@@ -29,14 +29,18 @@
          destructive step; owner OK required (project CLAUDE.md section 5).
 
     ESCALATION (exit 2, nothing further changed): sprk_trackingscope exists with another type or a length other than 36; a key named
-    sprk_invoicesubmission_scope_trackingnumber exists on other columns; a row's scope differs from its firm; two rows share (tracking
-    number, scope); the scope key index is Failed.
+    sprk_invoicesubmission_scope_trackingnumber exists on other columns; a key of any other name exists on (sprk_trackingnumber,
+    sprk_trackingscope) (checked before any write: the BFF's phase probe needs the exact name); a row's scope differs from its firm; two rows
+    share (tracking number, scope); the scope key index is Failed; at step 9, a row without a scope is found (re-counted next to the Active
+    re-read, before the delete).
 
     NOT RUN BY THE TASK THAT ADDS IT. The main session runs it with the owner's OK and after the notices to uac-r2, ontology-r1 and SPA-r3
     (notes/095c, "Notice for uac-r2"). -WhatIf and -Verify may be run at any time. Publish is entity-scoped (PublishXml for
     sprk_invoicesubmission only) and only when this run wrote metadata. Solution source: Entities/sprk_invoicesubmission/Entity.xml in
-    SpaarkeMaster carries the end state (the scope column SystemRequired, sprk_vendororg None, the scope key only); a stamp provisioned
-    from it needs no backfill and no script.
+    SpaarkeMaster carries the scope column SystemRequired, sprk_vendororg None, and BOTH keys (the firm key stays in source until a later
+    release retires it, after every environment with rows has run this script through step 9: a managed upgrade deletes components that are
+    missing from source, which on an environment with rows would drop the firm key before the scope key can guard them); a stamp provisioned
+    from it has no rows and needs no backfill and no script.
 
 .PARAMETER EnvironmentUrl
     Dataverse environment URL. Defaults to $env:DATAVERSE_URL, else the dev environment.
@@ -112,7 +116,16 @@ function Get-RequiredLevel([string]$Column, [string]$Kind) {
     return [string]$a.RequiredLevel.Value
 }
 
-function Get-ScopeKey { return Get-Keys $Table | Where-Object { $_.SchemaName -eq $ScopeKey -or (Get-KeyColumns $_) -eq $ScopeKeyColumns } | Select-Object -First 1 }
+# By name only: the BFF's phase probe (TrackingScopePhaseProbe) requires this exact key name, so a key of another name on the same columns is
+# not the scope key (see Get-MisnamedScopeKey).
+function Get-ScopeKey { return Get-Keys $Table | Where-Object { $_.SchemaName -eq $ScopeKey } | Select-Object -First 1 }
+# A key on (tracking number, scope) under any other name: the BFF would read P1 forever, and Add-AlternateKey would skip creating the right one.
+function Get-MisnamedScopeKey { return Get-Keys $Table | Where-Object { $_.SchemaName -ne $ScopeKey -and (Get-KeyColumns $_) -eq $ScopeKeyColumns } | Select-Object -First 1 }
+function Publish-Submission {
+    # Entity-scoped (never PublishAllXml): the BFF's phase probe reads published metadata.
+    Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" } | Out-Null
+    Write-Host "  published $Table" -ForegroundColor Green
+}
 function Get-FirmKey { return Get-Keys $Table | Where-Object { $_.SchemaName -eq $FirmKey } | Select-Object -First 1 }
 
 # The scope a row must carry: its firm id in D form (lower case, as the BFF writes Guid.ToString("D")), or 'none'.
@@ -208,6 +221,8 @@ function Test-Preflight {
     }
     $named = Get-Keys $Table | Where-Object { $_.SchemaName -eq $ScopeKey } | Select-Object -First 1
     if ($named -and (Get-KeyColumns $named) -ne $ScopeKeyColumns) { $conflict.Add("key $ScopeKey exists on [$(@($named.KeyAttributes) -join ', ')], not ($ScopeKeyColumns)") }
+    $misnamed = Get-MisnamedScopeKey
+    if ($misnamed) { $conflict.Add("key $($misnamed.SchemaName) already covers ($ScopeKeyColumns) under another name; the BFF reads the phase from the exact name $ScopeKey and would stay in P1") }
     if ($conflict.Count -gt 0) { throw [EscalationException]::new("$Table cannot take the tracking scope as specified: $($conflict -join '; '). Owner decision needed. Nothing was changed.") }
     $fk = Get-FirmKey
     Write-Host ("  firm key {0}: {1}" -f $FirmKey, $(if ($fk) { $fk.EntityKeyIndexStatus } else { 'not present' }))
@@ -241,6 +256,8 @@ if ($Verify) {
         elseif ($lvl -ne 'SystemRequired') { $gaps.Add("step 5: $ScopeColumn is $lvl, not SystemRequired") }
         if ($lvl) { foreach ($p in (Test-ScopeData)) { $gaps.Add("step 6: $p") } }
         $sk = Get-ScopeKey
+        $misnamed = Get-MisnamedScopeKey
+        if ($misnamed) { $gaps.Add("step 7: key $($misnamed.SchemaName) covers ($ScopeKeyColumns) under another name; the BFF requires $ScopeKey") }
         if (-not $sk) { $gaps.Add("step 7: key $ScopeKey does not exist") }
         elseif ($sk.EntityKeyIndexStatus -ne 'Active') { $gaps.Add("step 7: key $ScopeKey is $($sk.EntityKeyIndexStatus), not Active") }
         if (Get-FirmKey) { $gaps.Add("step 9: the firm key $FirmKey is still present (expected after -KeepFirmKey)") }
@@ -262,15 +279,16 @@ try {
     Write-Host "  phase a BFF instance reads now: $(Get-Phase)"
 
     Write-Host "1. $FirmColumn required level -> None" -ForegroundColor Cyan
+    $changedBefore = $script:Changed.Count
     Set-FirmOptional
+    if (-not $DryRun -and $script:Changed.Count -gt $changedBefore) { Publish-Submission }
 
     Write-Host "2. $ScopeColumn (text, $ScopeLength) at None" -ForegroundColor Cyan
     $script:ScopeColumnPlanned = -not (Get-Attr $Table $ScopeColumn)
     Add-Column -Column $ScopeColumn -ExpectedType 'String' -Definition (New-StringDef -Schema $ScopeSchema -Display 'Tracking Scope' -Description $ScopeDescription -MaxLength $ScopeLength)
     if (-not $DryRun -and $script:Created.Count -gt 0) {
         # Entity-scoped publish now, so the BFF's published-metadata read (phase P1) sees the column before the wait starts.
-        Invoke-Dv -Path 'PublishXml' -Method POST -Body @{ ParameterXml = "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>" } | Out-Null
-        Write-Host "  published $Table" -ForegroundColor Green
+        Publish-Submission
     }
 
     $scopeLevel = if ($script:ScopeColumnPlanned -and $DryRun) { 'None' } else { Get-RequiredLevel $ScopeColumn 'String' }
@@ -289,6 +307,7 @@ try {
 
     Write-Host "5. $ScopeColumn required level -> SystemRequired" -ForegroundColor Cyan
     if ($DryRun -and $script:ScopeColumnPlanned) { Write-Host "  WOULD SET $ScopeColumn required level None -> SystemRequired (after the backfill)" -ForegroundColor Cyan }
+    $changedBeforeRaise = $script:Changed.Count
     for ($try = 1; $try -le 3; $try++) {
         Set-StringRequiredLevel -Table $Table -Column $ScopeColumn -Level 'SystemRequired'
         if ($DryRun -or (Get-RequiredLevel $ScopeColumn 'String') -eq 'SystemRequired') { break }
@@ -296,6 +315,8 @@ try {
         if ($try -eq 3) { throw "$Table.$ScopeColumn could not be raised to SystemRequired after 3 backfill rounds: $($script:Deferred -join '; ')" }
         Invoke-Backfill "re-backfill before raise $try"
     }
+    # Published at once (entity scope): the platform and the BFF's published-metadata read must see the raised level before step 6 relies on it.
+    if (-not $DryRun -and $script:Changed.Count -gt $changedBeforeRaise) { Publish-Submission }
 
     Write-Host "6. Re-backfill and verify the scope data" -ForegroundColor Cyan
     Invoke-Backfill 're-backfill'
@@ -342,7 +363,12 @@ try {
         # The order guarantee: re-read the scope key immediately before the delete; anything but Active stops here.
         $sk = Get-ScopeKey
         if (-not $sk -or $sk.EntityKeyIndexStatus -ne 'Active') { throw "the scope key reads $(if ($sk) { $sk.EntityKeyIndexStatus } else { 'absent' }), not Active: the firm key is NOT retired." }
-        Invoke-Dv -Path "EntityDefinitions(LogicalName='$Table')/Keys($($fk.MetadataId))" -Method DELETE -ExtraHeaders $script:SolutionHeader | Out-Null
+        # And re-count the rows without a scope: the scope key does not cover them, so once the firm key is gone nothing would guard such a row.
+        # (A row written by a stale instance after step 8 would be one.) Non-zero stops with exit 2 before the delete.
+        $nullScopes = Get-RowCountExact $EntitySet $IdColumn "$ScopeColumn eq null"
+        if ($null -eq $nullScopes) { throw "the rows without a scope could not be counted: the firm key is NOT retired." }
+        if ($nullScopes -gt 0) { throw [EscalationException]::new("$nullScopes row(s) have no ${ScopeColumn}: the scope key does not cover them, so the firm key is NOT retired. Backfill them (re-run the script) and retry.") }
+        Invoke-Dv -Path "EntityDefinitions(LogicalName='$Table')/Keys($($fk.MetadataId))" -Method DELETE -ExtraHeaders $State.SolutionHeader | Out-Null
         for ($i = 0; $i -lt 12 -and (Get-FirmKey); $i++) { Start-Sleep -Seconds 5 }
         if (Get-FirmKey) { throw "the firm key $FirmKey is still readable 60 s after the delete; re-run -Verify." }
         $script:Changed.Add("key $FirmKey retired"); Write-Host "  DELETED  key $FirmKey" -ForegroundColor Green

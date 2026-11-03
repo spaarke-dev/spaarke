@@ -758,6 +758,12 @@ public class AccessTableAppOnlyWriterTests
             _writes.Invocations.Should().BeEmpty(key);
         }
 
+        // The refusal says what the column is: it decides no access and the allocator writes it (the access columns' text would be wrong).
+        var reason = InheritedAccessPermission.RefuseAppOnlyWrite(submission, ["sprk_trackingscope"])!.Reason;
+        reason.Should().Contain("decides no access").And.Contain("only the tracking number allocator writes it").And.NotContain("who may see");
+        InheritedAccessPermission.RefuseAppOnlyWrite(submission, ["sprk_trackingnumber"])!.Reason
+            .Should().Contain("who may see what", "the other access columns keep their text");
+
         // Must not fire: the same column name on another table, a neighbouring name, and the caller's own write.
         Code("sprk_invoice", "sprk_trackingscope").Should().BeNull("only the submission carries the scope");
         Code(submission, "sprk_trackingscopes").Should().BeNull("a neighbouring name");

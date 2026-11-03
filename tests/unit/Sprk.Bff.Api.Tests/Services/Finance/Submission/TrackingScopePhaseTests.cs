@@ -124,6 +124,46 @@ public sealed class TrackingScopePhaseTests
     }
 
     [Fact]
+    public async Task TwoForcedReReads_QueuedBehindEachOther_DoOneMetadataRead_WhenBothWereRefusedBeforeItStarted()
+    {
+        var cache = new TrackingScopePhaseCache(_clock);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<TrackingScopePhase?> SlowRead(CancellationToken _)
+        {
+            _reads++;
+            started.TrySetResult();
+            return release.Task.ContinueWith(_ => (TrackingScopePhase?)TrackingScopePhase.P1ScopeColumn, TaskScheduler.Default);
+        }
+
+        // Two callers, both refused by the platform before any read started, both ask for a forced re-read.
+        var refusedAt = cache.ReadsStarted;
+        var first = cache.GetAsync(SlowRead, force: true, default, refusedAt);
+        await started.Task; // the first read is in flight and holds the gate
+        var second = cache.GetAsync(SlowRead, force: true, default, refusedAt);
+        release.SetResult();
+
+        (await first).Should().Be(TrackingScopePhase.P1ScopeColumn);
+        (await second).Should().Be(TrackingScopePhase.P1ScopeColumn, "the second shares the first's read: it started after the second's refusal");
+        _reads.Should().Be(1, "one metadata read for two queued forced re-reads");
+    }
+
+    [Fact]
+    public async Task AForcedReRead_ForARefusalThatCameAfterTheLastReadStarted_IsStillMade()
+    {
+        // Must-not-fire control: a read that started before this caller's refusal says nothing of what the refusal showed.
+        var cache = new TrackingScopePhaseCache(_clock);
+        _answers.Enqueue(TrackingScopePhase.P0NoScopeColumn);
+        _answers.Enqueue(TrackingScopePhase.P1ScopeColumn);
+
+        await cache.GetAsync(Read, force: false, default); // read 1, before the refusal
+        var refusedAt = cache.ReadsStarted;
+
+        (await cache.GetAsync(Read, force: true, default, refusedAt)).Should().Be(TrackingScopePhase.P1ScopeColumn);
+        _reads.Should().Be(2);
+    }
+
+    [Fact]
     public async Task BeforeAnyRead_ThePhaseIsP0_AndAnUnreadableFirstReadStaysP0()
     {
         var cache = new TrackingScopePhaseCache(_clock);

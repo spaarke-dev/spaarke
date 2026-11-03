@@ -42,8 +42,10 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// metadata (<see cref="TrackingScopePhaseProbe"/>) and cached per process (<see cref="TrackingScopePhaseCache"/>, forward-only, 5 minutes
 /// until P2): P0 is today's behaviour; P1 also writes the scope on every row and still counts per firm; P2 counts per scope and numbers a
 /// submission with no firm. Before P2 a submission with no firm is refused (<see cref="TrackingNumberReasons.FirmRequired"/>) and nothing is
-/// written. A P0 instance whose cached phase is stale after the schema script raised the scope column to SystemRequired is refused by the
-/// platform (<c>0x80040200</c>); it re-reads the phase once and retries in the new phase, or answers the retryable
+/// written; but the submission id's existing row is looked up first and returned in any phase (a P2 instance may have created a no-firm row
+/// whose reply was lost, and the redelivery can land on a stale one). A P0 instance whose cached phase is stale after the schema script raised
+/// the scope column to SystemRequired is refused by the platform (<c>0x80040200</c>); it re-reads the phase once (callers refused together
+/// share one read, <see cref="TrackingScopePhaseCache.GetAsync"/>) and retries in the new phase, or answers the retryable
 /// <see cref="TrackingNumberReasons.Unavailable"/> - never a 500 and never a second number.</para>
 /// </remarks>
 public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
@@ -147,6 +149,13 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
         var number = NormalizeFirmInvoiceNumber(firmInvoiceNumber);
         RejectOwnedColumns(fields);
 
+        // The row this id already names is the answer whatever phase this instance holds: a P2 instance may have created a no-firm row whose
+        // reply was lost, and the redelivery can land on a stale P1 instance, which must return that row, not refuse it.
+        if (await FindExistingAsync(submissionId, ct).ConfigureAwait(false) is { } already)
+        {
+            return Reconcile(already, submissionId, firmId, number);
+        }
+
         var phase = await _phases.GetAsync(_readPhase, force: false, ct).ConfigureAwait(false);
         if (firmId is null && phase != TrackingScopePhase.P2ScopeKeyActive)
         {
@@ -155,11 +164,6 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
                 "{Code}: submission={SubmissionId} phase={Phase} - a submission with no firm is numbered only once the scope key is Active; nothing written",
                 TrackingNumberReasons.FirmRequired, submissionId, phase);
             return TrackingNumberResult.Refused(TrackingNumberReasons.FirmRequired);
-        }
-
-        if (await FindExistingAsync(submissionId, ct).ConfigureAwait(false) is { } already)
-        {
-            return Reconcile(already, submissionId, firmId, number);
         }
 
         // ebilling-r1 task 094 (EB-D-167): a number may be held by a row the sequence read cannot see - an attempt whose commit was
@@ -182,10 +186,12 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
                 // Task 095c: this instance still holds P0, but the scope column exists and is SystemRequired (schema script step 5), so the
                 // platform refused the row whole: nothing was written. Re-read the phase once and retry in it; a phase that still reads P0 is
                 // the retryable 503, never a 500.
+                var refusedAtRead = _phases.ReadsStarted;
                 if (!reread)
                 {
                     reread = true;
-                    phase = await _phases.GetAsync(_readPhase, force: true, ct).ConfigureAwait(false);
+                    // One forced re-read at a time: callers refused together share the read that starts after the first of them (K2).
+                    phase = await _phases.GetAsync(_readPhase, force: true, ct, refusedAtRead).ConfigureAwait(false);
                     if (phase != TrackingScopePhase.P0NoScopeColumn)
                     {
                         _logger.LogWarning(

@@ -1262,9 +1262,12 @@ internal static class InheritedAccessPermission
         if (appOnly && AccessColumns.TryGetValue(trimmed, out var accessColumns)
             && columns.FirstOrDefault(accessColumns.Contains) is { } accessColumn)
         {
+            // ebilling-r1 task 095c: the tracking scope decides no access (it is listed because its only writer is typed); say so.
+            var decides = accessColumn == Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn
+                ? "it decides no access; only the tracking number allocator writes it"
+                : "it decides who may see what";
             return RecordOwnerResolution.Refused(AppOnlyAccessColumnWriteReasonCode,
-                $"{accessColumn} of a {trimmed.ToLowerInvariant()} is set by Spaarke (it decides who may see what), so it was " +
-                "not written");
+                $"{accessColumn} of a {trimmed.ToLowerInvariant()} is set by Spaarke ({decides}), so it was not written");
         }
 
         // #2247: on every table, the row's owner and its creator are the BFF's typed writers' (OwnerColumns, CreatorColumns).
