@@ -886,3 +886,12 @@ When the home token has no `email` claim, the form's prefill falls back to the u
 | **What** | The Projects, Matters, Work Assignments, Documents and Invoices widgets are `planes: ['ciam']` (`widgetRegistry.ts`). Workforce-plane callers get only the default modules (Legal Front Door, Policy Library, Service Requests). A granted matter is reachable only from the grant email's link or the bell. |
 | **Decision** | Owner 2026-11-01: R4. Show the record tabs to a workforce contact who holds grants, scoped by Tier-2. |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2508 |
+
+### ISS-030: Production go-live of external.spaarke.com (task 073) moved to the provisioning project
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, owner decision at R3 wrap-up |
+| **What** | Task 073 deploys the production SPA to `external.spaarke.com`, hands over the production Teams package and smoke-tests three personas against one provisioned stamp (ACME). Every gate item belongs to provisioning or the owner (`notes/task-073-gate-acme.md`). |
+| **Decision** | Owner 2026-11-03: a production demo activity; customer-provisioning-orchestration-r1 runs it. R3 closes without it. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2532 |
