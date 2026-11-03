@@ -654,14 +654,15 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.run-last-reviewed != 'false' }}
     continue-on-error: true
-    timeout-minutes: 2
+    timeout-minutes: 5
     outputs:
       result: ${{ steps.report.outputs.result }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0   # need history for git diff
+          fetch-depth: 0       # need history for the merge-base diff
+          filter: blob:none    # commits + trees only; a full clone outgrew the 2-min budget (cancelled at checkout, 2026-11-03)
 
       - name: Check Last Reviewed stamp on touched docs
         id: stamp
