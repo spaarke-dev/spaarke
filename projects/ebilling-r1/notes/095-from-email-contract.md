@@ -269,3 +269,25 @@ Added 2026-10-28 (094): after `Failed` with `ebilling.submission.source_check_fa
 - `canCorrect` is the Correction intake's own guard (`InvoiceSubmissionService.JudgeCorrectionAsync`, the code `CheckCorrectionAsync` runs), asked of the same rows with the invoice's own firm, record and number, so a request the add-in builds from this body is judged by the same code. `reason` is null when `canCorrect` is true; otherwise it is the reason the intake would refuse with, in the intake's order: `invoice_status` (not In Review, or inactive), `no_submission`, `submission_in_progress`. The intake's `different_firm`, `different_core_record` and `different_invoice_number` cannot arise from the invoice's own values; if the invoice and its submission still disagree, the answer is `canCorrect: false`, `reason: "no_submission"`.
 - `replacedBy` is **always present** and is null unless `invoiceStatus` is `Superseded` and the caller has **Read** on the replacement invoice (checked as the caller, through the same Finance authorization seam as the gate). The replacement is the invoice of the submission whose `sprk_resubmissionof` is this invoice's own submission, the direct one only (no chain is followed). If several submissions name it, the one whose invoice is not itself Superseded; if that is still not exactly one, null. `name` is the replacement invoice's primary name (`sprk_name`). It is null, never an error, when the caller cannot read the replacement or the read of it fails (a Warning is logged), so the answer never names an invoice the caller cannot open and a fault there does not make the call a 503.
 - A read fault anywhere else (the invoice, its submission, the firm's or the record's name) is **503** `ebilling.submission.record_unavailable`; never a partial answer.
+
+## 11. Submission by email (built in 095a)
+
+`GET /api/finance/invoice-submissions?internetMessageId=<RFC Message-ID>`, in the /api/finance group with step 0 (internal callers only), behind the eBilling kill switch (503 `ebilling.disabled`). For the add-in's "already submitted" banner. The only input is the Message-ID, as Outlook gives it: with or without the angle brackets, in any case.
+
+- **Gate.** The Finance filter: step 0, the shape check of the Message-ID and the caller's table-level Read on submissions (the credited check). The handler then puts the **.eml document** and **every candidate submission** to the caller's own Read (`finance.read` on `sprk_documents` and on `sprk_invoicesubmissions`, as the caller, per record).
+- **How the attempts are found.** The `.eml` Documents (`sprk_isemailarchive`) whose `sprk_emailmessageid` is the Message-ID in either spelling, then the submissions whose `sprk_sourceemaildocument` is one of the readable ones (the link written at create for every from-email attempt; task 095a, owner choice B), newest `createdon` first. The newest attempt the caller can read answers; an unreadable newer attempt is skipped and never named. Attempts written before the column carry no link until the backfill script is run, and are not found.
+- **200** is the `GET /invoice-submissions/{id}` body (same names, same omissions, `replacedBy` included) plus:
+
+```json
+{
+  "submissionId": "guid", "trackingNumber": "string", "status": "Received | Processing | Accepted | Rejected | Failed",
+  "outcomeReasonCode": "string (absent when none)", "invoiceId": "guid (absent unless the attempt has one)",
+  "submittedOn": "2026-11-03T10:00:00Z",
+  "submittedBy": { "name": "string" },
+  "isCorrection": false
+}
+```
+
+  `submittedOn` is the row's `createdon` (UTC, ISO 8601 with Z). `submittedBy` is the name of the person recorded in `sprk_createdbyperson` (never `createdby`, which is the service identity); it is **null** when no person is recorded, the person no longer exists or has no name, and it never carries an id or an address. `isCorrection` is true when the attempt names a submission it replaces (`sprk_resubmissionof`). The source-email link is never returned. A latest attempt that Failed is answered as Failed with its `outcomeReasonCode`; a running attempt is answered with its status so the pane resumes polling by `submissionId`.
+- **404** reasonCode `sdap.access.deny.record_unavailable` (the uniform answer, section 8): no .eml for the Message-ID, an .eml with no attempt, an .eml the caller cannot read, no attempt the caller can read, an empty, repeated or malformed Message-ID (an Exchange item id such as `AAMk...` included), a step-0 refusal and no table-level Read. All have the same body (apart from the correlation id) and reveal nothing about whether an email or an attempt exists.
+- **503** `ebilling.submission.record_unavailable` for **any** read fault: the .eml or attempt query, the caller's rights read on either (thrown, or a snapshot that carries no Read and is flagged Faulted), the submitter's name read, or more than 50 candidates that cannot be decided. The route never answers "not submitted" when it could not decide. This replaces the 095a POML's "a rights-read fault is a 404" (uac-r2, 2026-11-03).
