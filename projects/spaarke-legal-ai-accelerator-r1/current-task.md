@@ -33,7 +33,6 @@
   - Cowork Added (8): Legal for Cowork (toggle OFF), Patent, Fabric IQ, Dataverse, PandaDoc, Harvey, Legora, SignatureAPI.
   - The Spaarke plugin and its folder skills are deleted.
   - Word web's Spaarke toggle was left ON; the plugin itself is gone.
-- **`src/accelerators/gates.py`** is a stray 0-byte file, deliberately not committed. Ask the owner before removing it.
 
 ## Component protocol v0.2 (decisions in effect)
 - Positions live only in playbooks; procedures only in skills; defaults only in the profile.
