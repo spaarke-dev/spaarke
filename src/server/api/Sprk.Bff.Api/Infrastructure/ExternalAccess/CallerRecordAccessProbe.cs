@@ -11,19 +11,20 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// The answer of <see cref="CallerRecordAccessProbe.CallerPrivilegeAnswerAsync"/>: whether the caller holds a Dataverse table
 /// privilege, with "Dataverse gave no complete answer" kept apart from "the caller does not hold it" (ebilling-r1 task 095a review F1).
 /// </summary>
+/// <remarks>Faulted is the zero value, so <c>default</c> (an unset mock, an uninitialised field) is never <see cref="Held"/>.</remarks>
 public enum CallerPrivilegeAnswer
 {
-    /// <summary>Dataverse answered and the privilege is among the caller's.</summary>
-    Held,
-
-    /// <summary>Dataverse answered and the privilege is not among the caller's.</summary>
-    NotHeld,
-
     /// <summary>
     /// No complete answer (no token, OBO unavailable, a failed exchange or identity lookup, a non-success response, an exception).
     /// A route that must never turn "could not decide" into a denial renders this as its own fault.
     /// </summary>
-    Faulted,
+    Faulted = 0,
+
+    /// <summary>Dataverse answered and the privilege is not among the caller's.</summary>
+    NotHeld = 1,
+
+    /// <summary>Dataverse answered and the privilege is among the caller's.</summary>
+    Held = 2,
 }
 
 /// <summary>

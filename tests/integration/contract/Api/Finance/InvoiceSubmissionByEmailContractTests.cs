@@ -662,6 +662,8 @@ public sealed class InvoiceSubmissionByEmailContractTests : IAsyncLifetime
         SeedEml();
         SeedAttempt("1001.1", InvoiceSubmissionStatus.Accepted);
         var noMatch = await NoMatchBodyAsync(); // the handler's no-match body, asked as the default internal caller BEFORE step 0 refuses
+        lock (_queries) _queries.Clear(); // only the refused request's reads count below
+        _probe.Calls.Clear();
         StepZero.Kind = kind;
 
         var response = await GetAsync();
