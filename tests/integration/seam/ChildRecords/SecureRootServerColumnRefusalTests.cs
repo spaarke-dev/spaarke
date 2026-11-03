@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -52,10 +53,32 @@ public sealed class SecureRootServerColumnRefusalTests
         else
         {
             outcome.Refusal.Code.Should().Be(AccessInheritance.ServerOnlyReasonCode);
+            // Round 3 (UAC-r2 review note 1): the plan's own words, with its noun.
             outcome.Refusal.Detail.Should().Be(
-                $"The {noun} was not created: {SecurableColumns.AccessRecord} is written only by Spaarke, so it was not created.");
+                $"The {noun} was not created: {SecurableColumns.AccessRecord} is written only by Spaarke, so the {noun} was not created.");
         }
 
+        _world.Creates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Round 3 (review #8): a hand-built system item whose column list LEAVES OUT the JSON-null key its body still carries —
+    /// neither <c>WritesOf</c> nor the columns name it, only the body does — is refused all the same, nothing written.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_project", "sprk_projectname", SecurableColumns.SecureFlag, AccessFollowsParent.SecureFlagReasonCode)]
+    [InlineData("sprk_workassignment", "sprk_name", SecurableColumns.AccessRecord, AccessInheritance.ServerOnlyReasonCode)]
+    [InlineData("sprk_matter", "sprk_mattername", SecurableColumns.SecureFlag, AccessFollowsParent.SecureFlagReasonCode)]
+    public async Task ASystemItem_WhoseColumnsLeaveOutABodyNull_IsStillRefused(string table, string nameColumn, string column, string code)
+    {
+        var json = JsonSerializer.Serialize(new Dictionary<string, object?> { [nameColumn] = "x", [column] = null });
+        var item = new DataverseWriteItemMapper.MappedItem(json, [nameColumn]);
+
+        var outcome = await _world.CreateAsync(new RecordCreationRequest(table, new RecordCreationPayload.Mapped(item)),
+            system: true, requestedBy: RecordRequester.Of(Directory.CallerUserId, Directory.CallerOid));
+
+        outcome.Succeeded.Should().BeFalse("the body names the column, whatever the column list says");
+        outcome.Refusal!.Code.Should().Be(code);
         _world.Creates.Should().BeEmpty();
     }
 

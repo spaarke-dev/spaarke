@@ -254,8 +254,7 @@ public static class ChildRecordEndpoints
         ILogger<Program> logger,
         CancellationToken ct,
         [FromQuery] string? mappingSourceEntity = null,
-        [FromQuery] string? mappingSourceId = null,
-        [FromServices] CallerRecordAccessProbe? callerAccess = null)
+        [FromQuery] string? mappingSourceId = null)
     {
         var entity = (table ?? string.Empty).Trim().ToLowerInvariant();
         if (!CreateTables.Contains(entity))
@@ -264,8 +263,8 @@ public static class ChildRecordEndpoints
         RecordCreationMapping? mapping = null;
         if (MappingSourceOf(entity, mappingSourceEntity, mappingSourceId) is { } source)
         {
-            // An in-process caller (a decision's follow-on) passes no probe: the request's own services hold it.
-            callerAccess ??= httpContext.RequestServices?.GetService<CallerRecordAccessProbe>();
+            // Resolved here, only when a mapping is built (task 020 review #7): a create that maps nothing never asks for it.
+            var callerAccess = httpContext.RequestServices?.GetService<CallerRecordAccessProbe>();
             if (callerAccess is null)
             {
                 // Fail closed: without the probe the source cannot be read AS THE CALLER (FR-04), and a create that silently

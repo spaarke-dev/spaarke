@@ -1,11 +1,17 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
@@ -49,11 +55,16 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                 _sources[(created, id)] = new Entity(created, id) { [number] = "N-000001" };
         };
 
-        var http = new DefaultHttpContext { TraceIdentifier = FixedCorrelation };
+        // The probe is the request's own service (the handler resolves it only when a mapping is built).
+        var http = new DefaultHttpContext
+        {
+            TraceIdentifier = FixedCorrelation,
+            RequestServices = new ServiceCollection().AddSingleton<CallerRecordAccessProbe>(_probe).BuildServiceProvider(),
+        };
         http.Request.Headers.Authorization = $"Bearer {CallerToken}";
         return ChildRecordEndpoints.CreateAsync(
             table, JsonSerializer.SerializeToElement(body), _user, Service(), http, NullLogger<Program>.Instance,
-            CancellationToken.None, sourceEntity, sourceId, _probe);
+            CancellationToken.None, sourceEntity, sourceId);
     }
 
     private static int? StatusOf(IResult result) => ((IStatusCodeHttpResult)result).StatusCode;
@@ -163,6 +174,50 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             "FR-04: the named source is probed for Read AS THE CALLER, with their own token, before it is read");
         Owner(fields).Should().Be(Directory.ChildTeam, "a mapping source is not a filing parent: the matter is still unfiled");
         WarningsOf(result).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Task 020 review #5: the same handler, reached over HTTP through ASP.NET Core's own parameter binding (an in-process
+    /// <see cref="WebApplication"/> on the test server, mapping <see cref="ChildRecordEndpoints.CreateAsync"/> at the route's
+    /// path) — <c>?mappingSourceEntity=sprk_matter&amp;mappingSourceId=…</c> binds to the query parameters and reaches the
+    /// service: the named matter is probed as the caller and its mapped column fills the unfiled project.
+    /// </summary>
+    /// <remarks>The group's authorization and rate-limit policies are not mapped here: they are not what binds the query.</remarks>
+    [Fact]
+    public async Task HttpCreate_AProjectWithTheMappingSourceInTheQueryString_BindsBothValues_AndTheServiceMapsFromThatSource()
+    {
+        TheGeneralMatter();
+        MatterToProjectProfile();
+        _onCreate = (created, id, _) =>
+        {
+            if (RecordTableRules.Find(created)?.AutonumberColumn is { } number)
+                _sources[(created, id)] = new Entity(created, id) { [number] = "N-000001" };
+        };
+
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton<IDataverseUserClient>(_user);
+        builder.Services.AddSingleton(Service());
+        builder.Services.AddSingleton<CallerRecordAccessProbe>(_probe);
+        await using var app = builder.Build();
+        // Through a Delegate variable: the RouteHandler analyzer throws (AD0001) on this method group inline; the runtime
+        // binding (RequestDelegateFactory, reflecting on the same method) is identical.
+        Delegate handler = ChildRecordEndpoints.CreateAsync;
+        app.MapPost("/api/v1/child-records/{table}", handler);
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", CallerToken);
+
+        using var response = await client.PostAsync(
+            $"/api/v1/child-records/sprk_project?mappingSourceEntity=sprk_matter&mappingSourceId={GeneralMatter:D}",
+            new StringContent("""{"sprk_projectname":"Phase 1"}""", System.Text.Encoding.UTF8, "application/json"));
+
+        ((int)response.StatusCode).Should().Be(StatusCodes.Status201Created, await response.Content.ReadAsStringAsync());
+        _probe.Asked.Should().ContainSingle().Which.Should().Be((CallerToken, "sprk_matters", GeneralMatter),
+            "both query values reached the service: the named matter is probed as the caller");
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_description").Should().Be("From the matter",
+            "FR-02: the named source's mapped column fills the project");
     }
 
     [Fact]
@@ -328,6 +383,89 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         StatusOf(result).Should().Be(StatusCodes.Status403Forbidden, DetailOf(result));
         ReasonOf(result).Should().Be(ChildRecordEndpoints.DeniedCode);
         _creates.Should().BeEmpty("the secure flag is the server's: Make Secure / provisioning, never a create payload");
+    }
+
+    // ── Task 020 round 3 (review #1): the caller's own checks on a Matter create, through the route ────────────────────
+
+    [Fact]
+    public async Task RouteCreate_AMatter_WithoutTheCreatePrivilege_Is403Denied_AndNothingIsCreated()
+    {
+        _scripted.Held.Remove("prvCreatesprk_matter");
+
+        var result = await RouteCreate("sprk_matter", new() { ["sprk_mattername"] = "Acme v. Widget" });
+
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden, DetailOf(result));
+        ReasonOf(result).Should().Be(ChildRecordEndpoints.DeniedCode);
+        _creates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// A lookup the caller may not append to answers exactly as a record that does not exist (the uniform not-found: same
+    /// status, code and words), and nothing is created either way.
+    /// </summary>
+    [Fact]
+    public async Task RouteCreate_AMatter_BindingALookupTheCallerCannotAppendTo_IsTheUniformNotFound_AsAMissingRecord()
+    {
+        var contact = Guid.Parse("a0200000-0000-4000-8000-0000000000c1");
+        var missing = Guid.Parse("a0200000-0000-4000-8000-0000000000c2");
+        _scripted.NoAppendTo.Add(contact);
+        _scripted.Missing.Add(missing);
+
+        // A contact lookup the scripted matter declares (its live navigation property).
+        var denied = await RouteCreate("sprk_matter", new()
+        {
+            ["sprk_mattername"] = "Acme v. Widget",
+            ["sprk_AssignedToInternal@odata.bind"] = $"/contacts({contact:D})",
+        });
+        var absent = await RouteCreate("sprk_matter", new()
+        {
+            ["sprk_mattername"] = "Acme v. Widget",
+            ["sprk_AssignedToInternal@odata.bind"] = $"/contacts({missing:D})",
+        });
+
+        StatusOf(denied).Should().Be(StatusCodes.Status404NotFound, DetailOf(denied));
+        ReasonOf(denied).Should().Be(ChildRecordEndpoints.NotFoundCode);
+        (StatusOf(absent), ReasonOf(absent), DetailOf(absent)).Should().Be((StatusOf(denied), ReasonOf(denied), DetailOf(denied)),
+            "a record the caller may not append to answers exactly as one that does not exist");
+        DetailOf(denied).Should().NotContain(contact.ToString("D"));
+        _creates.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The scripted matter's metadata (the shared harness) declares no <c>ownerid</c> navigation property, so a bind of it
+    /// would be refused by the payload mapper (400) before the service's own owner refusal is reached. Live, every
+    /// user/team-owned table declares <c>ownerid</c>: this answers the matter's lookup metadata with it added — the scripted
+    /// list, plus that one row — through the harness's own response hook, leaving the shared harness unchanged.
+    /// </summary>
+    private void TheMatterDeclaresItsOwnerLookup() => _user.FailOn = path =>
+    {
+        if (!path.Contains("'sprk_matter'", StringComparison.Ordinal) || !path.Contains("ManyToOneRelationships", StringComparison.Ordinal))
+            return null;
+
+        var scripted = _scripted.GetAsync(path, CancellationToken.None).GetAwaiter().GetResult();
+        var relationships = scripted.Body!.Value.GetProperty("ManyToOneRelationships").EnumerateArray()
+            .Select(r => (object)r.Clone())
+            .Append(new { ReferencingAttribute = "ownerid", ReferencingEntityNavigationPropertyName = "ownerid", ReferencedEntity = "systemuser" })
+            .ToArray();
+        return DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(
+            new { LogicalName = "sprk_matter", ManyToOneRelationships = relationships }));
+    };
+
+    [Fact]
+    public async Task RouteCreate_AMatter_NamingTheOwner_Is403_AndNothingIsCreated()
+    {
+        TheMatterDeclaresItsOwnerLookup();
+
+        var result = await RouteCreate("sprk_matter", new()
+        {
+            ["sprk_mattername"] = "Acme v. Widget",
+            ["ownerid@odata.bind"] = "/systemusers(a0200000-0000-4000-8000-0000000000aa)",
+        });
+
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden, "the client never sets the owner");
+        ReasonOf(result).Should().Be(ChildRecordEndpoints.DeniedCode);
+        DetailOf(result).Should().Contain("ownerid");
+        _creates.Should().BeEmpty();
     }
 
     public static TheoryData<string, string, bool?> RootsAndSecureFlagValues() => new()

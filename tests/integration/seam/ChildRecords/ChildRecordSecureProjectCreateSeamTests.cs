@@ -71,9 +71,15 @@ public partial class SecureRootInheritanceWriterTests
                 _gate,
                 new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
                 entities: serviceReads.Object),
-            new DefaultHttpContext(), NullLogger<Program>.Instance, CancellationToken.None,
-            callerAccess: new CallerRecordAccessProbe(
-                new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance));
+            new DefaultHttpContext
+            {
+                // The probe is the request's own service; the inferred mapping (no profile) never calls it.
+                RequestServices = new ServiceCollection()
+                    .AddSingleton(new CallerRecordAccessProbe(
+                        new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance))
+                    .BuildServiceProvider(),
+            },
+            NullLogger<Program>.Instance, CancellationToken.None);
     }
 
     /// <summary>The app-only create into the fixture, and no field-mapping profile for matter → project (mapping is a no-op).</summary>

@@ -1464,10 +1464,12 @@ internal sealed partial class RecordCreationService
     /// <summary>
     /// Task 020 fix rounds 1 and 2 (F-1, F-2): the ONE check, for every secure root (matter, project, work assignment), that a
     /// create names none of the columns only the transitions and the cascade write — <c>sprk_issecure</c> on all three, and
-    /// <c>sprk_accessinheritance</c> on the two that carry it (project, work assignment). "Names" is the item's own columns as
-    /// well as <see cref="OwnedChildWrite.WritesOf"/>, which leaves out a JSON-null body column the create would still write.
-    /// Answers with the secure-root plan's own refusals (code and words; <see cref="PlanRefused"/> makes it 403), in the plan's
-    /// order. <c>null</c>: neither is named, or the table is no secure root. Pure.
+    /// <c>sprk_accessinheritance</c> on the two that carry it (project, work assignment). "Names" is every key the create could
+    /// write: <see cref="OwnedChildWrite.WritesOf"/>, the item's own columns, and every property of its JSON body (round 3,
+    /// review #8: <c>WritesOf</c> leaves out a JSON-null body column, and a hand-built item's columns may too). Answers with the
+    /// secure-root plan's own refusals (code and words, <see cref="SecureRootInheritance.PlanCreateAsync"/>;
+    /// <see cref="PlanRefused"/> makes it 403), in the plan's order. <c>null</c>: neither is named, or the table is no secure
+    /// root. Pure.
     /// </summary>
     internal static RecordOwnerResolution? SecureRootServerColumnRefusal(string table, DataverseWriteItemMapper.MappedItem item)
     {
@@ -1475,13 +1477,20 @@ internal sealed partial class RecordCreationService
         if (!inherits && !SecureRootInheritance.IsParent(table))
             return null;
 
-        var named = OwnedChildWrite.WritesOf(item).Select(w => w.Key).Concat(item.Columns)
+        IEnumerable<string> bodyKeys;
+        using (var body = JsonDocument.Parse(item.JsonBody))
+            bodyKeys = body.RootElement.ValueKind == JsonValueKind.Object
+                ? body.RootElement.EnumerateObject().Select(p => p.Name).ToList()
+                : [];
+
+        var named = OwnedChildWrite.WritesOf(item).Select(w => w.Key).Concat(item.Columns).Concat(bodyKeys)
             .Select(SecureRootInheritance.NormalizeColumn)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (inherits && named.Contains(AccessInheritance.Column))
         {
+            // The plan's words (UAC-r2 review note 1), with its noun.
             return RecordOwnerResolution.Refused(AccessInheritance.ServerOnlyReasonCode,
-                $"{AccessInheritance.Column} is written only by Spaarke, so it was not created");
+                $"{AccessInheritance.Column} is written only by Spaarke, so the {NounOf(table)} was not created");
         }
 
         return named.Contains(AccessFollowsParent.SecureFlagColumn)
