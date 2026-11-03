@@ -61,6 +61,9 @@ jest.mock('@azure/msal-browser', () => ({
 
 import { OfficeNaaStrategy } from '../src/strategies/OfficeNaaStrategy';
 
+/** MSAL's real error classes, so the codes are the ones MSAL produces (the module itself is mocked above). */
+const realMsal = jest.requireActual<typeof import('@azure/msal-browser')>('@azure/msal-browser');
+
 const baseConfig: Required<IAuthConfig> = {
   clientId: 'test-client-id',
   authority: 'https://login.microsoftonline.com/tenant-guid',
@@ -181,10 +184,13 @@ describe('OfficeNaaStrategy — which MSAL client the host gets', () => {
     expect(strategy.isNaaActive()).toBe(false);
   });
 
-  it('a failed NAA token request falls back once to the standard popup client, which answers', async () => {
+  it('Entra refusing the brokered request falls back once to the standard popup client, which answers', async () => {
     installOffice({ host: 'Outlook', platform: 'OfficeOnline', nestedAppAuth: true });
-    naaInstance.acquireTokenSilent.mockRejectedValue(new Error('bridge: AADSTS700046'));
-    naaInstance.acquireTokenPopup.mockRejectedValue(Object.assign(new Error('bridge'), { errorCode: 'server_error' }));
+    naaInstance.acquireTokenSilent.mockRejectedValue(new realMsal.InteractionRequiredAuthError('interaction_required'));
+    // What NestedAppAuthAdapter.fromBridgeError makes of a PersistentError from Entra.
+    naaInstance.acquireTokenPopup.mockRejectedValue(
+      new realMsal.ServerError('invalid_request', 'AADSTS700046: Invalid Reply Address. must have scheme brk-…')
+    );
     const strategy = new OfficeNaaStrategy(baseConfig, { fallbackRedirectUri: FALLBACK });
 
     const token = await strategy.acquire();
@@ -202,12 +208,34 @@ describe('OfficeNaaStrategy — which MSAL client the host gets', () => {
     expect(mockPca).toHaveBeenCalledTimes(1);
   });
 
-  it('a user cancel on the NAA prompt is not answered with a second (popup) prompt', async () => {
+  it('the host disabling the bridge falls back to the standard popup client', async () => {
     installOffice({ host: 'Outlook', platform: 'OfficeOnline', nestedAppAuth: true });
-    naaInstance.acquireTokenSilent.mockRejectedValue(new Error('interaction required'));
+    naaInstance.acquireTokenSilent.mockRejectedValue(new Error('no cached token'));
     naaInstance.acquireTokenPopup.mockRejectedValue(
-      Object.assign(new Error('cancelled'), { errorCode: 'user_cancelled' })
+      new realMsal.ClientAuthError(realMsal.ClientAuthErrorCodes.nestedAppAuthBridgeDisabled)
     );
+    const strategy = new OfficeNaaStrategy(baseConfig, { fallbackRedirectUri: FALLBACK });
+
+    expect((await strategy.acquire()).accessToken).not.toBe('');
+    expect(mockPca).toHaveBeenCalledTimes(1);
+  });
+
+  // Failures that must NOT switch: the user's answer, or a transient fault (switching would keep the page on the
+  // popup client for good). The errors are the ones msal-browser 3.30 builds for each bridge status.
+  it.each([
+    ['a user cancel over the bridge (user_canceled)', () => new realMsal.ClientAuthError('user_canceled')],
+    ['a user cancel, browser spelling (user_cancelled)', () => new realMsal.BrowserAuthError('user_cancelled')],
+    ['no network', () => new realMsal.ClientAuthError(realMsal.ClientAuthErrorCodes.noNetworkConnectivity)],
+    ['no account', () => new realMsal.ClientAuthError(realMsal.ClientAuthErrorCodes.noAccountFound)],
+    [
+      'a transient server error without an AADSTS code',
+      () => new realMsal.ServerError('temporarily_unavailable', 'try later'),
+    ],
+    ['interaction required', () => new realMsal.InteractionRequiredAuthError('interaction_required')],
+  ])('%s on the NAA prompt does not switch to the popup client', async (_label, makeError) => {
+    installOffice({ host: 'Outlook', platform: 'OfficeOnline', nestedAppAuth: true });
+    naaInstance.acquireTokenSilent.mockRejectedValue(new Error('no cached token'));
+    naaInstance.acquireTokenPopup.mockRejectedValue(makeError());
     const strategy = new OfficeNaaStrategy(baseConfig, { fallbackRedirectUri: FALLBACK });
 
     const token = await strategy.acquire();
@@ -215,6 +243,32 @@ describe('OfficeNaaStrategy — which MSAL client the host gets', () => {
     expect(token.accessToken).toBe('');
     expect(mockPca).not.toHaveBeenCalled();
     expect(strategy.isNaaActive()).toBe(true);
+  });
+
+  it('sign-out under NAA clears the add-in MSAL session cache (MSAL cannot: both calls are unsupported there)', async () => {
+    installOffice({ host: 'Outlook', platform: 'OfficeOnline', nestedAppAuth: true });
+    naaInstance.logoutPopup.mockRejectedValue(new Error('unsupported'));
+    naaInstance.clearCache.mockRejectedValue(new Error('unsupported'));
+    const accountKey = 'uid.utid-login.microsoftonline.com-tenant-guid';
+    const tokenKey = 'uid.utid-login.microsoftonline.com-accesstoken-test-client-id-tenant-guid-scope';
+    sessionStorage.setItem('msal.account.keys', JSON.stringify([accountKey]));
+    sessionStorage.setItem(
+      'msal.token.keys.test-client-id',
+      JSON.stringify({ idToken: [], accessToken: [tokenKey], refreshToken: [] })
+    );
+    sessionStorage.setItem(accountKey, '{}');
+    sessionStorage.setItem(tokenKey, '{}');
+    sessionStorage.setItem('unrelated', 'kept');
+    const strategy = await start();
+
+    await strategy.logout();
+
+    expect(naaInstance.logoutPopup).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(accountKey)).toBeNull();
+    expect(sessionStorage.getItem(tokenKey)).toBeNull();
+    expect(sessionStorage.getItem('msal.account.keys')).toBeNull();
+    expect(sessionStorage.getItem('unrelated')).toBe('kept');
+    sessionStorage.clear();
   });
 
   it('the standard popup client failing is not retried (no fallback loop)', async () => {

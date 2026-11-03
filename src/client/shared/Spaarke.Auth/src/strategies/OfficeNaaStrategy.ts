@@ -18,6 +18,24 @@ const MSAL_LOG_LEVEL_INFO = 2;
 const BRIDGE_AVAILABLE_LINE = /Nested App Auth Bridge available: (true|false)/;
 
 /**
+ * Whether an NAA interactive failure shows that NAA cannot serve this app on this host, so the standard popup client
+ * should take over. msal-browser 3.x maps bridge statuses in `NestedAppAuthAdapter.fromBridgeError`:
+ *   - Disabled / NestedAppAuthUnavailable → `nested_app_auth_bridge_disabled` (or a host code): yes.
+ *   - Transient / PersistentError → `ServerError(code, description)`: yes only when Entra refused the request (an
+ *     `AADSTS…` code in the message: a registration without the broker redirect, a Conditional Access block).
+ *   - UserCancel → `user_canceled` (the browser popup's spelling is `user_cancelled`), NoNetwork →
+ *     `no_network_connectivity`, AccountUnavailable → `no_account_found`, UserInteractionRequired, and anything else:
+ *     no. A cancel is an answer; the others are transient.
+ */
+function naaCannotServe(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { errorCode?: unknown; errorMessage?: unknown; message?: unknown; name?: unknown };
+  if (e.errorCode === 'nested_app_auth_bridge_disabled') return true;
+  if (e.name !== 'ServerError') return false;
+  return /AADSTS\d+/.test(`${String(e.errorMessage ?? '')} ${String(e.message ?? '')}`);
+}
+
+/**
  * Decode a JWT and return its `exp` claim as a Unix-ms timestamp.
  * Returns 0 if the token is malformed or has no `exp` claim.
  *
@@ -167,8 +185,8 @@ export class OfficeNaaStrategy implements AuthStrategy {
   private _initPromise: Promise<void> | null = null;
   private _fallbackPromise: Promise<IPublicClientApplication | null> | null = null;
   private _isNaaActive = false;
-  /** The last interactive attempt was cancelled by the user (MSAL `user_cancelled`): never answered with a second prompt. */
-  private _lastInteractionCancelled = false;
+  /** The error of the last interactive attempt (null when it succeeded); decides whether NAA can serve this app. */
+  private _lastPopupError: unknown = null;
 
   /**
    * @param config Standard @spaarke/auth resolved config (clientId, authority,
@@ -188,10 +206,12 @@ export class OfficeNaaStrategy implements AuthStrategy {
     const token = await this._tryAcquireWith(msal);
     if (token) return token;
 
-    // NAA failed (an app registration without the broker redirect, a Conditional Access block on the bridge, a host
-    // fault): fall back once to the standard popup client, the path these hosts used before NAA was turned on for
-    // them. Not after a user cancel: that is an answer, not a fault.
-    if (this._isNaaActive && !this._lastInteractionCancelled) {
+    // NAA cannot serve this app here (the host disabled the bridge, or Entra refused the brokered request: an app
+    // registration without the broker redirect, a Conditional Access block): fall back once to the standard popup
+    // client, the path these hosts used before NAA was turned on for them. Only for those failures: a cancel is an
+    // answer, and a network drop or a missing account is transient; switching on them would leave the page on the
+    // popup client for good, and the proactive refresh would then open popups.
+    if (this._isNaaActive && naaCannotServe(this._lastPopupError)) {
       const fallback = await this._switchToFallback();
       if (fallback) {
         const retried = await this._tryAcquireWith(fallback);
@@ -226,7 +246,7 @@ export class OfficeNaaStrategy implements AuthStrategy {
 
     // 2. acquireTokenPopup — under NAA this routes through the Office broker (no real popup);
     //    under fallback PCA it opens an interactive popup.
-    this._lastInteractionCancelled = false;
+    this._lastPopupError = null;
     try {
       const loginHint = account?.username;
       console.info(
@@ -241,7 +261,7 @@ export class OfficeNaaStrategy implements AuthStrategy {
       const token = this._validate(result);
       if (token) return token;
     } catch (err) {
-      this._lastInteractionCancelled = (err as { errorCode?: string } | null)?.errorCode === 'user_cancelled';
+      this._lastPopupError = err;
       console.warn('[OfficeNaaStrategy] acquireTokenPopup failed:', err);
     }
 
@@ -275,6 +295,11 @@ export class OfficeNaaStrategy implements AuthStrategy {
 
   clearCache(): void {
     if (!this._instance) return;
+    // Under NAA, MSAL's clearCache() is unsupported (it throws), so the local cache is cleared directly.
+    if (this._isNaaActive) {
+      this._clearMsalSessionStorage();
+      return;
+    }
     // MSAL v3 clearCache() — clears accounts + tokens for this PCA instance.
     // Fire-and-forget per AuthStrategy contract; the SpaarkeAuthProvider's
     // own logout() awaits the full chain.
@@ -284,17 +309,22 @@ export class OfficeNaaStrategy implements AuthStrategy {
   }
 
   /**
-   * Sign the user out at the identity-provider layer.
+   * Sign the user out.
    *
-   * Under NAA, `logoutPopup` is routed through the Office host broker (no real
-   * popup window). Under the fallback PCA path, this opens an MSAL logout popup.
-   * If the popup is blocked / unavailable, falls back to `clearCache()` so the
-   * local cache state matches the user-intended outcome — the Entra session may
-   * remain alive in that degraded path; the user's next interactive login resyncs.
+   * Under NAA the Office host owns the account: MSAL's `logoutPopup` and `clearCache` are unsupported there (both
+   * throw in msal-browser 3.x), so this clears the add-in's MSAL session cache directly. The host stays signed in, so
+   * the next sign-in may be silent. Under the standard client this opens an MSAL logout popup; if the popup is
+   * blocked / unavailable, falls back to `clearCache()` so the local cache state matches the user-intended outcome —
+   * the Entra session may remain alive in that degraded path; the user's next interactive login resyncs.
    */
   async logout(): Promise<void> {
     const msal = await this._ensureInitialized();
     if (!msal) return;
+
+    if (this._isNaaActive) {
+      this._clearMsalSessionStorage();
+      return;
+    }
 
     const account = this._pickAccount(msal);
     if (!account) return;
@@ -366,6 +396,36 @@ export class OfficeNaaStrategy implements AuthStrategy {
       }
     } catch {
       /* best-effort */
+    }
+  }
+
+  /**
+   * Remove this add-in's MSAL cache from session storage: every `msal.*` key (the key indexes, interaction state) and
+   * the account and token entries those indexes list (`msal.account.keys`, `msal.token.keys.<clientId>`). Used under
+   * NAA, where MSAL offers no way to clear its own cache. Best-effort; never throws.
+   */
+  private _clearMsalSessionStorage(): void {
+    try {
+      if (typeof sessionStorage === 'undefined') return;
+      const listed = new Set<string>();
+      const collect = (indexKey: string): void => {
+        try {
+          const value: unknown = JSON.parse(sessionStorage.getItem(indexKey) ?? 'null');
+          const lists = Array.isArray(value) ? [value] : value && typeof value === 'object' ? Object.values(value) : [];
+          for (const list of lists) {
+            if (Array.isArray(list)) list.forEach(key => typeof key === 'string' && listed.add(key));
+          }
+        } catch {
+          /* an unreadable index lists nothing */
+        }
+      };
+      collect('msal.account.keys');
+      collect(`msal.token.keys.${this._config.clientId}`);
+      for (const key of Object.keys(sessionStorage)) {
+        if (key.startsWith('msal.') || listed.has(key)) sessionStorage.removeItem(key);
+      }
+    } catch (err) {
+      console.warn('[OfficeNaaStrategy] clearing the MSAL session cache failed:', err);
     }
   }
 
