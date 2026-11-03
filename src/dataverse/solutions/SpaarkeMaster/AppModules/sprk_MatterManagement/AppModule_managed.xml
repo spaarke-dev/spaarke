@@ -55,6 +55,8 @@
     <AppModuleComponent type="1" schemaName="sprk_container" />
     <AppModuleComponent type="1" schemaName="sprk_dataverseenvironment" />
     <AppModuleComponent type="1" schemaName="sprk_document" />
+    <AppModuleComponent type="1" schemaName="sprk_ebillingoverride" />
+    <AppModuleComponent type="1" schemaName="sprk_ebillingsetting" />
     <AppModuleComponent type="1" schemaName="sprk_emailartifact" />
     <AppModuleComponent type="1" schemaName="sprk_emailsaverule" />
     <AppModuleComponent type="1" schemaName="sprk_emailupdatefield" />
