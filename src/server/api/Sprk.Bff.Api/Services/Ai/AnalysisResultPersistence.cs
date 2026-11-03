@@ -271,7 +271,6 @@ public class AnalysisResultPersistence
             ContentType: null,
             DocumentId: documentId,
             ParentEntity: null,
-            SearchIndexName: null, // handler runs ISearchIndexNameResolver chain
             Source: "AnalysisOrchestration",
             CorrelationId: analysisId);
 

@@ -4,7 +4,7 @@
     <title>Characterize the #2483 window: a create's owner ignores its derived stamp's root (tests only)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
     <gate>startable on owner approval of this task (requested 2026-11-02); lands ALONE, in its own PR, before 042b</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Tests only (tags testing, integration-test), no src change; CLAUDE.md §8 TEST-MODIFYING override: code-review and adr-check run regardless.</rigor-reason>
     <model-tier>sonnet</model-tier>

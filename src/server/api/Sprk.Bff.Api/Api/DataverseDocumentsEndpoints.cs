@@ -148,8 +148,8 @@ public static class DataverseDocumentsEndpoints
                         });
                 }
 
-                // Task 039 (FR-38): a document's search index is the SERVER's: step 8 of the create is the only writer on the create
-                // and client paths (from the owning business unit). The indexing pipeline's own stamps (RagEndpoints and the RAG
+                // Task 039 (FR-38), task 041 (FR-40): a document's search index is the SERVER's, and nothing on the create and
+                // client paths writes it (the index follows the content type). The indexing pipeline's own stamps (RagEndpoints and the RAG
                 // indexing jobs) record where a file was indexed and are deliberately left alone. A body that names one has it
                 // dropped — never refused — and the row's index stays as it is. This typed request does not use
                 // DropSearchIndexFromUpdate (it has no dictionary or JSON body to drop from: one nullable property).

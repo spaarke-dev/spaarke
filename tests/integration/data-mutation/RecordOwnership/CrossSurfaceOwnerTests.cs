@@ -68,7 +68,7 @@ public sealed class CrossSurfaceOwnerTests
 
     // TheLiveOfficeQuickCreate_KeepsTheActingUsersTeam_ForAProjectUnderAMatter_UntilTask018 is gone (task 018c): task 018b
     // changed that owner on purpose (record-first through the unified create), pinned over the live route by
-    // SecureRootCreateRouteTests.OfficeQuickCreate_UnderAnOrdinaryMatter_IsOwnedByTheMattersUnitTeam_NotSecure_AndIndexedByThatUnit.
+    // SecureRootCreateRouteTests.OfficeQuickCreate_UnderAnOrdinaryMatter_IsOwnedByTheMattersUnitTeam_NotSecure_AndGetsNoSearchIndex.
 
     // =====================================================================================
     // The owner order

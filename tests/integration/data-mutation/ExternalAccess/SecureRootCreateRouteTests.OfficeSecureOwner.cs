@@ -46,10 +46,11 @@ public partial class SecureRootCreateRouteTests
     /// UAC-r2 condition (b)(ii): a Project quick-created from a SECURE (Restricted) matter is owned by the Secure Record Owners
     /// team — in the create itself, never the matter's unit's team and never asked of the owner resolver; it is secure in
     /// the create itself and after; it inherits the matter's Access Permission as a FLOOR (the access record the isolated
-    /// completion writes: inherited from the matter, not its own); and its search index is its OWNER's unit's.
+    /// completion writes: inherited from the matter, not its own); and no search index is written (task 041: the index follows
+    /// the content type, not the owner's unit).
     /// </summary>
     [Fact]
-    public async Task OfficeQuickCreate_UnderASecureMatter_IsOwnedByTheSecureTeam_Secure_FlooredByTheMatter_AndIndexedByItsOwnersUnit()
+    public async Task OfficeQuickCreate_UnderASecureMatter_IsOwnedByTheSecureTeam_Secure_FlooredByTheMatter_AndGetsNoSearchIndex()
     {
         var matter = Guid.NewGuid();
         SecureMatter(_fixture, matter);
@@ -88,18 +89,17 @@ public partial class SecureRootCreateRouteTests
         record.OwnSecure.Should().BeFalse("its Secure is inherited, not its own: it follows the matter out");
         record.OwnPermission.Should().BeNull("no Access Permission of its own");
 
-        // The search index follows the OWNER: the Secure team's unit, read once.
-        _fixture.TeamReads.Should().Equal([SecureTeam], "step 8 reads the owning team's unit");
-        body["sprk_searchindexname"].Should().Be("spaarke-secure-index");
-        body["sprk_AI_Search_Index@odata.bind"].Should().Be($"/sprk_aisearchindexes({SecureIndex:D})");
+        // Task 041: the index follows the content type, so step 8 reads no unit and writes neither column.
+        _fixture.TeamReads.Should().BeEmpty("step 8 reads no owning team's unit any more");
+        body.Should().NotContainKey("sprk_searchindexname").And.NotContainKey("sprk_AI_Search_Index@odata.bind");
     }
 
     /// <summary>
     /// The ordinary control: under an ORDINARY matter the project is owned by the team record-first gives for the matter
-    /// (the matter's unit's team, asked once with the matter as its parent), it is not secure, and its index is that unit's.
+    /// (the matter's unit's team, asked once with the matter as its parent), it is not secure, and it gets no search index.
     /// </summary>
     [Fact]
-    public async Task OfficeQuickCreate_UnderAnOrdinaryMatter_IsOwnedByTheMattersUnitTeam_NotSecure_AndIndexedByThatUnit()
+    public async Task OfficeQuickCreate_UnderAnOrdinaryMatter_IsOwnedByTheMattersUnitTeam_NotSecure_AndGetsNoSearchIndex()
     {
         var matter = Guid.NewGuid();
         _fixture.SeedMatter(matter, isSecure: false);
@@ -119,9 +119,8 @@ public partial class SecureRootCreateRouteTests
             .Which.Parents.Should().Contain(new RecordOwnershipParent("sprk_matter", matter), "over the matter it is filed under");
         Flag(body).Should().BeFalse("an ordinary matter confers nothing");
         _fixture.IsSecureOf(_fixture.OfficeCreates.Single().Id).Should().BeFalse();
-        _fixture.TeamReads.Should().Equal([OrdinaryUnitTeam]);
-        body["sprk_searchindexname"].Should().Be("spaarke-ordinary-index");
-        body["sprk_AI_Search_Index@odata.bind"].Should().Be($"/sprk_aisearchindexes({OrdinaryIndex:D})");
+        _fixture.TeamReads.Should().BeEmpty();
+        body.Should().NotContainKey("sprk_searchindexname").And.NotContainKey("sprk_AI_Search_Index@odata.bind");
     }
 
     // ── Task 015 review: the isolated project's ordering ────────────────────────────────────────────────────────────

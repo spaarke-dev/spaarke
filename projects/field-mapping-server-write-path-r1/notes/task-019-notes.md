@@ -51,7 +51,7 @@ Tests: 1750 passed; ArchTests subset 316 passed.
 | P2-2 | The Office autonumber retry now fires only on a 412 from the PATCH upsert. The SDK `0x80060892` classifier no longer sees a body. Task 013's note "live check needed" (task-013-notes.md:105) is still open. | `RecordCreationService.cs:223`, `:1657-1659` | K (unverified) | **Live check:** add it to live check B. Provoke or observe a seed collision, or read the status Dataverse returns. If the status differs, fix the classifier before W3. |
 | P2-3 | A search-index bind under a different navigation-property name would survive the drop. It is not live: all six tables use `sprk_AI_Search_Index`. | `RecordTableRules.cs:566-590` | K (hardening) | **Fixed:** PR #2520. A new ArchTest checks each table's navigation property, with must-fire and must-not-fire controls. |
 | P2-4 | #2514's run-as-user drop log fires before the secure-filing refusal and the POST. No current table reaches it. | `DataverseCreateRecordHandler.cs:448-454` | NIT | **Fixed:** PR #2520. The log is written after a successful POST, with 3 tests. |
-| P2-5 | When step 8 faults, the applied value is (null, null), so a malformed dropped value compares equal and is not logged. | `RecordCreationService.cs:1408-1419` | K4 | Moot once task 041 makes step 8 a no-op. No fix. |
+| P2-5 | When step 8 faults, the applied value is (null, null), so a malformed dropped value compares equal and is not logged. | `RecordCreationService.cs:1408-1419` | K4 | **Corrected 2026-11-03 (task 041):** not moot. Once step 8 is a no-op, the applied value is always (null, null). So a client index that parses to no id is never logged, even though it is still dropped and never written. A client value that parses to a real id still logs, because it differs from none. Diagnostics only, so it stays K4 and is not fixed. It is pinned by the renamed chat test in task-041-notes "AC9 exceptions". |
 
 A third full pass is not needed: P2-1 is a logging-only change. A scoped Sonnet re-check covers the fix diff and its direct callers (CLAUDE.md §8.5).
 
@@ -69,8 +69,24 @@ The W2 total stays far below the 55 MB review line. 039 measured 39.10 MB at f56
 
 **Review status:** two full passes, with no F-class finding open once #2520 merges. Still open: P2-2 (live check B) and the live checks themselves.
 
-## Live checks A–C and App Insights
+## Live checks A–C and App Insights (dev BFF 3740e1a105, live 18:52Z on 2026-11-02)
 
-Pending. Two things must happen first:
-- dev carries 0e3962069b (039) and the P1-1 fix, through R3's batch;
-- the owner gives an OK in this session for the `FMSWP-019` test-row creates.
+Full detail is in `notes/task-019-live-checks.md`. The parent record is MAT-000032 (ordinary), owned by the BU default team "Spaarke Business Unit 1".
+
+| Check | Result |
+|---|---|
+| A: child-records route, Event | **PASS.** The owner is the BU default team. The I-1 stamp is set, `EVT-000001` was assigned, and the search index is the BU's. **Deviation:** the "mapped fields" clause does not apply. The route deliberately passes no mapping until W3, where task 020 adds mapping to it, so that clause moves to 020. |
+| B: Office quick-create, Project | **PASS.** Same owner as A, the stamp is set, 6 fields were mapped, and `PRJ-000044` was assigned. The response shape is unchanged. |
+| P2-2 | Remains K, unverified. The alternate key on `sprk_projectnumber` exists and is Active. A collision was not provoked. |
+| C: chat create | **PASS (intent), 2026-11-03.** The owner created a To Do through the Console Assistant: event `6d1563bb-829d-49da-9d29-92ea695ebba6`, `EVT-000003`. The owner is the BU default team "Spaarke Business Unit 1". The I-1 stamp `sprk_regardingmatter` was set at create, the search index is `spaarke-files-index`, and it was created by `# mi-bff-api-dev` (the service path). Its name is "Contact Outside Counsel" and its parent is PAT-792345, not the prompt's "FMSWP-019 C" under MAT-000032. **Correction (owner, 2026-11-03):** the Assistant asked for the name and parent, and the owner supplied these. The record is a test row, and the owner does not want it deleted. Afterwards, the chat tool description on dev was re-seeded (`Seed-TypedHandlers.ps1 -OnlyHandler DATAVERSE-CREATE-RECORD`, row `18b3531f-…`). It now tells the model that `sprk_eventnumber` is set by the server. |
+| Negative check (AppendTo) | **PASS, 2026-11-03**, as `# UAC Child BU Test User`. Child-records gives 404 `child_record.not_found` and Office gives 403 `OFFICE_009`; each is byte-identical to the response for a nonexistent parent, the timing matches, and no row was created. The "denied mapping source → no mapped values + one warning" clause cannot be reached live until 020 adds an explicit `mappingSource`, so it moves to 020 (unit tests cover it today). |
+| App Insights | No 5xx after the deploy. The `sprk_userentityassociation` "does not exist" exception (×10 at 19:00:52Z) is **not new**. It is the known #2292 (UAC-r2): the nightly reconciler logs about 1,000 of them a day. Check A triggered one first-time membership event, which is 10 log lines. The fault is fail-closed, so it does not affect A or B. **Correction:** the "24 h before" baseline was wrong, because `az monitor app-insights query` defaults to `--offset 1h`. Future baselines must pass `--offset` or a `timestamp` filter. Check A produced no telemetry: #2522. |
+
+Also found: the Office Project create took about 18 s, about 11 s of it on six sequential assigned-access grants (#2523).
+
+**Rows to delete later:**
+- event `fcdd4724-e243-4d37-9583-d694a8644318`;
+- project `1cccf07d-0e0a-43f9-8ea0-f40533d5d691`;
+- 6 `sprk_assignedaccess` rows, with their ids in the live-checks note.
+
+The check-C event `6d1563bb-…` stays: the owner created it and said not to delete it.

@@ -59,7 +59,7 @@ public class OfficeQuickCreateContractTests
     // ── Happy path ──────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Post_Matter_WithMatterType_Returns201_SetsTypeOwnerAndBusinessUnitDefaults_AndLeavesTheNumberToThePlatform()
+    public async Task Post_Matter_WithMatterType_Returns201_SetsTypeAndOwner_NoSearchIndex_AndLeavesTheNumberToThePlatform()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
@@ -90,8 +90,8 @@ public class OfficeQuickCreateContractTests
         matter.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
         matter.GetAttributeValue<string>("sprk_mattername").Should().Be("Acme v. Globex");
         matter.GetAttributeValue<string>("sprk_matterdescription").Should().Be("From Word");
-        matter.GetAttributeValue<string>("sprk_searchindexname").Should().Be("spaarke-files-index");
-        matter.GetAttributeValue<EntityReference>("sprk_ai_search_index").Id.Should().Be(SearchIndexId);
+        matter.Contains("sprk_searchindexname").Should().BeFalse("the index follows the content type, not the unit (task 041)");
+        matter.Contains("sprk_ai_search_index").Should().BeFalse("the index follows the content type, not the unit (task 041)");
         AssertNumberLeftToThePlatform(matter);
         matter.Contains("sprk_containerid").Should().BeFalse("the container is derived server-side, never stamped on create (task 076 W1)");
     }
