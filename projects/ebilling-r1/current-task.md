@@ -32,6 +32,7 @@
 2. 153 end-to-end test invoices.
 3. The refused bell links to the submission. Confirm.
 4. Triage the six guideline gaps (notes/evaluation-set/guidelines/gap-report.md).
+5. Firm-name check: should intake flag an invoice whose printed firm (extracted, used in the invoice name) differs from the firm it is submitted under? Seen 2026-11-03: INV-2025-05166 reads "Garrison and Ellison LLP" but sits under Morrison Foerster LLP (67577f8c), with no finding.
 
 ## Peer state
 - uac-r2 (38): waits for the export-fix diff and the AP send time; the NFR-05 census after deploy; prvReadsprk_StoredFile goes in 086's follow-up.
