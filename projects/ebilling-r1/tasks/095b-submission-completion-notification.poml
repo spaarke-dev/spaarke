@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095b" project="ebilling-r1">
+  <metadata>
+    <title>Notify the submitter when an invoice submission ends</title>
+    <phase>3 Rules (follow-up to 095; owner scope 2026-11-03)</phase>
+    <gate>owner confirms scope and channel in the ebilling session</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes BFF background work (the submission job handler) and writes a Dataverse row per submission; tags include bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Composes the existing NotificationService (appnotification) after the job's final status, following GrantAccessNotifier / AssignTaskNotifier.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>095</deps>
+    <tags>bff-api, job, ebilling</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>When an invoice submission reaches a final status (Accepted, Failed, Rejected / refused), tell the person who submitted it, so a user who closed the Outlook pane still hears the outcome. Owner, 2026-11-03 (relayed by word-add-in-r1): "notification completion now".</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF job handlers (ADR-004) and the in-app notification service.</role>
+
+  <goal>Each submission that ends creates exactly one in-app (bell) notification for its submitter, naming the tracking number and the outcome and linking to the invoice when there is one; the notification can never change, delay or fail the submission's outcome.</goal>
+
+  <context>
+    <background>
+      Channel (recommended; the owner confirms): the Dataverse in-app notification (appnotification, the bell) through the existing NotificationService, as GrantAccessNotifier and AssignTaskNotifier (task 168) do. It shows in Matter Management and the Console. It does not show inside Outlook; the pane covers Outlook through 095a. Email is not in scope unless the owner asks for it.
+      The recipient is the submission's person (sprk_createdbyperson, a systemuser). No person recorded (an external caller with no linked user) means no notification; the portal has its own status view.
+      Where the final status is set: InvoiceSubmissionProcessingJobHandler ("final delivery failed; submission … Failed") and the persister's Accepted path. A refused submission (a rule refusal) is final too. Replays and dead-letter redeliveries must not notify twice.
+    </background>
+    <relevant-files>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Signals/AssignTaskNotifier.cs (bell after the decision; never fails the decision; EventIds beside the notifier)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs and src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs (or the one place every final status passes)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">The notifier answers the three justification questions in the task notes. Reuse NotificationService unchanged; no new channel, package or background service.</constraint>
+    <constraint source="ADR-004 / ADR-052">No new BackgroundService or timer. The notification is sent inside the existing job handler, after the final status is committed.</constraint>
+    <constraint source="outcome safety">A notification fault is logged (a stable EventId, Warning) and swallowed: the submission's status, its job's completion and its retries never depend on it.</constraint>
+    <constraint source="exactly once">One notification per submission reaching a final status: a redelivered job, a replay of K and a dead-letter after a Failed status do not create a second one. State how (for example a deterministic id or a check on the status transition).</constraint>
+    <constraint source="privacy">The notification text names the tracking number, the firm invoice number and the outcome sentence only: no amounts, no findings text, no other person's name.</constraint>
+    <constraint source="CLAUDE.md §10">BFF hygiene: placement statement, publish-size delta against a fresh master build, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Find every path that sets a final status and pick the single point to notify from.</step>
+    <step>Implement the notifier (title "Invoice INV-… accepted" / "… could not be processed" / "… refused"; body: the outcome sentence; action: open the invoice when one exists, else the submission).</step>
+    <step>Write notes/095b-submission-completion-notification.md (justification, placement, publish size, review log).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Accepted: one bell notification for the submitter, linking to the created invoice.</criterion>
+    <criterion>Failed after the last delivery, and refused: one notification each, with the outcome sentence and no invoice link.</criterion>
+    <criterion>A job redelivered after the notification, and a replay of the same email, create no second notification.</criterion>
+    <criterion>No person on the submission: no notification, logged at Information.</criterion>
+    <criterion>NotificationService throws: the submission still reaches its final status and the job completes; a Warning with the notifier's EventId is logged.</criterion>
+    <criterion>Test scope: the cases above. Anything beyond needs a one-line justification in the notes. Seed-proof the "notification fault never fails the job" guard only.</criterion>
+    <criterion>Gate: the 5 test projects build; ArchTests and the broad Finance filter pass.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the owner wants email (or Teams) as well as the bell, STOP: a mailbox send needs the 151c-1a monitored-recipient and marker rules reviewed, and that is a scope change.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+</task>
