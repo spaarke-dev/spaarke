@@ -5,13 +5,13 @@ techStack: [powershell, azure, dataverse, pac-cli]
 appliesTo: ["scripts/Deploy-Release.ps1", "config/environments.json", "deploy new release", "production release", "deploy release"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-10-11
+last-reviewed: 2026-11-03
 ---
 
 # Deploy New Release
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-10-11 (mandatory `-CustomerId`, per-environment coverage, route master→dev to `/master-deploy`)
+> **Last Reviewed**: 2026-11-03 (progress checklist; 2026-10-11: mandatory `-CustomerId`, per-environment coverage, route master→dev to `/master-deploy`)
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — **leave-alone**: cleanest critical-rules structure in batch; BFF URL gotcha well-surfaced)
 > **Exemplar rationale**: Interactive UX patterns change frequently; the BFF URL host-only rule is the stable contract (recurring production issue prevented).
 > **Procedure**: [`docs/procedures/production-release.md`](../../../docs/procedures/production-release.md)
@@ -51,6 +51,19 @@ Interactive Claude Code skill for deploying a Spaarke release to one or more pro
 - **NEVER** create a release tag if any environment deployment failed
 
 ---
+
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Step 1: Pre-Flight Checks (any failure is a hard stop)
+- [ ] Step 2: Environment Selection
+- [ ] Step 3: Change Detection
+- [ ] Step 4: Deployment Plan Confirmation (GATE): operator typed "yes" or "proceed"
+- [ ] Step 5: Execute Deployment (`Deploy-Release.ps1`, including Phase 5 validation)
+- [ ] Step 6: Post-Deployment (report results, confirm release tag only if every environment succeeded)
+```
 
 ## Procedure
 
@@ -237,6 +250,8 @@ Wait for the operator to type **"yes"** or **"proceed"**. Any other response (in
 
 ### Step 5: Execute Deployment
 
+If you need a parameter not shown in this step, read `references/release-reference.md` before continuing.
+
 Call `Deploy-Release.ps1` with the operator's selections.
 
 #### Build the Command
@@ -366,6 +381,8 @@ DEPLOYMENT COMPLETED WITH FAILURES
        git push origin v1.1.0
 ```
 
+If validation fails: fix the cause, then go back to Step 4 — any redeploy passes the confirmation gate again; do not report success until validation passes.
+
 ---
 
 ## Decision Tree: When to Use This Skill
@@ -388,43 +405,9 @@ Is this a full production release to existing environments?
 
 ---
 
-## Parameters for Deploy-Release.ps1
+## Parameters and Environment Registry
 
-| Parameter | Type | Default | Notes |
-|-----------|------|---------|-------|
-| `-EnvironmentUrl` | string[] | (required) | Environment names or Dataverse URLs |
-| `-CustomerId` | string | **(required)** | Phase 4 target via the `sprk_dataverseenvironment` registry; `^[a-z][a-z0-9]{2,7}$`. Dev = `dev`. See Step 5 |
-| `-AdminEnvironmentUrl` | string | `$env:SPAARKE_ADMIN_DATAVERSE_URL`, else the registry's platform-admin entry, else the first non-template entry (dev) | Where the registry lives |
-| `-Version` | string | auto-suggested | `v{major}.{minor}.{patch}` format |
-| `-SkipPhase` | string[] | none | `Build`, `BffApi`, `OntologyConfig`, `Solutions`, `WebResources`, `Validation` |
-| `-SkipBuild` | switch | $false | Shortcut for `-SkipPhase Build` |
-| `-StopOnFailure` | bool | $true | Stop remaining environments on failure |
-| `-ClientSecret` | string | (none) | **Ignored since T218f (2026-10-08)** — prints a warning. Phase 3 imports SpaarkeMaster with the operator's own az/pac sign-in; no service principal secret is used anywhere in the release. Kept so older invocations do not break. |
-| `-WhatIf` | switch | $false | Preview without executing |
-
----
-
-## Environment Registry Format
-
-Environments are defined in `config/environments.json` (read it at runtime; this excerpt shows the shape and the dev values as of 2026-10-11):
-
-```json
-{
-  "environments": {
-    "dev": {
-      "solutionPackageType": "none",
-      "displayName": "Development",
-      "dataverseUrl": "https://spaarkedev1.crm.dynamics.com",
-      "bffApiUrl": "https://spaarke-bff-dev.azurewebsites.net",
-      "appServiceName": "spaarke-bff-dev",
-      "appServiceSlot": "staging",
-      "resourceGroup": "rg-spaarke-dev",
-      "keyVaultName": "spaarke-spekvcert",
-      "tenantId": "a221a95e-..."
-    }
-  }
-}
-```
+The full parameter table for `Deploy-Release.ps1` and the `config/environments.json` shape are in `references/release-reference.md`. Read `config/environments.json` itself at runtime.
 
 **Key rule**: `bffApiUrl` must be **host-only** — no `/api` suffix, no trailing slash. The client code appends `/api/...` at runtime. See `docs/procedures/production-release.md` Phase 0.5 for details.
 

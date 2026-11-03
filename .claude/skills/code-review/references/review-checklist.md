@@ -1,5 +1,15 @@
 # Code Review Quick Reference
 
+## Contents
+
+- **Security Checks** — secrets, connection strings, bearer tokens, SQL injection, path traversal
+- **Performance Checks** — sync-over-async, missing disposal, in-memory cache
+- **Style Checks** — long methods, deep nesting, magic numbers, commented-out code
+- **ADR Quick Checks** — BFF runtime and placement, plugins and the write path, Graph isolation, global auth, DI count
+- **TypeScript/PCF Specific** — list keys, state mutation, Fluent v8 vs v9 imports, `any`
+- **AI Code Smells** — patterns typical of generated code
+- **Review Severity Guide** — how to rank a finding
+
 ## Security Checks
 
 ### Secrets Detection Patterns
@@ -240,7 +250,7 @@ return Ok(response);
 - [ ] **Check**: Does any method handle > 3 distinct concerns?
 - **Detection**: Method name contains "And"/"Or"/"Also"/"Then", or method body has
   distinct sections (validate, fetch, transform, save, notify, log, error-handle)
-- **Severity**: Warning (>3 responsibilities), Critical (>5)
+- **Severity**: Suggestion by default; Warning when the responsibilities have different reasons to change. Never Critical on a count (SKILL.md Step 5.5)
 
 **Example (BAD)**:
 ```csharp
@@ -265,7 +275,8 @@ public async Task<ActionResult> CreateAndProcessDocument(CreateRequest req)
 | Missing auth check | 🔴 Critical | Unprotected endpoint |
 | Sync-over-async | 🟡 Warning | `.Result` on async call |
 | Missing disposal | 🟡 Warning | `new HttpClient()` without using |
-| ADR violation | 🟡 Warning | Graph types in API layer |
+| ADR violation, no documented exception | 🔴 Critical | Graph types in API layer (SKILL.md Step 6) |
+| ADR deviation documented as Path A / Path B | 🟡 Warning | Cited in PR / "ADR Tensions" (SKILL.md Step 6) |
 | Magic number | 🔵 Suggestion | `if (count > 100)` |
-| Long method | 🔵 Suggestion | Method >50 lines |
+| Long method that does more than one thing | 🔵 Suggestion | Method >50 lines mixing concerns (length alone is a signal, not a finding — root CLAUDE.md §11.5) |
 | Missing docs | 🔵 Suggestion | Public API without XML doc |

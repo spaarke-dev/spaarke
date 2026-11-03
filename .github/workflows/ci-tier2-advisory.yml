@@ -614,6 +614,15 @@ jobs:
         shell: pwsh
         run: ./scripts/quality/Test-InstructionPaths.ps1
 
+      # SKILL.md files over 500 lines must justify their length; long skill reference files need a contents
+      # list. Ratcheted: scripts/quality/skill-length.baseline.txt lists the known ones; only a NEW violation
+      # (or a baselined skill growing) fails. Standard: .claude/skills/_template/SKILL.md items 7-9.
+      - name: Check skill length
+        id: skilllength
+        continue-on-error: true
+        shell: pwsh
+        run: python3 scripts/quality/check-skill-length.py   # ubuntu image ships python3; no setup-python needed
+
       - name: Report result
         id: report
         if: always()
@@ -621,6 +630,8 @@ jobs:
         run: |
           if ("${{ steps.instrpaths.outcome }}" -eq "failure") {
             "result=fail (instruction paths)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } elseif ("${{ steps.skilllength.outcome }}" -eq "failure") {
+            "result=fail (skill length)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } elseif ("${{ steps.mdcheck.outputs.skipped }}" -eq "true") {
             "result=skip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } elseif ("${{ steps.mdcheck.outcome }}" -eq "success") {

@@ -10,22 +10,7 @@
 .claude/constraints/provisioning.md|scripts/provisioning-prereqs/reserved-suffixes.yaml
 .claude/FAILURE-MODES.md|infrastructure/ai-search/spaarke-knowledge-index-v2.json
 .claude/FAILURE-MODES.md|scripts/ai-search/Deploy-IndexSchemas.ps1
-.claude/patterns/ai/endpoint-di-symmetry.md|src/server/api/Sprk.Bff.Api/Endpoints/EndpointMappingExtensions.cs
-.claude/patterns/ai/node-executor-authoring.md|src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts
-.claude/patterns/ai/node-executor-authoring.md|tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/CanvasServerMappingDriftTests.cs
-.claude/patterns/api/endpoint-definition.md|src/server/api/Sprk.Bff.Api/Api/DocumentsEndpoints.cs
-.claude/patterns/api/endpoint-definition.md|src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs
-.claude/patterns/api/provisioning-pipeline.md|src/server/api/Sprk.Bff.Api/Endpoints/RegistrationEndpoints.cs
-.claude/patterns/api/send-email-integration.md|src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SendCommunicationToolHandler.cs
-.claude/patterns/auth/msal-client.md|src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts
-.claude/patterns/auth/msal-client.md|src/client/pcf/UniversalQuickCreate/control/services/auth/msalConfig.ts
-.claude/patterns/auth/oauth-scopes.md|src/client/pcf/UniversalQuickCreate/control/services/auth/msalConfig.ts
-.claude/patterns/caching/token-cache.md|src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts
-.claude/patterns/pcf/control-initialization.md|src/client/pcf/UniversalQuickCreate/control/index.ts
-.claude/patterns/pcf/dataverse-queries.md|src/client/pcf/UniversalQuickCreate/control/services/MetadataService.ts
-.claude/patterns/pcf/error-handling.md|src/client/shared/Spaarke.UI.Components/src/services/document-upload/SdapApiClient.ts
 .claude/patterns/provisioning/resource-name-availability-precheck.md|scripts/provisioning-prereqs/reserved-suffixes.yaml
-.claude/patterns/testing/mocking-patterns.md|tests/unit/Sprk.Bff.Api.Tests/Integration/DataverseWebApiWireMockTests.cs
 .claude/skills/ai-procedure-maintenance/SKILL.md|scripts/Validate-AIProcedures.ps1
 .claude/skills/azure-deploy/SKILL.md|infrastructure/bicep/stacks/model1-shared.bicep
 .claude/skills/jps-scope-refresh/SKILL.md|src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ExecutorType.cs
@@ -39,4 +24,3 @@
 .claude/skills/spe-integration/SKILL.md|docs/learn-containertypes.md
 .claude/skills/spe-integration/SKILL.md|docs/learn-knowledge-source.md
 .claude/skills/spe-integration/SKILL.md|docs/learn-semantic-index.md
-.claude/skills/task-create/SKILL.md|src/server/api/CLAUDE.md
