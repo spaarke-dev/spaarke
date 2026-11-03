@@ -114,6 +114,9 @@ public static class StoredFileSchema
     /// <summary>The source document's table and set (the copy rule reads it).</summary>
     public const string DocumentTable = "sprk_document";
     public const string DocumentEntitySet = "sprk_documents";
+
+    /// <summary>The source document's display name (read only for the invoice file list, ebilling-r1 task 151e).</summary>
+    public const string DocumentName = "sprk_documentname";
     public const string CommunicationTable = "sprk_communication";
 
     /// <summary>Every parent lookup column, in a fixed order.</summary>
@@ -122,7 +125,7 @@ public static class StoredFileSchema
     /// <summary>The columns a read of a row asks for (every column the store's rules look at).</summary>
     public static readonly string[] ReadColumns =
     [
-        IdColumn, Purpose, FirmVisible, Status, SourceDocument, SourceCommunication, Sha256, ContentType, SizeBytes, BlobPath,
+        IdColumn, Name, Purpose, FirmVisible, Status, SourceDocument, SourceCommunication, Sha256, ContentType, SizeBytes, BlobPath,
         ProcedureVersionTable, InvoiceTable, BillingExportTable, VersionNumber, CreatedOn,
     ];
 
@@ -567,3 +570,21 @@ public enum StoredFileProcessingOutcome
 
 /// <summary>A job's read of a Stored File's bytes.</summary>
 public sealed record StoredFileProcessingRead(StoredFileProcessingOutcome Outcome, BinaryData? Content = null, string? ContentType = null);
+
+/// <summary>
+/// One row of <c>GET /api/finance/invoices/{invoiceId}/files</c> (ebilling-r1 task 151e): an OUTBOUND response record (it lives outside
+/// <c>Api/**</c> so the inbound-body guard does not mistake it for a request body).
+/// </summary>
+/// <param name="FileId">The Stored File id: the content route's <c>{fileId}</c>.</param>
+/// <param name="Name">The file's display name.</param>
+/// <param name="Purpose"><c>InvoicePdf</c> or <c>Supporting</c>.</param>
+/// <param name="SizeBytes">The size, when recorded.</param>
+/// <param name="ContentType">The stored media type.</param>
+/// <param name="AddedOn">When the row was created (UTC).</param>
+/// <param name="ScanState"><c>Ready</c> (Open serves it) or <c>Pending</c> (its malware scan has no verdict yet).</param>
+/// <param name="SourceEmail">The email Document the file is a copy of, when the caller may read it (always, for a listed copy); otherwise <c>null</c>.</param>
+public sealed record InvoiceFileListItem(
+    Guid FileId, string Name, string Purpose, int? SizeBytes, string? ContentType, DateTime? AddedOn, string ScanState, InvoiceFileSourceEmail? SourceEmail);
+
+/// <summary>The email Document a file was copied from (outbound; see <see cref="InvoiceFileListItem"/>).</summary>
+public sealed record InvoiceFileSourceEmail(Guid DocumentId, string? Name);
