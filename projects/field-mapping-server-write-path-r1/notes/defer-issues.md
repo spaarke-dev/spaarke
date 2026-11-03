@@ -133,3 +133,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Out of scope, pre-existing: the scripts are run by hand and have not been run under 041 |
 | **Owner task** | Unassigned; the runbook note goes in task 062 |
 | **Failure** | `Backfill-MultiContainerMultiIndex-Documents.ps1` stamps the literal `spaarke-files-index`, which is wrong wherever `KnowledgeIndexName` differs. `…-ParentRecords.ps1` writes record index columns that FR-40 says have no writer |
+
+## DI-014 — The DeliverToIndex playbook node reports an index it never uses
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 041 adversarial review (finding 8) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2539 |
+| **Class** | Out of scope, pre-existing (F1, user-visible text): outside 041's diff, and it touches the JPS node config contract |
+| **Owner task** | Unassigned (AI playbook owners) |
+| **Failure** | `DeliverToIndexNodeExecutor` requires `indexName` and reports it in its output, but the enqueued payload carries no index. Under FR-40 the file always goes to `KnowledgeIndexName`, so the output names the wrong index |
