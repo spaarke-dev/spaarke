@@ -58,6 +58,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
     /// <summary>Task 094: the caller's own rights the from-document route's step 1 asks (gate variant) on the source document and communication.</summary>
     private readonly Sprk.Bff.Api.Tests.Finance.Files.RecordingRightsProbe _sourceRights = new();
+
+    /// <summary>Task 118b-2: SharePoint Embedded's download, which the shared document read calls for a supporting document (its item's bytes).</summary>
+    private readonly Mock<Sprk.Bff.Api.Infrastructure.Graph.ISpeFileOperations> _spe = new();
     private WebApplication _app = null!;
     // ebilling-r1 task 098 (review round 4b): the submission routes' seam is the REAL ExternalDataService.HideSubmissionsForAsync over
     // an app-only Web API double (InvoiceWorld): a test seeds the invoice's and the documents' rows the way their writers do.
@@ -75,6 +78,8 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         // D-106: the firm is one of the matter's assigned law firms (the work-assignment and project below are linked per test).
         _participations.Links[("sprk_matter", MatterId)] = new[] { FirmId };
         _resolver.Principal = Collaborator(AccessRights.Read | AccessRights.Create | AccessRights.Write);
+        _spe.Setup(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, string item, CancellationToken _) => (Stream?)new MemoryStream(System.Text.Encoding.ASCII.GetBytes("bytes of " + item)));
     }
 
     public async Task InitializeAsync()
@@ -105,6 +110,10 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         // Task 094: Submit Invoice step 1 (from-document route): the caller's rights probe and the app-only reader (the harness's Dataverse).
         builder.Services.AddSingleton<CallerRecordAccessProbe>(_sourceRights);
         builder.Services.AddSingleton(_h.Entities.Object);
+        // Task 118b-2: the shared document read's seams the route binds for a supporting document (the download, and the REAL container
+        // check over a world whose business unit claims the test drive).
+        builder.Services.AddSingleton(_spe.Object);
+        builder.Services.AddSingleton(TestRecordContainerResolver.ForBusinessUnitContainers("b!drive"));
         // ebilling-r1 task 098: the submission routes' (a') seam, as AddExternalAccess registers it (each call recorded).
         if (_registerSubmissionHiding)
             builder.Services.AddScoped<ExternalInvoiceSubmissionHiding>(_ => (caller, submissions, ct) =>
@@ -2163,7 +2172,14 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     /// <summary>A supporting document row linking <paramref name="communication"/> (null: none), readable by the caller when <paramref name="readable"/>.</summary>
     private void SupportingDocumentExists(Guid id, Guid? communication, bool readable = true)
     {
-        var row = new Entity("sprk_document", id) { ["sprk_graphdriveid"] = "b!drive", ["sprk_graphitemid"] = "item-" + id.ToString("N") };
+        var row = new Entity("sprk_document", id)
+        {
+            ["sprk_graphdriveid"] = "b!drive",
+            ["sprk_graphitemid"] = "item-" + id.ToString("N"),
+            ["versionnumber"] = 5L,
+            ["sprk_mimetype"] = "application/pdf",
+            ["sprk_filename"] = "Timesheet.pdf",
+        };
         if (communication is { } linked)
         {
             row["sprk_relatedcommunication"] = new EntityReference("sprk_communication", linked);
@@ -2176,8 +2192,8 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         }
     }
 
-    [Fact(DisplayName = "118b-1 (must not fire): readable supporting documents of the same communication pass, each checked as the caller (OBO); a new attempt then gets 118b-1's interim refusal, nothing filed or written")]
-    public async Task FromDocument_readable_supporting_documents_pass_the_checks_as_the_caller()
+    [Fact(DisplayName = "118b-2 (acceptance: two readable supporting documents): 202 with the document's submission; each supporting document checked once as the caller (OBO), read through the shared read (its container verified, its bytes downloaded) and staged under its part id with its own source; one submission, one job")]
+    public async Task FromDocument_two_readable_supporting_documents_are_202_and_each_copy_is_staged_with_its_source()
     {
         GrantInternalSubmit();
         SourceDocumentExists();
@@ -2186,15 +2202,37 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
 
         var response = await PostFromDocumentAsync(SupportingBody(SupportingB, SupportingA, SupportingB));
 
-        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
-        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.Failed);
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, await response.Content.ReadAsStringAsync());
+        var submissionId = InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(SourceDocumentId);
+        using (var receipt = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            receipt.RootElement.GetProperty("submissionId").GetGuid().Should().Be(submissionId, "the id is still the document's (D-134)");
+        }
+
         foreach (var id in new[] { SupportingA, SupportingB })
         {
             _sourceRights.Calls.Should().ContainSingle(c => c.Set == FinanceAuthorizationFilter.DocumentEntitySet && c.Id == id && c.Token != null,
                 "each supporting document is checked once (repeats ignored), as the caller");
+            _spe.Verify(s => s.DownloadFileAsync("b!drive", "item-" + id.ToString("N"), It.IsAny<CancellationToken>()), Times.Once());
         }
 
-        NothingWritten();
+        var parent = new Sprk.Bff.Api.Services.Finance.Files.StoredFileParent(
+            Sprk.Bff.Api.Services.Finance.Files.StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(submissionId));
+        var container = Sprk.Bff.Api.Services.Finance.Files.StoredFileSchema.ContainerOf(Sprk.Bff.Api.Services.Finance.Files.StoredFilePurpose.InvoiceSupportingFile);
+        _h.Stages.Should().HaveCount(2);
+        var sorted = new[] { SupportingA, SupportingB }.Order().ToArray();
+        for (var number = 1; number <= sorted.Length; number++)
+        {
+            var blob = _h.Files.Gateway.Get(container, Sprk.Bff.Api.Services.Finance.Files.StoredFileBlobName.Build(
+                _h.Files.TenantId, parent, InvoiceSubmissionPersister.DocumentPartFileId(submissionId, number)))!;
+            blob.Metadata[Sprk.Bff.Api.Services.Finance.Files.StoredFileBlobs.MetadataSourceDocument].Should().Be(
+                sorted[number - 1].ToString("D"), "part numbers follow the sorted ids");
+            blob.Metadata[Sprk.Bff.Api.Services.Finance.Files.StoredFileBlobs.MetadataSourceCommunication].Should().Be(SourceCommunicationId.ToString("D"));
+            blob.Metadata[Sprk.Bff.Api.Services.Finance.Files.StoredFileBlobs.MetadataSourceVersion].Should().Be("5");
+        }
+
+        _h.Allocations.Should().ContainSingle().Which.SubmissionId.Should().Be(submissionId);
+        _h.JobsSent.Should().ContainSingle();
     }
 
     [Theory(DisplayName = "118b-1 (seed-proof, the Read guard; must fire): a supporting document the caller cannot Read, an unknown one, one of another communication or of none is the uniform 404, byte-for-byte the same; an unreadable row is never read; nothing written")]
@@ -2281,7 +2319,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         _sourceRights.Calls.Count(c => c.Set == FinanceAuthorizationFilter.DocumentEntitySet && ids.Contains(c.Id)).Should().Be(ids.Length);
     }
 
-    [Fact(DisplayName = "118b-1 (must fire): a retry of an earlier submission of the document that names supporting documents is 409 document_already_submitted (the earlier attempt has the empty set until 118b-2); nothing written")]
+    [Fact(DisplayName = "118b (must fire): a retry of an earlier submission of the document that staged no supporting documents (the empty set), naming some, is 409 document_already_submitted; the same request without them replays; nothing written")]
     public async Task FromDocument_retry_with_another_supporting_set_is_409()
     {
         GrantInternalSubmit();

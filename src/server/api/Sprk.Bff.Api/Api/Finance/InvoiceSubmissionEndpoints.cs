@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
@@ -716,6 +717,16 @@ public static class InvoiceSubmissionEndpoints
                 FileSourceBeforeWrite = prepared.Hook, // step A: the intake runs it after its read-only refusals (fix round F1-b)
                 CorrectedInvoice = correctedInvoice, // task 097b: judged by the intake after the retry check, before step A
                 SupportingDocumentIds = supporting, // task 118b: compared with an earlier attempt's set (never part of the submission id)
+                // Task 118b-2: the ONE shared document read (the job's), bound here to the route's SharePoint Embedded and container seams;
+                // resolved only when a new attempt reads a supporting document.
+                ReadSupportingDocument = supporting.Count == 0
+                    ? null
+                    : (id, readCt) => SourceDocumentFileRead.ReadAsync(
+                        http.RequestServices.GetRequiredService<IGenericEntityService>(),
+                        http.RequestServices.GetRequiredService<ISpeFileOperations>(),
+                        http.RequestServices.GetRequiredService<RecordContainerResolver>(),
+                        id,
+                        readCt),
             }, ct);
         }
         catch (SourceFilingRefusedException ex)

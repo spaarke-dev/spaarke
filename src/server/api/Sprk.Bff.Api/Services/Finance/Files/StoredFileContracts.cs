@@ -493,6 +493,9 @@ public sealed record StagedBlob(string Container, string BlobPath, string Sha256
 /// ebilling-r1 task 094 (from-email): what a from-email Invoice part's stage records beside its own source facts: the ordinals of the
 /// Supporting parts staged with it (each under <c>StoredFileIds.ForAttachment(submission, "eml-part-{n}")</c>) and the part's file
 /// extension. Nothing else of the email (no name, no subject) is recorded.
+/// <para>Task 118b-2: the from-document intake's supporting parts use it too. The first part's <paramref name="SupportingOrdinals"/> are
+/// the numbers of every part of the attempt (1 to N, each under <c>StoredFileIds.ForAttachment(submission, "document-part-{n}")</c>); every
+/// part records its own extension.</para>
 /// </summary>
 internal sealed record StagedSourceManifest(IReadOnlyList<int> SupportingOrdinals, string? Extension);
 

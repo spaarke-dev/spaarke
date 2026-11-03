@@ -170,6 +170,14 @@ public sealed record InvoiceSubmissionRequest
     /// attempt, never the submission id (D-134: one submission per document and attempt).
     /// </summary>
     public IReadOnlyList<Guid> SupportingDocumentIds { get; init; } = [];
+
+    /// <summary>
+    /// ebilling-r1 task 118b-2: the read of one supporting document's file, the route's binding of the ONE shared read
+    /// (<see cref="SourceDocumentFileRead.ReadAsync"/>, app-only, the pointer's container verified first) to its own SharePoint Embedded and
+    /// container seams, which the intake does not take (it never reaches SharePoint Embedded itself, task 092). Required when
+    /// <see cref="SupportingDocumentIds"/> is not empty and the request makes a new attempt; a fault throws.
+    /// </summary>
+    internal Func<Guid, CancellationToken, Task<SourceDocumentFile>>? ReadSupportingDocument { get; init; }
 }
 
 /// <summary>A submission that was received: the row exists with its tracking number and the processing job is enqueued.</summary>
