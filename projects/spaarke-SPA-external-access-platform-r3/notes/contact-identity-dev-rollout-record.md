@@ -175,3 +175,18 @@
   - SECURE-CENSUS: findings=0 at 19:00Z and 19:15Z.
   - Exceptions: none new (#2292, the known acme readability read, and the AI catalog drift check, all as before).
   - Information only, which uac-r2 is following up with field-mapping: from 19:05Z the ROOT-OWNER census reports 1 project filed under a matter with no link row, up from 0. It coincides with a new project (61 → 62), probably field-mapping's quick-create check. It has no effect on ownership or read access.
+
+## 16. Dev BFF `5796774091` (2026-11-03, deployed by R3; ebilling 151c, Email to AP)
+
+- **Content:** master at the #2526 merge (ebilling 151c: the AP export Email to AP and Mark Sent to AP routes, the server-send marker on `CommunicationService` and `IncomingCommunicationProcessor`, the missing-column retry). Also #2525 (office-addins only) and #2521 (tests only). The src/server delta from `3740e1a105` is #2526's 12 files. R3 checked that the external message post (`PostToRecordThreadAsync`) is unchanged. #2450 is present, and there is no non-comment `sprk_invoicestatus`.
+- **CI:** the first Router run failed because the Tier 1 arch-test job was cancelled at its 10-minute limit with every step green (filed as #2527). The failed jobs were re-run, and Router went green at 2026-11-02 23:06:42Z.
+- **Go:** the owner in R3's session ("go BFF deploy 5796774091").
+- **OKs:** ebilling (7b), ontology (a9), uac-r2 (38), field-mapping (5c), word-add-in (dc); provisioning standing.
+- **Pre-deploy checks:**
+  - Settings: 225; both write switches true; Ebilling Enabled=true, StoredFileReconcileEnabled=false, MalwareScanningEnabled=false; the three name-only keys present.
+  - `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` exited 0 (272 OK).
+  - phaseA: live `3740e1a105`, healthz 200. Rollback snapshot `deploy/rollback/wwwroot-20261103T132814Z` (197 files).
+- **Deploy:** `Deploy-BffApi.ps1 -Environment dev` from a detached worktree at `5796774091`. Package 39.31 MB. Received at 2026-11-03 13:29:19Z. The 4 critical files match by SHA-256; health and CORS checks passed.
+- **Readback** (13:30:33Z): ProductVersion `+5796774091…`; /healthz 200, /healthz/dataverse 200, anonymous /api/me 401. Settings unchanged (225).
+- **After-notices** sent to all five. uac-r2's gate runs from 13:29:19Z, with the external, finance export-batches and verified server-send splits. ebilling then imports the ApExport code page, ribbons and views.
+- **Rollback:** redeploy `3740e1a105`, or restore the snapshot above.
