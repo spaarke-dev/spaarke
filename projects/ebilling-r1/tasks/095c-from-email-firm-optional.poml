@@ -65,7 +65,7 @@
     <step>Contract: mode New accepts firmId null or absent; the correction rule above; §6 and §8 unchanged otherwise; the user sentence.</step>
     <step>The allocator and persister with a null firm; the hold finding; the approval refusal; null handling in every reader listed above.</step>
     <step>Tests; notes/095c-from-email-firm-optional.md (justification, placement, publish size, the alternate-key evidence, the reader inventory with the null behaviour of each); the D-106 amendment entry.</step>
-    <step>Send word-add-in-r1 the contract delta and the PR number.</step>
+    <step>Send word-add-in-r1 the contract delta and the PR number, including the exact "submitted without a firm" sentence and its outcome code, which the pane shows after acceptance (their request, 2026-11-03).</step>
   </steps>
 
   <acceptance-criteria>
