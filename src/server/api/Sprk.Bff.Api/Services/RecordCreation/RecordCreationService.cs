@@ -706,6 +706,11 @@ internal sealed partial class RecordCreationService
                 }
             }
 
+            // Task 020 fix round 2 (F-2): the plan reads WritesOf, which leaves out a JSON-null body column, so a system item
+            // naming the secure flag or the access record as null reached the create. Asked here, on the item, first.
+            if (SecureRootServerColumnRefusal(table, item) is { } serverColumn)
+                return Decision.Refuse(PlanRefused(serverColumn, noun));
+
             var plan = await _rootFiling.PlanCreateAsync(table, OwnedChildWrite.WritesOf(item), creatorPerson, ct,
                 user is null ? null : CallerMayFileUnder(user, creatorPerson, item, request.ServerSetLookupColumns)).ConfigureAwait(false);
             if (plan.Refusal is { } planRefusal)
@@ -721,20 +726,10 @@ internal sealed partial class RecordCreationService
         {
             // Field-mapping task 020 fix round 1 (F-1; UAC-r2 rule, 2026-11-03): a matter is a secure root that inherits
             // nothing, so the plan above never asks it — but its secure flag is the transitions' alone (Make Secure / Remove
-            // Secure), exactly as a project's: a create that NAMES sprk_issecure (any value, null included) is refused with the
-            // plan's own refusal, code, words and status, whatever the principal and whatever the path (route, chat, Office,
-            // a system writer). sprk_matter carries no sprk_accessinheritance column, so the plan's access-record refusal has
-            // nothing to apply to here. "Names" includes a JSON null in a mapped item's body, which WritesOf leaves out (it
-            // lists a null only for a cleared LOOKUP) but the create would still write.
-            if (SecureRootInheritance.IsParent(table)
-                && (AccessFollowsParent.NamesSecureFlag(OwnedChildWrite.WritesOf(item))
-                    || item.Columns.Any(c => string.Equals(
-                        SecureRootInheritance.NormalizeColumn(c), AccessFollowsParent.SecureFlagColumn, StringComparison.OrdinalIgnoreCase))))
-            {
-                return Decision.Refuse(PlanRefused(
-                    RecordOwnerResolution.Refused(AccessFollowsParent.SecureFlagReasonCode, SecureRootInheritance.SecureFlagRefusalText),
-                    noun));
-            }
+            // Secure), exactly as a project's: refused with the plan's own refusal, code, words and status, whatever the
+            // principal and whatever the path (route, chat, Office, a system writer).
+            if (SecureRootServerColumnRefusal(table, item) is { } serverColumn)
+                return Decision.Refuse(PlanRefused(serverColumn, noun));
 
             trace.Record(RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran, "ordinary (the table inherits no secure parent)");
         }
@@ -1465,6 +1460,34 @@ internal sealed partial class RecordCreationService
         { Denied: { } denied } => new(RecordCreationRefusalKind.Forbidden, RecordCreationRefusal.DeniedCode, denied),
         _ => new(RecordCreationRefusalKind.Undecided, RecordCreationRefusal.NoDecisionCode, $"The {noun} was not created."),
     };
+
+    /// <summary>
+    /// Task 020 fix rounds 1 and 2 (F-1, F-2): the ONE check, for every secure root (matter, project, work assignment), that a
+    /// create names none of the columns only the transitions and the cascade write — <c>sprk_issecure</c> on all three, and
+    /// <c>sprk_accessinheritance</c> on the two that carry it (project, work assignment). "Names" is the item's own columns as
+    /// well as <see cref="OwnedChildWrite.WritesOf"/>, which leaves out a JSON-null body column the create would still write.
+    /// Answers with the secure-root plan's own refusals (code and words; <see cref="PlanRefused"/> makes it 403), in the plan's
+    /// order. <c>null</c>: neither is named, or the table is no secure root. Pure.
+    /// </summary>
+    internal static RecordOwnerResolution? SecureRootServerColumnRefusal(string table, DataverseWriteItemMapper.MappedItem item)
+    {
+        var inherits = SecureRootInheritance.Inherits(table);
+        if (!inherits && !SecureRootInheritance.IsParent(table))
+            return null;
+
+        var named = OwnedChildWrite.WritesOf(item).Select(w => w.Key).Concat(item.Columns)
+            .Select(SecureRootInheritance.NormalizeColumn)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (inherits && named.Contains(AccessInheritance.Column))
+        {
+            return RecordOwnerResolution.Refused(AccessInheritance.ServerOnlyReasonCode,
+                $"{AccessInheritance.Column} is written only by Spaarke, so it was not created");
+        }
+
+        return named.Contains(AccessFollowsParent.SecureFlagColumn)
+            ? RecordOwnerResolution.Refused(AccessFollowsParent.SecureFlagReasonCode, SecureRootInheritance.SecureFlagRefusalText)
+            : null;
+    }
 
     /// <summary>
     /// The secure-create plan's refusal (task 158 r1), split as <c>ChildRecordEndpoints.PlanRefused</c> splits it today: no
