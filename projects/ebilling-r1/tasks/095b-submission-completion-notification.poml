@@ -4,7 +4,7 @@
     <title>Notify the submitter when an invoice submission ends</title>
     <phase>3 Rules (follow-up to 095; owner scope 2026-11-03)</phase>
     <gate>owner confirms scope and channel in the ebilling session</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes BFF background work (the submission job handler) and writes a Dataverse row per submission; tags include bff-api.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -75,4 +75,15 @@
       <file>projects/ebilling-r1/CLAUDE.md</file>
     </files>
   </knowledge>
+
+  <notes>
+    Done on branch worktree-agent-a00d7e2496d172b6c at 7d5604d65d (owner scope and channel confirmed 2026-11-03: bell only, no email). SubmissionOutcomeNotifier (new) is called by
+    InvoiceSubmissionProcessingJobHandler only from the delivery whose own write set the final status (after-steps Completed and not AlreadyTerminal,
+    the unreadable Rejected, FailAsync, the final-delivery Failed, the commit gate's Undone), so a redelivery, a replay and a dead-letter after Failed never
+    notify twice. A fault is a Warning (EventId 50396) and is swallowed. 24 tests (095b), the swallow guard seeded. Gate: 5 test projects build; ArchTests
+    1911 passed; filtered unit run 7274 passed, 6 skipped (pre-existing), 0 failed. Own code-review and adr-check: no F-class finding; independent
+    adversarial review and the publish-size measurement are the main session's. Details, hook points, exactly-once mechanism and K-class limits:
+    notes/095b-submission-completion-notification.md.
+    rework: none task 095b
+  </notes>
 </task>
