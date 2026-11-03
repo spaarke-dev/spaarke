@@ -51,7 +51,7 @@ public class OfficeQuickCreateProjectContractTests
     // ── Happy path ──────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Post_Project_Returns201_OwnedByCallersTeam_WithBusinessUnitDefaults_AndLeavesTheNumberToThePlatform()
+    public async Task Post_Project_Returns201_OwnedByCallersTeam_NoSearchIndex_AndLeavesTheNumberToThePlatform()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
@@ -79,8 +79,8 @@ public class OfficeQuickCreateProjectContractTests
         project.GetAttributeValue<string>("sprk_projectdescription").Should().Be("From Word");
         project.GetAttributeValue<EntityReference>("ownerid").Should()
             .BeEquivalentTo(OwnerTeam);
-        project.GetAttributeValue<string>("sprk_searchindexname").Should().Be("spaarke-files-index");
-        project.GetAttributeValue<EntityReference>("sprk_ai_search_index").Id.Should().Be(SearchIndexId);
+        project.Contains("sprk_searchindexname").Should().BeFalse("the index follows the content type, not the unit (task 041)");
+        project.Contains("sprk_ai_search_index").Should().BeFalse("the index follows the content type, not the unit (task 041)");
         AssertNumberLeftToThePlatform(project);
         project.Contains("sprk_containerid").Should()
             .BeFalse("the container is derived server-side, never stamped on create (task 076 W1)");
@@ -108,8 +108,12 @@ public class OfficeQuickCreateProjectContractTests
             "the Project path has no matter-type concept, as the caller either");
     }
 
+    /// <summary>
+    /// Task 041 (FR-40): step 8 reads no business-unit defaults any more, so a team read that would fail is never made and
+    /// the create carries no "Business-unit search defaults could not be read" warning (the warning is gone with the read).
+    /// </summary>
     [Fact]
-    public async Task Post_Project_WhenBusinessUnitDefaultsCannotBeRead_StillCreates_AndWarns()
+    public async Task Post_Project_NeverReadsTheBusinessUnitDefaults_SoAFailingTeamReadNeitherFailsNorWarns()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
@@ -121,13 +125,11 @@ public class OfficeQuickCreateProjectContractTests
         var response = await factory.CreateClient().PostAsJsonAsync(
             Route, new QuickCreateRequest { Name = "No BU Defaults" });
 
-        response.StatusCode.Should().Be(HttpStatusCode.Created, "index-routing hints are never worth failing a create");
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
-        body!.Warnings.Should().ContainSingle(w => w.Contains("Business-unit search defaults could not be read"));
-        // Pins the SECOND sentence too: ApplyBusinessUnitDefaultsAsync is shared with the Matter path, and its noun
-        // was hardcoded to "matter" until task 031's Step 9.5 review caught it leaking onto Project creates.
-        body.Warnings!.Single().Should().Contain("this project falls back")
-            .And.NotContain("matter", "the shared BU helper must not leak the Matter noun onto the Project path");
+        body!.Warnings.Should().BeNull("no business-unit defaults are read, so none can fail to be read");
+        factory.Entities.Verify(
+            e => e.RetrieveAsync("team", OwnerTeam.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
         created.Entity!.Contains("sprk_searchindexname").Should().BeFalse();
         created.Entity.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
     }
