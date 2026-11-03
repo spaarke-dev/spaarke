@@ -53,12 +53,23 @@ public sealed class CommunicationAccountService
     /// </summary>
     public async Task<CommunicationAccount[]> QueryReceiveEnabledAccountsAsync(CancellationToken ct = default)
     {
-        return await GetCachedAccountsAsync(
-            ReceiveEnabledCacheKey,
-            "sprk_receiveenabled eq true and statecode eq 0",
-            "sprk_emailaddress,sprk_displayname,sprk_accounttype,sprk_name,sprk_graphsubscriptionid,sprk_graphsubscriptionexpiry,sprk_monitorfolder,sprk_autocreaterecords,sprk_archiveincomingoptin,sprk_securitygroupid,sprk_securitygroupname",
-            ct);
+        return await GetCachedAccountsAsync(ReceiveEnabledCacheKey, ReceiveEnabledFilter, ReceiveEnabledSelect, ct);
     }
+
+    /// <summary>
+    /// As <see cref="QueryReceiveEnabledAccountsAsync"/>, but a Dataverse fault THROWS instead of answering an empty list (ebilling-r1 task 151c-1a,
+    /// uac-r2 F2): for a check that must fail closed, where "no monitored mailboxes" would let a send go ahead. A cache fault still falls back to
+    /// Dataverse, as in the lenient method.
+    /// </summary>
+    public async Task<CommunicationAccount[]> QueryReceiveEnabledAccountsStrictAsync(CancellationToken ct = default)
+    {
+        return await GetCachedAccountsAsync(ReceiveEnabledCacheKey, ReceiveEnabledFilter, ReceiveEnabledSelect, ct, throwOnQueryFault: true);
+    }
+
+    private const string ReceiveEnabledFilter = "sprk_receiveenabled eq true and statecode eq 0";
+
+    private const string ReceiveEnabledSelect =
+        "sprk_emailaddress,sprk_displayname,sprk_accounttype,sprk_name,sprk_graphsubscriptionid,sprk_graphsubscriptionexpiry,sprk_monitorfolder,sprk_autocreaterecords,sprk_archiveincomingoptin,sprk_securitygroupid,sprk_securitygroupname";
 
     /// <summary>
     /// Returns the default send-enabled account, or null if none found.
@@ -80,7 +91,7 @@ public sealed class CommunicationAccountService
     }
 
     private async Task<CommunicationAccount[]> GetCachedAccountsAsync(
-        string cacheKey, string filter, string select, CancellationToken ct)
+        string cacheKey, string filter, string select, CancellationToken ct, bool throwOnQueryFault = false)
     {
         // Check Redis cache first
         try
@@ -110,7 +121,7 @@ public sealed class CommunicationAccountService
             accounts = entities.Select(MapToCommunicationAccount).ToArray();
             _logger.LogDebug("Retrieved {Count} communication accounts from Dataverse ({Key})", accounts.Length, cacheKey);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!throwOnQueryFault)
         {
             _logger.LogWarning(ex, "Failed to query communication accounts from Dataverse ({Key}); returning empty", cacheKey);
             return Array.Empty<CommunicationAccount>();

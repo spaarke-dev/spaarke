@@ -110,11 +110,13 @@ describe('App — the Invoice view is reachable only through ?action=submitInvoi
 
     await waitFor(() => expect(InvoiceView).toHaveBeenCalled());
     expect(SaveView).not.toHaveBeenCalled();
-    // A1: the submission and the firm list are wired (ebilling's from-email contract); corrections stay off.
+    // A1: the submission and the firm list are wired (ebilling's from-email contract); corrections are on (ebilling
+    // 097b/c/e live on dev) with their prefill.
     const props = InvoiceView.mock.calls[InvoiceView.mock.calls.length - 1]![0];
     expect(typeof props.onSubmit).toBe('function');
     expect(typeof props.loadFirms).toBe('function');
-    expect(props.correctionAvailable).toBeUndefined();
+    expect(props.correctionAvailable).toBe(true);
+    expect(typeof props.loadCorrectionPrefill).toBe('function');
     // Stable seams across re-renders: a new `loadFirms` would make the view reload the firms and drop the choice.
     const first = InvoiceView.mock.calls[0]![0];
     expect(props.loadFirms).toBe(first.loadFirms);

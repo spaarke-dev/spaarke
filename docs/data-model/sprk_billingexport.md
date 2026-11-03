@@ -1,7 +1,7 @@
 # sprk_billingexport (Billing Export)
 
 > **Project**: ebilling-r1, task 023 (FR-13, FR-41, D-21, D-56)
-> **Last Updated**: 2026-10-15
+> **Last Updated**: 2026-11-02 (task 151c-2: `sprk_communication.sprk_billingexport`)
 > **Script**: `scripts/ebilling/Deploy-EbillingExportSchema.ps1` (idempotent, additive; a second run changes nothing)
 > **Solution**: `SpaarkeMaster` (unmanaged, in dev). Solution source, forms and views are synced by task 029.
 
@@ -15,11 +15,12 @@ User-owned, entity set `sprk_billingexports`, primary name `sprk_name` (text 100
 |---|---|---|
 | `sprk_name` | Text (100), primary name, application-required | The batch id (D-56 column `BatchId`). |
 | `sprk_invoicecount` | Whole number, min 0, max 1,000,000 | Number of invoices in the batch. Written by task 150. |
-| `sprk_totalamount` | Money (precision 2, minimum -922337203685477 after D-129 (4), maximum 1,000,000,000, plus `_base` companion) | Sum of the approved totals of the batch's invoices; an approved credit memo has a negative approved total (D-127), so the sum can be negative. The minimum was 0 and is lowered by `scripts/ebilling/Deploy-EbillingInvoiceTotalsRange.ps1` (idempotent, widen-only; not yet run on dev, owner's OK; 053 adds it to SpaarkeMaster). Written by task 150. |
+| `sprk_totalamount` | Money (precision 2, minimum -922337203685477 after D-129 (4), maximum 1,000,000,000, plus `_base` companion) | Sum of the approved totals of the batch's invoices; an approved credit memo has a negative approved total (D-127), so the sum can be negative. The minimum was 0 and is lowered by `scripts/ebilling/Deploy-EbillingInvoiceTotalsRange.ps1` (idempotent, widen-only; run on dev 2026-10-30 with the owner's OK; 053 adds it to SpaarkeMaster). Written by task 150. |
 | `sprk_formats` | Multi-select choice (local) | The formats this batch produced: CSV 100000000, JSON 100000001, XML 100000002. XML is reserved (D-21): nothing writes it in R1. |
 | `sprk_exportstatus` | Choice (local), no default | Generating 100000000, Completed 100000001, Failed 100000002. |
 | `sprk_mappingsnapshot` | Multiline text (1,048,576) | The field mapping used to produce the files, snapshotted per batch (FR-41): a later mapping change does not alter how a past batch is read. |
 | `sprk_failurereason` | Text (200) | Why the batch failed, when `sprk_exportstatus` is Failed. |
+| `sprk_senttoapdate` | Date and Time (user local), optional ("Sent to AP Date") | When the batch was first sent to AP (task 151c-1a, EB-D-182; `scripts/ebilling/Deploy-EbillingSentToApDateColumn.ps1`, idempotent, refuses a same-name column of another type or Date Only). Set by `POST .../email` when it first succeeds, or by `POST .../mark-sent-to-ap` for files delivered another way; empty until then; **set once, never overwritten**. No per-invoice copy. On the Billing Export main form. |
 
 The system `statecode` / `statuscode` keep their defaults (Active / Inactive) and carry no export meaning.
 
@@ -32,8 +33,15 @@ All use delete = RemoveLink and NoCascade for assign, merge, reparent, share and
 | `sprk_billingexport` | `sprk_csvdocument` | `sprk_document` | `sprk_billingexport_csvdocument_document` | The CSV file, stored as a Document in the E-Billing Output Files container (D-44, D-55). |
 | `sprk_billingexport` | `sprk_jsondocument` | `sprk_document` | `sprk_billingexport_jsondocument_document` | The JSON file, same container. |
 | `sprk_invoice` | `sprk_billingexport` ("Export Batch") | `sprk_billingexport` | `sprk_invoice_billingexport_billingexport` | See "Invoice in one batch" below. |
+| `sprk_communication` | `sprk_billingexport` ("Export Batch") | `sprk_billingexport` | `sprk_communication_billingexport_billingexport` | Task 151c-2 (EB-D-182): the AP email sent for the batch. See "Email to batch reference" below. |
 
 FR-13 says "file document" (singular); FR-41 produces a CSV and a JSON file, so there is one document lookup per format and `sprk_formats` records which files a batch produced.
+
+## Email to batch reference (task 151c-2)
+
+`sprk_communication.sprk_billingexport` ("Export Batch", `scripts/ebilling/Deploy-EbillingCommunicationBatchLink.ps1`, idempotent, `-WhatIf`) is a **plain reference**, written by the BFF in the same create as the AP email (`ServerSendOptions.BillingExportId`, internal and never bound from a request body). It is **not** a `sprk_regarding*` column, a filing or an ownership parent: it is in none of `RecordFamilyEdges`, `SecureChildLineage`, `RegardingFieldMap`, `RegardingLookupMap` or the communication filing fields, so it cannot change who owns or can read the email (guard: `CommunicationBatchLinkNotFilingGuardTests`).
+
+**Cascade (an access requirement, agreed with unified-access-control-r2):** Assign, Share, Unshare, Reparent, Merge and Rollup View are **NoCascade**; Delete is **RemoveLink** (not Restrict). The script sets these explicitly and verifies them on every run; an existing relationship that differs stops it (exit 2). The Billing Export main form shows the emails in an "AP emails" subgrid (`Deploy-EbillingFormsViews.ps1`). An email sent before the column existed has no reference.
 
 ## Invoice in one batch
 

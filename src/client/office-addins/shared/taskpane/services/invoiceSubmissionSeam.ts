@@ -166,6 +166,31 @@ export interface InvoiceFirmOption {
 /** The firms linked to a core record (contract §8; `invoiceSubmissionService.loadInvoiceFirms`). */
 export type LoadInvoiceFirms = (target: InvoiceSubmissionTarget) => Promise<InvoiceFirmOption[]>;
 
+/**
+ * What a correction of an invoice must keep, and whether it can be made (contract §10, ebilling 097e). A correction is
+ * sent with the invoice's own firm, core record and firm invoice number; `canCorrect` is the intake's own guard.
+ */
+export interface InvoiceCorrectionPrefill {
+  invoiceId: string;
+  firm: { id: string; name: string };
+  coreRecord: InvoiceFiledUnder;
+  /** The lifecycle status name (`InReview`, `SentToAp`, `Superseded`, ...), or null when the server doesn't know it. */
+  invoiceStatus: string | null;
+  trackingNumber: string | null;
+  firmInvoiceNumber: string;
+  canCorrect: boolean;
+  /** Why not, when `canCorrect` is false: `invoice_status`, `no_submission`, `submission_in_progress` (or a newer one). */
+  reason: string | null;
+  /** A Superseded invoice's replacement, when the caller can open it. */
+  replacedBy: { invoiceId: string; name: string } | null;
+}
+
+/**
+ * The correction prefill of an invoice (`invoiceSubmissionService.loadCorrectionPrefill`). Any failure THROWS with a
+ * sentence for the user, as {@link LoadInvoiceFirms} does.
+ */
+export type LoadCorrectionPrefill = (invoiceId: string) => Promise<InvoiceCorrectionPrefill>;
+
 /** The contract's `firmInvoiceNumber` bound: trimmed, 1-100 characters. */
 export const FIRM_INVOICE_NUMBER_MAX = 100;
 

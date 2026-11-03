@@ -762,8 +762,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             _ => table,
         };
 
-        private static string OwnershipOf(string table) =>
-            OrganizationOwned.Contains(table) ? "OrganizationOwned" : BusinessOwned.Contains(table) ? "BusinessOwned" : "UserOwned";
+        /// <summary>
+        /// Per-instance additions to <see cref="OrganizationOwned"/>: a test that needs a table the handler creates AS THE USER
+        /// (no user/team ownership - <c>OwnedChildWrite.PathFor</c>) lists it here. Instance state, so no other test sees it.
+        /// </summary>
+        public HashSet<string> AlsoOrganizationOwned { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        private string OwnershipOf(string table) =>
+            OrganizationOwned.Contains(table) || AlsoOrganizationOwned.Contains(table)
+                ? "OrganizationOwned"
+                : BusinessOwned.Contains(table) ? "BusinessOwned" : "UserOwned";
 
         /// <summary>table → (lookup column, target table, navigation property).</summary>
         private static readonly Dictionary<string, (string Column, string Target, string Navigation)[]> Lookups = new()
@@ -1034,6 +1042,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         public Func<string, DataverseUserResponse?>? GetOverride { get; set; }
 
         public int PatchStatus { get; set; } = 204;
+
+        /// <summary>The status the caller's POST answers with; 400 and above is a refusal (nothing is created).</summary>
+        public int PostStatus { get; set; } = 201;
         public List<(string Path, string Body)> Posts { get; } = new();
         public List<(string Path, string Body)> Patches { get; } = new();
 
@@ -1336,6 +1347,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         {
             if (RefuseUndeclared(absoluteApiPath, jsonBody) is { } refused)
                 return Task.FromResult(refused);
+
+            if (PostStatus >= 400)
+                return Task.FromResult(DataverseUserResponse.Fail(PostStatus, DataverseUserClientErrorCodes.AccessDenied, "Denied."));
 
             Posts.Add((absoluteApiPath, jsonBody));
             return Task.FromResult(Ok(new { sprk_todoid = Guid.NewGuid(), activityid = Guid.NewGuid() }, 201));

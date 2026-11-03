@@ -94,6 +94,9 @@ public sealed class InvoiceLifecycleServiceTests
         [InvoiceLifecycleStatus.Rejected, InvoiceLifecycleStatus.Approved],
         [InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.Paid],
         [InvoiceLifecycleStatus.SentToAp, InvoiceLifecycleStatus.Approved],
+        // Task 097a: Superseded is reached and left only through the transaction request builders, never TransitionAsync.
+        [InvoiceLifecycleStatus.InReview, InvoiceLifecycleStatus.Superseded],
+        [InvoiceLifecycleStatus.Superseded, InvoiceLifecycleStatus.InReview],
     ];
 
     [Theory]
@@ -112,8 +115,9 @@ public sealed class InvoiceLifecycleServiceTests
     }
 
     /// <summary>
-    /// The closed set: of all 49 (current, requested) pairs exactly the seven FR-06 moves write, the seven same-status pairs are
-    /// no-ops, and the other 35 (every move out of a final status among them) are refused with no write.
+    /// The closed set: of all 64 (current, requested) pairs exactly the seven FR-06 moves write, the eight same-status pairs are
+    /// no-ops, and the other 49 (every move out of a final status, and every move into or out of Superseded, among them) are refused with
+    /// no write.
     /// </summary>
     [Fact]
     public async Task EveryPair_BehavesPerTheFr06Matrix()
@@ -157,7 +161,7 @@ public sealed class InvoiceLifecycleServiceTests
             }
         }
 
-        (wrote, noops, refused).Should().Be((7, 7, 35));
+        (wrote, noops, refused).Should().Be((7, 8, 49));
     }
 
     [Theory]
@@ -334,6 +338,7 @@ public sealed class InvoiceLifecycleServiceTests
             (InvoiceLifecycleStatus.Rejected, 659490003, 1),
             (InvoiceLifecycleStatus.ReturnedToFirm, 659490004, 1),
             (InvoiceLifecycleStatus.Cancelled, 2, 1),
+            (InvoiceLifecycleStatus.Superseded, 659490005, 1), // task 088 F5 (docs/data-model/sprk_invoice.md)
         };
 
         Enum.GetValues<InvoiceLifecycleStatus>().Should().HaveCount(expected.Length);
@@ -449,6 +454,177 @@ public sealed class InvoiceLifecycleServiceTests
         CreateService().BuildInvoiceCreateRequest(NewInvoice(), InvoiceLifecycleStatus.Approved);
 
         _records.VerifyNoOtherCalls();
+    }
+
+    // ---- ebilling-r1 task 097a: Superseded. A correction closes the invoice it replaces (In Review to Superseded) inside its commit
+    // transaction, and the correction's undo reopens it (Superseded to In Review). Both are requests the lifecycle service builds and the
+    // caller's transaction carries, conditional on the row version the caller read.
+
+    private static InvoiceTransitionRequestResult Supersede(InvoiceLifecycleService service, InvoiceLifecycleStatus current, long version = 7) =>
+        service.BuildSupersedeRequest(InvoiceId, current, version);
+
+    private static InvoiceTransitionRequestResult Undo(InvoiceLifecycleService service, InvoiceLifecycleStatus current, long version = 7) =>
+        service.BuildSupersedeUndoRequest(InvoiceId, current, version);
+
+    /// <summary>
+    /// Dataverse's optimistic concurrency inside one transaction (as <c>CorrectionWorld</c> models it): a conditional update whose row version
+    /// is not the stored row's faults, and nothing in the transaction is applied; otherwise every update is applied and the version moves.
+    /// An update that is NOT conditional is applied whatever the stored version (a blind write).
+    /// </summary>
+    private static bool CommitAgainst(Entity stored, IReadOnlyList<OrganizationRequest> requests)
+    {
+        var updates = requests.OfType<UpdateRequest>().Where(u => u.Target.Id == stored.Id).ToList();
+        if (updates.Any(u => u.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches
+                             && u.Target.RowVersion != stored.GetAttributeValue<long>("versionnumber").ToString(System.Globalization.CultureInfo.InvariantCulture)))
+        {
+            return false;
+        }
+
+        foreach (var update in updates)
+        {
+            foreach (var attribute in update.Target.Attributes)
+            {
+                stored[attribute.Key] = attribute.Value;
+            }
+
+            stored["versionnumber"] = stored.GetAttributeValue<long>("versionnumber") + 1;
+        }
+
+        return true;
+    }
+
+    private static Entity StoredInvoice(InvoiceLifecycleStatus status, long version) => new("sprk_invoice", InvoiceId)
+    {
+        ["statecode"] = new OptionSetValue(InvoiceStatusCodes.StateCodeOf(status)),
+        ["statuscode"] = new OptionSetValue(InvoiceStatusCodes.StatusCodeOf(status)),
+        ["versionnumber"] = version,
+    };
+
+    [Fact]
+    public void BuildSupersedeRequest_FromInReview_IsAConditionalUpdateOfTheStatusPairOnly_AtTheReadVersion()
+    {
+        var result = Supersede(CreateService(), InvoiceLifecycleStatus.InReview, version: 42);
+
+        result.Succeeded.Should().BeTrue();
+        result.Reason.Should().BeNull();
+        result.Current.Should().Be(InvoiceLifecycleStatus.InReview);
+        result.Requested.Should().Be(InvoiceLifecycleStatus.Superseded);
+        var request = result.Request!;
+        request.ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches, "an invoice changed since the read must fault the commit");
+        request.Target.LogicalName.Should().Be("sprk_invoice");
+        request.Target.Id.Should().Be(InvoiceId);
+        request.Target.RowVersion.Should().Be("42");
+        request.Target.Attributes.Keys.Should().BeEquivalentTo("statecode", "statuscode");
+        request.Target.GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(1, "Superseded is Inactive");
+        request.Target.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(659490005);
+    }
+
+    [Fact]
+    public void BuildSupersedeUndoRequest_FromSuperseded_IsAConditionalUpdateBackToInReview_AtTheReadVersion()
+    {
+        var result = Undo(CreateService(), InvoiceLifecycleStatus.Superseded, version: 43);
+
+        result.Succeeded.Should().BeTrue();
+        result.Current.Should().Be(InvoiceLifecycleStatus.Superseded);
+        result.Requested.Should().Be(InvoiceLifecycleStatus.InReview);
+        var request = result.Request!;
+        request.ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches);
+        request.Target.RowVersion.Should().Be("43");
+        request.Target.Attributes.Keys.Should().BeEquivalentTo("statecode", "statuscode");
+        request.Target.GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(0, "In Review is Active");
+        request.Target.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(1);
+    }
+
+    public static IEnumerable<object[]> StatusesOtherThan(InvoiceLifecycleStatus allowed) =>
+        Enum.GetValues<InvoiceLifecycleStatus>().Where(s => s != allowed).Select(s => new object[] { s });
+
+    [Theory]
+    [MemberData(nameof(StatusesOtherThan), InvoiceLifecycleStatus.InReview)]
+    public void BuildSupersedeRequest_FromAnyStatusButInReview_IsRefused_WithNoRequest(InvoiceLifecycleStatus current)
+    {
+        var result = Supersede(CreateService(), current);
+
+        result.Succeeded.Should().BeFalse();
+        result.Request.Should().BeNull("a refused move can never be sent by mistake");
+        result.Reason.Should().Be(InvoiceTransitionReasons.NotAllowed);
+        result.Current.Should().Be(current);
+    }
+
+    [Theory]
+    [MemberData(nameof(StatusesOtherThan), InvoiceLifecycleStatus.Superseded)]
+    public void BuildSupersedeUndoRequest_FromAnyStatusButSuperseded_IsRefused_WithNoRequest(InvoiceLifecycleStatus current)
+    {
+        var result = Undo(CreateService(), current);
+
+        result.Succeeded.Should().BeFalse();
+        result.Request.Should().BeNull("the undo reopens only a Superseded invoice; Paid, Rejected or Approved is never reopened this way");
+        result.Reason.Should().Be(InvoiceTransitionReasons.NotAllowed);
+        result.Current.Should().Be(current, "a caller that finds the invoice already In Review can tell there is nothing to undo");
+    }
+
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    public void TheBuilders_WithNoReadVersion_Throw_BecauseTheMoveCouldNotBeConditional(long version)
+    {
+        FluentActions.Invoking(() => Supersede(CreateService(), InvoiceLifecycleStatus.InReview, version)).Should().Throw<ArgumentOutOfRangeException>();
+        FluentActions.Invoking(() => Undo(CreateService(), InvoiceLifecycleStatus.Superseded, version)).Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void TheBuilders_Perform_NoIo()
+    {
+        Supersede(CreateService(), InvoiceLifecycleStatus.InReview);
+        Undo(CreateService(), InvoiceLifecycleStatus.Superseded);
+        Supersede(CreateService(), InvoiceLifecycleStatus.Approved);
+
+        _records.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void BuildSupersedeUndoRequest_AtTheCurrentVersion_ReopensTheInvoice_InsideOneTransaction()
+    {
+        var stored = StoredInvoice(InvoiceLifecycleStatus.Superseded, version: 8);
+        var undo = Undo(CreateService(), InvoiceLifecycleStatus.Superseded, version: 8).Request!;
+        var other = new DeleteRequest { Target = new EntityReference("sprk_invoice", Guid.NewGuid()) };
+
+        CommitAgainst(stored, [other, undo]).Should().BeTrue();
+
+        stored.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+        stored.GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(InvoiceStatusCodes.StateActive);
+    }
+
+    [Fact]
+    public void BuildSupersedeUndoRequest_AtAStaleVersion_IsRefusedByTheRowVersionGuard_AndTheInvoiceStaysAsItIs()
+    {
+        // The undo read the old invoice Superseded at version 8; something changed it since (version 9). The reopen must not overwrite that.
+        var stored = StoredInvoice(InvoiceLifecycleStatus.Superseded, version: 9);
+        stored["sprk_note"] = "changed since the read";
+        var undo = Undo(CreateService(), InvoiceLifecycleStatus.Superseded, version: 8).Request!;
+
+        CommitAgainst(stored, [undo]).Should().BeFalse("the row-version guard faults the stale reopen and the transaction rolls back");
+
+        stored.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.Superseded);
+        stored.GetAttributeValue<long>("versionnumber").Should().Be(9);
+    }
+
+    [Fact]
+    public void BuildSupersedeRequest_AtAStaleVersion_IsRefusedByTheRowVersionGuard_SoAnApprovalSinceTheReadIsNeverOverwritten()
+    {
+        // Read In Review at version 5; approved since (version 6). The close must fault, not move an Approved invoice to Superseded.
+        var stored = StoredInvoice(InvoiceLifecycleStatus.Approved, version: 6);
+        var close = Supersede(CreateService(), InvoiceLifecycleStatus.InReview, version: 5).Request!;
+
+        CommitAgainst(stored, [close]).Should().BeFalse();
+
+        stored.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    [Fact]
+    public void Superseded_IsNeverCountedInSpend_NorAsPendingSpend()
+    {
+        FinanceBaseValues.CountedInvoiceStatuses.Should().NotContain(InvoiceStatusCodes.Superseded);
+        FinanceBaseValues.PendingInvoiceStatuses.Should().NotContain(InvoiceStatusCodes.Superseded);
     }
 
     // ADR-038 B3 note: this is not a plain "service resolves" wiring test. It pins the gating contract the task 014 acceptance criterion

@@ -356,8 +356,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public void ChatCreate_TheToolDescription_SaysAllThreeNumbersAreServerSet_AndOffersNoneAsAWritableColumn_OwnerDecision2c()
     {
-        // Task 017 review F-8: the autonumber columns the service refuses as BlockedColumn are the matter's, the project's and
-        // the budget's — the description names all three as the server's and offers none as a column to send.
+        // Task 017 review F-8: the autonumber columns the service refuses as BlockedColumn are the matter's, the project's, the
+        // budget's and (#2515) the event's — the description names all four as the server's and offers none as a column to send.
         var description = CreateRecordHandler().Metadata.Description;
 
         description.Should().Contain("set by the server, so NEVER send any of them");
@@ -368,7 +368,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         }
 
         RecordTableRules.All.Select(r => r.AutonumberColumn).OfType<string>()
-            .Should().BeEquivalentTo("sprk_matternumber", "sprk_projectnumber", "sprk_budgetnumber");
+            .Should().BeEquivalentTo("sprk_matternumber", "sprk_projectnumber", "sprk_budgetnumber", "sprk_eventnumber");
         description.Should().Contain("sprk_mattername (text, REQUIRED); sprk_matterdescription");
     }
 
