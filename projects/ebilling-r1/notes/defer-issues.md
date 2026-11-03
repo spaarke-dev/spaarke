@@ -10,6 +10,24 @@
 
 ## Open (in priority order)
 
+### DEF-051 — Dates read day-for-month at high confidence get past the reliability gate
+
+| Field | Value |
+|---|---|
+| **Status** | Open, for 162 to decide |
+| **Urgency** | before go-live |
+| **Filed** | 2026-11-03 |
+| **Source** | ebilling-r1 task 161 offline baseline (notes/calibration-report.md section 7) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2547 |
+
+**Description**: on two non-US evaluation items (B-0002 and B-0021), the GA analyzer read the invoice date day-for-month at 0.992 confidence. No D-47 signal checks whether a date is plausible, so the seeded settings would trust both. The preview analyzer read them correctly. The proposed check: when the day and month are both 12 or less and the invoice is not in USD, cap the date below the threshold, or check it against the billing period and the line dates.
+
+**Entry-points**: `Services/Finance/Resolution/` (`CombinedConfidenceCalculator` and its signals); task 162.
+
+**Fails without it**: a misread invoice date is trusted, and can cause a rejection (for example a date outside the billing period or a guideline window). That breaks NFR-06 whenever the GA fallback analyzer is in use.
+
+---
+
 ### DEF-050 — Orphaned submission-marked .eml after a from-email re-attempt race
 
 | Field | Value |
