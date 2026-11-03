@@ -159,7 +159,7 @@ No live write was made; the schema script was not run against any environment. I
 | Item | File | What |
 |---|---|---|
 | Schema script | `scripts/ebilling/Deploy-EbillingSubmissionTrackingScopeSchema.ps1` | The 9-step order below, idempotent, `-WhatIf`, `-Verify`, `-KeepFirmKey` (stop before step 9), `-CacheWaitSeconds` (301 to 3600, default 330). Escalation (exit 2) on a conflicting column or key, a scope that differs from its row's firm, a duplicated (tracking number, scope) pair, or a Failed key index. |
-| Solution source | `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_invoicesubmission/Entity.xml` | The end state: `sprk_vendororg` RequiredLevel `none`; new `sprk_TrackingScope` (nvarchar 36, `systemrequired`, audited, not secured); the key `sprk_invoicesubmission_scope_trackingnumber` on (`sprk_trackingnumber`, `sprk_trackingscope`) replaces `sprk_invoicesubmission_firm_trackingnumber`. |
+| Solution source | `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_invoicesubmission/Entity.xml` | `sprk_vendororg` RequiredLevel `none`; new `sprk_TrackingScope` (nvarchar 36, `systemrequired`, audited, not secured; `IntroducedVersion` 1.2.4.0); the key `sprk_invoicesubmission_scope_trackingnumber` on (`sprk_trackingnumber`, `sprk_trackingscope`; 1.2.4.0) is added **next to** `sprk_invoicesubmission_firm_trackingnumber`, which stays in source (8.8; review fix F1). |
 | Allocator | `Services/Finance/Submission/TrackingNumberAllocator.cs`, `ITrackingNumberAllocator.cs` | `CreateSubmissionAsync(Guid submissionId, Guid? firmId, ...)`. `Guid.Empty` still throws; null means "no firm". New reason `ebilling.tracking.firm_required`. The scope column is owned (a caller's `fields` cannot name it). |
 | Phase probe | `Services/Finance/Submission/TrackingScopePhase.cs` (new) | `TrackingScopePhase` (P0, P1, P2); `TrackingScopePhaseProbe` (a `RetrieveEntityRequest` with `EntityFilters.Entity | Attributes` over `TryUnwrapServiceClient`, the path `ComposeIdentityKeyHealthCheck` uses; published metadata); `TrackingScopePhaseCache` (process-wide static, forward-only, 5 minutes until P2). No DI registration: the allocator's public constructor now also takes `IDataverseService` (already a singleton). |
 | Generic-write refusal | `Services/Dataverse/ParentLineage.cs` (`InheritedAccessPermission.AccessColumns`) | `sprk_trackingscope` joins the submission's refused columns: an Update Record node or output mapping running app-only cannot set it. The allocator is its typed writer. |
@@ -212,6 +212,8 @@ Uniqueness at every moment: until step 7 every row has a firm and the firm key g
 | `AnAppOnlyWriteOfTheSubmissionsTrackingScope_IsRefused_...` + the column in the per-table and reader lists | `tests/integration/data-mutation/ChildAccessPermission/AccessTableAppOnlyWriterTests.cs` | the generic-write refusal, with must-not-fire controls |
 | `SubmissionTrackingScopeNotAccessGuardTests` (3) | `tests/Spaarke.ArchTests/` | only the allocator, the probe and the refusal list name the column; `InvoiceSubmissionService` (ListAsync), `ExternalInvoiceSubmissionAuthorizationFilter` (DecideReadOneAsync) and `ExternalInvoiceSubmissionEndpoints` (ReplacementGate) never do; controls fire and do not fire |
 
+Review round 1 (see 10) adds: `BeforeP2_ARedeliveredNoFirmCreate_ThatAP2InstanceAlreadyNumbered_ReturnsThatRow_NotFirmRequired` (P0, P1), `AP1InstanceAndAP2Instance_NumberingOneFirmAndNumberTogether_NeverShareANumber_AndNeitherFaults` (both keys present; firm key retired), `TwoForcedReReads_QueuedBehindEachOther_DoOneMetadataRead_...` and its must-not-fire control, and tightened P1 and P2 tests (asserted create and read counts; a firm-A row filed in the `none` scope).
+
 The in-memory table now models both keys (each ignores a row whose key column is null), the firm key's retirement and the scope column at SystemRequired (`0x80040200`).
 
 Fail-before proofs (mutations of the new source, each restored byte-identical, SHA-256 checked): see 8.7.
@@ -238,30 +240,47 @@ Each mutation was applied to the new source, the suite run, and the file restore
 | `sprk_trackingscope` removed from `AccessColumns` | ArchTests (3) / unit | 1 / 7 |
 | the replacement gate names the scope | ArchTests (3) | 2 |
 
+Review round 1 (10), same method (mutate the source, run, restore from a copy):
+
+| Mutation / old code | Suite | Failed (test) |
+|---|---|---|
+| existing-row check after the `firm_required` refusal (the original order, `git checkout` of the committed file) | allocator tests (data-mutation) | 2 (`BeforeP2_ARedeliveredNoFirmCreate_..._NotFirmRequired`, P0 and P1) |
+| the refusal text of the original `ParentLineage.cs` ("decides who may see what") | `AccessTableAppOnlyWriterTests` | 1 (`AnAppOnlyWriteOfTheSubmissionsTrackingScope_...`) |
+| P1 counts per scope instead of per firm (`AddSequenceScope`: `phase != P0`) | allocator tests | 1 (`P1_AFirmSubmission_WritesItsFirmAsTheScope_AndStillCountsPerFirm`) |
+| P2 counts per firm instead of per scope (`AddSequenceScope`: scope only for a null firm) | allocator tests | 1 (`P2_AFirmSubmission_IsCountedPerScope_...`); the old P2 test passed this mutation, which is why the firm-A row in the `none` scope was added |
+| the forced re-read made even when a read started after the caller's refusal (skip condition removed) | `TrackingScopePhaseTests` | 1 (`TwoForcedReReads_QueuedBehindEachOther_...`) |
+
 ### 8.8 Provisioning (stamps)
 
-A stamp imports SpaarkeMaster with the end state: the column SystemRequired, `sprk_vendororg` None, the scope key only. It has no rows, so it needs no backfill and no script. Until the key index is Active (seconds on an empty table) instances read P1: they count per firm and write the scope, and no key guards the row (the same window the firm key has on a new stamp today). Nothing else is needed from customer-provisioning-orchestration-r1.
+**Source keeps both keys (review fix F1).** `SpaarkeMaster` carries the scope column SystemRequired, `sprk_vendororg` None, the scope key **and** the firm key. Retiring the firm key from source is a later release, done only after every environment that has submission rows has run the schema script through step 9 (steps 1 to 8 retire nothing; step 9 deletes the firm key by hand).
 
-Do not import this SpaarkeMaster version into an environment that already has submission rows before the script has run there: the import would add the column as SystemRequired with null rows and build the scope key over the null-free subset, leaving the firm key in place. That fails safe (the firm key still refuses a duplicate; a firm submission may need more attempts, or answer the retryable 503, until the script's backfill runs), but the order above is the supported path for dev.
+Why both stay: a managed upgrade (`StageAndUpgradeAsync`, `DataverseWebApiSolutionImporter`) deletes components that are present in the installed solution and missing from the new one. With the firm key dropped from source, an upgrade of an environment that has rows would delete the firm key at once. The new scope key then builds over the non-null rows only (the column is new, so every existing row is null) and reads Active, so the BFF reads P2 while no key guards the existing rows: P2 would number a firm's submission from a count of scoped rows only and issue a number a pre-upgrade row already holds. With both keys in source, the upgrade leaves the firm key where it is, and the firm key keeps refusing a duplicate until the script's backfill and step 9.
+
+**A stamp** (no rows) imports this and has both keys. It needs no backfill and no script; until the scope key index is Active (seconds on an empty table) instances read P1 (count per firm, write the scope). Both keys guard a firm row; the firm key is retired from source by the later release, which also removes the step-9 deletion from the script's required path. Nothing else is needed from customer-provisioning-orchestration-r1 beyond the notice in 9.
+
+**An environment that already has rows** must run the script (steps 1 to 8, then 9 with the owner's OK) and must not rely on the import to do it. Importing this SpaarkeMaster version before the script has run adds the column as SystemRequired with null rows; the firm key stays (both keys in source), the scope key builds over the null-free subset and reads Active (P2 for an instance), and the script's steps 4 and 6 backfill and verify the rows. Until the backfill, a P2 instance counts the scope's rows only, so it can pick a number a null-scope row holds: the firm key refuses that write (the row has a firm), the allocator retries past it (or, past ten such numbers for one invoice number, answers the retryable 503), so the number is still never duplicated; a no-firm submission is the case that is unguarded, and it exists only after P2 is read, so run the script immediately after such an import.
 
 ### 8.9 Deviations and known limits
 
 - **Deviation: the probe is a copy of the Compose request shape, not a call into `ComposeIdentityKeyHealthCheck`.** Its fetch is a `protected virtual` member of a hosted health check for another table; making it shared would change the Compose check (out of scope).
 - **Deviation: a null firm before P2 is a refusal (`firm_required`), not an exception.** The allocator is the single owner of the number, so it holds the rule as defence in depth; 095c-2 maps the code to the 400 and decides whether the intake checks the phase earlier.
 - **Publish-size delta and CVE check:** not measured in this part (no package added, three small source files). 095c-4's full gate measures it against a fresh master build.
+- **K1, constraint on 095d (assign-firm).** Assigning a firm to a `none`-scope row (a no-firm from-email submission that a person later files to a firm) without renumbering breaks two things: `Test-ScopeData` (script step 6 and `-Verify`) reads a row whose scope is `none` but whose firm is set as "a scope that is not its firm", and P2 counts per scope, so the number that row holds is not in the firm's scope and P2 can issue the same `{n}` again for that firm. 095d's assign-firm operation must therefore **renumber the row into the firm's scope and set `sprk_trackingscope` to the firm id (D form) in the same write**, through the allocator (the single owner of the number), so the backfill rule "scope = the row's firm, or `none` with no firm" holds at every moment. `Test-ScopeData` stays strict; do not relax it to accept a firm row in `none`. (The allocator tests seed such a row only to prove the count is per scope.)
 - K2: the phase never moves backward in a running process. If the scope key were dropped after P2, a running instance would keep counting per scope until restarted. No flow drops it.
 - K2: an unreadable metadata read leaves an instance at its cached phase for 5 minutes. In P0 that is today's behaviour, and after step 5 the stale case above applies.
 - K4: `sprk_trackingscope` is not field-secured. A user with Write on a submission could edit it natively. It decides no access (the ArchTest above); it is refused to app-only generic writers. Field security would need a profile change and a uac-r2 notice; not asked.
 
 ## 9. Notice for uac-r2
 
-For uac-r2 (and ontology-r1, SPA-r3). Nothing has been run. The main session runs the script with the owner's OK after this notice.
+For uac-r2 (and ontology-r1, SPA-r3, customer-provisioning-orchestration-r1). Nothing has been run. The main session runs the script with the owner's OK after this notice, and sends it.
+
+**For customer-provisioning-orchestration-r1 (stamps).** A new stamp imports SpaarkeMaster, which now carries `sprk_trackingscope` (SystemRequired), `sprk_vendororg` at None, and both alternate keys (`sprk_invoicesubmission_firm_trackingnumber` and `sprk_invoicesubmission_scope_trackingnumber`; the firm key stays until a later release retires it). A stamp has no rows, so it needs no backfill and no script: the BFF reads its phase from metadata and reaches P2 by itself once the scope key index is Active. An environment that already has submission rows must not be brought up by import alone: it needs `scripts/ebilling/Deploy-EbillingSubmissionTrackingScopeSchema.ps1` (steps 1 to 9) run by the main session with the owner's OK. If an upgrade of an existing environment is ever scripted, it must run that script right after the import.
 
 **What changes on `sprk_invoicesubmission`.**
 
 - `sprk_vendororg` (the firm) goes from SystemRequired to None. Only the internal from-email route, mode New, will ever send a null firm (095c-2). The external SPA route and the internal wizard route keep requiring it.
 - A new text column `sprk_trackingscope` (36 characters, SystemRequired from step 5): the firm id in D form, or the literal `none`.
-- The key changes. The old key is `sprk_invoicesubmission_firm_trackingnumber` on (`sprk_trackingnumber`, `sprk_vendororg`). The new key is `sprk_invoicesubmission_scope_trackingnumber` on (`sprk_trackingnumber`, `sprk_trackingscope`). The old key is retired only after the new one reads Active.
+- The key changes. The old key is `sprk_invoicesubmission_firm_trackingnumber` on (`sprk_trackingnumber`, `sprk_vendororg`). The new key is `sprk_invoicesubmission_scope_trackingnumber` on (`sprk_trackingnumber`, `sprk_trackingscope`). The old key is retired only after the new one reads Active (script step 9, owner OK). The solution source keeps both keys; removing the old key from source is a later release, after every environment with rows has run the script.
 
 **Backfill rule.** Each existing row's scope is its `sprk_vendororg` id in lower-case D form. A row with no firm gets `none`; on dev there are no such rows (10 rows, all with a firm). The script verifies every row against this rule before it creates the key, and stops if any row differs.
 
@@ -271,6 +290,8 @@ For uac-r2 (and ontology-r1, SPA-r3). Nothing has been run. The main session run
 - A no-firm submission therefore stays invisible externally: the list omits it and its single read is the uniform 404.
 - `SubmissionTrackingScopeNotAccessGuardTests` (ArchTests) fails if any of those three gates, or any unreviewed type, names `sprk_trackingscope`.
 - The column is added to `AccessColumns` for `sprk_invoicesubmission`, so an app-only generic writer is refused. Its only writer is the allocator, at create, plus the script's one backfill.
+
+**Constraint for task 095d (assign a firm to a no-firm submission).** A no-firm row has scope `none`. Assigning it a firm must renumber the row into the firm's scope and set `sprk_trackingscope` to the firm id (D form) in the same write, through the allocator. Otherwise the row reads as "a scope that is not its firm" (the script's data check, which stays strict) and P2, which counts per scope, can issue the same number again for that firm. uac-r2: if your work lets a person set `sprk_vendororg` on an existing submission by any other path, tell the main session, because that path has the same problem.
 
 **Behaviour in each phase.** The BFF reads the phase from metadata and caches it for 5 minutes until P2. The phase only moves forward.
 
@@ -290,5 +311,24 @@ For uac-r2 (and ontology-r1, SPA-r3). Nothing has been run. The main session run
 - During steps 7 to 9 every instance writes the scope, so retiring the old key leaves no row unguarded.
 
 **Order of the run.** `-WhatIf`, then a run with `-KeepFirmKey` (steps 1 to 8), then `-Verify` (expect only the step-9 gap), then a run without it (step 9, owner OK), then `-Verify` (PASS). Notify uac-r2, ontology-r1 and SPA-r3 before the first write and after the last.
+
+## 10. Review round 1 fixes (2026-11-03)
+
+| Finding | Fix |
+|---|---|
+| F1 source drops the firm key | `Entity.xml` keeps `sprk_invoicesubmission_firm_trackingnumber` next to the scope key; `IntroducedVersion` of the scope column and key is 1.2.4.0 (the solution version). 8.8 rewritten; 9 gains the customer-provisioning-orchestration-r1 notice. |
+| F1 existing-row check first | `TrackingNumberAllocator.CreateSubmissionAsync` runs `FindExistingAsync` / `Reconcile` before the phase read and the `firm_required` refusal. Test: a P0 and a P1 allocator given a no-firm request for an id whose `none`-scope row exists return that row, with no sequence read and no create. |
+| F3 P1 and P2 tests prove their names | P1 asserts one create and one sequence read; P2 adds a firm-A row filed in `none` and asserts `.2` with one create and one read. Both mutations (opposite counting rule) fail the matching test (8.7); the old P2 test did not fail its mutation. |
+| K3 two phases on one number | `AP1InstanceAndAP2Instance_...` (both keys; firm key retired): two instances with different cached phases allocate on one (firm, number); one takes `.1`, the other retries to `.2`; both Created, never a duplicate or a fault. The in-memory store gained `AfterSequenceRead` to hold both callers after they have each taken an answer (the existing `BeforeSequenceRead` does not make both read before either writes). These two cases pass on the old code too: they are regression coverage, not fail-before proofs. |
+| Schema script | (a) entity-scoped `PublishXml` after step 1 and after step 5 when the run changed the column (never `PublishAllXml`); (b) step 9 re-counts rows without a scope next to the Active re-read, non-zero stops with exit 2 before the delete; (c) pre-flight stops with exit 2 on a key over (`sprk_trackingnumber`, `sprk_trackingscope`) under another name (`Get-ScopeKey` now matches by name only; `-Verify` reports such a key as a gap); (d) `$State.SolutionHeader` replaces the unset `$script:SolutionHeader`. |
+| K2 one forced re-read at a time | `TrackingScopePhaseCache` counts reads started (`ReadsStarted`); `GetAsync(..., refusedAtRead)` skips a forced read when a read started after the caller's refusal (reads are serial, so it has completed). The allocator takes the count at the refusal. Tests: two queued forced re-reads do one read; a refusal after the last read started still reads (must-not-fire). |
+| ParentLineage text | The `sprk_trackingscope` entry of the access-column refusal says "it decides no access; only the tracking number allocator writes it"; other columns keep their text. |
+| K1 to 095d | 8.9 and 9: assign-firm renumbers into the firm's scope and sets `sprk_trackingscope` to the firm in one write; `Test-ScopeData` stays strict. |
+
+Read-only runs against spaarkedev1 after the script edits: `-WhatIf` (exit 0) lists pre-flight (firm key Active, no scope key, `sprk_vendororg` SystemRequired, no scope column, 10 rows, none without a firm, phase P0) and the nine steps as would-do (lower the firm to None, create the column, wait 330 s, backfill, raise, re-backfill, create the key, retire the firm key), 2 created / 2 changed, nothing written. `-Verify` (exit 1) lists the same four gaps as before (steps 1, 2, 7, 9). The step-9 recount, the misnamed-key stop and the publishes only run in an apply and were checked by parsing and reading, not run.
+
+Gate: all five test projects build with 0 errors; full `Spaarke.ArchTests` 1931 passed; the filtered `Sprk.Bff.Api.Tests` run 6756 passed, 2 failed (`InvoiceSubmissionByEmailContractTests.Step0Refusal_IsTheUniform404`, both cases: a 095a test defect from `1d5248b181`, see below); the allocator tests 55 of 55 (983 with the phase and access-writer classes).
+
+Found, not fixed (not this change): `Step0Refusal_IsTheUniform404` asserts `_queries.Should().BeEmpty()` after `NoMatchBodyAsync()` has already run the handler and recorded its queries (`tests/integration/contract/Api/Finance/InvoiceSubmissionByEmailContractTests.cs:664-672`). Owner: 095a. The fix is to clear `_queries` after the no-match call.
 
 rework: none task 095c
