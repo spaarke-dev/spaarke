@@ -31,11 +31,15 @@ import {
   describeOverBudget,
   isPdfAttachment,
   filedUnderRecord,
+  describeSubmittedLine,
+  previousSubmissionTitle,
   FIRM_INVOICE_NUMBER_MAX,
   PO_NUMBER_MAX,
   type InvoiceCoreRecordType,
   type InvoiceCorrectionPrefill,
+  type FollowPreviousSubmission,
   type InvoiceFirmOption,
+  type InvoicePreviousSubmission,
   type InvoiceSubmissionInput,
   type InvoiceSubmissionOutcome,
   type InvoiceListedAttachment,
@@ -43,6 +47,7 @@ import {
   type InvoiceSubmitHandler,
   type LoadCorrectionPrefill,
   type LoadInvoiceFirms,
+  type LoadPreviousSubmission,
 } from '../../services/invoiceSubmissionSeam';
 import { describeCorrectionBlock } from '../../utils/invoiceSubmissionMessages';
 import {
@@ -85,6 +90,11 @@ import {
  * filed under (contract §6 `document_core_record_mismatch`), so the view names the filed record when the user picks
  * another. An email that is not filed gets the Save picker's suggested-record cards (`fetchRelatedCandidates`).
  *
+ * An email that was already submitted says so at the top ({@link InvoiceViewProps.loadPreviousSubmission}, contract §11,
+ * ebilling 095a): when, as what tracking number and by whom, and where it stands. One still being processed is followed
+ * to its final status; an accepted one offers a correction of its invoice; a failed or rejected one can be submitted
+ * again. The form stays below it (a repeat of an accepted submission replays the same tracking number).
+ *
  * Search reuses the Save picker's component (`RelatedToPicker`) and search (`searchOfficeEntities`); the attachment
  * list comes from the host adapter as Save's does, and the content is captured at submit by A1 (no second capture).
  * Fluent UI v9 + Griffel + semantic tokens only (ADR-021).
@@ -119,6 +129,19 @@ export interface InvoiceViewProps {
    * to another kind of record.
    */
   filedRecord?: EntitySearchResult | null;
+  /** The open email's latest submission (contract §11), read once when the view opens. Absent → nothing is shown. */
+  loadPreviousSubmission?: LoadPreviousSubmission;
+  /** Follows an earlier submission that is still Received / Processing. Absent → it is shown as processing. */
+  followPreviousSubmission?: FollowPreviousSubmission;
+}
+
+type PreviousLoad =
+  | { status: 'none' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; submission: InvoicePreviousSubmission; following: boolean };
+
+function isRunning(status: InvoicePreviousSubmission['status']): boolean {
+  return status === 'Received' || status === 'Processing';
 }
 
 function sameRecordId(a: string, b: string): boolean {
@@ -223,6 +246,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   loadCorrectionPrefill,
   onBusyChange,
   filedRecord = null,
+  loadPreviousSubmission,
+  followPreviousSubmission,
 }) => {
   const styles = useStyles();
   const { announce, liveRegion } = useAnnounce();
@@ -260,6 +285,11 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   /** Bumped by the prefill's Retry; the prefill effect runs again. */
   const [prefillReload, setPrefillReload] = useState(0);
   const prefillRequestRef = useRef(0);
+  const [previous, setPrevious] = useState<PreviousLoad>({ status: 'none' });
+  /** Bumped by the earlier-submission check's Retry; the effect runs again. */
+  const [previousReload, setPreviousReload] = useState(0);
+  /** The earlier-submission read / follow in flight; a new submission from this view aborts it. */
+  const previousAbortRef = useRef<AbortController | null>(null);
 
   const chooseCoreRecord = useCallback((record: EntitySearchResult | null) => {
     userPickedRef.current = true;
@@ -299,6 +329,45 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       active = false;
     };
   }, [hostAdapter]);
+
+  // The email's latest submission (§11), and — while it is still running — its final status. Leaving the view, a
+  // Retry, or a new submission from this view (which is then the newer answer) aborts both.
+  useEffect(() => {
+    if (!loadPreviousSubmission) return;
+    const controller = new AbortController();
+    previousAbortRef.current = controller;
+    setPrevious({ status: 'none' });
+    void (async () => {
+      let found: InvoicePreviousSubmission | null;
+      try {
+        found = await loadPreviousSubmission(controller.signal);
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setPrevious({
+            status: 'error',
+            message:
+              err instanceof Error ? err.message : "Couldn't check whether this email's invoice was already submitted.",
+          });
+        }
+        return;
+      }
+      if (controller.signal.aborted || !found) return;
+      const follow = isRunning(found.status) && followPreviousSubmission !== undefined;
+      setPrevious({ status: 'ready', submission: found, following: follow });
+      if (!follow) return;
+      let followed: InvoicePreviousSubmission | null;
+      try {
+        followed = await followPreviousSubmission(found, controller.signal);
+      } catch (err) {
+        console.warn("[InvoiceView] Couldn't follow the earlier submission.", err);
+        followed = found;
+      }
+      if (controller.signal.aborted || !followed) return;
+      setPrevious({ status: 'ready', submission: followed, following: false });
+      if (!isRunning(followed.status)) announce(previousSubmissionTitle(followed), 'polite');
+    })();
+    return () => controller.abort();
+  }, [loadPreviousSubmission, followPreviousSubmission, previousReload, announce]);
 
   // Leaving the view (unmount) stops a running submission's status polling.
   useEffect(
@@ -490,6 +559,10 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
 
   const runAttempt = async (input: InvoiceSubmissionInput, actionId: string): Promise<void> => {
     if (!onSubmit) return;
+    // This attempt is the newer answer: stop following the earlier one (no second poller, no second announcement).
+    previousAbortRef.current?.abort();
+    // Cleared now (not on the next read) so the earlier attempt never shows between Done and the re-read.
+    setPrevious({ status: 'none' });
     lastAttemptRef.current = { input, actionId };
     const controller = new AbortController();
     abortRef.current = controller;
@@ -517,6 +590,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     setProcessing(null);
     setOutcome(result);
     setRetryableInARow(prev => (result.kind === 'retryable' ? prev + 1 : 0));
+    // Not accepted (refused, retryable, permanent): the banner shows again, so read the email's latest attempt afresh.
+    // An accepted one (success / ended) is read again on Done.
+    if (result.kind !== 'success' && result.kind !== 'ended') setPreviousReload(n => n + 1);
     announce(
       result.kind === 'success'
         ? 'Invoice submitted.'
@@ -580,6 +656,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       if (load.status === 'ready') setMarking(defaultInvoiceMarking(load.attachments, 'new'));
       setFormKey(k => k + 1);
     }
+    // The banner at the top now describes this submission (accepted, or ended): read it again.
+    setPreviousReload(n => n + 1);
     setOutcome(null);
     announce('Ready for another invoice.');
   };
@@ -689,6 +767,99 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
           </MessageBar>
         );
     }
+  };
+
+  // "Submit a correction" on an accepted earlier submission: the existing-invoice form, on its invoice (§10 prefill).
+  const handleCorrectPrevious = (submission: InvoicePreviousSubmission): void => {
+    if (!submission.invoiceId) return;
+    setMode('existing');
+    setCorrectionChosen(true);
+    setInvoice({
+      id: submission.invoiceId,
+      entityType: 'Invoice',
+      logicalName: 'sprk_invoice',
+      name: submission.trackingNumber ? `Invoice ${submission.trackingNumber}` : 'This invoice',
+    });
+    announce('Correcting this invoice. Mark the corrected PDF, then submit.');
+  };
+
+  /**
+   * The email's earlier submission, at the top. Hidden while a new submission from this view runs or shows its result
+   * (that result is the newer answer); a refusal of a new attempt leaves it showing.
+   */
+  const renderPrevious = () => {
+    if (submitting || processing || outcome?.kind === 'success' || outcome?.kind === 'ended') return null;
+    if (previous.status === 'error') {
+      return (
+        <MessageBar intent="warning" layout="multiline" role="status" data-testid="invoice-previous-error">
+          <MessageBarBody>{previous.message}</MessageBarBody>
+          <MessageBarActions>
+            <Button
+              appearance="outline"
+              size="small"
+              aria-label="Check again whether this email's invoice was already submitted"
+              onClick={() => setPreviousReload(n => n + 1)}
+            >
+              Retry
+            </Button>
+          </MessageBarActions>
+        </MessageBar>
+      );
+    }
+    if (previous.status !== 'ready') return null;
+    const { submission, following } = previous;
+    const running = isRunning(submission.status);
+    // "Submit again" only after Failed, and only for a new invoice: after Rejected the same request is refused (§5
+    // `submission_already_ended`), and a failed correction is resent from Existing invoice, not as a new invoice.
+    const offerSubmitAgain = submission.status === 'Failed' && !submission.isCorrection;
+    const detail = running
+      ? following
+        ? 'Spaarke is checking it.'
+        : 'Spaarke is still processing it. You can follow it in Spaarke with the tracking number.'
+      : submission.message;
+    const offerCorrection = submission.status === 'Accepted' && correctionAvailable && submission.invoiceId !== null;
+    return (
+      <MessageBar
+        intent={submission.status === 'Accepted' ? 'success' : running ? 'info' : 'warning'}
+        layout="multiline"
+        role="status"
+        data-testid="invoice-previous-submission"
+      >
+        <MessageBarBody>
+          <MessageBarTitle>{previousSubmissionTitle(submission)}</MessageBarTitle>
+          {describeSubmittedLine(submission)}
+          {detail ? ` ${detail}` : ''}
+        </MessageBarBody>
+        {(offerCorrection || offerSubmitAgain) && (
+          <MessageBarActions>
+            {offerCorrection && (
+              <Button
+                appearance="outline"
+                size="small"
+                disabled={choicesLocked}
+                onClick={() => handleCorrectPrevious(submission)}
+                data-testid="invoice-previous-correct"
+              >
+                Submit a correction
+              </Button>
+            )}
+            {offerSubmitAgain && (
+              <Button
+                appearance="outline"
+                size="small"
+                onClick={() => {
+                  setPrevious({ status: 'none' });
+                  announce('Check the details below and submit the invoice again.');
+                }}
+                data-testid="invoice-previous-submit-again"
+              >
+                Submit again
+              </Button>
+            )}
+          </MessageBarActions>
+        )}
+      </MessageBar>
+    );
   };
 
   /** Attachments the capture left out of the saved email, with why — the Save view's own wording (SaveView). */
@@ -987,6 +1158,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
               <MessageBarBody>{"Submitting invoices from Outlook isn't available yet."}</MessageBarBody>
             </MessageBar>
           )}
+
+          {renderPrevious()}
 
           <RadioGroup
             layout="horizontal"

@@ -17,6 +17,8 @@ import { CreateTodoView } from './components/views/CreateTodoView';
 import { InvoiceView } from './components/views/InvoiceView';
 import {
   createInvoiceSubmitHandler,
+  createPreviousSubmissionFollower,
+  createPreviousSubmissionLoader,
   hostAdapterInvoiceEmailSource,
   loadCorrectionPrefill,
   loadInvoiceFirms,
@@ -693,6 +695,19 @@ export const App: React.FC<AppProps> = ({
     (invoiceId: string) => loadCorrectionPrefill(invoiceId, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
     [apiBaseUrl, getInvoiceAccessToken]
   );
+  // The open email's earlier submission, shown at the top of the view (contract §11, ebilling 095a).
+  const loadPreviousInvoiceSubmission = useMemo(
+    () =>
+      createPreviousSubmissionLoader({
+        config: { apiBaseUrl, getAccessToken: getInvoiceAccessToken },
+        adapter: hostAdapter,
+      }),
+    [apiBaseUrl, getInvoiceAccessToken, hostAdapter]
+  );
+  const followPreviousInvoiceSubmission = useMemo(
+    () => createPreviousSubmissionFollower({ config: { apiBaseUrl, getAccessToken: getInvoiceAccessToken } }),
+    [apiBaseUrl, getInvoiceAccessToken]
+  );
   // The record the open email is already filed to (task 120's lookup — the Save tab's "Filed to"): the view starts there.
   const invoiceFiledTo = useMemo(() => invoiceFiledRecord(documentIdentity), [documentIdentity]);
 
@@ -906,7 +921,7 @@ export const App: React.FC<AppProps> = ({
         {/* Task 133: the Outlook "Submit Invoice" view — reached only from the ribbon (`?action=submitInvoice`), never
             from a tab. The submission and the firm list are ebilling's from-email contract (invoiceSubmissionService);
             corrections are on: ebilling 097b/c/e (#2507) is on master and dev, and the view prepares each one from
-            the invoice's correction prefill. */}
+            the invoice's correction prefill. The email's earlier submission shows at the top (§11). */}
         {currentTab === 'invoice' && (
           <InvoiceView
             hostAdapter={hostAdapter}
@@ -918,6 +933,8 @@ export const App: React.FC<AppProps> = ({
             loadCorrectionPrefill={loadPrefill}
             onBusyChange={setInvoiceBusy}
             filedRecord={invoiceFiledTo}
+            loadPreviousSubmission={loadPreviousInvoiceSubmission}
+            followPreviousSubmission={followPreviousInvoiceSubmission}
           />
         )}
 
