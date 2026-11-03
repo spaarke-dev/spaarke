@@ -86,13 +86,6 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 
     private static readonly string[] StatusColumns = ["sprk_processingstatus", InvoiceSubmissionPersister.SubmissionInvoice];
 
-    /// <summary>The source document as step 2 reads it: the file pointer, the version and the type, in ONE retrieve.</summary>
-    private static readonly string[] SourceDocumentColumns =
-    [
-        "sprk_graphdriveid", "sprk_graphitemid", "sprk_mimetype", InvoiceReviewService.VersionNumber,
-        "sprk_relatedcommunication", "sprk_isemailarchive",
-    ];
-
     private readonly IGenericEntityService _entities;
     private readonly ISpeFileOperations _spe;
     private readonly RecordContainerResolver _containerResolver;
@@ -725,49 +718,30 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     {
         var documentId = snapshot.DocumentId
             ?? throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);
-        Entity document;
-        try
+
+        // Task 118b-1: the read itself is the shared one (SourceDocumentFileRead), moved from here unchanged, so the intake's supporting
+        // copies read a document through the same rule. The outcomes keep their codes, permanence and logs.
+        var file = await SourceDocumentFileRead.ReadAsync(_entities, _spe, _containerResolver, documentId, ct).ConfigureAwait(false);
+        switch (file.Outcome)
         {
-            document = await _entities.RetrieveAsync(InvoiceSubmissionPersister.DocumentEntity, documentId, SourceDocumentColumns, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (IsRecordNotFound(ex))
-        {
-            _logger.LogError("Invoice submission {SubmissionId}: its source document {DocumentId} no longer exists", snapshot.SubmissionId, documentId);
-            throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);
+            case SourceDocumentFileOutcome.Gone:
+                _logger.LogError("Invoice submission {SubmissionId}: its source document {DocumentId} no longer exists", snapshot.SubmissionId, documentId);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);
+            case SourceDocumentFileOutcome.NoFile:
+                _logger.LogError("Invoice submission {SubmissionId}: source document {DocumentId} has no file pointer or is an email archive", snapshot.SubmissionId, documentId);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);
+            case SourceDocumentFileOutcome.StorageUnverified:
+                _logger.LogWarning("Invoice submission {SubmissionId}: the storage of document {DocumentId} could not be verified", snapshot.SubmissionId, documentId);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentStorageUnverified, permanent: true);
+            case SourceDocumentFileOutcome.NotDownloaded:
+                // Transient (SharePoint Embedded may answer later), as the rule-draft handler treats a download that returns nothing.
+                _logger.LogWarning("Invoice submission {SubmissionId}: document {DocumentId} could not be downloaded", snapshot.SubmissionId, documentId);
+                throw new SubmissionStepFailure(SubmissionReasonCodes.ProcessingFailed, permanent: false);
         }
 
-        var driveId = document.GetAttributeValue<string>("sprk_graphdriveid");
-        var itemId = document.GetAttributeValue<string>("sprk_graphitemid");
-        if (string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId) || document.GetAttributeValue<bool?>("sprk_isemailarchive") == true)
-        {
-            _logger.LogError("Invoice submission {SubmissionId}: source document {DocumentId} has no file pointer or is an email archive", snapshot.SubmissionId, documentId);
-            throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentUnavailable, permanent: true);
-        }
-
-        var version = InvoiceSubmissionPersister.VersionOf(document);
-        if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(documentId, driveId, itemId, ct).ConfigureAwait(false))
-        {
-            _logger.LogWarning("Invoice submission {SubmissionId}: the storage of document {DocumentId} could not be verified", snapshot.SubmissionId, documentId);
-            throw new SubmissionStepFailure(SubmissionReasonCodes.DocumentStorageUnverified, permanent: true);
-        }
-
-        var stream = await _spe.DownloadFileAsync(driveId, itemId, ct).ConfigureAwait(false);
-        if (stream is null)
-        {
-            // Transient (SharePoint Embedded may answer later), as the rule-draft handler treats a download that returns nothing.
-            _logger.LogWarning("Invoice submission {SubmissionId}: document {DocumentId} could not be downloaded", snapshot.SubmissionId, documentId);
-            throw new SubmissionStepFailure(SubmissionReasonCodes.ProcessingFailed, permanent: false);
-        }
-
-        byte[] bytes;
-        using (stream)
-        {
-            using var buffer = new MemoryStream();
-            await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
-            bytes = buffer.ToArray();
-        }
-
-        var mimeType = document.GetAttributeValue<string>("sprk_mimetype");
+        var bytes = file.Content!;
+        var version = file.Version;
+        var mimeType = file.MimeType;
         var contentType = string.IsNullOrWhiteSpace(mimeType) || mimeType.Length > StoredFileSchema.ContentTypeMaxLength
             ? InvoiceSubmissionService.PdfContentType
             : mimeType;
@@ -780,9 +754,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
             ContentType = contentType,
             FirmVisible = false,
             SourceDocumentId = documentId,
-            SourceCommunicationId = document.GetAttributeValue<EntityReference>("sprk_relatedcommunication")?.Id is { } communication && communication != Guid.Empty
-                ? communication
-                : null,
+            SourceCommunicationId = file.CommunicationId,
             SourceVersion = version,
             SourceSha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
             SubmissionId = snapshot.SubmissionId,

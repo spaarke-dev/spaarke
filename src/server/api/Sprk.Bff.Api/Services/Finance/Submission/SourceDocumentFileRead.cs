@@ -1,0 +1,143 @@
+// ebilling-r1 task 118b-1: the ONE read of a Submit Invoice source document's bytes (procedure-and-file-model 9.1 step 2), moved out of
+// InvoiceSubmissionProcessingJobHandler.LoadSourceDocumentAsync so the job (the invoice copy) and the from-document intake (the supporting
+// copies, 118b-2) read a document through the same rule.
+//
+// Component Justification (CLAUDE.md §11):
+//   (1) Existing - InvoiceSubmissionProcessingJobHandler.LoadSourceDocumentAsync read the row, refused an email archive or a row with no
+//       file pointer, verified the pointer's container and downloaded the bytes, inline. EmlMarkedPartReader reads a .eml (no container
+//       check, MIME parts), which is not a document's file.
+//   (2) Extension - it IS that code, moved (a static method, no DI registration, no new service): the job keeps its staging, its logs and
+//       its outcome mapping; only the read moved. Extending EmlMarkedPartReader would mix the .eml's MIME rule into a document read.
+//   (3) Cost of doing nothing - the intake would need a second copy of the container-verified read to stage supporting documents (118b
+//       escalation, option C rejected), and the two copies could drift on the one check that keeps the app from copying a file the row
+//       does not own.
+
+using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Graph;
+
+namespace Sprk.Bff.Api.Services.Finance.Submission;
+
+/// <summary>How the read of a source document's file ended (<see cref="SourceDocumentFileRead.ReadAsync"/>).</summary>
+internal enum SourceDocumentFileOutcome
+{
+    /// <summary>The bytes were read; <see cref="SourceDocumentFile.Content"/> and <see cref="SourceDocumentFile.Version"/> are set.</summary>
+    Read,
+
+    /// <summary>The <c>sprk_document</c> row no longer exists.</summary>
+    Gone,
+
+    /// <summary>The row has no file pointer (drive or item), or it is an email archive (<c>sprk_isemailarchive</c>): not a Submit Invoice source.</summary>
+    NoFile,
+
+    /// <summary>The pointer's container could not be verified as the row's own (<see cref="RecordContainerResolver.IsDocumentPointerContainerAllowedAsync(Guid, string?, string?, CancellationToken)"/>); nothing was downloaded.</summary>
+    StorageUnverified,
+
+    /// <summary>SharePoint Embedded returned no stream (it may answer later).</summary>
+    NotDownloaded,
+}
+
+/// <summary>
+/// The answer of <see cref="SourceDocumentFileRead.ReadAsync"/>. On <see cref="SourceDocumentFileOutcome.Read"/>: the bytes, the row's
+/// <c>versionnumber</c> read in the same retrieve, its <c>sprk_mimetype</c> as stored (null when empty) and its communication
+/// (<c>sprk_relatedcommunication</c>, null when none). On any other outcome only <see cref="Outcome"/> is meaningful.
+/// </summary>
+internal sealed record SourceDocumentFile(
+    SourceDocumentFileOutcome Outcome,
+    byte[]? Content = null,
+    long Version = 0,
+    string? MimeType = null,
+    Guid? CommunicationId = null);
+
+/// <summary>
+/// ebilling-r1 tasks 094 / 118b-1 (procedure-and-file-model 9.1 step 2): a source document's file, read as the application. In order, as
+/// the job has read it since 094: ONE retrieve of the row (<see cref="Columns"/>: the file pointer, the version, the type, the
+/// communication, the email-archive flag); a row with no pointer, or an email archive, is <see cref="SourceDocumentFileOutcome.NoFile"/>;
+/// the version (<see cref="InvoiceSubmissionPersister.VersionOf"/>, which throws when the row carries none); the pointer's container
+/// verified FIRST (the download follows the pointer as the application; fail closed); then the bytes.
+/// </summary>
+/// <remarks>A fault of the retrieve (other than not-found), of the container check or of the download propagates: the caller decides
+/// whether it is transient. Nothing is logged here; the callers log with their own ids (ADR-015: ids and codes only).</remarks>
+internal static class SourceDocumentFileRead
+{
+    /// <summary>The source document as step 2 reads it: the file pointer, the version and the type, in ONE retrieve.</summary>
+    internal static readonly string[] Columns =
+    [
+        "sprk_graphdriveid", "sprk_graphitemid", "sprk_mimetype", InvoiceReviewService.VersionNumber,
+        "sprk_relatedcommunication", "sprk_isemailarchive",
+    ];
+
+    /// <summary>Reads the file of <paramref name="documentId"/> (see the type's summary for the order).</summary>
+    internal static async Task<SourceDocumentFile> ReadAsync(
+        IGenericEntityService entities,
+        ISpeFileOperations spe,
+        RecordContainerResolver containerResolver,
+        Guid documentId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(spe);
+        ArgumentNullException.ThrowIfNull(containerResolver);
+
+        Entity document;
+        try
+        {
+            document = await entities.RetrieveAsync(InvoiceSubmissionPersister.DocumentEntity, documentId, Columns, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            return new SourceDocumentFile(SourceDocumentFileOutcome.Gone);
+        }
+
+        var driveId = document.GetAttributeValue<string>("sprk_graphdriveid");
+        var itemId = document.GetAttributeValue<string>("sprk_graphitemid");
+        if (string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId) || document.GetAttributeValue<bool?>("sprk_isemailarchive") == true)
+        {
+            return new SourceDocumentFile(SourceDocumentFileOutcome.NoFile);
+        }
+
+        var version = InvoiceSubmissionPersister.VersionOf(document);
+        if (!await containerResolver.IsDocumentPointerContainerAllowedAsync(documentId, driveId, itemId, ct).ConfigureAwait(false))
+        {
+            return new SourceDocumentFile(SourceDocumentFileOutcome.StorageUnverified);
+        }
+
+        var stream = await spe.DownloadFileAsync(driveId, itemId, ct).ConfigureAwait(false);
+        if (stream is null)
+        {
+            return new SourceDocumentFile(SourceDocumentFileOutcome.NotDownloaded);
+        }
+
+        byte[] bytes;
+        using (stream)
+        {
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, ct).ConfigureAwait(false);
+            bytes = buffer.ToArray();
+        }
+
+        var mimeType = document.GetAttributeValue<string>("sprk_mimetype");
+        return new SourceDocumentFile(
+            SourceDocumentFileOutcome.Read,
+            bytes,
+            version,
+            string.IsNullOrWhiteSpace(mimeType) ? null : mimeType,
+            document.GetAttributeValue<EntityReference>("sprk_relatedcommunication")?.Id is { } communication && communication != Guid.Empty
+                ? communication
+                : null);
+    }
+
+    private static bool IsRecordNotFound(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (RecordContainerResolver.IsRecordNotFound(e))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
