@@ -18,6 +18,14 @@ export { EvidenceLine } from '../../../../client/shared/Spaarke.UI.Components/sr
 export type { ConsoleStatusOverride } from '../../../../client/shared/Spaarke.UI.Components/src/components/ConsoleKit/consoleStatus';
 export { AiFieldTag } from '../../../../client/shared/Spaarke.UI.Components/src/components/AiFieldTag/AiFieldTag';
 export { FormModal } from '../../../../client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/FormModal';
+export { RecordRow } from '../../../../client/shared/Spaarke.UI.Components/src/components/ConsoleKit/RecordRow';
+export type { RecordClass } from '../../../../client/shared/Spaarke.UI.Components/src/components/ConsoleKit/consoleStatus';
+export { WizardShell } from '../../../../client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell';
+export type {
+  IWizardShellHandle,
+  IWizardStepConfig,
+  IWizardSuccessConfig,
+} from '../../../../client/shared/Spaarke.UI.Components/src/components/Wizard/wizardShellTypes';
 export type { IPdfHighlight, PdfBytes } from '../../../../client/shared/Spaarke.UI.Components/src/components/FilePreview/PdfHighlightViewer';
 export type { IPdfNormalisedBox } from '../../../../client/shared/Spaarke.UI.Components/src/components/FilePreview/pdfHighlightGeometry';
 

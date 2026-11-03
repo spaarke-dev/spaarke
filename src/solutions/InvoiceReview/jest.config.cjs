@@ -4,7 +4,8 @@
  * Patterned after src/solutions/InvoiceFiles/jest.config.cjs (ts-jest, jsdom, `@spaarke/auth` mapped to its source, React forced onto this
  * package's copy) and src/solutions/EventDetailSidePane/jest.config.cjs (`@spaarke/ui-components` mapped to a test seam, so the library barrel,
  * with its lexical / d3 / pdfjs graph, is never loaded). The seam re-exports the REAL shared components the page composes from their
- * source files (MetricCardRow, PanelSplitter, useTwoPanelLayout, StatusBar, StatusBadge, EvidenceLine, AiFieldTag, FormModal) and stands in
+ * source files (MetricCardRow, PanelSplitter, useTwoPanelLayout, StatusBar, StatusBadge, EvidenceLine, AiFieldTag, FormModal, RecordRow,
+ * WizardShell) and stands in
  * for PdfHighlightViewer only (108 tests the viewer with pdfjs faked; here the page's highlight prop is what is checked). Fluent resolves to
  * this package's copy for the shared sources too, so every component shares one React and one Fluent.
  *
@@ -13,6 +14,8 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
+  // The page tests mount a Fluent dialog with a wizard; on a cold ts-jest cache under load (parallel worktree builds) one can pass 5 s.
+  testTimeout: 20000,
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.cjs'],

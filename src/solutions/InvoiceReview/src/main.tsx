@@ -27,10 +27,11 @@ import {
   ensureNavigatorSidePane,
 } from '@spaarke/ui-components';
 import { resolveRuntimeConfig, getAuthProvider, getTelemetryConnectionString } from '@spaarke/auth';
-import { InvoiceReviewPage } from './components/InvoiceReviewPage';
+import { InvoiceReviewWithDecisions } from './components/InvoiceReviewWithDecisions';
 import { setRuntimeConfig, getBffBaseUrl } from './config/runtimeConfig';
 import { ensureAuthInitialized, authenticatedFetch } from './services/authInit';
 import { createInvoiceReviewApi } from './services/invoiceReviewApi';
+import { createInvoiceDecisionApi } from './services/decisionApi';
 import { parseLaunch } from './services/launch';
 
 const useStyles = makeStyles({
@@ -129,6 +130,7 @@ function Root() {
 
   // Built once the runtime config is set (getBffBaseUrl throws before that).
   const api = React.useMemo(() => (ready ? createInvoiceReviewApi(authenticatedFetch, getBffBaseUrl()) : null), [ready]);
+  const decisionApi = React.useMemo(() => (ready ? createInvoiceDecisionApi(authenticatedFetch, getBffBaseUrl()) : null), [ready]);
 
   let body: React.ReactNode;
   if (!launch.ok) {
@@ -142,14 +144,14 @@ function Root() {
         onRetry={() => setAttempt(n => n + 1)}
       />
     );
-  } else if (!api) {
+  } else if (!api || !decisionApi) {
     body = (
       <div className={s.centered} data-testid="invoicereview-bootstrapping">
         <Spinner size="small" label="Loading…" />
       </div>
     );
   } else {
-    body = <InvoiceReviewPage invoiceId={launch.invoiceId} api={api} openRecord={openRecord} />;
+    body = <InvoiceReviewWithDecisions invoiceId={launch.invoiceId} api={api} decisionApi={decisionApi}openRecord={openRecord} />;
   }
 
   // The FluentProvider carries only the theme; the surface colours sit on a wrapper div (project gotcha F-10).

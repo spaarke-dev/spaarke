@@ -169,7 +169,8 @@ export function BulkDecisionModal({ request, busy, error, onClose, onSubmit }: B
       onClose={() => {
         if (!busy) onClose();
       }}
-      onSubmit={() => onSubmit(reason.trim() || null)}
+      // The server stores no reason for an Accept (it drops it), so none is asked for or sent.
+      onSubmit={() => onSubmit(request.action === 'accept' ? null : reason.trim() || null)}
     >
       <Text>
         {n} {n === 1 ? 'line gets' : 'lines get'} the same decision and reason
@@ -189,9 +190,11 @@ export function BulkDecisionModal({ request, busy, error, onClose, onSubmit }: B
           {request.skipped} {request.skipped === 1 ? 'line is' : 'lines are'} left out (already decided, still processing, or with no suggestion).
         </Caption1>
       ) : null}
-      <Field label={request.action === 'accept' ? 'Reason (optional)' : 'Reason'}>
-        <Textarea value={reason} onChange={(_, d) => setReason(d.value)} resize="vertical" aria-label="Reason" />
-      </Field>
+      {request.action !== 'accept' && (
+        <Field label="Reason">
+          <Textarea value={reason} onChange={(_, d) => setReason(d.value)} resize="vertical" aria-label="Reason" />
+        </Field>
+      )}
       {error && (
         <MessageBar intent="error" data-testid="bulk-error">
           <MessageBarBody>{error}</MessageBarBody>

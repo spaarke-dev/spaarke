@@ -176,9 +176,12 @@ describe('InvoiceReviewPage: layout and states', () => {
     expect(screen.getByTestId(`aiobs-${lineId(1)}`)).toBeInTheDocument();
   });
 
-  it('renders under the dark theme', async () => {
+  it('renders under the dark theme with the same rows as the light theme', async () => {
+    // jsdom computes no colours, so what keeps the page theme-correct is the colour-literal source guard below; this checks that the page
+    // mounts and renders its content under the dark provider.
     renderPage(mockApi(normal()), { theme: webDarkTheme });
     expect(await screen.findByTestId('invoice-review')).toBeInTheDocument();
+    expect(screen.getAllByTestId(/^line-row-/)).toHaveLength(5);
   });
 });
 
@@ -356,6 +359,165 @@ describe('InvoiceReviewPage: decisions (task 100)', () => {
   });
 });
 
+describe('InvoiceReviewPage: failures and recovery (task 110 fix round 2)', () => {
+  it('repeats a failed Accept all clean through the multi-line route with the committed ids and the same decision id', async () => {
+    const api = mockApi(normal());
+    api.acceptClean.mockResolvedValueOnce(
+      failed(problem(503, 'ebilling.decision.incomplete', { detail: 'The lines were saved; the totals were not.', failedStep: 'totals', committedLineIds: [lineId(1)] }))
+    );
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(screen.getByTestId('accept-clean'));
+    fireEvent.click(await screen.findByTestId('notice-repeat'));
+    await waitFor(() => expect(api.decideLines).toHaveBeenCalledTimes(1));
+    // Not accept-clean again (its lines are no longer Clean: the server would answer 200 and apply nothing).
+    expect(api.acceptClean).toHaveBeenCalledTimes(1);
+    expect(api.decideLines).toHaveBeenCalledWith(INVOICE_ID, {
+      decisionId: api.acceptClean.mock.calls[0][1],
+      action: 'accept',
+      reason: null,
+      lines: [{ lineId: lineId(1), approvedAmount: null }],
+    });
+  });
+
+  it('shows the server state before offering Repeat after a 503 incomplete', async () => {
+    const api = mockApi(normal());
+    api.decideLine.mockResolvedValueOnce(failed(problem(503, 'ebilling.decision.incomplete', { detail: 'The line was saved; the record was not.' })));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(row(2));
+    await screen.findByTestId(`pane-line-${lineId(2)}`);
+    fireEvent.click(screen.getByTestId('decision-confirm'));
+    await screen.findByTestId('notice-repeat');
+    // The page re-read the review, so it no longer shows the pre-write state next to a Repeat.
+    expect(api.getReview).toHaveBeenCalledTimes(2);
+  });
+
+  it('sends no reason for an Accept and offers no reason field for it', async () => {
+    const api = mockApi(normal());
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(row(1));
+    await screen.findByTestId(`pane-line-${lineId(1)}`);
+    fireEvent.click(screen.getByRole('radio', { name: /Accept at/ }));
+    expect(screen.queryByLabelText('Reason for line 1')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('decision-confirm'));
+    await waitFor(() => expect(api.decideLine).toHaveBeenCalledTimes(1));
+    expect(api.decideLine.mock.calls[0][2]).toEqual({ decisionId: expect.any(String), action: 'accept', reason: null, approvedAmount: null });
+  });
+
+  it('asks for no reason in the bulk Accept form and sends null', async () => {
+    const api = mockApi(normal());
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(within(row(1)).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('bulk-accept'));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByLabelText('Reason')).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Accept 1 line' }));
+    await waitFor(() => expect(api.decideLines).toHaveBeenCalledTimes(1));
+    expect(api.decideLines.mock.calls[0][1]).toMatchObject({ action: 'accept', reason: null });
+  });
+
+  it('closes a dialog on a 409 and offers Reload on the page (bulk)', async () => {
+    const api = mockApi(normal());
+    api.decideLines.mockResolvedValue(failed(problem(409, 'ebilling.line.changed', { detail: 'A line changed. Reload and decide again.' })));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(within(row(2)).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('bulk-disallow'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Disallow 1 line' }));
+    await waitFor(() => expect(screen.queryByText('Disallow 1 selected line')).not.toBeInTheDocument());
+    expect(screen.getByTestId('notice')).toHaveTextContent('A line changed. Reload and decide again.');
+    expect(screen.queryByTestId('bulk-error')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('notice-reload'));
+    await waitFor(() => expect(api.getReview).toHaveBeenCalledTimes(2));
+  });
+
+  it('closes the Correct value form on a 409 and offers Reload on the page', async () => {
+    const api = mockApi(normal());
+    api.correctLine.mockResolvedValue(failed(problem(409, 'ebilling.correction.line_changed', { detail: 'The line changed. Reload and correct it again.' })));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(row(2));
+    fireEvent.click(within(await screen.findByTestId(`pane-line-${lineId(2)}`)).getByTestId('correct-Hours'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Correct value'), { target: { value: '2' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save correction' }));
+    await waitFor(() => expect(screen.queryByTestId('correct-error')).not.toBeInTheDocument());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('notice-reload')).toBeInTheDocument();
+  });
+
+  it('keeps polling after one failed re-read, offers Reload, and clears the notice when a later re-read works', async () => {
+    jest.useFakeTimers();
+    try {
+      const ready = review([line(1), flagged(2), line(3)]);
+      const api = mockApi(normal());
+      api.getReview
+        .mockResolvedValueOnce(ok(normal()))
+        .mockResolvedValueOnce(failed(problem(503, null)))
+        .mockResolvedValue(ok(ready));
+      renderPage(api, { pollIntervalMs: 1000 });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await screen.findByTestId('review-title');
+
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+      await waitFor(() => expect(api.getReview).toHaveBeenCalledTimes(2));
+      // The re-read failed: what is shown stays, and the notice offers Reload.
+      expect(await screen.findByTestId('notice-reload')).toBeInTheDocument();
+      expect(screen.getByTestId('notice')).toHaveTextContent('temporarily unavailable');
+      expect(screen.getByTestId(`processing-${lineId(3)}`)).toBeInTheDocument();
+
+      // Polling was not abandoned: the next tick re-reads and the page recovers by itself.
+      await act(async () => {
+        jest.advanceTimersByTime(1000);
+      });
+      await waitFor(() => expect(api.getReview).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(screen.queryByTestId(`processing-${lineId(3)}`)).not.toBeInTheDocument());
+      expect(screen.queryByTestId('notice')).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('says so when a write was saved but the page could not refresh, with Reload', async () => {
+    const api = mockApi(normal());
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    api.getReview.mockResolvedValue(failed(problem(503, null)));
+    fireEvent.click(row(1));
+    await screen.findByTestId(`pane-line-${lineId(1)}`);
+    fireEvent.click(screen.getByRole('radio', { name: /Accept at/ }));
+    fireEvent.click(screen.getByTestId('decision-confirm'));
+    await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('could not refresh'));
+    expect(screen.getByTestId('notice')).toHaveAttribute('data-intent', 'warning');
+    expect(screen.getByTestId('notice-reload')).toBeInTheDocument();
+  });
+
+  it('shows the connection sentence, never the browser text, when a write gets no server answer', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const api = mockApi(normal());
+      api.decideLine.mockResolvedValue(failed(new TypeError('Failed to fetch')));
+      renderPage(api);
+      await screen.findByTestId('review-title');
+      fireEvent.click(row(2));
+      await screen.findByTestId(`pane-line-${lineId(2)}`);
+      fireEvent.click(screen.getByTestId('decision-confirm'));
+      await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('The change could not be sent. Check your connection and retry.'));
+      expect(screen.getByTestId('notice')).not.toHaveTextContent('Failed to fetch');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
 describe('InvoiceReviewPage: corrections (task 101) and the PDF', () => {
   const lowHours = () =>
     review([
@@ -403,6 +565,12 @@ describe('InvoiceReviewPage: corrections (task 101) and the PDF', () => {
     await waitFor(() => expect(screen.queryByText('Correct hours · line 7')).not.toBeInTheDocument());
     // The line is Clean after the server re-ran the rules.
     expect(within(row(7)).getByText('Clean')).toBeInTheDocument();
+    // The "Suggested: reduce" choice made against the old finding did not survive: nothing is chosen, so Confirm cannot send it.
+    const confirm = await screen.findByTestId('decision-confirm');
+    expect(confirm).toBeDisabled();
+    expect(screen.queryByRole('radio', { name: /Suggested/ })).not.toBeInTheDocument();
+    fireEvent.click(confirm);
+    expect(api.decideLine).not.toHaveBeenCalled();
   });
 
   it('confirms a low-confidence value as read', async () => {
@@ -447,7 +615,66 @@ describe('InvoiceReviewPage: corrections (task 101) and the PDF', () => {
   });
 });
 
+/** CSS named colours a style value might use. */
+const NAMED_COLOURS = new Set([
+  'white', 'black', 'red', 'green', 'blue', 'yellow', 'orange', 'purple', 'pink', 'brown', 'gray', 'grey', 'silver', 'gold', 'navy', 'teal',
+  'maroon', 'olive', 'lime', 'aqua', 'cyan', 'magenta', 'fuchsia', 'ivory', 'beige', 'tan', 'khaki', 'coral', 'salmon', 'crimson', 'indigo',
+  'violet', 'lavender', 'turquoise', 'azure', 'whitesmoke', 'gainsboro', 'lightgray', 'lightgrey', 'darkgray', 'darkgrey', 'dimgray',
+  'slategray', 'darkred', 'darkgreen', 'darkblue', 'lightblue', 'lightgreen', 'skyblue', 'royalblue', 'steelblue', 'orangered', 'tomato',
+  'firebrick',
+]);
+
+/**
+ * Colour literals in source text: hex colours, rgb()/rgba()/hsl()/hsla(), and CSS named colours used as a style value. Comments are ignored. A
+ * named colour counts only inside the quoted value of a style property (`color: 'white'`, `border: '1px solid red'`), so prose and ids do not
+ * trip it. Fluent tokens, `transparent`, `inherit` and `currentColor` are not literals.
+ */
+function findColourLiterals(source: string): string[] {
+  const text = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+  const found: string[] = [];
+  for (const m of text.matchAll(/(^|[^\w&#])(#[0-9a-fA-F]{3,8})(?![\w-])/g)) found.push(m[2]);
+  for (const m of text.matchAll(/\b(rgba?|hsla?)\(/g)) found.push(`${m[1]}(`);
+  const prop =
+    /\b(?:color|backgroundColor|background|border\w*|outline\w*|fill|stroke|boxShadow|textDecorationColor|caretColor|accentColor)\s*:\s*(['"`])([^'"`]*)\1/g;
+  for (const m of text.matchAll(prop)) {
+    for (const word of m[2].split(/[^A-Za-z]+/)) if (NAMED_COLOURS.has(word.toLowerCase())) found.push(word);
+  }
+  return found;
+}
+
 describe('source guards', () => {
+  it('uses no colour literal anywhere in the page source (dark mode: Fluent tokens only, ADR-021)', () => {
+    const srcRoot = path.resolve(__dirname, '..');
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) return e.name === '__tests__' ? [] : walk(p);
+        return /\.(ts|tsx)$/.test(e.name) ? [p] : [];
+      });
+    for (const f of walk(srcRoot)) {
+      const found = findColourLiterals(fs.readFileSync(f, 'utf8'));
+      expect({ file: path.relative(srcRoot, f), found }).toEqual({ file: path.relative(srcRoot, f), found: [] });
+    }
+  });
+
+  it('the colour guard fires on hex, rgb() / hsl() and named colours in style values', () => {
+    expect(findColourLiterals("const a = { color: '#fff' };")).toEqual(['#fff']);
+    expect(findColourLiterals("const a = { border: '1px solid #CCCCCC80' };")).toEqual(['#CCCCCC80']);
+    expect(findColourLiterals("const a = { backgroundColor: 'rgb(0, 0, 0)' };")).toEqual(['rgb(']);
+    expect(findColourLiterals('const a = { fill: `hsla(0,0%,0%,.5)` };')).toEqual(['hsla(']);
+    expect(findColourLiterals("const a = { backgroundColor: 'white' };")).toEqual(['white']);
+    expect(findColourLiterals('const a = { color: "Black", borderTopColor: "red" };')).toEqual(['Black', 'red']);
+    expect(findColourLiterals('<div style={{ background: "navy" }} />')).toEqual(['navy']);
+  });
+
+  it('the colour guard stays quiet on tokens, transparent, comments, ids and non-colour words', () => {
+    expect(findColourLiterals('const a = { color: tokens.colorNeutralForeground1, backgroundColor: tokens.colorNeutralBackground2 };')).toEqual([]);
+    expect(findColourLiterals("const a = { backgroundColor: 'transparent', color: 'inherit', borderColor: 'currentColor' };")).toEqual([]);
+    expect(findColourLiterals("// a #fff comment and 'white' in prose\n/* rgb(0,0,0) */ const a = 1;")).toEqual([]);
+    expect(findColourLiterals("document.getElementById('root'); const href = '#root'; const t = 'Black Friday sale';")).toEqual([]);
+    expect(findColourLiterals("const a = { overflow: 'hidden', display: 'flex', position: 'relative' };")).toEqual([]);
+  });
+
   const srcDir = path.resolve(__dirname, '..');
   const files = (dir: string): string[] =>
     fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {

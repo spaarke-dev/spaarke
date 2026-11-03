@@ -9,10 +9,12 @@ import type {
   InvoiceReview,
   InvoiceReviewApi,
   LineDecisionResponse,
+  ReviewDecisionRecord,
   ReviewField,
   ReviewFinding,
   ReviewLine,
 } from '../services/invoiceReviewApi';
+import type { ApprovalState, BlockedSubmission, ContextSection, InvoiceContext, InvoiceDecisionApi } from '../services/decisionApi';
 import { toFailure } from '../services/invoiceReviewApi';
 
 export const INVOICE_ID = '0d9178d3-9f32-7f46-ed9a-4dec59f66c1a';
@@ -170,6 +172,161 @@ export function mockApi(reviews: InvoiceReview[] | InvoiceReview): MockApi {
     ),
     listCorrections: jest.fn(async () => ok([])),
     fetchFile: jest.fn(async () => ok(new ArrayBuffer(8))),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task 111: the decision wizard, the blocked view and the panes
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const SUBMISSION_ID = '5b5b5b5b-0000-4000-8000-0000000000b5';
+
+/** An approval state (task 103): an eligible approver on a pending invoice with nothing open, unless overridden. */
+export function approval(overrides: Partial<ApprovalState> = {}): ApprovalState {
+  return {
+    invoiceId: INVOICE_ID,
+    approvalId: 'ap-1',
+    status: 'Pending',
+    eligibleApprovers: ['Pat Approver', 'Sam Second'],
+    noEligibleApprover: false,
+    eligibilityUnavailable: false,
+    callerEligible: true,
+    canApprove: true,
+    openLines: { pending: 0, flagged: 0, total: 0 },
+    undecidedCleanLines: 0,
+    held: false,
+    approvedAmount: null,
+    decidedBy: null,
+    decidedOn: null,
+    decisionRecordId: null,
+    eligibleResolvedOn: null,
+    ...overrides,
+  };
+}
+
+export function blockedSubmission(overrides: Partial<BlockedSubmission> = {}): BlockedSubmission {
+  return {
+    submissionId: SUBMISSION_ID,
+    invoiceId: INVOICE_ID,
+    trackingNumber: 'INV-2025-78232.3',
+    firmInvoiceNumber: 'INV-2025-78232',
+    channel: 'Internal',
+    status: 'Rejected',
+    outcomeReasonCode: 'submission.blocked',
+    state: 'Blocked',
+    canOverride: true,
+    canReturn: true,
+    findings: [
+      {
+        index: 0,
+        ruleType: 'Duplicate',
+        policyCode: 'DUP-INV',
+        policyVersionId: 'pv1',
+        clause: 'No duplicate invoices',
+        clauseLocation: '§2',
+        subject: 'invoice',
+        line: null,
+        reasonCode: 'invoice.duplicate',
+        detailWithheld: false,
+        consequence: 'Block',
+        blocking: true,
+        heldBecause: 'Looks like a duplicate of an earlier invoice',
+        overridden: false,
+        valuesRead: [],
+      },
+    ],
+    override: null,
+    return: null,
+    ...overrides,
+  };
+}
+
+/** A review whose invoice is held by a blocked submission. */
+export function heldReview(lines: ReviewLine[] = [line(1)]): InvoiceReview {
+  const base = review(lines);
+  return { ...base, header: { ...base.header, held: true }, submission: { submissionId: SUBMISSION_ID, trackingNumber: 'INV-2025-78232.3', kind: 'Blocked' } };
+}
+
+export function decisionRecord(overrides: Partial<ReviewDecisionRecord> = {}): ReviewDecisionRecord {
+  return {
+    recordId: 'rec-1',
+    number: 'DR-0001',
+    actionCode: 'accept-line',
+    subject: 'line',
+    lineId: lineId(1),
+    recordClass: 'Routine',
+    outcome: 'Authorized',
+    decidedOn: '2026-11-03T09:00:00Z',
+    decidedBy: { id: 'u1', name: 'Reviewer One' },
+    reason: null,
+    ...overrides,
+  };
+}
+
+export type MockDecisionApi = { [K in keyof InvoiceDecisionApi]: jest.Mock };
+
+const emptySection = <T>(data: T): ContextSection<T> => ({ status: 'available', data, code: null, message: null });
+
+export function invoiceContext(overrides: Partial<InvoiceContext> = {}): InvoiceContext {
+  return {
+    invoiceId: INVOICE_ID,
+    coreRecord: emptySection({ type: 'matter', id: MATTER_ID, name: 'Example matter', number: 'M-100', statusCode: 1, status: 'Active', openedDate: '2025-01-05', closedDate: null }),
+    budget: emptySection({ budget: 100000, spendToDate: 42000, remaining: 58000, utilizationPercent: 42, invoiceCount: 4, asOf: '2025-04-01T00:00:00Z' }),
+    priorInvoices: emptySection({
+      limit: 5,
+      hasMore: false,
+      items: [{ id: 'pi1', number: 'INV-2025-77001', invoiceDate: '2025-03-01', billed: 4000, approved: 3900, status: 'Approved', statusCode: 3 }],
+    }),
+    disallowHistory: emptySection({ invoicesConsidered: 4, reducedCount: 3, reducedAmount: 450, disallowedCount: 1, disallowedAmount: 200, topReasons: [{ reason: 'Rate above approved', count: 3 }] }),
+    rateHistory: emptySection({
+      timekeepers: [
+        {
+          timekeeperId: 'tk1',
+          name: 'A. Partner',
+          approvedRates: [{ effectiveFrom: '2025-01-01', effectiveTo: null, approvedRate: 650, rackRate: 750, basis: 'Negotiated', scope: 'Matter' }],
+          billedOnThisInvoice: [{ rate: 750, lineCount: 3, firstSeen: null, lastSeen: null }],
+          billedPreviously: [],
+        },
+      ],
+    }),
+    ...overrides,
+  };
+}
+
+/** A fake decision API: every route succeeds with the happy-path body unless a test overrides it. */
+export function mockDecisionApi(initial: ApprovalState = approval()): MockDecisionApi {
+  return {
+    getApproval: jest.fn(async () => ok(initial)),
+    approve: jest.fn(async () => ok({ outcome: 'approved', decisionId: 'd1', decisionRecordId: 'rec-9', state: approval({ status: 'Approved', canApprove: false, approvedAmount: 5000 }) })),
+    reject: jest.fn(async () => ok({ outcome: 'decided', decision: 'Rejected', decisionId: 'd2', decisionRecordId: 'rec-10' })),
+    returnToFirm: jest.fn(async () => ok({ outcome: 'decided', decision: 'Returned', decisionId: 'd3', decisionRecordId: 'rec-11' })),
+    listAdjustmentRules: jest.fn(async () =>
+      ok({
+        asOf: null,
+        rules: [{ ruleId: 'r1', policyCode: 'BILL-CAP', headline: 'Block billing', ruleSetId: 'rs1', ruleSetName: 'Example Guidelines', scope: 'Firm', version: 2, clauseReference: '§7', clauseLocation: null }],
+      })
+    ),
+    addAdjustment: jest.fn(async () =>
+      ok({ adjustment: { lineId: lineId(90), adjustmentId: 'a1', method: 'percent', value: 5, amount: -250, reason: 'Courtesy', ruleId: null, reviewedOn: '2026-11-03T10:00:00Z' }, removedLineId: null, totals: null, alreadyApplied: false })
+    ),
+    removeAdjustment: jest.fn(async (_i: string, id: string) => ok({ adjustment: null, removedLineId: id, totals: null, alreadyApplied: false })),
+    getBlocked: jest.fn(async () => ok(blockedSubmission())),
+    overrideBlocked: jest.fn(async () => ok({ submissionId: SUBMISSION_ID, invoiceId: INVOICE_ID, outcome: 'Overridden', recordId: 'rec-12', alreadyDecided: false })),
+    returnBlocked: jest.fn(async () => ok({ submissionId: SUBMISSION_ID, invoiceId: INVOICE_ID, outcome: 'Returned', recordId: 'rec-13', alreadyDecided: false })),
+    getContext: jest.fn(async () => ok(invoiceContext())),
+    getRelatedWork: jest.fn(async (_i: string, id: string) =>
+      ok({
+        invoiceId: INVOICE_ID,
+        lineId: id,
+        status: 'available',
+        reason: null,
+        code: null,
+        message: null,
+        windowDays: 7,
+        truncated: false,
+        items: [{ documentId: 'doc1', name: 'Draft agreement.docx', createdOn: '2025-03-11T10:00:00Z', score: 0.8 }],
+      })
+    ),
   };
 }
 

@@ -284,6 +284,11 @@ export interface ApiFailure {
   signInFailed: boolean;
   /** `failedStep` of a 503 incomplete (the change was saved; repeat the same request to finish). */
   failedStep: string | null;
+  /**
+   * `committedLineIds` of a 503 incomplete decision: the lines already written. Accept all Clean cannot be repeated through its own route
+   * (the lines left Clean), so its repeat goes through the multi-line route with these ids (InvoiceLineDecisionService.cs).
+   */
+  committedLineIds: string[];
 }
 
 export type ApiResult<T> = { ok: true; value: T } | { ok: false; failure: ApiFailure };
@@ -294,6 +299,10 @@ export const CODE_CORRECTION_INCOMPLETE = 'ebilling.correction.incomplete';
 
 function str(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function ids(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v.length > 0) : [];
 }
 
 /** Turn whatever `authenticatedFetch` threw into an {@link ApiFailure}. Exported for the tests. */
@@ -307,14 +316,19 @@ export function toFailure(err: unknown): ApiFailure {
       detail: str(p?.detail),
       signInFailed: isAuthFailure(err),
       failedStep: str(p?.failedStep),
+      committedLineIds: ids(p?.committedLineIds),
     };
   }
+  // Not a server answer (the browser's "Failed to fetch", a body that was not JSON): the raw text is for the console, never for the user,
+  // so the status-0 sentence of the message helpers shows.
+  if (err instanceof Error && !isAuthFailure(err)) console.warn('[InvoiceReview] A request failed without a server answer:', err.message);
   return {
     status: 0,
     errorCode: null,
-    detail: err instanceof Error ? err.message : null,
+    detail: null,
     signInFailed: isAuthFailure(err),
     failedStep: null,
+    committedLineIds: [],
   };
 }
 
@@ -396,6 +410,7 @@ const unexpected = (what: string): ApiFailure => ({
   detail: `The server answered with an unexpected ${what}.`,
   signInFailed: false,
   failedStep: null,
+  committedLineIds: [],
 });
 
 function isReview(body: unknown): body is InvoiceReview {
