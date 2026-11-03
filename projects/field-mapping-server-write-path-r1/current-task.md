@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Active** | **Task 041 (FR-40, #2502), step 2–5 with the Opus implementer `fm-041` on branch `task/fm-041`** (cut from c0b543aedc). Rigor FULL, opus/high, prescriptive. Session 5c is the only field-mapping session; pid 53128 (pre-crash, no window) is still alive, and the owner can say "kill it".
+| **Active** | **Task 041 (FR-40, #2502), step 2–5 with the Opus implementer `fm-041` on branch `task/fm-041`** (cut from c0b543aedc). Rigor FULL, opus/high, prescriptive. Session 5c is the only field-mapping session (the pre-crash pid 53128 was stopped 2026-11-03).
 - Step 0 done: master merged into the work branch (9935ef2dcf); no open PR touches 041's files.
 - Step 1 done: the read-only dev count is in `notes/task-041-notes.md` (c0b543aedc). No BU names a non-files index, so there is no escalation. 77 old document stamps (knowledge-index-v2 ×76, file-index ×1) are left alone.
 - AC9 rulings to fm-041: (1) ChatCreate + SearchIndexDefaultTests: only the applied-value, Warning→Information and BU-bind fragments change; (2) RelocatedFileIndexingTests Issue1510: only the `ResolveAsync` Verify line is deleted; (3) §14.4 row 10 (moving the constants) is skipped because AC9 pins SearchIndexDropGuardTests. All three are listed in the notes as "AC9 exceptions" / "Prescribed steps not done" for UAC-r2.
@@ -25,7 +25,7 @@
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
 | **Waiting on** | - fm-041 (implementer).
-- Owner: the Family 1.0.56 look, 005 `-Apply`, the 076 narrower-user pass, and "kill it" for pid 53128.
+- Owner: the Family 1.0.56 look (the four #2513 items on dev) and the 076 narrower-user pass. **Done 2026-11-03:** 005 `-Apply` on dev (36 migrated, VERIFY PASS, idempotent); pid 53128 (the pre-crash session) stopped on the owner's "kill it".
 - Rows to delete later: see `notes/task-019-notes.md` (the check-C event is the owner's and stays).
 - #2518 (ontology writer identity not provisioned): ontology's to own. |
 | **Owner to do** | 076 live check (owner + narrower user). Leftover locked worktrees agent-aec6d06ca99a5a9f6 (075) and agent-a7ed21b81867c4e2e (039, merged; locked by its agent process): end of project, via Remove-WorktreeSafe after unlock. |
