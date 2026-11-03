@@ -201,7 +201,7 @@ No matter create path bypasses the service: the Office core that used to create 
 - **GREEN:** 49 of 49 = the 32 task 020 seam tests + 6 route + 8 service + 3 chat.
 - **The existing field-security seam test** (`RouteCreate_ACallerSuppliedSecureFlagOnARoot_IsRefused403_AndNothingIsCreated`) still asserts 403 `child_record.denied` for both tables, because step 2 runs before step 6. Only its doc comment changed: the "a matter's is not" parenthetical became the step order.
 
-**F-2, found and NOT fixed (for main to file or route to UAC-r2).** The same JSON-null gap exists for project and work assignment.
+**F-2, found in round 1 and fixed in round 2 (below, on the coordinator's instruction).** The same JSON-null gap exists for project and work assignment.
 - A system principal's mapped item `{ "sprk_issecure": null }` on an unfiled `sprk_project` or `sprk_workassignment` is NOT refused. The create writes `sprk_issecure = null`.
 - Probe: a temporary test over `CreateWorld`, since removed. Both tables returned `Succeeded`, with body `sprk_issecure=` present.
 - Cause: `SecureRootFilingGate.PlanCreateAsync` and `SecureRootInheritance.PlanCreateAsync` both ask `NamesSecureFlag(OwnedChildWrite.WritesOf(item))`, and `WritesOf` drops JSON-null body columns.
@@ -216,6 +216,37 @@ No matter create path bypasses the service: the Office core that used to create 
 - After the pre-commit `dotnet format`, the 49 seam tests were rerun on the committed code: 49 of 49.
 - Publish delta (the scratch copy of `publish-delta.ps1`), origin/master 249809ce0b against 47dd89ba00: **+591 bytes, total 39.3 MB**. This includes task 041, which is on the work branch but not yet on master.
 - CVE: "no vulnerable packages given the current sources".
+
+## Fix round 2 (F-2): a JSON-null server column on a project or work assignment
+
+**The gap.** A SYSTEM principal's mapped item that names `sprk_issecure` or `sprk_accessinheritance` as a JSON `null` was created, and the null was written. This happened on an unfiled `sprk_project` or `sprk_workassignment`.
+- The secure-root plan (`SecureRootFilingGate.PlanCreateAsync`, `SecureRootInheritance.PlanCreateAsync`) asks `NamesSecureFlag` and `AccessInheritance.IsNamedIn` over `OwnedChildWrite.WritesOf(item)`.
+- `WritesOf` drops a JSON-null body column; it lists a null only for a cleared lookup.
+- **The access column has the same gap.** It was confirmed red for both tables, so it is closed in the same helper with `AccessInheritance.ServerOnlyReasonCode`.
+- Caller paths (route, chat, Office) were not affected.
+
+**The fix.** It is in `RecordCreationService.cs` only. The gate and `SecureRootInheritance.cs` are unchanged, and so is their contract.
+- One helper, `RecordCreationService.SecureRootServerColumnRefusal(table, item)`. It is internal static and pure, and is placed beside `PlanRefused`. It serves all three secure roots, so they cannot drift apart. It reads the names in `WritesOf(item)` plus `item.Columns`, normalised with `SecureRootInheritance.NormalizeColumn`, and asks in the plan's order:
+  - `sprk_accessinheritance` on an inheriting root (project, work assignment) → `AccessInheritance.ServerOnlyReasonCode`, with the gate's words "sprk_accessinheritance is written only by Spaarke, so it was not created";
+  - then `sprk_issecure` on any secure root → `AccessFollowsParent.SecureFlagReasonCode`, `SecureFlagRefusalText`.
+- `sprk_matter` is asked only the flag, since it carries no access column (round 1).
+- Both answers go through step 6's `PlanRefused`, so the response is 403 with the plan's code and words.
+- **Call sites (step 6):**
+  - for an inheriting table, immediately before `_rootFiling.PlanCreateAsync`, after the system-principal filing refusal and the server-set AppendTo check, so every existing order is unchanged;
+  - for a matter, in the non-inheriting branch. This replaces round 1's inline check, so the behaviour is identical.
+- For a non-null value the helper gives the same answer the plan gave, so behaviour changes only for the JSON-null case.
+
+**Tests** (`tests/integration/seam/ChildRecords/SecureRootServerColumnRefusalTests.cs`, which makes the round 1 probe permanent):
+- **The refusal theory.** System principal, unfiled project and work assignment; `sprk_issecure: null` and `sprk_accessinheritance: null` → 403 Forbidden, the plan's code and exact detail, nothing written. Control rows (`sprk_issecure: false`, `sprk_accessinheritance: "{}"`) must give the same answer.
+- **Must-not-fire.** A system create of matter, project and work assignment without either column is created.
+- **RED** before the fix: **4 failed** (both columns null × both tables); the 4 control rows and 3 must-not-fire rows passed.
+- **GREEN** after: the F-2 tests, the round 1 tests, the task 020 seam tests, `ServerBindSpellingTests` and the `WorkAssignmentCreate_*` route tests: **102 of 102**.
+
+**Verification, fix round 2** (`verify-suites.sh`):
+- Solution build: 0 warnings, 0 errors.
+- ArchTests (rebuilt): **1911 of 1911 passed**.
+- BFF filtered suites: **6618 passed, 0 failed, 7 skipped**, which is 6607 + the 11 new tests. The existing `SecureRoot*`, `SecureChildOwnershipAiToolTests*`, `RecordCreation*`, `ServerBindSpelling` and `ChildRecord*` suites stayed green, and none of their files was changed.
+- No TypeScript changed, so jest was not rerun.
 
 ## Verification
 
