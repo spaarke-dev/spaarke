@@ -15,6 +15,7 @@
  *   contact conflict (403)         an administrator must resolve the record
  *   email missing (403)            the sign-in carried no email address
  *   not invited (403)              no current invitation names this sign-in: ask for a new invitation
+ *   not configured (500)           the organization's set-up is unfinished: an administrator must finish it; no retry
  *   error                          anything else: "Try again" repeats the same request
  *
  * ADR-021: Fluent v9 semantic tokens only. ADR-012: the shared `EmptyState` shell renders the message states.
@@ -52,6 +53,7 @@ import {
   type RegistrationRefusal,
 } from '../auth/registration-client';
 import { BffAccessState } from '../components/auth/BffAccessState';
+import { OWNER_UNCONFIGURED_MESSAGE, OWNER_UNCONFIGURED_TITLE } from '../api/me-client';
 
 export interface RegistrationPageProps {
   /** What the BFF knows about the caller (from the `registration_required` refusal). The email is shown read-only. */
@@ -70,6 +72,7 @@ type View =
   | { kind: 'conflict' }
   | { kind: 'emailMissing' }
   | { kind: 'notInvited' }
+  | { kind: 'notConfigured' }
   | { kind: 'linkBlocked' }
   | { kind: 'signin' }
   /**
@@ -145,6 +148,8 @@ function refusalView(reason: RegistrationRefusal, confirm: boolean): View {
       return { kind: 'emailMissing' };
     case 'contact_not_invited':
       return { kind: 'notInvited' };
+    case 'not_configured':
+      return { kind: 'notConfigured' };
     case 'invalid':
       return { kind: 'form', formError: 'Check the values you entered and try again.' };
     case 'signin':
@@ -321,6 +326,13 @@ export const RegistrationPage: React.FC<RegistrationPageProps> = ({ prefill, log
         <Warning48Regular className={s.iconWarning} />,
         'You need an invitation',
         'This sign-in cannot be registered until you are invited. Ask the person who invited you to send a new invitation.'
+      );
+
+    case 'notConfigured':
+      return message(
+        <Warning48Regular className={s.iconWarning} />,
+        OWNER_UNCONFIGURED_TITLE,
+        OWNER_UNCONFIGURED_MESSAGE
       );
 
     case 'linkBlocked':
