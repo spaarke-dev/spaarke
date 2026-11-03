@@ -1540,6 +1540,55 @@ public class SecureBuRoleDepthAssertionTests
         finding.Message.Should().Contain(missing).And.Contain(table);
     }
 
+    /// <summary>
+    /// 089a review K6, must-fire: clause 5 returns early when it cannot grade (two owner roles here), so a codified depth-list
+    /// privilege the environment lacks (<c>prvReadsprk_ruleset</c>) would go unnamed. The builder reports it, so the run has
+    /// the role-count finding AND exactly one finding naming the privilege (criterion 148).
+    /// </summary>
+    [Fact]
+    public void Build_WhenClauseFiveCannotGrade_AMissingCodifiedDepthListPrivilegeIsStillNamedOnce()
+    {
+        const string missing = "prvReadsprk_ruleset";
+        var ownerRole = Guid.NewGuid();
+        var secondOwnerRole = Guid.NewGuid();
+        var returned = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded)
+            .Where(name => name != missing)
+            .ToArray();
+
+        var adminRole = Guid.NewGuid();
+        var depths = returned.ToDictionary(p => (ownerRole, p), _ => PrivilegeDepth.Basic);
+        foreach (var root in SecureBuRoleDepthAssertion.GuardedPrivileges)
+        {
+            depths[(adminRole, root)] = PrivilegeDepth.Global;
+        }
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            depths,
+            new[]
+            {
+                new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole),
+                new CensusRole(secondOwnerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, secondOwnerRole),
+                new CensusRole(adminRole, "System Administrator", RootBu, adminRole)
+            },
+            new[] { new CensusUser(Guid.NewGuid(), IsHuman: true, RootBu, new[] { adminRole }) },
+            new[] { new CensusTeam(Guid.NewGuid(), OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
+            SecureRecordOwnerRoleSet.Embedded,
+            returned);
+
+        census.OwnerRoleCoverage.OwnerRoleCount.Should().Be(2);
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
+
+        outcome.Findings.Should().HaveCount(2, outcome.Message);
+        outcome.Findings.Should().ContainSingle(f =>
+            f.Verdict == SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege && f.Message.Contains("2 role(s)"));
+        outcome.Findings.Should().ContainSingle(f =>
+            f.Verdict == SecureBuVerdict.RestrictedContentPrivilegeNotResolved
+            && f.Message.Contains(missing) && f.Message.Contains("sprk_ruleset"));
+    }
+
     /// <summary>Must-not-fire: every depth-list privilege resolved and held only by the owner role at Basic — isolated.</summary>
     [Fact]
     public void Build_WhenEveryDepthListPrivilegeResolves_ReportsNoDepthListFinding()

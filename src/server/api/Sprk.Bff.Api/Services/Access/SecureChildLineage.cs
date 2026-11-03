@@ -233,7 +233,7 @@ internal static class SecureChildLineage
         // ebilling-r1 task 089a (procedure model 5.2): a record-scoped rule set (sprk_scope Record or Firm record) is a secure
         // child of its record; one record lookup per core type (live spaarkedev1 2026-11-03), RemoveLink. A Procedure's or a
         // legacy set has none of them set, so it is never reached. sprk_procedure, sprk_firm and sprk_sourcedocument are not
-        // filing (a Procedure set carries the Procedure; a record set carries no source document).
+        // filing (a Procedure set carries the Procedure; a legacy uploaded set carries its source document, a CitationLookups entry).
         T("sprk_ruleset", "sprk_rulesets",
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)),
         T("sprk_reportcard", "sprk_reportcards",

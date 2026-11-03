@@ -88,8 +88,9 @@ Both privileges are **already held** on dev: the earlier 089 attempt ran the ref
 
 - **Do not run the refusal probes.** A create owned by the team would now succeed and leave a row.
 - **Do not run `-Apply`**: there is nothing to add.
-- Run `Set-SecureRecordOwnerRolePrivileges.ps1 -Verify` (reads only) after uac-r2 has seen the `-WhatIf`.
-- Run the NFR-05 census (`SecureRecordIsolationCensusJob`) once on dev: clause 1 now grades the stored-file privilege, so a human role holding it above Basic is a new finding.
+- Run `Set-SecureRecordOwnerRolePrivileges.ps1 -Verify` (reads only) after uac-r2 has seen the `-WhatIf`. **Done 2026-11-03: `-Verify` passed on dev, exit 0, Read at Basic on all 39 tables.**
+- Run the NFR-05 census (`SecureRecordIsolationCensusJob`) once on dev: clause 1 now grades the stored-file privilege, so a human role holding it above Basic is a new finding. **Not run yet: it waits for the next dev BFF deploy, because the dev BFF predates 089a** (the deployed census does not know the depth list).
+- The 2026-10-27 `-Apply` (the earlier 089 attempt, `8f4920ce0c`) **predates the rule that uac-r2 sees the `-WhatIf` first**. It was not re-run; the 2026-11-03 `-WhatIf` above is the one uac-r2 reviews, and `-Verify` confirms the state the old `-Apply` left.
 
 ### Overlaps
 
@@ -100,8 +101,26 @@ Both privileges are **already held** on dev: the earlier 089 attempt ran the ref
 ### K findings and open items
 
 - Only `RuleSetServiceNoMatterScopeGuardTests` keeps `sprk_matter` off policies; it is unchanged.
-- The Restrict delete behaviour on the core lookups (uac Q10) is a schema change and is not done here (task 117).
-- `sprk_ruleset.sprk_sourcedocument` is not a citation: a record rule set has no source document.
+- ~~Restrict on the core lookups (uac Q10) -> task 117.~~ **Superseded.** Model 5.2 says no Restrict is reachable from a core-record delete: the set's core lookups are RemoveLink, so deleting a matter unlinks its record-scoped sets (task 117 retires the unlinked ones) and nothing blocks the delete.
+- `sprk_ruleset.sprk_sourcedocument` -> `sprk_document` (an ownership parent) is a citation. **Fixed in the 089a review (K7)**: a legacy uploaded set carries it (`RuleSetService.cs:497`), and read as a parent it would have filed the set under its document. Added to `CitationLookups`; the must-not-fire in `SecureChildLineageTests` now covers the legacy shape, with and without a core lookup.
 - No pin yet that no non-BFF role holds Create or Write on `sprk_procedureversion` or `sprk_procedureassignment` (089b).
 - 089c: record-scoped writers must live in their own Routed file, because the census guard works per file. 089c also decides whether evaluation closes stale base-code Signals.
 - The client list has no npm unit test here (no `node_modules`); the ArchTest pins it.
+
+### 089c must
+
+Found in the 089a review; none is fixed in 089a. 089c is not done until each holds:
+
+- **A RecordScoped refusal (409) on every `RuleSetService` mutation and on the list** (K1; `RuleSetService.cs:23`, `:1105`, `:2006`). A record-scoped set is a secure child; the legacy service must not edit, list or delete it.
+- **Record-scope census markers that match write shapes only**, with the scope enum moved out of the waived file or exempted (K4; `RecordOwnerAssignmentCensusTests.cs:2304-2312`). The `RuleSetScope` marker also matches a read or a declaration, so `RuleSetService.cs` cannot carry the enum and 089c's reads cannot live in a waived file.
+- **089c's record-rule writer is listed Routed or as an UnscannedWriter** (K1). `RuleFamilyWaiverProblems` sees only the files the census lists or names; a writer in neither is not caught. The doc sentence that said otherwise (`:2314`) is corrected in this review.
+- **A write validator so a set never carries both `sprk_procedure` and a core lookup** (K1; `SecureChildLineage.cs:237`). The lineage reaches a set by its core lookup alone, so a set carrying both would be a secure child and a Procedure's set at once.
+
+### 089a review fixes (2026-11-03)
+
+| Item | Handling |
+|---|---|
+| F3: census Error branch untested | `Run_WhenADepthListPrivilegeDoesNotExistInTheEnvironment_LogsOneErrorNamingIt_NotCritical`: the fake directory lacks `prvReadsprk_StoredFile`; one Error naming it, no Critical, `status=findings`. Seeded: with the `or RestrictedContentPrivilegeNotResolved` clause dropped the test fails (the line goes out at Critical). |
+| F3: comment claimed a protection the test did not give | `AnAssignment_ExcludingAnotherSecureMattersRecordRule_FollowsItsOwnMatterOutOfIsolation` (reconciler, Unsecure pass): an assignment on a mid-unsecure matter excludes another Secure matter's record rule and still moves to the content team. Seeded: with `("sprk_procedureassignment","sprk_excludedpolicy")` out of `CitationLookups` it fails. The first test's comment now says what it proves and points here and at the unit pin. (The Make Secure shape cannot express this: the reconciler never reads `sprk_excludedpolicy`, so the citation only matters to the parent derivation, i.e. secure-if-any on the Unsecure pass.) |
+| K7: legacy set filed under its source document | `("sprk_ruleset","sprk_sourcedocument")` in `CitationLookups`; must-not-fire extended (legacy set alone: no parent; with a matter: the matter only). Seeded: fails without the entry. |
+| K6: a missing table can go unnamed | The builder now reports every depth-list privilege the environment did not return, codified or not. The evaluator drops a codified one only where clause 5 can grade (tables present, exactly one non-replica owner role) and names it, so each missing privilege yields exactly one finding. Test: two owner roles and `prvReadsprk_ruleset` not installed give the role-count finding plus one `RestrictedContentPrivilegeNotResolved` naming it. Seeded: fails on the old builder. The existing one-finding theory (clause 5 able to grade) still passes. |

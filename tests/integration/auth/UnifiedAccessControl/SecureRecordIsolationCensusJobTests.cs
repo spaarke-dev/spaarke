@@ -312,6 +312,27 @@ public class SecureRecordIsolationCensusJobTests
         _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains(moved.ToString()));
     }
 
+    /// <summary>
+    /// ebilling-r1 (089a review F3): an NFR-05 depth-list privilege the environment lacks (<c>sprk_storedfile</c>, which the
+    /// codified set does not list) leaves that table ungraded. It is ONE Error line naming it, never Critical (it is not an
+    /// exposure), and the run reports <c>findings</c>, not <c>isolated</c>.
+    /// </summary>
+    [Fact]
+    public async Task Run_WhenADepthListPrivilegeDoesNotExistInTheEnvironment_LogsOneErrorNamingIt_NotCritical()
+    {
+        _directory.RemovePrivilege(_codifiedChildPrivileges["sprk_storedfile"]);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse("a table whose isolation is unknown is not reported as isolated");
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error
+                                                 && e.Message.Contains(nameof(SecureBuVerdict.RestrictedContentPrivilegeNotResolved))
+                                                 && e.Message.Contains("prvReadsprk_StoredFile"));
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error);
+        _log.Entries.Should().NotContain(e => e.Level == LogLevel.Critical, "an ungraded table is not an exposure");
+        _log.Entries.Should().ContainSingle(e => e.Message.Contains("heartbeat status=findings"));
+    }
+
     /// <summary>A missing GUARDED privilege still stops the run: clause 1 cannot be graded without it.</summary>
     [Fact]
     public async Task Run_WhenAGuardedPrivilegeDoesNotExistInTheEnvironment_ThrowsRatherThanGrading()

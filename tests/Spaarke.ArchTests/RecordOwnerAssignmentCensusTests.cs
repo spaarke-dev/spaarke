@@ -2313,8 +2313,10 @@ public class RecordOwnerAssignmentCensusTests
 
     /// <summary>
     /// The problems of the rule-set waiver: a waived rule-table entry (or a listed Procedure rule-set writer) whose file names a record
-    /// scope, and a Routed rule-table entry whose owner file never asks <c>IRecordOwnershipResolver</c>. Together with the census
-    /// itself (an unlisted create fails), a record-scoped create that bypasses the resolver cannot pass.
+    /// scope, and a Routed rule-table entry whose owner file never asks <c>IRecordOwnershipResolver</c>. It sees only the files the
+    /// census lists (Waived, Routed) or <c>unscannedFiles</c> names: a record-rule writer in a file that is in none of them is not
+    /// caught here, so 089c must list its writer Routed or as an unscanned writer (089a review K1). The census itself still fails an
+    /// unlisted create in a scanned file.
     /// </summary>
     private static List<string> RuleFamilyWaiverProblems(
         IEnumerable<CensusEntry> census, IEnumerable<string> unscannedFiles, IReadOnlyDictionary<string, string> files)

@@ -318,6 +318,23 @@ public class SecureChildLineageTests
         };
         RecordOwnershipContext.ParentsOf(procedureSet).Should().BeEmpty("a Procedure rule set is not a secure child (model 5.2)");
 
+        // 089a review K7: a LEGACY uploaded set carries the document it was read from (RuleSetService). sprk_document is an
+        // ownership parent, so without the citation the set would be filed under the document.
+        var legacySourceDocument = Guid.NewGuid();
+        var legacySet = new Microsoft.Xrm.Sdk.Entity("sprk_ruleset", Guid.NewGuid())
+        {
+            ["sprk_sourcedocument"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", legacySourceDocument),
+        };
+        RecordOwnershipResolver.IsCitation("sprk_ruleset", "sprk_sourcedocument").Should().BeTrue();
+        RecordOwnershipContext.ParentsOf(legacySet).Should().BeEmpty("a legacy set's source document is provenance, not parentage");
+
+        var legacyRecordSet = new Microsoft.Xrm.Sdk.Entity("sprk_ruleset", Guid.NewGuid())
+        {
+            ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter),
+            ["sprk_sourcedocument"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", legacySourceDocument),
+        };
+        RecordOwnershipContext.ParentsOf(legacyRecordSet).Should().Equal(new RecordOwnershipParent("sprk_matter", matter));
+
         var recordRule = new Microsoft.Xrm.Sdk.Entity("sprk_policy", Guid.NewGuid())
         {
             ["sprk_ruleset"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_ruleset", Guid.NewGuid()),
