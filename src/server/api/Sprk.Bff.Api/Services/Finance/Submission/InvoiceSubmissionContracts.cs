@@ -162,6 +162,14 @@ public sealed record InvoiceSubmissionRequest
     /// and records the target on the new submission (<see cref="InvoiceSubmissionService.ResubmissionOfColumn"/>).
     /// </summary>
     public Microsoft.Xrm.Sdk.Entity? CorrectedInvoice { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 118b: the from-document route's supporting documents, de-duplicated and sorted, already checked by the route (the
+    /// caller's Read, the same communication). Empty (the default) behaves exactly as before 118b. Read only by
+    /// <see cref="InvoiceSubmissionService.SubmitExistingDocumentAsync"/>: the set joins the "same details?" comparison with an earlier
+    /// attempt, never the submission id (D-134: one submission per document and attempt).
+    /// </summary>
+    public IReadOnlyList<Guid> SupportingDocumentIds { get; init; } = [];
 }
 
 /// <summary>A submission that was received: the row exists with its tracking number and the processing job is enqueued.</summary>

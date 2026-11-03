@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Xrm.Sdk;
@@ -88,7 +89,9 @@ public static class InvoiceSubmissionEndpoints
                 "submission; the processing job copies its bytes into the invoice's file (the document is never moved). Body: " +
                 "{communicationId, documentId, coreRecord: {kind: matter|project|workassignment, id}, firmId, firmInvoiceNumber, poNumber?, " +
                 "mode?: New|Correction, invoiceId? (required for Correction: the In Review invoice it replaces, same firm, record and firm " +
-                "invoice number)}. " +
+                "invoice number), supportingDocumentIds? (documents of the same communication kept with the invoice as Supporting files; " +
+                "repeats ignored; the invoice document or more than 50 files in all is 400; one the caller cannot Read, an unknown one or " +
+                "one of another communication is the uniform 404)}. " +
                 "The caller needs Read on the document and its communication, Read and AppendTo on the core record and AppendTo on the firm " +
                 "(and Write on the invoice a Correction replaces); " +
                 "after every read-only check passes, a communication the D-140 chain reads as unfiled is filed " +
@@ -375,6 +378,60 @@ public static class InvoiceSubmissionEndpoints
         return SourcePreparation.Proceed(new SourceFiling(communication, communicationRights, core, http, services));
     }
 
+    /// <summary>
+    /// Task 118b (POML constraints "contract", "access"): the from-document route's supporting documents, READ-ONLY, after step 1 passed for
+    /// the invoice document and before the intake (so before step A and before anything is staged). For each id, in order: the caller's own
+    /// Read, through the check the invoice document uses (<see cref="CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync"/>,
+    /// gate variant); then the row, read app-only, must link <paramref name="communicationId"/> (<c>sprk_relatedcommunication</c>). A document
+    /// the caller cannot Read, an unknown one and one of another communication (or none) all get the uniform not-found answer
+    /// (<see cref="FinanceAuthorizationFilter.UniformRecordNotFound"/>, 404 <c>sdap.access.deny.record_unavailable</c>): the same bytes, and
+    /// the row of an unreadable one is never read. A read fault is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>. Null: every
+    /// one passed (or there are none).
+    /// </summary>
+    internal static async Task<IResult?> CheckSupportingDocumentsAsync(
+        IReadOnlyList<Guid> supportingDocumentIds, Guid communicationId, HttpContext http, CancellationToken ct)
+    {
+        if (supportingDocumentIds.Count == 0)
+        {
+            return null;
+        }
+
+        var services = SourceServices.From(http);
+        var token = TokenHelper.ExtractBearerTokenOrNull(http);
+        foreach (var documentId in supportingDocumentIds)
+        {
+            var rights = await services.Probe.GetCallerRightsForAuthorizationGateAsync(token, FinanceAuthorizationFilter.DocumentEntitySet, documentId, ct);
+            if (!rights.HasFlag(AccessRights.Read))
+            {
+                services.Logger.LogInformation("Submit Invoice: a supporting document the caller cannot Read was refused (uniform not-found)");
+                return FinanceAuthorizationFilter.UniformRecordNotFound(http);
+            }
+
+            Entity? document;
+            try
+            {
+                document = await services.Entities.RetrieveAsync(InvoiceSubmissionPersister.DocumentEntity, documentId, [DocumentRelatedCommunication], ct);
+            }
+            catch (Exception ex) when (IsNotFound(ex))
+            {
+                return FinanceAuthorizationFilter.UniformRecordNotFound(http);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                services.Logger.LogWarning("Submit Invoice: supporting document {DocumentId} could not be read ({Fault})", documentId, ex.GetType().Name);
+                return Unavailable();
+            }
+
+            if (document?.GetAttributeValue<EntityReference>(DocumentRelatedCommunication)?.Id != communicationId)
+            {
+                services.Logger.LogInformation("Submit Invoice: supporting document {DocumentId} is not a document of the communication named (uniform not-found)", documentId);
+                return FinanceAuthorizationFilter.UniformRecordNotFound(http);
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>What step 1 decided: a refusal (the route's answer, nothing written), or proceed with step A (null: nothing to file).</summary>
     internal sealed record SourcePreparation(IResult? Refusal, SourceFiling? Filing)
     {
@@ -634,6 +691,13 @@ public static class InvoiceSubmissionEndpoints
             return refused;
         }
 
+        // Task 118b: the supporting documents, read-only, as the caller, before the intake (nothing is filed or staged before this passes).
+        var supporting = request.SupportingDocuments;
+        if (await CheckSupportingDocumentsAsync(supporting, request.CommunicationId, http, ct) is { } supportingRefused)
+        {
+            return supportingRefused;
+        }
+
         Guid? callerOid = Guid.TryParse(CallerResolution.ResolveObjectId(http.User), out var oid) ? oid : null;
         InvoiceSubmissionOutcome outcome;
         try
@@ -651,6 +715,7 @@ public static class InvoiceSubmissionEndpoints
                 CorrelationId = http.TraceIdentifier,
                 FileSourceBeforeWrite = prepared.Hook, // step A: the intake runs it after its read-only refusals (fix round F1-b)
                 CorrectedInvoice = correctedInvoice, // task 097b: judged by the intake after the retry check, before step A
+                SupportingDocumentIds = supporting, // task 118b: compared with an earlier attempt's set (never part of the submission id)
             }, ct);
         }
         catch (SourceFilingRefusedException ex)
@@ -1007,8 +1072,24 @@ public sealed record SubmitInvoiceFromDocumentRequest
     /// <summary>Task 097b: the invoice a <c>Correction</c> replaces; required for <c>Correction</c>, absent (or null) otherwise.</summary>
     public Guid? InvoiceId { get; init; }
 
+    /// <summary>
+    /// Task 118b: the documents of the same communication to keep with the invoice as its Supporting Stored Files. Optional and additive:
+    /// absent or empty behaves exactly as before 118b. Repeats are ignored (<see cref="SupportingDocuments"/>); the invoice document itself
+    /// is a 400, and so is more files in total (the invoice document and these) than <see cref="SubmissionCommitGate.MaxFiles"/>. Each must be
+    /// a <c>sprk_document</c> the caller can Read and that links <see cref="CommunicationId"/>; otherwise the uniform not-found answer.
+    /// </summary>
+    public IReadOnlyList<Guid>? SupportingDocumentIds { get; init; }
+
     /// <summary>Task 097b: the invoice a valid body corrects, or null for a New submission (call after <see cref="Validate"/>).</summary>
     internal Guid? CorrectedInvoiceId => Mode == FromEmailModes.Correction ? InvoiceId : null;
+
+    /// <summary>
+    /// Task 118b: <see cref="SupportingDocumentIds"/> de-duplicated and sorted (the order the intake compares and, in 118b-2, numbers the
+    /// parts in); empty when the body names none.
+    /// </summary>
+    internal IReadOnlyList<Guid> SupportingDocuments => SupportingDocumentIds is { Count: > 0 } ids
+        ? ids.Distinct().Order().ToArray()
+        : [];
 
     /// <summary>The core record, or null when <see cref="CoreRecord"/> does not name one.</summary>
     internal InvoiceCoreRecord? ToCoreRecord() =>
@@ -1061,6 +1142,28 @@ public sealed record SubmitInvoiceFromDocumentRequest
             default:
                 errors["mode"] = ["mode must be New or Correction."];
                 break;
+        }
+
+        // Task 118b: the supporting documents' shape, with the body, so a malformed list is a 400 before any rights query or read (and so
+        // before anything is staged). Repeats are not an error; the count is of the distinct ids plus the invoice document.
+        if (SupportingDocumentIds is { Count: > 0 } supporting)
+        {
+            if (supporting.Any(id => id == Guid.Empty))
+            {
+                errors["supportingDocumentIds"] = ["supportingDocumentIds cannot contain an empty id."];
+            }
+            else if (DocumentId != Guid.Empty && supporting.Contains(DocumentId))
+            {
+                errors["supportingDocumentIds"] = ["supportingDocumentIds cannot contain the invoice document (documentId)."];
+            }
+            else if (SupportingDocuments.Count + 1 > SubmissionCommitGate.MaxFiles)
+            {
+                errors["supportingDocumentIds"] =
+                [
+                    string.Create(CultureInfo.InvariantCulture,
+                        $"An invoice holds at most {SubmissionCommitGate.MaxFiles} files: the invoice document and at most {SubmissionCommitGate.MaxFiles - 1} supporting documents."),
+                ];
+            }
         }
 
         return errors;

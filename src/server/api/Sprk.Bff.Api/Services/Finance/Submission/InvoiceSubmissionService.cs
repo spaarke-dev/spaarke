@@ -83,6 +83,13 @@ public class InvoiceSubmissionService
     internal const string EarlierAttemptBeingRemovedDetail =
         "An earlier attempt to submit this invoice failed and is still being removed. Nothing was saved; try again shortly.";
 
+    /// <summary>
+    /// Task 118b-1: the detail of the interim refusal of a new attempt that names supporting documents, until 118b-2 stages their copies.
+    /// TEMPORARY: 118b-2 removes it with the refusal (SubmitExistingDocumentAsync step 4a-supporting).
+    /// </summary>
+    internal const string SupportingNotYetCopiedDetail =
+        "Supporting documents cannot be submitted with an invoice yet. Nothing was saved; submit the invoice document without them.";
+
     internal static readonly string[] ViewColumns =
     {
         TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn, TrackingNumberAllocator.FirmColumn,
@@ -568,6 +575,17 @@ public class InvoiceSubmissionService
             resubmissionOf = target;
         }
 
+        // ── 4a-supporting. Task 118b-1: the supporting copies are staged by 118b-2, here (after every read-only refusal, before step A).
+        //        Until that is built, a NEW attempt that names supporting documents is refused, read-only, so the field is never silently
+        //        dropped (a submission created without the files the caller asked for). A retry was answered above ("same details?"). ──
+        if (request.SupportingDocumentIds.Count > 0)
+        {
+            _logger.LogInformation("Invoice submission: document {DocumentId} names {Count} supporting documents, which this build cannot copy yet; refused (503)",
+                documentId, request.SupportingDocumentIds.Count);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed,
+                SupportingNotYetCopiedDetail);
+        }
+
         // ── 4b. Step A (fix round F1-b): the route's filing of an unfiled source communication, as the caller - only now, after every
         //        read-only refusal above, so a refused submission never leaves a filing behind. Its refusal throws (the route answers). ──
         var filed = request.FileSourceBeforeWrite is { } fileSource && await fileSource(ct);
@@ -682,9 +700,26 @@ public class InvoiceSubmissionService
         InvoiceSubmissionRequest request, string number, InvoiceSubmissionView earlier, Guid documentId, Guid jobId,
         Func<CancellationToken, Task<bool>>? fileSource, CancellationToken ct)
     {
+        // Task 118b-1: the supporting set joins the "same details?" comparison (never the submission id, D-134): the earlier attempt's set
+        // is read from its part stages (ReadAttemptSupportingDocumentsAsync). A different set is "other details" (409 below); after a Failed
+        // attempt the request never reaches here (step 2 makes a new attempt).
+        IReadOnlyList<Guid> earlierSupporting;
+        try
+        {
+            earlierSupporting = await ReadAttemptSupportingDocumentsAsync(earlier.SubmissionId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: its supporting documents could not be read ({Fault}); refused (503)",
+                earlier.SubmissionId, ex.GetType().Name);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                "The earlier submission of this document could not be checked right now. Nothing was saved; try again shortly.");
+        }
+
         // Task 094: an undone submission (9.1 step 5) has its firm invoice number cleared, so for a terminal one an empty number matches.
         var ended = earlier.Status is nameof(InvoiceSubmissionStatus.Failed) or nameof(InvoiceSubmissionStatus.Rejected);
-        var same = earlier.FirmId == request.FirmId
+        var same = SameSupportingDocuments(earlierSupporting, request.SupportingDocumentIds)
+            && earlier.FirmId == request.FirmId
             && earlier.CoreRecord == request.CoreRecord
             && earlier.DocumentId == documentId
             && (string.Equals(earlier.FirmInvoiceNumber?.Trim(), number, StringComparison.OrdinalIgnoreCase)
@@ -733,6 +768,24 @@ public class InvoiceSubmissionService
     internal static bool SameCorrectionTarget(Guid? earlierResubmissionOf, Guid? requestInvoiceId) => earlierResubmissionOf is { } earlier
         ? requestInvoiceId is { } invoice && InvoiceSubmissionPersister.InvoiceIdFor(earlier) == invoice
         : requestInvoiceId is null;
+
+    /// <summary>
+    /// Task 118b-1: whether an earlier attempt's supporting documents are the request's: the same set (both de-duplicated and compared in
+    /// sorted order). Two empty sets are the same, so a request without supporting documents compares exactly as before 118b.
+    /// </summary>
+    internal static bool SameSupportingDocuments(IReadOnlyList<Guid> earlier, IReadOnlyList<Guid> requested) =>
+        earlier.Distinct().Order().SequenceEqual(requested.Distinct().Order());
+
+    /// <summary>
+    /// Task 118b: the supporting documents attempt <paramref name="submissionId"/> was created with, de-duplicated and sorted. They are read
+    /// from its part stages (<c>StoredFileIds.ForAttachment(submissionId, "document-part-{i}")</c>, the first part listing the parts), which
+    /// task 118b-2 writes; a fault throws (the caller answers 503, never "no supporting documents").
+    /// <para><b>Until 118b-2</b> nothing stages document parts, and the intake refuses a new attempt that names supporting documents (step
+    /// 4a-supporting), so every attempt has no stored parts and its set is the EMPTY set. This method answers that without a read; 118b-2
+    /// replaces the body with the stage read.</para>
+    /// </summary>
+    internal virtual Task<IReadOnlyList<Guid>> ReadAttemptSupportingDocumentsAsync(Guid submissionId, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<Guid>>([]);
 
     /// <summary>
     /// Null when the document can be submitted; otherwise the refusal. A read fault is 503 (never "not found"). A document filed under a core
