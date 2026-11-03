@@ -128,5 +128,6 @@
 - [Lavern Precedent Board (2026-05-20)](lavern-precedent-board.md) — cross-engagement memory with promotion/decay
 
 ## Meta
+- [Law-dept benchmarks + OCG provisions (2026-11-03)](law-dept-benchmarks-ocg-2026-11-03.md) — ACC 2025 medians by revenue band; RRR rates; CNA/Allianz/PSU/DE OCG text; all use 0.1-hr increments
 - [Knowledge base layout](knowledge-base-layout.md) — `knowledge/` tree convention; SOURCE/NOTES/README
 - [Cascade delete privileges/Archive (2026-10-17)](dataverse-cascade-delete-privileges-archive-2026-10-17.md) — child Delete priv checked, whole op fails (documented); Archive 'internal use only'; PUT+MergeLabels
