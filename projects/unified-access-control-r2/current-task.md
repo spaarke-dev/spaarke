@@ -12,20 +12,16 @@
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green: `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys and settings changes need the owner's go IN THIS SESSION. |
 | **Active task** | None in progress. Reviewing and gating for peers. |
-| **NEW ROLE (owner confirmed in this session, 2026-11-03)** | **uac-r2 orchestrates dev BFF deploys** after R3's final deploy and my 30-minute gate on it. Procedure: `docs/procedures/dev-bff-deploy-coordination.md`. Scripts: `scripts/Save-BffDevRollbackSnapshot.ps1` and `scripts/Test-BffDevDeployReadback.ps1`. Record: R3 `notes/contact-identity-dev-rollout-record.md` §9–16. All arrive on master with PR #2546. R3 (session `spaarke-wt-spa-external-access-platform-f2`) runs one last deploy: merged #2546 master SHA = 5796774091 plus 2 R3 fixes. Peers' OKs, then the owner's go. **Reply to R3 still to send** (accept; conditions below). |
+| **NEW ROLE (owner confirmed in this session, 2026-11-03)** | **uac-r2 orchestrates dev BFF deploys** after R3's final deploy and my 30-minute gate on it. Procedure: `docs/procedures/dev-bff-deploy-coordination.md`. Scripts: `scripts/Save-BffDevRollbackSnapshot.ps1` and `scripts/Test-BffDevDeployReadback.ps1`. Record: R3 `notes/contact-identity-dev-rollout-record.md` §9–16. All arrive on master with PR #2546. R3 (session `spaarke-wt-spa-external-access-platform-f2`) runs one last deploy: merged #2546 master SHA = 5796774091 plus 2 R3 fixes. Peers' OKs, then the owner's go. Acceptance and the conditions below were sent to R3 at ~21:35Z. |
 | **Dev state** | BFF = 5796774091 since 13:29:19Z (gate PASSED, `$TEMP/uacmerge/uacg/gate5796_30m.txt`; rollback 3740e1a105). Dev SPA = b083d62183. |
-| **Next action** | 1. Send R3 my acceptance and conditions (see below). 2. Wait for ebilling's Email-to-AP send time, then run `$TEMP/uacmerge/uacg/apsend_check.sh SINCE UNTIL BATCHID` and report to the owner. 3. Review diffs as they arrive (list below). 4. #2524 re-file link write (my code). |
+| **Next action** | 1. Wait for R3's merged #2546 SHA: diff review since 5796774091 and the checks below, then my OK. 2. Wait for ebilling's Email-to-AP send time, then run `$TEMP/uacmerge/uacg/apsend_check.sh SINCE UNTIL BATCHID` and report to the owner. 3. Review diffs as they arrive (list below). 4. #2524 re-file link write (my code). |
 
 ## Email-to-AP test (owner go, 2026-11-03)
 - AP address: `sprk_apexportemail` = **ap@finance.spaarke.com** on settings row 92acd624 (read back 20:42:32Z). Not monitored: receive-enabled accounts are mailbox-central@ and testuser1@ only. ap@ must never be receive-enabled; invoices@ is free to become intake. Memory: test-mailbox-invoices.
 - Both invoices are **Approved** by the owner's script: INV-2025-05166 (9723a5aa) and INV #2025023029 (7c200dd1).
 - The first export (20:43Z) failed with 503: the owner's account 1d02f31c is in the ROOT business unit, so the CSV Stored File's hard-deny owner was refused (`AnswerIsRootBusinessUnit`). Failed batch f6788e95 is kept, owned by the root default team, with no file (owner: leave it).
 - **Owner decision:** demo@demo.spaarke.com runs `-ExportOnly` (export only, no approvals). The owner then opens the batch as themselves, checks the AP emails grid has no New button, and clicks Email to AP. ebilling sends me the time and batch id.
-- ebilling is fixing 2 findings in scope: a 409 `ebilling.export.owner_unit_not_allowed`, and the owner pre-check before any write. **My scoped check before merge:**
-  - the same owner question and acting user;
-  - a fault is 503;
-  - nothing is written before the check;
-  - 3 tests.
+- ebilling's fix for the 2 findings (a 409 `ebilling.export.owner_unit_not_allowed`, and an owner pre-check before any write), diff 82786ce7f3..fad65a79ad, merged to work/ebilling-r1 at a6ff149cd9: **four-point check PASSED**, sent ~21:40Z. `sprk_billingexport` is not an ownership parent, so the pre-check never reads the batch that doesn't exist yet. `no_default_team` and `acting_user_unresolved` stay 503. Note: live proof for a BU1 caller comes with the first BU1 export after the deploy (record it in 153's notes). The fix reaches dev only through a master PR and a deploy that I orchestrate.
 
 ## Conditions to send R3 on the hand-over
 - R3's final deploy goes through the existing protocol, with my OK on the merged SHA. I check the diff since 5796774091 and the `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`, ebilling's 6 app-setting keys and both write switches true. Then my 30-minute gate.
@@ -34,7 +30,6 @@
 
 ## Reviews owed (waiting for diffs)
 - **ebilling:**
-  - the AP export fix (above);
   - 095a PR: my 4 conditions plus the attribute and relationship in source;
   - 095c: schema notice; the tracking-scope column is refused in ParentLineage with a typed writer only, and is never a visibility filter; I need the key columns, the backfill and the race behaviour;
   - 095d: full review. Conditions: Write on the invoice plus AppendTo on the firm; the core record derived from the invoice; Unreadable is 503; assign only, In Review only; ParentLineage names the typed writer;
