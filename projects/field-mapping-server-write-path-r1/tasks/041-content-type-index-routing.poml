@@ -4,7 +4,7 @@
     <title>FR-40: the search index follows the content type, never the user (#2502, DI-012)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up; runs before W3)</phase>
     <gate>019 complete; 039 complete; owner approval of this task (requested 2026-11-02)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api across RAG indexing, the create pipeline and Repair; tags include bff-api; removes DTO fields and deletes tests (deletion, TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>

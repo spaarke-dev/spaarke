@@ -733,3 +733,17 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
   - NOTE 1: restore the document trigger-2 Repair test as owner-only. Done in round 3.
   - NOTE 2: the removed `ResolveAsync` Verify in Issue1510 is correct, so no action.
 - **UAC-r2 on task 020 F-1.** No objection to refusing a caller-supplied `sprk_issecure` on a Matter create in the service with `sdap.access.secure_flag_transition_only`, exactly as for Project, with explicit false and null treated as the Project rule treats them. UAC-r2 sees the diff before merge.
+
+## 2026-11-03 — Task 020 secure-flag refusal: UAC-r2 verdict; 005 applied on dev
+
+- **UAC-r2 on 020 F-1/F-2** (3c4941bec5..2b6920e009): "OK WITH NOTES, merge when CI is green."
+  - F-1: a Matter create that names `sprk_issecure` is refused in the service (plan code, text and 403; true, false and null; every principal).
+  - F-2 is a real fix: `MappedItem.Columns` keeps null keys.
+  - Running the helper before `PlanCreateAsync` changes no answer and adds no existence signal.
+  - Note 1 (cosmetic): align the access-record refusal text with the plan's "…so the {noun} was not created". This goes into the 020 review fix round.
+  - Note 2: UAC-r2 will make `SecureRootFilingGate.CheckAsync` and `PlanCreateAsync` read named columns, nulls included, as its own follow-up. Those update writers feed `WritesOf(item)` (`DataverseUpdateRecordHandler:299`, `ProjectMatterFiling:256`). Nothing more is needed in 020.
+- **005 `-Apply` on dev**, with the owner's OK given in this session:
+  - 40 Copy rules, all created by the owner, the newest 2026-10-22;
+  - 36 migrated (20 empty, 16 One-time), 0 failed, VERIFY PASS;
+  - a second pass found 0 to migrate.
+  - Detail is in task-005-notes.

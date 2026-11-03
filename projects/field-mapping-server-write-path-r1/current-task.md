@@ -8,24 +8,48 @@
 
 | Field | Value |
 |---|---|
-| **Active** | **Task 041 (FR-40, #2502), step 2–5 with the Opus implementer `fm-041` on branch `task/fm-041`** (cut from c0b543aedc). Rigor FULL, opus/high, prescriptive. Session 5c is the only field-mapping session; pid 53128 (pre-crash, no window) is still alive, and the owner can say "kill it".
-- Step 0 done: master merged into the work branch (9935ef2dcf); no open PR touches 041's files.
-- Step 1 done: the read-only dev count is in `notes/task-041-notes.md` (c0b543aedc). No BU names a non-files index, so there is no escalation. 77 old document stamps (knowledge-index-v2 ×76, file-index ×1) are left alone.
-- AC9 rulings to fm-041: (1) ChatCreate + SearchIndexDefaultTests: only the applied-value, Warning→Information and BU-bind fragments change; (2) RelocatedFileIndexingTests Issue1510: only the `ResolveAsync` Verify line is deleted; (3) §14.4 row 10 (moving the constants) is skipped because AC9 pins SearchIndexDropGuardTests. All three are listed in the notes as "AC9 exceptions" / "Prescribed steps not done" for UAC-r2.
-- **041 state:** rounds 1 and 2 are merged and pushed (f6124e8fab, then fde1b0aa5b with the decisions entry). Verified: sln 0/0, ArchTests 1911/1911, affected suites green. The Opus review plus the scoped Sonnet re-check have no F-class finding open. UAC-r2's verdict is **PASS WITH NOTES** (decisions.md 2026-11-03). fm-041 is on round 3 (UAC-r2 NOTE 1: restore the document trigger-2 Repair test as owner-only). Next: merge round 3, verify, then **open the PR from the work branch** (it holds 041 only). Cite ADR-008 path A; release notes (index-file ignores `searchIndexName`; old chunks are left; drop log at Information until 035); Placement Justification; 041's publish delta −6 KB. After merge, close #2206, #2413, #2502 and DI-012; mark TASK-INDEX ✅ and the POML completed.
-- **020 state:** `task/fm-020` e4ef0e5ad6 is pushed and NOT merged into the work branch. A clean merge was made and then backed out so the 041 PR stays 041-only; the local ref `hold/fm-020-merge` points at it. Redo the merge after the 041 PR is open. All ACs pass per fm-020. Filed DI-015 #2540 (ribbon-only tables). **F-1, to fix in 020's scope after 041 merges:** a Matter create through the route can write `sprk_issecure` (and maybe the access-inheritance column). The refusal at `SecureRootInheritance.PlanCreateAsync:1083` only covers Inherits tables. Live, only field security stops it. Plan: merge 020 after 041, resume fm-020 to refuse it the way Project does (in the service, ADR-008 path A), and check whether chat or Office Matter creates share the gap. Ping UAC-r2 before merge (refusal-code change). Then one Opus review, then the live check on dev (needs an R3 BFF deploy). Open for 022: the secure-toggle branching (see the task-020 notes).
-- **019 ✅ (2026-11-03):** the negative check passed as the test user. Check C passed: the owner supplied the name and parent; event `6d1563bb` stays. The chat tool row was re-seeded. **042a ✅** (#2521). |
-| **Next Action** | 1. When fm-041 reports: merge `task/fm-041` into the work branch `--no-ff`, verify the build and filtered tests, and run ONE adversarial-reviewer pass (opus). Fix every F-class finding.
-2. Send the diff to UAC-r2 for its scoped check (AC17: only routing removed, no trim moved). Record its verdict line.
-3. Open the PR (cite ADR-008 path A; release note: index-file ignores `searchIndexName`). After merge: close #2206, #2413, #2502 and DI-012 (AC15). TASK-INDEX ✅.
-4. Then 042b (sequential: both edit `RecordCreationService*.cs`; UAC-r2 does a full review). 020 depends only on 019 and may start beside 041.
-5. Then W3: 021–029 (wait on 041), plus 030–034. Task 043 (#2524, N:N link) goes through the scope path.
-6. Fix the stale wording in POMLs 020–034 and 052, and the 028 test path, as each task starts. |
+| **Active** | **Task 020: PR #2551 open with auto-merge** (the work branch carries 020 merged and level with master; verified 6625/0/7, ArchTests 1911, jest 107/107). **Task 042b: Opus implementer `fm-042b` on `task/fm-042b`**, from cfebe65f9b, stops after POML step 5. The main session then runs two adversarial passes and the UAC-r2 full pass. Session 5c is the only field-mapping session (the pre-crash pid 53128 was stopped 2026-11-03).
+- **020 so far:**
+  - the route creates sprk_matter and sprk_project;
+  - the optional mapping source is passed as query params;
+  - only matter and project infer a source;
+  - a secure-parent project is created into isolation;
+  - F-1: a Matter naming `sprk_issecure` is refused;
+  - F-2: a JSON-null `sprk_issecure` / `sprk_accessinheritance` is refused on project and WA, through one service helper.
+
+  Per fm-020 (not checked by me): 6618 passed / 0 failed / 7 skipped, ArchTests 1911/1911, publish +591 B, no CVE.
+- **Reviews done:**
+  - Opus adversarial review: 0 blocking, 11 K-class findings.
+  - UAC-r2: "OK WITH NOTES, merge when CI green" (decisions.md 2026-11-03).
+- **Round 3 (sent to fm-020):**
+  - #1: Matter route refusal tests;
+  - #5: an HTTP-binding test;
+  - #6: comments in EntityCreationService.ts;
+  - #7: lazy CallerRecordAccessProbe;
+  - #8: normalise JsonBody keys in the helper;
+  - UAC-r2 note 1: refusal text;
+  - notes corrections #4, #10, #9, #11.
+
+  Items #2 and #3 are written into POML 021/022 notes (uncommitted, see below).
+- **041 ✅** PR #2541 merged 249809ce0b (2026-11-03T19:50Z). It is not on the dev BFF yet; that needs an R3 deploy.
+- **005 `-Apply` done on dev 2026-11-03** (36 migrated, VERIFY PASS, idempotent).
+- **019 ✅, 042a ✅.** |
+| **Next Action** | 1. When fm-020 reports round 3:
+   - read the fix diff, or run a scoped Sonnet re-check if it is large;
+   - merge `origin/task/fm-020` into the work branch `--no-ff` (the work branch is level with master after #2541);
+   - verify with `scripts/verify-suites.sh`, plus jest for the adapter;
+   - push, then open the PR. Cite ADR-008 path A. Placement Justification: extends an existing route. Include the §11 answer for `mappingSource`. Release note: the route creates matter and project; a caller-named `sprk_issecure` on a matter create is now refused 403 `sdap.access.secure_flag_transition_only`. Then enable auto-merge. If Classify Tier 1 times out (#2350), rerun the failed jobs.
+2. After the merge:
+   - TASK-INDEX 020 ✅, POML completed, run the drift check;
+   - the live check on dev: a Matter/Project create via the route (needs an R3 deploy with the owner's go).
+3. Next tasks: 042b (sequential; full UAC-r2 review). Then W3 021 onward. Item #2 must be fixed in 021 before cutover.
+4. Fix the stale wording in POMLs 020–034 as each task starts. |
 | **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
-| **Waiting on** | - fm-041 (implementer).
-- Owner: the Family 1.0.56 look, 005 `-Apply`, the 076 narrower-user pass, and "kill it" for pid 53128.
+| **Waiting on** | - fm-020 (round 3).
+- Owner: the Family 1.0.56 look (the four #2513 items on dev) and the 076 narrower-user pass. **Done 2026-11-03:** 005 `-Apply` on dev (36 migrated, VERIFY PASS, idempotent); pid 53128 (the pre-crash session) stopped on the owner's "kill it".
+- 041 live proof: dev BFF d763dc120e (carries #2541) is live since 2026-11-03T22:26:31Z. The post-deploy check passed on what existed (0 5xx; no index or child-records traffic; no rows since the deploy). The startup logger exception is pre-existing (#2549, DI-016). After the next real upload or create on dev, re-run the read-only checks (document `sprk_searchindexname` = spaarke-files-index; no `sprk_ai_search_index` on new rows). Send the results to **uac-r2** (it now runs dev deploys), and copy R3 (`spa-external-access-platform-f2`) only for its rollout record §17.
 - Rows to delete later: see `notes/task-019-notes.md` (the check-C event is the owner's and stays).
 - #2518 (ontology writer identity not provisioned): ontology's to own. |
 | **Owner to do** | 076 live check (owner + narrower user). Leftover locked worktrees agent-aec6d06ca99a5a9f6 (075) and agent-a7ed21b81867c4e2e (039, merged; locked by its agent process): end of project, via Remove-WorktreeSafe after unlock. |
