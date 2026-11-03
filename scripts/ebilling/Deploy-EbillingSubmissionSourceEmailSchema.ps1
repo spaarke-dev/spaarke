@@ -36,8 +36,12 @@
     script is NOT run by the task that adds it; the owner's OK is needed to run it on dev. -WhatIf is read-only and may be run against dev
     at any time. Rows written before the column existed carry no link until Backfill-EbillingSubmissionSourceEmail.ps1 is run.
 
-    PRIVILEGES. The BFF writes the reference as its app identity (the sysadmin entity service), so no role change is needed. The column is not
-    field-secured (IsSecured 0): nobody reads it but the BFF.
+    PRIVILEGES. The BFF writes and reads the reference as its app identity (IGenericEntityService), so no role change is needed. The column is
+    FIELD-SECURED, BFF only (095a review F2, uac-r2 binding: IsSecured 1 in the solution source, "Spaarke BFF-Managed Field Writers" read /
+    create / update, no reader profile). This script only CREATES the column (unsecured) and REPORTS whether it is secured (step 3, read only,
+    never a write, never a failure): securing it, the profile permission and their verification are scripts/ebilling/Set-EbillingSourceEmailFieldSecurity.ps1
+    (-WhatIf, then a run, then -Verify), because they need the reused writer profile, the BFF application ids and their own preconditions. Run it
+    straight after this one on a new environment.
 
 .PARAMETER EnvironmentUrl
     Dataverse environment URL. Defaults to $env:DATAVERSE_URL, else the dev environment.
@@ -177,6 +181,17 @@ try {
             throw [EscalationException]::new("relationship $($rels[0].SchemaName) reads back with a different cascade configuration: $($diff -join '; '). Not changed by this script.")
         }
         Write-Host ("  verified {0}: delete {1}; archive {2}; assign, share, unshare, reparent, merge, rollup view {3}" -f $rels[0].SchemaName, $rels[0].CascadeConfiguration.Delete, $rels[0].CascadeConfiguration.Archive, $rels[0].CascadeConfiguration.Assign) -ForegroundColor Green
+    }
+
+    # Read only: this script never secures the column (Set-EbillingSourceEmailFieldSecurity.ps1 does, with its profile grants); it says where the column stands.
+    Write-Host "3. Field security (read only report)" -ForegroundColor Cyan
+    $secured = Get-Attr $Table $Column 'LogicalName,IsSecured'
+    if ($DryRun -and ($script:Created.Count -gt 0)) {
+        Write-Host "  WhatIf: the column does not exist yet; after the create run Set-EbillingSourceEmailFieldSecurity.ps1 to secure it (BFF writer profile only)" -ForegroundColor Cyan
+    } elseif ($secured -and $secured.IsSecured) {
+        Write-Host "  ok       $Table.$Column is field-secured (check the profile permission with Set-EbillingSourceEmailFieldSecurity.ps1 -Verify)" -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING  $Table.$Column is NOT field-secured: any user with Write on a submission could point it at another .eml. Run scripts/ebilling/Set-EbillingSourceEmailFieldSecurity.ps1 (-WhatIf first, then -Verify)." -ForegroundColor Yellow
     }
 
     Write-Host "Publish" -ForegroundColor Cyan
