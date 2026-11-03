@@ -561,6 +561,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     if (!onSubmit) return;
     // This attempt is the newer answer: stop following the earlier one (no second poller, no second announcement).
     previousAbortRef.current?.abort();
+    // Cleared now (not on the next read) so the earlier attempt never shows between Done and the re-read.
+    setPrevious({ status: 'none' });
     lastAttemptRef.current = { input, actionId };
     const controller = new AbortController();
     abortRef.current = controller;

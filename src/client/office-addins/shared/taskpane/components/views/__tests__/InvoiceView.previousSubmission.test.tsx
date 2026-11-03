@@ -335,13 +335,28 @@ describe('InvoiceView — the earlier submission and a new one from this view', 
         message: 'Could not read it.',
         trackingNumber: 'INV-1.2',
       }));
-      const load = jest.fn(async () => ({ ...ACCEPTED, status: 'Failed' as const, trackingNumber: 'INV-1.1' }));
+      const load = jest.fn(
+        async (): Promise<InvoicePreviousSubmission | null> => ({
+          ...ACCEPTED,
+          status: 'Failed',
+          trackingNumber: 'INV-1.1',
+        })
+      );
       renderView(formProps({ onSubmit, loadPreviousSubmission: load }));
       await banner();
       await fillAndSubmit();
       expect(await screen.findByText('The invoice could not be processed')).toBeInTheDocument();
-      load.mockResolvedValueOnce({ ...ACCEPTED, status: 'Failed', trackingNumber: 'INV-1.2' });
+      let reread: (s: InvoicePreviousSubmission) => void = () => undefined;
+      load.mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            reread = resolve;
+          })
+      );
       await userEvent.click(screen.getByRole('button', { name: 'Done' }));
+      // Between Done and the re-read, the attempt before (INV-1.1) is never shown.
+      expect(screen.queryByTestId('invoice-previous-submission')).not.toBeInTheDocument();
+      reread({ ...ACCEPTED, status: 'Failed', trackingNumber: 'INV-1.2' });
       await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
       expect(await banner()).toHaveTextContent('INV-1.2');
     },
@@ -357,13 +372,23 @@ describe('InvoiceView — the earlier submission and a new one from this view', 
         return new Promise<InvoicePreviousSubmission | null>(() => undefined);
       });
       const load = jest.fn(async () => ({ ...ACCEPTED, status: 'Processing' as const }));
-      const onSubmit = jest.fn(async () => ({ kind: 'refused' as const, message: 'Not allowed.' }));
+      let refuse: (o: { kind: 'refused'; message: string }) => void = () => undefined;
+      const onSubmit = jest.fn(
+        () =>
+          new Promise<{ kind: 'refused'; message: string }>(resolve => {
+            refuse = resolve;
+          })
+      );
       renderView(formProps({ onSubmit, loadPreviousSubmission: load, followPreviousSubmission: follow }));
       await banner();
       expect(signals[0]?.aborted).toBe(false);
       await fillAndSubmit();
-      expect(await screen.findByText('Not allowed.')).toBeInTheDocument();
+      // While the new submission is still running (before any result can re-read the banner).
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
       expect(signals[0]?.aborted).toBe(true);
+      expect(load).toHaveBeenCalledTimes(1);
+      refuse({ kind: 'refused', message: 'Not allowed.' });
+      expect(await screen.findByText('Not allowed.')).toBeInTheDocument();
       await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
       expect(await banner()).toBeInTheDocument();
     },
