@@ -1,6 +1,58 @@
 # 086: invoice Stored Files join the secure family (leaf child of sprk_invoice)
 
+> **Ported 2026-11-03** onto `work/ebilling-r1` 27e9cdc90d as branch `task/ebill-086-rebased` (089a and uac-r2 194b had landed). Read "Port onto work/ebilling-r1" below first: it supersedes deviation 1, the owner-pin and Unsecure expectations, and the live-step status in the sections after it, which record the original branch as built.
+
 Branch `task/ebill-086-storedfile-secure-child`. Base: `origin/task/ebill-089-assignments` 8f4920ce0c, merged with `origin/work/ebilling-r1` (master uac-194) in its own commit 22b803e1a5. Rigor FULL, opus @ high. The code and tests are done. The live steps are listed below and have **not been run**: the main session runs them (owner EB-D-158). The role row's evidence is `PENDING-LIVE-PROBE`. The only live calls from this task were metadata and count reads.
+
+## Port onto work/ebilling-r1 (2026-11-03)
+
+Only 086's own commits were brought, by `git cherry-pick -x`: `6703ca3f3f` (feature), `e88825a528` (probe evidence), `6482277b9b` (these notes). The earlier 089 attempt (`b9a80f9bd2`, `9082a05a04`, `8f4920ce0c`) and the merge `22b803e1a5` were not.
+
+**Conflicts and how each was resolved** (089a's content kept; only what 086 needs for `sprk_storedfile` added):
+
+| File | Resolution |
+|---|---|
+| `RecordOwnershipResolver.cs` | 089a's `CitationLookups` kept unchanged. 086's two citations `(sprk_storedfile, sprk_sourcedocument)` and `(sprk_storedfile, sprk_sourcecommunication)` **dropped** (see below). The file carries no 086 change. |
+| `RecordOwnerAssignmentCensusTests.cs` | 089a's Routed entries and PersonBearingWriters kept; the old 089 `ProcedureAssignmentService` entries not brought. Added: `ChildTables` `sprk_storedfile`; Routed `StoredFileService.cs / sprk_storedfile / 1` (text updated to `ForRow` / `StoredFileOwnerContext`); PersonBearingWriters `StageCreateFlipAsync` and `BuildRow`; the scanner's qualified-const fix and its control (deviation 2, unchanged). |
+| `SecureChildLineageTests.cs` | The old 089 test not brought (089a has its own). 086's test now pins the invoice as the row's primary and the sources as non-citations. |
+| Auto-merged | `config/secure-record-owner-role.json` (row after 089a's `sprk_ruleset`, 40 tables), `SecureChildLineage.cs` (comment updated for 194b), `RecordCreatorPerson.cs`, `StoredFileService.cs`, the creator-person script and Pester pin, `CreatorPersonColumnSecuredGuardTests`, `ProcedureRolePrivilegeGuardTests`. |
+| `SecureBuRoleDepthAssertion.cs`, `BillingLookupsConferNoAccessTests.cs` | 086's own commits do not touch them (only the old 089 attempt did); 089a's content stands. The NFR-05 depth list already holds `prvReadsprk_StoredFile`; not duplicated. `GuardedPrivileges` unchanged. |
+
+**Deviation 1 is withdrawn.** uac-r2 194b (R4b-2, owner round 131, "the 086 ruling") now asks a Stored File's owner by the row's own question on the service create (`StoredFileService.OwnerQuestionOf`, `ForRow` over the parent and the source lookups) and in the reconciler (`OrderedParentsOf`), so those two agree, which was the premise of the fix. The Submit Invoice persister asks over the core record only (`InvoiceSubmissionPersister.StoredFileOwnerContext`); see K-P1. And uac-r2 re-check K deliberately keeps the source document as a filing parent of the row's question (`StoredFileServiceOwnershipTests.NoCoreParent_WithASourceDocument_TheDocumentIsThePrimary`: under a parent that files nothing, the source document leads, and a Secure source gives the Secure team). With 086's citations, those four cases fail. For an invoice file the invoice is still the primary (lineage order), so a source in another business unit never decides its team; a Secure source makes it Secure-owned (fail closed).
+
+**HEAD semantics the ported tests now follow** (behaviour from 194b and 094, not changed here):
+- An ordinary invoice's Stored File is owned by the **restricted-content owner team** (hard-deny table), not the invoice's business-unit team. An Unsecure moves an isolated invoice file to that team.
+- The service path refuses an invoice PDF (task 094's writer guard), so the owner pin uses a supporting file there; the persister case uses `InvoiceSubmissionPersister.StoredFileOwnerContext(core)`.
+
+**Other guards that needed an entry after the port:**
+- `RecordFamilyEdgesGuardTests.KnownDisagreements` (task 070, landed since): `sprk_storedfile.sprk_invoice -> sprk_invoice` baselined as ownership lineage only, as 089a did for its tables. **Whether a Stored File joins the displayed family is UAC-r2's call.**
+- 089a's depth tests assumed the Stored File was not codified yet. Updated: the theory's Stored File case is now clause 5's finding (`SecureOwnerRoleLacksCodifiedPrivilege`); the un-codified branch has its own test over a three-root set (`Build_WhenAnUncodifiedDepthListPrivilegeIsNotInTheEnvironment_ReportsItOnce`); the census-job F3 test reaches `RestrictedContentPrivilegeNotResolved` through a second owner role (clause 5 cannot grade, 089a K6). Seeded: with `or RestrictedContentPrivilegeNotResolved` dropped from the job, the F3 test fails.
+
+- `InvoiceSubmissionPersisterTests` (outside the task's test filter; found by the adversarial pass): with `sprk_storedfile` a lineage child, `SubmissionCommitGate.FileRootsAsync` walks the copy's roots up from its file rows (the branch 094 wrote for 086). The harness mirrored only the invoice into its isolation world, so the gate found no rows and undid every source submission: 17 "094" tests failed, and `Gate_ReRunCannotBeMade_IsUndone` and `Gate_SourceRootsNotCoveredByTheCopy_IsUndone` passed for that reason rather than their own. The harness now files each created Stored File under its invoice; 196/196, and the happy-path tests that share those controls' set-up pass, so each control fails for its own cause. No production change.
+
+**Seeding proof re-run** (stored-file lineage guard): with the `sprk_storedfile` lineage entry removed, both reconciler must-fire tests, the lineage test and `TheLineageMapCoversExactlyTheCodifiedChildTables` fail; restored.
+
+**Live, read only (2026-11-03, spaarkedev1):**
+- `Set-SecureRecordOwnerRolePrivileges.ps1 -WhatIf`: config 40 tables, present 40 of 40, "Outside the file (4)": `prvCreateSharePointData`, `prvReadSharePointData`, `prvReadSharePointDocument`, `prvWriteSharePointData` (Global). `prvReadsprk_StoredFile` is no longer listed. "Nothing to add." Exit 0.
+- `Set-SecureRecordOwnerRolePrivileges.ps1 -Verify`: "VERIFY PASS: the role holds Read at Basic on all 40 tables." Exit 0.
+- `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`: `sprk_storedfile.sprk_createdbyperson` exists, is field-secured, both BFF profiles granted, in SpaarkeMaster; "VERIFY PASS", exit 0. INFO: 1 app-created Stored File row with no person recorded (dev held 0 rows on 2026-10-27).
+- So the role `-Apply` and the creator-person `-Apply` were run on dev after the 2026-10-27 probe; who ran them and when is not recorded in this branch.
+
+**Still pending (live or review; none run by the port):**
+1. The pre-deploy count of Stored Files on invoices of Secure records (step 6 below; dev now holds 1 Stored File row, so the count is no longer trivially 0).
+2. The owner's OK with dates, and the `-Apply` outputs, for the role and creator-person runs (criterion 6).
+3. The live NFR-05 census once a BFF carrying 089a/086 is on dev.
+4. The second adversarial pass and the uac-r2 review of `SecureChildLineage.cs`, `RecordCreatorPerson.cs`, the role JSON, the creator-person script and pin, the census, `RecordFamilyEdgesGuardTests` and the 089a depth tests.
+
+`Ebilling:StoredFileReconcileEnabled` stays `false` (HARD RULE); not touched.
+
+**Port review (one adversarial pass, opus, 2026-11-03).** F-class: the persister harness (fixed above); the notes' missing live records (criterion 6, still pending: items 1-2 above). Known limits:
+- **K-P1 (K1, dormant until uac-r2 191).** The persister owns an invoice file by the core record only; the service create and the reconciler also read the source document and communication as secure-if-any parents; every walk (descendant load, share sync, recent-changes pass, commit gate) follows `sprk_invoice` only. So a copy whose source is later filed under a Secure matter S stays Secure-owned after its own matter's Unsecure, S's walks never reach it, and S's Make Secure never pulls in a restricted-content copy. Nothing is exposed: no role grants a Stored File privilege, and the BFF serves a file only on the caller's Read of its invoice and its source. For uac-r2 to rule on with 191.
+- **K-P2 (K2, fails closed).** The commit gate's walk now passes through the invoice; a Secure core whose invoice is still ordinary-owned (Make Secure racing the gate) gives the copy no roots, so the commit is undone `source_check_failed`. No test pins this race.
+- **K-P3 (K3).** `ProcedureRolePrivilegeGuardTests` scans source role XML only; a platform role holding Stored File privileges (Support User, System Customizer, Service Reader/Writer/Deleter on dev) assigned to a flagged-external user is caught only by the live NFR-05 census.
+- **K-P4 (K4).** `StoredFileOwnerPinTests` is a pin, not a proof: the owner already comes from 194b's row question and `BuildRow`'s explicit stamp hides the `StampedChildTables` entry, so no case fails without 086's own edits. The persister-path proof is the repaired `InvoiceSubmissionPersisterTests`.
+- The original K1 (share mirror puts Delete on Secure-owned Stored Files under Full Access) stands.
+- Noticed, not changed: `SubmissionCommitGate.FileRootsAsync`'s pre-086 branch (`SecureChildLineage.IsChild(sprk_storedfile)` false) is now dead, and its comments (`SubmissionCommitGate.cs` remarks and `FileRootsAsync` summary) still describe both states.
 
 ## What was built
 
