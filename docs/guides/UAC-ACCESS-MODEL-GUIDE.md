@@ -213,7 +213,7 @@ A set built over a failed read is never cached.
 | **Manage Access → "Add person"** (the Access Grant modal) | One entry over contacts and users; the server decides what is written. An internal user, picked directly (`/share-user`) or through the contact that represents them (`/grant`), gets a Dataverse share at the level's share mask (§4), with **no end date**, plus a **paired grant** at the same level on the one contact that represents them, so the record also shows in their workforce app (dated: the Expiration sent, else today + 90). An external contact (`/grant`) gets a grant row, and `/grant` invites an unbound contact that has an email (the invite never undoes the grant). On a **Restricted** record the lookup offers users only, and none flagged external. | Internal users and partners |
 | **Manage Access → organization** | An organization-wide grant row (no contact). | Every current member of an organization |
 | **Contact Grants** (in the SPA) | A grant row issued by a contact to a colleague in their own organization (§4). A contact cannot grant themselves (409 `self_grant`). | Partners granting colleagues |
-| **Assigned-To rule** (automatic) | For each person or organization named in an "Assigned …" column: a Collaborate grant row, or a Collaborate share if the contact is linked to an eligible systemuser. Runs after BFF saves, from the form's post-save step (Update Access), and every 5 minutes. Never lowers existing access; if staff remove it, it is not re-added. Policy applies: on a **Secure** record grants and shares are only *suggested* for staff to confirm (an existing automatic grant is kept); on **Restricted** no contact or organization grant is written (a linked internal user's share still is, unless they are flagged external); on **Limited** no organization grant. When an assignment is changed or cleared, the previous person's unmodified automatic access is removed (always on save; by the 5-minute job only when its revoke switch is on). | Assignees |
+| **Assigned-To rule** (automatic) | For each person or organization named in an "Assigned …" column: a Collaborate grant row, or a Collaborate share if the contact is linked to an eligible systemuser. Runs after BFF saves, from the form's post-save step (Update Access), and every 5 minutes. Never lowers existing access. If staff remove it in Manage Access, it stays removed while the assignment stands, until someone adds it again in Manage Access or the Assigned To is cleared (or changed) and set again, which writes it afresh (see "Access given twice, and removing it" below). Policy applies: on a **Secure** record grants and shares are only *suggested* for staff to confirm (an existing automatic grant is kept); on **Restricted** no contact or organization grant is written (a linked internal user's share still is, unless they are flagged external); on **Limited** no organization grant. When an assignment is changed or cleared, the previous person's unmodified automatic access is removed (always on save; by the 5-minute job only when its revoke switch is on). | Assignees |
 | **Close project** (`/close-project`, projects only) | Deactivates every contact and organization grant on the project and removes those people's container permissions on a Secure project's own container. Matters and work assignments have no close yet (#2337): end their access by revoking each grant. | Ending a project |
 | **Contact form: Standing Grant** | `sprk_standinggrant` + baseline level on the contact. | Contact-only workforce users |
 | **Owner / business unit** (platform Assign) | `ownerid`. | MDA users (and the licensed SPA membership walk) |
@@ -240,7 +240,7 @@ in `sprk_pairedsystemuser`. The contact gets **no invite and no notification**.
 |---|---|---|
 | What honours it | The model-driven app (and the SPA only if the impersonated read is on) | The workforce SPA and Teams, through the colleague's linked contact |
 | Level | The level picked, as the share mask (§4) | The same level |
-| End date | None. An Expiration sent with it is not applied to the share (`expiryNotApplied`) | The Expiration sent, else today + 90. A live re-add keeps its date; a lapsed one is restored with today's |
+| End date | None. An Expiration sent with it is not applied to the share (`expiryNotApplied`) | The Expiration sent, else today + 90. The modal sends the record's Expiration on every add, a user picked directly (`/share-user` `expiryDate`) included; a past date is refused 400 `sdap.access.grant.expiry_in_past`. A live re-add keeps its date; a lapsed one is restored with today's |
 | Secure record | Written | Written, as on a Standard record |
 | Restricted record | Written | **Not written** (Restricted allows no contact grant) |
 
@@ -262,10 +262,29 @@ The modal never shows the codes. If the No Access flags cannot be read, the shar
 written.
 
 **Current Access** lists the share and its paired grant together: the grant row sits under its share, and the share row
-notes "(workforce app access until {date})". The share row has one Revoke, which removes both. A grant counts as paired
+notes what that grant gives now: "(workforce app access until {date})", "(workforce app access expired {date})", "(no
+workforce app access: blocked by the No Access list)", "(no workforce app access while this record is Restricted)", or
+"(workforce app access has no date yet, so it gives no access)". The share row has one Revoke, which removes both. A grant counts as paired
 only while its share is listed. A grant whose share is not listed (removed, for example) is its own row, "Workforce app
 access for {name} · granted {date}"; its Revoke asks "Remove {name}'s workforce app access? The record will no longer
 show in their workforce app." and says "Removed {name}'s workforce app access." No share is mentioned.
+
+**Access given twice, and removing it (owner ruling 2026-10-28).** One person can get the same share from the
+Assigned-To rule and from Manage Access "Add person", in either order; the ledger then records it as one access (the rule
+finds the share already there, `CoveredByExisting`, or Add person adopts the rule's share, `Adopted`). Two rules govern
+removal:
+
+- **Removing it in Manage Access removes all of it.** Revoke on the share ends the share and its paired grant, and the
+  Assigned-To ledger records the removal (`Declined`), so the rule does not write it again.
+- **A Manage Access revoke of Assigned-To access holds** until someone adds the person again in Manage Access, or the
+  Assigned To is cleared (or set to someone else) and then set to them again. Clearing or changing the field ends the
+  `Declined` record (`Revoked`), and setting it again is a new assignment that writes the share and its paired grant
+  afresh. The clear and the re-set must be separate saves: in one save the field never changes. A re-assignment that
+  comes before the rule has finished ending an earlier paired grant (`share-ended-paired-grant-pending`) is also a new
+  assignment, never read as a removal.
+
+As built, clearing the Assigned To of a person who was also added in Manage Access keeps the Manage Access share and its paired
+grant (`KeptAdopted`, or nothing of the rule's to remove after `CoveredByExisting`).
 
 **What each removal ends.** The share is always removed first, then its paired grant. The grant is found by
 `sprk_pairedsystemuser` on that record; a grant the operator gave the contact on purpose, or one paired with someone
@@ -273,7 +292,7 @@ else, is never ended.
 
 | Removal | Ends the paired grant? |
 |---|---|
-| Current Access Revoke on the share (`/unshare-user`) | **Yes**, once the share is confirmed gone. This includes a user who held no share, so a repeat finishes an earlier half-done revoke. The answer carries `pairedGrantEnded` |
+| Current Access Revoke on the share (`/unshare-user`) | **Yes**, once the share is confirmed gone. This includes a user who held no share, so a repeat finishes an earlier half-done revoke. The answer carries `pairedGrant` (below) |
 | No Access enforcement (a person walled off a Secure record) | **Yes**, for each covered user whose share is gone |
 | Restricted enforcement (a user flagged external) | **Yes**, for each user whose share it removed |
 | Secure-root inheritance (a parent's share withdrawn from a filed record) | **Yes**, when the inherited share is removed outright; not on the Remove Secure cascade |
@@ -282,14 +301,28 @@ else, is never ended.
 | Current Access Revoke on the paired grant alone (`/revoke`), project closure, person removal | Ends the grant only. **The share stays**, and the modal says so |
 | A share removed outside Spaarke (the platform Share dialog, an import) | Not at once: the daily clean-up below |
 
-**When the grant cannot be ended.** Sometimes the share is removed but the paired grant cannot be ended: the pairing
-could not be read, a row was not deactivated, or the file-container clean-up failed. Then the share stays removed,
-`pairedGrantEnded` is `false`, the failure is logged at Error with ids only, and the modal promises no timing. It says
-"Removed {name}'s share. Their workforce app access could not be removed just now; it is still listed under Current
-Access, where you can revoke it." When related records are still pending, the server's sentence comes first, then "Their
-workforce app access could not be removed just now; you can revoke it under Current Access." The modal reloads Current
-Access, and the grant stays listed as its own row with Revoke after its share is gone (worded without a share, above). A system path reports itself not
-complete. The daily clean-up is rule **R5** of the
+**When the grant cannot be ended.** Once the share is confirmed gone, `/unshare-user` answers `pairedGrant` (on the 200,
+and on the related-records-pending 500): `ended`, `none` (nothing was paired), `endFailed` (a row was not deactivated),
+`unconfirmed` (the pairing could not be read) or `fileAccessUnconfirmed` (the rows were ended, but removing the
+file-container access could not be confirmed). `pairedGrantEnded` is kept for older clients: `true` for `ended`, `false`
+for the three failures, absent for `none`. On a failure the share stays removed and the failure is logged at Error with
+ids only. The modal reads `pairedGrant` first and never calls the workforce app access removed unless it is `ended`. It
+says "Removed {name}'s share." and then:
+
+| `pairedGrant` | The modal adds |
+|---|---|
+| `ended` | "… and their workforce app access." (one sentence) |
+| `none` | nothing |
+| `endFailed` | "Their workforce app access could not be removed, so it may still be active; it is still listed under Current Access. Try again." |
+| `unconfirmed` | "Whether they also had workforce app access could not be checked, so it may still be active. Try again." |
+| `fileAccessUnconfirmed` | "Their workforce app access was ended, but removing its file access could not be confirmed, so they may still be able to open this record's files from their workforce app. Try again." |
+| none, with `pairedGrantEnded: false` (an older server) | "Their workforce app access could not be confirmed removed, so it may still be active. Try again." |
+
+Each failure offers **Try again**, which repeats `/unshare-user` for the same person (the server's way to retry the end;
+the share is already gone, so only the pairing is retried) and reports that answer. When related records are still
+pending, the server's sentence comes first, then the same sentence and Try again. No sentence promises a timing. The
+modal reloads Current Access, and the grant stays listed as its own row with Revoke after its share is gone (worded
+without a share, above). A system path reports itself not complete. The daily clean-up is rule **R5** of the
 external-access reconciliation job (05:00 UTC). It ends every active paired grant whose user no longer holds a direct
 share on the record, and keeps the pairing on the row; a share it cannot read leaves the row for the next run. R5 writes
 only when `ExternalAccess:Reconciliation:WritesEnabled` is `true`. In report-only mode (the default) it lists the grant
@@ -404,7 +437,8 @@ platform Share button. Dataverse still caps what a share can do by the person's 
   A request above the ceiling is **narrowed** (the response says `narrowed`), not refused. A share is also capped at the
   caller's own rights.
 - **Never lower by accident.** If a request was narrowed and the person already holds more, the write is refused (409
-  `would_lower_existing`). An explicit downgrade is allowed.
+  `would_lower_existing`). Only access still in effect counts: a lapsed grant is not "more". An explicit downgrade is
+  allowed.
 - **Expiry.** Default today + 90 days (Date Only, UTC). The Manage Access **Expiration** command sets one date on every
   active external grant of the record at once. Re-adding over a lapsed grant restores it with today + 90 days. An
   undated grant (written outside Spaarke) confers nothing until the daily reconciliation dates it.
@@ -745,7 +779,7 @@ Assigned-To, secure-child mirroring) and keeps everything consistent afterwards:
 | **Restricted** record | The Share button is hidden on the form, and on grids when any selected row is Restricted (also whenever the setting cannot be read). A share to a user flagged external made any other way is removed by the form's post-save Update Access call and by the 5-minute job. |
 | **Secure** record | Allowed. The record's children receive the new share within 2 minutes; an unshare is passed on the same way. |
 | Person on the **No Access** list, Secure record | Their direct share is removed within minutes. |
-| An Assigned-To share someone removed | Treated as a decision: it is not re-added. |
+| An Assigned-To share someone removed | Treated as a decision: it is not re-added while the assignment stands. Clearing or changing the Assigned To and then setting it again writes it afresh. |
 
 The platform Share button never gives a **contact** anything — partner and contact access comes only from grants.
 
@@ -839,7 +873,8 @@ code already does; deviating needs an ADR conflict resolution (CLAUDE.md §6.5).
 | Someone who should not see Secure records can | Their business unit is an ancestor of the secure one with a Deep Read role, or they hold Global Read | Check `[SECURE-CENSUS]`; move them out of the root business unit or narrow the role depth |
 | Share button missing on a record | The record is Restricted (by design) | Use Manage Access "Add person" for internal users |
 | A colleague added with "Add person" can open the record in the MDA, but it does not show in their workforce app | No paired grant was written: the record is Restricted, they have no single linked contact, the pairing column is not deployed, or a read failed (the modal named the reason, §2) | Link exactly one contact to them, apply `Deploy-ExternalRecordAccessPairedSystemUser.ps1`, or add them again |
-| A colleague whose share was removed still sees the record in their workforce app | The paired grant was not ended (`pairedGrantEnded: false`), or the share was removed outside Spaarke | Revoke the paired grant in Current Access. R5 ends it the next morning only while `ExternalAccess:Reconciliation:WritesEnabled` is on |
+| A colleague whose share was removed still sees the record in their workforce app | The paired grant was not ended (`pairedGrant` other than `ended` or `none`; the modal said it may still be active), or the share was removed outside Spaarke | Use Try again in the notice, or Revoke the paired grant in Current Access. R5 ends it the next morning only while `ExternalAccess:Reconciliation:WritesEnabled` is on |
+| An Assigned-To colleague whose share was revoked does not get it back on the next save | The revoke is a decision that holds while the assignment stands (owner rule (b)) | Add them again in Manage Access, or clear the Assigned To, save, then set it again and save |
 | Remove Secure refused | Caller is not a Full Access holder or the creator (403), or a parent is Secure (409 `access_follows_parent`) | Ask a Full Access holder; un-secure the parent instead |
 | Change not visible yet | Caches (up to 2 minutes) or a background job not yet run (2–5 minutes) | Wait, then re-check; look for the job's log line |
 
