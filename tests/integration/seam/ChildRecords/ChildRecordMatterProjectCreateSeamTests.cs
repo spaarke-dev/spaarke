@@ -309,8 +309,8 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     /// <summary>
     /// A caller-supplied <c>sprk_issecure</c> on a root, as the route answers it today (not changed by task 020). The flag is
     /// field-secured live (only the BFF writes it: Make Secure, provisioning), which the scripted caller models: the caller's
-    /// own column check refuses it, 403 <see cref="ChildRecordEndpoints.DeniedCode"/>, and nothing is created. (Without field
-    /// security a project's flag is still refused by the secure-root gate; a matter's is not — task 020 notes, finding F-1.)
+    /// own column check refuses it, 403 <see cref="ChildRecordEndpoints.DeniedCode"/>, and nothing is created. That check
+    /// (step 2) runs before the service's own secure-flag refusal (step 6, below), for a matter as for a project.
     /// </summary>
     [Theory]
     [InlineData("sprk_matter", "sprk_mattername")]
@@ -328,5 +328,39 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         StatusOf(result).Should().Be(StatusCodes.Status403Forbidden, DetailOf(result));
         ReasonOf(result).Should().Be(ChildRecordEndpoints.DeniedCode);
         _creates.Should().BeEmpty("the secure flag is the server's: Make Secure / provisioning, never a create payload");
+    }
+
+    public static TheoryData<string, string, bool?> RootsAndSecureFlagValues() => new()
+    {
+        { "sprk_matter", "sprk_mattername", true },
+        { "sprk_matter", "sprk_mattername", false },
+        { "sprk_matter", "sprk_mattername", null },
+        // Controls: the project's refusal, which the matter's now matches (code, words, status).
+        { "sprk_project", "sprk_projectname", true },
+        { "sprk_project", "sprk_projectname", false },
+        { "sprk_project", "sprk_projectname", null },
+    };
+
+    /// <summary>
+    /// Task 020 fix round 1 (F-1; UAC-r2 rule, 2026-11-03): with NO field security on the column, a root create that names
+    /// <c>sprk_issecure</c> — true, false or null — is refused by the SERVICE, <see cref="AccessFollowsParent.SecureFlagReasonCode"/>,
+    /// 403, in the project's words, and nothing is created. Before the fix a matter's was created with the flag.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(RootsAndSecureFlagValues))]
+    public async Task RouteCreate_ARootNamingTheSecureFlag_WithoutFieldSecurity_IsRefusedSecureFlagTransitionOnly_403_AndNothingIsCreated(
+        string table, string nameColumn, bool? value)
+    {
+        var result = await RouteCreate(table, new()
+        {
+            [nameColumn] = "Secret",
+            [SecurableEntityRegistry.SecureFlagAttribute] = value,
+        });
+
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden, DetailOf(result));
+        ReasonOf(result).Should().Be(AccessFollowsParent.SecureFlagReasonCode);
+        DetailOf(result).Should().Be(
+            $"The {(table == "sprk_matter" ? "matter" : "project")} was not created: {SecureRootInheritance.SecureFlagRefusalText}.");
+        _creates.Should().BeEmpty();
     }
 }

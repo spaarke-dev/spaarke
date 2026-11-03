@@ -719,6 +719,23 @@ internal sealed partial class RecordCreationService
         }
         else
         {
+            // Field-mapping task 020 fix round 1 (F-1; UAC-r2 rule, 2026-11-03): a matter is a secure root that inherits
+            // nothing, so the plan above never asks it — but its secure flag is the transitions' alone (Make Secure / Remove
+            // Secure), exactly as a project's: a create that NAMES sprk_issecure (any value, null included) is refused with the
+            // plan's own refusal, code, words and status, whatever the principal and whatever the path (route, chat, Office,
+            // a system writer). sprk_matter carries no sprk_accessinheritance column, so the plan's access-record refusal has
+            // nothing to apply to here. "Names" includes a JSON null in a mapped item's body, which WritesOf leaves out (it
+            // lists a null only for a cleared LOOKUP) but the create would still write.
+            if (SecureRootInheritance.IsParent(table)
+                && (AccessFollowsParent.NamesSecureFlag(OwnedChildWrite.WritesOf(item))
+                    || item.Columns.Any(c => string.Equals(
+                        SecureRootInheritance.NormalizeColumn(c), AccessFollowsParent.SecureFlagColumn, StringComparison.OrdinalIgnoreCase))))
+            {
+                return Decision.Refuse(PlanRefused(
+                    RecordOwnerResolution.Refused(AccessFollowsParent.SecureFlagReasonCode, SecureRootInheritance.SecureFlagRefusalText),
+                    noun));
+            }
+
             trace.Record(RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran, "ordinary (the table inherits no secure parent)");
         }
 
