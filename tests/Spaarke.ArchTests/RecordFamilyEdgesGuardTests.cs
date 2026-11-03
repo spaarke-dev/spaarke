@@ -64,6 +64,29 @@ public class RecordFamilyEdgesGuardTests
             "the adjustment or rejection report generated for the submission: its output, not its filing (as an "
             + "analysis's sprk_outputfileid)",
 
+        // ebilling-r1 task 089a (model 5.2, 2026-11-03): the secure-child registration of Procedure assignments and record-scoped
+        // rule sets (with their policies) adds ownership lineage only. The family registry is left as it is: the owner ruled
+        // sprk_procedureassignment never family (2026-10-27, RecordFamilyEdges remarks), and whether a record-scoped rule set or
+        // its rule joins the displayed family is UAC-r2's call (raised in the 089 notes). Until then each edge is baselined here.
+        [Only("SecureChildLineage", "sprk_procedureassignment.sprk_matter -> sprk_matter")] =
+            "ownership lineage of a Procedure assignment (secure child, 089a); never family (owner, 2026-10-27)",
+        [Only("SecureChildLineage", "sprk_procedureassignment.sprk_project -> sprk_project")] =
+            "ownership lineage of a Procedure assignment (secure child, 089a); never family (owner, 2026-10-27)",
+        [Only("SecureChildLineage", "sprk_procedureassignment.sprk_workassignment -> sprk_workassignment")] =
+            "ownership lineage of a Procedure assignment (secure child, 089a); never family (owner, 2026-10-27)",
+        [Only("SecureChildLineage", "sprk_ruleset.sprk_matter -> sprk_matter")] =
+            "ownership lineage of a record-scoped rule set (secure child, 089a); family membership pending UAC-r2",
+        [Only("SecureChildLineage", "sprk_ruleset.sprk_project -> sprk_project")] =
+            "ownership lineage of a record-scoped rule set (secure child, 089a); family membership pending UAC-r2",
+        [Only("SecureChildLineage", "sprk_ruleset.sprk_workassignment -> sprk_workassignment")] =
+            "ownership lineage of a record-scoped rule set (secure child, 089a); family membership pending UAC-r2",
+        [Only("SecureChildLineage", "sprk_policy.sprk_ruleset -> sprk_ruleset")] =
+            "a record rule's ownership parent, its record-scoped rule set (089a); family membership pending UAC-r2",
+        [Only("OwnershipParentEntities", "sprk_procedureassignment")] =
+            "an ownership parent (secure child, 089a) that no family row names: never family (owner, 2026-10-27)",
+        [Only("OwnershipParentEntities", "sprk_ruleset")] =
+            "an ownership parent (a record rule's set, 089a) that no family row names: family membership pending UAC-r2",
+
         // CoreAncestorResolver's stamp sources are the intermediates a stamp is COPIED from, not every filing lookup.
         [Extra("CoreAncestorResolver.StampSourceColumns", "sprk_analysis.sprk_documentid -> sprk_document")] =
             "the analysis's ownership primary, not a stamp source (CoreAncestorResolver.cs:212-214)",

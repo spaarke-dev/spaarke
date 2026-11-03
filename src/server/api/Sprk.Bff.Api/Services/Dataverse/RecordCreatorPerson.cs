@@ -121,7 +121,9 @@ public static class RecordCreatorPerson
         // ebilling-r1 task 090 (UAC answer to 081 Q5): every table the BFF creates app-only for a person records that person. A rule set
         // is created app-only for the calling admin (RuleSetService's upload, ProcedureService's Procedure create: owner.ApplyTo), and a
         // Procedure assignment will be (no BFF writer creates one yet). 080 created both columns UNSECURED; the script empty-checks,
-        // secures and publishes them like 081's four (SpaarkeMaster).
+        // secures and publishes them like 081's four (SpaarkeMaster). Task 089a (model 5.2): both are codified Secure Record Owner
+        // children now (a record-scoped rule set and an assignment are filed under their core record), so they left
+        // StampedOutsideCodifiedChildren; sprk_procedure and sprk_procedureversion stay outside.
         "sprk_ruleset", "sprk_procedureassignment",
     };
 

@@ -4,7 +4,7 @@
     <title>Assignment and override service (pin, exclude, change rule, removal preview); secure-child registration; K-2 pin test</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-C</phase>
     <gate>081 merged; 080 schema live on dev (incl. sprk_createdbyperson on all four tables); owner OK for the live probes and -Apply runs; uac-r2 reviews every edit to its files</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Caller-checked writes on Secure records, a new secure child table and record-scoped rule sets joining the secure family, the shared ownership census and live role changes on dev: auth and tenant-isolation code.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -1746,7 +1746,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // parent of its versions. sprk_policyversion is NOT listed: it is a lineage child only (SecureChildLineage), like
         // sprk_signal, because Signals and Decision Records name the version they cite, which files nothing.
         "sprk_policy",
+        // ebilling-r1 task 089a (procedure model 5.2): a Procedure assignment is its record's child, and a record-scoped rule
+        // set is its record's child and the parent of its rules. Both UserOwned (live spaarkedev1 2026-11-03).
+        "sprk_procedureassignment",
         "sprk_reportcard",
+        "sprk_ruleset",
         "sprk_spendsignal",
         "sprk_spendsnapshot",
         "sprk_todo",
@@ -1768,7 +1772,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
          // ebilling-r1 task 095a: a from-email submission's link to the .eml it was read from. The .eml is an ownership-parent table
          // (sprk_document); read as a parent it would file the submission under the email (and under a Restricted email's isolation).
          // The submission is filed under its core record only; the link is a plain reference (SubmissionSourceEmailLinkNotFilingGuardTests).
-         ("sprk_invoicesubmission", "sprk_sourceemaildocument")], CitationComparer.Instance);
+         ("sprk_invoicesubmission", "sprk_sourceemaildocument"),
+         // ebilling-r1 task 089a (procedure model 5.2): a Procedure assignment names what it assigns, pins or excludes; it is
+         // filed under its record only. sprk_excludedpolicy targets an ownership-parent table (sprk_policy): read as a parent it
+         // would file the override under the rule (and under a record-scoped rule's isolation). The other two target tables that
+         // are no ownership parent; they are listed so the assignment's whole citation set is one declaration.
+         ("sprk_procedureassignment", "sprk_excludedpolicy"),
+         ("sprk_procedureassignment", "sprk_procedure"),
+         ("sprk_procedureassignment", "sprk_pinnedversion")], CitationComparer.Instance);
 
     /// <summary>True when <paramref name="column"/> of <paramref name="table"/> cites a record rather than files the row under it.</summary>
     public static bool IsCitation(string? table, string? column) =>

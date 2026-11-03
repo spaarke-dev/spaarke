@@ -101,6 +101,16 @@ public class SecureRecordIsolationCensusJobTests
             _directory.Depth(OwnerRole, privilegeId, PrivilegeDepth.Basic);
         }
 
+        // ebilling-r1 (NFR-05 depth list): the environment also has the hard-deny tables' Reads the codified set does not list
+        // yet (sprk_storedfile) — iterated FROM the list, held by no role here.
+        foreach (var (logicalName, privilegeName) in SecureBuRoleDepthAssertion.RestrictedContentPrivileges
+                     .Where(e => SecureRecordOwnerRoleSet.Embedded.Tables.All(t => !string.Equals(t.PrivilegeName, e.PrivilegeName, StringComparison.OrdinalIgnoreCase))))
+        {
+            var privilegeId = Guid.NewGuid();
+            _directory.Privilege(privilegeId, privilegeName);
+            _codifiedChildPrivileges[logicalName] = privilegeId;
+        }
+
         _directory.User(Admin, "Ralph Admin", RootBu, accessMode: 0, isDisabled: false, isApplication: false, SysAdminRole);
         _directory.User(TestUser, "Test User 1", SiblingBu, accessMode: 0, isDisabled: false, isApplication: false, BasicUserSiblingCopy);
         _directory.User(AppUser, "# mi-bff-api-dev", RootBu, accessMode: 4, isDisabled: false, isApplication: true);
