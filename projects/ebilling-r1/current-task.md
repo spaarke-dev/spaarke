@@ -1,33 +1,36 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-02 (#2526 merged). 151c is on master at 5796774091; #2507 at 0878ca36ac. This session is ebilling-r1-7b; the duplicate 9c session after the crash should stay idle or be closed.
+> **Last Updated**: 2026-11-03 (checkpoint, context ~85%). 151c is on master (#2526, 5796774091); the dev BFF has been on 5796774091 since 13:29Z (SPA-r3). This session is ebilling-r1-7b; the duplicate 9c session after the crash should stay idle or be closed.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Waiting on** | (a) SPA-r3's dev BFF deploy of 5796774091 (needs the owner's go in SPA-r3's session). (b) The owner's correction test in Outlook (no browser here): first a new submission, then a correction against its invoice. Then ebilling verifies the server side by tracking number. |
-| **Next action** | (1) Done: #2526 merged; SHA sent to ontology-r1, uac-r2, SPA-r3 and word-add-in. (2) After that BFF deploy, import the UI on dev (owner OK given 2026-11-02): code page `sprk_apexport`, ribbon script 1.1.0 `{a20517ef-dd2a-4461-822b-f80c1d735e69}`, the RibbonDiffs on sprk_invoice and sprk_billingexport, and the views, through Import-SolutionScoped or the code-page-deploy and web-resource scripts. Check the Office Add In User role's Read on `sprk_billingexport` (K3). This is step 5 of task 153; the rest of 153 (index, end to end, UI tests) waits for task 136. Task 153 step 4 conflicts with the rule that only SPA-r3 deploys the dev BFF: amend the POML. (3) Click-through: a batch's AP emails grid shows no New button (Add Existing may show: K1). This needs a browser; it is on the owner's checklist through uac-r2. (4) Delete `C:\w15p`, the publish-size scratch folder. A safety check blocked my rm, so the owner deletes it. |
+| **Blocking defect on dev** | `sprk_invoice.sprk_trackingnumber` does NOT exist on dev, although the 151b note says it was created on 10/30. `InvoiceSubmissionPersister` (around line 1263) writes it on every invoice create, so every intake fails with `ebilling.submission.transaction_failed`. The owner's INV-792345.1 (submission 5a1a526f-4868-c2c7-050b-2a7d80514275) failed this way at 13:39Z. App Insights `6a76b012-46d9-412f-b4ab-4905658a9559` shows "'sprk_invoice' entity doesn't contain attribute … sprk_trackingnumber", retried 5 times (about 14 s each). **The owner is creating the column by hand**: Text, max length 100, optional; display name "Tracking Number"; schema name `sprk_TrackingNumber`; the description is in `scripts/ebilling/Deploy-EbillingInvoiceTrackingNumberSchema.ps1` line 59; it must be in SpaarkeMaster. When they say it's done, verify it with the script's -WhatIf, which should report "skipped". |
+| **Next action** | (1) After the column exists, create the three invoice views from SpaarkeMaster source through the Web API, with fixed ids and the `MSCRM.SolutionUniqueName: SpaarkeMaster` header: `{467cbd98-eb63-4f05-b7fb-3bc71f14bac9}` Approved – ready for export, `{cd153641-74d9-4a9f-9318-3cb7caf4fccf}` Sent to AP, `{b0feb580-dbb5-464f-bb07-3ce64fb5e21d}` Paid. The layoutxml grid needs `object="<sprk_invoice ObjectTypeCode>"`, because the source omits it and Web API validation requires it. Then PublishXml `sprk_invoice` only, after the pending-changes check. (2) Run uac-r2's after-notice checks: (a) the temporary solution `sprkEbillingApExportUiTemp` holds only the two table shells with RibbonDiffs (behavior 1; no forms, attributes or views); (b) the batch form still has `subgrid_apemails`; (c) the link relationship's cascade is unchanged; (d) the `sprk_communication` subgrid ribbon still uses `nativeNewAllowed` and `newChildAvailable`, and dev's `secure_child_ribbon.js` still has NO_NEW_HOSTS; (e) K3 (Office Add In User Read on `sprk_billingexport`), report only. Then send after-notices to uac-r2, ontology-r1 and SPA-r3. Delete the temporary solution record; that leaves its components in place. (3) File issues: (i) the submission job retries a permanent schema fault 5 times (should be non-retryable); (ii) the 151b note wrongly says the tracking-number column was created on dev; (iii) `ai.invoice.binding_missing` for invoice-codeset-match on dev, which isn't fatal because it falls back to embedding ranking. (4) The owner retests the submission in Outlook web, then the correction test; ebilling verifies the server side by tracking number. |
 
-## Done this stretch
-- 151c-1b merged into work (b1f05d71c5). 151c-2 merged (9402a48ad4). uac-r2 passed both, including the 151c-2 F1 re-check; I took its doc-line nit. The forms-script conflict kept both the AP emails subgrid and the Sent to AP Date view column.
-- Live on dev, 2026-11-02 (owner OK): `sprk_ebillingsetting.sprk_apexportemail` and `sprk_billingexport.sprk_senttoapdate`; the batch form date is read-only.
-- Filed: #2511 (SendAsUserAsync post-send token), #2517 (Email to AP: an unknown send outcome is answered as retryable).
+## Done on dev 2026-11-03 (owner OK for the UI import)
+- Web resources `sprk_apexport` (837ac16f-8bd7-f111-84e8-7ced8dda31f8) and `sprk_/scripts/apexport_ribbon.js` 1.1.0 (a20517ef-dd2a-4461-822b-f80c1d735e69): created in SpaarkeMaster, published, read back byte-identical.
+- RibbonDiffs for `sprk_invoice` and `sprk_billingexport` imported through `Import-SolutionScoped.ps1`, solution `sprkEbillingApExportUiTemp`, with a scoped publish of the two tables. The invoice RibbonDiff is dev's current one plus the 36 ApExport elements. It deliberately leaves out task 014's 7 HideCustomAction elements (Activate and Deactivate), which are in source but were never deployed; that's outside this OK. Package scratch: `scratchpad/apui/`.
+- The batch Active view `{c19542df-…}` gained the Sent to AP Date column (PATCH with `object=11020`) and `sprk_billingexport` was published.
+- Before-notices went to uac-r2 (no objection; it asked for the checks in step 2), ontology-r1 and SPA-r3.
 
-## Dev state
-- The dev BFF has been on master 3740e1a105 since 2026-11-02 18:52Z (SPA-r3 deployed it; that build includes #2507). It does NOT include 151c. `Ebilling:Enabled=true`, `StoredFileReconcileEnabled=false`, `MalwareScanningEnabled=false`. Before deploying, SPA-r3 ran `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`, which exited 0.
-- word-add-in now switches corrections on and bumps the add-in version. Ebilling then tests a correction against dev when asked.
-- Live on dev 2026-11-02 (owner OK; notices sent before and after): `sprk_communication.sprk_billingexport` and its relationship (cascade read back as agreed); `sprk_/scripts/secure_child_ribbon.js` at the work version (NO_NEW_HOSTS, plus the ISS-010 catch-up), published on its own; the batch form's AP emails subgrid. The click-through check (no New on the subgrid) is still open because no browser is connected.
-- Not on dev yet: the ApExport code page, the 151b and 151c-1b ribbons (sprk_invoice and sprk_billingexport RibbonDiffs, the ribbon script `{a20517ef-dd2a-4461-822b-f80c1d735e69}`) and the views (task 153, owner OK given).
+## Owner's Outlook report (sent to word-add-in 2026-11-03)
+- Outlook desktop: the sign-in popup fails with "Bad Request - Request Too Long" (`naa=false`). This is word-add-in's to fix, and the owner wants it ASAP.
+- Outlook web: a 404 on `…%3E/suggestions` (a malformed URL), also word-add-in's.
+- Over a minute of processing: the 5 retries; a good run takes about 15 s. The owner asked to be able to leave and come back with a notification; I asked word-add-in what fits the add-in.
+
+## Waiting on
+- word-add-in's answers on the above.
+- The click-through check that the AP emails grid shows no New button (on the owner's checklist through uac-r2).
+- Delete `C:\w15p` (owner; my rm was blocked).
 
 ## Open items
-- 151c-1b K3: the Office Add In User role may lack Read on `sprk_billingexport`. Check when importing the invoice views.
-- 151d (new): the invoice form shows the batch's Sent to AP Date (151c-1b K4).
-- The main checkout `C:\code_files\spaarke` has another session's uncommitted changes. Don't fast-forward it.
-- Older notes name the owner in plain text (003, 004, 011, 029, 091). Clean up in a docs pass.
-- 151b: 053 must add `sprk_trackingnumber` to `sprk_Invoice/Entity.xml` before any non-dev import.
+- Task 153 step 4 conflicts with the rule that only SPA-r3 deploys the dev BFF: amend the POML. The rest of 153 waits for 136.
+- 151d: the invoice form shows the batch's Sent to AP Date.
+- 053 must add `sprk_trackingnumber` to `sprk_Invoice/Entity.xml` before any non-dev import.
+- Older notes name the owner in plain text (003, 004, 011, 029, 091): docs pass.
 - 050a §9 items 2–4 (owner).
-- Worktrees to remove once merged and pushed: `C:\code_files\spaarke\.claude\worktrees\agent-ab1007764e5ac3856` (151c-2) and the 151c-1b one, `agent-ae423c3eb3b722197` (`Remove-WorktreeSafe.ps1`, one path per call).
 
 ## Standing rules (see project CLAUDE.md)
-No bare git stash, no --no-verify. Live writes and role changes need the owner's OK. Schema runs need notices before and after, and the publish is entity-scoped only (ontology-r1). StoredFileReconcileJob stays off until F4 merges and DEF-044 is fixed. After merges: 5 builds, ArchTests and the broad filter before pushing (ISS-005 is flaky, #2469). Never run `dotnet build-server shutdown` while another gate is building. Master PRs: auto-merge only after ontology-r1 approves; send before-notices to word-add-in, SPA-r3 and uac-r2, and send the merge SHA to ontology-r1. Max 4 concurrent subagents, and every agent launch states a model. No bare jq, no grep -P. Remove worktrees with `pwsh -File scripts/worktree/Remove-WorktreeSafe.ps1 -Path <one path>`.
+No bare git stash, no --no-verify. Live writes and role changes need the owner's OK. Schema runs need notices before and after, and the publish is entity-scoped only. StoredFileReconcileJob stays off. ebilling never deploys the dev BFF (SPA-r3 does). Master PRs: ontology-r1 review, then auto-merge, then the SHA to peers. Max 4 subagents, and every agent launch states a model. No bare jq, no grep -P.
