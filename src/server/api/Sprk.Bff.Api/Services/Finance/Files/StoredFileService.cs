@@ -872,6 +872,24 @@ public sealed class StoredFileService
     // Row reads
     // =============================================================================================================================
 
+    /// <summary>
+    /// ebilling-r1 task 151e: the display name of the source email Document <paramref name="documentId"/>, app-only. Called only for a document
+    /// the CALLER may Read (the copy rule, <c>StoredFileAccessFilter.DecideRowAsync</c>). <c>null</c> when it has no name or does not exist; a
+    /// fault throws.
+    /// </summary>
+    internal async Task<string?> ReadDocumentNameAsync(Guid documentId, CancellationToken ct)
+    {
+        try
+        {
+            var entity = await _entities.RetrieveAsync(StoredFileSchema.DocumentTable, documentId, [StoredFileSchema.DocumentName], ct).ConfigureAwait(false);
+            return entity.GetAttributeValue<string>(StoredFileSchema.DocumentName);
+        }
+        catch (Exception ex) when (StoredFileNotFound.Is(ex))
+        {
+            return null;
+        }
+    }
+
     /// <summary>The row, or <c>null</c> when Dataverse answered not-found. Any other fault throws.</summary>
     internal async Task<StoredFileRow?> ReadRowAsync(Guid fileId, CancellationToken ct)
     {
@@ -932,6 +950,12 @@ public sealed class StoredFileService
 internal sealed record StoredFileRow
 {
     public required Guid FileId { get; init; }
+
+    /// <summary>The display name (<c>sprk_name</c>). Shown only in the invoice file list; never logged.</summary>
+    public string? Name { get; init; }
+
+    /// <summary>The recorded size in bytes (<c>sprk_sizebytes</c>), when set.</summary>
+    public int? SizeBytes { get; init; }
 
     /// <summary>The purpose, or <c>null</c> for an unknown value.</summary>
     public StoredFilePurpose? Purpose { get; init; }
@@ -995,6 +1019,8 @@ internal sealed record StoredFileRow
         return new StoredFileRow
         {
             FileId = entity.Id,
+            Name = entity.GetAttributeValue<string>(StoredFileSchema.Name),
+            SizeBytes = entity.GetAttributeValue<int?>(StoredFileSchema.SizeBytes),
             Purpose = purpose,
             Status = status,
             Parent = parent,
