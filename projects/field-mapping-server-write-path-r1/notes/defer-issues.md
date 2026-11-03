@@ -143,3 +143,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Out of scope, pre-existing (F1, user-visible text): outside 041's diff, and it touches the JPS node config contract |
 | **Owner task** | Unassigned (AI playbook owners) |
 | **Failure** | `DeliverToIndexNodeExecutor` requires `indexName` and reports it in its output, but the enqueued payload carries no index. Under FR-40 the file always goes to `KnowledgeIndexName`, so the output names the wrong index |
+
+## DI-015 — Ribbon-only BFF create tables are not in the client set
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 020 implementer |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2540 |
+| **Class** | Out of scope: changing the client routing of three tables needs its own decision, and billingevent is in ebilling-r1's area |
+| **Owner task** | Unassigned; ebilling-r1 must agree to the billingevent part |
+| **Failure** | `CreateTables` has sprk_budget, sprk_kpiassessment and sprk_billingevent; `BFF_CHILD_CREATE_TABLES` does not, so a wrapped client create of these tables bypasses the BFF. Pinned as `RibbonOnlyCreateTables` in `ChildRecordCreateTablesAgreementTests` |
