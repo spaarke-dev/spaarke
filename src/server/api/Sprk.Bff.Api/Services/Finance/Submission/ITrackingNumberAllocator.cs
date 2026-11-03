@@ -24,6 +24,13 @@ public static class TrackingNumberReasons
     /// The caller may try again later.
     /// </summary>
     public const string Unavailable = "ebilling.tracking.unavailable";
+
+    /// <summary>
+    /// Task 095c: a submission with no firm was asked for before this environment's scope key is Active (tracking-scope phase P0 or P1), so
+    /// nothing guards its number and no row was created. Not retryable as such: the intake answers it as "a firm is required" until the
+    /// schema script has run (notes/095c-from-email-firm-optional.md, "Notice for uac-r2").
+    /// </summary>
+    public const string FirmRequired = "ebilling.tracking.firm_required";
 }
 
 /// <summary>The result of <see cref="ITrackingNumberAllocator.CreateSubmissionAsync"/>.</summary>
@@ -74,7 +81,11 @@ public interface ITrackingNumberAllocator
     /// <c>sprk_trackingnumber</c>). On an <see cref="TrackingNumberOutcome.AlreadyCreated"/> result the existing row stands; these values are not applied.
     /// </param>
     /// <remarks>
-    /// Uniqueness comes from the Dataverse alternate key on (<c>sprk_vendororg</c>, <c>sprk_trackingnumber</c>), not from the read that picks n:
+    /// Task 095c: <paramref name="firmId"/> null numbers a submission with no firm, in the <c>none</c> scope; it is refused with
+    /// <see cref="TrackingNumberReasons.FirmRequired"/> (nothing written) until the environment's scope key is Active
+    /// (<see cref="TrackingScopePhase"/>). <see cref="Guid.Empty"/> is never "no firm" and throws.
+    /// Uniqueness comes from the Dataverse alternate key on (<c>sprk_vendororg</c>, <c>sprk_trackingnumber</c>), and from the scope key on
+    /// (<c>sprk_trackingnumber</c>, <c>sprk_trackingscope</c>) once it is Active, not from the read that picks n:
     /// two parallel callers can pick the same n, one create wins, the other is refused whole by the key and recomputes. At most
     /// <see cref="TrackingNumberAllocator.MaxAttempts"/> attempts, then <see cref="TrackingNumberOutcome.Refused"/> with
     /// <see cref="TrackingNumberReasons.Unavailable"/> and no row created. Any other fault propagates on the first attempt.
@@ -88,7 +99,7 @@ public interface ITrackingNumberAllocator
     /// holds a different firm invoice number, or was not numbered by this service. A caller bug; nothing was written.</exception>
     Task<TrackingNumberResult> CreateSubmissionAsync(
         Guid submissionId,
-        Guid firmId,
+        Guid? firmId,
         string firmInvoiceNumber,
         IReadOnlyDictionary<string, object>? fields = null,
         CancellationToken ct = default);

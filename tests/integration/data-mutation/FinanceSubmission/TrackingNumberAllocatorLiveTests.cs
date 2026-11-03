@@ -59,7 +59,7 @@ public sealed class TrackingNumberAllocatorLiveTests
             var tasks = ids.Select((id, i) => Task.Run(async () =>
             {
                 await start.Task;
-                return await new TrackingNumberAllocator(entities, logs[id]).CreateSubmissionAsync(
+                return await new TrackingNumberAllocator(entities, dataverse, logs[id]).CreateSubmissionAsync(
                     id, firmId, invoiceNumber, new Dictionary<string, object> { ["sprk_name"] = $"{NamePrefix} parallel {i}" });
             })).ToList();
             start.SetResult();
@@ -101,7 +101,7 @@ public sealed class TrackingNumberAllocatorLiveTests
         var racing = Guid.NewGuid();
         try
         {
-            TrackingNumberAllocator NewAllocator() => new(entities, NullLogger<TrackingNumberAllocator>.Instance);
+            TrackingNumberAllocator NewAllocator() => new(entities, dataverse, NullLogger<TrackingNumberAllocator>.Instance);
             Dictionary<string, object> Fields(string label) => new() { ["sprk_name"] = $"{NamePrefix} {label}" };
 
             // A redelivery after the first create finished: found by its id before anything is written.

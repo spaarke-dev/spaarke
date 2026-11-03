@@ -249,7 +249,7 @@ internal static class ResubmissionOfWriteControlFixtures
     internal sealed class CallerBackedAllocator(IDataverseUserClient user) : ITrackingNumberAllocator
     {
         public async Task<TrackingNumberResult> CreateSubmissionAsync(
-            Guid submissionId, Guid firmId, string firmInvoiceNumber, IReadOnlyDictionary<string, object>? fields = null, CancellationToken ct = default)
+            Guid submissionId, Guid? firmId, string firmInvoiceNumber, IReadOnlyDictionary<string, object>? fields = null, CancellationToken ct = default)
         {
             await user.PostAsync("sprk_invoicesubmissions", "{}", ct);
             return TrackingNumberResult.Refused("control");

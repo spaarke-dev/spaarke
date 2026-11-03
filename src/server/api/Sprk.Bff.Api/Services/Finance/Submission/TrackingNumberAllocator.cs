@@ -35,6 +35,16 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// (<see cref="MaxHiddenSkips"/>), not counted as a lost race.</para>
 /// <para><b>Known limit.</b> A numbered submission that is later deleted frees its n: the next submission of that invoice number takes it again.
 /// Submissions are not deleted by any eBilling flow (the lifecycle closes them), so this is only a manual-cleanup effect.</para>
+/// <para><b>Tracking scope (task 095c, option B).</b> A submission may have no firm (the internal from-email channel, mode New). The firm key
+/// does not cover a row whose firm is null, so the sequence is kept per <i>scope</i>: <c>sprk_trackingscope</c> holds the firm id in D form,
+/// or <see cref="NoFirmScope"/>, and the key <see cref="ScopeKeyName"/> on (<c>sprk_trackingnumber</c>, <c>sprk_trackingscope</c>) guards it
+/// the way the firm key guards it today. What this service does follows the environment's <see cref="TrackingScopePhase"/>, read from
+/// metadata (<see cref="TrackingScopePhaseProbe"/>) and cached per process (<see cref="TrackingScopePhaseCache"/>, forward-only, 5 minutes
+/// until P2): P0 is today's behaviour; P1 also writes the scope on every row and still counts per firm; P2 counts per scope and numbers a
+/// submission with no firm. Before P2 a submission with no firm is refused (<see cref="TrackingNumberReasons.FirmRequired"/>) and nothing is
+/// written. A P0 instance whose cached phase is stale after the schema script raised the scope column to SystemRequired is refused by the
+/// platform (<c>0x80040200</c>); it re-reads the phase once and retries in the new phase, or answers the retryable
+/// <see cref="TrackingNumberReasons.Unavailable"/> - never a 500 and never a second number.</para>
 /// </remarks>
 public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
 {
@@ -66,25 +76,59 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     internal const string SequenceColumn = "sprk_submissionsequence";
     internal const string TrackingNumberColumn = "sprk_trackingnumber";
 
+    /// <summary>Task 095c: the sequence's scope, the firm id in D form or <see cref="NoFirmScope"/>. Written only by this service.</summary>
+    internal const string ScopeColumn = "sprk_trackingscope";
+
+    /// <summary>Task 095c: the scope of a submission with no firm.</summary>
+    internal const string NoFirmScope = "none";
+
+    /// <summary>Task 095c: the alternate key on (<c>sprk_trackingnumber</c>, <c>sprk_trackingscope</c>) relied on from P2.</summary>
+    internal const string ScopeKeyName = "sprk_invoicesubmission_scope_trackingnumber";
+
     /// <summary>The columns this service writes; a caller's <c>fields</c> must not name them.</summary>
     private static readonly string[] OwnedColumns =
-        [SubmissionIdColumn, FirmColumn, FirmInvoiceNumberColumn, SequenceColumn, TrackingNumberColumn];
+        [SubmissionIdColumn, FirmColumn, FirmInvoiceNumberColumn, SequenceColumn, TrackingNumberColumn, ScopeColumn];
 
     private static readonly string[] ExistingRowColumns = [FirmColumn, FirmInvoiceNumberColumn, SequenceColumn, TrackingNumberColumn];
 
+    /// <summary>Task 095c: "Attribute 'x' cannot be NULL", <c>0x80040200</c>: a SystemRequired column was missing from the write (measured in
+    /// dev, notes/022 and notes/027). Dataverse refuses the write whole.</summary>
+    private const int RequiredColumnNullFault = unchecked((int)0x80040200);
+
     private readonly IGenericEntityService _entities;
+    private readonly Func<CancellationToken, Task<TrackingScopePhase?>> _readPhase;
+    private readonly TrackingScopePhaseCache _phases;
     private readonly ILogger<TrackingNumberAllocator> _logger;
 
-    public TrackingNumberAllocator(IGenericEntityService entities, ILogger<TrackingNumberAllocator> logger)
+    public TrackingNumberAllocator(IGenericEntityService entities, IDataverseService dataverse, ILogger<TrackingNumberAllocator> logger)
+        : this(
+            entities,
+            ReaderOver(dataverse ?? throw new ArgumentNullException(nameof(dataverse)), logger ?? throw new ArgumentNullException(nameof(logger))),
+            TrackingScopePhaseCache.Shared,
+            logger)
+    {
+    }
+
+    /// <summary>Tests: a canned phase reader and a cache of their own (ADR-038 B1: the seam is the reader, not the transport).</summary>
+    internal TrackingNumberAllocator(
+        IGenericEntityService entities,
+        Func<CancellationToken, Task<TrackingScopePhase?>> readPhase,
+        TrackingScopePhaseCache phases,
+        ILogger<TrackingNumberAllocator> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
+        _readPhase = readPhase ?? throw new ArgumentNullException(nameof(readPhase));
+        _phases = phases ?? throw new ArgumentNullException(nameof(phases));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    private static Func<CancellationToken, Task<TrackingScopePhase?>> ReaderOver(IDataverseService dataverse, ILogger logger) =>
+        ct => TrackingScopePhaseProbe.ReadAsync(dataverse, logger, ct);
 
     /// <inheritdoc />
     public async Task<TrackingNumberResult> CreateSubmissionAsync(
         Guid submissionId,
-        Guid firmId,
+        Guid? firmId,
         string firmInvoiceNumber,
         IReadOnlyDictionary<string, object>? fields = null,
         CancellationToken ct = default)
@@ -96,11 +140,22 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
 
         if (firmId == Guid.Empty)
         {
-            throw new ArgumentException("A firm id is required: the sequence is per firm.", nameof(firmId));
+            // Task 095c: "no firm" is null, never the empty id (a caller that lost its firm must not be numbered as a no-firm submission).
+            throw new ArgumentException("A firm id is a firm or null, never empty.", nameof(firmId));
         }
 
         var number = NormalizeFirmInvoiceNumber(firmInvoiceNumber);
         RejectOwnedColumns(fields);
+
+        var phase = await _phases.GetAsync(_readPhase, force: false, ct).ConfigureAwait(false);
+        if (firmId is null && phase != TrackingScopePhase.P2ScopeKeyActive)
+        {
+            // Task 095c: before the scope key is Active nothing guards a no-firm row's number (the firm key ignores a null firm).
+            _logger.LogWarning(
+                "{Code}: submission={SubmissionId} phase={Phase} - a submission with no firm is numbered only once the scope key is Active; nothing written",
+                TrackingNumberReasons.FirmRequired, submissionId, phase);
+            return TrackingNumberResult.Refused(TrackingNumberReasons.FirmRequired);
+        }
 
         if (await FindExistingAsync(submissionId, ct).ConfigureAwait(false) is { } already)
         {
@@ -112,14 +167,37 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
         // is skipped (never re-read as free), and a skip is not a lost race: it has its own bound.
         var floor = 0;
         var skips = 0;
+        var reread = false;
         for (var attempt = 1; ;)
         {
-            var next = Math.Max(await ReadHighestSequenceAsync(firmId, number, ct).ConfigureAwait(false) + 1, floor + 1);
+            var next = Math.Max(await ReadHighestSequenceAsync(phase, firmId, number, ct).ConfigureAwait(false) + 1, floor + 1);
             var trackingNumber = Format(number, next);
 
             try
             {
-                await _entities.CreateAsync(BuildRow(submissionId, firmId, number, next, trackingNumber, fields), ct).ConfigureAwait(false);
+                await _entities.CreateAsync(BuildRow(phase, submissionId, firmId, number, next, trackingNumber, fields), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (phase == TrackingScopePhase.P0NoScopeColumn && HasFaultCode(ex, RequiredColumnNullFault))
+            {
+                // Task 095c: this instance still holds P0, but the scope column exists and is SystemRequired (schema script step 5), so the
+                // platform refused the row whole: nothing was written. Re-read the phase once and retry in it; a phase that still reads P0 is
+                // the retryable 503, never a 500.
+                if (!reread)
+                {
+                    reread = true;
+                    phase = await _phases.GetAsync(_readPhase, force: true, ct).ConfigureAwait(false);
+                    if (phase != TrackingScopePhase.P0NoScopeColumn)
+                    {
+                        _logger.LogWarning(
+                            "Submission {SubmissionId}: the cached tracking-scope phase was stale; re-read as {Phase}, retrying", submissionId, phase);
+                        continue;
+                    }
+                }
+
+                _logger.LogError(ex,
+                    "{Code}: submission={SubmissionId} - a required column was refused while the tracking-scope phase reads P0; nothing written",
+                    TrackingNumberReasons.Unavailable, submissionId);
+                return TrackingNumberResult.Refused(TrackingNumberReasons.Unavailable);
             }
             catch (Exception ex) when (IsPrimaryKeyDuplicate(ex))
             {
@@ -136,7 +214,7 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
             catch (Exception ex) when (DataverseServiceClientImpl.IsAlternateKeyDuplicate(ex))
             {
                 floor = next;
-                if (await IsHeldByAnUnnumberedRowAsync(firmId, trackingNumber, ct).ConfigureAwait(false))
+                if (await IsHeldByAnUnnumberedRowAsync(phase, firmId, trackingNumber, ct).ConfigureAwait(false))
                 {
                     if (++skips > MaxHiddenSkips)
                     {
@@ -175,14 +253,14 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     }
 
     /// <summary>
-    /// ebilling-r1 task 094 (EB-D-167): true when the firm's row holding <paramref name="trackingNumber"/> has no firm invoice number, so
-    /// the sequence read cannot see it: an attempt whose commit was undone. A row that still has its number (a concurrent winner) or no
-    /// row at all (deleted in between) is a lost race. A fault propagates.
+    /// ebilling-r1 task 094 (EB-D-167): true when the firm's (from P2: the scope's) row holding <paramref name="trackingNumber"/> has no firm
+    /// invoice number, so the sequence read cannot see it: an attempt whose commit was undone. A row that still has its number (a concurrent
+    /// winner) or no row at all (deleted in between) is a lost race. A fault propagates.
     /// </summary>
-    private async Task<bool> IsHeldByAnUnnumberedRowAsync(Guid firmId, string trackingNumber, CancellationToken ct)
+    private async Task<bool> IsHeldByAnUnnumberedRowAsync(TrackingScopePhase phase, Guid? firmId, string trackingNumber, CancellationToken ct)
     {
         var query = new QueryExpression(SubmissionEntity) { ColumnSet = new ColumnSet(FirmInvoiceNumberColumn), TopCount = 1 };
-        query.Criteria.AddCondition(FirmColumn, ConditionOperator.Equal, firmId);
+        AddSequenceScope(query, phase, firmId);
         query.Criteria.AddCondition(TrackingNumberColumn, ConditionOperator.Equal, trackingNumber);
         var found = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return found.Entities.Count == 1 && string.IsNullOrWhiteSpace(found.Entities[0].GetAttributeValue<string>(FirmInvoiceNumberColumn));
@@ -230,11 +308,14 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     /// or not the tracking number is also taken (the primary key is checked before the alternate key), and not matched by
     /// <see cref="DataverseServiceClientImpl.IsAlternateKeyDuplicate"/>. The typed fault code only, as an exact match.
     /// </summary>
-    private static bool IsPrimaryKeyDuplicate(Exception ex)
+    private static bool IsPrimaryKeyDuplicate(Exception ex) => HasFaultCode(ex, unchecked((int)0x80040237));
+
+    /// <summary>True when <paramref name="ex"/> or an inner exception is an <see cref="OrganizationServiceFault"/> with exactly this code.</summary>
+    private static bool HasFaultCode(Exception ex, int code)
     {
         for (var e = ex; e is not null; e = e.InnerException)
         {
-            if (e is System.ServiceModel.FaultException<OrganizationServiceFault> fault && fault.Detail?.ErrorCode == unchecked((int)0x80040237))
+            if (e is System.ServiceModel.FaultException<OrganizationServiceFault> fault && fault.Detail?.ErrorCode == code)
             {
                 return true;
             }
@@ -243,12 +324,33 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
         return false;
     }
 
+    /// <summary>
+    /// Task 095c: the rows one sequence counts. Before P2 the firm's rows (the firm key guards them; a no-firm submission never gets this
+    /// far); from P2 the scope's rows (the scope key guards them; a firm's rows carry the firm's id as their scope).
+    /// </summary>
+    private static void AddSequenceScope(QueryExpression query, TrackingScopePhase phase, Guid? firmId)
+    {
+        if (phase == TrackingScopePhase.P2ScopeKeyActive)
+        {
+            query.Criteria.AddCondition(ScopeColumn, ConditionOperator.Equal, ScopeOf(firmId));
+        }
+        else
+        {
+            query.Criteria.AddCondition(FirmColumn, ConditionOperator.Equal, firmId!.Value);
+        }
+    }
+
+    /// <summary>Task 095c: the scope a submission is numbered in: its firm's id in D form, or <see cref="NoFirmScope"/>.</summary>
+    internal static string ScopeOf(Guid? firmId) =>
+        firmId is { } firm ? firm.ToString("D", System.Globalization.CultureInfo.InvariantCulture) : NoFirmScope;
+
     /// <summary><c>{firm invoice number}.{n}</c>: n a positive integer without padding (D-37).</summary>
     private static string Format(string firmInvoiceNumber, int sequence) =>
         string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{firmInvoiceNumber}.{sequence}");
 
     private static Entity BuildRow(
-        Guid submissionId, Guid firmId, string number, int sequence, string trackingNumber, IReadOnlyDictionary<string, object>? fields)
+        TrackingScopePhase phase, Guid submissionId, Guid? firmId, string number, int sequence, string trackingNumber,
+        IReadOnlyDictionary<string, object>? fields)
     {
         var row = new Entity(SubmissionEntity, submissionId);
         if (fields is not null)
@@ -259,7 +361,17 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
             }
         }
 
-        row[FirmColumn] = new EntityReference(FirmEntity, firmId);
+        if (firmId is { } firm)
+        {
+            row[FirmColumn] = new EntityReference(FirmEntity, firm);
+        }
+
+        if (phase != TrackingScopePhase.P0NoScopeColumn)
+        {
+            // Task 095c: from P1 on every row, so the scope key can be built over every row once the backfill has run.
+            row[ScopeColumn] = ScopeOf(firmId);
+        }
+
         row[FirmInvoiceNumberColumn] = number;
         row[SequenceColumn] = sequence;
         row[TrackingNumberColumn] = trackingNumber;
@@ -267,17 +379,17 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     }
 
     /// <summary>
-    /// The highest sequence held for the firm and firm invoice number, over rows in every state (an inactive, closed submission still owns its
-    /// number); 0 when none. Dataverse compares strings without regard to case, as the alternate key does.
+    /// The highest sequence held for the firm (from P2: the scope) and firm invoice number, over rows in every state (an inactive, closed
+    /// submission still owns its number); 0 when none. Dataverse compares strings without regard to case, as the alternate key does.
     /// </summary>
-    private async Task<int> ReadHighestSequenceAsync(Guid firmId, string number, CancellationToken ct)
+    private async Task<int> ReadHighestSequenceAsync(TrackingScopePhase phase, Guid? firmId, string number, CancellationToken ct)
     {
         var query = new QueryExpression(SubmissionEntity)
         {
             ColumnSet = new ColumnSet(SequenceColumn),
             TopCount = 1,
         };
-        query.Criteria.AddCondition(FirmColumn, ConditionOperator.Equal, firmId);
+        AddSequenceScope(query, phase, firmId);
         query.Criteria.AddCondition(FirmInvoiceNumberColumn, ConditionOperator.Equal, number);
         query.Criteria.AddCondition(SequenceColumn, ConditionOperator.NotNull);
         query.AddOrder(SequenceColumn, OrderType.Descending);
@@ -301,10 +413,10 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     }
 
     /// <summary>
-    /// A submission with the caller's id exists: it is the answer to a redelivered create when it holds the same firm's number for the same firm invoice
-    /// number; anything else is a caller bug, and is not repaired (nothing is renumbered, nothing is overwritten).
+    /// A submission with the caller's id exists: it is the answer to a redelivered create when it holds the same firm's number (no firm for no
+    /// firm) for the same firm invoice number; anything else is a caller bug, and is not repaired (nothing is renumbered, nothing is overwritten).
     /// </summary>
-    private TrackingNumberResult Reconcile(Entity existing, Guid submissionId, Guid firmId, string number)
+    private TrackingNumberResult Reconcile(Entity existing, Guid submissionId, Guid? firmId, string number)
     {
         if (existing.GetAttributeValue<EntityReference>(FirmColumn)?.Id != firmId)
         {
