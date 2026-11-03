@@ -895,3 +895,21 @@ When the home token has no `email` claim, the form's prefill falls back to the u
 | **What** | Task 073 deploys the production SPA to `external.spaarke.com`, hands over the production Teams package and smoke-tests three personas against one provisioned stamp (ACME). Every gate item belongs to provisioning or the owner (`notes/task-073-gate-acme.md`). |
 | **Decision** | Owner 2026-11-03: a production demo activity; customer-provisioning-orchestration-r1 runs it. R3 closes without it. |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2532 |
+
+### ISS-031: Auth architecture doc predates ADR-028 A9
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, R3 wrap-up (task 090) |
+| **What** | `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md` exists only on `work/spaarke-auth-system-of-record-r1` (last commit 2026-10-10). Its §5.3, §5.8 and §8.2 predate A9: the WorkforceHome plane, the A9 identity routes, and the decisions A9 closed. |
+| **Decision** | Handed to spaarke-auth-system-of-record-r1 when it resumes; otherwise R4 lands the doc on master. R3 does not edit another project's branch. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2534 |
+
+### ISS-032: UAC provisioning timeout test is flaky under machine load
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, R3 wrap-up (task 090) test triage |
+| **What** | `ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_FailsLoudlyAndLogsTheContainerId` failed twice with a real-clock 30 s `WaitAsync` timeout while other full suites ran. It passed 5 / 5 alone. The endpoint has no logic race. |
+| **Decision** | Filed to unified-access-control-r2 (the test's owner): register it `TimingSensitive`, or lengthen the real-clock waits. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2543 |

@@ -64,7 +64,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 077 | BFF default scheme accepts the bare app-id audience (v2 tokens) before the 059 v2 switch | P4b | ✅ [done] 2026-10-19 | 045 | O/h | FULL | A9 (from 059 stop S-1; owner 2026-10-19) |
 | 078 | ISS-010 quick fix: read_query / search_data hide internal-only communications from licensed users flagged external | R3 hardening | ✅ | 065 | O/h | FULL | ISS-010 #1864 (owner 2026-10-20) |
 | 079 | #2458 / ISS-024: grant notifier skips the external email for a home-linked WorkforceHome contact | P7 | ✅ [done] 2026-11-01 PR #2500 (fcf01480f4), deployed to dev 14:03:20Z; also fixes #2491; live re-check waived by owner; follow-ups #2499, #2508 (R4) | 036 | S/h | FULL | — |
-| 090 | Project wrap-up | Wrap-up | 🔲 [open] | all | S/h | FULL | — (serial) |
+| 090 | Project wrap-up | Wrap-up | ✅ [done] 2026-11-03 | all | S/h | FULL | — (serial) |
 
 ## Parallel Execution Plan
 
