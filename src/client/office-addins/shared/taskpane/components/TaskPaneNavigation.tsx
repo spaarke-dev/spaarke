@@ -4,6 +4,7 @@ import {
   SaveRegular,
   SearchRegular,
   MailRegular,
+  ReceiptRegular,
   // V1: Disabled icons - uncomment for future releases
   // ShareRegular,
   // ClockRegular,
@@ -61,14 +62,15 @@ const useStyles = makeStyles({
  * legacy member wired to a job-status placeholder in App.tsx — do not conflate the two.
  */
 export type NavigationTab = 'save' | 'createTodo' | 'find' | 'email' | 'share' | 'recent' | 'search' | 'invoice';
-// Task 133: `invoice` is the Outlook "Submit Invoice" view. It is deliberately NOT in TAB_CONFIGS — no tab reaches
-// it; only the ribbon's `?action=submitInvoice` opens it (App `initialAction`).
+// Task 133: `invoice` is the Outlook "Submit Invoice" view — a tab since package 1.1.4 (owner UAT 2026-11-03: "shouldn't
+// Submit Invoice just be a tab"; its ribbon button is gone). A cached older manifest's `?action=submitInvoice` still
+// opens it (App `initialAction`).
 
 /**
  * The host capabilities the tab table can be gated on (task 096). A subset of `HostCapabilities`, so callers
  * pass `hostAdapter.getCapabilities()` straight through.
  */
-export type TabCapabilities = Pick<HostCapabilities, 'canEmailFromPane'>;
+export type TabCapabilities = Pick<HostCapabilities, 'canEmailFromPane' | 'canGetAttachments'>;
 
 /**
  * Tab configuration.
@@ -121,6 +123,15 @@ const TAB_CONFIGS: TabConfig[] = [
     label: 'To Do',
     icon: <MicrosoftToDoIcon active />,
     availableFor: ['outlook', 'word'],
+  },
+  {
+    // Task 133 (package 1.1.4): Submit Invoice, for a received email — the `canGetAttachments` CAPABILITY (Outlook read
+    // mode), never a `hostType` list. The view starts on the record the email is filed to.
+    value: 'invoice',
+    label: 'Invoice',
+    icon: <ReceiptRegular />,
+    availableFor: ['outlook', 'word'],
+    requiresCapability: 'canGetAttachments',
   },
   {
     // Find frame (task 015 / FR-03) — both hosts. The Find VIEW (similarity results,

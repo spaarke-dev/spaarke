@@ -204,6 +204,27 @@ describe('Open Spaarke replaces Share on the Word ribbon (task 089, UAT-10)', ()
   });
 });
 
+describe('Submit Invoice and Create To Do are pane tabs, not Outlook ribbon buttons (task 133, package 1.1.4)', () => {
+  it('the package has no Submit Invoice or Create To Do button and no runtime that opens the pane on an action', () => {
+    const merged = buildFromSources();
+    const ids = idsOf(merged);
+    const outlookControls = merged.extensions[0].ribbons
+      .filter((r: Json) => r.requirements.scopes[0] === 'mail')
+      .flatMap((r: Json) => r.tabs.flatMap((t: Json) => t.groups.flatMap((g: Json) => g.controls)));
+
+    expect(ids.controls).not.toEqual(expect.arrayContaining(['SubmitInvoiceButton']));
+    expect(ids.controls).not.toEqual(expect.arrayContaining(['CreateTodoButton']));
+    expect(outlookControls.map((c: Json) => c.label)).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/Submit Invoice|Create To Do/)])
+    );
+    expect(JSON.stringify(merged)).not.toMatch(/\?action=(submitInvoice|createTodo)/);
+    // Save to Spaarke (which opens the pane, with its Invoice and To Do tabs) and Quick Save stay.
+    expect(outlookControls.map((c: Json) => c.id)).toEqual(
+      expect.arrayContaining(['SaveToSpaarkeButton', 'QuickSaveButton'])
+    );
+  });
+});
+
 describe('icons — every icon URL in the package must resolve', () => {
   it('points an icon that does not exist at the same-size Spaarke icon, and fails when no fallback exists', () => {
     const merged = buildFromSources();

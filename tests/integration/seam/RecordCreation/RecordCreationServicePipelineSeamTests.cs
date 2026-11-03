@@ -112,7 +112,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
                 new Entity(table, id) { ["sprk_matternumber"] = "MAT-000013" });
 
         // Task 015 (step 8, FR-10): a search-indexed table's owner team is read for its business unit, and that unit for its
-        // search-index defaults — none set in this world, so nothing is filled (SearchIndexDefaultTests covers the fill).
+        // search-index defaults — none set in this world. Since task 041 step 8 fills nothing (SearchIndexDefaultTests).
         _readBack
             .Setup(e => e.RetrieveAsync("team", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
@@ -142,7 +142,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             (RecordCreationStep.CallerChecks, RecordCreationStepState.Ran),
             (RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran),
             (RecordCreationStep.Owner, RecordCreationStepState.Ran),
-            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.Ran), // task 039: an event is search-indexed now
+            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp), // task 041: the index follows the content type
             (RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran),
             (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Ran),
             (RecordCreationStep.Create, RecordCreationStepState.Ran),
@@ -254,7 +254,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             (RecordCreationStep.CallerChecks, RecordCreationStepState.Skipped),
             (RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran),
             (RecordCreationStep.Owner, RecordCreationStepState.Ran),
-            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.Ran), // task 039: an event is search-indexed now
+            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp), // task 041: the index follows the content type
             (RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran),
             (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Ran),
             (RecordCreationStep.Create, RecordCreationStepState.Ran),

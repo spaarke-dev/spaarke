@@ -994,7 +994,6 @@ public static class AnalysisEndpoints
             ContentType: null,
             DocumentId: documentId.ToString(),
             ParentEntity: parentEntity,
-            SearchIndexName: null,
             Source: "LinearDocumentProfile",
             CorrelationId: httpContext.TraceIdentifier);
 

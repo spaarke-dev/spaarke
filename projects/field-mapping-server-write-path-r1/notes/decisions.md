@@ -714,3 +714,22 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 - **Chat tool description:** re-seeded on dev (row `18b3531f-…`) so the model knows that `sprk_eventnumber` is set by the server.
 - **042a:** done in #2521 (merged 2026-11-02T19:28Z); the index is now ✅.
 - **Next:** 041 and 042b, **in sequence, not in parallel** (TASK-INDEX: both edit `RecordCreationService*.cs`). 041 goes first because W3 waits on it. 020 depends only on 019 and may run beside 041. UAC-r2 reviews the 041 diff (scoped) and the 042b diff (full) before merge.
+
+## 2026-11-03 — Task 041: review and UAC-r2 verdict
+
+- **Opus adversarial review.** Over c58ea58faf. 0 High, and no authorization bypass, existence oracle or data-loss path. Two findings were F-class:
+  - F4: the bulk handler and the Office worker did not stamp the index. Fixed in round 1.
+  - F3: the MF7 test proved nothing. Fixed in round 1.
+  - K4 items 3–5 were also fixed in round 1.
+- **Scoped Sonnet re-check.** Over b087022071. All five findings fixed, and nothing F-class new. N1 (a scoped service held by the Office worker), N3 and N4 were fixed in round 2 (bdadc2a3b9). N2 (the Office worker's stamp has no harness) is a disclosed known limit.
+- **Filed.**
+  - DI-013 #2538: the backfill scripts.
+  - DI-014 #2539: the DeliverToIndex node reports an index it does not use.
+  - The P2-5 note in task-019 is corrected: a malformed client index is dropped but no longer logged (K4).
+- **UAC-r2 verdict (AC17).** "PASSES WITH NOTES; nothing blocks the PR."
+  - Only write-time routing was removed, and no retrieval trim or search-time selection moved.
+  - The drops are intact at all nine sites.
+  - The AC9 exceptions are as listed, and no drop, refusal or authorization assertion was weakened.
+  - NOTE 1: restore the document trigger-2 Repair test as owner-only. Done in round 3.
+  - NOTE 2: the removed `ResolveAsync` Verify in Issue1510 is correct, so no action.
+- **UAC-r2 on task 020 F-1.** No objection to refusing a caller-supplied `sprk_issecure` on a Matter create in the service with `sdap.access.secure_flag_transition_only`, exactly as for Project, with explicit false and null treated as the Project rule treats them. UAC-r2 sees the diff before merge.

@@ -9,6 +9,7 @@
  * - §2 `POST /api/finance/invoice-submissions/from-email` — {@link submitInvoiceFromEmail};
  * - §3 `GET statusUrl` until the status is final — {@link pollSubmission};
  * - §8 `GET /api/finance/core-records/{entityType}/{entityId}/firms` — {@link loadInvoiceFirms};
+ * - §11 `GET /api/finance/invoice-submissions?internetMessageId=` — {@link loadPreviousSubmission} (ebilling 095a);
  * - §5, §6 and §9 codes → user text in `utils/invoiceSubmissionMessages.ts`.
  *
  * The request's `email` is EXACTLY `/office/save`'s: built by the ribbon Quick Save's `buildEmailSaveRequest` (only its
@@ -52,7 +53,10 @@ import {
   type InvoiceCorrectionPrefill,
   type InvoiceFiledUnder,
   type InvoiceFirmOption,
+  type InvoicePreviousSubmission,
   type InvoiceSubmissionInput,
+  type FollowPreviousSubmission,
+  type LoadPreviousSubmission,
   type InvoiceSubmissionMark,
   type InvoiceSubmissionTarget,
   type InvoiceSubmitHandler,
@@ -689,6 +693,149 @@ export async function loadCorrectionPrefill(
   const prefill = readCorrectionPrefill(await response.json().catch(() => null));
   if (!prefill) throw new Error(UNREADABLE_PREFILL_MESSAGE);
   return prefill;
+}
+
+export const SUBMISSIONS_BY_EMAIL_ROUTE = '/api/finance/invoice-submissions';
+
+const PREVIOUS_STATUSES: ReadonlySet<string> = new Set<InvoicePreviousSubmission['status']>([
+  'Received',
+  'Processing',
+  'Accepted',
+  'Rejected',
+  'Failed',
+]);
+
+const PREVIOUS_UNREADABLE_MESSAGE =
+  "Spaarke's answer about this email's earlier invoice submission couldn't be read. Try again.";
+
+/** The sentence for a final status, from its outcome code (the same words the view shows after a submit); else null. */
+function previousSubmissionMessage(
+  status: InvoicePreviousSubmission['status'],
+  outcomeReasonCode: string | null,
+  replacedByTrackingNumber: string | undefined
+): string | null {
+  if (status === 'Accepted') return describeAcceptedOutcome(outcomeReasonCode, replacedByTrackingNumber) ?? null;
+  if (status === 'Rejected' || status === 'Failed') return describeInvoiceOutcome(outcomeReasonCode, {}, status);
+  return null;
+}
+
+function replacedByTracking(json: Record<string, unknown>): string | undefined {
+  const replacedBy = json.replacedBy;
+  return replacedBy && typeof replacedBy === 'object'
+    ? stringOrUndefined((replacedBy as Record<string, unknown>).trackingNumber)
+    : undefined;
+}
+
+/** A §11 200 body, or undefined when it has no submission id or a status this build does not know. */
+function readPreviousSubmission(json: Record<string, unknown> | null): InvoicePreviousSubmission | undefined {
+  if (!json) return undefined;
+  const submissionId = stringOrUndefined(json.submissionId);
+  const status = stringOrUndefined(json.status);
+  if (!submissionId || !status || !PREVIOUS_STATUSES.has(status)) return undefined;
+  const typedStatus = status as InvoicePreviousSubmission['status'];
+  const by =
+    json.submittedBy && typeof json.submittedBy === 'object' ? (json.submittedBy as Record<string, unknown>) : null;
+  const submittedBy = stringOrUndefined(by?.name)?.trim() || null;
+  return {
+    submissionId,
+    statusUrl: `${SUBMISSIONS_BY_EMAIL_ROUTE}/${encodeURIComponent(cleanGuid(submissionId))}`,
+    trackingNumber: stringOrUndefined(json.trackingNumber) || null,
+    status: typedStatus,
+    message: previousSubmissionMessage(
+      typedStatus,
+      stringOrUndefined(json.outcomeReasonCode) ?? null,
+      replacedByTracking(json)
+    ),
+    invoiceId: stringOrUndefined(json.invoiceId) || null,
+    submittedOn: stringOrUndefined(json.submittedOn) || null,
+    submittedBy,
+    isCorrection: json.isCorrection === true,
+  };
+}
+
+/**
+ * The email's latest invoice submission the caller can read (§11, ebilling 095a), or null when there is none to show:
+ * the uniform 404 (none, not readable, or a refused check), and 503 `ebilling.disabled` (Submit says that itself). Any
+ * other failure THROWS with a sentence: the route never says "not submitted" when it could not decide, and nor does this.
+ */
+export async function loadPreviousSubmission(
+  internetMessageId: string,
+  config: InvoiceServiceConfig,
+  signal?: AbortSignal
+): Promise<InvoicePreviousSubmission | null> {
+  let response: Response;
+  try {
+    const token = await config.getAccessToken();
+    response = await authenticatedJsonFetch(
+      `${config.apiBaseUrl}${SUBMISSIONS_BY_EMAIL_ROUTE}?internetMessageId=${encodeURIComponent(internetMessageId)}`,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' }, ...(signal ? { signal } : {}) },
+      token,
+      { getRetryToken: config.getAccessToken }
+    );
+  } catch {
+    throw new Error(
+      "Couldn't reach Spaarke to check whether this email's invoice was already submitted. Check your connection and try again."
+    );
+  }
+  const json = await readJson(response);
+  if (!response.ok) {
+    if (response.status === 404) return null;
+    if (response.status === 503 && problemCode(503, json) === 'ebilling.disabled') return null;
+    throw new Error(
+      "Spaarke couldn't check whether this email's invoice was already submitted. Try again in a moment."
+    );
+  }
+  const previous = readPreviousSubmission(json);
+  if (!previous) throw new Error(PREVIOUS_UNREADABLE_MESSAGE);
+  return previous;
+}
+
+/**
+ * The view's {@link LoadPreviousSubmission} over the host adapter: the open email's RFC Message-ID (capability-gated, as
+ * the suggested-record lookup reads it; never a hostType check). No Message-ID (a draft, or a host without the lookup)
+ * means there is nothing to look up.
+ */
+export function createPreviousSubmissionLoader(deps: {
+  config: InvoiceServiceConfig;
+  adapter: IHostAdapter;
+}): LoadPreviousSubmission {
+  return async signal => {
+    const { adapter } = deps;
+    if (!adapter.getCapabilities().canResolveEmailIdentity || !adapter.getEmailIdentityKeys) return null;
+    let internetMessageId: string | undefined;
+    try {
+      internetMessageId = (await adapter.getEmailIdentityKeys())?.internetMessageId;
+    } catch (err) {
+      console.warn('[invoiceSubmissionService] No Message-ID; no earlier submission is looked up.', err);
+      return null;
+    }
+    if (!internetMessageId) return null;
+    return loadPreviousSubmission(internetMessageId, deps.config, signal);
+  };
+}
+
+/**
+ * The view's {@link FollowPreviousSubmission}: follows the status URL (§3) as a submit does. A final status updates the
+ * submission and its sentence; a status not known in time, or one that can't be read, leaves it as it was.
+ */
+export function createPreviousSubmissionFollower(deps: {
+  config: InvoiceServiceConfig;
+  poll?: Omit<Parameters<typeof pollSubmission>[1], 'config'>;
+}): FollowPreviousSubmission {
+  return async (submission, signal) => {
+    const polled = await pollSubmission(submission.statusUrl, {
+      config: deps.config,
+      ...deps.poll,
+      ...(signal ? { signal } : {}),
+    });
+    if (polled.kind === 'aborted') return null;
+    if (polled.kind !== 'final') return submission;
+    return {
+      ...submission,
+      status: polled.status,
+      message: previousSubmissionMessage(polled.status, polled.outcomeReasonCode, polled.replacedByTrackingNumber),
+    };
+  };
 }
 
 /** The text context for messages: the file the user marked Invoice, from the client's own marks. */

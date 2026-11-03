@@ -123,3 +123,33 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Out of scope, pre-existing: 039 covers record create/update payloads; search trims by live Read (design §13.3b), so routing, not disclosure |
 | **Owner task** | Owner decision: does FR-38 cover where a document is indexed? |
 | **Failure** | `POST /api/ai/rag/index-file` passes a client, allow-listed `searchIndexName` to `FileIndexingService` (`:140`, `:224`, `:272`), so the chunks land in the index the client named, not the record's server-owned one |
+
+## DI-013 — The multi-container backfill scripts contradict FR-40
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 041 implementer (backfill inventory in `task-041-notes.md`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2538 |
+| **Class** | Out of scope, pre-existing: the scripts are run by hand and have not been run under 041 |
+| **Owner task** | Unassigned; the runbook note goes in task 062 |
+| **Failure** | `Backfill-MultiContainerMultiIndex-Documents.ps1` stamps the literal `spaarke-files-index`, which is wrong wherever `KnowledgeIndexName` differs. `…-ParentRecords.ps1` writes record index columns that FR-40 says have no writer |
+
+## DI-014 — The DeliverToIndex playbook node reports an index it never uses
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 041 adversarial review (finding 8) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2539 |
+| **Class** | Out of scope, pre-existing (F1, user-visible text): outside 041's diff, and it touches the JPS node config contract |
+| **Owner task** | Unassigned (AI playbook owners) |
+| **Failure** | `DeliverToIndexNodeExecutor` requires `indexName` and reports it in its output, but the enqueued payload carries no index. Under FR-40 the file always goes to `KnowledgeIndexName`, so the output names the wrong index |
+
+## DI-015 — Ribbon-only BFF create tables are not in the client set
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 020 implementer |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2540 |
+| **Class** | Out of scope: changing the client routing of three tables needs its own decision, and billingevent is in ebilling-r1's area |
+| **Owner task** | Unassigned; ebilling-r1 must agree to the billingevent part |
+| **Failure** | `CreateTables` has sprk_budget, sprk_kpiassessment and sprk_billingevent; `BFF_CHILD_CREATE_TABLES` does not, so a wrapped client create of these tables bypasses the BFF. Pinned as `RibbonOnlyCreateTables` in `ChildRecordCreateTablesAgreementTests` |
