@@ -102,12 +102,19 @@ R3 closes with these filed issues still open. Each has a home:
 | #1886 Document lists show rows with no file | R4 backlog (documents) |
 | #1930 WorkforceHome scheme tests order-dependent | R4 backlog (test hygiene) |
 | #2125 Grid overview tool and external-flagged callers | unified-access-control-r2 |
+| #2269 Retryable binder faults answer 403, should be 503 | R4 backlog (UAC reviews) |
+| #2270 Contacts created in a foreign environment have no owner | R4 backlog; needs an owner decision on the owner-team source |
+| #2271 Document lock 409 has no ProblemDetails title or status | R4 backlog (documents) |
+| #2275 `no-mock-identity.test.tsx` cold-start timeout | R4 backlog (test hygiene) |
+| #2278 Backfill the owner of existing app-owned contacts | R4 backlog, with #1673 |
 | #2415 Removal sweep telemetry on an empty pass | unified-access-control-r2 (removal sweep) |
 | #2499 Contact identity store in-memory double | R4 backlog (test debt) |
 | #2534 Auth architecture doc predates ADR-028 A9 | spaarke-auth-system-of-record-r1, else R4 |
 | #2543 Provisioning timeout test flaky under load | unified-access-control-r2 (test owner) |
 
 Already in R4's `design.md` §7: #2446, #2447, #2489, #2490, #2508.
+
+#2269, #2270, #2271, #2275 and #2278 were filed on 2026-10-22 with "Owner: R3" during the ISS-004/ISS-005 work, but were not in this table until 2026-11-04, when R4 asked. All five were still open and unfixed on master then. #1566 (FR-18, task 042) and #1568 (FR-19, task 011) were closed as done the same day.
 
 ## Changelog
 
