@@ -3379,6 +3379,24 @@ public partial class InvoiceSubmissionPersisterTests
                             : Task.FromResult(AnswerEarlierInvoices(q));
                     }
 
+                    // Task 095c-5 review K1: the app-only read of the replaced invoice's firm hold (the invoice's own column; no linked submission).
+                    if (q.EntityName == "sprk_invoice" && q.ColumnSet.Columns.Contains(InvoiceFirmHold.InvoiceHoldColumn))
+                    {
+                        if (HoldReadFault is { } holdFault)
+                        {
+                            return Task.FromException<EntityCollection>(holdFault);
+                        }
+
+                        var asked = q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToHashSet();
+                        return Task.FromResult(new EntityCollection(OldInvoice is { } held && asked.Contains(held.Id) ? [Copy(held)] : []));
+                    }
+
+                    if (q.EntityName == FinanceBaseValues.SubmissionEntity
+                        && q.Criteria.Conditions.Any(c => c.AttributeName == InvoiceSubmissionPersister.SubmissionInvoice && c.Operator == ConditionOperator.In))
+                    {
+                        return Task.FromResult(new EntityCollection());
+                    }
+
                     return Task.FromResult(q.EntityName == InvoiceSubmissionPersister.LineEntity
                         ? new EntityCollection(StoredLines.ToList())
                         : Isolation.Answer(q));
@@ -3714,6 +3732,9 @@ public partial class InvoiceSubmissionPersisterTests
 
         /// <summary>Task 097c: the old invoice as Dataverse keeps it (statecode, statuscode, versionnumber, firm, core lookup); null: none.</summary>
         public Entity? OldInvoice { get; set; }
+
+        /// <summary>Task 095c-5 review K1: non-null, the app-only read of the replaced invoice's firm hold throws this.</summary>
+        public Exception? HoldReadFault { get; set; }
 
         /// <summary>Task 097c: the old invoice no longer exists.</summary>
         public bool OldInvoiceDeleted { get; set; }

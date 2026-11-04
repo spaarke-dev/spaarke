@@ -1676,6 +1676,30 @@ public class InvoiceSubmissionService
                 "The invoice to correct is from another firm, so this submission cannot replace it. Nothing was saved."), null);
         }
 
+        // Task 095c-5 review K1: a held invoice is treated as one with no firm, whatever its firm column says now (the column is writable),
+        // so a request that names a firm never matches it. The hold is read app-only (_entities), never from the caller's row; a read
+        // fault is the same 503 as the submission read below.
+        if (firmId is not null)
+        {
+            bool held;
+            try
+            {
+                held = await InvoiceFirmHold.IsHeldAsync(_entities, invoice.Id, ct);
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogWarning(ex, "Invoice correction refused: the firm hold of invoice {InvoiceId} could not be read", invoice.Id);
+                return (InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "The invoice to correct could not be checked right now. Nothing was saved; try again shortly."), null);
+            }
+
+            if (held)
+            {
+                return (CorrectionRefused(invoice.Id, FromEmailCorrectionReasons.DifferentFirm,
+                    "The invoice to correct is from another firm, so this submission cannot replace it. Nothing was saved."), null);
+            }
+        }
+
         if (!IsCore(EligibleApproverResolver.SingleCoreOf(FinanceBaseValues.InvoiceEntity, invoice), core))
         {
             return (DifferentCoreRecord(invoice.Id), null);
@@ -1785,6 +1809,11 @@ public class InvoiceSubmissionService
         if (refusal is null)
         {
             return new CorrectionPrefillJudgement(submission, true, null);
+        }
+
+        if (refusal.StatusCode == StatusCodes.Status503ServiceUnavailable)
+        {
+            return null; // a read fault (the route answers 503), never reported as a reason
         }
 
         var reason = refusal.Extensions is { } extensions && extensions.TryGetValue("reason", out var value) ? value as string : null;

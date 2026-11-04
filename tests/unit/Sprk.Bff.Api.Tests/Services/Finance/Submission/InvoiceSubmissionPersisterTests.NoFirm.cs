@@ -187,6 +187,47 @@ public partial class InvoiceSubmissionPersisterTests
         store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
     }
 
+    // ── 095c-5 review K1: a held invoice is not replaced by a submission that names a firm, whatever its firm column says ──
+
+    [Fact(DisplayName = "095c-5 K1 (must fire): a Correction naming the firm of an invoice held for a firm (sprk_firmhold set, firm column set) is refused different_firm at commit, nothing sent")]
+    public async Task HeldInvoice_WithItsFirmColumnSet_CorrectionNamingThatFirm_IsRefusedAtCommit()
+    {
+        var store = CorrectionStore();
+        store.OldInvoice![InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;
+        store.OldInvoice.Contains("sprk_vendororg").Should().BeTrue("the firm column names the same firm as the correction");
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Refused);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.CorrectionDifferentFirm);
+        store.Transactions.Should().BeEmpty();
+        store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+    }
+
+    [Fact(DisplayName = "095c-5 K1: the hold of the replaced invoice cannot be read at commit - Retry, never committed as 'not held'")]
+    public async Task HeldInvoice_HoldReadFault_IsRetry_NothingSent()
+    {
+        var store = CorrectionStore();
+        store.HoldReadFault = new TimeoutException("throttled");
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Retry);
+        store.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095c-5 K1 must not fire: an ordinary firm invoice (hold column present and empty) corrected with its firm is committed")]
+    public async Task OrdinaryFirmInvoice_HoldColumnEmpty_CorrectionKeepingTheFirm_IsCommitted()
+    {
+        var store = CorrectionStore();
+        store.OldInvoice![InvoiceFirmHold.InvoiceHoldColumn] = null;
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.Superseded);
+    }
+
     // ── 104 D-43: no predecessor for a submission with no firm ──
 
     [Fact(DisplayName = "095c-3: a no-firm submission is never linked to a Returned to Firm invoice, not even a no-firm one of the same number and record; nothing is queried")]

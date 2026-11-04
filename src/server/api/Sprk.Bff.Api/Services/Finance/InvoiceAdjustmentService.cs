@@ -83,6 +83,13 @@ public static class AdjustmentCodes
 
     /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/>.</summary>
     public const string FirmMissingDetail = "This invoice has no firm, so no billing rule can be cited. Add the firm first, or add the adjustment without a rule.";
+
+    /// <summary>095c-5 review K2: the sentence with <see cref="FirmMissing"/> when the invoice shows a firm but is held for one
+    /// (<see cref="InvoiceFirmNeed.Held"/>); the code is the same as for no firm, as approve does.</summary>
+    public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned, so no billing rule can be cited. Add the adjustment without a rule, or cite one once the firm is assigned.";
+
+    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
+    public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
 }
 
 /// <summary>An Adjustment line as the reviewer needs it to update the screen without a second read.</summary>
@@ -248,9 +255,10 @@ public sealed class InvoiceAdjustmentService
             }
 
             // Task 095c-4: the options are the firm's rules; with no firm there are none to offer (never the empty firm's).
-            if (InvoiceFirmHold.HasNoFirm(invoice))
+            // Task 095c-5 review K2: nor for a held invoice, whatever its firm column says now (read app-only; a fault is Unavailable below).
+            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
             {
-                return new AdjustmentRulesResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.FirmMissingDetail);
+                return new AdjustmentRulesResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.FirmDetailFor(need));
             }
 
             var (asOf, rules) = await ReadOptionsAsync(invoice, ct).ConfigureAwait(false);
@@ -454,9 +462,20 @@ public sealed class InvoiceAdjustmentService
         if (command.RuleId is { } ruleId)
         {
             // Task 095c-4: a cited rule is one of the firm's; with no firm there is none to cite.
-            if (InvoiceFirmHold.HasNoFirm(invoice))
+            // Task 095c-5 review K2: nor a held invoice's, whatever its firm column says now (read app-only; a fault is Unavailable).
+            InvoiceFirmNeed need;
+            try
             {
-                return new AdjustmentResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.FirmMissingDetail);
+                need = await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return ReadFailed(command.InvoiceId, ex);
+            }
+
+            if (need != InvoiceFirmNeed.None)
+            {
+                return new AdjustmentResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.FirmDetailFor(need));
             }
 
             IReadOnlyList<AdjustmentRuleOptionDto> options;

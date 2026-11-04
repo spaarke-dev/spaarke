@@ -946,4 +946,26 @@ public sealed class InvoiceCorrectionServiceTests
         result.Detail.Should().Be(CorrectionCodes.FirmHeldDetail, "095c-4 review K1: the invoice shows a firm, so the sentence says it is waiting for one");
         NothingWritten(world);
     }
+
+    [Fact(DisplayName = "095c-5 K5: a line or header correction of an invoice held by its own sprk_firmhold alone (a firm set, no submission hold) is 409 firm_missing and writes nothing")]
+    public async Task HeldByTheInvoiceColumnAlone_Correction_Is409FirmMissing_WritesNothing()
+    {
+        var world = new CorrectionWorld();
+        world.Submission = null; // no submission at all: only the invoice's own hold remains
+        world.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] =
+            Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldValue;
+        world.Invoice.Contains("sprk_vendororg").Should().BeTrue("the firm column is set");
+
+        var line = await world.Service().CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+        var header = await world.Service().CorrectAsync(Header("TotalDue", "2400"), CancellationToken.None);
+
+        foreach (var result in new[] { line, header })
+        {
+            result.Status.Should().Be(CorrectionStatus.FirmMissing);
+            result.Code.Should().Be(CorrectionCodes.FirmMissing);
+            result.Detail.Should().Be(CorrectionCodes.FirmHeldDetail);
+        }
+
+        NothingWritten(world);
+    }
 }
