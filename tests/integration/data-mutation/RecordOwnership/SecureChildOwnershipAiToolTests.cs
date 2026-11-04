@@ -650,8 +650,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             identity ?? IdentityNormalizationFixtures.WithContact(CallerContact).Object,
             // Task 017 (2d-3): the owned create is the ONE server create, over this harness's collaborators (its share world
             // and stamp world, as the route's suites build it).
-            RouteRecordCreation.Over(resolver ?? _world.Resolver(), _appOnly.Object, Restamper(), Shares(),
-                rootFiling ?? SecureRootFilingGateFixtures.NothingSecure()));
+            RouteRecordCreation.Over(resolver ?? _world.Resolver(), _appOnly.Object, _serviceRestamper ?? Restamper(), Shares(),
+                rootFiling ?? SecureRootFilingGateFixtures.NothingSecure(), entities: _serviceEntities?.Object));
 
     private Task<ToolResult> CreateRecord(string table, params (string Column, JsonElement Value)[] item) =>
         CreateRecordHandler().ExecuteChatAsync(
@@ -945,6 +945,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_corerecordtype", "sprk_recordtype_ref", "sprk_CoreRecordType"),
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                // Task 042c fix round 2 (B'): the project stamp, for a row filed under two core records.
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
             },
             // Field mapping task 042c (#2561): the Decision Record's core matter, the core pair's type, the invoice subject and
             // the matter stamp.
@@ -954,6 +956,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_corerecordtype", "sprk_recordtype_ref", "sprk_CoreRecordType"),
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                // Task 042c fix round 2 (B'): the project stamp, for a row filed under two core records.
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
             },
             // Task 147 r1 E2 (the secure-record ribbon's "New Budget"): sprk_Matter_Budget_1n, live 2026-10-04.
             ["sprk_budget"] = new[]

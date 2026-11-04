@@ -493,6 +493,114 @@ public class WriterBuilderOwnershipParityTests
         }).Should().Be(world.MatterInY.ToString("D").ToLowerInvariant());
     }
 
+    // ── Task 042c fix round 2 (B', owner 2026-11-04): a HALF core pair is filled, replaced or cleared, never written or refused ──
+    // Ruling 10: the system principal applies the same rules as the caller (step 6¾ runs for both), and a completed row is owned
+    // as the reconciler owns the written row (ruling 1's parity: the filled core is asked first by both).
+
+    [Theory(DisplayName = "042c B' rulings 1-7 and 10: a create (system principal, and the caller for the fill) naming a core TYPE with no id is completed from the row as it ends — filled, replaced or cleared with its warning, or refused 503 / 409 on a fault / a Secure root — and a completed row is owned as the reconciler owns the written row")]
+    [InlineData("sprk_signal", "system", "fill from the plan")]
+    [InlineData("sprk_signal", "caller", "fill from the plan")]
+    [InlineData("sprk_signal", "system", "fill, filed under the root")]
+    [InlineData("sprk_signal", "system", "replace")]
+    [InlineData("sprk_signal", "system", "clear, no root")]
+    [InlineData("sprk_signal", "system", "clear, no catalog row")]
+    [InlineData("sprk_signal", "system", "catalog fault")]
+    [InlineData("sprk_signal", "system", "planning fault")]
+    [InlineData("sprk_signal", "system", "secure root")]
+    [InlineData("sprk_decisionrecord", "system", "fill from the plan")]
+    [InlineData("sprk_decisionrecord", "caller", "fill from the plan")]
+    [InlineData("sprk_decisionrecord", "system", "fill, filed under the root")]
+    [InlineData("sprk_decisionrecord", "system", "replace")]
+    [InlineData("sprk_decisionrecord", "system", "clear, no root")]
+    [InlineData("sprk_decisionrecord", "system", "clear, no catalog row")]
+    [InlineData("sprk_decisionrecord", "system", "catalog fault")]
+    [InlineData("sprk_decisionrecord", "system", "planning fault")]
+    [InlineData("sprk_decisionrecord", "system", "secure root")]
+    public async Task ACreateWithAHalfCorePair_IsCompletedFromTheRowAsItEnds(string table, string principal, string @case)
+    {
+        var world = new CreateParityWorld();
+        var type = CreateParityWorld.MatterRecordType;
+        (string Column, string Target, Guid Id)[] lookups = [("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice)];
+        switch (@case)
+        {
+            case "fill, filed under the root":
+                lookups = [("sprk_regardingmatter", "sprk_matter", world.MatterInY)];
+                break;
+            case "replace":
+                world.InvoiceUnder(world.MatterInY);
+                type = CreateParityWorld.DocumentRecordType;
+                break;
+            case "clear, no root":
+                world.InvoiceUnderNothing();
+                break;
+            case "clear, no catalog row":
+                world.InvoiceUnder(world.MatterInY);
+                world.CatalogByTable["sprk_matter"] = [];
+                break;
+            case "catalog fault":
+                world.InvoiceUnder(world.MatterInY);
+                world.CatalogFault = new InvalidOperationException("Scripted catalog fault.");
+                break;
+            case "planning fault":
+                world.InvoiceUnder(world.MatterInY);
+                world.FailInvoiceRead();
+                break;
+            case "secure root":
+                world.InvoiceUnder(world.SecureMatter);
+                break;
+            default:
+                world.InvoiceUnder(world.MatterInY);
+                break;
+        }
+
+        var (outcome, written) = await world.CreateWithHalfPairAsync(principal == "caller", table, type, lookups);
+
+        if (@case is "catalog fault" or "planning fault")
+        {
+            outcome.Refusal.Should().NotBeNull();
+            outcome.Refusal!.Code.Should().Be(RecordCreationRefusal.StampUnavailableCode, "ruling 6: the existing 503, never a clear");
+            RecordCreationProblemMap.StatusOf(outcome.Refusal).Should().Be(503);
+            world.Creates.Should().BeEmpty();
+            return;
+        }
+
+        if (@case == "secure root")
+        {
+            outcome.Refusal.Should().NotBeNull("ruling 7: the filled Secure root takes the normal path to row 8");
+            outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved);
+            outcome.Refusal.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
+            outcome.Refusal.OwnerDecision!.IsSecureOwner.Should().BeTrue();
+            world.Creates.Should().BeEmpty();
+            return;
+        }
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = world.Creates.Should().ContainSingle().Subject.Fields;
+        var noun = RecordCreationService.NounOf(table);
+        var cleared = @case.StartsWith("clear", StringComparison.Ordinal);
+        if (cleared)
+        {
+            outcome.MappingWarnings.Should().ContainSingle().Which.Should().Be(new RecordCreationWarning(
+                RecordCreationWarning.CoreRecordClearedCode, "sprk_corerecordtype", RecordCreationService.CoreRecordCleared(noun)));
+            fields.Keys.Should().NotContain(k => k.Contains("corerecord", StringComparison.OrdinalIgnoreCase), "neither column is written");
+            written!.Contains("sprk_corerecordtype").Should().BeFalse();
+        }
+        else
+        {
+            outcome.MappingWarnings.Should().ContainSingle().Which.Code.Should().Be(@case == "replace"
+                ? RecordCreationWarning.CoreRecordReplacedCode
+                : RecordCreationWarning.CoreRecordFilledCode);
+            written!.GetAttributeValue<string>("sprk_corerecordid").Should().Be(world.MatterInY.ToString("D"), "filled with the root as the row ends");
+            written.GetAttributeValue<EntityReference>("sprk_corerecordtype")!.Id.Should().Be(CreateParityWorld.MatterRecordType,
+                "the type is the root's catalog row (UAC-r2 (b): never a sent type beside an id of another type)");
+        }
+
+        var reconciler = await world.ReconcilerAnswerAsync(written!);
+        outcome.OwningTeamId.Should().Be(reconciler.OwningTeamId, "the create's owner is the reconciler's for the written row");
+        if (!cleared)
+            outcome.OwningTeamId.Should().Be(Directory.CustomerChildTeam, "the filled core (Y) is asked first");
+    }
+
     /// <summary>
     /// The REAL <see cref="RecordCreationService"/> over an
     /// <see cref="Directory"/> (the resolver's rows), a <see cref="CoreAncestorStamping.StampWorld"/> (the I-1 derivation and
@@ -529,6 +637,30 @@ public class WriterBuilderOwnershipParityTests
 
         /// <summary>Task 042c fix round 1: ids the service's app-only single-row read does not find (it throws, as Dataverse does).</summary>
         public HashSet<Guid> MissingRows { get; } = [];
+
+        /// <summary>Task 042c fix round 2 (B'): the active record-type catalog rows by table, as the service reads them
+        /// (<c>CoreAncestorResolver.RecordTypeOfCoreTableAsync</c>); a read of it faults with <see cref="CatalogFault"/>.</summary>
+        public Dictionary<string, List<Guid>> CatalogByTable { get; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_matter"] = [MatterRecordType],
+        };
+
+        public Exception? CatalogFault { get; set; }
+
+        /// <summary>Task 042c fix round 2 (B'): the invoice, team-owned in X, filed under no core record.</summary>
+        public void InvoiceUnderNothing()
+        {
+            _directory.WithRecord("sprk_invoice", Invoice, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+            _stamps.Row("sprk_invoice", Invoice);
+        }
+
+        /// <summary>Task 042c fix round 2 (B'): step 6½ cannot read the invoice (a planning fault).</summary>
+        public void FailInvoiceRead() => _stamps.FailRead("sprk_invoice", Invoice);
+
+        /// <summary>Task 042c fix round 2 (B'): a create naming the core pair's TYPE and no id, as the caller or the system.</summary>
+        public Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateWithHalfPairAsync(
+            bool asCaller, string table, Guid type, params (string Column, string Target, Guid Id)[] lookups) =>
+            CreateAsAsync(asCaller ? CallerPrincipal() : RecordCreationPrincipal.ForSystem(), table, lookups, null, type);
 
         public CreateParityWorld()
         {
@@ -695,7 +827,9 @@ public class WriterBuilderOwnershipParityTests
             // look like an unfiled row and could agree with the reconciler vacuously. Every lookup the item names must be on it.
             if (written is not null)
             {
-                foreach (var (column, target, lookupId) in lookups)
+                // Task 042c fix round 2 (B'): the core pair's type is the service's to fill, replace or clear (step 6¾); the theory
+                // asserts it on its own.
+                foreach (var (column, target, lookupId) in lookups.Where(l => l.Column != "sprk_corerecordtype"))
                 {
                     written.GetAttributeValue<EntityReference>(column).Should().Be(new EntityReference(target, lookupId),
                         $"the create body binds the item's {column}, so the written row holds it");
@@ -760,6 +894,18 @@ public class WriterBuilderOwnershipParityTests
             entities
                 .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) => _directory.Answer(query));
+            // Task 042c fix round 2 (B'): the catalog read by table (the directory answers reads by id only).
+            entities
+                .Setup(e => e.RetrieveMultipleAsync(
+                    It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()))
+                .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
+                {
+                    if (CatalogFault is { } fault)
+                        return Task.FromException<EntityCollection>(fault);
+                    var table = (string)query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_recordlogicalname").Values.Single();
+                    var ids = CatalogByTable.TryGetValue(table, out var rows) ? rows : [];
+                    return Task.FromResult(new EntityCollection(ids.Select(id => new Entity("sprk_recordtype_ref", id)).ToList()));
+                });
             entities
                 .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .Returns((string table, Guid id, string[] _, CancellationToken _) => MissingRows.Contains(id)

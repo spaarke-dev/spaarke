@@ -694,15 +694,79 @@ public class ExistingRowOwnershipParityTests
         built.CallerSystemUserId.Should().Be(reconciler.CallerSystemUserId);
         JsonSerializer.Serialize(built).Should().Be(JsonSerializer.Serialize(reconciler), "the whole question");
     }
-    [Theory(DisplayName = "042c fix round 1 (A-d, two stamps): ForRow with the core record asks the reconciler's primary, the same parents and gets the same owner when the row carries two stamps (their order after the primary differs: escalated, see task-042c-notes Fix round 1)")]
-    [InlineData("sprk_signal")]
-    [InlineData("sprk_decisionrecord")]
-    public async Task ForRow_WithTheCoreRecord_AndTwoStamps_HasTheReconcilersPrimaryParentsAndOwner(string table)
-    {
-        var (coreMatter, todo) = (Guid.NewGuid(), Guid.NewGuid());
-        var row = CoredRow(table, "two stamps", coreMatter, todo);
+    /// <summary>The owner kinds UAC-r2's K2 condition names (042c fix round 2): a Secure team, an ordinary team, a user, and a
+    /// record the resolver cannot read (it is not there).</summary>
+    private static readonly string[] OwnerKinds = ["secure team", "ordinary team", "user-owned", "unreadable or missing"];
 
-        var existing = await QuestionAsync(row);
+    /// <summary>Every combination of owner kinds for the subject (a To Do), its matter stamp and its project stamp, both tables.</summary>
+    public static TheoryData<string, string, string, string> TwoStampOwnerKinds()
+    {
+        var data = new TheoryData<string, string, string, string>();
+        foreach (var table in new[] { "sprk_signal", "sprk_decisionrecord" })
+            foreach (var subject in OwnerKinds)
+                foreach (var matter in OwnerKinds)
+                    foreach (var project in OwnerKinds)
+                        data.Add(table, subject, matter, project);
+        return data;
+    }
+
+    /// <summary>A root of <paramref name="table"/> owned as <paramref name="kind"/> says (nothing, for a record that is not there).</summary>
+    private void RootOwned(string table, Guid id, string kind)
+    {
+        switch (kind)
+        {
+            case "secure team":
+                _world.SecureRoot(table, id);
+                break;
+            case "ordinary team":
+                _world.OrdinaryRoot(table, id);
+                break;
+            case "user-owned":
+                _world.Add(table, id, ("owninguser", Ref("systemuser", SecureChildShareWorld.SomeUser)), ("sprk_issecure", false));
+                break;
+        }
+    }
+
+    [Theory(DisplayName = "042c fix round 2 (UAC-r2 K2 condition): with the core record and TWO stamps, ForRow(core) and ForExistingRowAsync give the same primary, the same parent set and the same owner (or the same refusal code) for every owner kind of the subject, the matter stamp and the project stamp (Secure team, ordinary team, user-owned, unreadable or missing); their order after the subject differs (CoreRecordEntities order vs lineage order)")]
+    [MemberData(nameof(TwoStampOwnerKinds))]
+    public async Task ForRow_WithTheCoreRecord_AndTwoStamps_HasTheReconcilersPrimaryParentsAndOwner(
+        string table, string subjectKind, string matterKind, string projectKind)
+    {
+        var (coreMatter, todo, matterX, project) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _world.OrdinaryRoot("sprk_matter", coreMatter);
+        RootOwned("sprk_matter", matterX, matterKind);
+        RootOwned("sprk_project", project, projectKind);
+        (string, string, Guid)[] todoLookups = [("sprk_regardingmatter", "sprk_matter", matterX), ("sprk_regardingproject", "sprk_project", project)];
+        switch (subjectKind)
+        {
+            case "secure team":
+                _world.SecureChild("sprk_todo", todo, todoLookups);
+                break;
+            case "ordinary team":
+                _world.OrdinaryChild("sprk_todo", todo, todoLookups);
+                break;
+            case "user-owned":
+                _world.UserOwnedChild("sprk_todo", todo, todoLookups);
+                break;
+        }
+
+        // The stamps are DERIVED from the To Do whatever the resolver can read of it: the derivation reads its own world (the
+        // To Do and both roots present), so an unreadable subject or stamp changes the owner question's answers, never its parents.
+        var derivation = SecureChildShareWorld.Standard()
+            .OrdinaryRoot("sprk_matter", matterX).OrdinaryRoot("sprk_project", project)
+            .UserOwnedChild("sprk_todo", todo, todoLookups);
+        var reads = new ExistingRowReads(Entities, SecureChildShareWorld.CoreAncestorsOver(() => derivation), _links);
+        var row = new Entity(table, Guid.NewGuid())
+        {
+            ["sprk_regardingtodo"] = Ref("sprk_todo", todo),
+            ["sprk_corerecordtype"] = Ref("sprk_recordtype_ref", CatalogMatter),
+            ["sprk_corerecordid"] = coreMatter.ToString("D"),
+            ["sprk_regardingrecordid"] = todo.ToString("D"),
+            ["sprk_regardingproject"] = Ref("sprk_project", project),
+            ["sprk_regardingmatter"] = Ref("sprk_matter", matterX),
+        };
+
+        var existing = await QuestionAsync(row, reads);
         var built = RecordOwnershipContext.ForRow(table, RecordOwnershipContext.LookupsOf(row), RecordOwnershipContext.PairIdOf(row),
             coreRecord: new RecordOwnershipParent("sprk_matter", coreMatter));
 
@@ -715,7 +779,11 @@ public class ExistingRowOwnershipParityTests
         built.Parents.Should().BeEquivalentTo(reconciler.Parents, "the same parents");
         built.SecureOnlyParents.Should().Equal(reconciler.SecureOnlyParents);
         built.ChildEntityLogicalName.Should().Be(reconciler.ChildEntityLogicalName);
-        (await Resolver.ResolveOwnerAsync(built, CancellationToken.None)).OwningTeamId.Should()
-            .Be((await Resolver.ResolveOwnerAsync(reconciler, CancellationToken.None)).OwningTeamId);
+        var fromBuilt = await Resolver.ResolveOwnerAsync(built, CancellationToken.None);
+        var fromReconciler = await Resolver.ResolveOwnerAsync(reconciler, CancellationToken.None);
+        fromBuilt.IsOwned.Should().Be(fromReconciler.IsOwned);
+        fromBuilt.OwningTeamId.Should().Be(fromReconciler.OwningTeamId, "the same owner");
+        fromBuilt.IsSecureOwner.Should().Be(fromReconciler.IsSecureOwner);
+        fromBuilt.RefusalCode.Should().Be(fromReconciler.RefusalCode, "or the same refusal code");
     }
 }

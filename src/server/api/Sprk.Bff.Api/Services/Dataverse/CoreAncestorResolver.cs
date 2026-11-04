@@ -1,4 +1,5 @@
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse.Models;
@@ -551,6 +552,36 @@ public sealed class CoreAncestorResolver
             .ConfigureAwait(false);
         var table = row.GetAttributeValue<string>("sprk_recordlogicalname")?.Trim().ToLowerInvariant();
         return table is not null && CoreRecordEntities.Contains(table, StringComparer.Ordinal) ? table : null;
+    }
+
+    /// <summary>
+    /// The inverse of <see cref="CoreTableOfRecordTypeAsync"/>: the ONE active <c>sprk_recordtype_ref</c> catalog row whose
+    /// <c>sprk_recordlogicalname</c> is <paramref name="coreTable"/> (one of <see cref="CoreRecordEntities"/>), which is what a
+    /// row's <c>sprk_corerecordtype</c> holds for a core record of that table. <c>null</c> when the catalog holds no active row
+    /// for it, or more than one (the type cannot be told), and for a table that is not a core record table. The catalog is
+    /// configuration, read with the BFF's own client (app-only); nothing about any record is read. A fault propagates: each
+    /// caller maps it to its own contract.
+    /// </summary>
+    /// <remarks>Field-mapping-server-write-path-r1 task 042c fix round 2 (B', owner 2026-11-04): the one shared helper the
+    /// unified create (<c>RecordCreationService</c>) reads a core table's catalog row through. Other copies of this read are left
+    /// where they are (each has its own columns, filter or failure contract; see task-042c-notes "Fix round 2").</remarks>
+    internal static async Task<Guid?> RecordTypeOfCoreTableAsync(
+        IGenericEntityService entityService, string coreTable, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entityService);
+        var table = coreTable?.Trim().ToLowerInvariant();
+        if (table is null || !CoreRecordEntities.Contains(table, StringComparer.Ordinal))
+            return null;
+
+        var query = new QueryExpression("sprk_recordtype_ref")
+        {
+            ColumnSet = new ColumnSet("sprk_recordtype_refid"),
+            TopCount = 2,
+        };
+        query.Criteria.AddCondition("sprk_recordlogicalname", ConditionOperator.Equal, table);
+        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+        var rows = await entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return rows?.Entities.Count == 1 && rows.Entities[0].Id != Guid.Empty ? rows.Entities[0].Id : null;
     }
 
     /// <summary>

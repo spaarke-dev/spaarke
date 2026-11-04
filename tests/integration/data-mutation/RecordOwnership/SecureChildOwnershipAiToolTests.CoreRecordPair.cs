@@ -72,8 +72,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
             new[] { Lookup("sprk_matter", "sprk_matter", OrdinaryMatter) }.Concat(CorePair(type, id)).ToDictionary(i => i.Column, i => i.Value));
         var mapped = await DataverseWriteItemMapper.MapAsync(_user, table, item, CancellationToken.None);
         mapped.Item.Should().NotBeNull(mapped.ValidationError);
-        return await RouteRecordCreation.Over(_world.Resolver(), _appOnly.Object, Restamper(), Shares(),
-                SecureRootFilingGateFixtures.NothingSecure(), entities: appOnlyEntities)
+        return await RouteRecordCreation.Over(_world.Resolver(), _appOnly.Object, _serviceRestamper ?? Restamper(), Shares(),
+                SecureRootFilingGateFixtures.NothingSecure(), entities: appOnlyEntities ?? _serviceEntities?.Object)
             .CreateAsync(new RecordCreationRequest(table, new RecordCreationPayload.Mapped(mapped.Item!)),
                 RecordCreationPrincipal.ForCaller(_user, CallerOid), CancellationToken.None);
     }
@@ -445,18 +445,6 @@ public sealed partial class SecureChildOwnershipAiToolTests
         asked.Should().NotContain(p => p.StartsWith("sprk_recordtype_refs(", StringComparison.Ordinal), "no catalog row is read");
         asked.Where(p => p.Contains("RetrievePrincipalAccess", StringComparison.Ordinal)).Should()
             .ContainSingle().Which.Should().Contain($"sprk_matters({OrdinaryMatter:D})", "AppendTo on its own lookup only");
-    }
-
-    [Theory(DisplayName = "042c AC5 (must not fire): a Signal or Decision Record naming only the core pair's TYPE (no id) names no core record, as PairTargetAsync reads a pair with no id: today's owner")]
-    [MemberData(nameof(CorePairTables))]
-    public async Task ACreateWithACoreTypeButNoId_KeepsTodaysOwner(string table)
-    {
-        CorePairWorld();
-
-        var result = await CreateWithCore(table, MatterRecordType, id: null);
-
-        result.Success.Should().BeTrue(result.ErrorMessage);
-        Owner(_appCreates.Should().ContainSingle().Subject.Fields).Should().Be(Directory.ChildTeam);
     }
 
     /// <summary>Whether an app-only read of the service (its IGenericEntityService) reads the core record.</summary>
