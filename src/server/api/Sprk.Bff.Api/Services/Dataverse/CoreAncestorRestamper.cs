@@ -506,27 +506,6 @@ public sealed class CoreAncestorRestamper
     }
 
     /// <summary>
-    /// field-mapping-server-write-path-r1 task 016 (Repair, FR-14): the I-1 stamp columns <paramref name="row"/> is MISSING,
-    /// fill-only — <see cref="RestampChildAsync"/>'s plan for a row filed under an intermediate
-    /// (<see cref="StampSourceKind.Source"/>), keeping only the columns that hold no value and that the source's current root
-    /// SETS. A stamp that holds a different value is never overwritten, and none is cleared: a stale or orphaned copy is
-    /// <see cref="CoreAncestorStampReconciliationJob"/>'s to repair. Nothing is written here, and nothing is cascaded (the
-    /// row's children are the job's too). <c>null</c>: nothing is missing, the table carries no stamp, or the row is not
-    /// filed under an intermediate (a direct link, filed under nothing, ambiguous or inconsistent).
-    /// </summary>
-    /// <param name="row">The row as read with every column (its source lookups, its pair and its stamp columns).</param>
-    /// <exception cref="InvalidOperationException">The source's root could not be derived (its message is for the log): a
-    /// <see cref="CoreAncestorStampUnderivableException"/>, which says whether that is a data condition (field-mapping task 017,
-    /// owner decision 2a: the create refuses it before anything is written).</exception>
-    /// <remarks>Component justification (CLAUDE.md §11): Existing — <see cref="RestampChildAsync"/> plans the same stamp but
-    /// re-reads the row and overwrites and clears; Extension — this reuses its probe, classification, root read and
-    /// <see cref="PlanStamp"/>, and adds only the fill-only filter, on the existing component; Cost of doing nothing — Repair
-    /// either cannot add a missing I-1 stamp in its one fill-only update, or overwrites a present stamp.</remarks>
-    internal async Task<Dictionary<string, object>?> PlanMissingStampAsync(
-        string entityLogicalName, Entity row, CancellationToken ct) =>
-        MissingOf(row, await PlanStampOfRowAsync(entityLogicalName, row, ct).ConfigureAwait(false));
-
-    /// <summary>
     /// field-mapping-server-write-path-r1 task 042b (F1, owner decision A' 2026-11-03): the FULL stamp plan for
     /// <paramref name="row"/> — exactly what <see cref="RestampChildAsync"/> writes for a row filed under an intermediate
     /// (<see cref="StampSourceKind.Source"/>): each stamp column whose value differs from the source's current root, SET to
@@ -535,10 +514,14 @@ public sealed class CoreAncestorRestamper
     /// an intermediate. The owner question asks over the row as it ENDS (a held value that disagrees is replaced), while the
     /// bind stays fill-only (<see cref="MissingOf"/>).
     /// </summary>
-    /// <exception cref="CoreAncestorStampUnderivableException">As <see cref="PlanMissingStampAsync"/>.</exception>
-    /// <remarks>Component justification (CLAUDE.md §11): Existing — <see cref="PlanMissingStampAsync"/> computed this plan and
-    /// dropped all but the missing columns; Extension — that method is now this one plus the fill-only filter, so there is one
-    /// plan; Cost of doing nothing — a caller-sent stamp that disagrees with the intermediate's root decides the owner, and the
+    /// <param name="row">The row as read with every column (its source lookups, its pair and its stamp columns).</param>
+    /// <exception cref="CoreAncestorStampUnderivableException">The source's root could not be derived (its message is for the
+    /// log); it says whether that is a data condition (field-mapping task 017, owner decision 2a: the create refuses it before
+    /// anything is written).</exception>
+    /// <remarks>Component justification (CLAUDE.md §11): Existing — the fill-only <c>PlanMissingStampAsync</c> (task 016)
+    /// computed this plan and dropped all but the missing columns; Extension — it is replaced by this one plus the fill-only
+    /// filter (<see cref="MissingOf"/>), so there is one plan (042b fix round 2 removed the old method, which had no caller
+    /// left); Cost of doing nothing — a caller-sent stamp that disagrees with the intermediate's root decides the owner, and the
     /// step-12 restamp then overwrites it (042b F1, the #2483 state again).</remarks>
     internal async Task<Dictionary<string, object>?> PlanStampOfRowAsync(
         string entityLogicalName, Entity row, CancellationToken ct)
@@ -572,7 +555,9 @@ public sealed class CoreAncestorRestamper
 
     /// <summary>
     /// The fill-only part of a <see cref="PlanStampOfRowAsync"/> plan: the columns <paramref name="row"/> holds no value in and
-    /// the plan SETS. <c>null</c> when none.
+    /// the plan SETS. <c>null</c> when none. A stamp that holds a different value is never overwritten here, and none is
+    /// cleared: a stale or orphaned copy is the step-12 restamp's (create) or <see cref="CoreAncestorStampReconciliationJob"/>'s
+    /// (Repair) to replace.
     /// </summary>
     internal static Dictionary<string, object>? MissingOf(Entity row, IReadOnlyDictionary<string, object>? planned)
     {
@@ -959,7 +944,7 @@ internal sealed record ClearedSource(ClearedSourceOutcome Outcome, string? Inter
 }
 
 /// <summary>
-/// field-mapping-server-write-path-r1 task 017 (owner decision 2a): <see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>
+/// field-mapping-server-write-path-r1 task 017 (owner decision 2a): <see cref="CoreAncestorRestamper.PlanStampOfRowAsync"/>
 /// could not derive the root of the row's source. <see cref="IsPermanent"/> and <see cref="RefusalKind"/> are the derivation's
 /// own (<see cref="CoreAncestorResult.IsPermanent"/>, <see cref="CoreAncestorResult.RefusalKind"/>), so a create can refuse a
 /// data condition (two roots, a source that does not exist) differently from a fault a retry may clear.

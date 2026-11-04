@@ -788,7 +788,7 @@ internal sealed partial class RecordCreationService
 
         // ── Step 10: the I-1 stamp step 6½ derived, bound into the payload, and I-16 (owner decision 2a; FR-41; see remarks) ──
         trace.Begin(RecordCreationStep.StampAndInheritance);
-        var stamped = await StampBeforeCreateAsync(table, user, item, fields, missingStamp, noun, ct).ConfigureAwait(false);
+        var stamped = await StampBeforeCreateAsync(table, user, item, fields, missingStamp, planned.Plan, noun, ct).ConfigureAwait(false);
         if (stamped.Refusal is { } stampRefusal)
             return Decision.Refuse(stampRefusal);
 
@@ -887,7 +887,8 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// Step 10 (owner decision 2a, task 017; FR-41): the I-1 stamp columns step 6½ derived (<paramref name="missing"/>), bound
-    /// into <paramref name="fields"/>; then I-16 from every lookup the row now names. No second derivation. A derived stamp the
+    /// into <paramref name="fields"/>; then I-16 from every lookup the row will END with (the item's lookups with
+    /// <paramref name="stampPlan"/> applied: 042b fix round 2). No second derivation. A derived stamp the
     /// table's metadata cannot bind is the non-retryable <see cref="RecordCreationRefusalKind.Undecided"/> (500, F-5); a bind
     /// Dataverse did not answer is <see cref="RecordCreationRefusal.StampUnavailableCode"/> (503). I-16 never refuses: it is
     /// display only, and a null is simply not set. A document gets neither (#2169).
@@ -898,7 +899,8 @@ internal sealed partial class RecordCreationService
     /// stamp is left to the post-create re-derivation (step 12), which runs for every principal.</remarks>
     private async Task<(RecordCreationRefusal? Refusal, RecordCreationStepState State, string? Note)> StampBeforeCreateAsync(
         string table, IDataverseUserClient? user, DataverseWriteItemMapper.MappedItem item, Dictionary<string, object?> fields,
-        IReadOnlyDictionary<string, object>? missing, string noun, CancellationToken ct)
+        IReadOnlyDictionary<string, object>? missing, IReadOnlyDictionary<string, object>? stampPlan, string noun,
+        CancellationToken ct)
     {
         if (InheritedAccessPermission.RecordsOwnNarrowing(table))
             return (null, RecordCreationStepState.Skipped, "a document is stamped after the create only (#2169)");
@@ -953,6 +955,20 @@ internal sealed partial class RecordCreationService
 
         if (takesI16)
         {
+            // 042b fix round 2: I-16 reads the row as it ENDS — the plan's replacements and clears too, which the step-12
+            // restamp writes — so a caller-sent stamp that disagrees with the intermediate's root does not set I-16 from the
+            // wrong root (as step 7 asks over AsTheRowEnds). The same parents' read, no extra read or probe.
+            if (stampsI1 && stampPlan is not null)
+            {
+                foreach (var (column, value) in stampPlan)
+                {
+                    if (value is EntityReference root)
+                        row[column] = root;
+                    else
+                        row.Attributes.Remove(column);
+                }
+            }
+
             var filed = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             foreach (var attribute in row.Attributes)
             {

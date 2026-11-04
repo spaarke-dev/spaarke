@@ -446,6 +446,56 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "the caller's own mapped value, not a server-derived bind: fill-only, nothing is derived over a stamp the item holds");
     }
 
+    private static readonly Guid RootProject = Guid.Parse("a2470000-0000-4000-8000-0000000004d1");
+    private static readonly Guid OtherProject = Guid.Parse("a2470000-0000-4000-8000-0000000004d2");
+
+    /// <summary>
+    /// Task 042b fix round 2 (item 3): a NON-null plan where the sent row agrees on one stamp column and the plan names another.
+    /// The intermediate event's root is the Secure matter AND a project; the item sends the Secure matter (agrees) and either
+    /// another project (disagrees: replaced) or no project (missing: added). The owner question keeps the agreeing column as
+    /// sent, with its value, and takes the planned value for the other; every non-stamp lookup is unchanged.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]  // the item sends a project that disagrees
+    [InlineData(false)] // the item sends no project
+    public async Task TheOwnerQuestion_KeepsAnAgreeingStampColumn_AndTakesThePlannedValueForAnother(bool sendsAnotherProject)
+    {
+        var stamps = new StampWorld().Row("sprk_matter", SecureMatter).Row("sprk_project", RootProject)
+            .Row("sprk_event", Event,
+                [("sprk_regardingmatter", "sprk_matter", SecureMatter), ("sprk_regardingproject", "sprk_project", RootProject)]);
+        var lookups = new List<KeyValuePair<string, RecordOwnershipParent?>>
+        {
+            KeyValuePair.Create("sprk_regardingevent", (RecordOwnershipParent?)new RecordOwnershipParent("sprk_event", Event)),
+            KeyValuePair.Create("sprk_regardingmatter", (RecordOwnershipParent?)new RecordOwnershipParent("sprk_matter", SecureMatter)),
+        };
+        if (sendsAnotherProject)
+        {
+            lookups.Add(KeyValuePair.Create("sprk_regardingproject",
+                (RecordOwnershipParent?)new RecordOwnershipParent("sprk_project", OtherProject)));
+        }
+
+        var merged = new Entity("sprk_event");
+        foreach (var (column, parent) in lookups)
+            merged[column] = new EntityReference(parent!.EntityLogicalName, parent.RecordId);
+
+        var plan = await stamps.Restamper.PlanStampOfRowAsync("sprk_event", merged, CancellationToken.None);
+        var question = RecordCreationService.AsTheRowEnds(lookups, plan);
+
+        plan.Should().NotBeNull().And.ContainKey("sprk_regardingproject").And.NotContainKey("sprk_regardingmatter",
+            "the plan names only the column that changes; the matter agrees");
+        question.Should().ContainSingle(l => l.Key == "sprk_regardingmatter")
+            .Which.Value.Should().Be(new RecordOwnershipParent("sprk_matter", SecureMatter), "the agreeing column is kept as sent");
+        question.Should().ContainSingle(l => l.Key == "sprk_regardingproject")
+            .Which.Value.Should().Be(new RecordOwnershipParent("sprk_project", RootProject),
+                sendsAnotherProject ? "a disagreeing column is replaced by the planned root" : "a missing column is added");
+        question.Should().ContainSingle(l => l.Key == "sprk_regardingevent")
+            .Which.Value.Should().Be(new RecordOwnershipParent("sprk_event", Event), "a non-stamp lookup is unchanged");
+        question.Should().HaveCount(3);
+        CoreAncestorRestamper.MissingOf(merged, plan).Should().Match<Dictionary<string, object>?>(m =>
+                sendsAnotherProject ? m == null : m!.Count == 1 && m.ContainsKey("sprk_regardingproject"),
+            "the bind stays fill-only: a held project is never overwritten, a missing one is bound");
+    }
+
     /// <summary>The stamp world's reads of <see cref="Event"/> (the intermediate) so far.</summary>
     private static int IntermediateReads(StampWorld stamps) =>
         Mock.Get(stamps.Service).Invocations.Count(i =>

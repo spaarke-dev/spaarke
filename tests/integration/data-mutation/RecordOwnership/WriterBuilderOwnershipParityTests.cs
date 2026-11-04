@@ -470,7 +470,20 @@ public class WriterBuilderOwnershipParityTests
                     new RecordCreationRequest(
                         table, new RecordCreationPayload.Mapped(item)),
                     principal, CancellationToken.None);
-            return (outcome, outcome.CreatedId is { } id ? _stamps.RowOf(table, id) : null);
+            var written = outcome.CreatedId is { } id ? _stamps.RowOf(table, id) : null;
+
+            // Fix round 2 (item 4): the written row is built from the create BODY's binds, so a body that bound nothing would
+            // look like an unfiled row and could agree with the reconciler vacuously. Every lookup the item names must be on it.
+            if (written is not null)
+            {
+                foreach (var (column, target, lookupId) in lookups)
+                {
+                    written.GetAttributeValue<EntityReference>(column).Should().Be(new EntityReference(target, lookupId),
+                        $"the create body binds the item's {column}, so the written row holds it");
+                }
+            }
+
+            return (outcome, written);
         }
 
         /// <summary>A row of <paramref name="table"/> holding <paramref name="lookups"/> (for a create that was refused).</summary>

@@ -632,7 +632,7 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// Step 10 (I-1) for an existing row: the stamp columns it is MISSING, from its source's current root
-    /// (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>), as planned once before the owner (FR-41, task 042b:
+    /// (<see cref="CoreAncestorRestamper.MissingOf"/> of <see cref="CoreAncestorRestamper.PlanStampOfRowAsync"/>), as planned once before the owner (FR-41, task 042b:
     /// <paramref name="stamp"/>; no second derivation). A held stamp — stale or not — and the row's children are
     /// <see cref="CoreAncestorStampReconciliationJob"/>'s.
     /// </summary>

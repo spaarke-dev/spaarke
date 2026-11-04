@@ -175,6 +175,32 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Posts.Should().BeEmpty("never created as the caller");
     }
 
+    /// <summary>
+    /// Task 042b fix round 2 (item 2): I-16 before the create follows the PLANNED root, not a stamp the caller sent that
+    /// disagrees. The event the new event is filed under is under the ordinary matter (Standard); the item also names the
+    /// Secure matter (Restricted) as its stamp, which the step-12 restamp replaces. Before the fix step 10 read the sent stamp
+    /// and set Restricted (the strongest of the two); now it reads the row as it ends and sets Standard.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_ASentStampThatDisagrees_DoesNotSetI16FromTheSentRoot_ButFromThePlannedOne()
+    {
+        TheEventIsFiledUnderTheOrdinaryMatter();
+        var stamps = new StampWorld().Row("sprk_matter", OrdinaryMatter).Row("sprk_matter", SecureMatter)
+            .Row("sprk_event", Event, [("sprk_regardingmatter", "sprk_matter", OrdinaryMatter)])
+            .Set("sprk_matter", OrdinaryMatter, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Standard))
+            .Set("sprk_matter", SecureMatter, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Restricted));
+
+        var result = await Chat(ChatHandlerOver(stamps), "sprk_event",
+            Lookup("sprk_regardingevent", "sprk_event", Event), Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var fields = _appCreates.Should().ContainSingle().Subject.Fields;
+        Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({SecureMatter:D})",
+            "the bind is fill-only: the sent stamp is created as sent (the restamp replaces it)");
+        fields.Should().ContainKey(InheritedAccessPermission.Column).WhoseValue.Should().Be(InheritedAccessPermission.Standard,
+            "I-16 is read from the row as it ends (the ordinary matter), never from the sent Secure matter");
+    }
+
     [Fact]
     public async Task ChatCreate_AToDoUnderASecureMatter_GetsItsSecureParentsShareesMirror_AtCreate()
     {
