@@ -763,3 +763,19 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 - Tests cover both directions plus the agreeing case.
 
 Also agreed with UAC-r2: Signal / Decision Record under a team-owned intermediate of a Secure root refuse 409 `NoOwnerSource` (fail closed). This is K1 and gets a §15.4 row. #2556 (DI-017) and #2557 (DI-018) are filed for the owner.
+
+## 2026-11-04 — 042c: a chat-created Signal or Decision Record with a Secure core is refused (owner)
+
+**Decision (owner, this session, 2026-11-04): Accept.** After 042c, chat can no longer create a Signal or Decision Record whose core record (`sprk_corerecordtype` + `sprk_corerecordid`) is Secure. The request is refused with 409 `NoOwnerSource`, using the same code, status and words as design §15.4 row 8. Before 042c, chat created the row team-owned with the ordinary owner, until the reconciler moved it to the Secure team.
+
+- **Unchanged:** `OwnerDecided` and the ontology writers (`SignalWriter`, `DecisionRecordWriter`).
+- **Ordering:** a caller without AppendTo on the core gets the uniform AppendTo refusal, never the 409, so the refusal does not reveal that the core is Secure.
+- **Approvals:** UAC-r2 OK'd the AC2 amendment with four conditions:
+  1. ordering, plus a faulted catalog read gives the existing 503;
+  2. the 409 is returned only when the caller holds AppendTo on the core;
+  3. the must-not-fire tests;
+  4. the parity of an ordinary core in Y with a subject in X.
+- **Release notes:** list this change.
+- **Rejected alternatives:**
+  - giving Signal and Decision Record a Secure owner at create, which would change the 042b rule;
+  - refusing all chat creates of these tables, which needs ontology-r1's agreement.
