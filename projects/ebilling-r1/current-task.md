@@ -1,13 +1,13 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-04 ~01:05Z (local 2026-11-03 20:05). Session ebilling-r1-7b (authoritative; the idle -9c session is not). Work head pushed: f801c16452 or later (`git log -1 origin/work/ebilling-r1`). The dev BFF is master d763dc120e (live 22:26:31Z, uac-r2 gate passed). **None of the work below is on master or dev yet.**
+> **Last Updated**: 2026-11-04 ~02:30Z (local 2026-11-03 20:05). Session ebilling-r1-7b (authoritative; the idle -9c session is not). Work head pushed: f801c16452 or later (`git log -1 origin/work/ebilling-r1`). The dev BFF is master d763dc120e (live 22:26:31Z, uac-r2 gate passed). **None of the work below is on master or dev yet.**
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
 | **Mode** | Parallel task-execute agents, max 4 (owner 2026-11-03). Merge each finished branch into work, launch the next ready task. One adversarial review per change set, two for auth. |
-| **Running agents** | (1) 095c-2 intake (Opus, branch task/ebilling-095c-2; includes the correction prefill `"firm": null`). (2) 118 review fix round (Sonnet, fix/ebilling-118-review: stale PCF Solution bundle/pack.ps1 1.3.21, 404 wording, onAccepted refresh, PCF button test, K fixes). (3) 086 rebase onto 089a (Opus, worktree-agent-a52582271b56d1ba9; brings the prvReadsprk_StoredFile role row; then one access review over 089a+086). |
+| **Running agents** | (1) 095c-2 F1 retry fix (Sonnet, fix/ebilling-095c-2-review). (2) 089a+086 review K4/doc fixes (Sonnet, fix/ebilling-086-review). (3) 089b adversarial pass 1 of 2 (Opus). (4) 095c-3 adversarial review (Opus). Work head 270aeaf8b9: 095c-2, 089b, 095c-3 merged. |
 | **Live blocker** | The owner sees no **Email to AP** on batch 14680609. uac-r2 says the screenshots so far were the GRID (Email to AP is form-only). Dev checks out: ribbondiff/ribboncommand/ribbonrule rows present, apexport_ribbon.js has batchIsCompleted, which returns true on a fake form, and the location pattern matches invoice/matter forms. Waiting for the FORM's command bar screenshot after Ctrl+F5 (and under the ⋮ menu). If none of the 4 form buttons show, the cause is the group or the bar; if only Email is missing, its rules. |
 | **Next action** | When agents report: merge, then build. When 095c-2, the 118 fixes and 086 are in: run the FILTERED unit gate on the work tip, measure publish size vs a fresh master, open ONE master PR (reviewers ontology-r1, uac-r2, R3; uac-r2 reviews the whole diff), auto-merge after approvals, send PR# and SHA to uac-r2 (and word-add-in, after the DEPLOY carrying 095c-2..4). |
 
@@ -25,9 +25,10 @@
   - **Deploy order after master + BFF:** ribbon -Apply/-Verify, then Deploy-EbillingFormsViews.ps1. The owner's go is in uac-r2's session.
 
 ## Filed this session
-DEF-051 #2547 (GA day-for-month dates), DEF-052 #2553 (job copy and .eml parts skip the size limit), #2548 (email-communication duplicate .eml), #2555 (Email Review OData passed to a FetchXML client).
+#2559 (UAC share mirror grants Write/Delete/Share on hard-deny rows; uac-r2 owns), DEF-051 #2547 (GA day-for-month dates), DEF-052 #2553 (job copy and .eml parts skip the size limit), #2548 (email-communication duplicate .eml), #2555 (Email Review OData passed to a FetchXML client).
 
 ## Owner decisions 2026-11-03
+- No-firm invoices stay VISIBLE to external participants on the matter/project (095c notes §13); uac-r2 told.
 - Firm optional: B; hold until a firm is set; D-201.
 - 118b option A.
 - The AP test: invoices 05166 and 2025023029, ap@finance.spaarke.com, export as demo@, leave the Failed batches.
