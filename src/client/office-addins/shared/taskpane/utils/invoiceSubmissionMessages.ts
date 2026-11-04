@@ -332,6 +332,16 @@ export const INVOICE_OUTCOME_MESSAGES: Readonly<Record<string, Entry>> = {
   // Task 094 (2026-10-28): a re-attempt is allowed (EB-D-160).
   'ebilling.submission.source_changed':
     "The email's saved copy in Spaarke changed while the invoice was being processed, so it was not processed. Submit it again.",
+  // 095c-4 (2026-11-03): the job retries these and stores the code on its last attempt; a re-attempt is allowed.
+  'ebilling.submission.core_record_changed':
+    'The matter, project or work assignment changed while the invoice was being processed, so it was not processed. ' +
+    'Submit it again.',
+  'ebilling.submission.firm_changed':
+    'The firm was set or cleared while the invoice was being processed, so it was not processed. Submit it again.',
+  'ebilling.submission.changed':
+    'The submission changed in Spaarke while the invoice was being processed, so it was not processed. Submit it again.',
+  'ebilling.submission.row_version_missing':
+    "Spaarke couldn't confirm the submission's latest version, so the invoice was not processed. Submit it again.",
   // ebilling task 191 (2026-11-01): the AI reading and line coding. The first two are permanent; the job retries the
   // other three and stores the code on its last attempt, so a later re-submission can work.
   'ai.invoice.read.not_configured':

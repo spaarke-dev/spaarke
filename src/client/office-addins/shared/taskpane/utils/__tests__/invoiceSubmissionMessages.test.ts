@@ -112,6 +112,11 @@ const PINNED_OUTCOME_CODES = [
   'ebilling.submission.processing_failed',
   'ebilling.submission.file_scan_timeout', // added to the contract at f1ae28290e (task 092; Failed, re-attempt allowed)
   'ebilling.submission.source_changed', // task 094 (97c793670b; Failed, re-attempt allowed)
+  // 095c-4 (a4f5884e66): retried, then stored on the last attempt; re-attempt allowed
+  'ebilling.submission.core_record_changed',
+  'ebilling.submission.firm_changed',
+  'ebilling.submission.changed',
+  'ebilling.submission.row_version_missing',
   // task 094 step 3 (97c793670b): the saved .eml changed state before the commit
   'ebilling.submission.document_already_invoiced',
   'ebilling.submission.document_rejected',
@@ -377,6 +382,19 @@ describe('invoice submission messages — task 094', () => {
 
   it('source_changed (Failed) says to submit again', () => {
     expect(describeInvoiceOutcome('ebilling.submission.source_changed', {}, 'Failed')).toMatch(/Submit it again\.$/);
+  });
+
+  it('095c-4: each transient Failed code says to submit again, not the generic sentence', () => {
+    for (const code of [
+      'ebilling.submission.core_record_changed',
+      'ebilling.submission.firm_changed',
+      'ebilling.submission.changed',
+      'ebilling.submission.row_version_missing',
+    ]) {
+      const sentence = describeInvoiceOutcome(code, {}, 'Failed');
+      expect(sentence).toMatch(/Submit it again\.$/);
+      expect(sentence).not.toBe(GENERIC_FAILED_OUTCOME_MESSAGE);
+    }
   });
 
   it('must-fire: a refusal after step A says the email stays filed; must-not-fire: without the flag it does not', () => {
