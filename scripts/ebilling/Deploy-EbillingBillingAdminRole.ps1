@@ -43,7 +43,7 @@
 
     Modes:
       -WhatIf   reads everything, prints the plan and what -Verify would report; writes nothing.
-      (plain)   applies the plan; reads every change back (root role and per-business-unit copies).
+      (plain)   applies the plan; reads every change back (root role and per-business-unit copies). A team holding the role is printed and exits 1, as -Verify does (089e K6).
       -Verify   read-only; exit 0 when the state above holds, exit 1 naming every gap (drift).
 
     No publish is needed (privileges are not a published customization). The role source in
@@ -106,6 +106,8 @@ $State = Initialize-EbillingSchema -EnvironmentUrl $EnvironmentUrl -SolutionUniq
 $script:Changed = $State.Changed
 $script:Skipped = $State.Skipped
 $Gaps = [System.Collections.Generic.List[string]]::new()
+# 089e K6: a team holding the role is a gap a plain (apply) run cannot fix and must not pass over: it prints it and exits 1, as -Verify does.
+$TeamHolderGaps = [System.Collections.Generic.List[string]]::new()
 
 # ---------------------------------------------------------------------------------------------------------------
 # Helpers
@@ -338,7 +340,10 @@ try {
             foreach ($u in @((Invoke-Dv "roles($holderRoleId)/systemuserroles_association?`$select=fullname").value)) { $users.Add([pscustomobject]@{ fullname = $u.fullname; RoleId = $holderRoleId }) }
         }
         Write-Host "  held by $($users.Count) user(s) directly, $($teams.Count) team(s), across the root role and $($copies.Count) business-unit copies"
-        if ($teams.Count) { $Gaps.Add("$RoleName is held by team(s) $(($teams | ForEach-Object { "$($_.name) (role copy $($_.RoleId))" }) -join ', '): assign it to users directly, never to a team (uac-r2 K-1)") }
+        if ($teams.Count) {
+            $teamGap = "$RoleName is held by team(s) $(($teams | ForEach-Object { "$($_.name) (role copy $($_.RoleId))" }) -join ', '): assign it to users directly, never to a team (uac-r2 K-1)"
+            $Gaps.Add($teamGap); $TeamHolderGaps.Add($teamGap)
+        }
     }
 
     # --- 4. Core and Basic User lose Read on sprk_ruleset ------------------------------------------------------------
@@ -449,5 +454,10 @@ if ($ReadOnly) {
     Write-Host "-Verify would report $($Gaps.Count) gap(s) now:" -ForegroundColor Cyan
     foreach ($g in $Gaps) { Write-Host "  GAP  $g" }
     Write-Host "WhatIf run: nothing was written." -ForegroundColor Cyan
+}
+elseif ($TeamHolderGaps.Count -gt 0) {
+    foreach ($g in $TeamHolderGaps) { Write-Host "  GAP  $g" -ForegroundColor Red }
+    Write-Host "APPLY FAIL: $($TeamHolderGaps.Count) team-holder gap(s) this script does not change (what it could change was applied above)." -ForegroundColor Red
+    exit 1
 }
 exit 0
