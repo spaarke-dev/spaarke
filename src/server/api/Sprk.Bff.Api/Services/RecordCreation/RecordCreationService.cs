@@ -625,7 +625,6 @@ internal sealed partial class RecordCreationService
 
         // ── Step 5: the caller checks on the merged payload (CallerWriteAuthorization, ADR-008 path A) ──────────────────
         trace.Begin(RecordCreationStep.CallerChecks);
-        RecordOwnershipParent? coreRecord = null;
         if (user is null)
         {
             trace.Record(RecordCreationStep.CallerChecks, RecordCreationStepState.Skipped, "system principal (FR-07)");
@@ -640,7 +639,6 @@ internal sealed partial class RecordCreationService
                 return Decision.Refuse(CallerCheckRefused(routeRefusal, noun));
             var appendToSkip = routeAuthorized.SkipAppendTo;
 
-            string ran;
             if (mappedValues.Count == 0)
             {
                 var check = await CallerWriteAuthorization.CheckCallerMayCreateAsync(
@@ -648,7 +646,8 @@ internal sealed partial class RecordCreationService
                 if (!check.Succeeded)
                     return Decision.Refuse(CallerCheckRefused(check, noun));
 
-                ran = "Create/Append, AppendTo on every record named, no field-secured column";
+                trace.Record(RecordCreationStep.CallerChecks, RecordCreationStepState.Ran,
+                    "Create/Append, AppendTo on every record named, no field-secured column");
             }
             else
             {
@@ -661,32 +660,10 @@ internal sealed partial class RecordCreationService
                 var dropped = mappedValues.Count - checkedMerge.Values.Count;
                 item = checkedMerge.Item!; // the SAME local again: what survived the checks is what is written
                 mappedValues = checkedMerge.Values;
-                ran = "Create/Append, AppendTo on every record named, no field-secured column — on the merged payload" +
-                      (dropped == 0 ? string.Empty : $"; {dropped} mapped value(s) dropped");
+                trace.Record(RecordCreationStep.CallerChecks, RecordCreationStepState.Ran,
+                    "Create/Append, AppendTo on every record named, no field-secured column — on the merged payload" +
+                    (dropped == 0 ? string.Empty : $"; {dropped} mapped value(s) dropped"));
             }
-
-            // Task 042c (#2561, DI-019): a Signal's or Decision Record's core pair costs AppendTo on the core record, asked as
-            // the caller on the row as it will be written, before anything reads that record app-only (step 7's owner).
-            var core = await CallerMayFileUnderCoreAsync(user, callerSystemUserId!.Value, table, item, ct).ConfigureAwait(false);
-            if (core.Refusal is { } coreRefusal)
-                return Decision.Refuse(CallerCheckRefused(coreRefusal, noun));
-
-            coreRecord = core.Record;
-            trace.Record(RecordCreationStep.CallerChecks, RecordCreationStepState.Ran,
-                coreRecord is null ? ran : ran + "; AppendTo on the core record");
-        }
-
-        // Task 042c fix round 1: a core id that is a record id is written as the writers store it (whatever the principal).
-        // Fix round 3: a type bound under a key the pair writer does not recognise is the existing 503, as at step 6¾.
-        try
-        {
-            item = WithCoreIdAsTheWritersStoreIt(table, item);
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogError(ex, "[RECORD-CREATE] the core record pair of a new {Table} could not be written (fault); nothing " +
-                                 "was created", table);
-            return Decision.Refuse(StampUnavailable(noun));
         }
 
         // ── Step 5½: the table's pre-write rules, on the row as it will be written (ebilling-r1 recipe) ────────────────
@@ -781,28 +758,13 @@ internal sealed partial class RecordCreationService
         // step 10's bind stays fill-only (only what the row is missing), and the step-12 restamp writes the rest.
         var missingStamp = CoreAncestorRestamper.MissingOf(MergedRowOf(table, item), planned.Plan);
 
-        // ── Step 6¾ (task 042c fix round 2, B', owner 2026-11-04): a HALF core pair is never written and never refused ───────
-        // A Signal or Decision Record that names its core record TYPE with no id is completed from the row as it ENDS (step 6½'s
-        // plan over the sent lookups), never from a probe of the caller: filled, replaced or cleared, with a warning. A catalog
-        // fault refuses (503 stamp_unavailable), nothing cleared or written.
-        var completed = await CompleteHalfCorePairAsync(table, item, planned.Plan, noun, ct).ConfigureAwait(false);
-        if (completed.Refusal is { } corePairRefusal)
-            return Decision.Refuse(corePairRefusal);
-
-        item = completed.Item;
-        if (completed.Record is { } filledCore)
-            coreRecord = filledCore;
-        if (completed.Warning is { } corePairWarning)
-            mappingWarnings.Add(corePairWarning);
-
         // ── Step 7: the owner — record-first for every create, roots and children (FR-09, task 015) ──────────────────
         trace.Begin(RecordCreationStep.Owner);
         RecordOwnerResolution? owner = null;
         if (isolatedTeam is null)
         {
             var decided = await DecideOwnerAsync(
-                    table, rule, item, planned.Plan, coreRecord, askedAsCaller: user is not null,
-                    ownerContextObjectId, callerSystemUserId, requestedBy, noun, ct)
+                    table, rule, item, planned.Plan, ownerContextObjectId, callerSystemUserId, requestedBy, noun, ct)
                 .ConfigureAwait(false);
             if (decided.Refusal is { } ownerRefusal)
                 return Decision.Refuse(ownerRefusal);
@@ -1107,17 +1069,11 @@ internal sealed partial class RecordCreationService
     /// root no longer hides the root, and a caller-sent stamp that disagrees with the intermediate's root (which the step-12
     /// restamp overwrites) no longer decides the owner (042b F1, owner decision A'). A sent stamp that agrees is unchanged. A
     /// message created in a record thread also takes the thread's filing under <c>sprk_communicationthread</c>
-    /// (<see cref="RecordThreadFiling"/>, UAC-r2 Q3), as Repair and the reconciler do.
-    /// <para>Task 042c (#2561, DI-019): a Signal or Decision Record that names a core record (<paramref name="coreRecord"/>,
-    /// step 5's answer, read through the catalog as the caller) is asked about it FIRST, as the reconciler asks the written row
-    /// (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>). A system principal has no step 5
-    /// (<paramref name="askedAsCaller"/> false): its core pair is read here, app-only, by the reconciler's own catalog read
-    /// (<see cref="CoreRecordOfSystemCreateAsync"/>); a pair that cannot be told is
-    /// <see cref="RecordOwnerRefusal.ParentUndetermined"/>, as an undetermined regarding pair is.</para></remarks>
+    /// (<see cref="RecordThreadFiling"/>, UAC-r2 Q3), as Repair and the reconciler do.</remarks>
     private async Task<(RecordOwnerResolution? Owner, RecordCreationRefusal? Refusal)> DecideOwnerAsync(
         string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item,
-        IReadOnlyDictionary<string, object>? stampPlan, RecordOwnershipParent? coreRecord, bool askedAsCaller,
-        Guid? callerObjectId, Guid? callerSystemUserId, RecordRequester? requestedBy, string noun, CancellationToken ct)
+        IReadOnlyDictionary<string, object>? stampPlan, Guid? callerObjectId, Guid? callerSystemUserId,
+        RecordRequester? requestedBy, string noun, CancellationToken ct)
     {
         var parents = OwnedChildWrite.ParentsOf(table, item);
         if (rule.OwnershipException is { } exception && parents.Count == 0)
@@ -1141,24 +1097,8 @@ internal sealed partial class RecordCreationService
             var filed = AsTheRowEnds(OwnedChildWrite.LookupsOf(item), stampPlan)
                 .Concat(RecordThreadFiling.FilingLookupsOf(threadParents))
                 .ToList();
-            // Task 042c fix round 2: a core record step 6¾ filled from the row is already known (no catalog read here).
-            if (!askedAsCaller && coreRecord is null)
-            {
-                var systemCore = await CoreRecordOfSystemCreateAsync(table, item, ct).ConfigureAwait(false);
-                if (systemCore.Undetermined is { } why)
-                {
-                    var refused = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
-                        $"what it is filed under could not be told ({why})");
-                    return (null, new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved,
-                        RecordOwnerRefusal.ParentUndetermined, refused.Reason!) { OwnerDecision = refused });
-                }
-
-                coreRecord = systemCore.Record;
-            }
-
             var resolved = await ResolveOwnerOverAsync(
-                    table, filed, pair.InvalidId, pair.IdText, pair.TypeId, callerObjectId, callerSystemUserId, requestedBy, ct,
-                    coreRecord: coreRecord)
+                    table, filed, pair.InvalidId, pair.IdText, pair.TypeId, callerObjectId, callerSystemUserId, requestedBy, ct)
                 .ConfigureAwait(false);
             if (resolved.Refusal is { } undetermined)
                 return (null, undetermined);
@@ -1191,13 +1131,11 @@ internal sealed partial class RecordCreationService
     /// the REAL column that files the row there — its lookups (<paramref name="filed"/>; on Repair also a message's thread filing,
     /// under <c>sprk_communicationthread</c>), and the record a project's pair names under <c>sprk_regardingrecordid</c> — ranked
     /// by the table's order, so Create, Repair and the reconciler ask the same ordered question. <paramref name="subjectPairId"/>
-    /// is the row's pair id as written when <paramref name="pairIdText"/> is not passed (Repair read the pair already).
-    /// Task 042c: <paramref name="coreRecord"/>, a Signal's or Decision Record's core record, is asked first
-    /// (<see cref="OwnerQuestionOf"/>); Repair passes none.</remarks>
+    /// is the row's pair id as written when <paramref name="pairIdText"/> is not passed (Repair read the pair already).</remarks>
     private async Task<(RecordOwnerResolution? Owner, RecordCreationRefusal? Refusal)> ResolveOwnerOverAsync(
         string table, IReadOnlyList<KeyValuePair<string, RecordOwnershipParent?>> filed, bool pairInvalidId, string? pairIdText,
         Guid? pairTypeId, Guid? callerObjectId, Guid? callerSystemUserId, RecordRequester? requestedBy, CancellationToken ct,
-        string? subjectPairId = null, RecordOwnershipParent? coreRecord = null)
+        string? subjectPairId = null)
     {
         // Only where the pair files the row on its own (a project); elsewhere a malformed pair is not an owner question.
         var pairParent = pairInvalidId && SecureRootInheritance.PairNamesAParentOnItsOwn(table)
@@ -1225,7 +1163,7 @@ internal sealed partial class RecordCreationService
 
         var owner = await _ownership.ResolveOwnerAsync(
             OwnerQuestionOf(table, throughIntermediates.Lookups.Concat(filed), pairParent.Parent, subjectPairId ?? pairIdText,
-                callerObjectId, callerSystemUserId, coreRecord) with
+                callerObjectId, callerSystemUserId) with
             {
                 RequestedBy = requestedBy,
             },
@@ -1237,19 +1175,16 @@ internal sealed partial class RecordCreationService
     /// UAC task 194b R4: Step 7's question — the row's parents keyed by the column that files it there (<paramref name="filed"/>),
     /// and the record a project's ADR-024 pair names (<paramref name="pairParent"/>) under <c>sprk_regardingrecordid</c>, which a
     /// project's order ranks first (<c>SecureChildLineage.RootLookupOrder</c>) — through the one builder.
-    /// <para>Task 042c (#2561, DI-019): a Signal's or Decision Record's core record (<paramref name="coreRecord"/>, the record its
-    /// core pair names) is the builder's own <c>coreRecord</c>: asked FIRST and the primary, as
-    /// <see cref="RecordOwnershipContext.ForExistingRowAsync"/> asks the written row (core, subject, …).</para>
     /// </summary>
     internal static RecordOwnershipContext OwnerQuestionOf(
         string table, IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> filed, RecordOwnershipParent? pairParent,
-        string? subjectPairId, Guid? callerObjectId, Guid? callerSystemUserId, RecordOwnershipParent? coreRecord = null) =>
+        string? subjectPairId, Guid? callerObjectId, Guid? callerSystemUserId) =>
         RecordOwnershipContext.ForRow(
             table,
             pairParent is { } named
                 ? filed.Append(KeyValuePair.Create(SecureRootInheritance.PairIdColumn, (RecordOwnershipParent?)named))
                 : filed,
-            subjectPairId, callerObjectId, callerSystemUserId, coreRecord);
+            subjectPairId, callerObjectId, callerSystemUserId);
 
     /// <summary>
     /// Step 7's answer for a resolved owner, shared by Create and Repair (task 016): no owner is the resolver's refusal
@@ -1514,373 +1449,6 @@ internal sealed partial class RecordCreationService
     internal static Task<(RecordOwnershipParent? Parent, string? Undetermined)> PairParentAsync(
         IGenericEntityService entities, string table, string? idText, Guid? typeId, CancellationToken ct) =>
         SecureRootInheritance.PairParentAsync(entities, table, idText, typeId, ct);
-
-    // ── Task 042c (#2561, DI-019): a Signal's or Decision Record's CORE pair ──────────────────────────────────────────
-
-    /// <summary>The core pair's type: a lookup to the ADR-024 record-type catalog (<c>sprk_recordtype_ref</c>).</summary>
-    private const string CoreRecordTypeColumn = "sprk_corerecordtype";
-
-    /// <summary>The core pair's id: a string holding the core record's id.</summary>
-    private const string CoreRecordIdColumn = "sprk_corerecordid";
-
-    /// <summary>What a create's item says about its core pair: the id as written (a non-string id is invalid, never absent)
-    /// and the type it binds.</summary>
-    private readonly record struct CorePairWrite(string? IdText, bool InvalidId, Guid? TypeId, string? TypeEntitySet);
-
-    /// <summary>The core pair <paramref name="item"/> writes (<see cref="OwnedChildWrite.PairOf"/>'s reading, for the core pair).</summary>
-    private static CorePairWrite CorePairOf(DataverseWriteItemMapper.MappedItem item)
-    {
-        string? idText = null;
-        var invalidId = false;
-        using (var body = JsonDocument.Parse(item.JsonBody))
-        {
-            if (body.RootElement.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var property in body.RootElement.EnumerateObject())
-                {
-                    if (!string.Equals(property.Name.Trim(), CoreRecordIdColumn, StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    switch (property.Value.ValueKind)
-                    {
-                        case JsonValueKind.Null:
-                            idText = null;
-                            break;
-                        case JsonValueKind.String:
-                            idText = property.Value.GetString();
-                            break;
-                        default:
-                            invalidId = true;
-                            break;
-                    }
-                }
-            }
-        }
-
-        var type = item.Lookups.FirstOrDefault(l => string.Equals(l.Column, CoreRecordTypeColumn, StringComparison.OrdinalIgnoreCase));
-        return new CorePairWrite(idText, invalidId, type?.RecordId, type?.RelatedEntitySet);
-    }
-
-    /// <summary>
-    /// Task 042c fix round 1: a Signal's or Decision Record's core id, once it is a record id, written as the writers store it
-    /// (<c>SignalWriter</c>, <c>DecisionRecordWriter</c>: the "D" form, lower case), because the readers compare it as a string
-    /// (<c>SignalSuppressionService</c>). Braces, upper case and padding are rewritten; anything else is left as sent (step 5 or
-    /// step 7 refuses an id that is not a record id). Every other table, and an item already in that form: <paramref name="item"/>.
-    /// </summary>
-    private static DataverseWriteItemMapper.MappedItem WithCoreIdAsTheWritersStoreIt(
-        string table, DataverseWriteItemMapper.MappedItem item)
-    {
-        if (!RecordOwnershipContext.CorePairTables.Contains(table))
-            return item;
-
-        var pair = CorePairOf(item);
-        if (pair.InvalidId || !Guid.TryParse(pair.IdText?.Trim(), out var id) || id == Guid.Empty)
-            return item;
-
-        var stored = StoredCoreId(id);
-        if (string.Equals(pair.IdText, stored, StringComparison.Ordinal))
-            return item;
-
-        // Fix round 2: through the ONE pair writer. An id with no type is left as sent (step 5 or step 7 refuses it).
-        return CoreTypeOf(item) is { } type ? WithCorePair(item, type, stored) : item;
-    }
-
-    /// <summary>A core record id as <c>SignalWriter</c> and <c>DecisionRecordWriter</c> store it: the "D" form, lower case.</summary>
-    private static string StoredCoreId(Guid id) =>
-        id.ToString("D", System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant();
-
-    /// <summary>The core pair's type lookup <paramref name="item"/> binds, or <c>null</c>.</summary>
-    private static DataverseWriteItemMapper.MappedLookup? CoreTypeOf(DataverseWriteItemMapper.MappedItem item) =>
-        item.Lookups.FirstOrDefault(l => string.Equals(l.Column, CoreRecordTypeColumn, StringComparison.OrdinalIgnoreCase));
-
-    /// <summary>Whether a body key names the core pair's type: its column, or its bind (<c>{navigation}@odata.bind</c>, the
-    /// navigation property being the column's schema name, which differs only in case).</summary>
-    private static bool IsCoreTypeKey(string key)
-    {
-        var name = key.Trim();
-        if (name.EndsWith(CoreRecordTypeBindSuffix, StringComparison.OrdinalIgnoreCase))
-            name = name[..^CoreRecordTypeBindSuffix.Length].TrimEnd();
-        return string.Equals(name, CoreRecordTypeColumn, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private const string CoreRecordTypeBindSuffix = "@odata.bind";
-
-    /// <summary>
-    /// Task 042c fix round 2 (B', owner 2026-11-04): THE one writer of a Signal's or Decision Record's core pair in this service.
-    /// <paramref name="item"/> with its pair set to <paramref name="type"/> + <paramref name="id"/> TOGETHER, or with BOTH removed
-    /// (both <c>null</c>): body, columns, lookups and clears alike. Never one without the other: a half pair is never written
-    /// (<c>CorePairTypeImpliesIdGuardTests</c> recognises this helper by name). The type keeps the key the item binds it under
-    /// (the table's navigation property); a type equal to the one bound is written exactly as sent.
-    /// </summary>
-    /// <exception cref="ArgumentException">One of <paramref name="type"/> and <paramref name="id"/> without the other.</exception>
-    /// <exception cref="InvalidOperationException">The item binds a core type (or a type is written) but the body does not bind
-    /// it exactly once under a key this helper recognises — whether the pair is written OR cleared, so a clear can never leave an
-    /// unrecognised type bind in the body (fix round 3). A fault: the caller refuses with
-    /// <see cref="RecordCreationRefusal.StampUnavailableCode"/> (503), nothing written.</exception>
-    private static DataverseWriteItemMapper.MappedItem WithCorePair(
-        DataverseWriteItemMapper.MappedItem item, DataverseWriteItemMapper.MappedLookup? type, string? id)
-    {
-        if ((type is null) != (id is null))
-            throw new ArgumentException("A core pair is written whole (a type and its id) or not at all.", nameof(type));
-
-        using var body = JsonDocument.Parse(item.JsonBody);
-        var typeKey = body.RootElement.EnumerateObject()
-            .Where(p => p.Name.Trim().EndsWith(CoreRecordTypeBindSuffix, StringComparison.OrdinalIgnoreCase) && IsCoreTypeKey(p.Name))
-            .Select(p => p.Name)
-            .ToList();
-        if ((type is not null || CoreTypeOf(item) is not null) && typeKey.Count != 1)
-            throw new InvalidOperationException("The core record type is not bound exactly once in the create body, so its pair cannot be written.");
-
-        var sentType = CoreTypeOf(item);
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject();
-            foreach (var property in body.RootElement.EnumerateObject())
-            {
-                if (IsCoreTypeKey(property.Name))
-                {
-                    if (type is null)
-                        continue; // cleared: the type is not written
-                    if (sentType is not null && sentType.RecordId == type.RecordId)
-                        property.WriteTo(writer); // the type as sent
-                    else
-                        writer.WriteString(property.Name, $"/{type.RelatedEntitySet}({type.RecordId:D})");
-                    continue;
-                }
-
-                if (!string.Equals(property.Name.Trim(), CoreRecordIdColumn, StringComparison.OrdinalIgnoreCase))
-                    property.WriteTo(writer);
-            }
-
-            if (id is not null)
-                writer.WriteString(CoreRecordIdColumn, id);
-            writer.WriteEndObject();
-        }
-
-        static bool IsPairColumn(string column) =>
-            string.Equals(column, CoreRecordTypeColumn, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(column, CoreRecordIdColumn, StringComparison.OrdinalIgnoreCase);
-
-        return item with
-        {
-            JsonBody = System.Text.Encoding.UTF8.GetString(stream.ToArray()),
-            Columns = [.. item.Columns.Where(c => !IsPairColumn(c)), .. type is null ? Array.Empty<string>() : [CoreRecordTypeColumn, CoreRecordIdColumn]],
-            Lookups = [.. item.Lookups.Where(l => !IsPairColumn(l.Column)), .. type is null ? Array.Empty<DataverseWriteItemMapper.MappedLookup>() : [type with { Column = CoreRecordTypeColumn }]],
-            ClearedColumns = [.. item.ClearedColumns.Where(c => !IsPairColumn(c))],
-        };
-    }
-
-    /// <summary>
-    /// Step 6¾ (task 042c fix round 2, B'; owner 2026-11-04: a half core pair is never written and never refused). For a Signal or
-    /// Decision Record that names its core record TYPE with no id (missing, null, empty or whitespace), the core record is taken
-    /// from the row as it ENDS (<see cref="CoreRootsAsTheRowEnds"/>: step 6½'s plan applied over the sent lookups; never a probe
-    /// of the caller), and the sent type is compared with each root's catalog row (<see cref="CoreAncestorResolver.RecordTypeOfCoreTableAsync"/>,
-    /// app-only):
-    /// <list type="bullet">
-    /// <item>the type is exactly one root's catalog row: FILLED with that root's id (the "D" form, lower case);</item>
-    /// <item>it is no root's, and there is exactly one root whose catalog row is known: REPLACED, the type and the id both from
-    /// that root (the type is that root's catalog row);</item>
-    /// <item>otherwise (no root, several roots and none or more than one of them of the sent type, or a root whose catalog row
-    /// cannot be told): CLEARED, neither column written, and the row is created with no core.</item>
-    /// </list>
-    /// Each with a warning (<see cref="RecordCreationWarning.CoreRecordFilledCode"/>, <see cref="RecordCreationWarning.CoreRecordReplacedCode"/>,
-    /// <see cref="RecordCreationWarning.CoreRecordClearedCode"/>) whose words name no record and nothing about its security. A
-    /// catalog fault is <see cref="RecordCreationRefusal.StampUnavailableCode"/> (503): nothing is cleared or written. The filled
-    /// root is step 7's core record (asked first, as the reconciler asks the written row), so a Secure root gets row 8's 409.
-    /// Every other row (no type, an id, a full pair, another table): unchanged.
-    /// </summary>
-    private async Task<(DataverseWriteItemMapper.MappedItem Item, RecordOwnershipParent? Record, RecordCreationWarning? Warning,
-        RecordCreationRefusal? Refusal)> CompleteHalfCorePairAsync(
-        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, object>? stampPlan, string noun,
-        CancellationToken ct)
-    {
-        if (!RecordOwnershipContext.CorePairTables.Contains(table) || CoreTypeOf(item) is not { } sent)
-            return (item, null, null, null);
-        var pair = CorePairOf(item);
-        if (pair.InvalidId || !string.IsNullOrWhiteSpace(pair.IdText))
-            return (item, null, null, null); // a full pair (or an id step 5 / step 7 refuses): unchanged
-
-        var roots = CoreRootsAsTheRowEnds(table, item, stampPlan);
-        var typeOfTable = new Dictionary<string, Guid?>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            foreach (var rootTable in roots.Select(r => r.EntityLogicalName).Distinct(StringComparer.OrdinalIgnoreCase))
-                typeOfTable[rootTable] = await CoreAncestorResolver.RecordTypeOfCoreTableAsync(_entities, rootTable, _logger, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Ruling 6: a fault is never a clear. Ids only (none here: the read is by table).
-            _logger.LogError(ex, "[RECORD-CREATE] the core record type of a new {Table} could not be read from the record-type " +
-                                 "catalog (fault); nothing was created", table);
-            return (item, null, null, StampUnavailable(noun));
-        }
-
-        var ofTheSentType = roots.Where(r => typeOfTable[r.EntityLogicalName] == sent.RecordId).ToList();
-        (DataverseWriteItemMapper.MappedItem, RecordOwnershipParent?, RecordCreationWarning?, RecordCreationRefusal?) completed;
-        try
-        {
-            if (ofTheSentType.Count == 1)
-            {
-                var root = ofTheSentType[0];
-                completed = (WithCorePair(item, sent, StoredCoreId(root.RecordId)), CoreRecordOf(root),
-                    new RecordCreationWarning(RecordCreationWarning.CoreRecordFilledCode, CoreRecordIdColumn, CoreRecordFilled(noun)), null);
-            }
-            else if (ofTheSentType.Count == 0 && roots.Count == 1 && typeOfTable[roots[0].EntityLogicalName] is { } rootType)
-            {
-                completed = (WithCorePair(item, sent with { RecordId = rootType }, StoredCoreId(roots[0].RecordId)), CoreRecordOf(roots[0]),
-                    new RecordCreationWarning(RecordCreationWarning.CoreRecordReplacedCode, CoreRecordTypeColumn, CoreRecordReplaced(noun)), null);
-            }
-            else
-            {
-                completed = (WithCorePair(item, null, null), null,
-                    new RecordCreationWarning(RecordCreationWarning.CoreRecordClearedCode, CoreRecordTypeColumn, CoreRecordCleared(noun)), null);
-            }
-        }
-        catch (InvalidOperationException ex)
-        {
-            // Fix round 3 (K3): the type is bound under a key WithCorePair does not recognise, so the pair can be neither written
-            // nor cleared. A fault, never a half pair: the existing 503, nothing written. The table only.
-            _logger.LogError(ex, "[RECORD-CREATE] the core record pair of a new {Table} could not be completed (fault); nothing " +
-                                 "was created", table);
-            return (item, null, null, StampUnavailable(noun));
-        }
-
-        // No record id at Information (UAC-r2): the table and what was done only.
-        _logger.LogInformation("[RECORD-CREATE] a new {Table} named its core record type without the core record; {Outcome}",
-            table, completed.Item3!.Code);
-        return completed;
-
-        static RecordOwnershipParent CoreRecordOf(RecordOwnershipParent root) =>
-            new(root.EntityLogicalName.Trim().ToLowerInvariant(), root.RecordId);
-    }
-
-    /// <summary>
-    /// Step 6¾'s roots (task 042c fix round 2, ruling 1): every core record (<see cref="CoreAncestorResolver.CoreRecordEntities"/>)
-    /// the row is filed under as it ENDS — <see cref="AsTheRowEnds"/> over step 6½'s plan (a planned stamp replaces a sent one
-    /// that disagrees; one that agrees is kept), so a row filed under a root uses that root — filtered as the owner question
-    /// filters them (an ownership parent, not a citation, not Secure-only), distinct. Nothing is read.
-    /// </summary>
-    private static List<RecordOwnershipParent> CoreRootsAsTheRowEnds(
-        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, object>? stampPlan) =>
-        AsTheRowEnds(OwnedChildWrite.LookupsOf(item), stampPlan)
-            .Where(l => l.Value is { IsSpecified: true } parent
-                        && CoreAncestorResolver.IsCoreRecordEntity(parent.EntityLogicalName)
-                        && !RecordOwnershipResolver.IsCitation(table, l.Key)
-                        && !RecordOwnershipResolver.IsSecureOnlyParent(table, l.Key))
-            .Select(l => new RecordOwnershipParent(l.Value!.EntityLogicalName.Trim().ToLowerInvariant(), l.Value.RecordId))
-            .Distinct()
-            .ToList();
-
-    /// <summary>Step 6¾'s words (B', ruling 8) for a filled core record: they name no record and nothing about its security.</summary>
-    internal static string CoreRecordFilled(string noun) =>
-        $"The {noun} named a core record type without the core record, so the core record was filled in from the record the " +
-        $"{noun} is filed under.";
-
-    /// <summary>Step 6¾'s words for a replaced core pair (B', ruling 3): no record named.</summary>
-    internal static string CoreRecordReplaced(string noun) =>
-        $"The {noun} named a core record type that is not the type of the record it is filed under, and no core record, so its " +
-        "core record type and core record were both taken from the record it is filed under.";
-
-    /// <summary>Step 6¾'s words for a cleared core record type (B', rulings 3-5): no record named.</summary>
-    internal static string CoreRecordCleared(string noun) =>
-        $"The {noun} named a core record type without the core record, and the core record could not be told from what the " +
-        $"{noun} is filed under, so it was created without a core record.";
-
-    /// <summary>Step 5's words (task 042c) for a core id that is not a record id: a non-string id and a string that is not a
-    /// record id alike (fix round 1).</summary>
-    internal const string CoreIdNotARecordId = $"'{CoreRecordIdColumn}' must hold the id of the core record this row belongs to.";
-
-    /// <summary>Step 5's words (task 042c fix round 1) for a core id with no core record type.</summary>
-    internal const string CoreIdWithNoType =
-        $"This row names a core record id ('{CoreRecordIdColumn}') but no core record type ('{CoreRecordTypeColumn}'), so the " +
-        "core record it belongs to cannot be told.";
-
-    /// <summary>
-    /// Step 5 (task 042c): for a Signal or Decision Record (<see cref="RecordOwnershipContext.CorePairTables"/>), the record its
-    /// core pair names, read AS THE CALLER by the regarding pair's rule (<see cref="CallerWriteAuthorization.PairTargetAsync"/>:
-    /// the pair's TYPE through the catalog under the caller's token; an unreadable catalog row is the uniform not-found; a type
-    /// naming no table is <see cref="OwnedChildWrite.Outcome.Invalid"/>), which must be a core record table
-    /// (<see cref="CoreAncestorResolver.CoreRecordEntities"/>, the reconciler's own rule: otherwise
-    /// <see cref="OwnedChildWrite.Outcome.Invalid"/>), then AppendTo on that record
-    /// (<see cref="CallerWriteAuthorization.CheckCallerMayAppendToAsync"/>): a record that is missing, unreadable, ordinary or
-    /// Secure answers alike — the uniform not-found an unappendable lookup gets — so no answer here tells whether the core
-    /// exists or is Secure. Nothing reads the core record app-only before this check. Every other table: nothing.
-    /// <para>Before any read (fix round 1): no id names nothing; an id that is not a record id (<see cref="CoreIdNotARecordId"/>,
-    /// whether or not it is a string) and an id with no type (<see cref="CoreIdWithNoType"/>) are
-    /// <see cref="OwnedChildWrite.Outcome.Invalid"/>, in the core pair's own words.</para>
-    /// </summary>
-    private static async Task<(RecordOwnershipParent? Record, OwnedChildWrite.Outcome? Refusal)> CallerMayFileUnderCoreAsync(
-        IDataverseUserClient user, Guid me, string table, DataverseWriteItemMapper.MappedItem item, CancellationToken ct)
-    {
-        if (!RecordOwnershipContext.CorePairTables.Contains(table))
-            return (null, null);
-
-        var pair = CorePairOf(item);
-        if (pair.InvalidId)
-            return (null, new OwnedChildWrite.Outcome { Invalid = CoreIdNotARecordId });
-        if (string.IsNullOrWhiteSpace(pair.IdText))
-            return (null, null); // the pair names no core record (as PairTargetAsync reads a pair with no id)
-        if (!Guid.TryParse(pair.IdText.Trim(), out var coreId) || coreId == Guid.Empty)
-            return (null, new OwnedChildWrite.Outcome { Invalid = CoreIdNotARecordId });
-        if (pair.TypeId is null)
-            return (null, new OwnedChildWrite.Outcome { Invalid = CoreIdWithNoType });
-
-        var target = await CallerWriteAuthorization.PairTargetAsync(
-                user, table, pair.IdText, pair.TypeId, pair.TypeEntitySet,
-                Array.Empty<DataverseWriteItemMapper.MappedLookup>(), ct,
-                idColumn: CoreRecordIdColumn, typeColumn: CoreRecordTypeColumn)
-            .ConfigureAwait(false);
-        if (target.Refusal is { } refused)
-            return (null, refused);
-        if (target.Lookup is not { } named)
-            return (null, null); // the pair names no core record
-
-        if (!CoreAncestorResolver.CoreRecordEntities.Contains(named.RelatedTable, StringComparer.OrdinalIgnoreCase))
-        {
-            return (null, new OwnedChildWrite.Outcome
-            {
-                Invalid = $"The record type '{CoreRecordTypeColumn}' names no core record table, so the core record this row " +
-                          "belongs to cannot be told.",
-            });
-        }
-
-        var appendTo = await CallerWriteAuthorization.CheckCallerMayAppendToAsync(user, me, [named], ct).ConfigureAwait(false);
-        return appendTo.Succeeded
-            ? (new RecordOwnershipParent(named.RelatedTable, named.RecordId), null)
-            : (null, appendTo);
-    }
-
-    /// <summary>
-    /// Step 7 for a SYSTEM principal (task 042c), which has no step 5: the record a Signal's or Decision Record's core pair
-    /// names, read app-only by the reconciler's own catalog read (<see cref="CoreAncestorResolver.CoreTableOfRecordTypeAsync"/>,
-    /// the read <see cref="RecordOwnershipContext.ForExistingRowAsync"/> makes). No id names nothing; an id that is not a record
-    /// id, an id with no type and a type that names no core record table are undetermined (why, as a phrase). A fault propagates
-    /// (step 7 refuses it as the owner fault it is, 503 <c>owner_unavailable</c>), and so does a type the catalog does not hold:
-    /// Dataverse's Retrieve throws for a missing row, as it does for the reconciler. Every other table: nothing.
-    /// </summary>
-    private async Task<(RecordOwnershipParent? Record, string? Undetermined)> CoreRecordOfSystemCreateAsync(
-        string table, DataverseWriteItemMapper.MappedItem item, CancellationToken ct)
-    {
-        if (!RecordOwnershipContext.CorePairTables.Contains(table))
-            return (null, null);
-
-        var pair = CorePairOf(item);
-        if (!pair.InvalidId && string.IsNullOrWhiteSpace(pair.IdText))
-            return (null, null);
-        if (pair.InvalidId || !Guid.TryParse(pair.IdText!.Trim(), out var id) || id == Guid.Empty)
-            return (null, $"its {CoreRecordIdColumn} is not a record id");
-        if (pair.TypeId is not { } type || type == Guid.Empty)
-            return (null, $"its {CoreRecordIdColumn} names a record without its record type");
-
-        var coreTable = await CoreAncestorResolver.CoreTableOfRecordTypeAsync(_entities, type, ct).ConfigureAwait(false);
-        return coreTable is null
-            ? (null, "its core record type is not a core record table in the record-type catalog")
-            : (new RecordOwnershipParent(coreTable, id), null);
-    }
 
     /// <summary>
     /// The business unit of <paramref name="owningTeam"/>, read app-only (step 7; shared with Repair, task 016).
@@ -2540,23 +2108,6 @@ internal sealed record RecordCreationWarning(string Code, string? Column, string
     /// <summary>Task 018a (K-7): a post-mapping default (<see cref="RecordCreationRequest.PostMappingDefaults"/>) was not written:
     /// the caller may not set it, it could not be checked, or the column cannot take it.</summary>
     internal const string DefaultValueDroppedCode = "record_creation.default_value_dropped";
-
-    /// <summary>Task 042c fix round 2 (B', owner 2026-11-04): a Signal or Decision Record named its core record type without the
-    /// core record, and the core record was FILLED from the record it is filed under (the type is that record's). Column:
-    /// <c>sprk_corerecordid</c>. Reaches the model and the caller only through this warning channel; its words name no record
-    /// id and nothing about the record's security.</summary>
-    internal const string CoreRecordFilledCode = "record_creation.core_record_filled";
-
-    /// <summary>Task 042c fix round 2 (B'): the core record type named with no core record was not the type of the one record the
-    /// row is filed under, so the WHOLE pair (type and id) was REPLACED from that record. Column: <c>sprk_corerecordtype</c>.
-    /// Same channel and words rule as <see cref="CoreRecordFilledCode"/>.</summary>
-    internal const string CoreRecordReplacedCode = "record_creation.core_record_replaced";
-
-    /// <summary>Task 042c fix round 2 (B'): the core record type named with no core record could not be completed from what the
-    /// row is filed under (no core record there, or none or several of the named type, or its catalog row cannot be told), so
-    /// the type was CLEARED and the row created with no core record (neither column written). Column: <c>sprk_corerecordtype</c>.
-    /// Same channel and words rule as <see cref="CoreRecordFilledCode"/>.</summary>
-    internal const string CoreRecordClearedCode = "record_creation.core_record_cleared";
 }
 
 /// <summary>The payload of a create: a caller's Dataverse Web API body, or an item already mapped (a chat tool, a server writer).</summary>

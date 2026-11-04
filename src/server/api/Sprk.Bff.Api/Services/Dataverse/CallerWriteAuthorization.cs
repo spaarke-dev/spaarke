@@ -178,22 +178,17 @@ internal static class CallerWriteAuthorization
     /// </list>
     /// Nothing here reads the record the pair names, so no answer depends on whether it exists or is secure; the caller
     /// asks AppendTo on the returned lookup before anything reads it app-only.
-    /// <para>Field-mapping-server-write-path-r1 task 042c (#2561): the same rule reads a Signal's or Decision Record's CORE pair
-    /// (<c>sprk_corerecordid</c> + <c>sprk_corerecordtype</c>), named by <paramref name="idColumn"/> and
-    /// <paramref name="typeColumn"/> so its words and its refused column name that pair. Left out, they are the ADR-024
-    /// regarding pair's, so every existing caller is unchanged.</para>
     /// </summary>
     internal static async Task<PairTarget> PairTargetAsync(
         IDataverseUserClient user, string table, string? idText, Guid? typeId, string? typeEntitySet,
         IReadOnlyCollection<DataverseWriteItemMapper.MappedLookup> lookups, CancellationToken ct,
-        IReadOnlyCollection<(string Column, Guid Id)>? keptOnTheRow = null,
-        string idColumn = SecureRootInheritance.PairIdColumn, string typeColumn = SecureRootInheritance.PairTypeColumn)
+        IReadOnlyCollection<(string Column, Guid Id)>? keptOnTheRow = null)
     {
         if (string.IsNullOrWhiteSpace(idText))
             return default; // names nothing (or clears it)
 
         if (!Guid.TryParse(idText.Trim(), out var pairId) || pairId == Guid.Empty)
-            return Refuse($"'{idColumn}' must hold the id of the record this row is filed under.");
+            return Refuse($"'{SecureRootInheritance.PairIdColumn}' must hold the id of the record this row is filed under.");
 
         if (typeId is not { } type)
         {
@@ -211,8 +206,8 @@ internal static class CallerWriteAuthorization
                 return new PairTarget(new DataverseWriteItemMapper.MappedLookup(column, keptTable, keptSet.EntitySet!, pairId), null);
             }
 
-            return Refuse($"'{idColumn}' names a record without its record type " +
-                          $"('{typeColumn}') or a lookup of this row that names it, so what it is " +
+            return Refuse($"'{SecureRootInheritance.PairIdColumn}' names a record without its record type " +
+                          $"('{SecureRootInheritance.PairTypeColumn}') or a lookup of this row that names it, so what it is " +
                           "filed under cannot be told.");
         }
 
@@ -226,7 +221,7 @@ internal static class CallerWriteAuthorization
                 {
                     Denied = "You do not have permission to file this record under the record type it names.",
                     ParentUnavailable = true,
-                    RefusedColumn = idColumn,
+                    RefusedColumn = SecureRootInheritance.PairIdColumn,
                 })
                 : new PairTarget(null, new Outcome { ClientFailure = typeRow });
         }
@@ -237,7 +232,7 @@ internal static class CallerWriteAuthorization
             ? logical.GetString()?.Trim().ToLowerInvariant()
             : null;
         if (string.IsNullOrEmpty(pairTable) || !LogicalName.IsMatch(pairTable))
-            return Refuse($"The record type '{typeColumn}' names no table, so what this row is filed under cannot be told.");
+            return Refuse($"The record type '{SecureRootInheritance.PairTypeColumn}' names no table, so what this row is filed under cannot be told.");
 
         // #1616: on a work assignment (an inheriting table whose pair is NOT BFF-managed) the pair names a root — a matter, a
         // project or another work assignment — only by repeating a typed filing lookup: the readers' one rule
@@ -259,7 +254,7 @@ internal static class CallerWriteAuthorization
             return new PairTarget(null, failure);
 
         return new PairTarget(
-            new DataverseWriteItemMapper.MappedLookup(idColumn, pairTable, entitySet.EntitySet!, pairId), null);
+            new DataverseWriteItemMapper.MappedLookup(SecureRootInheritance.PairIdColumn, pairTable, entitySet.EntitySet!, pairId), null);
 
         static PairTarget Refuse(string why) => new(null, new Outcome { Invalid = why });
     }

@@ -336,274 +336,6 @@ public class WriterBuilderOwnershipParityTests
         outcome.OwningTeamId.Should().Be(reconciler.OwningTeamId, "the create asks the thread's filing too (Q3)");
     }
 
-    // ── field-mapping-server-write-path-r1 task 042c (#2561, DI-019): a Signal's or Decision Record's CORE pair ────────────
-    //
-    // The reconciler asks a Signal or Decision Record with a core pair about its core record FIRST
-    // (RecordOwnershipContext.ForExistingRowAsync: sprk_corerecordtype read through the catalog, + sprk_corerecordid). The
-    // service's create now asks the same: step 5 asks the caller's AppendTo on the core record (the catalog read as the caller),
-    // and step 7 puts the core record first in the owner question. The row is filed under a team-owned invoice in the child
-    // unit (X) of an ordinary matter there (MatterInX), and names a core record elsewhere.
-
-    /// <summary>The two tables whose rows name a core record in a pair (RecordOwnershipContext.CorePairTables).</summary>
-    public static readonly TheoryData<string> CorePairTables = new() { "sprk_signal", "sprk_decisionrecord" };
-
-    [Theory(DisplayName = "042c AC2 (b): a caller's Signal or Decision Record whose ORDINARY core is in Y, filed under a team-owned invoice in X, is owned by Y's team at create, as the reconciler owns the written row")]
-    [MemberData(nameof(CorePairTables))]
-    public async Task ACallersCreateWithAnOrdinaryCoreInY_FiledUnderAnInvoiceInX_IsOwnedByYsTeam_AsTheReconcilerOwnsTheWrittenRow(string table)
-    {
-        var world = new CreateParityWorld();
-        world.InvoiceUnder(world.MatterInX);
-
-        var (outcome, written) = await world.CreateWithCoreAsCallerAsync(table, world.MatterInY,
-            ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
-
-        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
-        written!.GetAttributeValue<string>("sprk_corerecordid").Should().Be(world.MatterInY.ToString("D"), "the core pair is written");
-        var reconciler = await world.ReconcilerAnswerAsync(written);
-        reconciler.OwningTeamId.Should().Be(Directory.CustomerChildTeam, "the reconciler asks the core record (Y) first");
-        outcome.OwningTeamId.Should().Be(reconciler.OwningTeamId,
-            "the create asks the core record first too (before 042c: the invoice's team in X, ChildTeam)");
-    }
-
-    [Theory(DisplayName = "042c AC2 (a), UAC-r2 condition 2: a caller holding AppendTo on a SECURE core gets the existing row-8 refusal (409 NoOwnerSource), byte-identical to a Signal or Decision Record filed under a Secure root, and nothing is written")]
-    [MemberData(nameof(CorePairTables))]
-    public async Task ACallersCreateWithASecureCore_GetsTheRow8Refusal_ByteIdentical_AndWritesNothing(string table)
-    {
-        var world = new CreateParityWorld();
-        world.InvoiceUnder(world.SecureMatter);
-        var (row8, _) = await world.CreateAsCallerAsync(table, ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
-        world.InvoiceUnder(world.MatterInX);
-
-        var (outcome, _) = await world.CreateWithCoreAsCallerAsync(table, world.SecureMatter,
-            ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
-
-        row8.Refusal.Should().NotBeNull("the baseline is design section 15.4 row 8");
-        outcome.Refusal.Should().NotBeNull("the Secure core is asked first, and a Signal or Decision Record is not a reparentable child");
-        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved);
-        outcome.Refusal.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
-        outcome.Refusal.OwnerDecision!.IsSecureOwner.Should().BeTrue();
-        outcome.Refusal.Detail.Should().Be(row8.Refusal!.Detail, "the words are row 8's");
-        RecordCreationProblemMap.ToProblemDetails(outcome.Refusal, table, "c").Should().BeEquivalentTo(
-            RecordCreationProblemMap.ToProblemDetails(row8.Refusal, table, "c"), "status, code and words are row 8's");
-        world.Creates.Should().BeEmpty();
-        (await world.ReconcilerAnswerAsync(world.RowAsItWouldBeWritten(table, world.SecureMatter,
-                ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice), ("sprk_regardingmatter", "sprk_matter", world.MatterInX))))
-            .OwningTeamId.Should().Be(Directory.SecureNamedTeam, "the reconciler would own the row in isolation, so refusing writes no ordinary row");
-    }
-
-    [Theory(DisplayName = "042c AC5 (must not fire): a caller's Signal or Decision Record whose core AGREES with its subject (the core is the invoice's own matter, as SignalWriter derives it) gets the same owner as with no core pair, and the reconciler's")]
-    [MemberData(nameof(CorePairTables))]
-    public async Task ACallersCreateWithAnAgreeingCore_GetsTheSameOwnerAsWithNoCore(string table)
-    {
-        var world = new CreateParityWorld();
-        world.InvoiceUnder(world.MatterInX);
-        var (noCore, noCoreRow) = await world.CreateAsCallerAsync(table, ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
-
-        var (outcome, written) = await world.CreateWithCoreAsCallerAsync(table, world.MatterInX,
-            ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
-
-        noCore.Succeeded.Should().BeTrue(noCore.Refusal?.Detail);
-        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
-        noCore.OwningTeamId.Should().Be(Directory.ChildTeam, "no core pair: today's owner, unchanged");
-        outcome.OwningTeamId.Should().Be(noCore.OwningTeamId, "a core that agrees changes no owner");
-        outcome.OwningTeamId.Should().Be((await world.ReconcilerAnswerAsync(written!)).OwningTeamId);
-        (await world.ReconcilerAnswerAsync(noCoreRow!)).OwningTeamId.Should().Be(noCore.OwningTeamId);
-    }
-
-    [Theory(DisplayName = "042c (system principal): a system create of a Signal or Decision Record with an ordinary core in Y reads the catalog as the reconciler does and is owned by Y's team, as the reconciler owns the written row")]
-    [MemberData(nameof(CorePairTables))]
-    public async Task ASystemCreateWithAnOrdinaryCoreInY_IsOwnedAsTheReconcilerOwnsTheWrittenRow(string table)
-    {
-        var world = new CreateParityWorld();
-        world.InvoiceUnder(world.MatterInX);
-
-        var (outcome, written) = await world.CreateWithCoreAsync(table, world.MatterInY,
-            ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
-
-        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
-        var reconciler = await world.ReconcilerAnswerAsync(written!);
-        reconciler.OwningTeamId.Should().Be(Directory.CustomerChildTeam);
-        outcome.OwningTeamId.Should().Be(reconciler.OwningTeamId);
-    }
-
-    [Theory(DisplayName = "042c (system principal, fail closed): a system create whose core pair cannot be told (a type that is no core table, an id that is not a record id, an id with no type) is refused 409 ParentUndetermined, nothing written")]
-    [InlineData("sprk_signal", "not-core-table")]
-    [InlineData("sprk_signal", "not-a-guid")]
-    [InlineData("sprk_signal", "no-type")]
-    [InlineData("sprk_decisionrecord", "not-core-table")]
-    [InlineData("sprk_decisionrecord", "not-a-guid")]
-    [InlineData("sprk_decisionrecord", "no-type")]
-    public async Task ASystemCreateWhoseCorePairCannotBeTold_IsRefused_ParentUndetermined(string table, string pair)
-    {
-        var world = new CreateParityWorld();
-        world.InvoiceUnder(world.MatterInX);
-
-        var (outcome, _) = pair switch
-        {
-            "not-core-table" => await world.CreateWithCoreAsync(table, world.MatterInY, CreateParityWorld.DocumentRecordType,
-                ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice)),
-            "not-a-guid" => await world.CreateWithCoreTextAsync(table, "not-a-guid", CreateParityWorld.MatterRecordType,
-                ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice)),
-            _ => await world.CreateWithCoreTextAsync(table, world.MatterInY.ToString("D"), null,
-                ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice)),
-        };
-
-        outcome.Refusal.Should().NotBeNull();
-        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved);
-        outcome.Refusal.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined);
-        world.Creates.Should().BeEmpty();
-    }
-
-    [Theory(DisplayName = "042c fix round 1 (G, system principal): a system create whose core type the catalog does not hold is the owner fault, 503 owner_unavailable (the app-only catalog read throws, as Dataverse's Retrieve does for a missing row), not 409; nothing written")]
-    [MemberData(nameof(CorePairTables))]
-    public async Task ASystemCreateWhoseCoreTypeTheCatalogDoesNotHold_IsTheOwnerFault503(string table)
-    {
-        var world = new CreateParityWorld();
-        world.InvoiceUnder(world.MatterInX);
-        var unknownType = Guid.Parse("0b000000-0000-4000-8000-000000042c23");
-        world.MissingRows.Add(unknownType);
-
-        var (outcome, _) = await world.CreateWithCoreAsync(table, world.MatterInY, unknownType,
-            ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
-
-        outcome.Refusal.Should().NotBeNull();
-        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Unavailable);
-        outcome.Refusal.Code.Should().Be(RecordCreationRefusal.OwnerUnavailableCode);
-        RecordCreationProblemMap.StatusOf(outcome.Refusal).Should().Be(503);
-        world.Creates.Should().BeEmpty();
-    }
-
-    [Theory(DisplayName = "042c fix round 1 (D, system principal): a system create's core id sent with braces, in upper case and padded is written as the writers store it (the normalisation runs whatever the principal)")]
-    [MemberData(nameof(CorePairTables))]
-    public async Task ASystemCreatesCoreId_IsWrittenAsTheWritersStoreIt(string table)
-    {
-        var world = new CreateParityWorld();
-        world.InvoiceUnder(world.MatterInX);
-
-        var (outcome, _) = await world.CreateWithCoreTextAsync(table, $" {world.MatterInY.ToString("B").ToUpperInvariant()} ",
-            CreateParityWorld.MatterRecordType, ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
-
-        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
-        var fields = world.Creates.Should().ContainSingle().Subject.Fields;
-        (fields["sprk_corerecordid"] switch
-        {
-            string text => text,
-            System.Text.Json.JsonElement element => element.GetString(),
-            _ => null,
-        }).Should().Be(world.MatterInY.ToString("D").ToLowerInvariant());
-    }
-
-    // ── Task 042c fix round 2 (B', owner 2026-11-04): a HALF core pair is filled, replaced or cleared, never written or refused ──
-    // Ruling 10: the system principal applies the same rules as the caller (step 6¾ runs for both), and a completed row is owned
-    // as the reconciler owns the written row (ruling 1's parity: the filled core is asked first by both).
-
-    [Theory(DisplayName = "042c B' rulings 1-7 and 10: a create (system principal, and the caller for the fill) naming a core TYPE with no id is completed from the row as it ends — filled, replaced or cleared with its warning, or refused 503 / 409 on a fault / a Secure root — and a completed row is owned as the reconciler owns the written row")]
-    [InlineData("sprk_signal", "system", "fill from the plan")]
-    [InlineData("sprk_signal", "caller", "fill from the plan")]
-    [InlineData("sprk_signal", "system", "fill, filed under the root")]
-    [InlineData("sprk_signal", "system", "replace")]
-    [InlineData("sprk_signal", "system", "clear, no root")]
-    [InlineData("sprk_signal", "system", "clear, no catalog row")]
-    [InlineData("sprk_signal", "system", "catalog fault")]
-    [InlineData("sprk_signal", "system", "planning fault")]
-    [InlineData("sprk_signal", "system", "secure root")]
-    [InlineData("sprk_decisionrecord", "system", "fill from the plan")]
-    [InlineData("sprk_decisionrecord", "caller", "fill from the plan")]
-    [InlineData("sprk_decisionrecord", "system", "fill, filed under the root")]
-    [InlineData("sprk_decisionrecord", "system", "replace")]
-    [InlineData("sprk_decisionrecord", "system", "clear, no root")]
-    [InlineData("sprk_decisionrecord", "system", "clear, no catalog row")]
-    [InlineData("sprk_decisionrecord", "system", "catalog fault")]
-    [InlineData("sprk_decisionrecord", "system", "planning fault")]
-    [InlineData("sprk_decisionrecord", "system", "secure root")]
-    public async Task ACreateWithAHalfCorePair_IsCompletedFromTheRowAsItEnds(string table, string principal, string @case)
-    {
-        var world = new CreateParityWorld();
-        var type = CreateParityWorld.MatterRecordType;
-        (string Column, string Target, Guid Id)[] lookups = [("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice)];
-        switch (@case)
-        {
-            case "fill, filed under the root":
-                lookups = [("sprk_regardingmatter", "sprk_matter", world.MatterInY)];
-                break;
-            case "replace":
-                world.InvoiceUnder(world.MatterInY);
-                type = CreateParityWorld.DocumentRecordType;
-                break;
-            case "clear, no root":
-                world.InvoiceUnderNothing();
-                break;
-            case "clear, no catalog row":
-                world.InvoiceUnder(world.MatterInY);
-                world.CatalogByTable["sprk_matter"] = [];
-                break;
-            case "catalog fault":
-                world.InvoiceUnder(world.MatterInY);
-                world.CatalogFault = new InvalidOperationException("Scripted catalog fault.");
-                break;
-            case "planning fault":
-                world.InvoiceUnder(world.MatterInY);
-                world.FailInvoiceRead();
-                break;
-            case "secure root":
-                world.InvoiceUnder(world.SecureMatter);
-                break;
-            default:
-                world.InvoiceUnder(world.MatterInY);
-                break;
-        }
-
-        var (outcome, written) = await world.CreateWithHalfPairAsync(principal == "caller", table, type, lookups);
-
-        if (@case is "catalog fault" or "planning fault")
-        {
-            outcome.Refusal.Should().NotBeNull();
-            outcome.Refusal!.Code.Should().Be(RecordCreationRefusal.StampUnavailableCode, "ruling 6: the existing 503, never a clear");
-            RecordCreationProblemMap.StatusOf(outcome.Refusal).Should().Be(503);
-            world.Creates.Should().BeEmpty();
-            return;
-        }
-
-        if (@case == "secure root")
-        {
-            outcome.Refusal.Should().NotBeNull("ruling 7: the filled Secure root takes the normal path to row 8");
-            outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved);
-            outcome.Refusal.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
-            outcome.Refusal.OwnerDecision!.IsSecureOwner.Should().BeTrue();
-            world.Creates.Should().BeEmpty();
-            // Row 8 either way (the Secure matter is also the filing parent): the FILL is proved by step 6¾'s logged outcome.
-            world.ServiceLog.Messages.Where(m => m.Contains("named its core record type without the core record", StringComparison.Ordinal))
-                .Should().ContainSingle().Which.Should().EndWith(RecordCreationWarning.CoreRecordFilledCode);
-            return;
-        }
-
-        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
-        var fields = world.Creates.Should().ContainSingle().Subject.Fields;
-        var noun = RecordCreationService.NounOf(table);
-        var cleared = @case.StartsWith("clear", StringComparison.Ordinal);
-        if (cleared)
-        {
-            outcome.MappingWarnings.Should().ContainSingle().Which.Should().Be(new RecordCreationWarning(
-                RecordCreationWarning.CoreRecordClearedCode, "sprk_corerecordtype", RecordCreationService.CoreRecordCleared(noun)));
-            fields.Keys.Should().NotContain(k => k.Contains("corerecord", StringComparison.OrdinalIgnoreCase), "neither column is written");
-            written!.Contains("sprk_corerecordtype").Should().BeFalse();
-        }
-        else
-        {
-            outcome.MappingWarnings.Should().ContainSingle().Which.Code.Should().Be(@case == "replace"
-                ? RecordCreationWarning.CoreRecordReplacedCode
-                : RecordCreationWarning.CoreRecordFilledCode);
-            written!.GetAttributeValue<string>("sprk_corerecordid").Should().Be(world.MatterInY.ToString("D"), "filled with the root as the row ends");
-            written.GetAttributeValue<EntityReference>("sprk_corerecordtype")!.Id.Should().Be(CreateParityWorld.MatterRecordType,
-                "the type is the root's catalog row (UAC-r2 (b): never a sent type beside an id of another type)");
-        }
-
-        var reconciler = await world.ReconcilerAnswerAsync(written!);
-        outcome.OwningTeamId.Should().Be(reconciler.OwningTeamId, "the create's owner is the reconciler's for the written row");
-        if (!cleared)
-            outcome.OwningTeamId.Should().Be(Directory.CustomerChildTeam, "the filled core (Y) is asked first");
-    }
-
     /// <summary>
     /// The REAL <see cref="RecordCreationService"/> over an
     /// <see cref="Directory"/> (the resolver's rows), a <see cref="CoreAncestorStamping.StampWorld"/> (the I-1 derivation and
@@ -621,15 +353,6 @@ public class WriterBuilderOwnershipParityTests
         public Guid MatterInY { get; } = Guid.Parse("0b000000-0000-4000-8000-000000042b12");
         public Guid MatterInAUnitWithNoDefaultTeam { get; } = Guid.Parse("0b000000-0000-4000-8000-000000042b13");
 
-        /// <summary>Task 042c: an ordinary matter in the child unit (X), owned by its default team.</summary>
-        public Guid MatterInX { get; } = Guid.Parse("0b000000-0000-4000-8000-000000042c14");
-
-        /// <summary>Task 042c: the record-type catalog's matter row and a row naming a table that is no core record table.</summary>
-        public static readonly Guid MatterRecordType = Guid.Parse("0b000000-0000-4000-8000-000000042c21");
-        public static readonly Guid DocumentRecordType = Guid.Parse("0b000000-0000-4000-8000-000000042c22");
-
-        private const string CoreRecordIdColumn = "sprk_corerecordid";
-
         private readonly Directory _directory;
         private readonly Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld _stamps = new();
         private readonly Mock<IFieldMappingDataverseService> _appOnly =
@@ -638,48 +361,14 @@ public class WriterBuilderOwnershipParityTests
         /// <summary>Every app-only create, with the fields of its body as sent (fix round 1: the theory reads what was written).</summary>
         public List<(string Table, Guid Id, Dictionary<string, object?> Fields)> Creates { get; } = [];
 
-        /// <summary>Task 042c B': what the service logged (step 6¾'s outcome).</summary>
-        public CapturingLog<RecordCreationService> ServiceLog { get; } = new();
-
-        /// <summary>Task 042c fix round 1: ids the service's app-only single-row read does not find (it throws, as Dataverse does).</summary>
-        public HashSet<Guid> MissingRows { get; } = [];
-
-        /// <summary>Task 042c fix round 2 (B'): the active record-type catalog rows by table, as the service reads them
-        /// (<c>CoreAncestorResolver.RecordTypeOfCoreTableAsync</c>); a read of it faults with <see cref="CatalogFault"/>.</summary>
-        public Dictionary<string, List<Guid>> CatalogByTable { get; } = new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["sprk_matter"] = [MatterRecordType],
-        };
-
-        public Exception? CatalogFault { get; set; }
-
-        /// <summary>Task 042c fix round 2 (B'): the invoice, team-owned in X, filed under no core record.</summary>
-        public void InvoiceUnderNothing()
-        {
-            _directory.WithRecord("sprk_invoice", Invoice, Directory.ChildBu, owningTeam: Directory.ChildTeam);
-            _stamps.Row("sprk_invoice", Invoice);
-        }
-
-        /// <summary>Task 042c fix round 2 (B'): step 6½ cannot read the invoice (a planning fault).</summary>
-        public void FailInvoiceRead() => _stamps.FailRead("sprk_invoice", Invoice);
-
-        /// <summary>Task 042c fix round 2 (B'): a create naming the core pair's TYPE and no id, as the caller or the system.</summary>
-        public Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateWithHalfPairAsync(
-            bool asCaller, string table, Guid type, params (string Column, string Target, Guid Id)[] lookups) =>
-            CreateAsAsync(asCaller ? CallerPrincipal() : RecordCreationPrincipal.ForSystem(), table, lookups, null, type);
-
         public CreateParityWorld()
         {
             _directory = Directory.Standard()
                 .WithSecureRoot("sprk_matter", SecureMatter)
                 .WithRecord("sprk_matter", MatterInY, Directory.CustomerChildBu, isSecure: false, owningTeam: Directory.CustomerChildTeam)
                 .WithBusinessUnit(NoTeamUnit, "No default team", parent: Directory.ChildBu)
-                .WithRecord("sprk_matter", MatterInAUnitWithNoDefaultTeam, NoTeamUnit, isSecure: false)
-                // Task 042c: an ordinary matter in X, and the catalog the reconciler reads app-only (CoreTableOfRecordTypeAsync).
-                .WithRecord("sprk_matter", MatterInX, Directory.ChildBu, isSecure: false, owningTeam: Directory.ChildTeam)
-                .WithRecord("sprk_recordtype_ref", MatterRecordType, null, extra: new() { ["sprk_recordlogicalname"] = "sprk_matter" })
-                .WithRecord("sprk_recordtype_ref", DocumentRecordType, null, extra: new() { ["sprk_recordlogicalname"] = "sprk_document" });
-            foreach (var matter in new[] { SecureMatter, MatterInY, MatterInAUnitWithNoDefaultTeam, MatterInX })
+                .WithRecord("sprk_matter", MatterInAUnitWithNoDefaultTeam, NoTeamUnit, isSecure: false);
+            foreach (var matter in new[] { SecureMatter, MatterInY, MatterInAUnitWithNoDefaultTeam })
                 _stamps.Row("sprk_matter", matter);
 
             _appOnly
@@ -690,9 +379,6 @@ public class WriterBuilderOwnershipParityTests
                 {
                     Creates.Add((table, id, new Dictionary<string, object?>(fields)));
                     _stamps.Row(table, id, [.. BindsOf(fields)]); // the row as Dataverse stores it: every lookup the body binds
-                    // Task 042c: and the core pair's id, a string column the reconciler reads (sprk_corerecordid).
-                    if (fields.TryGetValue(CoreRecordIdColumn, out var coreId) && TextOf(coreId) is { } coreText)
-                        _stamps.Set(table, id, CoreRecordIdColumn, coreText);
                 })
                 .Returns(Task.CompletedTask);
         }
@@ -759,62 +445,19 @@ public class WriterBuilderOwnershipParityTests
         /// </summary>
         public Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateAsCallerAsync(
             string table, params (string Column, string Target, Guid Id)[] lookups) =>
-            CreateAsAsync(CallerPrincipal(), table, lookups);
-
-        /// <summary>
-        /// Task 042c: the caller's scripted Dataverse — the record-type catalog as the caller reads it, and Create/Append on the
-        /// two core-pair tables (every other answer is <see cref="SecureChildOwnershipAiToolTests.ScriptedUserClient"/>'s).
-        /// </summary>
-        private static RecordCreationPrincipal CallerPrincipal()
-        {
-            var user = new SecureChildOwnershipAiToolTests.ScriptedUserClient(Directory.CallerUserId);
-            user.Held.UnionWith(["prvCreatesprk_signal", "prvAppendsprk_signal", "prvCreatesprk_decisionrecord", "prvAppendsprk_decisionrecord"]);
-            user.RecordTypes[MatterRecordType] = "sprk_matter";
-            user.RecordTypes[DocumentRecordType] = "sprk_document";
-            return RecordCreationPrincipal.ForCaller(user, Directory.CallerOid);
-        }
-
-        /// <summary>Task 042c: a caller's create naming the core pair (the catalog's matter type, <paramref name="core"/>).</summary>
-        public Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateWithCoreAsCallerAsync(
-            string table, Guid core, params (string Column, string Target, Guid Id)[] lookups) =>
-            CreateAsAsync(CallerPrincipal(), table, lookups, core.ToString("D"), MatterRecordType);
-
-        /// <summary>Task 042c: a system create naming the core pair (the catalog's matter type, <paramref name="core"/>).</summary>
-        public Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateWithCoreAsync(
-            string table, Guid core, params (string Column, string Target, Guid Id)[] lookups) =>
-            CreateWithCoreAsync(table, core, MatterRecordType, lookups);
-
-        /// <summary>Task 042c: a system create naming the core pair with <paramref name="type"/>.</summary>
-        public Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateWithCoreAsync(
-            string table, Guid core, Guid type, params (string Column, string Target, Guid Id)[] lookups) =>
-            CreateAsAsync(RecordCreationPrincipal.ForSystem(), table, lookups, core.ToString("D"), type);
-
-        /// <summary>Task 042c: a system create whose core pair holds <paramref name="idText"/> and <paramref name="type"/> (none: no type).</summary>
-        public Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateWithCoreTextAsync(
-            string table, string idText, Guid? type, params (string Column, string Target, Guid Id)[] lookups) =>
-            CreateAsAsync(RecordCreationPrincipal.ForSystem(), table, lookups, idText, type);
-
-        private static string? TextOf(object? value) => value switch
-        {
-            string text => text,
-            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => element.GetString(),
-            _ => null,
-        };
+            CreateAsAsync(
+                RecordCreationPrincipal.ForCaller(
+                    new SecureChildOwnershipAiToolTests.ScriptedUserClient(Directory.CallerUserId), Directory.CallerOid),
+                table, lookups);
 
         private async Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateAsAsync(
-            RecordCreationPrincipal principal, string table, (string Column, string Target, Guid Id)[] lookups,
-            string? coreIdText = null, Guid? coreType = null)
+            RecordCreationPrincipal principal, string table, (string Column, string Target, Guid Id)[] lookups)
         {
-            // Task 042c: the core pair's type is a lookup to the catalog, its id a string column.
-            if (coreType is { } type)
-                lookups = [.. lookups, ("sprk_corerecordtype", "sprk_recordtype_ref", type)];
             _lookups = lookups;
-            var body = lookups.ToDictionary(l => $"{l.Column}@odata.bind", l => (object)$"/{l.Target}s({l.Id:D})");
-            if (coreIdText is not null)
-                body[CoreRecordIdColumn] = coreIdText;
             var item = new DataverseWriteItemMapper.MappedItem(
-                System.Text.Json.JsonSerializer.Serialize(body),
-                [.. lookups.Select(l => l.Column), .. coreIdText is null ? Array.Empty<string>() : [CoreRecordIdColumn]])
+                System.Text.Json.JsonSerializer.Serialize(lookups.ToDictionary(
+                    l => $"{l.Column}@odata.bind", l => $"/{l.Target}s({l.Id:D})")),
+                [.. lookups.Select(l => l.Column)])
             {
                 Lookups = [.. lookups.Select(l => new DataverseWriteItemMapper.MappedLookup(l.Column, l.Target, l.Target + "s", l.Id))],
             };
@@ -822,7 +465,7 @@ public class WriterBuilderOwnershipParityTests
             var outcome = await RouteRecordCreation.Over(
                     _directory.Resolver(), _appOnly.Object, _stamps.Restamper,
                     SecureChildShareWorld.Standard().Synchronizer(new FakeRecordShareTable()),
-                    Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), entities: Entities(), logger: ServiceLog)
+                    Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), entities: Entities())
                 .CreateAsync(
                     new RecordCreationRequest(
                         table, new RecordCreationPayload.Mapped(item)),
@@ -833,9 +476,7 @@ public class WriterBuilderOwnershipParityTests
             // look like an unfiled row and could agree with the reconciler vacuously. Every lookup the item names must be on it.
             if (written is not null)
             {
-                // Task 042c fix round 2 (B'): the core pair's type is the service's to fill, replace or clear (step 6¾); the theory
-                // asserts it on its own.
-                foreach (var (column, target, lookupId) in lookups.Where(l => l.Column != "sprk_corerecordtype"))
+                foreach (var (column, target, lookupId) in lookups)
                 {
                     written.GetAttributeValue<EntityReference>(column).Should().Be(new EntityReference(target, lookupId),
                         $"the create body binds the item's {column}, so the written row holds it");
@@ -851,15 +492,6 @@ public class WriterBuilderOwnershipParityTests
             var row = new Entity(table, Guid.NewGuid());
             foreach (var (column, target, id) in lookups)
                 row[column] = new EntityReference(target, id);
-            return row;
-        }
-
-        /// <summary>Task 042c: the row as it would be written, naming the core pair (the catalog's matter type, <paramref name="core"/>).</summary>
-        public Entity RowAsItWouldBeWritten(string table, Guid core, params (string Column, string Target, Guid Id)[] lookups)
-        {
-            var row = RowAsItWouldBeWritten(table, lookups);
-            row["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", MatterRecordType);
-            row[CoreRecordIdColumn] = core.ToString("D");
             return row;
         }
 
@@ -900,24 +532,9 @@ public class WriterBuilderOwnershipParityTests
             entities
                 .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) => _directory.Answer(query));
-            // Task 042c fix round 2 (B'): the catalog read by table (the directory answers reads by id only).
-            entities
-                .Setup(e => e.RetrieveMultipleAsync(
-                    It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()))
-                .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
-                {
-                    if (CatalogFault is { } fault)
-                        return Task.FromException<EntityCollection>(fault);
-                    var table = (string)query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_recordlogicalname").Values.Single();
-                    var ids = CatalogByTable.TryGetValue(table, out var rows) ? rows : [];
-                    return Task.FromResult(new EntityCollection(ids.Select(id => new Entity("sprk_recordtype_ref", id)).ToList()));
-                });
             entities
                 .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .Returns((string table, Guid id, string[] _, CancellationToken _) => MissingRows.Contains(id)
-                    // Task 042c fix round 1: a row that does not exist throws, as Dataverse's Retrieve does.
-                    ? Task.FromException<Entity>(new InvalidOperationException($"{table} With Id = {id:D} Does Not Exist"))
-                    : Task.FromResult(_directory.Row(table, id)));
+                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => _directory.Row(table, id));
             return entities.Object;
         }
     }

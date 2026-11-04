@@ -821,33 +821,17 @@ public sealed record RecordOwnershipContext
     /// <c>sprk_regardingrecordid</c> as written, which names the subject first on a regarding host table. A writer that needs
     /// another primary has found a table whose order is wrong: that is changed in <c>SecureChildLineage</c>, with a reason,
     /// never at the call site. The one opt-out is <see cref="ForParentsInWriterOrder"/> (a closed list).
-    /// <para>Field-mapping-server-write-path-r1 task 042c (#2561, UAC-r2): <paramref name="coreRecord"/> is the record a Signal's or
-    /// Decision Record's core pair (<c>sprk_corerecordtype</c> + <c>sprk_corerecordid</c>) names, which no lookup holds. Given, it
-    /// is asked FIRST and is the primary, ahead of the primary order (distinct), because that is the order
-    /// <see cref="ForExistingRowAsync"/> asks the written row in (core, then subject, stamps and the rest), so the create's owner
-    /// is the reconciler's. Only a row of <see cref="CorePairTables"/> names one: any other table throws
-    /// <see cref="ArgumentException"/>. Left out (<c>null</c>), the question is exactly what it was without it.</para>
     /// </summary>
     public static RecordOwnershipContext ForRow(
         string table, IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> lookups, string? pairId = null,
-        Guid? callerObjectId = null, Guid? callerSystemUserId = null, RecordOwnershipParent? coreRecord = null)
+        Guid? callerObjectId = null, Guid? callerSystemUserId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
         ArgumentNullException.ThrowIfNull(lookups);
         var name = table.Trim().ToLowerInvariant();
-        if (coreRecord is not null && !CorePairTables.Contains(name))
-        {
-            throw new ArgumentException(
-                $"Only a row of a core-pair table ({string.Join(", ", CorePairTables)}) names a core record; '{name}' does not.",
-                nameof(coreRecord));
-        }
-
         var held = lookups.ToArray();
-        var ordered = PrimaryOrdered(name, held, pairId);
         // V-fix 3: a Secure-only lookup (an editable copy's canonical) joins secure-if-any only, never the primary order.
-        return ForParents(
-                coreRecord is null ? ordered : new RecordOwnershipParent?[] { coreRecord }.Concat(ordered),
-                callerObjectId, callerSystemUserId) with
+        return ForParents(PrimaryOrdered(name, held, pairId), callerObjectId, callerSystemUserId) with
         {
             SecureOnlyParents = SecureOnlyOf(name, held),
             ChildEntityLogicalName = name, // R4b-2
