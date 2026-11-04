@@ -260,3 +260,93 @@ No surface names a parent core record today. 082d must keep `ChainRecord` and `R
 | Extra mutation (c): `decisive.Any(Excluded)` → `.All(...)` | Both O1 "Exclude wins" cases failed (run with (d)-(g); `All` over no rows also excludes every unassigned Procedure, so that run's 22 failures were confounded) |
 | Extra mutations (d)-(g), rerun without (c): record rule judged at `DateOnly.MaxValue`; rules not filtered by the chosen Procedure Version; rule-exclude firm filter dropped; chain record ids appended to the reader-view Procedure name | 7 of 49 failed, each a targeted test: the owner date window, record rule per firm, K1/K3 dropped base, versions per window, Pin in a later window, rule excluded for firm F, U3. Restored. |
 | Fail-closed fix (`b7d3589bed`): unknown or empty Applies to throws; an unnamed Procedure reads "(unnamed Procedure)" | The 3 new cases failed before the fix and pass after |
+
+## 082b review and fix round (2026-11-04)
+
+Branch `task/ebilling-082b`, from `0e264aaa04`. Nothing was written to Dataverse; no live call. Where the coordinator's correction from ontology-r1 D-203 (5)-(7) (items A1, A2, A6) conflicts with the first fix brief, the correction is followed.
+
+### Reviews received
+
+- **uac-r2: U3 APPROVED, no F.** One known-limit note, K1: `Level` and `Distance` in `ForReaders()` show that a parent at that level holds a Procedure assignment. That is accepted while Procedures stay catalogue-level. If Procedures are ever created per record, or named from the record, it becomes F and the two fields must go. A one-line comment now sits at `ForReaders()`.
+- **ontology-r1 D-203** (recorded in full below).
+- **Adversarial pass:** two F1 (retiring the first or only version switches the Procedure off; the content of a removed change comes back), one F3 (the firm condition untested for an All-records Procedure), and K1 to K6.
+
+### Findings and what changed
+
+| Finding | What changed | Tests (all fail against the old file unless marked regression) |
+|---|---|---|
+| **F1 #1: retiring the first or only version** | `ChooseVersion` runs the F2-d test first (`NotApplicableOn`). "Before the Procedure's first version opened" now means before the earliest effective-from over Active, Superseded **and Retired** versions that have one (`ProcedureVersionRow.OpenedAWindow`). Retired versions stay out of the in-force set, so work in a Retired version's window, or after the last end, is a gap (model 3.1 I-P5). A Draft never opens a window. The whole Procedure retired is untouched: the Procedure query filters it, so no gap. | V1 Superseded then Retired + V2 Active: Feb 1 is a gap, Mar 15 is V2, a date before Jan 1 is not applicable; the only version Retired: any date from its from-date is a gap, a date before is not applicable; with an end: after the end is `AfterLastVersion`; retiring the Procedure raises no gap (regression, 3 version statuses) |
+| **F1 #2: the content of a removed change comes back** | `RecordRuleVersionOn` counts only the versions of the **current episode** (below). This replaces the brief's "highest-numbered Published version only", which breaks an edit inside one episode (coordinator A2). | removal then re-change: Jan 20 and Apr 1 give the base rule, Jul 1 gives v2; an edit inside one episode: v1, then v2 between its from-date and v3's, then v3 (regression for the rule it replaces) |
+| **F3: firm condition untested for All-records** | Tests only. | An All-records Procedure naming F applies to F and not to G, on a matter and with no core record; the same Procedure also assigned on the matter still does not apply to G (the case the seeding mutation reaches) |
+| **K1: record-rule pairing** | `RuleOverridesOf` finds a record rule by its **derived id**, `ProcedureAssignmentService.RecordRulePolicyIdFor(RecordRuleSetIdFor(table, record, firm), basePolicyId)` (the helpers are reused, not copied). `RequireBasedOn` then checks that every Published version of it names a version of its base rule; if not, `ProcedureResolutionFaultException`. A cleared link can no longer turn the change's Exclude into a plain Exclude. | a cleared based-on link, and one naming another rule's version, both throw |
+| **K2: ToString leaks** | `PrintMembers` on `ProcedureOverrideRow`, `AppliedProcedure`, `RecordRuleSlot` and `ProcedureGap`: names, numbers, kinds, distance and counts only. Xmldoc on `ProcedureResolutionFaultException`, `RulesOn` and the class remarks: `ex.Message` names ids for operators and must never be shown to a reader (see the 082c criteria). | each record's `ToString()` holds no id, row id, Procedure id, reason or matter name, both built directly and from a resolution over a Secure matter |
+| **K4: wording** | The comment at `RulesOf` and one test name now say "enabled is required but not sufficient". `sprk_enabled` is Off only for a removed record rule or a rule of a retired Procedure; it never picks a version, and "dropped" is never inferred from Off. | (comment only) |
+| **K6: malformed rows** | A row naming both a Procedure and a rule, or neither, throws `ProcedureResolutionFaultException`, after the "core lookups name no chain record" skip. | both throw |
+
+### D-203 (ontology-r1), as received
+
+- **Q1:** a Follow and a Pin that choose different outcomes for the date (two versions, or a version vs none) are a `ConflictingParents` gap. If they choose the same version, no gap.
+- **Q2:** keep the earliest Published policy version under the pin. The F2-d applicability test runs FIRST: work dated before the Procedure's first Active version is not applicable, pinned or not. A Retired pinned version is a gap.
+- **Deviation 1** (Superseded Procedure Versions are in force for their window; Retired is a gap) and **deviation 2** (only the Exclude paired with a record rule is date-limited; a plain Exclude removes the base on every date): agreed.
+- **(5) / A1, retiring a version is a gap:** agreed, with (a) the model 7.1 applicability test ("at least one Active version") widened the same way, to Active, Superseded or Retired; (b) it must NOT fire when the whole Procedure is retired (a normal end of life: its policies are Off, its dates not applicable); (c) prefer that 081 refuses to retire a version that was never Active, or record a fail-closed known limit.
+- **(6) / A2, a change removed and made again:** count only the versions published since the last removal (the current episode). Inside the episode the latest version whose from-date is on or before the work date applies. Before the episode's first from-date the base rule runs.
+- **(7) / A6, `sprk_enabled`:** "required but not sufficient". The enabled filter only switches off a removed record rule and a policy whose Procedure was retired. It never picks a version.
+
+### Decisions made in this round (confirm or correct)
+
+1. **Episode boundary (A2).** The current episode starts at the **`createdon` of the change's Exclude row**: a version counts if its `createdon` is on or after it. Why this and not the version number: an edit adds a version in the same episode, so version numbers do not mark episodes. Why it holds: `ProcedureAssignmentService` writes the Exclude row, the version and the switch-on in one transaction (row first), and a removal deletes the row, so the next change has a newer row. A version of the current episode is never created before its row. `ProcedureOverrideRow.CreatedOn` and `ResolvedPolicyVersion.CreatedOn` (internal) carry the two values; both queries now read `createdon`.
+   - **No Exclude row, or one with no `createdon`:** no boundary is known, so every version counts (the earlier behaviour). A version with no `createdon` beside a known boundary does not count.
+   - **Model 6.3 check.** "Remove an override: the base rule runs again for invoices checked from then on." This matches: between a removal and the next change the record rule is Off and not read, so the base runs; once a re-change exists, dates before its first from-date also get the base, and the removed change's v1 is never used again (Jan 20 gives the base in the removal test).
+2. **Gap kind for a Retired version's window** is `HoleBetweenVersions` (its doc already reads "a hole, or a withdrawn version's window"). A date past the last end with no successor stays `AfterLastVersion`.
+3. **Follow vs Pin (D-203 Q1).** A version beside "none" (a gap) is `ConflictingParents` too, not the first gap's own kind. Rows that all end in a gap keep the first gap. When rows agree on a version the result is `Pinned` if any of them pins; before, `Pinned` followed the RowId order of the deciding rows, which is random (found while writing the agree test).
+4. **Pins run the F2-d test first (D-203 Q2).** The old test "a pinned version's rules apply before its effective-from" (one version from Mar 1, pin, Jan 15) now gives *not applicable*; it was replaced by two: a pin dated inside the Procedure but before the pinned version's window takes that version's earliest policy version, and a pin dated before the Procedure's first version is not applicable for a pin to an Active, a Retired and a Draft version alike (after that date the pin's own outcome decides).
+5. **081 `RetireVersionAsync` was NOT changed (A1 c).** It cannot refuse a Draft cheaply: "retire" is the only way to discard a Draft (`ProcedureService` has no delete, and `procedure.draft_exists` tells the user to "publish or retire it before creating another"). An existing test relies on a Draft being retired without publishing (`Update_ScopeChange_AfterADraftWasRetiredWithoutPublishing_Succeeds`). Refusing would remove the discard path, which is a 081 contract change, not a resolver fix. **Recorded as a fail-closed known limit, releasable by Override:** a Draft that has an effective-from and is then retired counts as a Retired version with a from-date, so it can open a window early. A gap appears only if the Draft's from-date is earlier than every in-force version's from-date, or falls in a hole. An alternative for later, if it bites: count a Retired version only when a Published policy version sits under it (the test `ProcedureService.ScopeLockedAsync` already uses); its own limit is a version published with no rule.
+6. **Model 7.1 text** ("at least one Active version") is not edited here (the model is final-state and owned elsewhere). The resolver implements the widened test; the model owner should change the sentence to "Active, Superseded or Retired".
+7. **`RequireBasedOn` checks every Published version of a record rule**, as `EnsureRecordRuleAsync` does before it writes. If a path is ever added that edits a record rule by adding a version (today `RuleSetService` refuses record-scoped sets), it must copy `sprk_basedonversion`, or the resolver faults.
+
+### Known limits (K)
+
+- **K3 (082c criterion):** 082c must run the gate before it calls `BillingRuleCatalogue.PrecedenceOf`, which throws for a non-billing rule type.
+- **K5:** the change's start is a UTC date (`sprk_inforcefrom` is written as `UtcNow` and read as its UTC date) and errs strict (coordinator's classification).
+- **Draft retired with a from-date:** decision 5 above.
+- **`createdon` tie:** if a removal and the next change fall within the same stored second, an older episode's version would count as current. Needs two BFF calls in one second; not seen. The boundary has not been checked against live Dataverse timestamps (no live call here).
+- **A record rule whose policy id is not the BFF-derived one** (made by hand) is not recognised; its Exclude reads as a plain Exclude. The BFF never writes one.
+- **`ToString` of other records still prints ids:** `ExcludedProcedure` (Procedure id), `ExcludedRule`, `ResolvedRule` and `ResolvedPolicyVersion` (policy and version ids), `CoreRecordLink` (record id). The brief named four types. They carry no override reason, and a collection member never prints its elements, but a direct `ToString()` of one is the same class of leak. Not changed.
+
+### Criteria carried forward
+
+**082c**
+- `ex.Message` of `ProcedureResolutionFaultException` (it names row, Procedure and rule ids) must never be shown to a reader. In particular the SPA warning at submit time (owner decision above) is built from a reason code and `ForReaders()` only, never from the exception text.
+- K3 above: gate before `PrecedenceOf`.
+- A gap raised for a Retired version's window (`HoleBetweenVersions`) reads the same as any hole to the partner; the reason code can tell them apart if 082c wants to.
+
+**082d snapshot design (uac-r2, binding)**
+- Store ids; never recompute.
+- Chain ids, Procedure Version ids, override row ids and reasons go in an app-only or field-secured part of the snapshot.
+- The findings JSON carries only the `ForReaders()` projection.
+- Names in the internal part are resolved at read time, behind the record check, and never frozen.
+
+**#2563 (existing output that names the core record)**: `InvoiceReviewReadService` returns the core record name after the invoice check only. uac-r2 triaged it as **not a defect** under the current access model and closed it: an internal caller who passes the invoice check is already a sharee of a Secure core record (an invoice is a codified secure child), a non-Secure record's name is the invoice lookup's display name, and the finance routes are internal-only (step 0). A correction narrowed the third point: the review header shows nothing beyond what the finance authorization filter already allows for the invoice itself; any change to that filter belongs to unified-access-control-r2. **Reopen if `sprk_invoice` stops being a codified secure child, or if any finance route starts admitting external callers.**
+
+### Supersedes (in the 082b notes above)
+
+- "Semantics as implemented" 3: a Draft-only Procedure is still not applicable, but a Procedure whose only versions are Retired is now a gap from the earliest Retired from-date; the not-applicable date is the earliest from over Active, Superseded and Retired versions.
+- Item 4 and the K1 / K3 date rule above: read "regardless of `sprk_enabled`" as "enabled is required but not sufficient".
+- Item 5 and 7: a record rule's versions are those of the current episode (decision 1), not "the latest Published version with from on or before the date" over all of them. Pairing is by the derived id, not by `sprk_basedonversion`.
+- Decision 2 (a pinned version's rules apply before its own window) holds only once the Procedure is applicable (decision 4).
+- The first fix brief's "highest-numbered Published version only" was replaced by the episode rule (A2).
+
+### Fix-round gates and seeding proofs
+
+| Run | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 warnings, 0 errors |
+| Unit `ProcedureResolver\|BillingRulePrecedence\|CoreRecordChain\|BillingRule` | 550/550 (the resolver class alone: 76, was 49) |
+| ArchTests `CoreRecordChain\|Billing` | 102/102 |
+| New tests against the old `ProcedureResolver.cs` (HEAD copied back, then restored byte-identical) | 15 to 16 of 76 failed: K6 x2, K2 x2, K1 x2, retiring the first / only version x3, the removal then re-change test, the pin before the Procedure's first version x3, a version beside none x2, and the Follow / Pin agree case on one parent order (it depends on the random RowId order, so it fails in some runs). The other new tests are regressions on behaviour that already held (F3, an edit inside one episode, a Superseded / Retired mix, retiring the Procedure, Follow vs Pin conflict, the pin's earliest policy version). |
+| Seeding proof F3: firm check skipped when the Procedure has rows on the chain (`&& !procedureRows[procedure.Id].Any()` at the firm check) | 2 failed: the new "All-records naming F, also assigned" test and the existing manual-assignment test. Restored, `cmp` identical. |
+| Seeding proof F3b: firm check skipped for an All-records source | 2 failed: both new F3 tests. Restored. (The brief's mutation only reaches a Procedure with rows on the chain, so the no-assignment case needed this second one.) |
+| Seeding proof F1 #1: the Retired from-date term removed from `OpenedAWindow` | 3 failed: first version retired, only version retired, only version retired with an end. Restored. |
+| Seeding proof F1 #2: the latest of ALL record-rule versions (no episode filter) | 1 failed: the removal then re-change test. Restored. |
+| Seeding proof A2: only the highest-numbered version of the episode counts (the rule the correction replaced) | 1 failed: the edit-inside-one-episode test. Restored. |
+| Publish size | Not re-measured: no package or project change, and the fix adds about 170 lines of resolver code against the +0.13 MB measured for 082b. |
