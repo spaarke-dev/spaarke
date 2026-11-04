@@ -435,3 +435,82 @@ No F-class finding. All six round-2 claims hold in the code; the filtered unit t
 **ontology-r1 on the round-2 result (2026-11-04).** The 9854ccee25 wording is right on all three points.
 - **D-203 (11) confirmed as a known limit:** a version published with no Accepted rule, then retired, raises no hold for its window. ontology does not ask for the 081 refusal (refusing an empty version would change product behaviour: an every-rule-rejected or documents-only version may be published on purpose; that is the owner's call). If the owner later wants it held, the 081 refusal is the place.
 - **Transient fault accepted, with a binding 082c criterion:** no hold and no reader warning while retries remain; once retries are exhausted the submission ends **held**, with the blocking internal finding naming the cause, never passed. Tests for both halves: a retry clears with no hold; exhausted retries end held.
+
+## 082c-1 implementation (2026-11-04)
+
+Brief `notes/082c-brief.md` section 5 item 1, under the binding answers of section 7 (uac-r2; ontology D-205). Branch `task/ebilling-082c-1` from `work/ebilling-r1` at 6824af3bef. Criteria C1-C10, C12, C17, the C6 comment, the C20 read-only items.
+
+### What changed
+
+- **Loader (C1-C4, C10).** `LoadAsync` reads the legacy sets and calls `ProcedureResolver.ReadAsync` once, beside them. `LoadRulesAsync` is renamed `LoadLegacyRulesAsync`, and its `sprk_procedure IS NULL` comment is rewritten as the D-205 item 1 partition, which goes away with the legacy read at 075's copy-forward. `RequireDisjoint` throws `ProcedureResolutionFaultException` when a policy version is in both streams. The Duplicate gate looks at both streams, through `ProcedureResolution.PolicyVersions` (every Published version the resolution read). `BillingLoadedFacts.Procedures` carries the resolution. `Rules` holds the legacy stream only; the evaluator throws if it finds a Procedure candidate there.
+- **Candidates (C5).** `BillingRuleCandidate` gains `Source` (Legacy or Procedure), `Rank`, `ProcedureId` and `ProcedureVersionId`.
+  - Legacy candidates use `LegacyRank(scope)`: ClientDefault is (AllRecords, 0, false), Firm is (Firm, 0, true).
+  - Procedure candidates come from `ProcedureCandidate(ResolvedRule)`. Their rank is that of the `AppliedProcedure` whose slot they take; a record rule takes its base rule's.
+- **Evaluator (C5-C9).** Legacy versions are selected per date, as before. Procedure rules come from `RulesOn(d)`, memoized per distinct subject date (the line date, else the invoice date, else `ReceivedOn`).
+  - **Precedence** is decided per subject and per `PrecedenceKey`, by `PrecedenceOf` and rank, for both streams:
+    - **Replace** keeps only the top valid rank. Valid means gate-accepted, handler-accepted and not downgraded. Ties all apply. A displaced Replace version is never run.
+    - **Additive** keeps every version.
+    - **Split** (ExpenseRule) keeps a displaced version but drops its `ExpenseAmountOverCap` findings. The C6 comment sits at that line.
+  - **C7:** `PrecedenceOf` is called only on gate-accepted definitions.
+  - **C8:** a refusal counts as covered only where a version of the same Replace key judged the subject at an equal or higher rank.
+  - `BillingEvaluationResult.Gaps` exposes each gap, with the subjects dated on it.
+- **Interim fail-closed rule.** `InvoiceSubmissionProcessor` throws `ProcedureGapNotYetHeldException` when the evaluation has any gap. The throw sits at one marked spot (`// 082c-1 interim: replaced by the gap hold in 082c-2.`). Resolver faults are not caught; they propagate. The job retries, and on the final delivery the submission ends Failed (`processing_failed`), never Accepted. The persister is not touched.
+- **Adjustment caller.** The `LoadRules` delegate is now `(firmId, CoreRecordReference? core, DateOnly date, ct)`.
+  - `BillingFactLoader.LoadRulesOnAsync` returns one legacy version per policy (`SelectVersion`), plus every Procedure rule in force on the date, with no precedence.
+  - The core record is the invoice's single lookup (`SingleCoreOf`). An invoice with none or several gets Unavailable.
+  - A Procedure rule's DTO `Scope` is `"Procedure"`.
+- **C12 (correction interim).** `PatchFindingsAsync` throws when the after-side has a gap, keyed `(ProcedureId, WorkDate, Kind)`, that the before-side lacks. The findings step then fails, the correction is Incomplete and nothing is patched.
+- **C17.** `PrintMembers` on `ExcludedProcedure`, `ExcludedRule`, `ResolvedRule`, `ResolvedPolicyVersion` and `CoreRecordLink`. None of them prints an id, a rule body, free text or a reason.
+- **C20.** `scripts/ebilling/Get-EbillingLegacyRuleOverlap.ps1` makes GET requests only, through a single `Invoke-DvGet`. The checklist types are pinned in the script because they cannot be derived from PowerShell; `BillingRulePrecedenceTests` fails if that line drifts from `PrecedenceOf`.
+
+### Decisions and deviations
+
+- `BillingRuleCandidate.Scope` is now nullable: it is null on a Procedure rule. `ReadSystemPolicyAsync` still sets ClientDefault (untouched).
+- `Rank` defaults to the legacy ClientDefault rank, so a candidate built elsewhere without a rank ranks lowest.
+- A Procedure candidate's `ProcedureVersionId` is the policy version's own link (null on a record rule's version). So one version maps to one candidate, whatever the date; the evaluator faults if one version ever maps to two.
+- C4 is checked twice: by the loader over the whole read, and by the evaluator over what was resolved.
+- **Expected outcome changes (C8; D-205 items 2 and 3; not escalated):**
+  1. A refused firm (higher-rank) Replace version is no longer covered by a judged client default, so its subjects stay `rules.not_checked`. Two F2 tests and one persister test were reworked, and the reverse case is the new must-not-fire test.
+  2. Under Split, a displaced client-default ExpenseRule keeps its code check, with its own consequence (which may be Reject). Two D-39 / 073 tests were reworked.
+  3. Legacy Additive types now add (D-205 item 2): a client-default RequiredData or NonBillableActivity rule applies beside the firm's.
+- **Split, literal reading (for ontology):** a valid higher-ranked ExpenseRule with no cap still displaces a lower version's cap, as D-39 did for the whole version. Ontology should say whether a cap-less higher version ought to leave the lower cap in force.
+- **AiObservation** is Additive in the catalogue, although D-205's list omits it. The script counts it on its own line.
+- The adjustment path now filters `IsCitableType` after selection; before, it filtered before `SelectVersion`. The two differ only where two versions of one policy overlap.
+- `ProcedureResolution.DatesResolved` was added for the C9 test. It is a counter and decides nothing.
+
+### Dev counts (GET only, https://spaarkedev1.crm.dynamics.com, as ralph.schroeder@spaarke.com)
+
+| Item | Count |
+|---|---|
+| `sprk_ruleset` rows (so legacy sets, Procedure sets and record sets) | 0 |
+| `sprk_procedure` | 0 |
+| Billing `sprk_policy` | 1 (the system policy, no rule set) |
+| `sprk_policyversion` | 10 |
+| Overlapping (firm, checklist type) pairs | **0** |
+| Firms affected | 0 |
+| K5: record rules whose Published version lacks `sprk_basedonversion` | **0** |
+
+Dev has no rule sets to migrate, so the census is only meaningful on an environment with authored sets.
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `dotnet build` (BFF and test project) | 0 warnings, 0 errors |
+| Filtered unit (`ProcedureResolver\|BillingFactLoader\|InvoiceComplianceEvaluator\|BillingRule\|InvoiceAdjustment\|InvoiceCorrection\|InvoiceSubmissionProcess\|BillingSystemFindings\|CoreRecordChain\|BillingEvaluat`) | 1516/1516 |
+| Namespaces `.Signals.Billing` + `.Finance` + the processing flow, once | 7203 passed, 3 skipped, 0 failed (of 7206) |
+| ArchTests (`Billing\|CoreRecordChain\|Procedure\|AccessTableReader\|ADR010\|FindingsJson\|RecordOwnerAssignmentCensus\|Finance\|ExceptionMessage`) | 226/226 |
+| Before the test updates | 5 existing tests failed under the new precedence (4 evaluator tests, 1 persister F2 test). All are the C8 / C6 outcome changes above; reworked |
+| Seeding: resolver call replaced by an empty resolution | 5 of 53 loader tests failed, including C2 end-to-end (also C3-second, C4, C9, C10). Restored, `cmp` identical |
+| Seeding: partition removed (query condition and re-check) | 7 of 53 failed, including the C3 second must-fire (also C2, C3, C4, C9, C10, adjustment). Restored, `cmp` identical |
+| Seeding: gap allowed through (`Gaps.Count < 0`) | 2 of 79 failed: the processor interim test and the end-to-end flow test. Restored, `cmp` identical |
+| Extra seeding: C12 check disabled | 1 of 15 failed: the C12 test. Restored, `cmp` identical |
+| Extra seeding: precedence forced to Replace (D-39 all-replace) | 7 Additive / Split / C8 tests failed. Restored, `cmp` identical |
+| Extra seeding: `RulesOn` per subject instead of the memo | the C9 test failed. Restored, `cmp` identical |
+| Publish size (`dotnet publish -c Release`; base 6824af3bef archived and published the same way) | total 137,499,800 -> 137,507,420 bytes (+7,620); `Sprk.Bff.Api.dll` 25,276,928 -> 25,293,824 (+16,896). No package change |
+
+### For 082c-2
+
+- The interim throw goes when the gap hold lands. It is one spot in the processor, and `ProcedureGapNotYetHeldException` is deleted with it.
+- `BillingEvaluationResult.Gaps` carries `AppliesToInvoice` and `LineIndexes` for each gap, for the C11 `rules.not_checked` lines.
+- The C12 interim in the correction stays until 082d / 101.

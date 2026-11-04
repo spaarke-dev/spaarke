@@ -63,4 +63,35 @@ public class BillingRulePrecedenceTests
 
         classify.Should().Throw<ArgumentOutOfRangeException>().WithMessage("*Not a billing rule type*");
     }
+
+    [Fact(DisplayName = "082c C20: the overlap census script's pinned checklist types are exactly the non-Replace, non-system billing types of PrecedenceOf")]
+    public void TheOverlapScriptsChecklistTypes_AreThoseOfPrecedenceOf()
+    {
+        var script = File.ReadAllText(FindFromRepoRoot("scripts", "ebilling", "Get-EbillingLegacyRuleOverlap.ps1"));
+        var line = System.Text.RegularExpressions.Regex.Match(script, @"^\$ChecklistRuleTypes = @\{(?<pairs>[^}]*)\}", System.Text.RegularExpressions.RegexOptions.Multiline);
+        line.Success.Should().BeTrue("the script pins the list on one line");
+        var pinned = System.Text.RegularExpressions.Regex.Matches(line.Groups["pairs"].Value, @"(?<value>\d+)\s*=\s*'(?<name>\w+)'")
+            .Select(m => (int.Parse(m.Groups["value"].Value, System.Globalization.CultureInfo.InvariantCulture), m.Groups["name"].Value))
+            .ToList();
+
+        var expected = Enum.GetValues<RuleType>()
+            .Where(t => RuleDomains.IsBilling(t) && !BillingRuleCatalogue.IsSystemType(t) && BillingRuleCatalogue.PrecedenceOf(t) != BillingRulePrecedence.Replace)
+            .Select(t => ((int)t, t.ToString()));
+
+        pinned.Should().BeEquivalentTo(expected);
+    }
+
+    private static string FindFromRepoRoot(params string[] parts)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine([dir.FullName, .. parts]);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new FileNotFoundException(Path.Combine(parts));
+    }
 }
