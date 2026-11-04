@@ -718,3 +718,10 @@ Gate (on the branch with every change):
 5. **Re-check the export.** An invoice assigned a firm after approval cannot exist, because approval is refused while it needs one. 095d must keep that true: no path from held straight to Approved.
 
 rework: none task 095c
+
+### 14.x Hold-lift known limit: disposition (uac-r2, 2026-11-04)
+
+- **Dev evidence (uac-r2, read-only):** `sprk_invoicesubmission.sprk_findingsjson` is field-secured. Only "Spaarke BFF-Managed Field Writers" and System Administrators can update it. `sprk_outcomereasoncode` and `sprk_vendororg` are not secured.
+- **The hold condition** (`InvoiceFirmHold.IsHeld`, `InvoiceFirmHold.cs:115-149`) holds when **any one** of these is true: the reason is `firm_missing`, the findings have the `firm_missing` pipeline finding, or the findings have a `rules.not_checked` line with cause `firm_missing`. The persister stores every no-firm outcome with the `firm_missing` pipeline finding (`InvoiceSubmissionPersister.cs:2203-2214`).
+- **Result:** the hold can be lifted only by writing the secured findings JSON. That leaves the limit **(c), closed by existing field security on sprk_findingsjson; admins excepted.** No schema task is needed. Removing reviewers' Write was rejected, because reviewers need Write for their real work.
+- **To add in the 095c-4 review fix round:** a test that rewrites the reason, sets the invoice firm and leaves the findings unchanged. Approval must stay 409 and export must stay refused.
