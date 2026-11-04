@@ -531,3 +531,25 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - 25 are work-assignment cores whose subject is the work assignment itself, so the stamp equals the core.
     - 7 are project cores whose subject is an event (4) or a To Do (3). For these the core reaches the lineage only through the subject's stamp, which is the K1 case and pre-dates 042c.
   - uac-r2 owns the fix: the core pair in `SecureChildLineage` for `sprk_signal`, or a typed project/work-assignment lookup on `sprk_signal`. The lookup is a schema change and needs the owner.
+
+## D-205 — ebilling 082c brief: ontology rulings on C1, decision (a), the C6 legacy precedence, ExpenseRule split, (b) and (d) (ontology position, 2026-11-04)
+
+- **Context:** ebilling `projects/ebilling-r1/notes/082c-brief.md` at `26fcfe7ba9`. Criteria only; no code yet. Ontology owner-reviews 082c-1.
+- **C1, accepted as a literal deviation.**
+  - Procedure sets go through the resolver. The legacy read keeps `sprk_procedure IS NULL` as a partition, because Procedure sets are written with ClientDefault or Firm scope.
+  - The MUST-DO's intent ("never skipped") holds: C2/C3 must-fire, C4 disjoint streams throw.
+  - The partition is removed with the legacy read at 075 copy-forward. Name it there.
+- **Decision (a): keep legacy sets loading beside the resolver.** Agreed. Dropping them would be a silent pass on every dev invoice.
+- **C6 for legacy sets: apply `PrecedenceOf` (limits replace, checklists add).** Do not keep the evaluator's "all replace" between legacy sets. The owner decided exactly this for firm vs client default (D-172 Q7, 2026-10-20: "for checklist types the general and specific items BOTH apply"; carried into the rank model by D-177(12)). Today's evaluator (:82-87, D-39 all-replace) never implemented it, so C6 closes that drift rather than making a new choice.
+  - Because it is stricter (possible new RequiredData / NonBillableActivity / ApprovedTimekeeper findings while the owner is in UAT), ebilling first counts the dev legacy sets where a Firm set and a ClientDefault set share an Additive precedence key.
+  - That count goes in the deploy notice. The owner hears about it before the deploy, not after.
+- **C6 ExpenseRule split: agreed.** A displaced version keeps its non-reimbursable code check (adds) and loses only its `ExpenseAmountOverCap` findings (cap replaces). "Per category" (D-172 round 3) has no key today: ExpenseRule has no category, and `maxAmountPerItem` caps every expense line. It becomes per category only if the owner's six-gap triage adds a per-code cap (gap "per-code cap", 22 findings).
+- **(b) A linked project with an empty pair: census as a rollout gate, no runtime fault. Agreed**, on two conditions:
+  - the census is re-runnable (a `-Verify` or the existing stamp/census report), not a one-off;
+  - a create-path test proves a new project under a matter always gets its pair, so the count cannot grow after rollout.
+- **(d) One gap finding code with a closed-map kind token: agreed.** An unmapped kind must throw at build time (like `RuleDomains.DomainOf`), never emit a blank or free-text token.
+- **Signal side (ontology's part of C11):** the ProcedureGap blocking finding maps under `BILL-SYSTEM-SUBMISSION`, so it joins the shared SubmissionIntegrity Signal per (policy, invoice) (D-201 amendment).
+  - A re-check that clears the gap re-maps the group: the title is recomputed, or the Signal closes `ConditionCleared` when no reason remains.
+  - A 114 Override release closes it through the billing decision path with a Decision Record.
+  - Add the `BillingFindingSignalMapper` order entry and a test that a gap plus firm_missing share one Signal and that clearing one keeps it open.
+- **Accepted as written:** C14 (the transient-fault ruling, D-203 follow-up), C21 (D-203(11)), C22 (082c reaches master only with ebilling 114), C11's "gap wins over a 073 rejection on SPA" (held, never passed, never auto-rejected on unchecked lines).
