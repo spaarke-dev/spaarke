@@ -65,14 +65,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
         CreateRecord(table, [Lookup("sprk_matter", "sprk_matter", OrdinaryMatter), .. CorePair(type, id)]);
 
     /// <summary>The same create through the service directly (the route's surface: status and ProblemDetails).</summary>
-    private async Task<RecordCreationOutcome> ServiceCreateWithCore(string table, Guid? type, object? id)
+    private async Task<RecordCreationOutcome> ServiceCreateWithCore(
+        string table, Guid? type, object? id, Spaarke.Dataverse.IGenericEntityService? appOnlyEntities = null)
     {
         var item = JsonSerializer.SerializeToElement(
             new[] { Lookup("sprk_matter", "sprk_matter", OrdinaryMatter) }.Concat(CorePair(type, id)).ToDictionary(i => i.Column, i => i.Value));
         var mapped = await DataverseWriteItemMapper.MapAsync(_user, table, item, CancellationToken.None);
         mapped.Item.Should().NotBeNull(mapped.ValidationError);
         return await RouteRecordCreation.Over(_world.Resolver(), _appOnly.Object, Restamper(), Shares(),
-                SecureRootFilingGateFixtures.NothingSecure())
+                SecureRootFilingGateFixtures.NothingSecure(), entities: appOnlyEntities)
             .CreateAsync(new RecordCreationRequest(table, new RecordCreationPayload.Mapped(mapped.Item!)),
                 RecordCreationPrincipal.ForCaller(_user, CallerOid), CancellationToken.None);
     }
@@ -178,9 +179,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _appCreates.Should().BeEmpty();
     }
 
-    [Theory(DisplayName = "042c UAC-r2 condition 1: a FAULTED catalog read (the core pair's type) is the existing upstream 503, never a 4xx; nothing is created")]
+    [Theory(DisplayName = "042c UAC-r2 condition 1: a fault on the core pair's own catalog read (its type's sprk_recordlogicalname, as the caller) is the existing upstream 503, never a 4xx; nothing is created")]
     [MemberData(nameof(CorePairTables))]
-    public async Task AFaultedCatalogRead_IsTheExisting503(string table)
+    public async Task AFaultOnTheCorePairsOwnCatalogRead_IsTheExisting503(string table)
     {
         CorePairWorld();
         _user.GetOverride = path => path.StartsWith($"sprk_recordtype_refs({MatterRecordType:D})?$select=sprk_recordlogicalname", StringComparison.Ordinal)
@@ -195,6 +196,37 @@ public sealed partial class SecureChildOwnershipAiToolTests
         RecordCreationProblemMap.StatusOf(viaService.Refusal).Should().Be(503);
         viaChat.Success.Should().BeFalse();
         viaChat.ErrorCode.Should().Be(DataverseUserClientErrorCodes.ServiceError, "the failure's own code, as any upstream failure");
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "042c fix round 1 (DI-P3, K1): a fault at the TYPE lookup's organization-owned AppendTo read (sprk_recordtype_refs(type)?$select=sprk_recordtype_refid, as the caller) is today's uniform 404, as for every organization-owned lookup; fails closed, nothing is created")]
+    [MemberData(nameof(CorePairTables))]
+    public async Task AFaultOnTheTypeLookupsAppendToRead_IsTodaysUniformNotFound(string table)
+    {
+        CorePairWorld();
+        var faulted = 0;
+        _user.GetOverride = path =>
+        {
+            if (!path.StartsWith($"sprk_recordtype_refs({MatterRecordType:D})?$select=sprk_recordtype_refid", StringComparison.Ordinal))
+                return null;
+            faulted++;
+            return DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "Scripted fault.");
+        };
+
+        var viaService = await ServiceCreateWithCore(table, MatterRecordType, CoreMatterInY.ToString("D"));
+        var viaChat = await CreateWithCore(table, MatterRecordType, CoreMatterInY.ToString("D"));
+
+        faulted.Should().Be(2, "the type lookup's AppendTo read is asked (and faults) on both paths");
+        viaService.Refusal.Should().NotBeNull();
+        viaService.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied,
+            "CallerWriteAuthorization reads a failed organization-owned row read as no AppendTo (return row.IsSuccess)");
+        var problem = RecordCreationProblemMap.ToProblemDetails(viaService.Refusal, table, "c");
+        problem.Status.Should().Be(404);
+        problem.Extensions["errorCode"].Should().Be(RecordCreationRefusal.NotFoundCode);
+        problem.Detail.Should().Be(UniformNotFound(table));
+        viaChat.Success.Should().BeFalse();
+        viaChat.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        viaChat.ErrorMessage.Should().Be(UniformNotFound(table));
         _appCreates.Should().BeEmpty();
     }
 
@@ -258,6 +290,97 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _appCreates.Should().BeEmpty();
     }
 
+    [Theory(DisplayName = "042c fix round 1 (C): a core id that is not a record id (not a string, not a guid, the empty guid) and a core id with no type are refused 400 in the core pair's own words, before the catalog is read; nothing is created")]
+    [InlineData("sprk_signal", "id is not a string")]
+    [InlineData("sprk_signal", "id is not a guid")]
+    [InlineData("sprk_signal", "id is the empty guid")]
+    [InlineData("sprk_signal", "id with no type")]
+    [InlineData("sprk_decisionrecord", "id is not a string")]
+    [InlineData("sprk_decisionrecord", "id is not a guid")]
+    [InlineData("sprk_decisionrecord", "id is the empty guid")]
+    [InlineData("sprk_decisionrecord", "id with no type")]
+    public async Task ACoreIdThatIsNotARecordIdOrHasNoType_IsRefusedInTheCorePairsOwnWords(string table, string condition)
+    {
+        CorePairWorld();
+        var asked = new List<string>();
+        _user.GetOverride = path =>
+        {
+            asked.Add(path);
+            return null;
+        };
+        Guid? type = MatterRecordType;
+        object id = condition switch
+        {
+            "id is not a string" => 42,
+            "id is not a guid" => "not-a-guid",
+            "id is the empty guid" => Guid.Empty.ToString("D"),
+            _ => CoreMatterInY.ToString("D"),
+        };
+        var words = RecordCreationService.CoreIdNotARecordId;
+        if (condition == "id with no type")
+            (type, words) = (null, RecordCreationService.CoreIdWithNoType);
+
+        var viaService = await ServiceCreateWithCore(table, type, id);
+        var viaChat = await CreateWithCore(table, type, id);
+
+        viaService.Refusal.Should().NotBeNull();
+        viaService.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Invalid);
+        viaService.Refusal.Code.Should().Be(RecordCreationRefusal.InvalidPayloadCode);
+        viaService.Refusal.Detail.Should().Be(words);
+        var problem = RecordCreationProblemMap.ToProblemDetails(viaService.Refusal, table, "c");
+        problem.Status.Should().Be(400);
+        problem.Detail.Should().Be(words);
+        viaChat.Success.Should().BeFalse();
+        viaChat.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        viaChat.ErrorMessage.Should().Be(words);
+        asked.Should().NotContain(p => p.Contains("$select=sprk_recordlogicalname", StringComparison.Ordinal), "refused before the catalog is read");
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "042c fix round 1 (D): a core id sent with braces, in upper case or padded is written as the writers store it (the 'D' form, lower case), through the service and through chat; one already in that form is written as sent")]
+    [InlineData("sprk_signal", "braces")]
+    [InlineData("sprk_signal", "upper case")]
+    [InlineData("sprk_signal", "padded")]
+    [InlineData("sprk_signal", "braces, upper case and padded")]
+    [InlineData("sprk_signal", "as stored")]
+    [InlineData("sprk_decisionrecord", "braces")]
+    [InlineData("sprk_decisionrecord", "upper case")]
+    [InlineData("sprk_decisionrecord", "padded")]
+    [InlineData("sprk_decisionrecord", "braces, upper case and padded")]
+    [InlineData("sprk_decisionrecord", "as stored")]
+    public async Task ACoreIdIsWrittenAsTheWritersStoreIt(string table, string shape)
+    {
+        CorePairWorld();
+        var stored = CoreMatterInY.ToString("D", System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant();
+        var sent = shape switch
+        {
+            "braces" => CoreMatterInY.ToString("B"),
+            "upper case" => stored.ToUpperInvariant(),
+            "padded" => $"  {stored}\t",
+            "braces, upper case and padded" => $" {CoreMatterInY.ToString("B").ToUpperInvariant()} ",
+            _ => stored,
+        };
+
+        var viaService = await ServiceCreateWithCore(table, MatterRecordType, sent);
+        var viaChat = await CreateWithCore(table, MatterRecordType, sent);
+
+        viaService.Succeeded.Should().BeTrue(viaService.Refusal?.Detail);
+        viaChat.Success.Should().BeTrue(viaChat.ErrorMessage);
+        _appCreates.Should().HaveCount(2);
+        _appCreates.Select(c => CoreIdWritten(c.Fields)).Should().AllBe(stored, "SignalWriter and DecisionRecordWriter store it so");
+        _appCreates.Select(c => Owner(c.Fields)).Should().OnlyContain(t => t == Directory.CustomerChildTeam, "the core record (Y) is still asked first");
+    }
+
+    private static string? CoreIdWritten(IReadOnlyDictionary<string, object?> fields) =>
+        fields.TryGetValue("sprk_corerecordid", out var value)
+            ? value switch
+            {
+                string text => text,
+                JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
+                _ => null,
+            }
+            : null;
+
     // ── AC1: the probe list and the call order ──────────────────────────────────────────────────────────────────
 
     [Theory(DisplayName = "042c AC1: step 5 reads the catalog row as the caller, then asks AppendTo on the core record; nothing reads the core record app-only before that check (the resolver reads it only after)")]
@@ -266,16 +389,27 @@ public sealed partial class SecureChildOwnershipAiToolTests
     {
         CorePairWorld();
         var asked = new List<string>();
-        List<QueryExpression>? readBeforeTheCheck = null;
+        // Fix round 1 (review item F): every app-only read is snapshotted at the caller's check — the resolver's queries AND its
+        // single-row reads (RetrieveAsync), and the service's own app-only reads (its IGenericEntityService: RetrieveAsync and
+        // RetrieveMultipleAsync).
+        var serviceEntities = RouteRecordCreation.Entities();
+        List<QueryExpression>? queriesBeforeTheCheck = null;
+        List<(string Entity, Guid Id)>? rowReadsBeforeTheCheck = null;
+        List<Moq.IInvocation>? serviceReadsBeforeTheCheck = null;
         _user.GetOverride = path =>
         {
             asked.Add(path);
             if (path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal) && path.Contains($"sprk_matters({CoreMatterInY:D})", StringComparison.Ordinal))
-                readBeforeTheCheck ??= [.. _world.RecordQueries];
+            {
+                queriesBeforeTheCheck ??= [.. _world.RecordQueries];
+                rowReadsBeforeTheCheck ??= [.. _world.RowReads];
+                serviceReadsBeforeTheCheck ??= [.. serviceEntities.Invocations];
+            }
+
             return null;
         };
 
-        var outcome = await ServiceCreateWithCore(table, MatterRecordType, CoreMatterInY.ToString("D"));
+        var outcome = await ServiceCreateWithCore(table, MatterRecordType, CoreMatterInY.ToString("D"), serviceEntities.Object);
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         var catalog = asked.FindIndex(p => p.StartsWith($"sprk_recordtype_refs({MatterRecordType:D})?$select=sprk_recordlogicalname", StringComparison.Ordinal));
@@ -283,8 +417,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
                                             && p.Contains($"sprk_matters({CoreMatterInY:D})", StringComparison.Ordinal));
         catalog.Should().BeGreaterThanOrEqualTo(0, "the core pair's type is read through the catalog as the caller");
         appendTo.Should().BeGreaterThan(catalog, "AppendTo is asked on the record the catalog names");
-        readBeforeTheCheck.Should().NotBeNull();
-        readBeforeTheCheck!.Should().NotContain(q => Names(q, CoreMatterInY), "nothing reads the core record app-only before the caller's check");
+        queriesBeforeTheCheck.Should().NotBeNull();
+        queriesBeforeTheCheck!.Should().NotContain(q => Names(q, CoreMatterInY), "no app-only query names the core record before the caller's check");
+        rowReadsBeforeTheCheck!.Should().NotContain(r => r.Id == CoreMatterInY, "no app-only RetrieveAsync of the core record before the caller's check");
+        serviceReadsBeforeTheCheck!.Where(ReadsTheCore).Should().BeEmpty("the service reads nothing app-only about the core before the caller's check");
         _world.RecordQueries.Should().Contain(q => Names(q, CoreMatterInY), "the owner question reads it after the check");
     }
 
@@ -322,6 +458,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
         result.Success.Should().BeTrue(result.ErrorMessage);
         Owner(_appCreates.Should().ContainSingle().Subject.Fields).Should().Be(Directory.ChildTeam);
     }
+
+    /// <summary>Whether an app-only read of the service (its IGenericEntityService) reads the core record.</summary>
+    private static bool ReadsTheCore(Moq.IInvocation invocation) => invocation.Method.Name switch
+    {
+        "RetrieveAsync" => invocation.Arguments[1] is Guid id && id == CoreMatterInY,
+        "RetrieveMultipleAsync" => invocation.Arguments[0] is QueryExpression query && Names(query, CoreMatterInY),
+        _ => false,
+    };
 
     /// <summary>Whether <paramref name="query"/> names <paramref name="id"/> in any condition, at any depth.</summary>
     private static bool Names(QueryExpression query, Guid id)

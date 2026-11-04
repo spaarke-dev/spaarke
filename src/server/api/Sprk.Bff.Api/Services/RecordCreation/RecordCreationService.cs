@@ -668,6 +668,9 @@ internal sealed partial class RecordCreationService
                 coreRecord is null ? ran : ran + "; AppendTo on the core record");
         }
 
+        // Task 042c fix round 1: a core id that is a record id is written as the writers store it (whatever the principal).
+        item = WithCoreIdAsTheWritersStoreIt(table, item);
+
         // ── Step 5½: the table's pre-write rules, on the row as it will be written (ebilling-r1 recipe) ────────────────
         if (rule.PreWriteRules.Count > 0)
         {
@@ -1202,31 +1205,18 @@ internal sealed partial class RecordCreationService
     /// and the record a project's ADR-024 pair names (<paramref name="pairParent"/>) under <c>sprk_regardingrecordid</c>, which a
     /// project's order ranks first (<c>SecureChildLineage.RootLookupOrder</c>) — through the one builder.
     /// <para>Task 042c (#2561, DI-019): a Signal's or Decision Record's core record (<paramref name="coreRecord"/>, the record its
-    /// core pair names) comes FIRST and is the primary, then the builder's parents, distinct — the order
-    /// <see cref="RecordOwnershipContext.ForExistingRowAsync"/> asks the written row in (core, subject, …). The builder's other
-    /// facts (the Secure-only parents, the child table, the caller) are kept.</para>
+    /// core pair names) is the builder's own <c>coreRecord</c>: asked FIRST and the primary, as
+    /// <see cref="RecordOwnershipContext.ForExistingRowAsync"/> asks the written row (core, subject, …).</para>
     /// </summary>
     internal static RecordOwnershipContext OwnerQuestionOf(
         string table, IEnumerable<KeyValuePair<string, RecordOwnershipParent?>> filed, RecordOwnershipParent? pairParent,
-        string? subjectPairId, Guid? callerObjectId, Guid? callerSystemUserId, RecordOwnershipParent? coreRecord = null)
-    {
-        var question = RecordOwnershipContext.ForRow(
+        string? subjectPairId, Guid? callerObjectId, Guid? callerSystemUserId, RecordOwnershipParent? coreRecord = null) =>
+        RecordOwnershipContext.ForRow(
             table,
             pairParent is { } named
                 ? filed.Append(KeyValuePair.Create(SecureRootInheritance.PairIdColumn, (RecordOwnershipParent?)named))
                 : filed,
-            subjectPairId, callerObjectId, callerSystemUserId);
-        if (coreRecord is not { } core)
-            return question;
-
-        var coreFirst = RecordOwnershipContext.ForParents(new RecordOwnershipParent?[] { core }.Concat(question.Parents));
-        return question with
-        {
-            TargetEntityLogicalName = coreFirst.TargetEntityLogicalName,
-            TargetRecordId = coreFirst.TargetRecordId,
-            Parents = coreFirst.Parents,
-        };
-    }
+            subjectPairId, callerObjectId, callerSystemUserId, coreRecord);
 
     /// <summary>
     /// Step 7's answer for a resolved owner, shared by Create and Repair (task 016): no owner is the resolver's refusal
@@ -1538,15 +1528,72 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
+    /// Task 042c fix round 1: a Signal's or Decision Record's core id, once it is a record id, written as the writers store it
+    /// (<c>SignalWriter</c>, <c>DecisionRecordWriter</c>: the "D" form, lower case), because the readers compare it as a string
+    /// (<c>SignalSuppressionService</c>). Braces, upper case and padding are rewritten; anything else is left as sent (step 5 or
+    /// step 7 refuses an id that is not a record id). Every other table, and an item already in that form: <paramref name="item"/>.
+    /// </summary>
+    private static DataverseWriteItemMapper.MappedItem WithCoreIdAsTheWritersStoreIt(
+        string table, DataverseWriteItemMapper.MappedItem item)
+    {
+        if (!RecordOwnershipContext.CorePairTables.Contains(table))
+            return item;
+
+        var pair = CorePairOf(item);
+        if (pair.InvalidId || !Guid.TryParse(pair.IdText?.Trim(), out var id) || id == Guid.Empty)
+            return item;
+
+        var stored = id.ToString("D", System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant();
+        if (string.Equals(pair.IdText, stored, StringComparison.Ordinal))
+            return item;
+
+        using var body = JsonDocument.Parse(item.JsonBody);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in body.RootElement.EnumerateObject())
+            {
+                if (string.Equals(property.Name.Trim(), CoreRecordIdColumn, StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.String
+                    && Guid.TryParse(property.Value.GetString()?.Trim(), out var sent) && sent == id)
+                {
+                    writer.WriteString(property.Name, stored);
+                }
+                else
+                {
+                    property.WriteTo(writer);
+                }
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return item with { JsonBody = System.Text.Encoding.UTF8.GetString(stream.ToArray()) };
+    }
+
+    /// <summary>Step 5's words (task 042c) for a core id that is not a record id: a non-string id and a string that is not a
+    /// record id alike (fix round 1).</summary>
+    internal const string CoreIdNotARecordId = $"'{CoreRecordIdColumn}' must hold the id of the core record this row belongs to.";
+
+    /// <summary>Step 5's words (task 042c fix round 1) for a core id with no core record type.</summary>
+    internal const string CoreIdWithNoType =
+        $"This row names a core record id ('{CoreRecordIdColumn}') but no core record type ('{CoreRecordTypeColumn}'), so the " +
+        "core record it belongs to cannot be told.";
+
+    /// <summary>
     /// Step 5 (task 042c): for a Signal or Decision Record (<see cref="RecordOwnershipContext.CorePairTables"/>), the record its
     /// core pair names, read AS THE CALLER by the regarding pair's rule (<see cref="CallerWriteAuthorization.PairTargetAsync"/>:
-    /// the pair's TYPE through the catalog under the caller's token; no id names nothing; an id that is not a record id, an id
-    /// with no type and a type naming no table are <see cref="OwnedChildWrite.Outcome.Invalid"/>; an unreadable catalog row is
-    /// the uniform not-found), which must be a core record table (<see cref="CoreAncestorResolver.CoreRecordEntities"/>, the
-    /// reconciler's own rule: otherwise <see cref="OwnedChildWrite.Outcome.Invalid"/>), then AppendTo on that record
+    /// the pair's TYPE through the catalog under the caller's token; an unreadable catalog row is the uniform not-found; a type
+    /// naming no table is <see cref="OwnedChildWrite.Outcome.Invalid"/>), which must be a core record table
+    /// (<see cref="CoreAncestorResolver.CoreRecordEntities"/>, the reconciler's own rule: otherwise
+    /// <see cref="OwnedChildWrite.Outcome.Invalid"/>), then AppendTo on that record
     /// (<see cref="CallerWriteAuthorization.CheckCallerMayAppendToAsync"/>): a record that is missing, unreadable, ordinary or
     /// Secure answers alike — the uniform not-found an unappendable lookup gets — so no answer here tells whether the core
     /// exists or is Secure. Nothing reads the core record app-only before this check. Every other table: nothing.
+    /// <para>Before any read (fix round 1): no id names nothing; an id that is not a record id (<see cref="CoreIdNotARecordId"/>,
+    /// whether or not it is a string) and an id with no type (<see cref="CoreIdWithNoType"/>) are
+    /// <see cref="OwnedChildWrite.Outcome.Invalid"/>, in the core pair's own words.</para>
     /// </summary>
     private static async Task<(RecordOwnershipParent? Record, OwnedChildWrite.Outcome? Refusal)> CallerMayFileUnderCoreAsync(
         IDataverseUserClient user, Guid me, string table, DataverseWriteItemMapper.MappedItem item, CancellationToken ct)
@@ -1556,7 +1603,13 @@ internal sealed partial class RecordCreationService
 
         var pair = CorePairOf(item);
         if (pair.InvalidId)
-            return (null, new OwnedChildWrite.Outcome { Invalid = $"'{CoreRecordIdColumn}' must hold the id of the core record this row belongs to." });
+            return (null, new OwnedChildWrite.Outcome { Invalid = CoreIdNotARecordId });
+        if (string.IsNullOrWhiteSpace(pair.IdText))
+            return (null, null); // the pair names no core record (as PairTargetAsync reads a pair with no id)
+        if (!Guid.TryParse(pair.IdText.Trim(), out var coreId) || coreId == Guid.Empty)
+            return (null, new OwnedChildWrite.Outcome { Invalid = CoreIdNotARecordId });
+        if (pair.TypeId is null)
+            return (null, new OwnedChildWrite.Outcome { Invalid = CoreIdWithNoType });
 
         var target = await CallerWriteAuthorization.PairTargetAsync(
                 user, table, pair.IdText, pair.TypeId, pair.TypeEntitySet,
@@ -1588,7 +1641,8 @@ internal sealed partial class RecordCreationService
     /// names, read app-only by the reconciler's own catalog read (<see cref="CoreAncestorResolver.CoreTableOfRecordTypeAsync"/>,
     /// the read <see cref="RecordOwnershipContext.ForExistingRowAsync"/> makes). No id names nothing; an id that is not a record
     /// id, an id with no type and a type that names no core record table are undetermined (why, as a phrase). A fault propagates
-    /// (step 7 refuses it as the owner fault it is). Every other table: nothing.
+    /// (step 7 refuses it as the owner fault it is, 503 <c>owner_unavailable</c>), and so does a type the catalog does not hold:
+    /// Dataverse's Retrieve throws for a missing row, as it does for the reconciler. Every other table: nothing.
     /// </summary>
     private async Task<(RecordOwnershipParent? Record, string? Undetermined)> CoreRecordOfSystemCreateAsync(
         string table, DataverseWriteItemMapper.MappedItem item, CancellationToken ct)

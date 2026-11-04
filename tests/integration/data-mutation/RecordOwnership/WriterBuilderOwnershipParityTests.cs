@@ -454,6 +454,45 @@ public class WriterBuilderOwnershipParityTests
         world.Creates.Should().BeEmpty();
     }
 
+    [Theory(DisplayName = "042c fix round 1 (G, system principal): a system create whose core type the catalog does not hold is the owner fault, 503 owner_unavailable (the app-only catalog read throws, as Dataverse's Retrieve does for a missing row), not 409; nothing written")]
+    [MemberData(nameof(CorePairTables))]
+    public async Task ASystemCreateWhoseCoreTypeTheCatalogDoesNotHold_IsTheOwnerFault503(string table)
+    {
+        var world = new CreateParityWorld();
+        world.InvoiceUnder(world.MatterInX);
+        var unknownType = Guid.Parse("0b000000-0000-4000-8000-000000042c23");
+        world.MissingRows.Add(unknownType);
+
+        var (outcome, _) = await world.CreateWithCoreAsync(table, world.MatterInY, unknownType,
+            ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
+
+        outcome.Refusal.Should().NotBeNull();
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Unavailable);
+        outcome.Refusal.Code.Should().Be(RecordCreationRefusal.OwnerUnavailableCode);
+        RecordCreationProblemMap.StatusOf(outcome.Refusal).Should().Be(503);
+        world.Creates.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "042c fix round 1 (D, system principal): a system create's core id sent with braces, in upper case and padded is written as the writers store it (the normalisation runs whatever the principal)")]
+    [MemberData(nameof(CorePairTables))]
+    public async Task ASystemCreatesCoreId_IsWrittenAsTheWritersStoreIt(string table)
+    {
+        var world = new CreateParityWorld();
+        world.InvoiceUnder(world.MatterInX);
+
+        var (outcome, _) = await world.CreateWithCoreTextAsync(table, $" {world.MatterInY.ToString("B").ToUpperInvariant()} ",
+            CreateParityWorld.MatterRecordType, ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = world.Creates.Should().ContainSingle().Subject.Fields;
+        (fields["sprk_corerecordid"] switch
+        {
+            string text => text,
+            System.Text.Json.JsonElement element => element.GetString(),
+            _ => null,
+        }).Should().Be(world.MatterInY.ToString("D").ToLowerInvariant());
+    }
+
     /// <summary>
     /// The REAL <see cref="RecordCreationService"/> over an
     /// <see cref="Directory"/> (the resolver's rows), a <see cref="CoreAncestorStamping.StampWorld"/> (the I-1 derivation and
@@ -487,6 +526,9 @@ public class WriterBuilderOwnershipParityTests
 
         /// <summary>Every app-only create, with the fields of its body as sent (fix round 1: the theory reads what was written).</summary>
         public List<(string Table, Guid Id, Dictionary<string, object?> Fields)> Creates { get; } = [];
+
+        /// <summary>Task 042c fix round 1: ids the service's app-only single-row read does not find (it throws, as Dataverse does).</summary>
+        public HashSet<Guid> MissingRows { get; } = [];
 
         public CreateParityWorld()
         {
@@ -720,7 +762,10 @@ public class WriterBuilderOwnershipParityTests
                 .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) => _directory.Answer(query));
             entities
                 .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => _directory.Row(table, id));
+                .Returns((string table, Guid id, string[] _, CancellationToken _) => MissingRows.Contains(id)
+                    // Task 042c fix round 1: a row that does not exist throws, as Dataverse's Retrieve does.
+                    ? Task.FromException<Entity>(new InvalidOperationException($"{table} With Id = {id:D} Does Not Exist"))
+                    : Task.FromResult(_directory.Row(table, id)));
             return entities.Object;
         }
     }

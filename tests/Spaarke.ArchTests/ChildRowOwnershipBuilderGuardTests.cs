@@ -159,7 +159,8 @@ public class ChildRowOwnershipBuilderGuardTests
     [
         Builder(nameof(RecordOwnershipContext.ForParents), typeof(IEnumerable<RecordOwnershipParent>), typeof(Guid?), typeof(Guid?)),
         Builder(nameof(RecordOwnershipContext.ForRow), typeof(string),
-            typeof(IEnumerable<KeyValuePair<string, RecordOwnershipParent>>), typeof(string), typeof(Guid?), typeof(Guid?)),
+            typeof(IEnumerable<KeyValuePair<string, RecordOwnershipParent>>), typeof(string), typeof(Guid?), typeof(Guid?),
+            typeof(RecordOwnershipParent)), // field-mapping task 042c: ForRow's optional core record (CorePairTables only)
         Builder(nameof(RecordOwnershipContext.ForChild), typeof(Entity)),
         Builder(nameof(RecordOwnershipContext.ForParentsInWriterOrder), typeof(IEnumerable<RecordOwnershipParent>)),
         Builder(nameof(RecordOwnershipContext.ForExistingRowAsync), typeof(Entity), typeof(ExistingRowReads), typeof(CancellationToken)),

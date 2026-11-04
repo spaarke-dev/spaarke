@@ -546,4 +546,176 @@ public class ExistingRowOwnershipParityTests
             (await Resolver.ResolveOwnerAsync(passContext, CancellationToken.None)).OwningTeamId.Should().Be(writerOwner.OwningTeamId);
         }
     }
+    // ── Field-mapping-server-write-path-r1 task 042c fix round 1 (item A, UAC-r2): ForRow's core record ──────────────────
+    //
+    // The create asks a Signal's or Decision Record's core record through the ONE builder (ForRow's coreRecord), FIRST and as the
+    // primary, because ForExistingRowAsync asks the written row core first. (a) only a core-pair table takes one; (c) without one
+    // the question is exactly today's; (d) with one it is ForExistingRowAsync's for the same row.
+
+    [Theory(DisplayName = "042c fix round 1 (A-a): ForRow refuses a core record for a table that is not a core-pair table (ArgumentException)")]
+    [InlineData("sprk_todo")]
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_document")]
+    public void ForRow_ACoreRecordForATableThatIsNoCorePairTable_Throws(string table)
+    {
+        var act = () => RecordOwnershipContext.ForRow(
+            table, [KeyValuePair.Create("sprk_regardingmatter", (RecordOwnershipParent?)new RecordOwnershipParent("sprk_matter", Guid.NewGuid()))],
+            coreRecord: new RecordOwnershipParent("sprk_matter", Guid.NewGuid()));
+
+        act.Should().Throw<ArgumentException>().Which.ParamName.Should().Be("coreRecord");
+    }
+
+    /// <summary>Rows for (c): a representative non-core table (a To Do under a matter and a project; an editable copy with a
+    /// Secure-only canonical) and a Signal and a Decision Record with NO core pair (a subject and its stamps).</summary>
+    public static TheoryData<string> RowsWithNoCore() => new() { "todo", "editable copy", "signal, no core", "decision record, no core" };
+
+    private static Entity RowWithNoCore(string shape)
+    {
+        var (matter, project, todo, document) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        return shape switch
+        {
+            "todo" => new Entity("sprk_todo", Guid.NewGuid())
+            {
+                ["sprk_regardingproject"] = Ref("sprk_project", project),
+                ["sprk_regardingmatter"] = Ref("sprk_matter", matter),
+                ["sprk_regardingrecordid"] = matter.ToString("D"),
+            },
+            "editable copy" => new Entity("sprk_document", Guid.NewGuid())
+            {
+                ["sprk_canonicaldocument"] = Ref("sprk_document", document),
+                ["sprk_matter"] = Ref("sprk_matter", matter),
+            },
+            "signal, no core" => new Entity("sprk_signal", Guid.NewGuid())
+            {
+                ["sprk_regardingmatter"] = Ref("sprk_matter", matter),
+                ["sprk_regardingtodo"] = Ref("sprk_todo", todo),
+                ["sprk_regardingproject"] = Ref("sprk_project", project),
+                ["sprk_regardingrecordid"] = todo.ToString("D"),
+            },
+            _ => new Entity("sprk_decisionrecord", Guid.NewGuid())
+            {
+                ["sprk_regardingproject"] = Ref("sprk_project", project),
+                ["sprk_regardingtodo"] = Ref("sprk_todo", todo),
+                ["sprk_regardingrecordid"] = todo.ToString("D"),
+            },
+        };
+    }
+
+    [Theory(DisplayName = "042c fix round 1 (A-c): with no core record, ForRow's whole question is byte-identical to today's (the primary order, the Secure-only parents, the child table, the caller), for a non-core table and for a Signal and a Decision Record with no core")]
+    [MemberData(nameof(RowsWithNoCore))]
+    public void ForRow_WithNoCoreRecord_IsTodaysQuestion_ByteIdentical(string shape)
+    {
+        var row = RowWithNoCore(shape);
+        var (oid, systemUser) = (Guid.NewGuid(), Guid.NewGuid());
+        // Today's ForRow, spelled out from the public parts it is made of: the primary order (OrderedParentsOf is PrimaryOrdered
+        // over the row's lookups and pair id), the caller, the Secure-only parents and the child table.
+        var today = RecordOwnershipContext.ForParents(RecordOwnershipContext.OrderedParentsOf(row), oid, systemUser) with
+        {
+            SecureOnlyParents = RecordOwnershipContext.SecureOnlyParentsOf(row),
+            ChildEntityLogicalName = row.LogicalName,
+        };
+
+        var leftOut = RecordOwnershipContext.ForRow(row.LogicalName, RecordOwnershipContext.LookupsOf(row),
+            RecordOwnershipContext.PairIdOf(row), oid, systemUser);
+        var passedNull = RecordOwnershipContext.ForRow(row.LogicalName, RecordOwnershipContext.LookupsOf(row),
+            RecordOwnershipContext.PairIdOf(row), oid, systemUser, coreRecord: null);
+
+        today.Parents.Should().NotBeEmpty("the row is filed");
+        JsonSerializer.Serialize(leftOut).Should().Be(JsonSerializer.Serialize(today), "the whole question, byte for byte");
+        JsonSerializer.Serialize(passedNull).Should().Be(JsonSerializer.Serialize(today));
+        leftOut.Should().BeEquivalentTo(today, o => o.WithStrictOrdering());
+        passedNull.Should().BeEquivalentTo(today, o => o.WithStrictOrdering());
+        if (shape == "editable copy")
+            leftOut.SecureOnlyParents.Should().ContainSingle("the canonical joins secure-if-any only, as today");
+    }
+
+    /// <summary>Rows for (d): a Signal and a Decision Record whose core matter no lookup of the row holds, about a To Do whose
+    /// stamp the row carries (one stamp) or that has none (no stamps).</summary>
+    public static TheoryData<string, string> CoredRows() => new()
+    {
+        { "sprk_signal", "one stamp" }, { "sprk_signal", "no stamps" },
+        { "sprk_decisionrecord", "one stamp" }, { "sprk_decisionrecord", "no stamps" },
+    };
+
+    /// <summary>A Signal or Decision Record row naming the core matter <paramref name="coreMatter"/> (by the catalog), about the
+    /// To Do <paramref name="todo"/>, carrying the stamps the To Do's derivation gives (none, one or two).</summary>
+    private Entity CoredRow(string table, string stamps, Guid coreMatter, Guid todo)
+    {
+        var (matterX, project) = (Guid.NewGuid(), Guid.NewGuid());
+        _world.OrdinaryRoot("sprk_matter", coreMatter).OrdinaryRoot("sprk_matter", matterX).OrdinaryRoot("sprk_project", project);
+        var row = new Entity(table, Guid.NewGuid())
+        {
+            ["sprk_regardingtodo"] = Ref("sprk_todo", todo),
+            ["sprk_corerecordtype"] = Ref("sprk_recordtype_ref", CatalogMatter),
+            ["sprk_corerecordid"] = coreMatter.ToString("D"),
+            ["sprk_regardingrecordid"] = todo.ToString("D"),
+        };
+        switch (stamps)
+        {
+            case "one stamp":
+                _world.UserOwnedChild("sprk_todo", todo, ("sprk_regardingmatter", "sprk_matter", matterX));
+                row["sprk_regardingmatter"] = Ref("sprk_matter", matterX);
+                break;
+            case "two stamps":
+                _world.UserOwnedChild("sprk_todo", todo,
+                    ("sprk_regardingmatter", "sprk_matter", matterX), ("sprk_regardingproject", "sprk_project", project));
+                row["sprk_regardingproject"] = Ref("sprk_project", project);
+                row["sprk_regardingmatter"] = Ref("sprk_matter", matterX);
+                break;
+            default:
+                _world.UserOwnedChild("sprk_todo", todo); // filed under nothing: the derivation names no stamp
+                break;
+        }
+
+        return row;
+    }
+
+    [Theory(DisplayName = "042c fix round 1 (A-d): ForRow with the core record asks exactly ForExistingRowAsync's question for the same Signal or Decision Record row — parents, order, primary, Secure-only parents, child table and caller — with its stamps present and absent")]
+    [MemberData(nameof(CoredRows))]
+    public async Task ForRow_WithTheCoreRecord_IsForExistingRowAsyncsQuestion(string table, string stamps)
+    {
+        var (coreMatter, todo) = (Guid.NewGuid(), Guid.NewGuid());
+        var row = CoredRow(table, stamps, coreMatter, todo);
+
+        var existing = await QuestionAsync(row);
+        var built = RecordOwnershipContext.ForRow(table, RecordOwnershipContext.LookupsOf(row), RecordOwnershipContext.PairIdOf(row),
+            coreRecord: new RecordOwnershipParent("sprk_matter", coreMatter));
+
+        existing.Undetermined.Should().BeNull();
+        var reconciler = existing.Context;
+        reconciler.Parents[0].Should().Be(new RecordOwnershipParent("sprk_matter", coreMatter), "the reconciler asks the core first");
+        reconciler.Parents.Should().HaveCount(stamps == "one stamp" ? 3 : 2);
+        built.Parents.Should().Equal(reconciler.Parents, "the same parents in the same order");
+        built.TargetEntityLogicalName.Should().Be(reconciler.TargetEntityLogicalName, "the same primary");
+        built.TargetRecordId.Should().Be(reconciler.TargetRecordId);
+        built.SecureOnlyParents.Should().Equal(reconciler.SecureOnlyParents);
+        built.ChildEntityLogicalName.Should().Be(reconciler.ChildEntityLogicalName).And.Be(table);
+        built.CallerObjectId.Should().Be(reconciler.CallerObjectId);
+        built.CallerSystemUserId.Should().Be(reconciler.CallerSystemUserId);
+        JsonSerializer.Serialize(built).Should().Be(JsonSerializer.Serialize(reconciler), "the whole question");
+    }
+    [Theory(DisplayName = "042c fix round 1 (A-d, two stamps): ForRow with the core record asks the reconciler's primary, the same parents and gets the same owner when the row carries two stamps (their order after the primary differs: escalated, see task-042c-notes Fix round 1)")]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    public async Task ForRow_WithTheCoreRecord_AndTwoStamps_HasTheReconcilersPrimaryParentsAndOwner(string table)
+    {
+        var (coreMatter, todo) = (Guid.NewGuid(), Guid.NewGuid());
+        var row = CoredRow(table, "two stamps", coreMatter, todo);
+
+        var existing = await QuestionAsync(row);
+        var built = RecordOwnershipContext.ForRow(table, RecordOwnershipContext.LookupsOf(row), RecordOwnershipContext.PairIdOf(row),
+            coreRecord: new RecordOwnershipParent("sprk_matter", coreMatter));
+
+        existing.Undetermined.Should().BeNull();
+        var reconciler = existing.Context;
+        reconciler.Parents.Should().HaveCount(4);
+        built.TargetEntityLogicalName.Should().Be(reconciler.TargetEntityLogicalName, "the same primary: the core");
+        built.TargetRecordId.Should().Be(reconciler.TargetRecordId).And.Be(coreMatter);
+        built.Parents.Take(2).Should().Equal(reconciler.Parents.Take(2), "core, then subject, on both");
+        built.Parents.Should().BeEquivalentTo(reconciler.Parents, "the same parents");
+        built.SecureOnlyParents.Should().Equal(reconciler.SecureOnlyParents);
+        built.ChildEntityLogicalName.Should().Be(reconciler.ChildEntityLogicalName);
+        (await Resolver.ResolveOwnerAsync(built, CancellationToken.None)).OwningTeamId.Should()
+            .Be((await Resolver.ResolveOwnerAsync(reconciler, CancellationToken.None)).OwningTeamId);
+    }
 }

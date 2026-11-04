@@ -73,6 +73,10 @@ internal sealed class OwnershipDirectory
     /// <summary>#2143 round 2: every query on a record table (not systemuser, team or businessunit), as sent — so a test can
     /// assert how the resolver reads a row (its <c>NoLock</c>, its column set).</summary>
     public List<QueryExpression> RecordQueries { get; } = new();
+
+    /// <summary>Field-mapping task 042c fix round 1: every single-row read (<c>RetrieveAsync</c>) the resolver made, in order, so a
+    /// test can assert what it read app-only before a caller's check.</summary>
+    public List<(string Entity, Guid Id)> RowReads { get; } = new();
     public List<string> UserKeyColumns { get; } = new();
 
     /// <summary>Every owner assignment the resolver made (task 146 reparent).</summary>
@@ -167,7 +171,10 @@ internal sealed class OwnershipDirectory
         entities
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string entity, Guid id, string[] _, CancellationToken _) =>
-                OwnerReadFault is { } readFault ? Task.FromException<Entity>(readFault) : Task.FromResult(Snapshot(Row(entity, id))));
+            {
+                RowReads.Add((entity, id));
+                return OwnerReadFault is { } readFault ? Task.FromException<Entity>(readFault) : Task.FromResult(Snapshot(Row(entity, id)));
+            });
 
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
