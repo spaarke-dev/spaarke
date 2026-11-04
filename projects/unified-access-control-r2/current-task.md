@@ -41,7 +41,7 @@
   - Accepted known limits: 086 K1/K-P1 (my 191)/K-P2/K-P3; 089a+086 K3/K4; Add Existing Communication on AP emails subgrid.
   - Owner decisions taken in ebilling's session: no-firm invoices stay externally visible; Billing Administrator may read rules org-wide (delivered by 089d, not Global).
 - **field-mapping** (`spaarke-wt-field-mapping-server-write-pa-5c`):
-  - **042b** merged as #2562 (0d4aa87ee0) with my verdict line; row 12 added. **042c** (#2561: core pair via `CallerWriteAuthorization.PairTargetAsync`, core first in the owner question) waits for the owner's OK in field-mapping's session; diff comes to me before merge.
+  - **042b** merged as #2562 (0d4aa87ee0) with my verdict line; row 12 added. **042c** (#2561: core pair via `CallerWriteAuthorization.PairTargetAsync`, core first in the owner question) under way; AC2 amended (Secure core → 409 NoOwnerSource as row 8, OwnerDecided unchanged) OK'd by me with 4 conditions (AppendTo before owner question, uniform refusal for Secure/nonexistent/unknown type/ordinary + catalog fault 503; 409 only with AppendTo; no-core + writers must-not-fire; BU-Y parity). Owner visibility (chat refusal in Secure matters) raised via field-mapping. Diff to me before merge.
   - **#2561** class F, follow-up task right after 042b: core record first in step 7's owner question (catalog) **plus** the caller's AppendTo check on the named core (confirmed missing). Tests: Secure core + ordinary subject → core's owner; no AppendTo on core → refused; agree → unchanged; Signal and DR each.
   - 042a; 043 (create-path link write, #2524 sibling); any #2523 change.
 
