@@ -496,3 +496,13 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - **(9) A Draft retired without ever being Active (081 cannot refuse it; retire is the only discard).** Preferred fix, with no schema: a Retired Procedure Version counts toward the "not applicable before" date only if it has a Published policy version or a published rate card, because a version that was never Active has neither. If that proves unreliable, the fail-closed known limit stands, releasable by Override.
   - **(10)** The model §7.1 sentence is ebilling's file. ebilling edits it, citing D-203(5a) and (9).
   - Follow-vs-Pin where one side gives no version reports `ConflictingParents`, as (1) intended.
+- **Added 2026-11-04 (082b round 2, `a01b5b1d96` and `4029ae571a`):**
+  - **(11) Known limit, accepted:** a version published with zero Accepted rules and then retired opens no window. This is the only Active version without a Published policy version (081 `PublishVersionAsync`).
+    - It matters only at the leading edge. A hole between versions in force, or a date after an end with no successor, is still a gap.
+    - There it fails open on the hold alone. The version judged nothing while it was Active, so no rule is skipped.
+    - Telling it apart from a discarded Draft would need a schema marker, which is not asked for.
+  - The published-rate-card half of (9) waits for 085, where the resolver first reads rate cards (ebilling acceptance criterion).
+  - Model §7.1 text checked, with three wording fixes sent to ebilling:
+    - the pseudo-code still selects "the Active Procedure Version" (it should be Active or Superseded, per (3));
+    - the gap definition still says "between Active versions";
+    - "whether an Override may release it is open" is stale (§15(iii) answered it).
