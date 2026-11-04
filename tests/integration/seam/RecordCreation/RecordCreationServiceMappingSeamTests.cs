@@ -538,34 +538,6 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     }
 
     [Fact]
-    public async Task CreateAsync_ACitationLookupMarkedServerSet_IsNotAFilingLookup_AndPassesTheGuard()
-    {
-        // A Signal CITES its rule (RecordOwnershipResolver.IsCitation): the owner decision files nothing under it, so it is
-        // no filing lookup, server-set or not (must not fire).
-        var policy = Guid.NewGuid();
-        var item = new DataverseWriteItemMapper.MappedItem(
-            JsonSerializer.Serialize(new Dictionary<string, object?>
-            {
-                ["sprk_name"] = "Spend over budget",
-                ["sprk_Policy@odata.bind"] = $"/sprk_policies({policy:D})",
-            }),
-            ["sprk_name", "sprk_policy"])
-        {
-            Lookups = [new DataverseWriteItemMapper.MappedLookup("sprk_policy", "sprk_policy", "sprk_policies", policy)],
-        };
-        var request = new RecordCreationRequest("sprk_signal", new RecordCreationPayload.Mapped(item))
-        {
-            CorrelationId = FixedCorrelation,
-            ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_policy" },
-        };
-
-        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
-
-        outcome.Refusal?.Code.Should().NotBe(RecordCreationRefusal.ServerSetFilingLookupCode);
-        _journal.Should().Contain("user:check", "the create went past the guard to step 5's checks");
-    }
-
-    [Fact]
     public async Task CreateAsync_AWorkAssignmentsAssignedToMarkedServerSet_IsNotAFilingLookup_AndCostsNoAppendTo()
     {
         // A person is no ownership parent: a server-set sprk_assignedto stays exempt from AppendTo (must not fire).

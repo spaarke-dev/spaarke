@@ -85,6 +85,61 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
         string.Join(" ", result.Errors).Should().Contain(table).And.Contain("REJECTED");
     }
 
+    // ── field-mapping-server-write-path-r1 task 042c fix round 4 (owner decision 2026-11-04, ontology D-204) ─────────────
+    // A Signal, a Decision Record and a Budget Revision are created only by their writers: the same hard block, in both legs.
+
+    [Theory(DisplayName = "042c fix round 4 (D-204, must fire): chat execute refuses a table only its writer creates, before any Dataverse call")]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    [InlineData("sprk_budgetrevision")]
+    public async Task CreateRecord_ATableOnlyItsWriterCreates_IsRefused_WithNoCreateCall(string table)
+    {
+        _user.Held.UnionWith([$"prvCreate{table}", $"prvAppend{table}"]);
+
+        var result = await CreateRecord(table, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed, "the sprk_document hard block's refusal shape");
+        result.ErrorMessage.Should().Be(DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage(table));
+        result.ErrorMessage.Should().Contain(table).And.Contain("REJECTED").And.Contain("Do NOT retry");
+        _appCreates.Should().BeEmpty("the row is never created by the application");
+        _user.Posts.Should().BeEmpty("nor as the caller");
+        _reads.Should().BeEmpty("refused before any Dataverse call, metadata included");
+        _user.PrivilegeQuestions.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "042c fix round 4 (D-204, must fire): chat validate refuses a table only its writer creates, before the confirmation")]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    [InlineData("sprk_budgetrevision")]
+    [InlineData("SPRK_Signal")]
+    public void ValidateChat_ATableOnlyItsWriterCreates_IsRefusedBeforeTheConfirmation(string table)
+    {
+        var result = Handler().ValidateChat(CreateContext(table, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter)),
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)));
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Should().Be(DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage(table.ToLowerInvariant()));
+        _reads.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "042c fix round 4 (D-204, must not fire): the invoice-family block keeps its own words, and an ordinary table is not writer-only")]
+    [InlineData("sprk_invoicesubmission")]
+    [InlineData("sprk_invoiceapproval")]
+    [InlineData("sprk_invoicecorrection")]
+    [InlineData("sprk_externalidentifier")]
+    public async Task CreateRecord_AServerWrittenInvoiceFamilyTable_KeepsItsOwnRefusal(string table)
+    {
+        var result = await CreateRecord(table, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter));
+
+        DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter(table).Should().BeFalse();
+        DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter("sprk_todo").Should().BeFalse();
+        DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter("sprk_event").Should().BeFalse();
+        result.ErrorMessage.Should().Be(DataverseCreateRecordHandler.ServerWrittenInvoiceFamilyCreateBlockedMessage(table));
+        _appCreates.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task CreateRecord_AnOrdinaryRegistryTable_IsStillCreated_MustNotFire()
     {
