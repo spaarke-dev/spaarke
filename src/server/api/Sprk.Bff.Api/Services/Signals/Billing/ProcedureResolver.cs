@@ -587,6 +587,7 @@ public static class ProcedureResolver
 {
     private const int StateActive = 0;
     private const int PageSize = 5000;
+    private const string UnnamedProcedure = "(unnamed Procedure)";
     private const string PolicyCodeColumn = "sprk_policycode";
     private const string RuleSetColumn = "sprk_ruleset";
     private const string ScopeColumn = "sprk_scope";
@@ -729,17 +730,25 @@ public static class ProcedureResolver
             query.Criteria.AddFilter(sources);
             foreach (var row in await AllAsync(entities, query, ct).ConfigureAwait(false))
             {
-                // Re-checked: Billing area, Active (an assignment to a Retired Procedure is ignored: 089b review 2 K1), a known Applies to.
+                // Re-checked: Billing area, Active (an assignment to a Retired Procedure is ignored: 089b review 2 K1).
                 if (row.GetAttributeValue<OptionSetValue>(ProcedureEntity.AreaColumn)?.Value != RuleDomains.PolicyDomainBilling
-                    || row.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value != ProcedureEntity.StatusActive
-                    || row.GetAttributeValue<OptionSetValue>(ProcedureEntity.AppliesToColumn)?.Value is not { } appliesTo
-                    || !Enum.IsDefined((ProcedureAppliesTo)appliesTo))
+                    || row.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value != ProcedureEntity.StatusActive)
                 {
                     continue;
                 }
 
+                // An Active Billing Procedure whose Applies to is unknown or empty cannot be placed (7.1): fail closed, as an unknown mode does.
+                if (row.GetAttributeValue<OptionSetValue>(ProcedureEntity.AppliesToColumn)?.Value is not { } appliesTo
+                    || !Enum.IsDefined((ProcedureAppliesTo)appliesTo))
+                {
+                    throw new ProcedureResolutionFaultException(
+                        $"Procedure {row.Id} has an unknown or empty Applies to; the Procedures that judge the invoice cannot be told.");
+                }
+
+                // The name reaches the reader view; a missing name never falls back to the row id (U3).
+                var name = row.GetAttributeValue<string>(ProcedureEntity.NameColumn);
                 found[row.Id] = new ProcedureRow(
-                    row.Id, row.GetAttributeValue<string>(ProcedureEntity.NameColumn) ?? row.Id.ToString("D"), (ProcedureAppliesTo)appliesTo,
+                    row.Id, string.IsNullOrWhiteSpace(name) ? UnnamedProcedure : name, (ProcedureAppliesTo)appliesTo,
                     row.GetAttributeValue<EntityReference>(ProcedureEntity.FirmColumn)?.Id);
             }
         }

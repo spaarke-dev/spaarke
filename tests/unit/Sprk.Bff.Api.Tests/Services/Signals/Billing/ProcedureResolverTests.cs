@@ -72,16 +72,16 @@ public sealed class ProcedureResolverTests
 
     private static DateTime Stored(DateOnly date) => date.ToDateTime(TimeOnly.MinValue);
 
-    private Guid AddProcedure(string name, ProcedureAppliesTo appliesTo, Guid? firm = null, int status = ProcedureEntity.StatusActive)
+    private Guid AddProcedure(string? name, ProcedureAppliesTo? appliesTo, Guid? firm = null, int status = ProcedureEntity.StatusActive)
     {
         var id = Guid.NewGuid();
         var columns = new List<(string, object)>
         {
-            (ProcedureEntity.NameColumn, name),
             (ProcedureEntity.AreaColumn, Option(RuleDomains.PolicyDomainBilling)),
-            (ProcedureEntity.AppliesToColumn, Option((int)appliesTo)),
             (ProcedureEntity.StatusColumn, Option(status)),
         };
+        if (name is not null) columns.Add((ProcedureEntity.NameColumn, name));
+        if (appliesTo is { } a) columns.Add((ProcedureEntity.AppliesToColumn, Option((int)a)));
         if (firm is { } f) columns.Add((ProcedureEntity.FirmColumn, Ref("sprk_organization", f)));
         _world.Add(ProcedureEntity.Entity, id, columns.ToArray());
 
@@ -671,6 +671,38 @@ public sealed class ProcedureResolverTests
         var read = () => Resolve(CoreRecordKind.Matter, M, F);
 
         await read.Should().ThrowAsync<ProcedureResolutionFaultException>();
+    }
+
+    [Theory(DisplayName = "082b fail closed: an assigned Billing Procedure with an unknown or empty Applies to faults the resolution")]
+    [InlineData(100000009)]
+    [InlineData(null)]
+    public async Task AnUnknownAppliesTo_Faults(int? appliesTo)
+    {
+        var procedure = AddProcedure("Procedure ODD", (ProcedureAppliesTo?)appliesTo);
+        var version = AddVersion(procedure, 1, Jan1, null);
+        AddRuleVersion(AddProcedureRule(procedure, "ODD-1"), version, Jan1);
+        Assign(Matter, M, procedure);
+
+        var read = () => Resolve(CoreRecordKind.Matter, M, F);
+
+        await read.Should().ThrowAsync<ProcedureResolutionFaultException>().WithMessage("*Applies to*");
+    }
+
+    [Fact(DisplayName = "082b U3: a Procedure with no name reads as '(unnamed Procedure)'; its row id never reaches the reader view")]
+    public async Task AnUnnamedProcedure_ReadsAsUnnamed_NotItsId()
+    {
+        var procedure = AddProcedure(null, ProcedureAppliesTo.AllRecords);
+        var version = AddVersion(procedure, 1, Jan1, null);
+        AddRuleVersion(AddProcedureRule(procedure, "NONAME-1"), version, Jan1);
+
+        var readerView = (await Resolve(CoreRecordKind.Matter, M, F)).RulesOn(Feb1).ForReaders();
+
+        readerView.Rules.Single().ProcedureName.Should().Be("(unnamed Procedure)");
+        var json = JsonSerializer.Serialize(readerView);
+        foreach (var form in new[] { procedure.ToString("D"), procedure.ToString("N") })
+        {
+            json.Should().NotContainEquivalentOf(form);
+        }
     }
 
     // ── Cost bound (8.2) ─────────────────────────────────────────────────────────────────────────────────────
