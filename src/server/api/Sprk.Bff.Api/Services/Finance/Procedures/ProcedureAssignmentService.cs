@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance.Procedures;
 
@@ -257,7 +258,7 @@ public class ProcedureAssignmentService
 
     /// <summary>
     /// The rule an Exclude names: an active Billing policy in a Billing rule set that is NOT record-scoped (no record scope and no core lookup:
-    /// a record rule is removed, not overridden), and not the system rule (D-125). Read as the application; the route has already checked the
+    /// a record rule is removed, not overridden), and not the system rule (D-125; refused 409 before a rule set is required, as it has none). Read as the application; the route has already checked the
     /// caller's Read on the policy. Returns the rule's name, or the refusal.
     /// </summary>
     private async Task<(string? Name, RuleSetOutcome<OverrideView>? Refusal)> LoadRuleAsync(Guid policyId, CancellationToken ct)
@@ -271,6 +272,13 @@ public class ProcedureAssignmentService
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
         RuleDomains.AddBillingFilter(query);
         var policy = (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(p => p.Id == policyId && RuleDomains.IsBillingRow(p));
+        // The system rule first, BEFORE a rule set is required: it belongs to no rule set (Seed-BillingSystemPolicy.ps1), so the set check
+        // below would answer it "not found". The caller's Read on the rule has already been checked by the route.
+        if (policy is not null && await IsSystemRuleAsync(policy, policyId, ct))
+        {
+            return (null, Refused<OverrideView>(StatusCodes.Status409Conflict, CodeSystemRule, "This is a system rule; it cannot be excluded for a record."));
+        }
+
         var set = policy?.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id is { } setId
             ? await LoadByIdAsync(RuleSetService.RuleSetEntity,
                 setId, new[] { "sprk_scope", RuleDomains.PolicyDomainColumn }.Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray(), ct)
@@ -280,15 +288,25 @@ public class ProcedureAssignmentService
             return (null, Refused<OverrideView>(StatusCodes.Status404NotFound, CodeRuleNotFound, "The rule was not found."));
         }
 
-        if (policy.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id is { } currentId
-            && await LoadByIdAsync(RuleSetService.VersionEntity, currentId, new[] { "sprk_policy", "sprk_ruletype" }, ct) is { } current
-            && current.GetAttributeValue<EntityReference>("sprk_policy")?.Id == policyId
-            && current.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value == (int)RuleType.SubmissionIntegrity)
+        return (policy.GetAttributeValue<string>("sprk_name") ?? policy.GetAttributeValue<string>("sprk_policycode") ?? policyId.ToString(), null);
+    }
+
+    /// <summary>
+    /// True for the system rule (D-125): the policy that carries <see cref="BillingRuleCatalogue.SystemPolicyCode"/> (as
+    /// <c>InvoiceSubmissionAfterSteps</c> finds it), or one whose version in force is of the SubmissionIntegrity type (as
+    /// <c>RuleSetService</c> refuses it). The system policy has no rule set, so this cannot wait for one.
+    /// </summary>
+    private async Task<bool> IsSystemRuleAsync(Entity policy, Guid policyId, CancellationToken ct)
+    {
+        if (string.Equals(policy.GetAttributeValue<string>("sprk_policycode")?.Trim(), BillingRuleCatalogue.SystemPolicyCode, StringComparison.Ordinal))
         {
-            return (null, Refused<OverrideView>(StatusCodes.Status409Conflict, CodeSystemRule, "This is a system rule; it cannot be excluded for a record."));
+            return true;
         }
 
-        return (policy.GetAttributeValue<string>("sprk_name") ?? policy.GetAttributeValue<string>("sprk_policycode") ?? policyId.ToString(), null);
+        return policy.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id is { } currentId
+            && await LoadByIdAsync(RuleSetService.VersionEntity, currentId, new[] { "sprk_policy", "sprk_ruletype" }, ct) is { } current
+            && current.GetAttributeValue<EntityReference>("sprk_policy")?.Id == policyId
+            && current.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value == (int)RuleType.SubmissionIntegrity;
     }
 
     /// <summary>
