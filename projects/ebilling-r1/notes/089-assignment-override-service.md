@@ -1000,3 +1000,39 @@ The uac-r2 design, binding. `RuleSetEndpoints.RequireAccessToTheRuleSet` runs on
 | Publish size (`git archive` short-path trees, `-c Release -r linux-x64`, `Compress-Archive`, 192 files each), this round vs the branch before it (`01924f383d`) | 137,287,256 B raw / 41,314,368 B zip to 137,290,092 B raw / 41,315,940 B zip: **+2,836 B raw (+1,572 B zip)**. No package. |
 
 - No Dataverse write, no role change on dev, no deploy. Dev reads were read-only (`-Verify`, metadata and row counts).
+
+## 089e auth pass 2 and fix round 3 (2026-11-04)
+
+### F2: the read-back after a no-answer stage 3 compares content, not only the row's parent
+
+- **Defect and location.** `ProcedureAssignmentService.CommittedAfterNoAnswerAsync` (called after the stage-3 `SendAsync` of `ChangeRuleAsync`). Two concurrent changes of the same rule on the same record compute the same version id (`RuleSetService.VersionIdFor(recordRule.Id, number)`). The read-back checked only that the row at that id belongs to the record rule, so a no-answer stage 3 that had NOT committed was reported committed when the other change's row was there, and the close ran for a change that was not saved.
+- **Fix.** The read-back also reads the content columns stage 3 writes from `merged`: `sprk_versionnumber`, `sprk_ruletype`, `sprk_rulebody`, `sprk_messagetemplate`, `sprk_shortheadline`, `sprk_consequence`, `sprk_proposalstatus`, `sprk_clausereference`, `sprk_clauselocation` and `sprk_basedonversion`. It reports committed only if they all equal what this change would have written (`VersionContentMatches`; a missing and an empty text are the same). Equal content counts as committed: it is a truthful answer, because the other change wrote what this one would have. Different content is not committed: the existing 500 `assignment.write_failed`, and no close runs.
+- **Tests.** Must-fire: the row seeded with a different body, and (one test, four shapes) a different template, headline, consequence and based-on version, are 500 and close nothing. Equal content is Done and the close runs. K7: a re-change after a removal whose stage 3 gives no answer and does not commit, with the earlier version row present, is 500 and writes no new version.
+- **Seeding proof.** With the content comparison removed (`VersionContentMatches` dropped from `committed`), the two must-fire tests failed (2 of 84 in `ProcedureAssignmentServiceTests`); the file was restored byte-identical (checked with `cmp`).
+
+### Known limits (K1 to K7)
+
+- **K1: `Reaches` takes no privilege.** `SecureBuRoleDepthAssertion.Reaches(depth, anchor, owner, tree)` is the depth model alone, so a per-privilege loop around it repeats one assertion. `RestrictedContentOwnerRoleGuardTests` now asserts it once per case (the customer copies at the file's depth, the root's copy at the file's depth, Global from a customer copy).
+- **K2: the list cap answered the wrong status.** More than `MaxRuleSetReadChecks` (1000) listed sets is not a rights failure but a result too large for one pass. The list now answers 422 `ruleset.result_truncated` with the service's own message (`RuleSetService.TooManyRuleSetsMessage`, shared with `ListAsync`), instead of 403 `system_failure`. A rights answer missing for any set is still 403 `system_failure`. The cap is still checked before any rights question.
+- **K3: DEPLOY ORDER (binding).** Apply the Billing Rule Reader extension (`config/billing-rule-readers-role.json`: `prvReadsprk_Policy`, `prvReadsprk_ruleset`, `prvReadsprk_procedure` at Deep) BEFORE, or TOGETHER WITH, the BFF deploy that carries 089e. The list now keeps only the sets the caller can Read, and a child-unit admin's own copy does not reach the customer top unit's sets: without the extension that admin's rule-set list is empty.
+- **K4: owner-approved parity, recorded for visibility.** The owner approved this behaviour as parity with the existing internal record routes. It is recorded here so a later reader does not take it for an oversight; it is not changed.
+- **K5: the route guard matches on `{ruleSetId`.** `EveryMappedByIdRoute_ASetTheCallerCannotRead_IsTheUniform404` selects by-id routes by a pattern containing `{ruleSetId`. A by-id route of rule sets that names its parameter differently, or is mapped outside `MapRuleSetEndpoints`, is not seen by it. On 2026-11-04 there is none.
+- **K6: a plain apply run did not fail on a team holder.** `Deploy-EbillingBillingAdminRole.ps1` printed a team holding the role only as a gap in the summary and exited 0 unless `-Verify`. A plain run that finds one now prints it and exits 1, as `-Verify` does. No other behaviour changed (the other gaps a plain run collects describe what it has just applied). There is no Pester file for the script: checked by parsing (0 errors) and by reading the code.
+- **K7: a re-change after a removal.** After a removal, the record rule keeps its earlier versions, so the new version has a number above them and a new id. If stage 3 then gives no answer and does not commit, the row at the new id is absent while an earlier version row exists. That is not committed (500, no close). Covered by a test; it passed before and after F2 (it pins the existing behaviour).
+
+### uac-r2: the assertion's table list
+
+- **Agreement (2026-11-04).** `sprk_procedure` is added to `SecureBuRoleDepthAssertion.RestrictedContentPrivileges`, with the comment "sprk_procedure added by ebilling 089e with uac-r2 agreement, 2026-11-04", and the role test's must-fire controls cover it.
+- **Status: NOT APPLIED. Stopped as the brief instructs.** With the entry added, one other caller fails: `SecureBuRoleDepthAssertionTests.RestrictedContentPrivileges_CoverTheFiveHardDenyTables_UnderTheirLiveNames` (`tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertionTests.cs`, ~:1451). It pins the list to exactly the five hard-deny tables and requires it to equal `RecordOwnershipResolver.RestrictedContentTables` ("no more and no fewer"). `sprk_procedure` is not in that resolver set. Run: `SecureBu` filter, 175 passed, 1 failed. Nothing else failed. The change was reverted; the list is unchanged. Decision needed from the owner of that pin: add `sprk_procedure` to both sets, or widen the pin to allow a list entry outside the resolver set.
+- **Role ArchTest note.** The Billing Administrator `prvReadsprk_procedure` entry of the until-191 exception in `ProcedureRolePrivilegeGuardTests` is annotated "uac-r2 agreed 2026-11-04".
+
+### Gates
+
+| Run | Result |
+|---|---|
+| Build (BFF) | 0 warnings, 0 errors |
+| Unit filter `RuleSetEndpointsTests\|ProcedureAssignmentServiceTests\|ProcedureAssignmentEndpointsTests\|RuleSetService` | 841 passed, 0 failed |
+| ArchTests `RestrictedContentOwnerRoleGuard\|RouteAuthorizationGuard\|SecureBu\|RuleSetRolePrivilege\|ProcedureRolePrivilege` | 203 passed, 0 failed |
+| Pester `Set-CustomerOwnerTeams.Tests.ps1` (Pester 5.7.1) | 35 passed, 0 failed |
+
+- No Dataverse write, no role change on dev, no deploy.
