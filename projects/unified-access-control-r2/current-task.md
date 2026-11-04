@@ -34,7 +34,7 @@
 
 ## Reviews owed / in flight
 - **ebilling** (`spaarke-wt-ebilling-r1-7b`):
-  - **095c-5** (5284787e81, running): field-secured `sprk_invoice.sprk_firmhold`; held = invoice hold OR any linked submission hold; binding: read app-only (OBO returns null), tests unlink/delete/reason+firm rewrite → still held; `sprk_invoice.sprk_vendororg` added to generic writers' refused list. `-Apply` needs owner go in ebilling's session, with notices to me.
+  - **095c-5** column APPLIED on dev 2026-11-04 14:16Z (owner go in ebilling's session): my read-back: sprk_invoice.sprk_firmhold String, IsSecured; SysAdmin 4/4/4, Writers 4/4/4, Readers 4/0/0 → pre-check passes. Owner decisions: 089d = option R (my 5 conditions); 503 on missing column accepted. Code (a8cee1ae4e, pass 2 running): field-secured `sprk_invoice.sprk_firmhold`; held = invoice hold OR any linked submission hold; binding: read app-only (OBO returns null), tests unlink/delete/reason+firm rewrite → still held; `sprk_invoice.sprk_vendororg` added to generic writers' refused list. `-Apply` needs owner go in ebilling's session, with notices to me.
   - **089d** (43a5b37051): OK with 2 binding notes (role `isinherited`=0 in -Apply/-Verify/guard; live negative proof before the first customer with a child unit). Who adds members = owner question via ebilling. **Option R** (direct role assignment in the customer top unit's copy; needs `EnableOwnershipAcrossBusinessUnits`) is acceptable: the census anchors direct grants at the role copy's unit (`SecureBuRoleDepthAssertion` :801, :999). Conditions sent: org setting is a precondition plus -Verify; holder checks; find any BFF code grading reach by home unit; live proof stays.
   - 089b/089c full review (Exclude keeps Read on `sprk_policies`, fail-closed 403; Billing Rule Readers team is 089d).
   - 095a PR conditions; 095c schema notice; 095d full review (Write on invoice + AppendTo on firm; core from invoice; Unreadable 503; assign only, In Review only; typed writer in ParentLineage).
@@ -62,4 +62,4 @@
 - ebilling's held notice to customer-provisioning (session 09) needs the owner to release it (permission modes).
 
 ## Peers
-- ebilling `spaarke-wt-ebilling-r1-7b`; field-mapping `spaarke-wt-field-mapping-server-write-pa-5c`; ontology `spaarke-wt-spaarke-ontology-platform-r1-be`; R3 closed (`spaarke-wt-spa-external-access-platform-f2`); others: word-add-in, provisioning, audit `spaarke-f6`.
+- (2026-11-04 restart) this session = `spaarke-wt-unified-access-control-r2-20` (owner: authoritative; duplicate -09 closed). ebilling `spaarke-wt-ebilling-r1-c7` (authoritative per ebilling; duplicate d4 open); field-mapping duplicates `-69` (busy) and `-ec`, which is active unconfirmed; ontology `spaarke-wt-spaarke-ontology-platform-r1-be`; R3 closed (`spaarke-wt-spa-external-access-platform-f2`); others: word-add-in, provisioning, audit `spaarke-f6`.
