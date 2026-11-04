@@ -423,3 +423,11 @@ The resolver reads no rate card. The 080 schema has `sprk_ratecard.sprk_procedur
 | Seeding proof 8b: `created >= episodeStart` changed to `>` | 10 of 88 failed: the new same-second test, the new K2 date-before-first-from control, and eight existing record-rule tests whose fixtures write the row and the version with one stamp. Restored, `cmp` identical. |
 | Seeding proof 8c: `e["overriddencreatedon"] = DateTime.UtcNow` appended to the real `ProcedureAssignmentService.cs` | the source-scan test failed with `ProcedureAssignmentService.cs: 1 mention(s) of overriddencreatedon (line 1523), 0 allowed` (and the must-not-fire control, which scans the real writers, failed with it). Restored, `cmp` identical, `git diff` clean. |
 | Publish size | Not re-measured: no package or project change; about 40 net lines of resolver code. |
+
+### Round 2 scoped re-check (2026-11-04)
+
+No F-class finding. All six round-2 claims hold in the code; the filtered unit tests (133) and the ArchTests (7) pass. 082b merged into work at 7061b5b7ec.
+
+- **K (new, transient): an evaluation that overlaps a create or re-change.** `ProcedureResolver.cs:756-763` reads the overrides first and the enabled policies and versions later, all with NoLock. An evaluation that lands between those reads can see the record rule enabled but no Exclude row (K3 throws), or the row and the enabled rule but no new version (K2 throws). The fault is thrown and the job retries, so it fails closed and clears on the next read. No fix. **082c criterion:** expect an occasional transient `ProcedureResolutionFaultException` on a record being changed; the retry path must not raise a hold or reach a reader for it before retries are exhausted.
+- **K (documented): guard limits.** The `overriddencreatedon` guard strips `//` without regard to string literals and does not strip `/* */`. The second only gives false failures (the safe direction).
+- **Task 117 ordering** (already a criterion): if the delete planner removes the Exclude rows before switching the rule Off, the K3 fault fires.
