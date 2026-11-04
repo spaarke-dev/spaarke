@@ -124,3 +124,132 @@ Found in the 089a review; none is fixed in 089a. 089c is not done until each hol
 | F3: comment claimed a protection the test did not give | `AnAssignment_ExcludingAnotherSecureMattersRecordRule_FollowsItsOwnMatterOutOfIsolation` (reconciler, Unsecure pass): an assignment on a mid-unsecure matter excludes another Secure matter's record rule and still moves to the content team. Seeded: with `("sprk_procedureassignment","sprk_excludedpolicy")` out of `CitationLookups` it fails. The first test's comment now says what it proves and points here and at the unit pin. (The Make Secure shape cannot express this: the reconciler never reads `sprk_excludedpolicy`, so the citation only matters to the parent derivation, i.e. secure-if-any on the Unsecure pass.) |
 | K7: legacy set filed under its source document | `("sprk_ruleset","sprk_sourcedocument")` in `CitationLookups`; must-not-fire extended (legacy set alone: no parent; with a matter: the matter only). Seeded: fails without the entry. |
 | K6: a missing table can go unnamed | The builder now reports every depth-list privilege the environment did not return, codified or not. The evaluator drops a codified one only where clause 5 can grade (tables present, exactly one non-replica owner role) and names it, so each missing privilege yields exactly one finding. Test: two owner roles and `prvReadsprk_ruleset` not installed give the role-count finding plus one `RestrictedContentPrivilegeNotResolved` naming it. Seeded: fails on the old builder. The existing one-finding theory (clause 5 able to grade) still passes. |
+
+## 089b - assignment and rule-exclude service and routes (done 2026-11-03)
+
+Branch `task/ebilling-089b`, from `work/ebilling-r1` at `53f3f6b724`. Not pushed. Nothing was written to Dataverse; no live call was made.
+
+| Commit | Subject |
+|---|---|
+| `d7f863e5d1` | Procedure assignment and rule-exclude service and routes |
+| (this commit) | notes, TASK-INDEX row |
+
+### What landed
+
+- **`ProcedureAssignmentService`** (`Services/Finance/Procedures/ProcedureAssignmentService.cs`) has two methods, `AssignProcedureAsync` and `ExcludeRuleAsync`. Each writes one `sprk_procedureassignment` row in one `ExecuteTransactionAsync`, all or nothing, with `CancellationToken.None`.
+  - `AssignProcedureAsync` writes a FollowLatest, Pinned or Excluded row.
+  - `ExcludeRuleAsync` excludes one rule, optionally for one firm.
+- **Assign and pin checks:**
+  - A pinned version must belong to that Procedure and be Active or Superseded (EB-D-155). Only a pinned row names a version.
+  - A retired Procedure is 409 `assignment.procedure_retired`. A missing one is 404 `assignment.procedure_not_found`.
+- **Exclude-rule checks:**
+  - The rule must be an active Billing policy in a Billing set that is not record-scoped, or the call is 404 `assignment.rule_not_found`. A set is record-scoped if it has a Record or Firm-record scope or any core lookup; either one alone counts.
+  - The system rule (a `SubmissionIntegrity` current version) is 409 `assignment.system_rule`.
+  - The reason is required, at most 2000 characters. A named firm must exist.
+- **Ownership (EB-D-168):**
+  - The service asks `RecordOwnershipContext.ForChild(row)`, with the caller as `CallerObjectId` and `RequestedBy`. It calls `owner.ApplyTo(row)` in the same member that builds the row.
+  - 089a drops the citations, so the core record is the row's one parent. A refusal writes nothing.
+  - Real-resolver tests: an ordinary matter's row goes to the restricted-content owner team and a Secure matter's row to its Secure team. The creator person is the caller in both.
+- **I-A1:** one row per (record, Procedure) and one per (record, rule), with or without a firm. Two guards:
+  - a read for an existing row;
+  - a derived v5 row id, `AssignmentIdFor(coreTable, recordId, subjectColumn, subjectId)`, so a racing create collides on the primary key (0x80040237).
+
+  Both answer 409 `assignment.duplicate`.
+- **Send results:**
+  - a duplicate key: 409 `assignment.duplicate`;
+  - a row-version conflict: 409 `assignment.concurrent_edit`;
+  - no answer, or a timeout: 500 `assignment.write_failed`, "may or may not have been saved (id ...)";
+  - any other fault: 500 `assignment.write_failed`, "nothing was written".
+- **Core table:** it must be in `InvoiceFamilyCoreRecordGuard.FilingCoreTables` (a new internal accessor), and the record id must be non-empty. Anything else throws: it is a bug, never input.
+- **Routes** (`Api/Finance/ProcedureAssignmentEndpoints.cs`): six POSTs, one literal chain per core type.
+  - `/api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments` and `.../rule-overrides/exclude`.
+  - Success is 201 with `Location` and the `OverrideView`.
+  - Checks, in order, all as the caller and fail closed:
+    1. `RequireAuthorization`.
+    2. Step 0 on the group (`RequireInternalFinanceCaller`), which answers in the uniform-404 shape.
+    3. The record filter `ebilling.record.override`: Write and AppendTo on that record, refused as the uniform 404.
+    4. A second filter, refused as 403: Read on the Procedure (`sprk_procedures`) or on the rule (`sprk_policies`), plus `BillingAdminAuthorization.Admin()` (prvWritesprk_ruleset). They are composed in one filter, with no second marker.
+    5. `RequireEbillingEnabled` (503).
+  - A missing or empty body id is 400 before any subject check.
+  - Errors are ProblemDetails with a stable `errorCode` (ADR-019). An owner refusal goes through `ProblemDetailsHelper.RecordOwnerRefused(..., "override", ...)`.
+- **`OperationAccessPolicy`**: `ebilling.record.override` = Write | AppendTo, plus its two completeness rows.
+- **DI**: `services.AddScoped<ProcedureAssignmentService>()` in `FinanceModule` (ADR-010: a concrete type, one registration), and `MapProcedureAssignmentEndpoints()` in `EndpointMappingExtensions`.
+- **Census**: `ProcedureAssignmentService.cs sprk_procedureassignment 1` is Routed. A `PersonBearingWriter` is added for `CreateRowAsync`.
+- **Route ledger**: `GovernedFile("Api/Finance/ProcedureAssignmentEndpoints.cs", Scope.RouteLevelGate, ...)`. `ExpectedEndpointFileCount` goes from 150 to 151.
+
+### Placement and section 11 (CLAUDE.md §10, §11)
+
+- **Placement:** the BFF, in the existing Finance module (`Services/Finance/Procedures`, `Api/Finance`).
+  - The rows are secure children of a core record, owned through the BFF's resolver.
+  - The caller checks need the BFF's OBO record path; no other host has it.
+  - No package and no background work are added.
+- **Existing:** `RuleSetService` writes rule sets without record scope, behind admin routes, and `ProcedureService` writes Procedures. Neither writes a row under a core record, and neither is caller-checked against one.
+- **Extension:** neither service can take these writes. Their routes check only a Procedure or the admin marker, and these rows are secure children of a core record. The ownership question, the outcome type (`RuleSetOutcome`) and the transaction seam are reused, not copied.
+- **Cost of doing nothing:** no record could be pinned to an earlier Procedure Version, opt out of a Procedure or waive a rule (O-4, O-10), and the resolver (082) would have no rows to read.
+- **New operation key** `ebilling.record.override`: no existing key asks Write and AppendTo on a core record for an override. The closest, `ebilling.submission.decide`, is a different action with a different audit.
+
+### Decisions and deviations
+
+1. **One service with two methods; 089c extends it.** The constructor is minimal: `IGenericEntityService`, `IRecordOwnershipResolver` and the logger. 089c adds its own dependencies.
+2. **The single create goes through `ExecuteTransactionAsync`.** 089c's change rule (set, rule, version and Exclude row) then uses the same seam and the same duplicate mapping.
+3. **The record check comes first and answers 404; the subject and role checks come second and answer 403.** A caller who cannot write the record learns nothing about it. A caller who can learns only that the subject is not theirs to cite.
+4. **Each route uses the literal operation string, not a const,** so the source scan in `OperationAccessPolicyCompletenessTests` discovers it.
+5. **POML step 0 (a live OwnershipType read) was not run**, because this brief allows no live calls. The 080 notes record the table as user-owned, 089a registered it, and the real-resolver tests use that shape.
+6. **The 089a open item about a missing role pin is stale.** That item says "No pin yet that no non-BFF role holds Create or Write on `sprk_procedureversion` or `sprk_procedureassignment` (089b)". `ProcedureRolePrivilegeGuardTests` (ArchTests) already pins this with `^prv(Create|Write)(sprk_procedureversion|sprk_procedureassignment)$`, so no new pin was added.
+
+### Seeding proofs
+
+Each change was restored afterwards, and the file content was compared to confirm it. Suite: `FullyQualifiedName~ProcedureAssignment`, 116 tests.
+
+| Change | Result |
+|---|---|
+| S1: record filter dropped on both matter routes | 12 failed: the step-0 must-fire on matter rows (the refusal is no longer the uniform 404), the uniform-404 theory (3) and the record-check must-not-fire |
+| S2: Read on the Procedure dropped (assign targets become admin only) | 3 failed: "no Read on the Procedure is 403" (matters, projects, work assignments) |
+| S3: Read on the rule dropped (exclude targets become admin only) | 3 failed: "no Read on the rule is 403" (3) |
+| S4: admin marker dropped (subject only) | 12 failed: "without the billing-admin privilege is 403" (6) and "a privilege probe fault fails closed" (6) |
+| S5: step 0 dropped from the group | 24 failed: the step-0 must-fire theory |
+| S6: the duplicate read never matches | 1 failed: "a second row for the same Procedure is 409 and writes nothing" (the derived id still refuses it, but only after a transaction is sent) |
+| S7: the derived id replaced by a random id | 4 failed: the race test and the three tests that pin the row id |
+| S8: `RequestedBy` dropped | 2 failed: the assign and exclude row tests (the resolver substitute sees no requester) |
+| S9: the duplicate-key fault not mapped | 1 failed: the race test (500, not 409) |
+
+### Gates
+
+| Run | Result |
+|---|---|
+| Build: Sprk.Bff.Api.Tests, Spaarke.ArchTests, Sprk.Bff.Api.IntegrationTests, Spaarke.Core.Tests, Spe.Integration.Tests | each 0 warnings, 0 errors |
+| Spaarke.ArchTests (full) | 1951/1951 |
+| Sprk.Bff.Api.Tests `FullyQualifiedName~Procedure\|~Finance\|~Assignment` | 5510 passed, 3 skipped, 0 failed |
+| Sprk.Bff.Api.Tests, adjacent: OperationAccessPolicy, RecordOwnership, SecureChild, BillingLookups, StepZero, EndpointRegistration, Startup | 2207/2207 |
+| Spaarke.Core.Tests | 64/64 |
+| New tests (`~ProcedureAssignment`): 23 service, 93 endpoint cases | 116/116 |
+| `dotnet list package --vulnerable --include-transitive` (BFF) | none |
+| Publish size: `git archive` of `53f3f6b724` vs `d7f863e5d1`, `dotnet publish -c Release -r linux-x64 --self-contained false`, `Compress-Archive -CompressionLevel Optimal` | 41,249,100 B to 41,264,209 B = **+15,109 B**; 192 files each; about 41.3 MB in total. No package added |
+
+### Known limits and questions
+
+- **K: Read on the rule's policy may refuse a billing admin in a child business unit (fail closed). Question for uac-r2 and the owner.**
+  - Billing policies are owned by the restricted-content team in the top business unit, and billing-admin Read on `sprk_policy` is Deep.
+  - EB-D-162 says "no route depends on it"; this route now does.
+  - So an admin in a unit below the policy's owner may get 403 for a rule they can see in the UI through the BFF.
+  - The alternative is to ask the caller's Read on the rule's Procedure: resolve the policy, its rule set and its Procedure as the app, then check the caller on that Procedure. That needs a custom filter.
+  - Not changed here, because the current check fails closed.
+- **K: an Exclude can name a firm the rule does not apply to.** For a firm-named base rule and another firm, the row is accepted but is a no-op: the resolver (082) never matches it. 089c's change rule refuses the same shape with `assignment.firm_mismatch`, and the exclude path could reuse that check later.
+- **K: a missing firm is a 400** ("The firm was not found"), so a billing admin can test whether an organization id exists. Billing admins already read organizations, so no caller Read on the firm is asked.
+- **K: an Exclude does not check that the rule belongs to a Procedure assigned to, or in force on, the record.** An Exclude of an unrelated rule is a no-op, and the caller still needs Read on the rule.
+- **The duplicate read does not filter `statecode`.** An inactive row still counts, and its derived id would collide anyway. So **089c's remove must delete the row, not deactivate it**, or that subject can never be overridden again.
+
+### 089c must (in addition to the 089a list above)
+
+- **Add change rule and remove (with preview).**
+  - The methods go in `ProcedureAssignmentService`; the routes go in `ProcedureAssignmentEndpoints`, one literal chain per core type.
+  - Extend the constructor with `RuleSetService`, `SignalClosureService` and `AffectedInvoiceCounter` as needed, and update the constructor arguments of the endpoint tests' `Mock<ProcedureAssignmentService>`.
+- **Reuse `AssignmentIdFor(coreTable, recordId, ExcludedPolicyColumn, policyId)` for change rule's Exclude row.** An Exclude and a change of the same rule are then one row per (record, rule) and collide on the key.
+- **Make the record filter (`ebilling.record.override`) each new route's first filter.** Add the new privileges to the second filter: Create on rule set, policy and policy version, and Write on policy for a removal.
+- **Keep the route-ledger entry** (same file, so `ExpectedEndpointFileCount` does not change).
+- **Add census entries:**
+  - the record-rule writer as Routed, in its own file if the census needs it (see the 089a list);
+  - a `PersonBearingWriter` for each new member that builds a row.
+- **Check Read on what the stored row overrides before removing it.** The request body does not name that subject, so this needs a custom filter. If one is added, give it a credited form for the route ledger.
+- **Move the record-scope constants if the new writer needs them.** `ScopeRecord` and `ScopeFirmRecord` are private to this service; a shared place must respect the census marker rule (089a K4).
+- **Remove by deleting the row, not deactivating it** (see the limit above).
