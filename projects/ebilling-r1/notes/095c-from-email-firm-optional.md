@@ -681,7 +681,7 @@ Gate (on the branch with every change):
   - The first run failed two tests.
   - `FindingsJsonAppOnlyReadGuardTests` C1 failed, correctly: `InvoiceFirmHold` is a new reader of the field-secured `sprk_findingsjson` (task 122). It reads app-only, so it is now in `ReviewedTypes`, and the task 122 inventory has row 9. C2 and C3 pass for it.
   - `ContactCreateOwnerPolicyGuardTests` "ISS-005 guard: 60 assignments … in bounded time" failed under the load of the parallel gate. It passes alone, and 095c-4 does not touch it: a pre-existing timing flake, reported.
-- Publish size (bff-hygiene item 4, `dotnet publish -c Release`, zipped with PDBs, from fresh `git archive` trees): PUBLISH_RESULT. No package changed, so there is no new CVE (no `PackageReference` edits in this diff).
+- Publish size (bff-hygiene item 4, `dotnet publish -c Release`, zipped with PDBs, from fresh `git archive` trees): 39.36 MB zipped at 78bc434c03 (192 files): +0.007 MB against the base 5d3c3b60da (39.35 MB) and +0.062 MB against master aef86b89f7 (39.30 MB). This is under the +5 MB threshold and the 55 MB review level. The trees were left at `C:\wt95c4m`, `C:\wt95c4b` and `C:\wt95c4x`, and can be deleted. No package changed, so there is no new CVE (no `PackageReference` edits in this diff).
 
 ### 14.6 Deviations
 
