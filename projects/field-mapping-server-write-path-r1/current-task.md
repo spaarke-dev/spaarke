@@ -8,19 +8,16 @@
 
 | Field | Value |
 |---|---|
-| **Active** | **042b ✅** PR #2562 merged 0d4aa87ee0 (2026-11-04T07:03Z); #2483 and DI-009 are closed.
-- UAC-r2 AC15: OK with notes (K3 rows 11 and 12; Q3 named as a create behaviour change).
-- The merged branch passed: verify-suites 6670/0/7, ArchTests 1911.
-- 042b is not on dev. It goes to uac-r2's next deploy batch with #2551.
-- **042c POML written** (#2561 / DI-019, which UAC-r2 ruled F): the caller's AppendTo on the core record, plus the core first in the owner question. Reuse `CallerWriteAuthorization.PairTargetAsync`. It waits on the owner's OK.
-- **020 ✅** (#2551). It is not on dev. The live route check needs the uac-r2 deploy and the owner's OK on test rows.
-- **041 ✅** (#2541), live on dev since d763dc120e. FR-40 is unproven live: there has been no activity.
-- 042b worktree `agent-ac26f071a1fb351e7` can be removed later, through Remove-WorktreeSafe.
-- **Open questions:** Q1 / #2556 (the report-card regarding) needs an owner decision. |
-| **Next Action** | 1. **Running (owner OK 2026-11-04):** 042c (Opus, task/fm-042c), 031 (Sonnet, task/fm-031), 021 code part only (Sonnet, task/fm-021; no live p95/deploy). All cut from 5f443eaae0. On each report: review, adversarial pass(es) (042c: two, then diff to UAC-r2), merge --no-ff, verify-suites + ArchTests. 021 live part needs #2551 on dev + owner OK for ~40 test matter creates and the code-page deploy.
-2. Tell uac-r2 that #2562 is on master, for the deploy batch. After the deploy: read-only checks on the route and the new owner behaviour, sent to uac-r2. Then ask the owner HERE for an OK on Matter/Project test rows.
-3. After a real dev upload: re-run the 041 read-only checks and send them to uac-r2.
-4. Then W3, starting with 021 (fix item #2, ReferenceLookupColumns / PostMappingDefaults, before cutover). |
+| **Active** | Checkpoint 2026-11-04 (late). uac-r2 session is now **`spaarke-wt-unified-access-control-r2-20`** (-38 and -09 gone).
+- **031** (FR-19): merged into the work branch LOCALLY as **603ae09027** (`--no-ff` of task/fm-031 a620880de1), NOT pushed yet. verify-suites + ArchTests running in background (log scratchpad `verify-031-merged`). UAC-r2 verdict for the PR: "UAC-r2: OK with notes (route-authorised exemption pinned to (column, id); closed allow-list + ArchTest; uniform 403; event route adds checks, removes none). No F findings." K items: K-2 resolved by (column,id); K-3 ArchTest name pin; K-4 doubles → 046; K-5 BuildCreateEventPayload → 063 (noted in 063 POML). Event type stays K1 (Basic + Office lack AppendTo on sprk_eventtype_ref → 046). Release notes in notes/task-031-notes.md.
+- **042c** (#2561): task/fm-042c, worktree `C:/code_files/spaarke/.claude/worktrees/agent-a854bfc2eb0fcc94d`. Fix round 1 pushed 6d87258cd3 (ForRow(coreRecord) one builder, core words, id normalised, DI-P3 K1 row 13). **B' fill-or-clear** (owner: never a half pair, never refuse) being built by agent fm-042c-b2 (verify running). UAC-r2 conditions a–g + additions (normalised filled id; type+id same catalog row; warnings no root id/Secure; create only; stamp-order theory → K2 or F). Then: 2nd adversarial pass, diff to UAC-r2, merge work branch in (031 overlap in RecordCreationService step 5), PR.
+- **021**: code done on task/fm-021 c2b3c327ec (not merged). Live p95 + deploy wait on #2551 on dev + owner OK (~40 test matters + code-page deploy).
+- **New tasks 043–046** written (5450e1a5af): 043 doc as mapping source; 044 core pair field security (UAC-r2 gate); 045 regarding pair complete+propagated (inventory first); 046 roles matrix (+ ebilling Procedure Read entry, d70346386b). #2524 task becomes 047 when written.
+- **Private (do NOT write publicly):** core-pair re-point on update — UAC-r2 owns (F), fixing on fix/uac-core-pair-update. |
+| **Next Action** | 1. When `verify-031-merged` passes: push the work branch, open PR to master (body: summary, behaviour changes, ADR-008 path A, placement/§11, publish delta +972 B / CVE clean, verification, UAC-r2 verdict line, K items, 🤖 footer), `gh pr merge --auto --merge`; TASK-INDEX 031 ✅ after merge.
+2. On fm-042c-b2 report: check, launch 2nd Opus adversarial pass (full 042c), then diff to UAC-r2, merge origin/work into task/fm-042c (resolve step 5 overlap), verify, merge, PR.
+3. Owner questions open: inactive playbook refused at analysis start? (pre-existing, not 031). 021 live OK. Family 1.0.56, 076, #2556.
+4. After uac-r2 deploys #2551/#2562: read-only checks → uac-r2. |
 | **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
