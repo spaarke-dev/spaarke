@@ -163,7 +163,7 @@ public sealed class ProcedureAssignmentEndpointsTests
         {
             Service.Verify(s => s.AssignProcedureAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ProcedureAssignmentRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
             Service.Verify(s => s.ExcludeRuleAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<RuleExcludeRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
-            Service.Verify(s => s.ChangeRuleAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<RuleChangeRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+            Service.Verify(s => s.ChangeRuleAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<RuleChangeRequest>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
             Service.Verify(s => s.RemoveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
             Service.Verify(s => s.PreviewRemovalAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         }
@@ -538,11 +538,12 @@ public sealed class ProcedureAssignmentEndpointsTests
         await using var host = await Host.StartAsync();
         RuleChangeRequest? seen = null;
         string? seenTable = null;
+        string? seenToken = null;
         var view = new RuleChangedView(
             new OverrideView(Guid.NewGuid(), "RuleChanged", "Excluded", null, null, PolicyId, null, "x"),
             new RecordRuleView(Guid.NewGuid(), Guid.NewGuid(), "BRR-x", Guid.NewGuid(), 1, Guid.NewGuid(), "Record", null));
-        host.Service.Setup(s => s.ChangeRuleAsync(It.IsAny<string>(), RecordId, It.IsAny<RuleChangeRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .Callback((string t, Guid _, RuleChangeRequest r, Guid? _, CancellationToken _) => (seenTable, seen) = (t, r))
+        host.Service.Setup(s => s.ChangeRuleAsync(It.IsAny<string>(), RecordId, It.IsAny<RuleChangeRequest>(), It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback((string t, Guid _, RuleChangeRequest r, Guid? _, string? token, CancellationToken _) => (seenTable, seen, seenToken) = (t, r, token))
             .ReturnsAsync(RuleSetOutcome<RuleChangedView>.Done(view));
         var url = $"/api/finance/{segment}/{RecordId}/rule-overrides/change";
 
@@ -550,9 +551,12 @@ public sealed class ProcedureAssignmentEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         response.Headers.Location!.ToString().Should().EndWith($"{url}/{view.Override.Id}");
-        (await Json(response))["recordRule"]!["code"]!.GetValue<string>().Should().Be("BRR-x");
+        var json = await Json(response);
+        json["recordRule"]!["code"]!.GetValue<string>().Should().Be("BRR-x");
+        json["closeComplete"]!.GetValue<bool>().Should().BeTrue("089e: the result says whether the base rule's findings were closed");
         seenTable.Should().Be(table);
         seen.Should().Be(new RuleChangeRequest(PolicyId, "x", null, null, null, "Cap", null));
+        seenToken.Should().NotBeNullOrEmpty("089e: the change counts the closed findings' invoices as the caller, so it gets the caller's token");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

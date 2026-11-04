@@ -61,7 +61,8 @@ public sealed record SignalClosureOutcome(int Closed, int ChangedSinceRead, int 
 /// writer and job are reused, not extended with admin-triggered callers. <i>Cost of doing nothing</i> — tasks 100 and 101
 /// cannot close Signals immediately, and an Off or superseded policy's Signals stay Open in the worklist.</para>
 /// <para>Not sealed (ebilling-r1 task 081): <see cref="SelectOpenSignalsOfPolicyAsync"/> and <see cref="ClosePolicySignalsRetiredAsync"/> are
-/// virtual so the Procedure retire tests can run the real selection and observe the close without a full Signal writer. No other member is
+/// virtual so the Procedure retire tests can run the real selection and observe the close without a full Signal writer; task 089e makes
+/// <see cref="SupersedeInPassAsync"/> virtual for the same reason (the record-rule change closes the base rule's findings through it). No other member is
 /// overridable and nothing in production derives from it (enforced by <c>SignalClosureServiceDerivationGuardTests</c>).</para>
 /// </remarks>
 public class SignalClosureService
@@ -120,10 +121,14 @@ public class SignalClosureService
     /// <paramref name="currentVersionId"/> and returns the list with each closed Signal shown as Resolved/Superseded, so the same
     /// pass's planner re-raises the subjects the current version still holds.
     /// </summary>
+    /// <remarks>ebilling-r1 task 089e (owner option (b), 2026-11-04): also the close a record-level rule change runs after its commit, over the
+    /// base rule's open Signals on that record's In Review invoices (chosen from <see cref="SelectOpenSignalsOfPolicyAsync"/>), with
+    /// <paramref name="currentVersionId"/> = the record rule's version the change put in force and every one of them outside the base rule's
+    /// scope now. Virtual only so that caller's tests can observe the close without a full Signal writer.</remarks>
     /// <param name="outsideScope">Task 102b (fix round 1, uac-r2 F2): for a policy limited to one matter, the Signals outside that scope.
     /// An open one closes <c>Superseded</c> as well, whatever version it cites (the current one, when the scope changed without a
     /// publish, or none): the policy's scope supersedes it. Null for an unscoped policy (only the version rule applies).</param>
-    internal async Task<(IReadOnlyList<ExistingSignal> Existing, SignalClosureOutcome Outcome, IReadOnlySet<Guid> NotClosed)> SupersedeInPassAsync(
+    internal virtual async Task<(IReadOnlyList<ExistingSignal> Existing, SignalClosureOutcome Outcome, IReadOnlySet<Guid> NotClosed)> SupersedeInPassAsync(
         string policyCode, Guid currentVersionId, IReadOnlyList<ExistingSignal> existing, CancellationToken ct,
         Func<ExistingSignal, bool>? outsideScope = null)
     {
