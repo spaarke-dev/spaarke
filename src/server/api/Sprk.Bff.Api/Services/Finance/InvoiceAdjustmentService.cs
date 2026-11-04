@@ -458,21 +458,22 @@ public sealed class InvoiceAdjustmentService
                 .ConfigureAwait(false);
         }
 
+        // Task 095c-5 review K2: the invoice's firm need is read once, app-only (a fault is Unavailable), and serves both uses below: a cited rule
+        // is one of the firm's (none for a no-firm or a held invoice, whatever its firm column says now), and (pass-2 review) the firm copied onto
+        // the line is only a CONFIRMED firm, so a rule-less adjustment (allowed by design) on a held invoice carries none.
+        InvoiceFirmNeed need;
+        try
+        {
+            need = await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return ReadFailed(command.InvoiceId, ex);
+        }
+
         // ── F-8 / D-74: a cited rule must be one of this invoice's options. ──
         if (command.RuleId is { } ruleId)
         {
-            // Task 095c-4: a cited rule is one of the firm's; with no firm there is none to cite.
-            // Task 095c-5 review K2: nor a held invoice's, whatever its firm column says now (read app-only; a fault is Unavailable).
-            InvoiceFirmNeed need;
-            try
-            {
-                need = await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                return ReadFailed(command.InvoiceId, ex);
-            }
-
             if (need != InvoiceFirmNeed.None)
             {
                 return new AdjustmentResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.FirmDetailFor(need));
@@ -514,7 +515,7 @@ public sealed class InvoiceAdjustmentService
 
         var reviewedOn = _time.GetUtcNow();
         var nextSequence = lineRows.Select(r => r.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0).DefaultIfEmpty(0).Max() + 1;
-        var row = BuildRow(command, lineId, method, value, reason, dryRun.AdjustmentLineAmounts[lineId], nextSequence, reviewedOn.UtcDateTime, invoice, core.Value);
+        var row = BuildRow(command, lineId, method, value, reason, dryRun.AdjustmentLineAmounts[lineId], nextSequence, reviewedOn.UtcDateTime, invoice, core.Value, copyFirm: need == InvoiceFirmNeed.None);
 
         // UAC 194b R3b-2: the line's question is built from the row itself (RecordOwnershipContext.ForChild: its invoice, its core record and
         // the other lookups it holds, in sprk_billingevent's primary order), the question the secure-child reconciler asks the written row.
@@ -611,7 +612,7 @@ public sealed class InvoiceAdjustmentService
 
     private static Entity BuildRow(
         AddAdjustmentCommand command, Guid lineId, InvoiceAdjustmentMethod method, decimal value, string reason, decimal amount, int sequence,
-        DateTime reviewedOnUtc, Entity invoice, (string Entity, Guid Id) core)
+        DateTime reviewedOnUtc, Entity invoice, (string Entity, Guid Id) core, bool copyFirm)
     {
         var row = new Entity(InvoiceReviewReadService.LineEntity, lineId)
         {
@@ -635,7 +636,9 @@ public sealed class InvoiceAdjustmentService
             row[LineRule] = new EntityReference(PolicyVersionEntity, ruleId);
         }
 
-        if (invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg) is { } firm && firm.Id != Guid.Empty)
+        // 095c-5 pass-2 review: an invoice held for its firm may show a firm written to its column directly; that firm is not confirmed, so the
+        // line does not carry it (the line is not a second place the unconfirmed firm can be read from).
+        if (copyFirm && invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg) is { } firm && firm.Id != Guid.Empty)
         {
             row[LineVendorOrg] = new EntityReference("sprk_organization", firm.Id);
         }

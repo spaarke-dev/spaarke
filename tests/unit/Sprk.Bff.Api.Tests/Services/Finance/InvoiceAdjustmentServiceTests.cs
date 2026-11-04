@@ -1373,6 +1373,34 @@ public sealed class InvoiceAdjustmentServiceTests
         w.FirmsAsked.Should().BeEmpty();
     }
 
+    // ── 095c-5 pass-2 review: a rule-less adjustment on a held invoice must not copy the unconfirmed firm onto its line ──
+
+    [Fact(DisplayName = "095c-5 pass-2 (must fire): a rule-less adjustment on an invoice held for a firm, firm column set directly, is applied and its line carries no firm")]
+    public async Task HeldWithAFirm_RuleLessAdjustment_IsApplied_TheLineCarriesNoFirm()
+    {
+        var w = new World();
+        w.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldValue;
+        w.Invoice.Contains("sprk_vendororg").Should().BeTrue("the firm column was set directly");
+
+        var result = await w.Service().AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied, "an adjustment that cites no rule is allowed by design");
+        w.Row(result.Adjustment!.LineId).Contains("sprk_vendororg").Should().BeFalse("an unconfirmed firm is not copied onto the line");
+        w.FirmsAsked.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095c-5 pass-2 must not fire: a rule-less adjustment on an ordinary firm invoice carries the invoice's firm on its line")]
+    public async Task OrdinaryFirmInvoice_RuleLessAdjustment_TheLineCarriesTheFirm()
+    {
+        var w = new World();
+        w.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = null;
+
+        var result = await w.Service().AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied);
+        w.Row(result.Adjustment!.LineId).GetAttributeValue<EntityReference>("sprk_vendororg").Id.Should().Be(Firm);
+    }
+
     [Fact(DisplayName = "095c-5 K2 must not fire: an ordinary firm invoice (hold column present and empty) lists its rules and takes a cited adjustment")]
     public async Task OrdinaryFirmInvoice_HoldColumnEmpty_ListsRules_AndTakesACitedAdjustment()
     {
