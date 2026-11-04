@@ -103,7 +103,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/matters/{recordId:guid}/rule-overrides/change",
                 (Guid recordId, RuleChangeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.ChangeRuleAsync(MatterTable, recordId, body, oid, ct), v => v.Override.Id))
+                    Created(http, oid => service.ChangeRuleAsync(MatterTable, recordId, body, oid, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ChangeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -156,7 +156,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/projects/{recordId:guid}/rule-overrides/change",
                 (Guid recordId, RuleChangeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.ChangeRuleAsync(ProjectTable, recordId, body, oid, ct), v => v.Override.Id))
+                    Created(http, oid => service.ChangeRuleAsync(ProjectTable, recordId, body, oid, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ChangeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -209,7 +209,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/workassignments/{recordId:guid}/rule-overrides/change",
                 (Guid recordId, RuleChangeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(http, oid => service.ChangeRuleAsync(WorkAssignmentTable, recordId, body, oid, ct), v => v.Override.Id))
+                    Created(http, oid => service.ChangeRuleAsync(WorkAssignmentTable, recordId, body, oid, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ChangeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()

@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
@@ -57,6 +58,12 @@ public static class RuleSetEndpoints
     internal const string CodeFileTooLarge = "ruleset.file_too_large";
     internal const string CodeDraftNotQueued = "ruleset.draft_not_queued";
 
+    /// <summary>
+    /// Task 089e (owner 2026-11-04): a record-scoped rule set asked for on a by-id route here, answered only to a caller who can Read the set
+    /// AND its record (<see cref="RequireAccessToTheRuleSet"/>). Logged under this code.
+    /// </summary>
+    internal const string CodeRecordScoped = "ruleset.record_scoped";
+
     public static IEndpointRouteBuilder MapRuleSetEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup(Route)
@@ -84,6 +91,7 @@ public static class RuleSetEndpoints
         group.MapPost("/{ruleSetId:guid}/draft", DraftRules)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.DraftRules())
             .RequireEbillingEnabled()
+            .RequireAccessToTheRuleSet() // 089e: Read on the set, and on its record when it is record-scoped (uniform 404)
             .RequireWriteOnTheRuleSetsProcedure() // uac-r2 round 2 (I-P5): and Write on the set's Procedure, when it has one
             .WithName("DraftRuleSetRules")
             .WithSummary("Start drafting the rule set's rules from its source document (a background job)")
@@ -113,6 +121,7 @@ public static class RuleSetEndpoints
         group.MapGet("/{ruleSetId:guid}", GetRuleSet)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.Admin())
             .RequireEbillingEnabled()
+            .RequireAccessToTheRuleSet() // 089e: Read on the set, and on its record when it is record-scoped (uniform 404)
             .RequireReadOnTheRuleSetsProcedure() // uac-r2 round 2 (I-P5): and Read on the set's Procedure, when it has one
             .WithName("GetRuleSet")
             .WithSummary("A rule set with its rules beside their clause quotes")
@@ -126,6 +135,7 @@ public static class RuleSetEndpoints
         group.MapPatch("/{ruleSetId:guid}/proposals/{policyId:guid}", EditProposal)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.EditRule())
             .RequireEbillingEnabled()
+            .RequireAccessToTheRuleSet() // 089e: Read on the set, and on its record when it is record-scoped (uniform 404)
             .RequireWriteOnTheRuleSetsProcedure() // uac-r2 D (I-P5): and Write on the set's Procedure, when it has one
             .WithName("EditRuleSetProposal")
             .WithSummary("Edit a rule (a published version is never changed: the edit creates a new Draft version)")
@@ -140,6 +150,7 @@ public static class RuleSetEndpoints
         group.MapPost("/{ruleSetId:guid}/proposals/{policyId:guid}/accept", AcceptProposal)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.DecideRule())
             .RequireEbillingEnabled()
+            .RequireAccessToTheRuleSet() // 089e: Read on the set, and on its record when it is record-scoped (uniform 404)
             .RequireWriteOnTheRuleSetsProcedure() // uac-r2 D (I-P5): and Write on the set's Procedure, when it has one
             .WithName("AcceptRuleSetProposal")
             .WithSummary("Accept a rule (validated; the body names the rowVersion the admin was shown, 409 when it changed since)")
@@ -154,6 +165,7 @@ public static class RuleSetEndpoints
         group.MapPost("/{ruleSetId:guid}/proposals/{policyId:guid}/reject", RejectProposal)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.DecideRule())
             .RequireEbillingEnabled()
+            .RequireAccessToTheRuleSet() // 089e: Read on the set, and on its record when it is record-scoped (uniform 404)
             .RequireWriteOnTheRuleSetsProcedure() // uac-r2 D (I-P5): and Write on the set's Procedure, when it has one
             .WithName("RejectRuleSetProposal")
             .WithSummary("Reject a rule (the body names the rowVersion the admin was shown and a required reason, 1 to 2,000 characters)")
@@ -168,6 +180,7 @@ public static class RuleSetEndpoints
         group.MapPost("/{ruleSetId:guid}/publish", PublishRuleSet)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.Publish())
             .RequireEbillingEnabled()
+            .RequireAccessToTheRuleSet() // 089e: Read on the set, and on its record when it is record-scoped (uniform 404)
             .WithName("PublishRuleSet")
             .WithSummary("Publish the accepted rules from an effective date, all or nothing")
             .WithDescription(
@@ -184,6 +197,7 @@ public static class RuleSetEndpoints
         group.MapPut("/{ruleSetId:guid}/assignment", AssignRuleSet)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.Admin())
             .RequireEbillingEnabled()
+            .RequireAccessToTheRuleSet() // 089e: Read on the set, and on its record when it is record-scoped (uniform 404)
             .WithName("AssignRuleSet")
             .WithSummary("Assign the rule set to the client default or a firm")
             .Produces<RuleSetSummary>(StatusCodes.Status200OK)
@@ -197,6 +211,7 @@ public static class RuleSetEndpoints
         group.MapPut("/{ruleSetId:guid}/visibility", SetVisibility)
             .AddFinanceAuthorizationFilter(_ => BillingAdminAuthorization.Admin())
             .RequireEbillingEnabled()
+            .RequireAccessToTheRuleSet() // 089e: Read on the set, and on its record when it is record-scoped (uniform 404)
             .WithName("SetRuleSetVisibility")
             .WithSummary("Turn \"visible to firms\" on or off")
             .Produces<RuleSetSummary>(StatusCodes.Status200OK)
@@ -348,9 +363,16 @@ public static class RuleSetEndpoints
         RuleSetService service, AuthorizationService authorization, ILogger<RuleSetService> logger, HttpContext http, CancellationToken ct)
     {
         var outcome = await service.ListAsync(ct);
-        if (outcome.Kind != RuleSetOutcomeKind.Done || outcome.Value is not { } sets || !sets.Any(s => s.ProcedureId is not null))
+        if (outcome.Kind != RuleSetOutcomeKind.Done || outcome.Value is not { } sets)
         {
             return Map(outcome, http);
+        }
+
+        var caller = new InvoiceContextService.InvoiceCaller(
+            CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
+        if (!sets.Any(s => s.ProcedureId is not null))
+        {
+            return await ReadableSetsOnlyAsync(sets, authorization, caller, logger, http, ct);
         }
 
         var procedures = sets.Where(s => s.ProcedureId is not null).Select(s => s.ProcedureId!.Value).Distinct().ToList();
@@ -362,8 +384,6 @@ public static class RuleSetEndpoints
             return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
         }
 
-        var caller = new InvoiceContextService.InvoiceCaller(
-            CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
         using var gate = new SemaphoreSlim(CallerReadCheck.Parallelism);
         var answers = await Task.WhenAll(procedures.Select(async id =>
         {
@@ -390,7 +410,43 @@ public static class RuleSetEndpoints
 
         var readable = answers.ToDictionary(a => a.Id, a => a.Outcome == CallerReadOutcome.Readable); // a known deny leaves the set out
         IReadOnlyList<RuleSetSummary> kept = sets.Where(s => s.ProcedureId is not { } id || readable[id]).ToList();
-        return Map(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(kept), http);
+        return await ReadableSetsOnlyAsync(kept, authorization, caller, logger, http, ct);
+    }
+
+    /// <summary>The most rule sets the list asks the caller's Read on (the same ceiling as the Procedure checks above).</summary>
+    internal const int MaxRuleSetReadChecks = InvoiceContextService.MaxSiblingAccessChecks;
+
+    /// <summary>
+    /// 089e fix round 2 (F1 ii): the list keeps only the sets the caller can Read, asked as the caller on each <c>sprk_ruleset</c> row
+    /// (<see cref="CallerReadCheck.ScanAsync{T}"/>) - the same question (A) of <see cref="RequireAccessToTheRuleSet"/> asks on every by-id route,
+    /// so a set the list shows is one its own routes answer, and a set its routes hide is not listed. A known deny leaves the set out; an answer
+    /// missing for ANY set makes the list 403 <c>system_failure</c>, as the Procedure checks do. More sets than <see cref="MaxRuleSetReadChecks"/>
+    /// is not a rights failure but a result too large to answer in one pass: 422 <c>result_truncated</c>, as the service's own cap (089e K2).
+    /// </summary>
+    private static async Task<IResult> ReadableSetsOnlyAsync(
+        IReadOnlyList<RuleSetSummary> sets, AuthorizationService authorization, InvoiceContextService.InvoiceCaller caller,
+        ILogger logger, HttpContext http, CancellationToken ct)
+    {
+        if (sets.Count > MaxRuleSetReadChecks)
+        {
+            logger.LogWarning(
+                "Rule set list: {Sets} sets exceed the {Cap} rights checks the list may ask; the list is refused as truncated",
+                sets.Count, MaxRuleSetReadChecks);
+            return Map(
+                RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Refused(
+                    StatusCodes.Status422UnprocessableEntity, RuleSetService.CodeResultTruncated, RuleSetService.TooManyRuleSetsMessage),
+                http);
+        }
+
+        var scan = await CallerReadCheck.ScanAsync(
+            authorization, caller, "sprk_rulesets", "read", sets, s => s.Id, int.MaxValue, MaxRuleSetReadChecks, logger,
+            "Rule set list: caller read on a set", ct);
+        if (scan.Failed || !scan.AllExamined)
+        {
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        }
+
+        return Map(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(scan.Readable), http);
     }
 
     private static async Task<IResult> GetRuleSet(Guid ruleSetId, RuleSetService service, HttpContext http, CancellationToken ct) =>
@@ -503,6 +559,125 @@ public static class RuleSetEndpoints
 
         return Map(await service.SetVisibilityAsync(ruleSetId, visible, ct), http);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Task 089e: the rule-set by-id routes authorise the set and its record
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The override routes of each core table, as the 409 names them (the record routes, <c>ProcedureAssignmentEndpoints</c>).</summary>
+    private static readonly IReadOnlyDictionary<string, (string EntitySet, string Segment, string Kind)> RecordHomes =
+        new Dictionary<string, (string EntitySet, string Segment, string Kind)>(StringComparer.Ordinal)
+        {
+            [ProcedureAssignmentEndpoints.MatterTable] = (FinanceAuthorizationFilter.MatterEntitySet, "matters", "matter"),
+            [ProcedureAssignmentEndpoints.ProjectTable] = (FinanceAuthorizationFilter.ProjectEntitySet, "projects", "project"),
+            [ProcedureAssignmentEndpoints.WorkAssignmentTable] = (FinanceAuthorizationFilter.WorkAssignmentEntitySet, "workassignments", "work assignment"),
+        };
+
+    /// <summary>
+    /// Task 089e (owner 2026-11-04, "Approve (A)+(B) on all 9 routes"; the uac-r2 design): every route here that takes a rule set id
+    /// authorises the set, and a record-scoped set's record, before anything that differs between "exists" and "does not exist" is read.
+    /// <list type="number">
+    /// <item>(A) The caller's own Read on the <c>sprk_ruleset</c> row (<see cref="CallerReadCheck"/>, as the caller), for every set.</item>
+    /// <item>Only then the set's home, read app-only (<see cref="RuleSetService.RecordHomeOfRuleSetAsync"/>). Not record-scoped, or no set:
+    /// the route continues unchanged (the Procedure filter where the route has one, then the service and its own 404).</item>
+    /// <item>(B) A record-scoped set: the caller's access to its core record through the evaluator the record's own routes use
+    /// (<see cref="FinanceAuthorizationFilter.CallerHoldsRightsAsync"/>, as the caller), asking Read. A Billing Administrator holds Read at
+    /// Deep on <c>sprk_ruleset</c>, so (A) alone would pass a set whose record (a Restricted or Secure one) the caller cannot see.</item>
+    /// <item>Both passed: 409 <see cref="CodeRecordScoped"/>, naming the record kind and its override routes, logged under the code.</item>
+    /// </list>
+    /// Any refusal, no answer, or a set with no single core record is the route's uniform 404 (<see cref="RuleSetService.RuleSetNotFound{T}"/>),
+    /// the same bytes a missing set gets, so neither the set's existence nor the record's changed rule is shown to a caller who cannot see
+    /// them. A fault reading the set's home (after (A) passed) is 403 <c>system_failure</c>, as in the Procedure filter.
+    /// </summary>
+    /// <remarks>§11: <i>Existing</i> — <c>RequireRead/WriteOnTheRuleSetsProcedure</c> (the set's Procedure only, on five routes) and
+    /// <c>RequireReadOnTheOverridesSubject</c> (the uniform-404 shape). <i>Extension</i> — the Procedure filter reads through
+    /// <c>LoadRuleSetAsync</c>, which hides a record-scoped set by design, and runs after this one; a separate filter keeps its 403 answers
+    /// unchanged. No new evaluator: (A) is <see cref="CallerReadCheck"/>, (B) the record routes' own check. <i>Cost of doing nothing</i> —
+    /// the owner's descriptive, tracked error for a record-scoped set cannot be given without telling every billing admin, including one
+    /// who cannot see the record, that the record has a changed rule.</remarks>
+    internal static TBuilder RequireAccessToTheRuleSet<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder =>
+        builder.AddEndpointFilter(async (context, next) =>
+        {
+            var http = context.HttpContext;
+            var services = http.RequestServices;
+            var logger = services.GetService<ILogger<FinanceAuthorizationFilter>>()
+                ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<FinanceAuthorizationFilter>.Instance;
+            if (!http.Request.RouteValues.TryGetValue("ruleSetId", out var raw) || !Guid.TryParse(raw?.ToString(), out var ruleSetId))
+            {
+                return Map(RuleSetService.RuleSetNotFound<object>(), http); // the route constraint guarantees a guid
+            }
+
+            var userId = CallerResolution.ResolveObjectId(http.User) ?? string.Empty;
+            var token = TokenHelper.ExtractBearerTokenOrNull(http);
+            var authorization = services.GetRequiredService<AuthorizationService>();
+
+            // (A) The set itself, as the caller. Refused and no answer are both the uniform 404: a set id that does not exist may answer either.
+            var setRead = await CallerReadCheck.CheckAsync(
+                authorization, new InvoiceContextService.InvoiceCaller(userId, token), "sprk_rulesets", "read", ruleSetId, logger,
+                $"Rule set {ruleSetId}: caller read on the set", http.RequestAborted);
+            if (setRead != CallerReadOutcome.Readable)
+            {
+                return Map(RuleSetService.RuleSetNotFound<object>(), http);
+            }
+
+            RecordRuleSetHome? home;
+            try
+            {
+                home = await services.GetRequiredService<RuleSetService>().RecordHomeOfRuleSetAsync(ruleSetId, http.RequestAborted);
+            }
+            catch (Exception ex) when (!http.RequestAborted.IsCancellationRequested)
+            {
+                logger.LogError(ex, "Rule set {RuleSetId}: its record could not be read for the record check; denying (fail closed)", ruleSetId);
+                return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            }
+
+            if (home is null)
+            {
+                return await next(context); // not record-scoped, or no set: unchanged
+            }
+
+            // (B) The record, through the record routes' own evaluator, as the caller. Any refusal or fault is the uniform 404.
+            if (home.CoreTable is not { } coreTable || !RecordHomes.TryGetValue(coreTable, out var record) || home.CoreId == Guid.Empty)
+            {
+                logger.LogWarning("Rule set {RuleSetId}: record-scoped with no single core record; denying (fail closed)", ruleSetId);
+                return Map(RuleSetService.RuleSetNotFound<object>(), http);
+            }
+
+            bool recordReadable;
+            try
+            {
+                recordReadable = userId.Length > 0 && await FinanceAuthorizationFilter.CallerHoldsRightsAsync(
+                    authorization, userId, record.EntitySet, home.CoreId, "read", token, http.RequestAborted);
+            }
+            catch (Exception ex) when (!http.RequestAborted.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "Rule set {RuleSetId}: the record check on {EntitySet} faulted; denying (fail closed)", ruleSetId, record.EntitySet);
+                recordReadable = false;
+            }
+
+            if (!recordReadable)
+            {
+                return Map(RuleSetService.RuleSetNotFound<object>(), http);
+            }
+
+            var routes = $"{ProcedureAssignmentEndpoints.Route}/{record.Segment}/{home.CoreId}";
+            logger.LogWarning(
+                "Rule set {RuleSetId}: {ReasonCode}: a record-scoped set ({RecordKind} {RecordId}) was asked for on {Method} {Path}",
+                ruleSetId, CodeRecordScoped, record.Kind, home.CoreId, http.Request.Method, http.Request.Path.Value);
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "This rule set belongs to one record",
+                detail: $"This rule set holds the changed rules of one {record.Kind}. It is not read or changed here: use that {record.Kind}'s "
+                    + $"override routes, {routes}/rule-overrides/change or {routes}/rule-overrides/exclude to change a rule, and "
+                    + $"{routes}/overrides/{{overrideId}} to remove one.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = CodeRecordScoped,
+                    ["recordKind"] = record.Kind,
+                    ["recordId"] = home.CoreId,
+                    ["overridesRoute"] = routes,
+                });
+        });
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Responses (ADR-019: ProblemDetails with a stable errorCode)

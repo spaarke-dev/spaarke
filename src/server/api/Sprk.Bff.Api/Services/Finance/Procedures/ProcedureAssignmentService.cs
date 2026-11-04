@@ -55,8 +55,17 @@ public sealed record RuleChangeRequest(
 public sealed record RecordRuleView(
     Guid RuleSetId, Guid PolicyId, string Code, Guid VersionId, int VersionNumber, Guid BasedOnVersionId, string Scope, Guid? FirmId);
 
-/// <summary>A changed rule as written: the Exclude row (kind <c>RuleChanged</c>) and the record rule that replaces the rule for the record.</summary>
-public sealed record RuleChangedView(OverrideView Override, RecordRuleView RecordRule);
+/// <summary>
+/// A changed rule as written: the Exclude row (kind <c>RuleChanged</c>) and the record rule that replaces the rule for the record. Task 089e:
+/// the base rule's open findings on the In Review invoices filed DIRECTLY on the record then close <c>Superseded</c> (not yet those of the
+/// records under it: 082). <see cref="CloseComplete"/> says whether that close of the record's own invoices finished, and
+/// <see cref="VisibleOpenInvoices"/> / <see cref="AffectedText"/> how many of those invoices THE CALLER can Read (null when that cannot be
+/// told). <see cref="Message"/> always says what the close covered: <see cref="ProcedureAssignmentService.ChangeCloseCompleteMessage"/> or
+/// <see cref="ProcedureAssignmentService.ChangeCloseIncompleteMessage"/>.
+/// </summary>
+public sealed record RuleChangedView(
+    OverrideView Override, RecordRuleView RecordRule, bool CloseComplete = true, string? AffectedText = null, int? VisibleOpenInvoices = null,
+    string? Message = null);
 
 /// <summary>
 /// The read-only confirmation before an override is removed (task 089c, model 15 answer 2). Only the removal of a changed rule closes
@@ -72,6 +81,13 @@ public sealed record OverrideRemoved(
 
 /// <summary>What a stored override row overrides (the Procedure, or the rule it excludes or changes), as the entity set the caller's Read is asked on.</summary>
 public sealed record OverrideSubject(string EntitySet, Guid Id);
+
+/// <summary>
+/// ebilling-r1 task 089e: the record a record-scoped rule set is filed under (<see cref="RecordRuleSet.HomeOf"/>). <see cref="CoreTable"/> is
+/// the core table's logical name (<c>sprk_matter</c>, <c>sprk_project</c>, <c>sprk_workassignment</c>), or null when the set carries no
+/// single core-record lookup.
+/// </summary>
+public sealed record RecordRuleSetHome(string? CoreTable, Guid CoreId);
 
 /// <summary>
 /// A record-scoped rule set (task 080 schema, model 5.2 and 6.3): the set that holds one record's changed rules. Its scope values live here,
@@ -99,6 +115,26 @@ public static class RecordRuleSet
     internal static bool IsRecordScoped(Entity set) =>
         set.GetAttributeValue<OptionSetValue>(ScopeColumn)?.Value is ScopeRecord or ScopeFirmRecord
         || InvoiceFamilyCoreRecordGuard.FilingCoreTables.Any(core => set.GetAttributeValue<EntityReference>(core) is not null);
+
+    /// <summary>
+    /// ebilling-r1 task 089e: where a record-scoped set lives, for the rule-set by-id routes' authorization. Null for a set that is not
+    /// record-scoped. A record-scoped set carrying exactly one core-record lookup names that record; any other shape (none, or more than
+    /// one) has no core table, which the route denies (fail closed).
+    /// </summary>
+    internal static RecordRuleSetHome? HomeOf(Entity set)
+    {
+        ArgumentNullException.ThrowIfNull(set);
+        if (!IsRecordScoped(set))
+        {
+            return null;
+        }
+
+        var cores = InvoiceFamilyCoreRecordGuard.FilingCoreTables
+            .Select(core => (Core: core, Ref: set.GetAttributeValue<EntityReference>(core)))
+            .Where(c => c.Ref is not null && c.Ref.Id != Guid.Empty)
+            .ToList();
+        return cores.Count == 1 ? new RecordRuleSetHome(cores[0].Core, cores[0].Ref!.Id) : new RecordRuleSetHome(null, Guid.Empty);
+    }
 
     /// <summary>
     /// The write validator of every rule-set create (089a K1, <c>SecureChildLineage</c>): a set has one home.
@@ -427,15 +463,21 @@ public class ProcedureAssignmentService
     /// <para>A failure in stage 3 leaves neither the Exclude row nor a rule in force. An Off policy and an empty set may stay behind, and
     /// the next change reuses them. A create that collides on a derived id or the code key is a retry only when the row it collided with
     /// is the same record's set, or a rule of that set based on THIS rule. Anything else is refused 409.</para>
+    /// <para>Task 089e (owner option (b), 2026-11-04): after the commit, the open findings the BASE rule raised on the In Review invoices filed
+    /// directly on this record (only that firm's, for a firm-scoped change) close <c>Superseded</c> (<see cref="SupersedeBaseFindingsAsync"/>).
+    /// The close records the resolution only, not the record rule's version. The close is best effort: the change stays committed whatever it
+    /// does, and the result says whether it completed, what it covered, and how many of those invoices the caller can see. A transaction that
+    /// gives no answer (pass-1 K2) is read back: when the record rule's version row is there (stage 3 alone writes it; fix round 2), the change
+    /// committed and the close runs.</para>
     /// </remarks>
     public virtual async Task<RuleSetOutcome<RuleChangedView>> ChangeRuleAsync(
-        string coreTable, Guid recordId, RuleChangeRequest request, Guid? callerObjectId, CancellationToken ct)
+        string coreTable, Guid recordId, RuleChangeRequest request, Guid? callerObjectId, string? callerBearerToken, CancellationToken ct)
     {
         RequireCore(coreTable, recordId);
         ArgumentNullException.ThrowIfNull(request);
         try
         {
-            return await ChangeRuleCoreAsync(coreTable, recordId, request, callerObjectId, ct);
+            return await ChangeRuleCoreAsync(coreTable, recordId, request, callerObjectId, callerBearerToken, ct);
         }
         catch (ReadFailedException ex)
         {
@@ -444,7 +486,7 @@ public class ProcedureAssignmentService
     }
 
     private async Task<RuleSetOutcome<RuleChangedView>> ChangeRuleCoreAsync(
-        string coreTable, Guid recordId, RuleChangeRequest request, Guid? callerObjectId, CancellationToken ct)
+        string coreTable, Guid recordId, RuleChangeRequest request, Guid? callerObjectId, string? callerBearerToken, CancellationToken ct)
     {
         var errors = new List<RuleSetError>();
         if (request.PolicyId is not { } policyId || policyId == Guid.Empty)
@@ -588,6 +630,11 @@ public class ProcedureAssignmentService
         }
 
         var sent = await SendAsync(new OrganizationRequest[] { excludeCreate.Request!, versionCreate.Request!, switchOn }, exclude.Id, "change rule");
+        if (sent == SendResult.Unknown && await CommittedAfterNoAnswerAsync(exclude.Id, versionId, recordRule.Id, number, merged, baseVersion.Id))
+        {
+            sent = SendResult.Done;
+        }
+
         if (sent != SendResult.Done)
         {
             return WriteRefused<RuleChangedView>(sent, exclude.Id);
@@ -595,10 +642,225 @@ public class ProcedureAssignmentService
 
         _logger.LogInformation("Override {AssignmentId}: rule {PolicyId} changed for {CoreTable} {RecordId}; record rule {RecordRuleId} v{Number} in force",
             exclude.Id, policyId, coreTable, recordId, recordRule.Id, number);
+
+        // The change is committed and the record rule is in force: nothing from here on may turn that into an error (089e, as RemoveAsync).
+        var (outcome, closed) = await SupersedeBaseFindingsAsync(coreTable, recordId, request.FirmId, policyId, baseRule.Code, versionId, exclude.Id);
+        int? count;
+        try
+        {
+            count = await _counter.CountVisibleOpenInvoicesAsync(closed, callerBearerToken, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Override {AssignmentId}: rule changed; the affected-invoice count could not be made, so none is shown", exclude.Id);
+            count = null;
+        }
+
         return RuleSetOutcome<RuleChangedView>.Done(new RuleChangedView(
             new OverrideView(exclude.Id, KindRuleChanged, ModeName(ProcedureAssignmentEntity.ModeExcluded), null, null, policyId, request.FirmId, reason),
-            new RecordRuleView(setId, recordRule.Id, code, versionId, number, baseVersion.Id, request.FirmId is null ? "Record" : "FirmRecord", request.FirmId)));
+            new RecordRuleView(setId, recordRule.Id, code, versionId, number, baseVersion.Id, request.FirmId is null ? "Record" : "FirmRecord", request.FirmId),
+            outcome.IsComplete, ProcedureService.AffectedText(count), count,
+            outcome.IsComplete ? ChangeCloseCompleteMessage : ChangeCloseIncompleteMessage));
     }
+
+    /// <summary>
+    /// Task 089e (pass-1 K2; fix round 2, F2; fix round 3, F2): after a stage-3 transaction that gave no answer, whether it committed. The
+    /// transaction is all or nothing, so the row only stage 3 writes is the answer: the record rule's version at its derived id
+    /// <paramref name="versionId"/>, under <paramref name="recordRuleId"/>. The Exclude row is not: a plain Exclude of the same rule writes a
+    /// row at the same derived id (I-A1). Two concurrent changes of the same rule on the same record also derive the same version id, so the
+    /// row's content must be the content this change wrote (<paramref name="merged"/>, <paramref name="number"/>,
+    /// <paramref name="basedOnVersionId"/>): equal content is a truthful "committed" (the other change wrote what this one would have); a
+    /// different content is the other change's row, so this one did not commit. The read runs on <see cref="CancellationToken.None"/>: a
+    /// caller who went away must not turn a committed change into a 500. A read fault is no answer, so the change keeps its 500.
+    /// </summary>
+    private async Task<bool> CommittedAfterNoAnswerAsync(
+        Guid excludeId, Guid versionId, Guid recordRuleId, int number, RuleSetService.VersionRow merged, Guid basedOnVersionId)
+    {
+        try
+        {
+            var version = await LoadByIdAsync(VersionTable, versionId, ReadBackVersionColumns, CancellationToken.None);
+            var committed = version?.GetAttributeValue<EntityReference>("sprk_policy")?.Id == recordRuleId
+                && VersionContentMatches(version, number, merged, basedOnVersionId);
+            _logger.LogWarning("Override {AssignmentId}: the change rule transaction gave no answer; read back of version {VersionId}: {Committed}",
+                excludeId, versionId, committed ? "committed" : "not committed");
+            return committed;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Override {AssignmentId}: the change rule transaction gave no answer, and the read back failed", excludeId);
+            return false;
+        }
+    }
+
+    /// <summary>The columns stage 3 writes to the record rule's version from the merged content (read back after a no-answer transaction).</summary>
+    private static readonly string[] ReadBackVersionColumns =
+    {
+        "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline", "sprk_consequence",
+        "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", BasedOnVersionColumn,
+    };
+
+    /// <summary>Whether a stored record-rule version holds the content stage 3 would have written (a missing and an empty text are the same).</summary>
+    private static bool VersionContentMatches(Entity? v, int number, RuleSetService.VersionRow merged, Guid basedOnVersionId) =>
+        v is not null
+        && (v.GetAttributeValue<int?>("sprk_versionnumber") ?? 0) == number
+        && v.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value == merged.RuleType
+        && SameText(v.GetAttributeValue<string>("sprk_rulebody"), merged.RuleBody)
+        && SameText(v.GetAttributeValue<string>("sprk_messagetemplate"), merged.Template)
+        && SameText(v.GetAttributeValue<string>("sprk_shortheadline"), merged.Headline)
+        && v.GetAttributeValue<OptionSetValue>("sprk_consequence")?.Value == merged.Consequence
+        && v.GetAttributeValue<OptionSetValue>("sprk_proposalstatus")?.Value == (int)ProposalState.Accepted
+        && SameText(v.GetAttributeValue<string>("sprk_clausereference"), merged.ClauseReference)
+        && SameText(v.GetAttributeValue<string>("sprk_clauselocation"), merged.ClauseLocation)
+        && v.GetAttributeValue<EntityReference>(BasedOnVersionColumn)?.Id == basedOnVersionId;
+
+    private static bool SameText(string? a, string? b) => string.Equals(a ?? string.Empty, b ?? string.Empty, StringComparison.Ordinal);
+
+    /// <summary>The result message when the change's close of the base rule's findings completed (task 089e, pass-1 F2: it says what it covered).</summary>
+    internal const string ChangeCloseCompleteMessage =
+        "The rule was changed. Open findings of the rule it replaces were closed on invoices filed directly on this record. Findings on invoices of the records under it are not closed by this change; they stay open for the reviewer.";
+
+    /// <summary>The result message when the change's close of the base rule's findings did not complete (task 089e).</summary>
+    internal const string ChangeCloseIncompleteMessage =
+        "The rule was changed, but some findings of the rule it replaces could not be closed now. They stay open on this record's invoices for the reviewer to resolve. The close covers only invoices filed directly on this record, not those of the records under it.";
+
+    /// <summary>
+    /// Task 089e (owner option (b), 2026-11-04): closes as <c>Superseded</c> the open findings of the base rule <paramref name="basePolicyId"/>
+    /// on the In Review invoices filed directly on this record (for a firm-scoped change, that firm's invoices only), through the existing
+    /// close (<see cref="SignalClosureService.SupersedeInPassAsync"/>). The close records the resolution only: the record rule's version is
+    /// passed as the current version, but with every target outside the base rule's scope it decides nothing, and no version is stored.
+    /// The reads are bounded by the record (pass-1 K4), never org-wide:
+    /// <list type="number">
+    /// <item>this record's In Review invoices: one query on the core lookup, the state and, for a firm-scoped change, the firm;</item>
+    /// <item>only those invoices' lines;</item>
+    /// <item>the base rule's open Signals regarding those invoices or lines, through the close's own selection
+    /// (<see cref="SignalClosureService.SelectOpenSignalsOfPolicyOnSubjectsAsync"/>).</item>
+    /// </list>
+    /// A Signal's invoice is its own invoice when it names one, else its line's invoice (as before), and it is kept only when that is one of
+    /// the record's In Review invoices. The invoice reads are app-only, as the counter's are; the caller-scoped count is made from what this
+    /// returns. Never throws: a fault is counted as a policy failure, so the result is incomplete.
+    /// </summary>
+    /// <remarks>Run after the commit, as <see cref="RemoveAsync"/> runs its close: closing first would leave closed findings behind a change that
+    /// failed. Unlike that close, nothing finishes this one later (the nightly run does not evaluate Billing rules, and the base rule stays on),
+    /// so the result says the rest stay open for the reviewer. Distance 0 only (pass-1 F2): the model also covers the record's direct
+    /// children, which needs 082's <c>CoreRecordChain</c> (hand-off in the 089 notes).</remarks>
+    private async Task<(SignalClosureOutcome Outcome, IReadOnlyList<OpenPolicySignal> Closed)> SupersedeBaseFindingsAsync(
+        string coreTable, Guid recordId, Guid? firmId, Guid basePolicyId, string baseCode, Guid recordRuleVersionId, Guid assignmentId)
+    {
+        try
+        {
+            var mine = await RecordsInReviewInvoicesAsync(coreTable, recordId, firmId);
+            var lineInvoices = mine.Count == 0 ? new Dictionary<Guid, Guid>() : await LinesOfInvoicesAsync(mine);
+            var open = mine.Count == 0
+                ? Array.Empty<OpenPolicySignal>()
+                : await _closure.SelectOpenSignalsOfPolicyOnSubjectsAsync(basePolicyId, mine, lineInvoices.Keys.ToList(), CancellationToken.None);
+            Guid? InvoiceOf(OpenPolicySignal s) =>
+                s.RegardingInvoiceId is { } invoice && invoice != Guid.Empty ? invoice
+                : s.RegardingInvoiceLineId is { } line && lineInvoices.TryGetValue(line, out var ofLine) ? ofLine
+                : null;
+
+            var targets = open.Where(s => InvoiceOf(s) is { } invoice && mine.Contains(invoice)).ToList();
+            if (targets.Count == 0)
+            {
+                _logger.LogInformation("Override {AssignmentId}: no open finding of base rule {BaseCode} on {CoreTable} {RecordId}'s In Review invoices to close",
+                    assignmentId, baseCode, coreTable, recordId);
+                return (SignalClosureOutcome.None, Array.Empty<OpenPolicySignal>());
+            }
+
+            // Every target is outside the base rule's scope now (this record is excluded from it), whatever version it cites.
+            var (after, outcome, _) = await _closure.SupersedeInPassAsync(
+                baseCode, recordRuleVersionId, targets.Select(t => t.Signal).ToList(), CancellationToken.None, outsideScope: static _ => true);
+            var closedIds = after.Where(s => s.Resolution == SignalWriter.ResolutionSuperseded).Select(s => s.Id).ToHashSet();
+            _logger.LogInformation(
+                "Override {AssignmentId}: {Closed} of {Targeted} finding(s) of base rule {BaseCode} on {CoreTable} {RecordId}'s In Review invoices closed Superseded; complete={Complete}",
+                assignmentId, outcome.Closed, targets.Count, baseCode, coreTable, recordId, outcome.IsComplete);
+            return (outcome, targets.Where(t => closedIds.Contains(t.Signal.Id)).ToList());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Override {AssignmentId}: rule changed; the open findings of base rule {BaseCode} on {CoreTable} {RecordId}'s invoices could not be closed now. They stay open for the reviewer",
+                assignmentId, baseCode, coreTable, recordId);
+            return (SignalClosureOutcome.None with { PolicyFailures = 1 }, Array.Empty<OpenPolicySignal>());
+        }
+    }
+
+    /// <summary>
+    /// The invoice of each line of <paramref name="invoiceIds"/> (<c>sprk_billingevent.sprk_invoice</c>), app-only, by line. Paged; more than
+    /// <see cref="MaxLinePages"/> pages per batch throws (the close is then incomplete). A fault throws.
+    /// </summary>
+    private async Task<Dictionary<Guid, Guid>> LinesOfInvoicesAsync(IReadOnlyCollection<Guid> invoiceIds)
+    {
+        var invoices = new Dictionary<Guid, Guid>();
+        foreach (var batch in invoiceIds.Select(id => (object)id).Chunk(MaxInValues))
+        {
+            var query = new QueryExpression(AffectedInvoiceCounter.LineEntity)
+            {
+                ColumnSet = new ColumnSet(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn),
+                PageInfo = new PagingInfo { Count = 5000, PageNumber = 1 },
+            };
+            query.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, ConditionOperator.In, batch);
+            for (var page = 1; ; page++)
+            {
+                if (page > MaxLinePages)
+                {
+                    throw new InvalidOperationException($"More than {MaxLinePages} pages of invoice lines.");
+                }
+
+                var rows = await ReadAsync(query, CancellationToken.None);
+                foreach (var row in rows.Entities)
+                {
+                    if (row.GetAttributeValue<EntityReference>(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn)?.Id is { } invoice && invoice != Guid.Empty)
+                    {
+                        invoices[row.Id] = invoice;
+                    }
+                }
+
+                if (!rows.MoreRecords)
+                {
+                    break;
+                }
+
+                query.PageInfo.PageNumber = page + 1;
+                query.PageInfo.PagingCookie = rows.PagingCookie;
+            }
+        }
+
+        return invoices;
+    }
+
+    /// <summary>The most pages of lines one batch of invoices is read for (5,000 rows a page).</summary>
+    private const int MaxLinePages = 20;
+
+    /// <summary>
+    /// The ids of the invoices filed under this record (its core lookup on <c>sprk_invoice</c>) that are open (Active, In Review) and, when
+    /// <paramref name="firmId"/> is set, of that firm (<c>sprk_vendororg</c>): one query, app-only. More than one page throws (the close is
+    /// then incomplete). A fault throws.
+    /// </summary>
+    private async Task<HashSet<Guid>> RecordsInReviewInvoicesAsync(string coreTable, Guid recordId, Guid? firmId)
+    {
+        var coreColumn = InvoiceFamilyCoreRecordGuard.CoreRecordLookups[AffectedInvoiceCounter.InvoiceEntity].Single(l => l.CoreEntity == coreTable).Column;
+        var query = new QueryExpression(AffectedInvoiceCounter.InvoiceEntity) { ColumnSet = new ColumnSet(coreColumn) };
+        query.Criteria.AddCondition(coreColumn, ConditionOperator.Equal, recordId);
+        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, InvoiceStatusCodes.StateActive);
+        query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, InvoiceStatusCodes.InReview);
+        if (firmId is { } firm)
+        {
+            query.Criteria.AddCondition(InvoiceFirmColumn, ConditionOperator.Equal, firm);
+        }
+
+        var rows = await ReadAsync(query, CancellationToken.None);
+        if (rows.MoreRecords)
+        {
+            throw new InvalidOperationException("More In Review invoices on the record than one page.");
+        }
+
+        return rows.Entities.Where(r => r.GetAttributeValue<EntityReference>(coreColumn)?.Id == recordId).Select(r => r.Id).ToHashSet();
+    }
+
+    /// <summary><c>sprk_invoice.sprk_vendororg</c>: the invoice's firm (as <see cref="InvoiceContextService"/> names it).</summary>
+    private const string InvoiceFirmColumn = InvoiceContextService.InvoiceFirm;
+
+    /// <summary>The ids per <c>In</c> condition (as <see cref="AffectedInvoiceCounter"/>).</summary>
+    private const int MaxInValues = 500;
 
     /// <summary>
     /// Stage 1: the record's record-scoped set (<see cref="RecordRuleSetIdFor"/>), created when missing. A create that collides on the id

@@ -3,8 +3,8 @@
 .SYNOPSIS
     Sets up ONE customer's top business unit (a direct child of the root, never the root and never Secure Record): the
     declared memberless owner teams, each with its own role holding Read at User (Basic) depth on exactly the tables its
-    config file declares, and the directly assigned 'Billing Rule Reader' role (Read at Deep on sprk_policy only), with the
-    org setting it needs. Dry run by default.
+    config file declares, and the directly assigned 'Billing Rule Reader' role (Read at Deep on sprk_policy, sprk_ruleset and
+    sprk_procedure only), with the org setting it needs. Dry run by default.
 
 .DESCRIPTION
     The Spaarke root business unit holds only Spaarke product data; customer records and customer configuration belong to
@@ -32,10 +32,10 @@
     role approach"):
 
       billing-rule-readers-role.json          (no team) / 'Billing Rule Reader'
-          Read at Deep on sprk_policy only, isinherited 0, assigned DIRECTLY to each of the customer's child-unit billing
-          admins. The copy assigned is the customer TOP unit's, never the root's, Secure Record's or the admin's own unit's:
-          a role's depth is measured from the business unit of the copy a principal holds, so a holder reads every rule
-          owned in the customer's top unit and the units below it, and none in Secure Record (a sibling). Assigning another
+          Read at Deep on sprk_policy, sprk_ruleset and sprk_procedure only (the last two: 089e fix round 2), isinherited 0,
+          assigned DIRECTLY to each of the customer's child-unit billing admins. The copy assigned is the customer TOP unit's, never the root's, Secure Record's or the admin's own unit's:
+          a role's depth is measured from the business unit of the copy a principal holds, so a holder reads every rule, rule set
+          and Procedure owned in the customer's top unit and the units below it, and none in Secure Record (a sibling). Assigning another
           unit's copy to a user needs the org setting EnableOwnershipAcrossBusinessUnits (matrix business units).
           -AssignBillingRuleReader assigns the right copy; the admin UI offers the user's own unit's copy first, which
           reaches nothing above that unit.

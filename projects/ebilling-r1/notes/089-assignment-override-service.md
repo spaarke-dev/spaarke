@@ -642,7 +642,11 @@ Branch `task/ebilling-089c-fix1`, from `work/ebilling-r1` at `0b3abd3e38`. No Da
 ### Decisions and deviations
 
 1. **A record-scoped set is 404 in `RuleSetService`, not the 409 the 089a list named.** A 409 would tell a caller that a set id exists; the uniform not-found leaks nothing.
+   - **Built in the 089e fix round (owner 2026-11-04: "Approve (A)+(B) on all 9 routes"; see "089e fix round" below).** Before that:
+   - **089e (owner 2026-11-04: "a more descriptive error is important/useful to the user; also so can be tracked"): STOPPED, unchanged.** The owner's 409 `ruleset.record_scoped` was to be given only to a caller who passes the route's existing Read check on the set or on its core record. No by-id rule-set route has such a check. Each one checks table privileges only (`BillingAdminAuthorization.Admin()` and similar, any depth) and, for a Procedure's set, Read or Write on that Procedure (`RequireRead/WriteOnTheRuleSetsProcedure`). A record-scoped set has no Procedure, so that filter passes it through. A 409 behind the privilege checks alone would tell every billing admin, including one who cannot Read the record, that the record has a changed rule. See "089e" below for the options.
 2. **Change also requires Write on `sprk_policy`.** The 089b list named it for removal only, but the change switches the record rule on, just as removal switches it off. This is stricter.
+   - **Changed in the 089e fix round (owner 2026-11-04: "Add to role file + apply on dev"):** the role source gains Read on `sprk_procedure` at Deep, so Procedure override removal and preview work for billing admins. See "089e fix round" below. Before that:
+   - **089e (owner: "provide edit rights as required"): no role change is needed.** The role source "Spaarke Billing Administrator" already holds `prvWritesprk_Policy` (Basic), and every other privilege the change and removal routes check. The check accepts any depth. The dev root role matches the source exactly (24 privileges, read-only query 2026-11-04). The privilege list is under "089e" below.
 3. **The change filter always requires Create on rule set**, because the filter cannot know whether the record's set already exists.
 4. **The base is the policy's `sprk_currentversion`, even for a record pinned to an earlier Procedure Version.** 082 resolves pins; the record rule copies the rule in force now.
 5. **A failure after stage 1 or 2 can leave an empty set, or a rule that is Off and has no version.** Nothing applies either one, and the next change reuses it. Stage 3 is all or nothing.
@@ -668,6 +672,7 @@ The stop fires, as expected. No evaluation closes the open Signals that the base
 - **Owner choice:**
   - (a) leave them for the reviewer, with a "rule changed" note in the UI; or
   - (b) close them at publish as Superseded, through the existing SignalWriter close, naming the record rule's first Policy Version.
+- **Decided 2026-11-04: (b). Built in 089e** (see "089e" below). The change closes them after its commit, best effort, as Superseded through `SignalClosureService.SupersedeInPassAsync`, naming the record rule's version the change put in force. The answer says whether the close completed (`closeComplete`) and how many of those invoices the caller can see. One difference from the removal: **nothing finishes a close that fails.** The nightly run does not evaluate Billing rules, and the base rule stays on. So any finding left open stays open for the reviewer, which is option (a) for those findings, and the message says so.
 
 ### Answers to spaarke-prototype questions h-j (`notes/084-prototype-questions.md`)
 
@@ -676,13 +681,13 @@ The stop fires, as expected. No evaluation closes the open Signals that the base
 - **j (request shapes):**
   - assign or pin: `POST .../procedure-assignments` `{ procedureId, mode: "FollowLatest"|"Pinned"|"Excluded", pinnedVersionId?, reason? }`;
   - exclude: `POST .../rule-overrides/exclude` `{ policyId, reason, firmId? }`;
-  - change: `POST .../rule-overrides/change` `{ policyId, reason, firmId?, ruleBody?, messageTemplate?, shortHeadline?, consequence? }`, answered 201 `{ override, recordRule }`;
+  - change: `POST .../rule-overrides/change` `{ policyId, reason, firmId?, ruleBody?, messageTemplate?, shortHeadline?, consequence? }`, answered 201 `{ override, recordRule, closeComplete, affectedText, visibleOpenInvoices, message }` (the last four added by 089e: the base rule's findings closed Superseded);
   - remove: `DELETE .../overrides/{overrideId}`, answered 200 `{ overrideId, kind, ruleSwitchedOff, closeComplete, affectedText, visibleOpenInvoices, message }`.
 
 ### Questions for the owner or uac-r2
 
-- The STOP above: choose (a) or (b).
-- Confirm deviation 1 (404, not 409) and deviation 2 (Write on policy for change).
+- The STOP above: choose (a) or (b). **Answered 2026-11-04: (b), built in 089e.**
+- Confirm deviation 1 (404, not 409) and deviation 2 (Write on policy for change). **Answered 2026-11-04: 1 wants a tracked 409 for readers (089e stopped it; see below); 2 confirmed, no role change needed.**
 
 ### 089c pass-2 review (2026-11-04)
 
@@ -723,4 +728,311 @@ A scoped re-check (Sonnet) of merge 593c70f2b5 found no fix-now finding. Unit te
 - **K1:** a dangling Procedure reference on a set counts as "not retired" (`ProcedureAssignmentService.cs:977-980`). Dataverse referential integrity makes this unreachable.
 - **K1 (test):** the byte-identity test (`ProcedureAssignmentEndpointsTests.cs:708-729`) now compares the filter's 404 with itself. Both answers come from the same `Map(OverrideNotFound<object>())` call, so they stay identical by construction.
 
-**089c is complete:** two adversarial passes, two fix rounds and a scoped re-check. Still open for the owner: the stale-Signals STOP, (a) or (b), and confirmation of deviations 1 and 2.
+**089c is complete:** two adversarial passes, two fix rounds and a scoped re-check. Still open for the owner: the stale-Signals STOP, (a) or (b), and confirmation of deviations 1 and 2. (Answered 2026-11-04; see 089e.)
+
+## 089e - the owner's three follow-ups to 089c (2026-11-04)
+
+Branch `task/ebilling-089e`, from `work/ebilling-r1` at `4a5f78ece0`. POML `tasks/089e-override-followups.poml`. No Dataverse write, no live call, no deploy. The dev reads are listed under item 3.
+
+### Item 1: a change closes the base rule's stale findings as Superseded (built)
+
+- **`ChangeRuleAsync`** now takes the caller's bearer token (before `ct`). All three change routes pass `TokenHelper.ExtractBearerTokenOrNull(http)`.
+- **After the stage-3 commit**, `SupersedeBaseFindingsAsync`:
+  1. selects the base rule's open findings through the close's own selection (`SignalClosureService.SelectOpenSignalsOfPolicyAsync(base, withBillingSubject: true)`; nothing under Procedures queries `sprk_signal`);
+  2. maps each finding to its invoice (directly, or through its line's `sprk_billingevent.sprk_invoice`);
+  3. keeps the invoices filed under this record (the core lookup from `InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_invoice"]`) that are Active and In Review and, for a firm-scoped change, of that firm (`sprk_vendororg`);
+  4. closes them through the existing close, `SignalClosureService.SupersedeInPassAsync(baseCode, recordRuleVersionId, …, outsideScope: _ => true)`. The record is outside the base rule's scope now. **Corrected (pass-1 F3):** the close does not name or record the record rule's version. The version is passed as the close's "current version", but with every target outside scope it decides nothing, and the writer stores the resolution only.
+- **The answer** (`RuleChangedView`, additive) carries `closeComplete`, `affectedText`, `visibleOpenInvoices` and `message`. The count is `AffectedInvoiceCounter` over the closed findings, as the caller, so it covers only invoices the caller can Read. Any fault in the selection, the invoice reads or the close is caught: the change stays 201 and `closeComplete=false`, and the message is `ChangeCloseIncompleteMessage`.
+- **Shape, and why it differs from the removal.** It is best effort after the commit, as `RemoveAsync` is. Closing first would leave closed findings behind a change that then failed. But **the nightly run does not finish this close.** `SignalReevaluationJob` evaluates Ontology policies only (`SignalReevaluationJob.cs:170`, `:1237`), and the base rule stays on, so its Off/Retired sweep never reaches it. A finding left open stays open until a reviewer resolves it, and the message says so. A guaranteed close needs a stricter shape: either a sweep step that closes base-rule findings on In Review invoices of records with a changed-rule row, or a retry route, because a repeated change is 409 `assignment.duplicate`. Neither is built; this is an owner question.
+- **`SignalClosureService.SupersedeInPassAsync`** became `virtual`, so the tests can observe the close, as with the two members 081 made virtual. `SignalClosureServiceDerivationGuardTests` still forbids a BFF subclass.
+- **Section 11:** no new public surface beyond four additive response members. The new private helpers reuse the counter's line → invoice and In Review rules. The cost of doing nothing: stale base-rule findings stay open on every changed record's invoices.
+- **Tests** (`ProcedureAssignmentServiceTests`, under "Task 089e"):
+  - must-fire: findings on the invoice and on a line, including an invoice the caller cannot see, all close Superseded; the count is 2 of 3 (the assertion on the version argument was dropped in the fix round, pass-1 F3);
+  - must-not-fire: another record's invoice, another rule, an Approved invoice, an inactive invoice, and a missing invoice stay open;
+  - firm-scoped: only that firm's invoices close;
+  - a write fault, and a selection fault: 201 with `closeComplete=false` and the message, the change committed.
+  - `ProcedureAssignmentEndpointsTests`: the change route hands the service the caller's token and returns `closeComplete`.
+- **Seeding proofs** (`~ProcedureAssignmentServiceTests.Change_`, 23 tests; each restored, and the file byte-identical afterwards):
+
+  | Seed | Result |
+  |---|---|
+  | S1: the close call replaced by "nothing closed" | 4 failed |
+  | S2: the record condition dropped (query and in-memory check) | 1 failed (must-not-fire) |
+  | S3: the firm condition dropped | 1 failed (firm-scoped) |
+  | S4: the In Review condition dropped | 1 failed (must-not-fire) |
+- **Known limit (K4), fixed in the fix round:** the selection read all of the base rule's open findings org-wide, then filtered to the record. It now reads the record's invoices first (see "089e fix round").
+
+### Item 1: quality gates
+
+- **code-review** (one pass, no adversarial reviewer, per the brief):
+  - **F2, fixed:** `SignalClosureServiceDerivationGuardTests`' doc listed only two virtual members.
+  - **K4:** the org-wide selection; see the known limit above.
+  - **K4:** with nothing to close, the answer reads "0 open invoices you can see are affected", as the removal's does.
+  - **K3:** the test fake mirrors `SupersedeInPassAsync`'s selection rule. The real rule stays pinned by `SignalReevaluationJobTests`.
+  - No F1. The catch blocks are deliberate best effort after a commit, not log-and-rethrow. `ProcedureAssignmentService.cs` is large (about 1,660 lines) but cohesive: one record's overrides, and the new helpers serve only the change's close.
+- **adr-check:**
+  - ADR-001 (Minimal API, no Functions), ADR-002 (no plugin; the close is the server-side owner), ADR-008 (filters unchanged), ADR-010 (no DI or interface change), ADR-013 (no AI dependency), ADR-019 (no new error shape), ADR-028 (the caller token is only passed on to the existing OBO-based counter) and ADR-052 (no background work): all compliant.
+  - ADR-038: the tests are unit tests in the existing maintain-class files, and nothing is deleted under a KEEP path.
+  - The diff has no Graph, `IMemoryCache`, AI, DI or interface hits.
+- **Placement (CLAUDE.md §10):** in the BFF, inside the existing `ProcedureAssignmentService`, the owner of the change route. There is no new endpoint, registration, package or background work.
+- **Gates:**
+
+  | Run | Result |
+  |---|---|
+  | Build (BFF) | 0 warnings, 0 errors |
+  | Unit filter `ProcedureAssignment\|RuleSetService\|SignalClosure\|Signal` | 4760 passed, 3 skipped, 0 failed |
+  | ArchTests `RouteAuthorizationGuard\|RecordOwnerAssignmentCensus\|ProcedureRolePrivilege\|FinanceStepZero\|SignalClosureServiceDerivation\|ProcedureRetireSelection\|RuleSetRolePrivilege` | 180 passed |
+  | Publish size (`-c Release`, `Compress-Archive`, 192 files each, short paths `C:\wt089e{m,a,b}`) | See below |
+
+- **Publish size, no package added:**
+  - **Against a fresh master** (`0d4aa87ee0`: 136,945,320 B raw, 41,208,838 B zip): the branch is 137,268,940 B raw and 41,310,785 B zip, **+323,620 B raw (+101,947 B zip)**. Most of that is ebilling-r1 work not yet on master.
+  - **This task alone**, against the base `4a5f78ece0` (137,254,820 B raw, 41,304,287 B zip): **+14,120 B raw (+6,498 B zip)**; the dll grows 12,288 B.
+
+### Item 2: a descriptive error for record-scoped rule sets (STOPPED, nothing changed; built in the fix round below)
+
+The brief's condition is that a reader gets the 409 only when they pass "the Read check on that set (or on its core record), whichever the route already checks". No by-id route has either check:
+
+| Route (`RuleSetEndpoints.cs`) | Checks | Record Read on the set or its core? |
+|---|---|---|
+| GET `/{id}` (`:113-116`) | `Admin()` (privilege, any depth); `RequireReadOnTheRuleSetsProcedure` | No. A record-scoped set has no Procedure, so the filter passes it through (`BillingAdminAuthorization.cs:174`, `:183`) |
+| draft, PATCH proposal, accept, reject (`:84-87`, `:126-157`) | privileges; `RequireWriteOnTheRuleSetsProcedure` | No (same pass-through) |
+| publish, assignment, visibility (`:168-198`) | privileges only | No |
+
+`LoadRuleSetAsync` (`RuleSetService.cs:2513-2528`) hides the set before anything else. A 409 placed there would answer every billing admin, including one who cannot Read the record, which is the existence leak deviation 1 avoids. **Options for the owner and uac-r2:**
+- **(A)** Extend the shared `OnTheRuleSetsProcedure` filter: for a record-scoped set, ask the caller's own Read on the set (`sprk_rulesets`, through `CallerReadCheck`). Readable gets 409 `ruleset.record_scoped`, logged under the code, with a message naming `/api/finance/{matters|projects|workassignments}/{recordId}/overrides` and the record kind. Refused or no answer gets the uniform 404. The filter would also go on publish, assignment and visibility, and the route ledger would change. This is a new auth check on nine routes.
+- **(B)** The same, but asking Read on the core record (the record filter's shape).
+- **(C)** Keep the 404 and add tracking only: a structured log or metric under a `ruleset.record_scoped` reason when the hide fires, with no change to the answer.
+- Recommendation: (A), because the set is the record's secure child and its own Read is the narrowest question. It needs uac-r2's sign-off as an auth change.
+
+### Item 3: Billing Administrator edit rights (no change needed)
+
+Role source `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Billing Administrator.xml`. Every Privilege-path check asks `RetrieveUserSetOfPrivilegesByNames` and accepts **any depth** (`FinanceAuthorizationFilter.cs:248`, `CallerRecordAccessProbe.cs:544`).
+
+| Route and check | Where it is checked | Privilege or right | Depth needed | Source holds |
+|---|---|---|---|---|
+| change: Read on the body's rule | `ProcedureAssignmentEndpoints.cs:299` (Record path, as the caller) | `prvReadsprk_Policy` | must reach the rule's owner (customer unit; child-unit admins via the 089d team) | Deep (`:24`) |
+| change: `CreateRuleSet()` | `:294`; `BillingAdminAuthorization.cs:53-56` | `prvCreatesprk_ruleset`, `prvWritesprk_ruleset` | any | Basic (`:16`, `:30`) |
+| change: `DraftRules()` | `:295`; `BillingAdminAuthorization.cs:75-79` | `prvWritesprk_ruleset`, `prvCreatesprk_Policy`, `prvCreatesprk_PolicyVersion` | any | Basic (`:30`, `:14`, `:15`) |
+| change: `EditRule()` | `:296`; `BillingAdminAuthorization.cs:59-63` | `prvWritesprk_ruleset`, `prvCreatesprk_PolicyVersion`, `prvWritesprk_PolicyVersion` | any | Basic (`:30`, `:15`, `:29`) |
+| change, remove: Write on policy | `:297`, `:308` | `prvWritesprk_Policy` | any | Basic (`:28`) |
+| preview, remove: `Admin()` | `:304`, `:306-309`; `BillingAdminAuthorization.cs:49-50` | `prvWritesprk_ruleset` | any | Basic (`:30`) |
+| remove, preview: Read on the row's subject, a rule | `:365` (`RequireReadOnTheOverridesSubject`) | `prvReadsprk_Policy` | as for change | Deep |
+| remove, preview: Read on the row's subject, a Procedure | `:365`; subject from `ProcedureAssignmentService.cs:870` | Read on `sprk_procedure` | must reach the Procedure | **none**, by design: `ProcedureRolePrivilegeGuardTests` forbids any role a privilege on `sprk_procedure` until uac-r2 task 191 |
+| every route: the record (`ebilling.record.override`) | `ProcedureAssignmentEndpoints.cs:87` etc.; `OperationAccessPolicy.cs:224` | Write and AppendTo on the core record | must reach the record | not this role's job: from the user's record roles |
+
+- **Nothing is missing from the billing-admin role for the change or for a changed rule's removal.** No source edit, no guard change, no live role change.
+- **Finding (not changed):** removing or previewing a **Procedure** override needs Read on `sprk_procedure`. Until uac-r2 191 no Spaarke role may hold it, so only a System Administrator can remove one. This is consistent with 089b's assign route, which needs the same Read.
+- **D-123:** nothing here needs Global, or Deep held in the root. The privilege checks accept Basic, and the one Read that needs reach is the existing Deep Read (EB-D-162). For child-unit admins that reach comes from the 089d team in the customer unit.
+- **Dev (read-only, `role` and `roleprivileges` through Dataverse SQL, 2026-11-04):** the root role `810926e0-a97c-44ea-9891-e80dadef73f0`, the source's id, holds 24 privileges. They are identical to the source in name and depth: Write, Create, Append and AppendTo at Basic (mask 1); Read at Deep (mask 4) on the three rule tables; the nine platform defaults at Global. The role also exists in five child units (Spaarke Demo, Spaarke Test 1, Spaarke Dev 1, Secure Record, Spaarke Business Unit 1), the inherited copies Dataverse makes. Nothing differs from the source.
+
+## 089e fix round and item 2 (2026-11-04)
+
+### Owner decisions (verbatim, typed in the main session)
+
+- Item 2: "Approve (A)+(B) on all 9 routes".
+- The role: "Add to role file + apply on dev" (the owner applies it on dev; this branch changes the source only).
+- Earlier owner wording on item 2: "a more descriptive error is important/useful to the user; also so can be tracked; and (2) yes provide edit rights as required".
+
+### Item 2: rule-set by-id routes authorise the set and its record (built)
+
+The uac-r2 design, binding. `RuleSetEndpoints.RequireAccessToTheRuleSet` runs on every rule-set route that takes a set id, after the privilege filter and the eBilling flag and before the Procedure filter.
+
+- **Routes.** `RuleSetEndpoints.cs` has eight such routes, not nine: draft, GET, PATCH proposal, accept, reject, publish, assignment and visibility. No other endpoint file takes a rule set id. All eight carry the filter.
+- **Order** (nothing that differs between "exists" and "does not exist" is read before the set is authorised):
+  1. **(A)** The caller's own Read on the `sprk_rulesets` row, through `CallerReadCheck` as the caller, for every set. Anything but Readable is the uniform 404. A set id that does not exist may answer Refused or no answer, so both are 404.
+  2. The set's record home, read app-only (`RuleSetService.RecordHomeOfRuleSetAsync`, through `RecordRuleSet.HomeOf`). If the set is not record-scoped, or there is no set, the route continues unchanged. A fault here, after (A), is 403 `system_failure`, as in the Procedure filter.
+  3. **(B)** For a record-scoped set, the caller's Read on its core record, through `FinanceAuthorizationFilter.CallerHoldsRightsAsync`, the record routes' own check. No new evaluator. A refusal, a fault, or a set with no single core lookup is the uniform 404. (A) alone is not enough: the Billing Administrator holds Read at Deep on `sprk_ruleset`.
+  4. Only then: **409 `ruleset.record_scoped`**. The detail names the record kind and its override routes (`/api/finance/{matters|projects|workassignments}/{recordId}/rule-overrides/change`, `/exclude` and `/overrides/{overrideId}`), with `recordKind`, `recordId` and `overridesRoute` members. It is tracked as a Warning log line carrying the code, the set, the record, the method and the path.
+- **The uniform 404** is `RuleSetService.RuleSetNotFound<T>()` rendered by the routes' own `Map`: `ruleset.not_found`, the same bytes the service answers for a missing set. It is byte-identical to a nonexistent set id on each route. The 089c removal filter's 404 has the same shape, but its own code (`assignment.override_not_found`).
+- **Procedure-scoped and legacy sets** keep today's behaviour, plus (A). Every existing Procedure-filter test is unchanged and green.
+- **The service is unchanged in behaviour.** `LoadRuleSetAsync` still hides a record-scoped set (the backstop for plans and the firm clause read). It now reads through `LoadBillingRuleSetAsync`, which `RecordHomeOfRuleSetAsync` shares.
+- **Deviations, for review:**
+  - (B) asks Read on the record (`"read"`), as the brief's tests state ("caller can't read the record"). It does not ask the override routes' `ebilling.record.override` (Write and AppendTo). A reader of the record who cannot override it gets the 409, and then the override routes' uniform 404.
+  - The vetoes. On `/api/finance` every caller is internal (step 0). The record routes' evaluator for an internal caller is `GetCallerRecordAccessAsync`, Dataverse's answer as the caller, so a Restricted or Secure record the caller cannot see answers no Read. The task 037 vetoes in `AccessibleRecordSetService` serve the external plane and are not on this path. The Restricted test models a record that answers no Read while the set is readable.
+- **Section 11.**
+  - `RequireAccessToTheRuleSet` (new filter). Existing: the Procedure filter, which sees only a set's Procedure, and the override-subject filter's uniform-404 shape. Extension: not possible, because the Procedure filter reads through `LoadRuleSetAsync`, which hides record-scoped sets by design, and keeping it separate keeps its 403 answers. Cost of doing nothing: the owner's descriptive, tracked error cannot be given without telling a billing admin who cannot see the record that the record has a changed rule.
+  - `RecordHomeOfRuleSetAsync`, `RecordRuleSetHome` and `RecordRuleSet.HomeOf`. They are the filter's only read. They live in `RecordRuleSet`, because the census forbids record-scope markers in the waived `RuleSetService.cs`.
+  - `RuleSetNotFound<T>`. One definition of the 404 bytes.
+- **Tests** (`RuleSetEndpointsTests`, theory over the eight routes, 49 new cases; `RuleSetServiceTests`, one):
+  - (A) must-fire: the set is unreadable and its record readable: 404, byte-identical to a missing set; the home is never read; no record question is asked.
+  - (B) must-fire: the record is unreadable: 404, identical.
+  - Restricted: Read on the set, no Read on the record: 404, identical, and no `ruleset.record_scoped` log line.
+  - Fail closed: no answer on the record, or no single core: 404, identical. A fault reading the home: 403 `system_failure`.
+  - Readable: 409 `ruleset.record_scoped` with the routes and the kind, logged; the Procedure filter is never asked. The kind is checked for each of the three core tables.
+  - Must-not-fire: a set that is not record-scoped reaches the service, and its 404 is the same bytes. A Procedure's set without Read on the set is 404, and the Procedure check is never asked.
+  - Service: the home of a record-scoped set, a lookup-only set, no core, two cores, a legacy set, another domain's set, none and an empty id; the reads still hide all four record-scoped shapes.
+- **Seeding proofs** (`RuleSetEndpoints.cs` restored byte-identical after each, sha1 `0e68651f…`):
+
+  | Seed | Result |
+  |---|---|
+  | (B) removed (`if (false && !recordReadable)`) | Restricted theory: 8 of 8 failed |
+  | (A) removed (`if (false && setRead != …)`) | unreadable-set theory: 8 of 8 failed |
+
+### Item B: Billing Administrator gains Read on `sprk_procedure` (source only)
+
+- **Added:** `prvReadsprk_procedure` at **Deep** in `src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Billing Administrator.xml`. That is the depth of its `sprk_ruleset` Read (EB-D-162).
+- **Why:** removing or previewing a Procedure override asks the caller's own Read on that Procedure (`RequireReadOnTheOverridesSubject`). Before this, only a System Administrator passed.
+- **`Deploy-EbillingBillingAdminRole.ps1`:** the privilege is now in the wanted set. A plain run adds it at Deep, and lowers it from Global like the other Reads. `-Verify` reports it as a gap when it is missing, at another depth, or missing from a business-unit copy. It is out of the forbidden set; any other privilege on the Procedure tables still stops the run. The script parses with no error. It was not run: no Dataverse write.
+- **Guards:**
+  - `RuleSetRolePrivilegeGuardTests`: the exact set includes it, with controls for missing, Global and an extra Write.
+  - `ProcedureRolePrivilegeGuardTests`: the until-191 rule now allows exactly this one grant (this role, this privilege, Deep). Any other role, depth, privilege or Procedure table is still reported, with must-fire and must-not-fire controls.
+  - Seed: the role-source line alone, before the guard edits, failed both guards (2 failed).
+- **Not done: the field-mapping task 046 permissions-vs-roles matrix.** It does not exist on this branch or on master. 046 is a POML on `work/field-mapping-server-write-path-r1` (`5450e1a5af`), not built. When 046 builds its matrix, it should list this privilege.
+- **For the owner and uac-r2:**
+  - `ProcedureRolePrivilegeGuardTests` said the until-191 rule changes only "with uac-r2's agreement". The owner's decision is recorded here; uac-r2 and ontology-r1 still need the notice the POML constraint names.
+  - D-123 ("never Deep held in the root") is the existing EB-D-162 position for the role's Reads. This Read follows it. Procedures are internal configuration, not records in the Secure Record unit.
+
+### Item C: adversarial pass-1 findings (all fixed)
+
+- **F2, the close covers distance 0 only.** Kept at distance 0, because 082's `CoreRecordChain` is not on this branch and nothing evaluates record rules yet. The answer is now honest:
+  - `message` is always set. On a complete close it is `ChangeCloseCompleteMessage` ("…closed on invoices filed directly on this record. Findings on invoices of the records under it are not closed by this change…"). On an incomplete one, `ChangeCloseIncompleteMessage` also says so.
+  - The `RuleChangedView` xmldoc says `closeComplete` covers the record's own invoices.
+  - **Hand-off for 082:** supersede-close must select through `CoreRecordChain` and respect nearer rows.
+- **F3, "names the record rule's new version" was not true.** The writer stores no version. Corrected in this file, the POML and the xmldoc (`ChangeRuleAsync`, `SupersedeBaseFindingsAsync`, `SupersedeInPassAsync`). The assertion on the no-op version argument was dropped. The writer is unchanged.
+- **F3, the write-fault test.** `w.Readable.Add(invoice)` before the act. Seed: counting targets instead of closed findings fails it.
+- **F3, the probe mock.** It is constrained to the caller's token (`It.Is<string?>(t => t == Token)`). The assertion inside the callback was removed, because the counter's fault handling would swallow it.
+- **K2, no answer from stage 3.** The Exclude row is read back at its derived id. If it is there, the change committed: the close runs and the answer is 201. If it is not there, or the read faults, the 500 stays. Tests cover both (harness: `TransactionCommitsButAnswersUnknown`, `TransactionGivesNoAnswer`, per transaction).
+- **K4, the close's reads are now bounded by the record:**
+  1. this record's In Review invoices: one query on the core lookup, the state and the firm (more than one page is incomplete);
+  2. only those invoices' lines (paged, at most 20 pages a batch);
+  3. the base rule's open Signals on those invoices or lines, through the new `SignalClosureService.SelectOpenSignalsOfPolicyOnSubjectsAsync`. It is `OpenSignalsOfPolicyQuery` with an `In` on the subject, so the rows are exactly the org-wide selection's for those subjects. It is virtual for the tests; the derivation guard's doc is updated.
+
+  The selection semantics are unchanged. A finding's invoice is its own when it names one, else its line's. The existing tests are green. New tests: no org-wide Signal read (every `sprk_signal` query carries the subject `In`, and every invoice and line read is bounded), and a record with no In Review invoice reads no Signal.
+- **Seeding proofs** (`~ProcedureAssignmentServiceTests.Change_`; `ProcedureAssignmentService.cs` restored byte-identical after each):
+
+  | Seed | Result |
+  |---|---|
+  | S5: count the targets, not the closed findings | write-fault test: 1 failed |
+  | S6: no read-back on no answer | committed-but-no-answer test: 1 failed |
+  | S7: the org-wide selection | K4 test and must-fire: 2 failed |
+  | S8: no message on a complete close | must-fire (message): 1 failed |
+
+### Fix round: gates
+
+| Run | Result |
+|---|---|
+| Build (BFF) | 0 warnings, 0 errors |
+| Unit filter `ProcedureAssignment\|RuleSet\|SignalClosure\|Signal\|BillingAdmin` (includes the rule-set endpoint tests and `SignalReevaluationJobTests`) | 5043 passed, 3 skipped, 0 failed (first run: 1 failed, `RuleSetServiceConsequenceTests` publish via the endpoint host, which needed Read on its own set; fixed in `61fb52b76b`) |
+| ArchTests `RouteAuthorizationGuard\|RuleSetRolePrivilege\|ProcedureRolePrivilege\|SignalClosureServiceDerivation\|ProcedureRetireSelection\|RecordOwnerAssignmentCensus\|FinanceStepZero` | 181 passed |
+| Permissions-vs-roles matrix guard (field-mapping 046) | not on this branch (see item B) |
+| Publish size (`git archive` short-path trees, `-c Release -r linux-x64`, `Compress-Archive Optimal`, 192 files each) | vs fresh master `0d4aa87ee0` (136,945,320 B raw, 41,208,838 B zip): 137,285,264 B raw, 41,314,415 B zip, **+339,944 B raw (+105,577 B zip)**, mostly ebilling-r1 work not on master. This round alone, vs the branch before it (`49896175a0`: 137,268,940 B raw, 41,310,785 B zip): **+16,324 B raw (+3,630 B zip)**. No package. |
+
+- **ADR notes:** ADR-008 (an endpoint filter for resource authorization); ADR-019 (ProblemDetails with a stable `errorCode`); ADR-028 (every new check is asked as the caller, never app-only; the one app-only read, the set's home, runs only after the caller's Read on the set); ADR-010 (no DI or interface change; the new members are virtual seams in existing concrete classes). No Dataverse write, no live call, no deploy, no role change on dev.
+- **Not reviewed yet:** this round has had no adversarial pass of its own. The auth change on eight routes warrants the two passes the auth rule asks for.
+
+## 089e auth pass 1 and fix round 2 (2026-11-04)
+
+### Findings (defect and location)
+
+| Id | Defect | Location | Outcome |
+|---|---|---|---|
+| F1 | The set filter's step (A) refuses billing admins homed in a child unit of the customer's top unit: their role reads `sprk_ruleset` and `sprk_procedure` at Deep from their own unit only. The rule-set list did not ask the caller's Read on each set, so the list and the by-id routes could disagree. | `RuleSetEndpoints.cs:574-580` (step A); `config/billing-rule-readers-role.json` (held `sprk_policy` only); `RuleSetEndpoints.ListRuleSets` | Fixed (role extended; list filtered) |
+| F2 | `-Verify`'s "never held by a team" check read the holders of the root role only. | `scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1:332-336` | Fixed |
+| F2 | When stage 3 of a change gave no answer, the read-back proved the commit by the Exclude row, which a plain Exclude also writes at the same id. | `ProcedureAssignmentService.cs:632-635`, `CommittedAfterNoAnswerAsync` (`:669-683`) | Fixed |
+| F3 | The by-id route theory list was written by hand; a new by-id route without the set filter would not be covered. | `RuleSetEndpointsTests.ByIdRoutes` | Fixed (route guard) |
+| F4 | Step (B) is Dataverse's Read answer only; it applies no per-user No Access deny. | `RuleSetEndpoints.cs:608` | Known limit (below); no change |
+| K6 | Possible cost difference between an unknown and an unreadable set id. | `DataverseAccessDataSource.cs:474-497` | Checked by uac-r2: unknown and unreadable ids cost the same; no change. |
+| K7 | `sprk_procedure` Read at Deep from the holder's own unit misses a Procedure owned in the customer's top unit. | Billing Administrator role | Fixed with F1 |
+
+### Owner decision (verbatim)
+
+- "Approve role + dev apply" (2026-11-04). The owner applies the role on dev after review. This branch changes the source only; no Dataverse write and no role change on dev was made.
+
+### Item 1: Billing Rule Reader holds Read at Deep on `sprk_ruleset` and `sprk_procedure` (`38e8ea9ab2`)
+
+- **`config/billing-rule-readers-role.json`.** The role now holds exactly: `prvReadsprk_Policy` Deep, `prvReadsprk_ruleset` Deep, `prvReadsprk_procedure` Deep. `isinherited` 0, users only, the customer top unit's copy. Evidence is read-only dev metadata (privilege ids and `CanBeDeep`, 2026-11-04).
+- **Both roles carry `prvReadsprk_procedure` Deep, on purpose.** Billing Administrator's copy is held in the admin's own unit and covers that unit's tree. Billing Rule Reader's copy is the customer top unit's and covers the top unit's tree, which a child-unit admin's own copy does not reach. Billing Administrator keeps its entry unchanged (uac-r2 agreed 2026-11-04).
+- **Guards.** `RestrictedContentOwnerRoleGuardTests` expects the three tables, with new must-fire controls (Write on a set, each table missing, another depth, a fourth table). `Set-CustomerOwnerTeams.ps1` is data-driven from the file; its header and `tests/scripts/Set-CustomerOwnerTeams.Tests.ps1` cover the three privileges in `-Verify` and `-Apply`.
+- **uac-r2's condition (binding): the role passes `SecureBuRoleDepthAssertion` from every unit copy holders are assigned from, and its reach covers no Secure Record row.** New ArchTest `TheExtendedBillingRuleReader_PassesTheSecureCensus_FromEveryCustomerTopUnitsCopy_AndNeverReachesSecureRecord`, on the D-123 tree shape (Secure Record a direct child of the root, the customer top units siblings of it):
+  - **Result: passes.** `Evaluate` clause 1 gives no finding for the role at Deep from the copies of Customer, its Child and Grandchild, and OtherCustomer.
+  - Must-fire: the root's copy, and Global from a customer copy, give a finding naming each graded table.
+  - **Coverage note.** The census grades `prvReadsprk_Policy` and `prvReadsprk_ruleset` (`RestrictedContentPrivileges`). It does not grade `prvReadsprk_procedure`. For that privilege the test asserts reach directly through `SecureBuRoleDepthAssertion.Reaches`: false into Secure Record from every customer copy at Deep, true from the root's copy (the must-fire). Adding `sprk_procedure` to the census lists is a change to the census, not part of this round.
+- **Dev, read-only `-Verify` (2026-11-04).** `Set-CustomerOwnerTeams.ps1 -Verify` for Spaarke Business Unit 1 reports the role with `prvReadsprk_Policy` at Deep, no holders, and two drift lines: `prvReadsprk_ruleset` and `prvReadsprk_procedure` missing. That is expected until the owner applies the role.
+
+### Item 1 (ii): the rule-set list keeps only the sets the caller can Read (`2dc3decefb`)
+
+- `ListRuleSets` asks the caller's Read on each listed `sprk_ruleset` row (`CallerReadCheck.ScanAsync`, as the caller), after the Procedure check. A known deny leaves the set out. A missing answer for any set, or more sets than `MaxRuleSetReadChecks` (1000, the same ceiling as the Procedure check), is 403 `system_failure`; the cap is checked before any question.
+- **Deviation:** the filter is in the endpoint, not in `RuleSetService.ListAsync`. The endpoint is `ListAsync`'s only caller and already holds the Procedure filter; the service reads as the application and has no caller.
+- Section 11: `MaxRuleSetReadChecks` and `ReadableSetsOnlyAsync` are new private surface in an existing file. Existing: the Procedure check in the same method. Extension: it reuses `CallerReadCheck.ScanAsync` and the Procedure check's answer shapes. Cost of doing nothing: the list shows sets whose own routes answer 404.
+- Tests: an unreadable set is absent and one question is asked per set; the list and the by-id GET agree (an omitted set is the uniform 404 there); an unknown answer is 403; more than the cap is 403 with no question; exactly the cap is answered in full. The existing list tests now grant Read on their sets.
+
+### F2: deploy script (`d0c0c23266`)
+
+- `-Verify` loops the root role and every business-unit copy (`Get-RoleCopies`), reading both `teamroles_association` and `systemuserroles_association`, and names the copy in a team finding. The script parses with no error. There is no Pester file for this script.
+- Dev, read-only `-Verify`: 0 users and 0 teams across the root role and 5 copies. Its two gaps are `prvReadsprk_procedure` at Deep, not yet applied (owner).
+
+### F2: read-back (`4cd1aa8a82`)
+
+- On no answer from stage 3, the commit is proven only by what stage 3 alone writes: the version row at `RuleSetService.VersionIdFor(recordRule.Id, number)` whose `sprk_policy` is the record rule. The Exclude row is not evidence; a plain Exclude writes it at the same id.
+- The read-back and the close use `CancellationToken.None`.
+- Tests: an Exclude row from a plain Exclude with no version row is 500 `assignment.write_failed`, with no close and the finding left open. A committed change whose request is cancelled during stage 3 still reads back with an uncancellable token and closes.
+
+### F3: route coverage guard (`5221f855c7`)
+
+- **Choice: an in-host guard over the routing table, not a source scan.** `EveryMappedByIdRoute_ASetTheCallerCannotRead_IsTheUniform404` reads `EndpointDataSource` on the test host (`MapRuleSetEndpoints`) for patterns containing `{ruleSetId`, sends each with no Read on the set, and requires the uniform 404 bytes. It sees routes as mapped (group prefix and filters applied) and tests behaviour, so a filter that is attached but bypassed also fails it. It also requires the hand-written `ByIdRoutes` theory list to equal the routing table (8 routes), so every other theory covers every by-id route. Limit: it sees the routes `MapRuleSetEndpoints` maps; on 2026-11-04 no other mapper has a `{ruleSetId` route.
+- Must-fire control (kept): `TheRouteGuard_ReportsAByIdRouteWithoutTheSetFilter` maps an extra by-id route without the filter and requires the guard to report it (200).
+
+### F4: known limit
+
+- Step (B) uses Dataverse's Read answer on the record, as the caller, and applies no per-user No Access deny. References: uac-r2 owner decision N2 ("access a No Access wall can't remove per user is reported and hidden, not revoked") and uac-r2 round 77. It is the same as the internal record routes: `RecordRouteAccessAuthorizationFilter`, through `CallerRecordAccessProbe`, uses Dataverse's answer only. No call to `IsRecordAccessibleAsync` was added.
+
+### Seeding proofs (each file restored after)
+
+| Seed | Result |
+|---|---|
+| Read-back: old `ProcedureAssignmentService.cs` | both new tests failed; after the fix, 29/29 `Change_` passed |
+| Read-back: a cancellable read-back token | the cancellation test failed |
+| Role file at HEAD before item 1, against the new ArchTests | 4 failed |
+| Census test: Global depth | failed |
+| Role file at HEAD before item 1, against the new Pester tests | 30 passed, 5 failed |
+| List: the endpoint before (ii) | 4 failed (the exactly-the-cap must-not-fire passes, as it should) |
+| Route guard: an extra by-id route without the set filter in `MapRuleSetEndpoints` | guard failed, reporting that route (200) |
+| Route guard: the set filter removed from the publish route | guard failed |
+
+### Gates
+
+| Run | Result |
+|---|---|
+| Build (BFF) | 0 warnings, 0 errors |
+| Unit filter `RuleSet\|ProcedureAssignment\|SignalClosure\|BillingAdmin\|CallerReadCheck` | 882 passed, 0 failed |
+| ArchTests `RouteAuthorizationGuard\|RuleSetRolePrivilege\|ProcedureRolePrivilege\|RestrictedContentOwnerRole\|SecureBu\|RecordOwnerAssignmentCensus` | 262 passed, 0 failed |
+| Pester `Set-CustomerOwnerTeams.Tests.ps1` (Pester 5.7.1) | 35 passed, 0 failed |
+| Publish size (`git archive` short-path trees, `-c Release -r linux-x64`, `Compress-Archive`, 192 files each), this round vs the branch before it (`01924f383d`) | 137,287,256 B raw / 41,314,368 B zip to 137,290,092 B raw / 41,315,940 B zip: **+2,836 B raw (+1,572 B zip)**. No package. |
+
+- No Dataverse write, no role change on dev, no deploy. Dev reads were read-only (`-Verify`, metadata and row counts).
+
+## 089e auth pass 2 and fix round 3 (2026-11-04)
+
+### F2: the read-back after a no-answer stage 3 compares content, not only the row's parent
+
+- **Defect and location.** `ProcedureAssignmentService.CommittedAfterNoAnswerAsync` (called after the stage-3 `SendAsync` of `ChangeRuleAsync`). Two concurrent changes of the same rule on the same record compute the same version id (`RuleSetService.VersionIdFor(recordRule.Id, number)`). The read-back checked only that the row at that id belongs to the record rule, so a no-answer stage 3 that had NOT committed was reported committed when the other change's row was there, and the close ran for a change that was not saved.
+- **Fix.** The read-back also reads the content columns stage 3 writes from `merged`: `sprk_versionnumber`, `sprk_ruletype`, `sprk_rulebody`, `sprk_messagetemplate`, `sprk_shortheadline`, `sprk_consequence`, `sprk_proposalstatus`, `sprk_clausereference`, `sprk_clauselocation` and `sprk_basedonversion`. It reports committed only if they all equal what this change would have written (`VersionContentMatches`; a missing and an empty text are the same). Equal content counts as committed: it is a truthful answer, because the other change wrote what this one would have. Different content is not committed: the existing 500 `assignment.write_failed`, and no close runs.
+- **Tests.** Must-fire: the row seeded with a different body, and (one test, four shapes) a different template, headline, consequence and based-on version, are 500 and close nothing. Equal content is Done and the close runs. K7: a re-change after a removal whose stage 3 gives no answer and does not commit, with the earlier version row present, is 500 and writes no new version.
+- **Seeding proof.** With the content comparison removed (`VersionContentMatches` dropped from `committed`), the two must-fire tests failed (2 of 84 in `ProcedureAssignmentServiceTests`); the file was restored byte-identical (checked with `cmp`).
+
+### Known limits (K1 to K7)
+
+- **K1: `Reaches` takes no privilege.** `SecureBuRoleDepthAssertion.Reaches(depth, anchor, owner, tree)` is the depth model alone, so a per-privilege loop around it repeats one assertion. `RestrictedContentOwnerRoleGuardTests` now asserts it once per case (the customer copies at the file's depth, the root's copy at the file's depth, Global from a customer copy).
+- **K2: the list cap answered the wrong status.** More than `MaxRuleSetReadChecks` (1000) listed sets is not a rights failure but a result too large for one pass. The list now answers 422 `ruleset.result_truncated` with the service's own message (`RuleSetService.TooManyRuleSetsMessage`, shared with `ListAsync`), instead of 403 `system_failure`. A rights answer missing for any set is still 403 `system_failure`. The cap is still checked before any rights question.
+- **K3: DEPLOY ORDER (binding).** Apply the Billing Rule Reader extension (`config/billing-rule-readers-role.json`: `prvReadsprk_Policy`, `prvReadsprk_ruleset`, `prvReadsprk_procedure` at Deep) BEFORE, or TOGETHER WITH, the BFF deploy that carries 089e. The list now keeps only the sets the caller can Read, and a child-unit admin's own copy does not reach the customer top unit's sets: without the extension that admin's rule-set list is empty.
+- **K4: native reach, owner-approved parity, recorded for visibility.** The list and the by-id answers follow the caller's native Read on `sprk_ruleset` (with its role depth) plus the core-record rights check. A caller whose native reach is wider than another's therefore sees more sets. This is the same as the existing internal record routes, and it is the fix-round-2 F4 known limit: F4 (a), narrowing by `IsRecordAccessibleAsync`, was withdrawn by uac-r2 because it would regress role and share readers. Recorded so a later reader does not take it for an oversight; not changed.
+- **K5: the route guard matches on `{ruleSetId`.** `EveryMappedByIdRoute_ASetTheCallerCannotRead_IsTheUniform404` selects by-id routes by a pattern containing `{ruleSetId`. A by-id route of rule sets that names its parameter differently, or is mapped outside `MapRuleSetEndpoints`, is not seen by it. On 2026-11-04 there is none.
+- **K6: a plain apply run did not fail on a team holder.** `Deploy-EbillingBillingAdminRole.ps1` printed a team holding the role only as a gap in the summary and exited 0 unless `-Verify`. A plain run that finds one now prints it and exits 1, as `-Verify` does. No other behaviour changed (the other gaps a plain run collects describe what it has just applied). There is no Pester file for the script: checked by parsing (0 errors) and by reading the code.
+- **K7: a re-change after a removal.** After a removal, the record rule keeps its earlier versions, so the new version has a number above them and a new id. If stage 3 then gives no answer and does not commit, the row at the new id is absent while an earlier version row exists. That is not committed (500, no close). Covered by a test; it passed before and after F2 (it pins the existing behaviour).
+
+### uac-r2: the assertion's table list
+
+- **Agreement (2026-11-04).** `sprk_procedure` is added to `SecureBuRoleDepthAssertion.RestrictedContentPrivileges`, with the comment "sprk_procedure added by ebilling 089e with uac-r2 agreement, 2026-11-04", and the role test's must-fire controls cover it.
+- **Status: NOT APPLIED. Stopped as the brief instructs.** With the entry added, one other caller fails: `SecureBuRoleDepthAssertionTests.RestrictedContentPrivileges_CoverTheFiveHardDenyTables_UnderTheirLiveNames` (`tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertionTests.cs`, ~:1451). It pins the list to exactly the five hard-deny tables and requires it to equal `RecordOwnershipResolver.RestrictedContentTables` ("no more and no fewer"). `sprk_procedure` is not in that resolver set. Run: `SecureBu` filter, 175 passed, 1 failed. Nothing else failed. The change was reverted; the list is unchanged. Decision needed from the owner of that pin: add `sprk_procedure` to both sets, or widen the pin to allow a list entry outside the resolver set.
+- **Role ArchTest note.** The Billing Administrator `prvReadsprk_procedure` entry of the until-191 exception in `ProcedureRolePrivilegeGuardTests` is annotated "uac-r2 agreed 2026-11-04".
+
+### Gates
+
+| Run | Result |
+|---|---|
+| Build (BFF) | 0 warnings, 0 errors |
+| Unit filter `RuleSetEndpointsTests\|ProcedureAssignmentServiceTests\|ProcedureAssignmentEndpointsTests\|RuleSetService` | 841 passed, 0 failed |
+| ArchTests `RestrictedContentOwnerRoleGuard\|RouteAuthorizationGuard\|SecureBu\|RuleSetRolePrivilege\|ProcedureRolePrivilege` | 203 passed, 0 failed |
+| Pester `Set-CustomerOwnerTeams.Tests.ps1` (Pester 5.7.1) | 35 passed, 0 failed |
+
+- No Dataverse write, no role change on dev, no deploy.
