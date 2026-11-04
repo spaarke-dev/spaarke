@@ -773,6 +773,25 @@ imported. The POML expected P0/P1 to work without the column. I did not gate the
 skip the hold. **Order:** run the script (or import SpaarkeMaster) before deploying this BFF build. Owner choice if that order cannot be kept: a
 phase-gated read at P0/P1.
 
+**Full route list (pass-1 review K4, read from the code).** While the column is missing, each of these answers 503 (a read fault is never "not held"):
+
+| Route | Entry point | Hold read | Answer |
+|---|---|---|---|
+| Approve | `InvoiceApprovalService` ~:534 | `CheckAsync` | 503 unavailable |
+| Approval-state GET | `InvoiceApprovalEndpoints.cs` ~:83 (`GetApproval` catch) from `InvoiceApprovalService.GetAsync` ~:326 | `CheckAsync` | 503 unavailable |
+| Return to Firm | `InvoiceRejectReturnService` ~:423 | `CheckAsync` | not decided (unavailable) |
+| Line and header correction | `InvoiceCorrectionService` ~:407 and ~:700 | `CheckAsync` | unavailable |
+| AP export: create batch and re-check | `ApExportService` ~:331 and ~:440 | `HeldInvoicesAsync` | unavailable |
+| AP candidates GET | `ApExportEndpoints.cs` ~:199 (`GetCandidates` catch) from `ApExportService.ListCandidatesAsync` ~:575 | `HeldInvoicesAsync`, only when Approved, unbatched invoices exist | 503 unavailable |
+| Adjustment rule options, and a rule-citing adjustment add (review K2) | `InvoiceAdjustmentService` ~:259 and ~:469 | `CheckAsync` | unavailable |
+| Intake correction naming a firm (review K1) | `InvoiceSubmissionService.JudgeCorrectionAsync` ~:1687; persister commit ~:1237 | `IsHeldAsync` | 503 record_unavailable at the intake; Retry at commit |
+
+**The POML's P0/P1 expectation ("the column can be absent without blocking ordinary approval") is not met.** Approval, the approval-state read, the
+AP candidates list, and (after review K1 and K2) a firm-naming intake correction and the adjustment rule options all fail closed on an environment
+without the column, at every phase. The mitigation is the binding deploy pre-check in 15.9 (the column exists, is secured, and carries the Writers and
+Readers grants before any BFF build with 095c-5 deploys), plus the SpaarkeMaster import on new environments. **Owner decision pending:** whether this is
+acceptable, or whether a phase-gated read at P0/P1 is wanted instead. Code change for K4: none.
+
 ### 15.4 Component justification (CLAUDE.md section 11)
 
 - **`sprk_firmhold`.** Existing: the submission's stored hold. Extension: not enough, because the link from submission to invoice is the bypass. Cost
@@ -797,6 +816,10 @@ Main session, with the owner's go and the uac-r2 notice:
 pwsh scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply
 pwsh scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Verify
 ```
+
+**Pass-1 review K3: -WhatIf again, after the backfill was extended (2026-11-04, spaarkedev1, read-only, no `-Apply`).** Preconditions all OK as above; the
+column is still absent. 6 submissions are linked to invoices. **BACKFILL COUNT (submission hold): 0. BACKFILL COUNT (empty firm): 8** (the same 8 legacy
+invoices that have no firm). Distinct invoices `-Apply` would write: 8. "DRY RUN complete - nothing was written." `-Apply` was not run.
 
 ### 15.6 095c-4 review fixes
 
@@ -840,7 +863,14 @@ Seed proofs (each mutation applied, built, the named tests run, the file restore
 ### 15.8 Known limits
 
 - The deviation in 15.3.
-- Adjustments still check "no firm" only (14.6); approval and export refuse a held invoice.
+- Adjustments: the 14.6 limit is closed by pass-1 review K2 (15.10). The rule options and a rule-citing add now use `InvoiceFirmHold.CheckAsync` (app-only)
+  and refuse NoFirm or Held with `ebilling.adjustment.firm_missing`, the held sentence for Held, as approve does.
+- A human System Administrator can always write a secured column (K6). The app-only read returns null if a BFF application user is neither in the
+  Writers profile nor a System Administrator, and a null reads as "no hold". The script's `-Verify` precondition p2 (the profile's members are exactly
+  the BFF application users) and p6 (each BFF user's System Administrator role), and the dev setup (both BFF application users hold System
+  Administrator), cover this.
+- The correction prefill (`JudgeCorrectionPrefillAsync`) asks the intake guard with the invoice's own firm; for an invoice held with a firm set natively
+  the guard now refuses, and the prefill reports it as `no_submission`, not as a held invoice. A read fault in the guard is passed on as the prefill's 503.
 - current-task.md, TASK-INDEX.md and the POML status are not updated here; the main session owns them.
 
 ### 15.9 Deploy order (uac-r2, 2026-11-04, binding)
@@ -853,3 +883,18 @@ Before deploying any BFF build that carries 095c-5, uac-r2 reads the attribute m
 - it carries the Writers grant (read, create, update) and the Readers grant (read).
 
 If any of these is missing, uac-r2 does not deploy. The column is created by `Set-EbillingInvoiceFirmHoldColumn.ps1 -Apply` (or, on a new environment, by the SpaarkeMaster import). It runs in the ebilling main session, after the owner's go, with notices sent before and after.
+
+### 15.10 095c-5 pass-1 review (2026-11-04)
+
+Branch `task/ebilling-095c-5-fix1`. Findings are described as defect and location only; the steps to reach them are not recorded here.
+
+| # | Defect | Location | Disposition |
+|---|---|---|---|
+| K1 | A correction compared the writable firm columns only, so a held invoice whose firm column was set could be superseded by a correction naming that firm, by a new invoice with no hold | `InvoiceSubmissionService.JudgeCorrectionAsync` (~:1673, intake) and `InvoiceSubmissionPersister` (~:1235, commit) | **Fixed.** Both read the hold app-only (`InvoiceFirmHold.IsHeldAsync`) when the request names a firm and treat a held target like a no-firm target: refused `different_firm` (409; `CorrectionDifferentFirm` at commit), the same code and sentence as the existing refusal. A hold read fault is 503 `record_unavailable` at the intake and Retry at commit. A held no-firm invoice corrected without a firm is still allowed (it stays held). Tests: `InvoiceCorrectionIntakeTests` (K1 block), `InvoiceSubmissionPersisterTests.NoFirm` (K1 block). Seed proof: the intake held check removed, 2 of 2 must-fire cases fail; restored, file SHA-256 identical. |
+| K2 | Adjustments checked the firm column only | `InvoiceAdjustmentService` (~:251 rule options, ~:457 cited add) | **Fixed.** Both use `InvoiceFirmHold.CheckAsync` (app-only) and refuse NoFirm or Held with the existing `ebilling.adjustment.firm_missing`; the sentence follows the need (`AdjustmentCodes.FirmDetailFor`), as approve does. A fault is `Unavailable`. Tests: `InvoiceAdjustmentServiceTests` (held with a firm: rule options and cited add refused; ordinary firm: allowed). |
+| K3 | A legacy invoice with no firm has no hold of its own and no linked submission hold | `Set-EbillingInvoiceFirmHoldColumn.ps1` (e) (~:465-472) | **Fixed in the script.** The backfill also sets the hold on every invoice with an empty `sprk_vendororg` and a blank `sprk_firmhold`. `-WhatIf` reports the submission-hold and empty-firm counts separately (15.5: 0 and 8 on dev). `-Verify` fails for either gap. Idempotent: a second `-Apply` finds both lists empty. No script test pins the backfill query (the agreement test pins the hold value and the profiles). |
+| K4 | The deviation's route list was incomplete | notes 15.3 | **Notes only.** The full list is in 15.3, including the approval-state GET and the AP candidates GET. The POML's P0/P1 expectation is not met; mitigation is 15.9 and the SpaarkeMaster import. **Owner decision pending.** |
+| K5 | Tests proved less than their names | `InvoiceFirmHoldColumnTests` (~:102, ~:177-181) | **Fixed.** The "correction state" name was dishonest (the test covers approve and Return to Firm): renamed, and `InvoiceCorrectionServiceTests.HeldByTheInvoiceColumnAlone_Correction_Is409FirmMissing_WritesNothing` covers `CorrectAsync` (line and header) with the invoice hold alone and a firm set. The caller-token test's route half duplicated `TheInvoiceHoldAlone_IsHeld` and was removed; the name now says what it proves (`CheckAsync` answers Held). |
+| K6 | The app-only read depends on the BFF user's profile | notes 15.8 | **Notes only.** Bullet added to 15.8. |
+
+Publish size: no new package, endpoint or DI registration, so no publish-size delta applies.

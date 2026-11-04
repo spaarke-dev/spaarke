@@ -50,14 +50,17 @@
       (d) publish sprk_invoice - only when this run wrote metadata;
       (e) BACKFILL: every invoice that a linked submission holds for a firm (the reason ebilling.submission.firm_missing, the firm_missing
           pipeline finding, a rules.not_checked line finding with that cause, or findings that cannot be parsed - the BFF's
-          InvoiceFirmHold.IsHeld) and whose sprk_firmhold is empty gets sprk_firmhold = ebilling.submission.firm_missing. Only after (b)
-          passed. -WhatIf and -Verify only count.
+          InvoiceFirmHold.IsHeld) and whose sprk_firmhold is empty gets sprk_firmhold = ebilling.submission.firm_missing. Task 095c-5
+          review K3: so does every invoice whose sprk_vendororg is empty (a legacy no-firm invoice has no submission hold) and whose
+          sprk_firmhold is blank (null, empty or whitespace), so a firm written to the column directly cannot lift the hold. Only after
+          (b) passed. -WhatIf reports the two counts separately (submission hold, empty firm) and the distinct total; -Verify only counts.
 
     A second -Apply reports every item OK and writes nothing (no publish either).
 
     -VERIFY passes only when the column exists and IS secured, the writer profile holds read=4 create=4 update=4, the reader profile holds
     read=4 create=0 update=0, NO other profile can create or update it (the System Administrator profile excepted), and no held invoice is
-    left without its hold (e).
+    left without its hold (e): neither an invoice a linked submission holds, nor an invoice with an empty sprk_vendororg, has a blank
+    sprk_firmhold.
 
     WHAT IT IS NOT. Not an access column: it decides no visibility. It is refused to the BFF's app-only generic writers
     (InheritedAccessPermission.AccessColumns, sprk_invoice) together with sprk_invoice.sprk_vendororg. Rollback: un-secure the column by
@@ -464,17 +467,27 @@ function Test-SubmissionHeld($s) {
 }
 $submissions = Get-AllPages "sprk_invoicesubmissions?`$select=sprk_invoicesubmissionid,_sprk_invoice_value,sprk_outcomereasoncode,sprk_findingsjson&`$filter=_sprk_invoice_value ne null"
 $heldInvoices = @($submissions | Where-Object { Test-SubmissionHeld $_ } | ForEach-Object { $_._sprk_invoice_value.ToString().ToLowerInvariant() } | Sort-Object -Unique)
-$noFirm = @((Get-AllPages "$($tableMeta.EntitySetName)?`$select=$($Table)id&`$filter=_sprk_vendororg_value eq null")).Count
-Report 'INFO' "$($submissions.Count) submission(s) linked to an invoice read; $($heldInvoices.Count) invoice(s) held for a firm by a linked submission; $noFirm invoice(s) with no firm"
-$toSet = @()
+# 095c-5 review K3: a legacy invoice with NO firm (sprk_vendororg empty) has no submission hold and no own hold, yet the BFF refuses it as
+# "no firm" only while the firm column stays empty. Its hold is set too, so a firm written to the column directly cannot lift it.
+$noFirmIds = @((Get-AllPages "$($tableMeta.EntitySetName)?`$select=$($Table)id&`$filter=_sprk_vendororg_value eq null") | ForEach-Object { $_."$($Table)id".ToString().ToLowerInvariant() })
+Report 'INFO' "$($submissions.Count) submission(s) linked to an invoice read; $($heldInvoices.Count) invoice(s) held for a firm by a linked submission; $($noFirmIds.Count) invoice(s) with no firm"
+# A blank hold is what InvoiceFirmHold.IsInvoiceHeld treats as no hold: null, empty or whitespace.
+$withHoldNow = @()
 if ($attr) {
-    $withHoldNow = @((Get-AllPages "$($tableMeta.EntitySetName)?`$select=$($Table)id&`$filter=$Column ne null") | ForEach-Object { $_."$($Table)id".ToString().ToLowerInvariant() })
-    $toSet = @($heldInvoices | Where-Object { $_ -notin $withHoldNow })
+    $withHoldNow = @((Get-AllPages "$($tableMeta.EntitySetName)?`$select=$($Table)id,$Column&`$filter=$Column ne null") |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_.$Column) } | ForEach-Object { $_."$($Table)id".ToString().ToLowerInvariant() })
 }
-else { $toSet = $heldInvoices }
-Report 'INFO' "BACKFILL COUNT: $($toSet.Count) invoice(s) need $Column = $HoldValue"
-if ($toSet.Count -eq 0) { Report 'OK' "every invoice held by a linked submission carries its own hold" }
-elseif ($Verify) { foreach ($id in $toSet) { Report 'MISSING' "invoice $id is held by a linked submission but $Column is empty" } }
+$submissionToSet = @($heldInvoices | Where-Object { $_ -notin $withHoldNow })
+$emptyFirmToSet = @($noFirmIds | Where-Object { $_ -notin $withHoldNow })
+$toSet = @($submissionToSet + $emptyFirmToSet | Sort-Object -Unique)
+Report 'INFO' "BACKFILL COUNT (submission hold): $($submissionToSet.Count) invoice(s) held by a linked submission need $Column = $HoldValue"
+Report 'INFO' "BACKFILL COUNT (empty firm): $($emptyFirmToSet.Count) invoice(s) with no firm need $Column = $HoldValue"
+Report 'INFO' "BACKFILL COUNT (distinct, written by -Apply): $($toSet.Count) invoice(s)"
+if ($toSet.Count -eq 0) { Report 'OK' "every invoice held by a linked submission, and every invoice with no firm, carries its own hold" }
+elseif ($Verify) {
+    foreach ($id in $submissionToSet) { Report 'MISSING' "invoice $id is held by a linked submission but $Column is empty" }
+    foreach ($id in $emptyFirmToSet) { Report 'MISSING' "invoice $id has no firm but $Column is empty" }
+}
 elseif ($IsDryRun) { foreach ($id in $toSet) { Report 'WOULD' "set $Table($id).$Column = $HoldValue" } }
 elseif (-not $permissionsOk -or -not $attr) { Report 'FAIL' "the backfill did not run: the column or its permissions are not in place ((s) to (b))" }
 else {
@@ -494,7 +507,7 @@ if ($IsDryRun) {
     else { Write-Host "`nDRY RUN complete - nothing was written." -ForegroundColor Cyan }
     exit 0
 }
-if ($gaps.Count -eq 0) { Write-Host "`nPASS: $Table.$Column exists and is field-secured, the BFF writer profile holds read/create/update, the reader profile holds read, no other profile (the System Administrator profile excepted) can create or update it, and every held invoice carries its hold." -ForegroundColor Green; exit 0 }
+if ($gaps.Count -eq 0) { Write-Host "`nPASS: $Table.$Column exists and is field-secured, the BFF writer profile holds read/create/update, the reader profile holds read, no other profile (the System Administrator profile excepted) can create or update it, and every held invoice, and every invoice with no firm, carries its hold." -ForegroundColor Green; exit 0 }
 Write-Host "`nFAIL ($($gaps.Count)):" -ForegroundColor Red
 $gaps | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
 exit 1
