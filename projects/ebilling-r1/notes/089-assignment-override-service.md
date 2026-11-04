@@ -475,3 +475,18 @@ The Pester must-fire cases (Global, an extra privilege, a member without the mar
 - **K: the member check is point in time.** A member who later loses Billing Administrator keeps Read on the rules until someone runs `-Verify` (or H13 re-checks, once provisioning's H7c ships). The owner teams' membership checks work the same way. Not changed here.
 - **K: `RetrieveUserPrivileges` counts the marker at any depth and through any team.** A user who holds `prvWritesprk_ruleset` some other way passes the member check. The BFF's own billing-admin check (`CallerHoldsPrivilegeAsync`) answers the same way, so the two agree.
 - **K: the root copy of the role exists** (Dataverse creates roles in the root). It is assigned to nobody and `-Verify` reports any assignment of it.
+
+### 089d: uac-r2 review (2026-11-04)
+
+uac-r2 approved 089d (43a5b37051) with two binding notes. Both are to be done in the 089d fix round.
+
+1. **Pin the role's member-privilege inheritance.** Set "Member's privilege inheritance" to Team privileges only (`isinherited` = 0).
+   - `-Apply` creates or sets the role with `isinherited` = 0.
+   - `-Verify` fails if it is 1.
+   - Add a guard test or a Pester case for each of these.
+   - Why: the isolation argument depends on the team's Deep being evaluated from the team's business unit.
+2. **A live proof is required before the first customer with a child unit relies on this.** A member homed in a child unit must be able to read a top-unit Billing rule, and must NOT be able to read a rule owned by Secure Record Owners.
+   - Add this to Phase 7a of the deployment guide and to the provisioning notice.
+   - For a proof on dev earlier, a test child unit under BU1 is needed, which is a live change and needs the owner's go.
+
+**Who adds members:** this is an owner question. The proposed default is that an operator adds each child-unit billing admin following guide Phase 7a, and `-Verify` catches mistakes.
