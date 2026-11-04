@@ -17,7 +17,7 @@
 
 ## Dev BFF deploy role (owner confirmed 2026-11-03; R3 rollout record §17, PR #2554)
 - **Each deploy:** owner's go per build in THIS session; peer OKs on the master SHA; pre-checks (`Set-ChildRecordCreatorPersonSchema.ps1 -Verify`, 225-name settings check, ebilling's 6 keys, both write switches true); `scripts/Save-BffDevRollbackSnapshot.ps1`; deploy; `scripts/Test-BffDevDeployReadback.ps1`; my 30-minute gate (copy `gated763.sh`); record in `docs/procedures/dev-bff-deploy-coordination.md`.
-- **Queued for the next deploy:** PR #2550 (R3: restores ExternalUserContextEndpoint `</summary>`; comments/tests only); #2551 (field-mapping 020, aef86b89f7; reviewed OK with notes). field-mapping post-deploy checks: 5xx on POST /api/v1/child-records/*; test-row creates need the owner's OK in field-mapping's session.
+- **Queued for the next deploy:** PR #2550 (R3: restores ExternalUserContextEndpoint `</summary>`; comments/tests only); #2551 (field-mapping 020, aef86b89f7; reviewed OK with notes); #2562 (field-mapping 042b, 0d4aa87ee0, my AC15 OK with notes; new fail-closed 409s per their §15.4 rows 5-8; they run read-only App Insights checks after the deploy). field-mapping post-deploy checks: 5xx on POST /api/v1/child-records/*; test-row creates need the owner's OK in field-mapping's session.
 - **ebilling's master PR** (wide: 60+ files incl. 086/089a/089b/089d/095a-c/hand-made batch fix/app sync) is BLOCKED on 095c-5. When it comes: review the whole PR diff; deploy request must carry the pre-deploy count of Stored Files on invoices of Secure records (dev: 1) and the K4 backfill-after-gate if > 0; `StoredFileReconcileEnabled` stays false until that gate and the NFR-05 census pass; 095c-4 approval refusal is a precondition before P2 is on anywhere. Order after the BFF gate: `Deploy-EbillingFormsViews.ps1` (legacy CSV/JSON Document fields off the batch form; owner go in ebilling's session).
 - **Watches:** field-mapping FR-40 live proof after the next real upload/create; word-add-in Office smoke after the owner's two Outlook saves; SPA registration message (85fbba3f64) waits for the next SPA deploy (`deploy-external-spa.yml` on a tag).
 
@@ -41,7 +41,7 @@
   - Accepted known limits: 086 K1/K-P1 (my 191)/K-P2/K-P3; 089a+086 K3/K4; Add Existing Communication on AP emails subgrid.
   - Owner decisions taken in ebilling's session: no-firm invoices stay externally visible; Billing Administrator may read rules org-wide (delivered by 089d, not Global).
 - **field-mapping** (`spaarke-wt-field-mapping-server-write-pa-5c`):
-  - **042b** AC15 DONE 2026-11-04: OK with notes on cfebe65f9b..4eef7f7f00 (row 11 K3 accepted; create twin K3 row to add; Q3 thread filing named in PR; #2561 next). Watch: their PR carries my verdict line.
+  - **042b** merged as #2562 (0d4aa87ee0) with my verdict line; row 12 added. **042c** (#2561: core pair via `CallerWriteAuthorization.PairTargetAsync`, core first in the owner question) waits for the owner's OK in field-mapping's session; diff comes to me before merge.
   - **#2561** class F, follow-up task right after 042b: core record first in step 7's owner question (catalog) **plus** the caller's AppendTo check on the named core (confirmed missing). Tests: Secure core + ordinary subject → core's owner; no AppendTo on core → refused; agree → unchanged; Signal and DR each.
   - 042a; 043 (create-path link write, #2524 sibling); any #2523 change.
 
