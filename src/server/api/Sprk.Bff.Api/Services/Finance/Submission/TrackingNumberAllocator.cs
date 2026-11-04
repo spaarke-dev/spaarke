@@ -48,6 +48,18 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// the scope column to SystemRequired is refused by the platform (<c>0x80040200</c>); it re-reads the phase once (callers refused together
 /// share one read, <see cref="TrackingScopePhaseCache.GetAsync"/>) and retries in the new phase, or answers the retryable
 /// <see cref="TrackingNumberReasons.Unavailable"/> - never a 500 and never a second number.</para>
+/// <para><b>Never reuse a no-firm number (task 095d-1a, K4; owner decision 2026-11-04).</b> A renumber moves a submission out of the <c>none</c>
+/// scope and overwrites its sequence, so without more the <c>none</c> scope would hold no trace of the n it gave up and the next no-firm intake of
+/// the same firm invoice number would be numbered with it again. The renumber therefore writes the row's old <c>none</c>-scope sequence to
+/// <see cref="PreviousSequenceColumn"/> in the same update. The <c>none</c> scope's next-number read is the highest of two bounded reads, in this
+/// order: the sequences of the rows still in the <c>none</c> scope, then the previous sequences of the rows with this firm invoice number (a
+/// renumber only ever leaves <c>none</c>, so they all refer to it). The order matters: a row that moves between the two reads was seen by the
+/// first, and one that moved before the first is seen by the second. The scope key still decides every race; the read only raises the floor.
+/// While the column does not exist the renumber is refused (<see cref="TrackingNumberReasons.SchemaMissing"/>, nothing sent), so no row can have
+/// left <c>none</c> yet and the create falls back to the scope-only read, logging a warning once.</para>
+/// <para><b>Known limit (K4 residue).</b> The previous-sequence read finds rows by their firm invoice number. The undo of a commit
+/// (<c>SubmissionCommitGate</c>) clears that number, so a renumbered row whose commit were undone afterwards would hide its previous sequence.
+/// The undo runs only inside the intake's commit, before assign-firm can renumber the row, so this is not a path today.</para>
 /// </remarks>
 public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
 {
@@ -106,9 +118,18 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     /// <summary>Task 095c: the alternate key on (<c>sprk_trackingnumber</c>, <c>sprk_trackingscope</c>) relied on from P2.</summary>
     internal const string ScopeKeyName = "sprk_invoicesubmission_scope_trackingnumber";
 
+    /// <summary>
+    /// Task 095d-1a (K4; owner decision 2026-11-04, "new column, never reuse"): <c>sprk_invoicesubmission.sprk_previoussequence</c>, a whole number
+    /// (Integer, 1 to 2147483647, not field-secured). The sequence a submission held in the <c>none</c> scope before a renumber moved it into a
+    /// firm's scope. Written only by <see cref="RenumberSubmissionAsync"/>, in the submission update of the renumber transaction; read only by
+    /// the <c>none</c> scope's next-number read, which counts it so a number that left the scope is not issued again. Created by
+    /// <c>scripts/ebilling/Deploy-EbillingSubmissionPreviousSequenceColumn.ps1</c> (pinned by <c>SubmissionPreviousSequenceColumnAgreementTests</c>).
+    /// </summary>
+    internal const string PreviousSequenceColumn = "sprk_previoussequence";
+
     /// <summary>The columns this service writes; a caller's <c>fields</c> must not name them.</summary>
     private static readonly string[] OwnedColumns =
-        [SubmissionIdColumn, FirmColumn, FirmInvoiceNumberColumn, SequenceColumn, TrackingNumberColumn, ScopeColumn];
+        [SubmissionIdColumn, FirmColumn, FirmInvoiceNumberColumn, SequenceColumn, TrackingNumberColumn, ScopeColumn, PreviousSequenceColumn];
 
     private static readonly string[] ExistingRowColumns = [FirmColumn, FirmInvoiceNumberColumn, SequenceColumn, TrackingNumberColumn];
 
@@ -116,9 +137,14 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     private const string VersionNumberColumn = "versionnumber";
 
     /// <summary>Task 095d-1a (F4): what the renumber's precondition read needs: the row version, the scope and the firm, the sequence and the
-    /// numbers the row holds. Read only at P2, where the scope column exists.</summary>
+    /// numbers the row holds. Read only at P2, where the scope column exists. It also names <see cref="PreviousSequenceColumn"/>: a column that
+    /// does not exist yet faults this read, before anything is sent, and that fault is the renumber's schema check (K4).</summary>
     private static readonly string[] RenumberRowColumns =
-        [VersionNumberColumn, ScopeColumn, FirmColumn, FirmInvoiceNumberColumn, SequenceColumn, TrackingNumberColumn];
+        [VersionNumberColumn, ScopeColumn, FirmColumn, FirmInvoiceNumberColumn, SequenceColumn, TrackingNumberColumn, PreviousSequenceColumn];
+
+    /// <summary>Task 095d-1a (K4): "'{table}' entity doesn't contain attribute with Name = '{column}'", <c>0x80041103</c>: a query names a column the
+    /// environment does not have. Measured on dev 2026-11-04 with a read-only fetch of <c>sprk_previoussequence</c> before it existed (HTTP 400).</summary>
+    private const int AttributeDoesNotExistFault = unchecked((int)0x80041103);
 
     /// <summary>Task 095c: "Attribute 'x' cannot be NULL", <c>0x80040200</c>: a SystemRequired column was missing from the write (measured in
     /// dev, notes/022 and notes/027). Dataverse refuses the write whole.</summary>
@@ -310,6 +336,10 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     /// <see cref="RenumberOutcome.AlreadyRenumbered"/> (its held number, nothing sent, no second number); a row that is not a no-firm row in the
     /// <c>none</c> scope is refused (<see cref="TrackingNumberReasons.NotUnnumbered"/>). The update's <c>IfRowVersionMatches</c> then pins the
     /// state that was read at write time, so a change between the read and the write is the transaction's <c>Conflict</c>.</para>
+    /// <para><b>Previous sequence (K4).</b> The same read gives the row's <c>none</c>-scope sequence, which the submission update writes to
+    /// <see cref="PreviousSequenceColumn"/> (the sequence read at the version the update is conditioned on). The read names that column, so an
+    /// environment that does not have it yet faults here, before anything is sent, and the renumber answers
+    /// <see cref="RenumberOutcome.Refused"/> with <see cref="TrackingNumberReasons.SchemaMissing"/>.</para>
     /// <para><b>Lost race.</b> A key fault on the submission update (index 0, or no index) is a race, as is <c>0x80040237</c> at index 0: on that
     /// update the only unique indexes are the two keys (<see cref="IsLostRaceOnTheSubmissionUpdate"/>). Both are refused whole.</para>
     /// </remarks>
@@ -349,7 +379,8 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
             return RenumberResult.Refused(TrackingNumberReasons.ScopeKeyInactive);
         }
 
-        if (await DecideFromStateAsync(submissionId, rowVersion, firmId, number, ct).ConfigureAwait(false) is { } decided)
+        var state = await DecideFromStateAsync(submissionId, rowVersion, firmId, number, ct).ConfigureAwait(false);
+        if (state.Decided is { } decided)
         {
             return decided;
         }
@@ -377,7 +408,7 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
             {
                 new UpdateRequest
                 {
-                    Target = BuildRenumberUpdate(submissionId, rowVersion, firmId, next, trackingNumber, apply.SubmissionFields),
+                    Target = BuildRenumberUpdate(submissionId, rowVersion, firmId, next, trackingNumber, state.PreviousSequence, apply.SubmissionFields),
                     ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches,
                 },
             };
@@ -453,15 +484,31 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     /// firm's scope): <see cref="RenumberOutcome.Refused"/> with <see cref="TrackingNumberReasons.NotUnnumbered"/>. A renumber moves a
     /// no-firm submission into a firm's scope and nothing else: it never moves a firm's submission to another firm.</item>
     /// </list>
+    /// Before all of these, a read that faults because <see cref="PreviousSequenceColumn"/> does not exist is
+    /// <see cref="RenumberOutcome.Refused"/> with <see cref="TrackingNumberReasons.SchemaMissing"/> (K4). When it goes on, the state also carries
+    /// the row's sequence, the value the renumber writes to <see cref="PreviousSequenceColumn"/>.
     /// </summary>
-    private async Task<RenumberResult?> DecideFromStateAsync(
+    private async Task<RenumberState> DecideFromStateAsync(
         Guid submissionId, string rowVersion, Guid firmId, string firmInvoiceNumber, CancellationToken ct)
     {
-        var existing = await FindExistingAsync(submissionId, RenumberRowColumns, ct).ConfigureAwait(false);
+        Entity? existing;
+        try
+        {
+            existing = await FindExistingAsync(submissionId, RenumberRowColumns, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsPreviousSequenceColumnMissing(ex))
+        {
+            // Nothing is sent, so nothing is written: a renumber without the column could not record the number it gives up (K4).
+            _logger.LogWarning(ex,
+                "{Code}: submission={SubmissionId} - {Column} does not exist in this environment yet (run Deploy-EbillingSubmissionPreviousSequenceColumn.ps1); nothing written",
+                TrackingNumberReasons.SchemaMissing, submissionId, PreviousSequenceColumn);
+            return RenumberState.Stop(RenumberResult.Refused(TrackingNumberReasons.SchemaMissing));
+        }
+
         if (existing is null)
         {
             _logger.LogWarning("Submission {SubmissionId}: renumber refused, the row no longer exists; nothing written", submissionId);
-            return RenumberResult.Conflict();
+            return RenumberState.Stop(RenumberResult.Conflict());
         }
 
         var heldVersion = existing.GetAttributeValue<long?>(VersionNumberColumn)?.ToString(System.Globalization.CultureInfo.InvariantCulture)
@@ -470,7 +517,7 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
         if (!string.Equals(heldVersion, rowVersion.Trim(), StringComparison.Ordinal))
         {
             _logger.LogWarning("Submission {SubmissionId}: renumber refused, the row changed since the caller read it; nothing written", submissionId);
-            return RenumberResult.Conflict();
+            return RenumberState.Stop(RenumberResult.Conflict());
         }
 
         if (!string.Equals(existing.GetAttributeValue<string>(FirmInvoiceNumberColumn)?.Trim(), firmInvoiceNumber, StringComparison.Ordinal))
@@ -488,7 +535,7 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
             _logger.LogInformation(
                 "Submission {SubmissionId} is already renumbered into its firm's scope with tracking sequence {Sequence}; nothing written", submissionId, heldSequence);
             _logger.LogDebug("Submission {SubmissionId} tracking number {TrackingNumber}", submissionId, heldNumber);
-            return RenumberResult.AlreadyRenumbered(heldNumber, heldSequence);
+            return RenumberState.Stop(RenumberResult.AlreadyRenumbered(heldNumber, heldSequence));
         }
 
         if (firm is not null || !string.Equals(scope, NoFirmScope, StringComparison.OrdinalIgnoreCase))
@@ -496,10 +543,20 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
             _logger.LogWarning(
                 "{Code}: submission={SubmissionId} - it is not a no-firm submission in the none scope; nothing written",
                 TrackingNumberReasons.NotUnnumbered, submissionId);
-            return RenumberResult.Refused(TrackingNumberReasons.NotUnnumbered);
+            return RenumberState.Stop(RenumberResult.Refused(TrackingNumberReasons.NotUnnumbered));
         }
 
-        return null;
+        // The row is a no-firm submission in the none scope at the caller's version: the sequence it holds there is the one it gives up (K4).
+        // None (a row the allocator never numbered) writes no previous sequence: there is no number to keep, and the column's minimum is 1.
+        return RenumberState.Go(existing.GetAttributeValue<int?>(SequenceColumn));
+    }
+
+    /// <summary>Task 095d-1a (K4): what the renumber's precondition read decided: stop with a result, or go on with the sequence the row holds now.</summary>
+    private readonly record struct RenumberState(RenumberResult? Decided, int? PreviousSequence)
+    {
+        public static RenumberState Stop(RenumberResult result) => new(result, null);
+
+        public static RenumberState Go(int? previousSequence) => new(null, previousSequence);
     }
 
     /// <summary>
@@ -522,10 +579,12 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
 
     /// <summary>
     /// Task 095d-1a: the renumber's submission update. The firm, its scope, the sequence and the number, at the caller's row version; the firm
-    /// invoice number is not written (it does not change).
+    /// invoice number is not written (it does not change). K4: also <see cref="PreviousSequenceColumn"/>, the <c>none</c>-scope sequence the row
+    /// gives up, in the same update (so it lands with the move or not at all).
     /// </summary>
     private static Entity BuildRenumberUpdate(
-        Guid submissionId, string rowVersion, Guid firmId, int sequence, string trackingNumber, IReadOnlyDictionary<string, object>? fields)
+        Guid submissionId, string rowVersion, Guid firmId, int sequence, string trackingNumber, int? previousSequence,
+        IReadOnlyDictionary<string, object>? fields)
     {
         var row = new Entity(SubmissionEntity, submissionId) { RowVersion = rowVersion };
         if (fields is not null)
@@ -540,6 +599,11 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
         row[ScopeColumn] = ScopeOf(firmId);
         row[SequenceColumn] = sequence;
         row[TrackingNumberColumn] = trackingNumber;
+        if (previousSequence is { } previous)
+        {
+            row[PreviousSequenceColumn] = previous;
+        }
+
         return row;
     }
 
@@ -739,6 +803,11 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     /// <summary>
     /// The highest sequence held for the firm (from P2: the scope) and firm invoice number, over rows in every state (an inactive, closed
     /// submission still owns its number); 0 when none. Dataverse compares strings without regard to case, as the alternate key does.
+    /// <para><b>The <c>none</c> scope (K4).</b> From P2, a no-firm number also counts the sequences that rows with this firm invoice number gave
+    /// up when a renumber moved them into a firm's scope (<see cref="PreviousSequenceColumn"/>): the result is the larger of the two reads, the
+    /// scope's own sequences FIRST and the previous sequences second. A row moves between them in one update, so a row that moves between the two
+    /// reads was seen by the first, and one that moved before the first is seen by the second. A firm's scope never counts the column: it refers to
+    /// the <c>none</c> scope only. The scope key still decides every race; this read only raises the floor.</para>
     /// </summary>
     private async Task<int> ReadHighestSequenceAsync(TrackingScopePhase phase, Guid? firmId, string number, CancellationToken ct)
     {
@@ -753,8 +822,83 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
         query.AddOrder(SequenceColumn, OrderType.Descending);
 
         var found = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        return found.Entities.Count == 0 ? 0 : found.Entities[0].GetAttributeValue<int?>(SequenceColumn) ?? 0;
+        var highest = found.Entities.Count == 0 ? 0 : found.Entities[0].GetAttributeValue<int?>(SequenceColumn) ?? 0;
+
+        return phase == TrackingScopePhase.P2ScopeKeyActive && firmId is null
+            ? Math.Max(highest, await ReadHighestPreviousSequenceAsync(number, ct).ConfigureAwait(false))
+            : highest;
     }
+
+    /// <summary>
+    /// Task 095d-1a (K4): the highest <see cref="PreviousSequenceColumn"/> held by a row with this firm invoice number, in any scope; 0 when none.
+    /// A column that does not exist yet (the schema script has not run) answers 0 and logs a warning once: while it is missing the renumber is
+    /// refused (<see cref="TrackingNumberReasons.SchemaMissing"/>), so no row has left the <c>none</c> scope through one and the scope-only read
+    /// is complete. Any other fault propagates, as the sequence read's does.
+    /// </summary>
+    private async Task<int> ReadHighestPreviousSequenceAsync(string number, CancellationToken ct)
+    {
+        var query = new QueryExpression(SubmissionEntity)
+        {
+            ColumnSet = new ColumnSet(PreviousSequenceColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(FirmInvoiceNumberColumn, ConditionOperator.Equal, number);
+        query.Criteria.AddCondition(PreviousSequenceColumn, ConditionOperator.NotNull);
+        query.AddOrder(PreviousSequenceColumn, OrderType.Descending);
+
+        try
+        {
+            var found = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            return found.Entities.Count == 0 ? 0 : found.Entities[0].GetAttributeValue<int?>(PreviousSequenceColumn) ?? 0;
+        }
+        catch (Exception ex) when (IsPreviousSequenceColumnMissing(ex))
+        {
+            if (_phases.TryMarkPreviousSequenceMissing())
+            {
+                _logger.LogWarning(ex,
+                    "{Code}: {Column} does not exist in this environment yet (run Deploy-EbillingSubmissionPreviousSequenceColumn.ps1); a no-firm " +
+                    "number is counted from the none scope alone, which is complete until a renumber runs (it is refused without the column). Logged once",
+                    TrackingNumberReasons.SchemaMissing, PreviousSequenceColumn);
+            }
+
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Task 095d-1a (K4): whether <paramref name="ex"/> says <see cref="PreviousSequenceColumn"/> does not exist in this environment: Dataverse's
+    /// "'{table}' entity doesn't contain attribute with Name = '{column}'" (<c>0x80041103</c>, measured on dev). Matched by the typed fault code
+    /// (the fault and its inner faults) or, where the client surfaces only text, by the message; either way the message must name THIS column, so a
+    /// missing column of some other query is never read as this one. Walks the exception chain: the client may wrap the fault.
+    /// </summary>
+    internal static bool IsPreviousSequenceColumnMissing(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is System.ServiceModel.FaultException<OrganizationServiceFault> faultException)
+            {
+                for (var fault = faultException.Detail; fault is not null; fault = fault.InnerFault)
+                {
+                    if (fault.ErrorCode == AttributeDoesNotExistFault && NamesThePreviousSequenceColumn(fault.Message))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            if (NamesThePreviousSequenceColumn(e.Message)
+                && (e.Message.Contains("contain attribute with Name", StringComparison.OrdinalIgnoreCase)
+                    || e.Message.Contains("0x80041103", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool NamesThePreviousSequenceColumn(string? message) =>
+        message is { Length: > 0 } && message.Contains(PreviousSequenceColumn, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The submission with this id as it stands, or null. A query (not a retrieve), so "no such row" is an empty answer and not a fault.</summary>
     private async Task<Entity?> FindExistingAsync(Guid submissionId, CancellationToken ct) =>

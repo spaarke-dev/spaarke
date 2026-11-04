@@ -54,6 +54,15 @@ public static class TrackingNumberReasons
     /// does not change by waiting; the caller answers it as a refusal.
     /// </summary>
     public const string NotUnnumbered = "ebilling.tracking.not_unnumbered";
+
+    /// <summary>
+    /// Task 095d-1a (K4; owner decision 2026-11-04, "new column, never reuse"): a renumber was asked for in an environment that does not have
+    /// <c>sprk_invoicesubmission.sprk_previoussequence</c> yet. The renumber records there the number a submission gives up in the <c>none</c>
+    /// scope, so without the column it could let that number be issued again; nothing was sent. Not retryable until
+    /// <c>scripts/ebilling/Deploy-EbillingSubmissionPreviousSequenceColumn.ps1</c> has run (<c>-Verify</c> exits 0): the caller answers it as a 503.
+    /// It is a different code from <see cref="ScopeKeyInactive"/> because the remedy is a different script.
+    /// </summary>
+    public const string SchemaMissing = "ebilling.tracking.schema_missing";
 }
 
 /// <summary>The result of <see cref="ITrackingNumberAllocator.CreateSubmissionAsync"/>.</summary>
@@ -182,6 +191,9 @@ public interface ITrackingNumberAllocator
     /// <see cref="TrackingNumberReasons.Unavailable"/> and no row created. Any other fault propagates on the first attempt.
     /// The allocator never refuses because the firm invoice number was seen before: a repeated number is a Duplicate-rule finding with a
     /// configured consequence (D-88), and each arrival gets its own n.
+    /// Task 095d-1a (K4): in the <c>none</c> scope n is also above every <c>sprk_previoussequence</c> a row with this firm invoice number
+    /// holds, so a number a renumber moved into a firm's scope is never issued again. An environment without that column keeps creating (the
+    /// scope-only read, a warning logged once): its renumber is refused, so no number has left the scope yet.
     /// </remarks>
     /// <exception cref="ArgumentException">An id is empty, <paramref name="firmInvoiceNumber"/> is blank or longer than
     /// <see cref="TrackingNumberAllocator.MaxFirmInvoiceNumberLength"/> after trimming, or <paramref name="fields"/> names a column this service
@@ -238,6 +250,10 @@ public interface ITrackingNumberAllocator
     /// <para><b>Row version.</b> A row-version mismatch anywhere in the transaction is <see cref="RenumberOutcome.Conflict"/>, never a retry: the
     /// caller re-reads. A repeat with the same, now stale, version is a Conflict (it never allocates a second number); a repeat at the version
     /// the commit left is <see cref="RenumberOutcome.AlreadyRenumbered"/> (nor does that).</para>
+    /// <para><b>Previous sequence (K4).</b> The submission update also writes <c>sprk_previoussequence</c>, the sequence the row held in the
+    /// <c>none</c> scope, so the <c>none</c> scope never issues that number again. In an environment without the column the renumber is
+    /// <see cref="RenumberOutcome.Refused"/> with <see cref="TrackingNumberReasons.SchemaMissing"/> (found by the precondition read, before
+    /// anything is sent).</para>
     /// <para><b>Phase and ceiling.</b> Only at <see cref="TrackingScopePhase.P2ScopeKeyActive"/>, else
     /// <see cref="TrackingNumberReasons.ScopeKeyInactive"/>. More caller requests than
     /// <see cref="TrackingNumberAllocator.MaxRenumberCallerRequests"/> is <see cref="TrackingNumberReasons.TooManyRequests"/>. Both write nothing.

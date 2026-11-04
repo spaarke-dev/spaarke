@@ -348,6 +348,8 @@ public sealed partial class TrackingNumberAllocatorTests
     [Theory(DisplayName = "095d-1a: the caller cannot write a column the allocator owns, nor any submission row: refused before anything is sent")]
     [InlineData("sprk_trackingnumber", false)]
     [InlineData("sprk_trackingscope", false)]
+    [InlineData("sprk_previoussequence", false)]
+    [InlineData("SPRK_PreviousSequence", false)]
     [InlineData("sprk_vendororg", false)]
     [InlineData("sprk_submissionsequence", false)]
     [InlineData("sprk_firminvoicenumber", false)]

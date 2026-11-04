@@ -428,6 +428,8 @@ public sealed partial class TrackingNumberAllocatorTests
     [InlineData("sprk_firminvoicenumber")]
     [InlineData("sprk_vendororg")]
     [InlineData("sprk_trackingscope")]
+    [InlineData("sprk_previoussequence")]
+    [InlineData("SPRK_PreviousSequence")]
     [InlineData("sprk_invoicesubmissionid")]
     [InlineData("SPRK_TrackingNumber")]
     public async Task AColumnTheAllocatorOwns_CannotBeSuppliedByTheCaller(string column)
@@ -860,6 +862,24 @@ public sealed partial class TrackingNumberAllocatorTests
                 .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns(async (QueryExpression query, CancellationToken _) =>
                 {
+                    // Task 095d-1a (K4): the none scope's previous-sequence read is counted; an environment whose schema script has not run
+                    // refuses any query that names the column, as Dataverse does.
+                    var previousRead = query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_previoussequence");
+                    if (previousRead)
+                    {
+                        Interlocked.Increment(ref _previousSequenceReads);
+                    }
+
+                    if (!PreviousSequenceColumnExists && NamesThePreviousSequence(query))
+                    {
+                        throw MissingPreviousSequenceFault();
+                    }
+
+                    if (previousRead && PreviousSequenceReadFault is { } readFault)
+                    {
+                        throw readFault;
+                    }
+
                     // A lookup by the submission id is the idempotency read; one on the sequence is the highest-sequence read; one on
                     // the tracking number is the held-number check (task 094).
                     var byId = !query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_submissionsequence");
@@ -999,6 +1019,11 @@ public sealed partial class TrackingNumberAllocatorTests
                             "The version of the existing record doesn't match the RowVersion property provided.");
                     }
 
+                    if (!PreviousSequenceColumnExists && target.Contains("sprk_previoussequence"))
+                    {
+                        throw TransactionFault(requests, index, unchecked((int)0x80041103), MissingPreviousSequenceMessage);
+                    }
+
                     var after = Clone(existing, existing.Id);
                     foreach (var attribute in target.Attributes)
                     {
@@ -1115,6 +1140,32 @@ public sealed partial class TrackingNumberAllocatorTests
 
         public int SequenceReads => Volatile.Read(ref _sequenceReads);
 
+        private int _previousSequenceReads;
+
+        /// <summary>Task 095d-1a (K4): the reads that name <c>sprk_previoussequence</c> in a condition (the none scope's previous-sequence read).</summary>
+        public int PreviousSequenceReads => Volatile.Read(ref _previousSequenceReads);
+
+        /// <summary>Task 095d-1a (K4): false models an environment whose schema script has not run: a query or a write that names
+        /// <c>sprk_previoussequence</c> faults as Dataverse faults on a column that is not there (<c>0x80041103</c>).</summary>
+        public bool PreviousSequenceColumnExists { get; set; } = true;
+
+        /// <summary>Task 095d-1a (K4): when set, every previous-sequence read raises it (a fault that is not a missing column).</summary>
+        public Exception? PreviousSequenceReadFault { get; set; }
+
+        public const string MissingPreviousSequenceMessage =
+            "'sprk_invoicesubmission' entity doesn't contain attribute with Name = 'sprk_previoussequence' and NameMapping = 'Logical' " +
+            "(look up attribute by name is case-sensitive).orgIndex: 142, logicalName: sprk_invoicesubmission";
+
+        /// <summary>The fault the SDK client raises for a query that names a column the environment does not have.</summary>
+        public static FaultException<OrganizationServiceFault> MissingPreviousSequenceFault() => new(
+            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80041103), Message = MissingPreviousSequenceMessage },
+            new FaultReason(MissingPreviousSequenceMessage));
+
+        private static bool NamesThePreviousSequence(QueryExpression query) =>
+            query.ColumnSet.Columns.Contains("sprk_previoussequence")
+            || query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_previoussequence")
+            || query.Orders.Any(o => o.AttributeName == "sprk_previoussequence");
+
         /// <summary>Task 095d-1a (review F4): the reads of a row by its id (the idempotency read of a create, the precondition read of a renumber).</summary>
         public int IdReads => Volatile.Read(ref _idReads);
 
@@ -1145,6 +1196,22 @@ public sealed partial class TrackingNumberAllocatorTests
         /// <c>none</c> with no firm.</summary>
         public Guid AddScoped(Guid? firmId, string firmInvoiceNumber, int sequence, Guid? id = null) =>
             Add(firmId, firmId?.ToString("D") ?? "none", firmInvoiceNumber, sequence, 0, id);
+
+        /// <summary>Task 095d-1a (K4): a submission as a renumber leaves it: in <paramref name="firmId"/>'s scope holding <paramref name="sequence"/>
+        /// there, with the <c>none</c>-scope sequence it gave up in <c>sprk_previoussequence</c>.</summary>
+        public Guid AddRenumbered(Guid firmId, string firmInvoiceNumber, int sequence, int previousSequence) =>
+            WithPreviousSequence(AddScoped(firmId, firmInvoiceNumber, sequence), previousSequence);
+
+        /// <summary>Task 095d-1a (K4): sets <c>sprk_previoussequence</c> on the row <paramref name="id"/>; returns the id.</summary>
+        public Guid WithPreviousSequence(Guid id, int previousSequence)
+        {
+            lock (_gate)
+            {
+                _rows[id]["sprk_previoussequence"] = previousSequence;
+            }
+
+            return id;
+        }
 
         /// <summary>Task 095c: a numbered submission with an explicit scope, whatever its firm (e.g. a firm filed in the <c>none</c> scope).</summary>
         public Guid AddWithScope(Guid? firmId, string scope, string firmInvoiceNumber, int sequence) =>
