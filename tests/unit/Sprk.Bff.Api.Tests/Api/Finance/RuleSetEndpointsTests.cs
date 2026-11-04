@@ -6,6 +6,7 @@ using Azure.Messaging.ServiceBus;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -108,7 +109,8 @@ public sealed class RuleSetEndpointsTests
                 new Mock<ServiceBusClient>().Object);
         }
 
-        public static async Task<Host> StartAsync(bool ebillingEnabled = true, int maxMb = 25, bool admin = true)
+        public static async Task<Host> StartAsync(
+            bool ebillingEnabled = true, int maxMb = 25, bool admin = true, Action<IEndpointRouteBuilder>? alsoMap = null)
         {
             var host = new Host();
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
@@ -145,6 +147,7 @@ public sealed class RuleSetEndpointsTests
             host._app.UseAuthentication();
             host._app.UseAuthorization();
             host._app.MapRuleSetEndpoints();
+            alsoMap?.Invoke(host._app); // 089e F3: the route guard's must-fire control maps a route without the set filter
             await host._app.StartAsync();
             host.Client = host._app.GetTestClient();
             return host;
@@ -193,6 +196,10 @@ public sealed class RuleSetEndpointsTests
                 Probe.Release(p);
             }
         }
+
+        /// <summary>089e F3: every route this host mapped, as the routing system holds it (group prefixes and filters applied).</summary>
+        public IReadOnlyList<RouteEndpoint> Routes =>
+            ((IEndpointRouteBuilder)_app).DataSources.SelectMany(d => d.Endpoints).OfType<RouteEndpoint>().ToList();
 
         public async ValueTask DisposeAsync()
         {
@@ -1322,6 +1329,66 @@ public sealed class RuleSetEndpointsTests
         host.Access.Grant("sprk_rulesets", SetId, AccessRights.None);
         var response = await host.Client.SendAsync(Req(method, url, content: ByIdBody(method, url)));
         return (response.StatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>
+    /// 089e F3: the (method, url) of every route the host mapped whose pattern carries a rule set id, read from the routing table rather than
+    /// written by hand. The set id becomes <see cref="SetId"/>; any other parameter becomes <see cref="PolicyId"/>.
+    /// </summary>
+    private static IReadOnlyList<(string Method, string Url)> MappedByIdRoutes(Host host) =>
+        host.Routes
+            .Where(e => e.RoutePattern.RawText?.Contains("{ruleSetId", StringComparison.Ordinal) == true)
+            .SelectMany(e => (e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? new[] { "GET" })
+                .Select(method => (method, "/" + System.Text.RegularExpressions.Regex.Replace(
+                    e.RoutePattern.RawText!.TrimStart('/'), @"\{(\w+)[^}]*\}",
+                    m => (m.Groups[1].Value == "ruleSetId" ? SetId : PolicyId).ToString()))))
+            .ToList();
+
+    /// <summary>089e F3: each mapped by-id route that does NOT answer a set the caller cannot Read with the uniform 404 bytes.</summary>
+    private static async Task<IReadOnlyList<string>> ByIdRoutesWithoutTheUniform404(Host host, (HttpStatusCode Status, string Body) missing)
+    {
+        host.Access.Grant("sprk_rulesets", SetId, AccessRights.None);
+        var breaks = new List<string>();
+        foreach (var (method, url) in MappedByIdRoutes(host))
+        {
+            var response = await host.Client.SendAsync(Req(method, url, content: ByIdBody(method, url)));
+            var body = await response.Content.ReadAsStringAsync();
+            if (response.StatusCode != missing.Status || body != missing.Body)
+            {
+                breaks.Add($"{method} {url}: {(int)response.StatusCode} {body}");
+            }
+        }
+
+        return breaks;
+    }
+
+    [Fact(DisplayName = "089e F3 guard: EVERY mapped route with a rule set id answers a set the caller cannot Read with the uniform 404, and the theory list matches the routing table")]
+    public async Task EveryMappedByIdRoute_ASetTheCallerCannotRead_IsTheUniform404()
+    {
+        var missing = await MissingSetAnswer("GET", $"{Base}/{SetId}");
+        missing.Status.Should().Be(HttpStatusCode.NotFound);
+        JsonNode.Parse(missing.Body)!["errorCode"]!.GetValue<string>().Should().Be(RuleSetService.CodeNotFound);
+        await using var host = await Host.StartAsync();
+
+        var mapped = MappedByIdRoutes(host);
+
+        (await ByIdRoutesWithoutTheUniform404(host, missing)).Should().BeEmpty();
+        mapped.Should().HaveCount(8, "non-vacuity: the eight by-id routes MapRuleSetEndpoints maps today");
+        mapped.Should().BeEquivalentTo(
+            ByIdRoutes.Select(row => ((string)row[0], (string)row[1])),
+            "the hand-written ByIdRoutes theory list is the routing table's, so every theory above covers every by-id route");
+    }
+
+    [Fact(DisplayName = "089e F3 guard must-fire: a by-id route mapped without the set filter is reported")]
+    public async Task TheRouteGuard_ReportsAByIdRouteWithoutTheSetFilter()
+    {
+        var missing = await MissingSetAnswer("GET", $"{Base}/{SetId}");
+        await using var host = await Host.StartAsync(alsoMap: routes =>
+            routes.MapGet(Base + "/{ruleSetId:guid}/unguarded", (Guid ruleSetId) => Microsoft.AspNetCore.Http.Results.Ok(new { ruleSetId })));
+
+        var breaks = await ByIdRoutesWithoutTheUniform404(host, missing);
+
+        breaks.Should().ContainSingle().Which.Should().StartWith($"GET {Base}/{SetId}/unguarded: 200");
     }
 
     [Theory(DisplayName = "089e (A) must-fire: a set the caller cannot Read is the uniform 404, even when its record is readable, and nothing about the set is read")]
