@@ -1,102 +1,65 @@
 # Current Task State — `unified-access-control-r2`
 
 > **Format:** CURRENT state only. Rewrite at each checkpoint (never prepend); keep ≤ 10 KB.
-> - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md` (latest 2026-11-02: BU1 move closed).
-> - **Defer list:** `notes/defer-issues.md`. **History:** git log of this file (checkpoints #88–#89 on 2026-11-03).
+> - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
+> - **History:** git log of this file (checkpoints #88–#90, 2026-11-03/04).
 
-> **Last Updated**: 2026-11-03 ~21:30Z (checkpoint #89: dev-deploy hand-over from R3 confirmed by the owner; Email-to-AP test in progress).
+> **Last Updated**: 2026-11-04 ~05:30Z (checkpoint #90: R3 hand-over done, d763dc120e gate PASS, mailbox users moved to BU1, ebilling and field-mapping reviews in flight).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green: `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys and settings changes need the owner's go IN THIS SESSION. |
-| **Active task** | None in progress. Reviewing and gating for peers. |
-| **NEW ROLE (owner confirmed in this session, 2026-11-03)** | **uac-r2 orchestrates dev BFF deploys** after R3's final deploy and my 30-minute gate on it. Procedure: `docs/procedures/dev-bff-deploy-coordination.md`. Scripts: `scripts/Save-BffDevRollbackSnapshot.ps1` and `scripts/Test-BffDevDeployReadback.ps1`. Record: R3 `notes/contact-identity-dev-rollout-record.md` §9–16. All arrive on master with PR #2546. R3 (session `spaarke-wt-spa-external-access-platform-f2`) runs one last deploy: merged #2546 master SHA = 5796774091 plus 2 R3 fixes. Peers' OKs, then the owner's go. Acceptance and the conditions below were sent to R3 at ~21:35Z. |
-| **Dev state** | BFF = **d763dc120e** since 22:26:31Z (R3's final deploy; my 30-minute gate PASSED, `$TEMP/uacmerge/uacg/gated763_30m.txt`, script `gated763.sh`; rollback: R3's snapshot `wwwroot-20261103T220358Z`, or redeploy 5796774091). **From now on I orchestrate dev BFF deploys.** Dev SPA = b083d62183. The census has reported findings since 19:45Z. Cause: the two new mailbox user accounts in the root business unit (see owner items). This predates the deploy. |
-| **Next action** | 1. Owner decision on the two mailbox users (owner items). 2. Wait for ebilling's Email-to-AP send time, then run `$TEMP/uacmerge/uacg/apsend_check.sh SINCE UNTIL BATCHID` and report to the owner. 3. Review diffs as they arrive (list below). 4. #2524 re-file link write (my code). |
+| **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green: `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys and settings changes need the owner's go IN THIS SESSION. Peers (ebilling, field-mapping) take the owner's go for THEIR live writes in THEIR own sessions. |
+| **Active task** | None in progress. Reviewing and gating for peers; orchestrating dev BFF deploys. |
+| **Dev state** | BFF = **d763dc120e** since 2026-11-03 22:26:31Z (R3's final deploy; my gate PASSED: `$TEMP/uacmerge/uacg/gated763_30m.txt`, script `gated763.sh`). Rollback: R3's `deploy/rollback/wwwroot-20261103T220358Z` (kept until my next deploy passes its gate) or redeploy 5796774091. Dev SPA = b083d62183. |
+| **Next action** | 1. Owner: click Email to AP on batch 14680609 (or send the form's command-bar screenshot); then run `$TEMP/uacmerge/uacg/apsend_check.sh SINCE UNTIL 14680609-b198-48e2-8391-3ada84fda689` and report. 2. Review diffs as they arrive (list below). 3. Own code: #2560, then #2524. |
+
+## Dev BFF deploy role (owner confirmed 2026-11-03; R3 rollout record §17, PR #2554)
+- **Each deploy:** owner's go per build in THIS session; peer OKs on the master SHA; pre-checks (`Set-ChildRecordCreatorPersonSchema.ps1 -Verify`, 225-name settings check, ebilling's 6 keys, both write switches true); `scripts/Save-BffDevRollbackSnapshot.ps1`; deploy; `scripts/Test-BffDevDeployReadback.ps1`; my 30-minute gate (copy `gated763.sh`); record in `docs/procedures/dev-bff-deploy-coordination.md`.
+- **Queued for the next deploy:** PR #2550 (R3: restores ExternalUserContextEndpoint `</summary>`; comments/tests only); #2551 (field-mapping 020, aef86b89f7; reviewed OK with notes). field-mapping post-deploy checks: 5xx on POST /api/v1/child-records/*; test-row creates need the owner's OK in field-mapping's session.
+- **ebilling's master PR** (wide: 60+ files incl. 086/089a/089b/089d/095a-c/hand-made batch fix/app sync) is BLOCKED on 095c-5. When it comes: review the whole PR diff; deploy request must carry the pre-deploy count of Stored Files on invoices of Secure records (dev: 1) and the K4 backfill-after-gate if > 0; `StoredFileReconcileEnabled` stays false until that gate and the NFR-05 census pass; 095c-4 approval refusal is a precondition before P2 is on anywhere. Order after the BFF gate: `Deploy-EbillingFormsViews.ps1` (legacy CSV/JSON Document fields off the batch form; owner go in ebilling's session).
+- **Watches:** field-mapping FR-40 live proof after the next real upload/create; word-add-in Office smoke after the owner's two Outlook saves; SPA registration message (85fbba3f64) waits for the next SPA deploy (`deploy-external-spa.yml` on a tag).
 
 ## Email-to-AP test (owner go, 2026-11-03)
-- AP address: `sprk_apexportemail` = **ap@finance.spaarke.com** on settings row 92acd624 (read back 20:42:32Z). Not monitored: receive-enabled accounts are mailbox-central@ and testuser1@ only. ap@ must never be receive-enabled; invoices@ is free to become intake. Memory: test-mailbox-invoices.
-- Both invoices are **Approved** by the owner's script: INV-2025-05166 (9723a5aa) and INV #2025023029 (7c200dd1).
-- The first export (20:43Z) failed with 503: the owner's account 1d02f31c is in the ROOT business unit, so the CSV Stored File's hard-deny owner was refused (`AnswerIsRootBusinessUnit`). Failed batch f6788e95 is kept, owned by the root default team, with no file (owner: leave it).
-- **Demo export succeeded:** batch **14680609-b198-48e2-8391-3ada84fda689** (21:55:05Z, Completed, 2 invoices, $20,517.83, owned by the BU1 team). **Blocker:** `sprk_billingexport` is in no app on dev; the source has it in the Matter Management AppModule.xml:49 and sitemap `subarea_eb_export`. The ribbon is deployed (13:35Z). Asked ebilling to prepare the app-module and sitemap import; the owner's go comes in this session. The owner has a direct form link to try.
-- **Ribbon import plan meets /ribbon-edit** (owner asked; evidence at f801c16452): dedicated `BillingExportRibbons` unmanaged solution under the Spaarke publisher; content compared against dev (0 diffs); PublishXml for this entity only; Alt 4/4; rollback copy saved. Offered to the owner to run before the BFF deploy (hides are independent of it).
-- **ebilling 086 ported onto 089a (53f3f6b724):** my answers were sent. Dropping the Stored File source citations is correct (194b). Stored Files stay out of the displayed family (baseline accepted). The runner of the role -Apply is not recorded; the -Verify state stands. K1, K-P1 (my task 191), K-P2 and K-P3 are accepted. `StoredFileReconcileEnabled` stays false until the 089a+086 deploy gate and the NFR-05 census pass. Full review in the master PR, with ebilling's second Opus access review.
-- **ebilling guide edit (e6ab9e46f5) OK** (Stored File paragraph, K1, counts 36/40). **095c-2** (from-email intake with no firm, P2) makes no-firm invoices a normal path: the owner's pending decision on no-firm external visibility must come before it is in a deploy request; I asked its review to confirm no external route treats a null firm as any firm.
-- **Owner decided (in ebilling's session): no-firm invoices stay externally visible.** 095c-2 checks hold. Accepted: 089a+086 K3 (reported, not moved) and K4 (backfill after the deploy if the pre-deploy count is above 0). 089b Exclude: keep the Read on policies check and its 403; the alternative is Billing Administrator Read at Global, which is the owner's decision through ebilling. 095c-4 (refuse approval of no-firm invoices) is a precondition before P2 is turned on.
-- **Billing Exports ribbon hides applied** by ebilling at 04:36Z (owner go in ebilling's session). Verified by me: none of the 7 hidden controls in the Form, HomepageGrid or SubGrid ribbon; the 4 ApExport form buttons are present. Rollback: `%TEMP%\BillingExportRibbons-rollback-20261103233623`.
-- **Owner said yes** to child-unit billing admins reading top-unit rules. My design to respect D-123: an owner team "Billing Rule Readers" in the CUSTOMER top business unit (never the root), with a role holding Read on `sprk_policy` at Deep; child-unit admins are members; the Secure business unit is a sibling, so it is not reached. Org-wide rules must be owned in the customer top unit (on dev, check whether they sit in the root). This is a customer setup step: guide plus provisioning hand-off.
-- **Hand-made batch fix reviewed OK** (bf85f93aee..b92530be4c; merged to work/ebilling-r1). Order: master PR → BFF deploy through me (owner go) → `Deploy-EbillingBillingExportRibbon.ps1 -Apply/-Verify` (7 hides; owner go in my session) → `Deploy-EbillingFormsViews.ps1` (drops the legacy CSV/JSON Document fields). Add Existing Communication stays a known limit. The master PR is wide (60 files incl. 095): review the whole PR diff.
-- **Hand-made batch gap (owner screenshot shows + New on the Billing Exports grid):** ebilling is fixing it in scope. The ribbon hides New and Delete (entity-scoped import; owner go in my session). Mark Sent refuses a batch with no files or no invoices (409). I asked for one more case: status and formats typed by hand but no Stored File gives 409 `file_not_available` on email and download, never a 5xx. The owner added the billing tables in the app designer at 22:13Z (confirmed).
-- **Done (owner go in this session):** moved invoices@ (6d013768) and ap@ (33a198ff) systemusers to BU1 (PATCH 204 for both; read back: BU1, no roles, member of BU1's team only). Owner rule: mailbox accounts go in BU1. Next census should clear the verdict. No new provisioning step is needed: it is already in `notes/handoffs/INCOMING-145-secure-setup-handler.md` T4 (root default team holds no Deep/Global read) and T5 (humans go to the customer business unit). Dev's root default team holding Basic User is an accepted dev artifact (owner, round 5).
-- **Email to AP button not visible** on batch 14680609's form for the owner. The published ribbon has all 4 buttons; the enable rule and the batch status match; 2 Stored Files exist. Sent the facts to ebilling to investigate (location or group in UCI?). Asked the owner for a hard refresh, a look under the overflow menu, and a screenshot of the command bar.
-- **Owner decision (done):** demo@demo.spaarke.com runs `-ExportOnly` (export only, no approvals). The owner then opens the batch as themselves, checks the AP emails grid has no New button, and clicks Email to AP. ebilling sends me the time and batch id.
-- ebilling's fix for the 2 findings (a 409 `ebilling.export.owner_unit_not_allowed`, and an owner pre-check before any write), diff 82786ce7f3..fad65a79ad, merged to work/ebilling-r1 at a6ff149cd9: **four-point check PASSED**, sent ~21:40Z. `sprk_billingexport` is not an ownership parent, so the pre-check never reads the batch that doesn't exist yet. `no_default_team` and `acting_user_unresolved` stay 503. Note: live proof for a BU1 caller comes with the first BU1 export after the deploy (record it in 153's notes). The fix reaches dev only through a master PR and a deploy that I orchestrate.
+- AP address `sprk_apexportemail` = **ap@finance.spaarke.com** (settings row 92acd624). Not receive-enabled; must never be. Memory: test-mailbox-invoices.
+- Demo export OK: batch **14680609-b198-48e2-8391-3ada84fda689** (21:55:05Z, Completed, 2 invoices, $20,517.83, owned by BU1 team; 2 Stored Files csv/json). Failed batches f6788e95 (root caller) and ac07ec43 are kept.
+- Owner added the billing tables in the Matter Management app designer at 22:13Z; ebilling synced source to match (reviewed OK, no role-map change).
+- Billing Exports ribbon hides applied by ebilling 04:36Z (owner go in ebilling's session); I verified: 7 hidden controls absent from Form/HomepageGrid/SubGrid ribbons; 4 ApExport form buttons present. Rollback `%TEMP%\BillingExportRibbons-rollback-20261103233623`.
+- Owner's screenshots so far were of the GRID; Email to AP is form-only. Waiting for the owner to open the form and click it.
+- ebilling AP export owner-unit fix (82786ce7f3..fad65a79ad): four-point check PASSED; live BU1 proof comes with the first export after its deploy (record in 153's notes).
 
-## Dev deploy role: items handed over by R3 (hand-over complete; gate PASS recorded in R3 rollout record §17, PR #2554)
-- **Each deploy:** the owner's go per build in THIS session; peer OKs; pre-checks (`Set-ChildRecordCreatorPersonSchema.ps1 -Verify`, the 225-name settings check, ebilling's 6 keys, both write switches true); readback; my 30-minute gate; the record in `docs/procedures/dev-bff-deploy-coordination.md`.
-- **Next deploy carries** PR #2550 (restores the ExternalUserContextEndpoint `</summary>`; ledger cite :46/:75; comments and test text only) and **#2551** (field-mapping 020, aef86b89f7, merged 23:21Z; I reviewed it OK with notes; no rush). field-mapping's post-deploy checks: 5xx on POST /api/v1/child-records/*, no change on existing tables. Test-row creates: field-mapping gets the owner's OK in ITS OWN session after my gate passes, then sends me timing and results for the gate record.
-- **Rollback for d763dc120e:** R3's snapshot `deploy/rollback/wwwroot-20261103T220358Z` (kept until my next deploy passes its gate), or redeploy 5796774091.
-- **Watches:**
-  - ebilling 095a/095b: answered at bf85f93aee. ExternalInvoiceVisibility is unchanged against master and does not read `sprk_sourceemaildocument`, so a restricted source email still hides the invoice through the Stored File. Any later change that makes it read that column is an access change for me and the owner;
-  - ebilling's Matter Management app source sync (f5354caebf..bf85f93aee): reviewed OK. It adds only entity components and the `area_finance` sitemap; no role-map change;
-  - field-mapping FR-40: live proof after the next real upload or create;
-  - word-add-in: the Office smoke test after the owner's two Outlook saves.
-- **Not deployed:** the SPA registration message change (85fbba3f64), due with the next SPA deploy (`deploy-external-spa.yml` on a tag).
-- #2543 (my provisioning timeout test flakes under load) and FAILURE-MODES G-24 are on my list.
+## Done this stretch (owner go in this session)
+- invoices@ (6d013768) and ap@ (33a198ff) systemusers moved root → BU1 (PATCH 204; read back: BU1, no roles). Owner rule: mailbox accounts go in BU1. Root-unit rule already in INCOMING-145 T4/T5; dev root default team holding Basic User is an accepted dev artifact (round 5).
 
-## Reviews owed (waiting for diffs)
-- **ebilling:**
-  - 095a PR: my 4 conditions plus the attribute and relationship in source;
-  - 095c: schema notice; the tracking-scope column is refused in ParentLineage with a typed writer only, and is never a visibility filter; I need the key columns, the backfill and the race behaviour;
-  - 095d: full review. Conditions: Write on the invoice plus AppendTo on the firm; the core record derived from the invoice; Unreadable is 503; assign only, In Review only; ParentLineage names the typed writer;
-  - 095c-4 (a4f5884e66): the firm_missing hold is found through the submission-to-invoice link. Two direct-write paths remain: unlink (`sprk_invoicesubmission.sprk_invoice` is not secured) and delete. I asked for a field-secured hold on the invoice itself (preferred), or for the link to be secured plus no Delete; ebilling chose the invoice-side hold: **095c-5** (5284787e81; blocks the master PR), field-secured `sprk_invoice.sprk_firmhold`. I made binding: read it app-only (field security returns null under OBO), with a test and a guard entry. Findings JSON is already secured;
-  - 089d (43a5b37051): reviewed OK with 2 binding notes: pin the role's member-privilege inheritance to Team privileges only (`isinherited`=0) in -Apply, -Verify and the guard; and a live negative proof is a precondition for the first customer with a child unit (guide Phase 7a; provisioning notice). Who adds members is the owner's question (default: operator, Phase 7a);
-  - 089b/089c: full review. Gate: step 0, record Write/AppendTo, Read on the Procedure, `Admin()`; change rule adds `CreateRuleSet()` plus the policy Create privileges;
-  - the NFR-05 census after the next deploy;
-  - 086's follow-up adds `prvReadsprk_StoredFile` to `config/secure-record-owner-role.json`.
-- **field-mapping:**
-  - #2561 (pre-existing; Signal and Decision Record create ignore the core pair in the owner question; reachable via chat create_record): I classed it **F**, a follow-up task after 042b that doesn't hold 042b. Fix: option 1 (core first in step 7 via the catalog) plus the caller's AppendTo check on the named core (to confirm whether it exists). Tests listed;
-  - 042b F1: the owner chose A' (replace) in field-mapping's session (decisions c1428c181d). Step 7 asks over the planned values for every column the restamp will write; tests in both directions plus "agrees"; Repair gets the same; §15.4 Signal/DR 409 row. Full pass (AC15) when the whole 042b diff arrives;
-  - 042a, and 042b with a full review;
-  - 043 (the #2524 create-path link write);
-  - any #2523 change to how grants run.
-  - 041 merged (#2541) and 020 is OK with notes.
+## Reviews owed / in flight
+- **ebilling** (`spaarke-wt-ebilling-r1-7b`):
+  - **095c-5** (5284787e81, running): field-secured `sprk_invoice.sprk_firmhold`; held = invoice hold OR any linked submission hold; binding: read app-only (OBO returns null), tests unlink/delete/reason+firm rewrite → still held; `sprk_invoice.sprk_vendororg` added to generic writers' refused list. `-Apply` needs owner go in ebilling's session, with notices to me.
+  - **089d** (43a5b37051): OK with 2 binding notes (role `isinherited`=0 in -Apply/-Verify/guard; live negative proof before the first customer with a child unit). Who adds members = owner question via ebilling.
+  - 089b/089c full review (Exclude keeps Read on `sprk_policies`, fail-closed 403; Billing Rule Readers team is 089d).
+  - 095a PR conditions; 095c schema notice; 095d full review (Write on invoice + AppendTo on firm; core from invoice; Unreadable 503; assign only, In Review only; typed writer in ParentLineage).
+  - Accepted known limits: 086 K1/K-P1 (my 191)/K-P2/K-P3; 089a+086 K3/K4; Add Existing Communication on AP emails subgrid.
+  - Owner decisions taken in ebilling's session: no-firm invoices stay externally visible; Billing Administrator may read rules org-wide (delivered by 089d, not Global).
+- **field-mapping** (`spaarke-wt-field-mapping-server-write-pa-5c`):
+  - **042b** (task/fm-042b, fix c0fbc125ee): A' done (owner chose it in field-mapping's session); full AC15 pass when cfebe65f9b..tip arrives.
+  - **#2561** class F, follow-up task right after 042b: core record first in step 7's owner question (catalog) **plus** the caller's AppendTo check on the named core (confirmed missing). Tests: Secure core + ordinary subject → core's owner; no AppendTo on core → refused; agree → unchanged; Signal and DR each.
+  - 042a; 043 (create-path link write, #2524 sibling); any #2523 change.
 
 ## My own work
-- **#2560 (replaces deleted #2559; mine, before task 191):** the share mirror must pass only Read (plus AppendTo if proven needed) onto Secure-owned rows of `RecordOwnershipResolver.RestrictedContentTables`. Fix in `RecordShareLevels.ChildMirrorMask`/`SecureChildShareSynchronizer`, with must-fire and must-not-fire tests and a census check.
-- **#2524:** the task 195 re-file core writes the `sprk_Project_Matter_nn` link for the new matter: app-only, idempotent, Warning on failure, after the AppendTo check.
-- **Gate null-column hardening:** `SecureRootFilingGate.CheckAsync` and `PlanCreateAsync` must see null-valued named columns. Callers that pass `WritesOf`: `DataverseUpdateRecordHandler:299`, `ProjectMatterFiling:256`. Defense in depth: those PATCHes run as the user under field security.
-- **Census item:** the Secure Record Owner role holds 4 SharePoint privileges outside the role file (SharePointData C/R/W Global, SharePointDocument R Global); their origin is unknown.
-- **#2543:** flaky provisioning timeout test (real-clock 30 s).
-- **#2292:** open; fails closed.
-- **Parked; branches pushed 2026-11-03:**
-  - 193 (C:/wt193, fix/uac-193-add-person @ 1bccd88c81);
-  - 197 (C:/wt197);
-  - #2427 (C:/wt2427);
-  - 196a/196b.
-- **TASK-INDEX is stale** (196/197 missing; many statuses old): reconcile it at wrap-up 090.
+- **#2560** (replaces deleted #2559; before task 191): share mirror passes only Read (+AppendTo if proven needed) onto Secure-owned rows of `RecordOwnershipResolver.RestrictedContentTables` (`RecordShareLevels.ChildMirrorMask` / `SecureChildShareSynchronizer`); must-fire/must-not-fire tests; census check. Keep public wording neutral (no scenarios).
+- **#2524:** task 195 re-file core writes the `sprk_Project_Matter_nn` link for the new matter (app-only, idempotent, Warning on failure, after AppendTo).
+- Gate null-column hardening (`SecureRootFilingGate` with `WritesOf` callers `DataverseUpdateRecordHandler:299`, `ProjectMatterFiling:256`).
+- Census item: Secure Record Owner role holds 4 SharePoint privileges outside the role file; origin unknown.
+- #2543 flaky provisioning timeout test; #2292 open (fails closed); K-P1 for task 191.
+- Parked, branches pushed: 193 (C:/wt193 @ 1bccd88c81), 197 (C:/wt197), #2427 (C:/wt2427), 196a/196b.
+- TASK-INDEX stale: reconcile at wrap-up 090.
 
-## Owner items outstanding
-- Owner decisions:
-  - no-firm invoices: hide them externally until a firm is set? (Today they are visible, by option A.)
-  - 095a: may a reader see the lookup name of a Restricted .eml?
-- Click-tests: the 195 click-test, and the AP emails grid with no New button (in today's test).
-- Q1 private items (`scratchpad/q1_owner_private.md`) and the Q4 private clean-up.
-- Whether chat should send invites (through field-mapping).
-- Older decisions:
-  - #2343, #2245, #2250, #2260, K5/#2270, #2262, #2396;
-  - task 191 F1/S4;
-  - task 190 Apply;
-  - #2382 UAT check 5;
-  - #2505.
-- Waiting-on-owner tasks: 140 (CIAM identities), 165 (SPE Admin role and write probes), 153 (banner UI checks).
-- Optional: move the admin account into BU1 (root-BU creates of customer rows fail closed).
+## Owner items outstanding (this session)
+- Email to AP click on batch 14680609 (see top).
+- 095a: may a reader see the lookup name of a Restricted .eml?
+- Click-test 195; Q1 private items (`scratchpad/q1_owner_private.md`); Q4 private clean-up; whether chat should send invites (through field-mapping).
+- Older: #2343, #2245, #2250, #2260, K5/#2270, #2262, #2396; 191 F1/S4; 190 Apply; #2382 UAT check 5; #2505. Waiting-on-owner tasks 140, 165, 153. Optional: move the admin account into BU1.
+- ebilling's held notice to customer-provisioning (session 09) needs the owner to release it (permission modes).
 
 ## Peers
-- R3 (closing): `spaarke-wt-spa-external-access-platform-f2`.
-- ebilling: `spaarke-wt-ebilling-r1-7b`.
-- field-mapping: `spaarke-wt-field-mapping-server-write-pa-5c`.
-- ontology: `spaarke-wt-spaarke-ontology-platform-r1-be`.
-- Others: word-add-in; provisioning; audit `spaarke-f6`.
+- ebilling `spaarke-wt-ebilling-r1-7b`; field-mapping `spaarke-wt-field-mapping-server-write-pa-5c`; ontology `spaarke-wt-spaarke-ontology-platform-r1-be`; R3 closed (`spaarke-wt-spa-external-access-platform-f2`); others: word-add-in, provisioning, audit `spaarke-f6`.
