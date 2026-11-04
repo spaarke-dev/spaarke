@@ -50,6 +50,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     private Exception? _catalogFault;
 
+    /// <summary>B': what the service logged in <see cref="ServiceCreate"/> (step 6¾'s outcome, and that no record id is logged).</summary>
+    private readonly CapturingLog<RecordCreationService> _halfPairLog = new();
+
     /// <summary>
     /// <see cref="CorePairWorld"/>, plus: the catalog by table (matter, project); an ordinary project in X; a team-owned invoice in
     /// X filed under the ordinary matter in Y (directory and stamp world: step 6½ plans the matter stamp from it).
@@ -106,10 +109,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
             _user, table, JsonSerializer.SerializeToElement(item.ToDictionary(i => i.Column, i => i.Value)), CancellationToken.None);
         mapped.Item.Should().NotBeNull(mapped.ValidationError);
         return await RouteRecordCreation.Over(_world.Resolver(), _appOnly.Object, _serviceRestamper ?? Restamper(), Shares(),
-                SecureRootFilingGateFixtures.NothingSecure(), entities: _serviceEntities?.Object)
+                SecureRootFilingGateFixtures.NothingSecure(), entities: _serviceEntities?.Object, logger: _halfPairLog)
             .CreateAsync(new RecordCreationRequest(table, new RecordCreationPayload.Mapped(mapped.Item!)),
                 RecordCreationPrincipal.ForCaller(_user, CallerOid), CancellationToken.None);
     }
+
+    /// <summary>Step 6¾'s outcomes the service logged (the warning codes), in order.</summary>
+    private IReadOnlyList<string> HalfPairOutcomesLogged() =>
+        [.. _halfPairLog.Messages.Where(m => m.Contains("named its core record type without the core record", StringComparison.Ordinal))];
 
     /// <summary>Runs <paramref name="item"/> through the service and then through chat.</summary>
     private async Task<(RecordCreationOutcome Service, ToolResult Chat)> BothPaths(string table, params (string Column, JsonElement Value)[] item) =>
@@ -375,6 +382,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
         viaChat.ErrorMessage.Should().Be(row8Chat.ErrorMessage);
         _appCreates.Should().BeEmpty();
         _catalogTablesAsked.Should().Contain("sprk_matter", "the Secure root was filled (step 6¾), then refused at step 7");
+
+        // The refusal is row 8's whether or not the pair is filled (the Secure matter is also the filing parent), so the fill
+        // itself is proved by step 6¾'s logged outcome: FILLED, never cleared. And no record id is logged at Information or above.
+        HalfPairOutcomesLogged().Should().ContainSingle().Which.Should().EndWith(RecordCreationWarning.CoreRecordFilledCode);
+        _halfPairLog.Entries.Where(e => e.Level >= Microsoft.Extensions.Logging.LogLevel.Information)
+            .Should().NotContain(e => e.Message.Contains(SecureMatter.ToString("D"), StringComparison.OrdinalIgnoreCase)
+                                      || e.Message.Contains(SecureMatter.ToString("N"), StringComparison.OrdinalIgnoreCase),
+                "UAC-r2: the root id is never logged at Information or above");
     }
 
     // ── Ruling 9: no pair, a full pair, an id with no type — unchanged ────────────────────────────────────────────────

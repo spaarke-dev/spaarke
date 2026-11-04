@@ -571,6 +571,9 @@ public class WriterBuilderOwnershipParityTests
             outcome.Refusal.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
             outcome.Refusal.OwnerDecision!.IsSecureOwner.Should().BeTrue();
             world.Creates.Should().BeEmpty();
+            // Row 8 either way (the Secure matter is also the filing parent): the FILL is proved by step 6¾'s logged outcome.
+            world.ServiceLog.Messages.Where(m => m.Contains("named its core record type without the core record", StringComparison.Ordinal))
+                .Should().ContainSingle().Which.Should().EndWith(RecordCreationWarning.CoreRecordFilledCode);
             return;
         }
 
@@ -634,6 +637,9 @@ public class WriterBuilderOwnershipParityTests
 
         /// <summary>Every app-only create, with the fields of its body as sent (fix round 1: the theory reads what was written).</summary>
         public List<(string Table, Guid Id, Dictionary<string, object?> Fields)> Creates { get; } = [];
+
+        /// <summary>Task 042c B': what the service logged (step 6¾'s outcome).</summary>
+        public CapturingLog<RecordCreationService> ServiceLog { get; } = new();
 
         /// <summary>Task 042c fix round 1: ids the service's app-only single-row read does not find (it throws, as Dataverse does).</summary>
         public HashSet<Guid> MissingRows { get; } = [];
@@ -816,7 +822,7 @@ public class WriterBuilderOwnershipParityTests
             var outcome = await RouteRecordCreation.Over(
                     _directory.Resolver(), _appOnly.Object, _stamps.Restamper,
                     SecureChildShareWorld.Standard().Synchronizer(new FakeRecordShareTable()),
-                    Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), entities: Entities())
+                    Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), entities: Entities(), logger: ServiceLog)
                 .CreateAsync(
                     new RecordCreationRequest(
                         table, new RecordCreationPayload.Mapped(item)),

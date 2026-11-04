@@ -90,7 +90,106 @@ Failing first (C, D): the 20 C/D cases run against the tip's `RecordCreationServ
 
 Seeding proof (A-d): in `ForRow`, the core is put LAST instead of first (`ordered.Concat([coreRecord])`). The six (d) cases (4 exact plus 2 two-stamp): **6 failed / 0 passed**. Reverted; 6 / 6 pass.
 
-**Escalated (not fixed): the stamp order after the subject.** With a core and TWO stamps on the subject (a matter and a project), `ForExistingRowAsync` asks `[core, subject, project, matter]`: its derived stamps come in `CoreAncestorResolver.CoreRecordEntities` order (project, matter, ...). `ForRow(coreRecord)`, like the first version's `OwnerQuestionOf`, asks `[core, subject, matter, project]`, in the table's lineage order. The primary (the core), the parent set and the owner are the same (the resolver's ordinary answer is the primary's unit, and secure-if-any is over the set). Only the order after the subject differs. Matching it would change `ForRow`'s ordering on the core path beyond what UAC-r2 approved, so it is left for UAC-r2 to rule on. Class: K-candidate (same primary and owner; the order of the non-primary parents could only change which unreadable parent a refusal names first).
+**Escalated (not fixed): the stamp order after the subject.** With a core and TWO stamps on the subject (a matter and a project), `ForExistingRowAsync` asks `[core, subject, project, matter]`: its derived stamps come in `CoreAncestorResolver.CoreRecordEntities` order (project, matter, ...). `ForRow(coreRecord)`, like the first version's `OwnerQuestionOf`, asks `[core, subject, matter, project]`, in the table's lineage order. The primary (the core), the parent set and the owner are the same (the resolver's ordinary answer is the primary's unit, and secure-if-any is over the set). Only the order after the subject differs. Matching it would change `ForRow`'s ordering on the core path beyond what UAC-r2 approved, so it is left for UAC-r2 to rule on. Class: K-candidate (same primary and owner; the order of the non-primary parents could only change which unreadable parent a refusal names first). Resolved in fix round 2: K2, design §15.4 row 14 (below).
+
+## Fix round 2 (B')
+
+**Owner rule (2026-11-04).** `RecordCreationService` never writes a HALF core pair on `sprk_signal` or `sprk_decisionrecord` (`sprk_corerecordtype` set, `sprk_corerecordid` missing, null, empty or whitespace), and never refuses because of one.
+
+**Rulings.**
+1. The fill comes from the row as it ENDS (042b's `AsTheRowEnds`: step 6½'s planned stamps over the sent ones; a sent stamp that agrees is kept). A filing parent that is itself a core-table record is a root. The derived root is never probed as the caller.
+2. The type is a root's table's catalog row: FILLED with that root's id, lower-case "D" form.
+3. The type disagrees and there is exactly one root: the pair is REPLACED, the type taken from the root table's catalog row through ONE shared helper (app-only). Zero or several catalog rows: CLEARED. A fault: the existing 503 `stamp_unavailable`, nothing written.
+4. Two roots: filled with the one of the sent type; neither: CLEARED.
+5. No root: CLEARED (the type is removed; neither column is written).
+6. Any planning or derivation FAULT: the existing 503 `stamp_unavailable`. Never a clear on a fault; nothing written.
+7. A filled Secure root: the normal path gives the row-8 409 `NoOwnerSource`.
+8. Warnings: distinct new codes on the existing pre-create warning channel. The text names neither the root id nor whether it is Secure.
+9. Unchanged: an id with no type stays refused in fix round 1's item-C words; no pair, or a full pair, is unchanged.
+10. The system-principal twin follows the same rules.
+11. ArchTest: server code that writes `sprk_corerecordtype` also writes `sprk_corerecordid`.
+
+**UAC-r2 conditions:** (a) the fill only from the plan or the ending row, never a probe; (b) never a sent type beside an id of another type; (c) no root: clear with a warning; (d) a fault: 503, nothing cleared or written; (e) a Secure fill: 409; (f) the warning names no root id and no Secure state; (g) the ArchTest has its controls.
+
+**Coordinator conditions (UAC-r2 accepted rulings 1-7):**
+1. A filled or replaced id is stored lower-case "D"; a replace takes the type from the SAME catalog row as the id's table, so a mixed pair cannot result.
+2. The codes are distinct and documented here and in XML doc. They reach only the model and caller through the existing channel. Nothing logs the root id at Information or above: step 6¾ logs the table and the outcome code only (Information), and a catalog fault logs the table only (Error).
+3. The ArchTest scans WRITES, not reads or lists that only name the columns.
+4. K2: the two-stamp owner-kind theory (below).
+
+**What changed in src.**
+- `RecordCreationService` step 6¾ (`CompleteHalfCorePairAsync`, after step 6½'s `missingStamp`, before step 7):
+  - roots = `CoreRootsAsTheRowEnds` (the lookups as the row ends; core tables only; no citation, no Secure-only parent; distinct);
+  - for each distinct root table, its catalog row through `CoreAncestorResolver.RecordTypeOfCoreTableAsync`;
+  - the sent type matches exactly one root → fill; no match, one root, its catalog row known → replace (`sent with { RecordId = rootType }`, the id that root's); otherwise → clear.
+  - The filled or replaced core becomes the owner question's core record (`coreRecord`), so step 7 asks it first, as fix round 1's `ForRow(coreRecord)`. `DecideOwnerAsync` skips its own catalog read for a core step 6¾ already decided (`!askedAsCaller && coreRecord is null`).
+- `WithCorePair(item, type, id)` is THE one writer of the pair in the service: type and id together, or both removed (body, `Columns`, `Lookups`, `ClearedColumns`). One without the other throws `ArgumentException`; a type to write with no bind in the body to keep the key of throws `InvalidOperationException`. `WithCoreIdAsTheWritersStoreIt` (fix round 1, D) now writes through it.
+- `CoreAncestorResolver.RecordTypeOfCoreTableAsync(entities, coreTable, ct)`: the active `sprk_recordtype_ref` row whose `sprk_recordlogicalname` is a core table (`TopCount = 2`; exactly one row, else `null`); app-only (the service's `IGenericEntityService`); throws on a fault.
+- Warning codes (`RecordCreationWarning`, XML doc on each):
+
+| Code | Column | Words (`RecordCreationService.`) | When |
+|---|---|---|---|
+| `record_creation.core_record_filled` | `sprk_corerecordid` | `CoreRecordFilled(noun)` | rulings 1, 2, 4 |
+| `record_creation.core_record_replaced` | `sprk_corerecordtype` | `CoreRecordReplaced(noun)` | ruling 3 |
+| `record_creation.core_record_cleared` | `sprk_corerecordtype` | `CoreRecordCleared(noun)` | rulings 3 (no or several catalog rows), 4, 5 |
+
+**No change** to `RecordOwnershipResolver` (beyond fix round 1's `ForRow` parameter), `SignalWriter`, `DecisionRecordWriter`, or any existing refusal's code, status or words. Nothing escalated.
+
+**Helper decision.** One new helper, `CoreAncestorResolver.RecordTypeOfCoreTableAsync`; the existing copies are left as they are. Consolidating them is not clean: each has its own columns, filters or failure contract, and `SignalWriter`'s may not change in this round. The copies (table → catalog row):
+- `SignalWriter.ResolveRecordTypeRefIdAsync` (about `:1719`);
+- `SignalEvaluator` (about `:699`);
+- `OfficeService.DeriveFiledUnderTypeAsync` (about `:2655`);
+- `CommunicationProposalApplyService` (about `:691`);
+- `CommunicationEnrichmentService` (about `:1119`);
+- `SignalReadService` (about `:846`);
+- `BudgetInquiryExecutor` (about `:226`);
+- `ExternalDataService` (about `:3304`).
+
+**Component justification (CLAUDE.md §11).**
+- `RecordTypeOfCoreTableAsync`. Existing: the copies above and `CoreTableOfRecordTypeAsync` (the reverse direction). Extension: it sits beside `CoreTableOfRecordTypeAsync` in `CoreAncestorResolver`; the copies have other contracts. Cost of doing nothing: rulings 2-4 cannot tell a root's type, so a half pair cannot be filled or replaced.
+- `WithCorePair`. Existing: fix round 1's id rewrite in `WithCoreIdAsTheWritersStoreIt`, now routed through it. Extension: it is that rewrite, generalised to the whole pair. Cost of doing nothing: no single place writes the pair, and the ArchTest has no writer to recognise.
+- Step 6¾ and the three warning codes. Existing: step 6½'s warning channel, extended rather than duplicated. Cost of doing nothing: the half pair is written (the owner rule fails).
+- No new endpoint, DI registration, package or Dataverse column. Placement: inside the existing create service (§10).
+
+**Interpretation (noted for review).** Two roots of the SAME table, or a sent type matching several roots, → CLEAR (the core cannot be told). The type is "matched" by comparing the sent type's id with the catalog row the helper returns for each root's table; the sent type's own row is never read.
+
+**Tests (KEEP paths; no new file under `tests/unit/Sprk.Bff.Api.Tests/**`).**
+- New `tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.HalfCorePair.cs`. The service and chat paths, both tables:
+
+| Ruling / condition | Test |
+|---|---|
+| 1, 2 (converted AC5 case) | `ACreateWithACoreTypeButNoId_IsFilledFromTheRecordItIsFiledUnder` (8 cases: the id missing, null, empty, whitespace; lower-case "D" stored) |
+| 1, (a) | `AHalfPair_IsFilledFromThePlannedStamp_NeverFromADisagreeingSentStamp_NorAProbe` (no caller probe of the derived root) |
+| 3, (b), coordinator 1 | `AHalfPairOfAnotherType_IsReplacedWholeFromTheOneRoot` (the type and the id from the same root) |
+| 3 (zero / several rows) | `AHalfPairWhoseRootsCatalogRowCannotBeTold_IsCleared` (4 cases) |
+| 3, 6, (d) | `ACatalogFault_IsTheExisting503_NothingClearedOrWritten`, `APlanningFault_IsTheExisting503_NothingClearedOrWritten` |
+| 4 | `AHalfPairUnderTwoRoots_IsFilledWithTheOneOfItsType_OrCleared` (6 cases) |
+| 5, (c) | `AHalfPairWithNoRoot_IsCleared_AndTheRowIsCreatedWithNoCore` |
+| 7, (e), coordinator 2 | `AHalfPairFilledWithASecureRoot_GetsTheRow8Refusal`: byte-identical row-8 ProblemDetails and chat words; step 6¾'s logged outcome is FILLED; no Information+ log entry holds the root id |
+| 8, (f) | every warning case asserts `NamesNoRecordAndNoSecureState` on the text, and that chat's `ToolResult.Warnings` carries it (`BothCreatedWithTheWarning`) |
+| 9 | `ARowWithNoPairOrAFullPair_IsUntouchedByStep6AndThreeQuarters` (4 cases); the id with no type stays `ACoreIdThatIsNotARecordIdOrHasNoType_IsRefusedInTheCorePairsOwnWords` (unchanged) |
+| 10 | `WriterBuilderOwnershipParityTests.ACreateWithAHalfCorePair_IsCompletedFromTheRowAsItEnds` (18 cases: system principal and caller; fill from the plan, fill when filed under the root, replace, clear with no root, clear with no catalog row, catalog fault, planning fault, Secure root; the owner equals the reconciler's for the written row) |
+| 11, (g) | `tests/Spaarke.ArchTests/CorePairTypeImpliesIdGuardTests.cs` (below) |
+
+- **Converted test.** `ACreateWithACoreTypeButNoId_KeepsTodaysOwner` (`SecureChildOwnershipAiToolTests.CoreRecordPair.cs`) is removed. It is now the fill case `ACreateWithACoreTypeButNoId_IsFilledFromTheRecordItIsFiledUnder`.
+- **Harness.** The chat `CreateRecordHandler` and `ServiceCreateWithCore` take the service's restamper and app-only entities from the B' world when set. The scripted user client's Signal and Decision Record lookups add `sprk_regardingproject`. The HalfCorePair service create and the parity world capture the service's log (`CapturingLog<RecordCreationService>`).
+- **K2 (coordinator 4).** `ExistingRowOwnershipParityTests.ForRow_WithTheCoreRecord_AndTwoStamps_HasTheReconcilersPrimaryParentsAndOwner` is now a theory over the owner kinds (Secure team, ordinary team, user-owned, unreadable or missing) of the subject To Do, the matter stamp and the project stamp, both tables: **128 cases**. For each it asserts the same primary, the same parent set, the same Secure-only parents and child table, and the same owner (`IsOwned`, `OwningTeamId`, `IsSecureOwner`) or the same `RefusalCode` from `ForRow(core)` and `ForExistingRowAsync`. The stamps are derived from a separate world holding the To Do and both roots, so an unreadable subject or stamp changes the resolver's answers, never the parents. **None differs: 128 / 128.** No `ForRow` change; K2 row 14 in design §15.4.
+
+**ArchTest `CorePairTypeImpliesIdGuardTests`.**
+- Rule 1 (keyed writes): an Entity or dictionary indexer assignment (`[KEY] =`, not `==`), `.Add(KEY, …)` / `.TryAdd(KEY, …)`, or a JSON writer call (`WriteString`, `WritePropertyName`, `WriteNull`, …) with the type's key needs an id write within 10 lines in the same file. A key is the literal (any case, with or without `@odata.bind`), a same-file `const string` with that value, or `SignalCoreRecordAccess.CoreRecordTypeColumn`.
+- Rule 2 (body rewrites): a member that names the type's key and assigns `JsonBody =` or `Lookups =` must be `WithCorePair`, and must write the id.
+- Seen today: `SignalWriter`, `DecisionRecordWriter`, `RecordFamilyReader` (rule 1) and `RecordCreationService.WithCorePair` (rule 2). All are non-vacuity pins.
+- Controls:
+  - Must fire: a type-only write in each shape, a same-file const, the shared const, an id too far away, an id only in a comment, a body rewrite outside `WithCorePair`, and a `WithCorePair` with no id write.
+  - Must not fire: a pair write; reads (`GetAttributeValue`, `AddCondition`, a filter string, `==`, `ColumnSet`, `columns.Add(LookupValue(…))`); refuse lists and other lists that only NAME the columns (`RefusedColumns = Columns("sprk_corerecordtype", "sprk_corerecordid")`, collection expressions, a set initializer, `RefuseColumns(table, fields, ["sprk_corerecordtype"])`); `WithCorePair` with a local function.
+- So it does not flag a helper that only names the pair in a refuse list.
+- Must fire on real code: with `SignalWriter.cs`'s id line removed, the guard reports `SignalWriter.cs: line 1794`. Restored.
+- Limits (in its XML doc): a dictionary collection initializer `{ { KEY, v } }`, an anonymous object and a hand-written JSON string are not seen.
+
+**Failing first.** The B' service, chat and parity tests (52 cases) were run against the tip's `RecordCreationService.cs` and `CoreAncestorResolver.cs` (`6d87258cd3`), with only the inert word functions and code constants added so they compile: **42 failed, 10 passed**. The 10 are the unchanged-behaviour controls: ruling 9 must-not-fire (4), the planning fault (2: step 6½ already refused before B'), and 4 parity cases. After the change: 52 / 52.
+
+**Seeding proof.** In `CompleteHalfCorePairAsync` the fill branch was skipped once (`if (ofTheSentType.Count == 1 && SkipTheFill())`, `SkipTheFill() => false`): **24 failed, 28 passed**. The 24 are every fill case: the converted case (8), ruling 1 (a) (2), ruling 4 (4), ruling 7 (2) and the parity theory's fill and Secure cases (8). Reverted; 52 / 52 pass.
+- Ruling 7's 409 is row 8's whether or not the pair is filled, because the Secure matter is also the filing parent. Its tests first passed with the fill skipped, so they now also assert step 6¾'s logged outcome (FILLED) in both the service test and the parity twin.
 
 ## Verification
 
