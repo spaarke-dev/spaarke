@@ -438,17 +438,22 @@ least as strict as the matter.
   team is found: every ordinary hard-deny write is refused (`OwnerTeamNotFound`, fail closed). The reconciler's ordinary
   pass leaves an author-owned row, or one owned by a non-default team, where it is and reports it, without refusing it; a
   hard-deny row owned by a non-default team other than the restricted-content team is always reported, by id.
-- **Reading billing rules across the customer (`Billing Rule Readers`; ebilling-r1 task 089d, owner 2026-11-03).** A billing
-  rule (`sprk_policy`) sits in the customer's top business unit, and Billing Administrator reads rules at Deep from the
-  admin's own unit, so an admin homed in a child unit cannot read it, and the rule-exclude route refuses that admin (403;
-  it checks the caller's own Read on the rule and infers nothing from Procedure rights). Each customer's top unit therefore
-  holds a `Billing Rule Readers` team whose role reads `sprk_policy` at Deep and nothing else; child-unit billing admins are
-  its members. A team's Deep is evaluated from the team's own unit, so members read every rule owned in the customer's unit
-  and below it, and never a rule owned by Secure Record Owners (Secure Record is a sibling of the customer unit). Global
-  Read, or Deep held in the root, would reach Secure Record and is not allowed. The one definition is
-  `config/billing-rule-readers-role.json`; `scripts/Set-CustomerOwnerTeams.ps1` sets the team up and its `-Verify` fails on a
-  team in the root or Secure Record, any other privilege or depth, or a member who lacks the billing-admin privilege or is
-  homed outside the customer's units.
+- **Reading billing rules across the customer (`Billing Rule Reader`; ebilling-r1 task 089d, owner 2026-11-03 and
+  2026-11-04).** A billing rule (`sprk_policy`) sits in the customer's top business unit, and Billing Administrator reads rules
+  at Deep from the admin's own unit, so an admin homed in a child unit cannot read it, and the rule-exclude route refuses that
+  admin (403; it checks the caller's own Read on the rule and infers nothing from Procedure rights). Such an admin is
+  therefore assigned one more role, `Billing Rule Reader`, which reads `sprk_policy` at Deep and nothing else. No team holds
+  it, and it is not added to Billing Administrator. Why this keeps Secure Record out of reach: Dataverse measures a role's
+  depth from the business unit of the role **copy** the user holds, not from the user's home unit. The copy assigned is the
+  customer's top unit's (with the org setting `EnableOwnershipAcrossBusinessUnits` on, a user may hold another unit's copy),
+  so Deep covers that unit and every unit below it. Secure Record is a sibling of the customer's top unit, both being direct
+  children of the root, so it is never below it and its rules stay out of reach. Global Read, or the root's copy at Deep,
+  would reach Secure Record and is not allowed; the admin's own unit's copy would not reach the top unit at all. The one
+  definition is `config/billing-rule-readers-role.json`. `scripts/Set-CustomerOwnerTeams.ps1` creates the role, sets the
+  org setting, assigns the right copy (`-AssignBillingRuleReader`), and its `-Verify` fails on the org setting off,
+  `isinherited` not 0, any other privilege or depth, a team holder, a wrong copy assigned, or a holder who lacks the
+  billing-admin privilege or is homed outside the customer's units. The Secure census anchors a directly assigned grant at
+  the copy's unit in the same way, so it would report a wrong copy that reaches Secure Record.
 - **A Decision Record** is also filed under the subject of every Signal it resolved (the ids its `sprk_steps` lists). A
   Secure pass reaches it through those Signals even when it lies outside the record's own family, so it moves into
   isolation, or out, with them.
