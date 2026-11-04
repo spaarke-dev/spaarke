@@ -1525,6 +1525,77 @@ public sealed class ProcedureAssignmentServiceTests
         w.StatusOf(finding).Should().Be(SignalWriter.SignalStatusOpen);
     }
 
+    [Fact(DisplayName = "089e fix round 2 (F2) must-fire: no answer from stage 3 while an Exclude row exists from a plain Exclude and the record rule's version row is absent is not committed: 500, nothing closed")]
+    public async Task Change_WhenTheTransactionGivesNoAnswer_AndOnlyAPlainExcludeRowExists_Is500_AndClosesNothing()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var finding = w.Signal(policy, w.Invoice(matter: MatterId));
+        Guid? versionId = null;
+        w.H.TransactionGivesNoAnswer = requests =>
+        {
+            if (requests.Count != 3)
+            {
+                return false; // stages 1 and 2 commit
+            }
+
+            // Stage 3 applies nothing; meanwhile a plain Exclude of the same rule writes the row at the same derived id (I-A1).
+            var exclude = ((Microsoft.Xrm.Sdk.Messages.CreateRequest)requests[0]).Target;
+            versionId = ((Microsoft.Xrm.Sdk.Messages.CreateRequest)requests[1]).Target.Id;
+            var plain = new Entity(exclude.LogicalName, exclude.Id);
+            foreach (var attribute in exclude.Attributes)
+            {
+                plain[attribute.Key] = attribute.Value;
+            }
+
+            w.H.Seed(plain);
+            return true;
+        };
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        w.Rows.Should().ContainSingle("the plain Exclude's row is there");
+        versionId.Should().NotBeNull();
+        w.RowsOf("sprk_policyversion").Should().NotContain(r => r.Id == versionId, "the record rule's version was never written");
+        outcome.StatusCode.Should().Be(500, "an Exclude row alone does not prove that stage 3 committed");
+        outcome.ErrorCode.Should().Be("assignment.write_failed");
+        w.Superseded.Should().BeEmpty();
+        w.SubjectSelections.Should().BeEmpty();
+        w.StatusOf(finding).Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
+    [Fact(DisplayName = "089e fix round 2 (F2): the read-back after no answer is not cancelled by the request's token")]
+    public async Task Change_WhenTheTransactionCommitsButGivesNoAnswer_AndTheRequestIsCancelled_StillReadsBack()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var finding = w.Signal(policy, w.Invoice(matter: MatterId));
+        using var cts = new CancellationTokenSource();
+        var readsBefore = -1;
+        w.H.TransactionCommitsButAnswersUnknown = requests =>
+        {
+            if (requests.Count != 3)
+            {
+                return false;
+            }
+
+            cts.Cancel(); // the caller went away while stage 3 committed
+            readsBefore = w.H.QueryTokens.Count;
+            return true;
+        };
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, cts.Token);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        w.StatusOf(finding).Should().Be(SignalWriter.SignalStatusResolved, "the change committed, so its close runs");
+        readsBefore.Should().BeGreaterThan(0);
+        var after = w.H.Queries.Skip(readsBefore).Zip(w.H.QueryTokens.Skip(readsBefore)).ToList();
+        after.Should().Contain(r => r.First.EntityName == "sprk_policyversion", "the read-back asks for the record rule's version row");
+        // The read-back (the version row) and the close's Signal reads; the caller-scoped count after them keeps the request's token.
+        after.Where(r => r.First.EntityName is "sprk_policyversion" or "sprk_signal")
+            .Should().OnlyContain(r => !r.Second.CanBeCanceled, "the read-back and the close run on CancellationToken.None");
+    }
+
     [Fact(DisplayName = "089c: an unknown override, or another record's, is 404 assignment.override_not_found and nothing is written")]
     public async Task Remove_AnUnknownOrAnotherRecordsOverride_Is404()
     {

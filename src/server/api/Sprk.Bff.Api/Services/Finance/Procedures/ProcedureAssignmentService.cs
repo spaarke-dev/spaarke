@@ -467,7 +467,8 @@ public class ProcedureAssignmentService
     /// directly on this record (only that firm's, for a firm-scoped change) close <c>Superseded</c> (<see cref="SupersedeBaseFindingsAsync"/>).
     /// The close records the resolution only, not the record rule's version. The close is best effort: the change stays committed whatever it
     /// does, and the result says whether it completed, what it covered, and how many of those invoices the caller can see. A transaction that
-    /// gives no answer (pass-1 K2) is read back: when the Exclude row is there, the change committed and the close runs.</para>
+    /// gives no answer (pass-1 K2) is read back: when the record rule's version row is there (stage 3 alone writes it; fix round 2), the change
+    /// committed and the close runs.</para>
     /// </remarks>
     public virtual async Task<RuleSetOutcome<RuleChangedView>> ChangeRuleAsync(
         string coreTable, Guid recordId, RuleChangeRequest request, Guid? callerObjectId, string? callerBearerToken, CancellationToken ct)
@@ -629,7 +630,7 @@ public class ProcedureAssignmentService
         }
 
         var sent = await SendAsync(new OrganizationRequest[] { excludeCreate.Request!, versionCreate.Request!, switchOn }, exclude.Id, "change rule");
-        if (sent == SendResult.Unknown && await CommittedAfterNoAnswerAsync(exclude.Id, ct))
+        if (sent == SendResult.Unknown && await CommittedAfterNoAnswerAsync(exclude.Id, versionId, recordRule.Id))
         {
             sent = SendResult.Done;
         }
@@ -663,19 +664,23 @@ public class ProcedureAssignmentService
     }
 
     /// <summary>
-    /// Task 089e (pass-1 K2): after a stage-3 transaction that gave no answer, whether it committed. The transaction is all or nothing, so the
-    /// Exclude row at its derived id is the answer. A read fault is no answer, so the change keeps its 500.
+    /// Task 089e (pass-1 K2; fix round 2, F2): after a stage-3 transaction that gave no answer, whether it committed. The transaction is all
+    /// or nothing, so the row only stage 3 writes is the answer: the record rule's version at its derived id <paramref name="versionId"/>,
+    /// under <paramref name="recordRuleId"/>. The Exclude row is not: a plain Exclude of the same rule writes a row at the same derived id
+    /// (I-A1). The read runs on <see cref="CancellationToken.None"/>: a caller who went away must not turn a committed change into a 500. A
+    /// read fault is no answer, so the change keeps its 500.
     /// </summary>
-    private async Task<bool> CommittedAfterNoAnswerAsync(Guid excludeId, CancellationToken ct)
+    private async Task<bool> CommittedAfterNoAnswerAsync(Guid excludeId, Guid versionId, Guid recordRuleId)
     {
         try
         {
-            var committed = await LoadByIdAsync(ProcedureAssignmentEntity.Entity, excludeId, new[] { ProcedureAssignmentEntity.ModeColumn }, ct) is not null;
-            _logger.LogWarning("Override {AssignmentId}: the change rule transaction gave no answer; read back: {Committed}",
-                excludeId, committed ? "committed" : "not committed");
+            var version = await LoadByIdAsync(VersionTable, versionId, new[] { "sprk_policy" }, CancellationToken.None);
+            var committed = version?.GetAttributeValue<EntityReference>("sprk_policy")?.Id == recordRuleId;
+            _logger.LogWarning("Override {AssignmentId}: the change rule transaction gave no answer; read back of version {VersionId}: {Committed}",
+                excludeId, versionId, committed ? "committed" : "not committed");
             return committed;
         }
-        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        catch (Exception ex)
         {
             _logger.LogError(ex, "Override {AssignmentId}: the change rule transaction gave no answer, and the read back failed", excludeId);
             return false;

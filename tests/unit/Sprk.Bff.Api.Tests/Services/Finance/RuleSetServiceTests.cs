@@ -159,9 +159,10 @@ public sealed class RuleSetServiceTests
                 .ReturnsAsync(() => OwnerAnswer);
 
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+                .ReturnsAsync((QueryExpression q, CancellationToken token) =>
                 {
                     Queries.Add(q);
+                    QueryTokens.Add(token);
                     var matched = (Rows.GetValueOrDefault(q.EntityName) ?? new List<Entity>())
                         .Where(r => IgnoreQueryFilters && q.EntityName != "sprk_organization" ? true : Matches(r, q.Criteria))
                         .Select(Clone);
@@ -325,6 +326,9 @@ public sealed class RuleSetServiceTests
                     return Task.CompletedTask;
                 });
         }
+
+        /// <summary>Task 089e fix round 2: the token each query in <c>Queries</c> was sent with, in the same order.</summary>
+        public readonly List<CancellationToken> QueryTokens = new();
 
         /// <summary>Every transaction as sent (task 081), whether or not it committed.</summary>
         public readonly List<IReadOnlyList<OrganizationRequest>> Transactions = new();
