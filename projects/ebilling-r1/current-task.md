@@ -1,15 +1,15 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-04 ~02:30Z (local 2026-11-03 20:05). Session ebilling-r1-7b (authoritative; the idle -9c session is not). Work head pushed: f801c16452 or later (`git log -1 origin/work/ebilling-r1`). The dev BFF is master d763dc120e (live 22:26:31Z, uac-r2 gate passed). **None of the work below is on master or dev yet.**
+> **Last Updated**: 2026-11-04 ~06:30Z. Session ebilling-r1-7b (authoritative). Work head pushed (`git log -1 origin/work/ebilling-r1`). Dev BFF is still master d763dc120e. **None of this work is on master or dev BFF yet.** Ribbon applied and verified on dev 04:37:54Z.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
 | **Mode** | Parallel task-execute agents, max 4 (owner 2026-11-03). Merge each finished branch into work, launch the next ready task. One adversarial review per change set, two for auth. |
-| **Running agents** | (1) 095c-5 + 095c-4 review fixes (Opus, task/ebilling-095c-5; -WhatIf only). (2) 089c change rule + removal (Opus, task/ebilling-089c; 2 passes needed). (3) 089d adversarial pass 1 of 2 (Opus); 089d merged 0c438d4071 (ArchTests 1974/1974, Pester 12/12, -WhatIf clean). 089d -Apply: `.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -CustomerBusinessUnitId cb15f587-baa0-f111-aaac-000d3a99d1d7 -Apply` then -Verify; needs the owner's go plus uac-r2 notices, after both passes. The provisioning notice for 089d is HELD by session 09 (permission mode); owner to approve there. **MASTER PR BLOCKED until 095c-5 merges and is applied to dev.** |
-| **Live blocker** | The owner sees no **Email to AP** on batch 14680609. uac-r2 says the screenshots so far were the GRID (Email to AP is form-only). Dev checks out: ribbondiff/ribboncommand/ribbonrule rows present, apexport_ribbon.js has batchIsCompleted, which returns true on a fake form, and the location pattern matches invoice/matter forms. Waiting for the FORM's command bar screenshot after Ctrl+F5 (and under the ⋮ menu). If none of the 4 form buttons show, the cause is the group or the bar; if only Email is missing, its rules. |
-| **Next action** | When agents report: merge, then build. When 095c-2, the 118 fixes and 086 are in: run the FILTERED unit gate on the work tip, measure publish size vs a fresh master, open ONE master PR (reviewers ontology-r1, uac-r2, R3; uac-r2 reviews the whole diff), auto-merge after approvals, send PR# and SHA to uac-r2 (and word-add-in, after the DEPLOY carrying 095c-2..4). |
+| **Running agents** | (1) 095c-5 + 095c-4 review fixes (Opus, task/ebilling-095c-5; -WhatIf only; -Apply needs the owner's go plus uac-r2 notices). (2) 089c change rule + removal (Opus, task/ebilling-089c; needs 2 adversarial passes). 089d merged at 0c438d4071; pass 1 done: F4 isinherited not pinned (dev roles default to 1), F4 guide missing the live-proof gate, K2 operator left in the team on a partial -Apply, K3 guide file pattern |
+| **Live blocker** | None. Email to AP is on the batch FORM (open the record); the owner hasn't clicked it yet. When they do, send uac-r2 the UTC time and record it in notes/153. |
+| **Next action** | 1) Answer the owner's 089d question 'why a team, not the role assignment?': check whether dev has modernized business units (role assigned from another BU, OrgDBOrgSettings). If on, a direct role assignment in the customer top unit replaces the team; take that to uac-r2 before the fix round. 2) 089d fix round: isinherited=0 plus -Verify, the guide's live-proof gate, member removal straight after team create, the file-pattern wording; then pass 2; then the update notice to provisioning-09 (it waits for 089d on master). 3) Merge 095c-5 when it reports, run its review, get the owner's go for -Apply. 4) Then the full gate and ONE master PR. |
 
 ## Merged into work this session (not on master)
 - Earlier: 095a/b, 151e, 052, 110/111, 095c-1, 089a, PR #2545 eval set, the AP export owner pre-check a6ff149cd9 (uac-r2 PASS).
@@ -44,7 +44,7 @@
 6. A leftover "lint-staged automatic backup" stash entry 1e84ffafed (holds committed changes only); dropping it needs the owner's confirmation.
 7. 089b: the owner said YES to rule Read organisation-wide. uac-r2's design is a Billing Rule Readers team in the customer top unit, with Deep Read on sprk_policy, to be built in task 089d. Not Global and not root-held (D-123). The 403 stays until the team exists. -Apply on dev needs the owner's go.
 8. The owner asked whether to make the GitHub repo private. Answered: it is their call; Claude Code keeps working through authenticated gh and git.
-9. 089d: who adds members to Billing Rule Readers, and when? The script never adds members. On dev, BU1 has no child units, so the team would have 0 members.
+9. 089d members: the OWNER ANSWERED that Billing Admin is a security role explicitly assigned to a limited set of users (operator adds; default OK). The owner asked: why a team rather than the role assignment? (pending answer). The owner changed provisioning-r1's permission mode (messages now deliver).
 
 ## Peer state
 - uac-r2 (38): runs ALL dev BFF deploys now (R3 stopped); the procedure is docs/procedures/dev-bff-deploy-coordination.md. Deploy requests carry the master SHA, the PRs and the pre-checks; the next deploy also carries #2550. It waits for the Email to AP UTC time, the master PR, and the NFR-05 census after deploy.
