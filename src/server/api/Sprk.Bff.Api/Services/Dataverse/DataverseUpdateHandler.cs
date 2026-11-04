@@ -105,7 +105,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // is asked on its shape alone, before any read or write. On a Signal the refusal above answers first.
         if (RecordTableRules.RefuseFixedAfterCreateColumns(entityLogicalName, fields.Keys) is { } fixedRefusal)
         {
-            throw new RecordOwnerUnresolvedException(entityLogicalName, fixedRefusal);
+            // Not the owner constructor: its message is about a create's owner. The update's own words, the same as the chat tool's.
+            throw new RecordOwnerUnresolvedException(entityLogicalName, fixedRefusal.RefusalCode!,
+                $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).");
         }
 
         // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,

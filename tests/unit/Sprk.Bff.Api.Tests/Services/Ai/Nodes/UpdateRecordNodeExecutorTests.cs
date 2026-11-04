@@ -495,6 +495,48 @@ public class UpdateRecordNodeExecutorTests
         written.Should().BeEmpty("the refusal comes before the write");
     }
 
+    [Fact(DisplayName = "Core record pair: a node naming a Decision Record's pair fails as a validation failure, logged at Warning, nothing written")]
+    public async Task ExecuteAsync_TheCorePairOfADecisionRecord_FailsTheNodeAsValidation_AndWritesNothing()
+    {
+        var config = $@"{{
+            ""entityLogicalName"":""sprk_decisionrecord"",
+            ""recordId"":""{Guid.NewGuid()}"",
+            ""fields"":{{""sprk_corerecordid"":""{Guid.NewGuid()}""}}
+        }}";
+        SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
+
+        var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(NodeErrorCodes.ValidationFailed);
+        result.ErrorMessage.Should().Be(
+            "The update was NOT written: sprk_corerecordid of a sprk_decisionrecord is set when the record is created and cannot "
+            + "be changed, so it was not written (record_update.fixed_after_create).");
+        written.Should().BeEmpty("the refusal comes before the write");
+        _loggerMock.Invocations.Where(i => i.Method.Name == nameof(ILogger.Log))
+            .Select(i => (LogLevel)i.Arguments[0]).Should().Contain(LogLevel.Warning).And.NotContain(LogLevel.Error);
+    }
+
+    [Fact(DisplayName = "Core record pair control: on a Signal the access-column refusal answers first and keeps its mapping (InternalError)")]
+    public async Task ExecuteAsync_TheCorePairOfASignal_KeepsTheAccessColumnRefusalsMapping()
+    {
+        var config = $@"{{
+            ""entityLogicalName"":""sprk_signal"",
+            ""recordId"":""{Guid.NewGuid()}"",
+            ""fields"":{{""sprk_corerecordid"":""{Guid.NewGuid()}""}}
+        }}";
+        SetupMockPassThrough();
+        var written = UseEntitySetsFromMetadata();
+
+        var result = await _executor.ExecuteAsync(CreateValidContext(config), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(NodeErrorCodes.InternalError);
+        result.ErrorMessage.Should().Contain($"({InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode})");
+        written.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "#2251 must not fire: the live matter node's update of an ordinary column (sprk_performancesummary) is written")]
     public async Task ExecuteAsync_AnOrdinaryColumnOnAMatter_IsWritten()
     {

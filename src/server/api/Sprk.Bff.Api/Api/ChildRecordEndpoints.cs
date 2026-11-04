@@ -658,6 +658,14 @@ public static class ChildRecordEndpoints
         if (filingOnly && FilingShapeProblem(body, entity) is { } shape)
             return shape;
 
+        // The core record pair is fixed after create on BFF update paths (RecordTableRule.FixedAfterCreateColumns): asked on the
+        // body's shape alone, before any read or write, so the contract holds for any table a caller of this core passes.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(
+                entity, body.ValueKind == JsonValueKind.Object ? body.EnumerateObject().Select(p => p.Name) : []) is { } fixedRefusal)
+        {
+            return Problem(StatusCodes.Status403Forbidden, DeniedCode, $"The {Noun(entity)} was not saved: {fixedRefusal.Reason}.");
+        }
+
         var meta = await user.GetAsync(
             $"EntityDefinitions(LogicalName='{entity}')?$select=EntitySetName,PrimaryIdAttribute", ct).ConfigureAwait(false);
         if (!meta.IsSuccess)

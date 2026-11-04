@@ -216,7 +216,9 @@ internal sealed class UpdateRecordActionCore
         // before any row is read or written. On a Signal the refusal above answers first for the app-only payloads.
         if (RecordTableRules.RefuseFixedAfterCreateColumns(input.EntityLogicalName, updatePayload.Keys) is { } fixedRefusal)
         {
-            throw new RecordOwnerUnresolvedException(input.EntityLogicalName, fixedRefusal);
+            // Not the owner constructor: its message is about a create's owner. The update's own words, the same as the chat tool's.
+            throw new RecordOwnerUnresolvedException(input.EntityLogicalName, fixedRefusal.RefusalCode!,
+                $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).");
         }
 
         async Task Patch(CancellationToken ct)

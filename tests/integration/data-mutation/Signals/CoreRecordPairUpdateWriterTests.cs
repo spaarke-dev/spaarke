@@ -44,8 +44,12 @@ public class CoreRecordPairUpdateWriterTests
     /// <summary>
     /// The doubles answer for <see cref="Row"/> as an existing row and for <see cref="MissingRow"/> as the real service answers
     /// for a row that does not exist: a read comes back with no columns (<c>DataverseWebApiService.RetrieveRecordFieldsAsync</c>
-    /// on a 404) and an update-only write throws <see cref="KeyNotFoundException"/>; <see cref="World"/> holds <see cref="Row"/>
-    /// only, and its read of any other id faults as Dataverse's does. So "the same refusal for any record id" can fail.
+    /// on a 404); <see cref="World"/> holds <see cref="Row"/> only, and its read of any other id faults as Dataverse's does. So
+    /// "the same refusal for any record id" can fail. A Signal or Decision Record update is sent through
+    /// <see cref="IFieldMappingDataverseService.UpdateRecordFieldsAsync"/>, whose real PATCH carries no <c>If-Match</c> and so
+    /// would create a row for a missing id rather than fail; it is not faked to throw — the any-id tests assert instead that no
+    /// call reached <see cref="_writes"/> for either id. (<c>UpdateExistingRecordFieldsAsync</c> is the invoice family's
+    /// update-only write; no table driven here reaches it, so it has no setup.)
     /// </summary>
     public CoreRecordPairUpdateWriterTests()
     {
@@ -54,13 +58,12 @@ public class CoreRecordPairUpdateWriterTests
             .ReturnsAsync((string _, Guid id, string[] columns, CancellationToken _) => id == MissingRow
                 ? new Dictionary<string, object?>()
                 : columns.ToDictionary(c => c, _ => (object?)"Existing"));
-        _writes.Setup(w => w.UpdateExistingRecordFieldsAsync(
-                It.IsAny<string>(), MissingRow, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new KeyNotFoundException());
-        _writes.Setup(w => w.UpdateExistingRecordFieldsAsync(
-                It.IsAny<string>(), MissingRow, It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new KeyNotFoundException());
     }
+
+    /// <summary>The refusal's exact words for <c>sprk_corerecordid</c> of <paramref name="table"/>.</summary>
+    private static string FixedAfterCreateMessage(string table) =>
+        $"The update was NOT written: sprk_corerecordid of a {table} is set when the record is created and cannot be changed, "
+        + $"so it was not written ({FixedAfterCreateCode}).";
 
     /// <summary>Every core-pair payload shape: one column, the other, both, mixed case, the bind form, and the pair with an ordinary column.</summary>
     public static readonly string[][] CorePairPayloads =
@@ -147,6 +150,23 @@ public class CoreRecordPairUpdateWriterTests
     [Theory]
     [InlineData("sprk_signal")]
     [InlineData("sprk_decisionrecord")]
+    public async Task ConfirmedProposal_TheRefusal_SaysTheUpdateWasNotWritten_NotThatNoOwnerWasResolved(string table)
+    {
+        var apply = () => Core().UpdateAsync(
+            new UpdateRecordActionInput(
+                table, Row, FieldMappings: null, LegacyFields(0), Lookups: null,
+                ImpersonateSystemUserId: Caller, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
+            CancellationToken.None);
+
+        var refused = (await apply.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which;
+        refused.Message.Should().Be(FixedAfterCreateMessage(table)).And.NotContain("No owner could be resolved");
+        (refused.RefusalCode, refused.EntityLogicalName).Should().Be((FixedAfterCreateCode, table));
+        _writes.Invocations.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
     public async Task UpdateRecordNode_TheRefusal_IsTheSameForAnyRecordId(string table)
     {
         async Task<string> RefusalFor(Guid id)
@@ -161,6 +181,7 @@ public class CoreRecordPairUpdateWriterTests
         }
 
         (await RefusalFor(MissingRow)).Should().Be(await RefusalFor(Row));
+        _writes.Invocations.Should().BeEmpty("nothing is read or written for either id");
 
         // Control: the double tells the two ids apart, so a refusal that depended on the row would differ.
         (await _writes.Object.RetrieveRecordFieldsAsync(table, Row, ["sprk_name"])).Should().NotBeEmpty();
@@ -230,6 +251,18 @@ public class CoreRecordPairUpdateWriterTests
     }
 
     [Fact]
+    public async Task OutputMapping_TheRefusalOfADecisionRecord_SaysTheUpdateWasNotWritten_NotThatNoOwnerWasResolved()
+    {
+        var mapping = () => Handler().UpdateAsync(
+            "sprk_decisionrecord", Row, Fields(0), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        var refused = (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which;
+        refused.Message.Should().Be(FixedAfterCreateMessage("sprk_decisionrecord")).And.NotContain("No owner could be resolved");
+        (refused.RefusalCode, refused.EntityLogicalName).Should().Be((FixedAfterCreateCode, "sprk_decisionrecord"));
+        _writes.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task OutputMapping_TheRefusal_IsTheSameForAnyRecordId()
     {
         async Task<string> RefusalFor(Guid id)
@@ -241,6 +274,7 @@ public class CoreRecordPairUpdateWriterTests
         }
 
         (await RefusalFor(MissingRow)).Should().Be(await RefusalFor(Row));
+        _writes.Invocations.Should().BeEmpty("nothing is read or written for either id");
 
         // Control: the world tells the two ids apart, so a refusal that depended on the row would differ.
         var world = World();

@@ -37,15 +37,11 @@ public class CoreRecordPairUpdateCheckGuardTests
     /// <summary>The closed list: methods that send an update through a scanned API without the check, each with its reason.</summary>
     private static readonly IReadOnlyList<(Type Type, string Method, string Reason)> FixedPayloadWriters = new[]
     {
-        // Helpers whose only caller asks the check first.
+        // A helper whose only caller asks the check first.
         (typeof(Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler), "PatchAsync",
             "Private write helper of UpdateAsync (through WriteAsync / UpdateWithOptimisticConcurrencyAsync), which asks the check first."),
-        (typeof(Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite), "RefileAsync",
-            "Re-file core: the chat update tool asks the check before it; ChildRecordEndpoints.UpdateAsync reaches it for its tables (below)."),
 
         // Fixed tables: none carries the core record pair.
-        (typeof(Sprk.Bff.Api.Api.ChildRecordEndpoints), "UpdateAsync",
-            "Re-file core for RefileTables (to-do, memo, invoice, report card, analysis) and the event / communication filing routes."),
         (typeof(Sprk.Bff.Api.Services.Dataverse.ProjectMatterFiling), "FileAsync",
             "Writes a sprk_project's regarding pair only."),
         (typeof(Sprk.Bff.Api.Api.Events.EventDueAssigneeWrite), "ApplyAsync",
@@ -80,10 +76,6 @@ public class CoreRecordPairUpdateCheckGuardTests
         // A create, not an update.
         (typeof(Sprk.Bff.Api.Services.RecordCreation.RecordCreationService), "CreateAsync",
             "The unified create (a fresh id): a create takes the pair; the fixed-after-create rule is update-only."),
-
-        // Configuration-named column (follow-up: ask the check).
-        (typeof(Sprk.Bff.Api.Services.Ai.TopicRegistryWorkProductPersister), "PersistAsync",
-            "Writes one AI envelope into the host table and column its sprk_aitopicregistry row names, as the caller; not yet asked (follow-up)."),
     };
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
@@ -109,17 +101,28 @@ public class CoreRecordPairUpdateCheckGuardTests
                 problems.Add($"STALE entry {type.FullName}.{method}: it no longer sends a generic update; remove it from the list.");
         }
 
-        // Non-vacuity: the update paths that ask the check in the member that writes are seen, with the check (the output
-        // mapping's DataverseUpdateHandler.UpdateAsync asks it and writes through its listed PatchAsync helper).
+        // Non-vacuity: the update paths that ask the check in the member that writes are seen, with the check.
         foreach (var (type, method) in new[]
                  {
                      (typeof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler), "ExecuteChatAsync"),
                      (typeof(Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordActionCore), "UpdateAsync"),
                      (typeof(Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints), "ApplyMappingsToChildRecordsAsync"),
+                     (typeof(Sprk.Bff.Api.Api.ChildRecordEndpoints), "UpdateAsync"),
+                     (typeof(Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite), "RefileAsync"),
+                     (typeof(Sprk.Bff.Api.Services.Ai.TopicRegistryWorkProductPersister), "PersistAsync"),
                  })
         {
             if (!methods.TryGetValue((type, method), out var asks) || !asks)
                 problems.Add($"{type.FullName}.{method}: expected to be seen sending a generic update and asking the check; the scan lost its signal.");
+        }
+
+        // Non-vacuity: the output mapping's DataverseUpdateHandler.UpdateAsync writes through its listed PatchAsync helper, so it
+        // is no writer here; it must still reference the check.
+        var askers = Askers(BffTypes.Value);
+        foreach (var (type, method) in new[] { (typeof(Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler), "UpdateAsync") })
+        {
+            if (!askers.Contains((type, method)))
+                problems.Add($"{type.FullName}.{method}: expected to reference RecordTableRules.RefuseFixedAfterCreateColumns; the scan lost its signal.");
         }
 
         Assert.True(problems.Count == 0,
@@ -204,12 +207,19 @@ public class CoreRecordPairUpdateCheckGuardTests
         typeof(IFieldMappingDataverseService).IsAssignableFrom(IlCallScan.Outermost(type))
         || typeof(IDataverseUserClient).IsAssignableFrom(IlCallScan.Outermost(type));
 
+    private static List<((Type Type, string Method) Key, MethodBase Target)> References(IEnumerable<Type> types) =>
+        IlCallScan.MethodReferences(types.Where(t => !IsTheApiItself(t)))
+            .Select(r => (Key: (IlCallScan.Outermost(r.Caller), SourceMember(r.Caller, r.CallerMethod)), r.Target))
+            .ToList();
+
+    /// <summary>Each (outermost type, source member) that references the check, whether or not it writes.</summary>
+    internal static IReadOnlySet<(Type Type, string Method)> Askers(IEnumerable<Type> types) =>
+        References(types).Where(r => IsTheCheck(r.Target)).Select(r => r.Key).ToHashSet();
+
     /// <summary>The detector: each (outermost type, source member) that sends a generic update, and whether it asks the check.</summary>
     internal static IReadOnlyDictionary<(Type Type, string Method), bool> Classify(IEnumerable<Type> types)
     {
-        var references = IlCallScan.MethodReferences(types.Where(t => !IsTheApiItself(t)))
-            .Select(r => (Key: (IlCallScan.Outermost(r.Caller), SourceMember(r.Caller, r.CallerMethod)), r.Target))
-            .ToList();
+        var references = References(types);
 
         var asks = references.Where(r => IsTheCheck(r.Target)).Select(r => r.Key).ToHashSet();
         return references.Where(r => IsGenericUpdate(r.Target))

@@ -132,6 +132,64 @@ public sealed partial class SecureChildOwnershipAiToolTests
         PatchedKeys().Should().BeEquivalentTo("sprk_name");
     }
 
+    // ── The shared update cores: today every caller passes a table without the pair; each core asks the check itself ──
+
+    [Fact]
+    public async Task ChildRecordUpdateCore_ACorePairColumnOfASignal_IsRefused_AndNothingIsReadOrWritten()
+    {
+        var reads = new List<string>();
+        _user.GetOverride = path =>
+        {
+            reads.Add(path);
+            return null;
+        };
+
+        var result = await Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync(
+            "sprk_signal", PairRow,
+            JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["sprk_name"] = "Renamed",
+                ["sprk_corerecordid"] = PairRecordType.ToString("D"),
+            }),
+            _user, _world.Resolver(),
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper, Children(),
+            new Microsoft.AspNetCore.Http.DefaultHttpContext(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Program>.Instance, CancellationToken.None);
+
+        var problem = result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(Microsoft.AspNetCore.Http.StatusCodes.Status403Forbidden);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(Sprk.Bff.Api.Api.ChildRecordEndpoints.DeniedCode);
+        problem.ProblemDetails.Detail.Should().Contain("sprk_corerecordid of a sprk_signal is set when the record is created");
+        _user.Patches.Should().BeEmpty("nothing of the body is written, not even its other columns");
+        _user.Posts.Should().BeEmpty();
+        reads.Should().BeEmpty("the refusal is decided on the body's shape, before any read");
+    }
+
+    [Fact]
+    public async Task RefileCore_ACorePairColumnOfADecisionRecord_IsRefused_AndNothingIsReadOrWritten()
+    {
+        var reads = new List<string>();
+        _user.GetOverride = path =>
+        {
+            reads.Add(path);
+            return null;
+        };
+
+        var outcome = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.RefileAsync(
+            _user, _world.Resolver(), "sprk_decisionrecord", PairRow, "sprk_decisionrecords", "sprk_decisionrecordid",
+            new Sprk.Bff.Api.Services.Dataverse.DataverseWriteItemMapper.MappedItem(
+                JsonSerializer.Serialize(new { sprk_name = "Renamed", sprk_corerecordid = PairRecordType.ToString("D") }),
+                ["sprk_name", "sprk_corerecordid"]),
+            callerObjectId: null, CancellationToken.None);
+
+        outcome.Invalid.Should().Contain($"({FixedAfterCreateCode})")
+            .And.Contain("sprk_corerecordid of a sprk_decisionrecord is set when the record is created");
+        (outcome.Written, outcome.NotARefile).Should().Be((false, false));
+        _user.Patches.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+        reads.Should().BeEmpty("the refusal is decided on the item's shape, before any read");
+    }
+
     [Fact]
     public async Task ChatUpdate_AColumnNamedLikeTheCorePair_OnAnotherTable_IsWritten()
     {
