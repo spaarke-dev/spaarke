@@ -476,7 +476,7 @@ internal static partial class RecordTableRules
         return named is null
             ? null
             : RecordOwnerResolution.Refused(FixedAfterCreateReasonCode,
-                $"{named} of a {rule.Table} is set when the record is created and cannot be changed, so it was not written");
+                $"{named} of a {rule.Table} is set when the record is created and cannot be changed");
     }
 
     /// <summary>

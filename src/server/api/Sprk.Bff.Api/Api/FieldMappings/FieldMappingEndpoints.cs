@@ -1082,7 +1082,7 @@ public static class FieldMappingEndpoints
                             SourceField = rule.SourceField,
                             TargetField = rule.TargetField,
                             Status = FieldMappingStatus.Skipped,
-                            ErrorMessage = fixedAfterCreate.Reason,
+                            ErrorMessage = $"{fixedAfterCreate.Reason}; the rule was skipped and nothing was written for it.",
                         });
                         continue;
                     }

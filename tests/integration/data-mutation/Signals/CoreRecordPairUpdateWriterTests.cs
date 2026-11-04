@@ -62,8 +62,8 @@ public class CoreRecordPairUpdateWriterTests
 
     /// <summary>The refusal's exact words for <c>sprk_corerecordid</c> of <paramref name="table"/>.</summary>
     private static string FixedAfterCreateMessage(string table) =>
-        $"The update was NOT written: sprk_corerecordid of a {table} is set when the record is created and cannot be changed, "
-        + $"so it was not written ({FixedAfterCreateCode}).";
+        $"The update was NOT written: sprk_corerecordid of a {table} is set when the record is created and cannot be changed "
+        + $"({FixedAfterCreateCode}).";
 
     /// <summary>Every core-pair payload shape: one column, the other, both, mixed case, the bind form, and the pair with an ordinary column.</summary>
     public static readonly string[][] CorePairPayloads =
@@ -318,6 +318,7 @@ public class CoreRecordPairUpdateWriterTests
             table, Row, It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_description")),
             It.IsAny<CancellationToken>(), Caller), Times.Once);
         results.Should().ContainSingle(r => r.TargetField == target).Which.Status.Should().Be(FieldMappingStatus.Skipped);
+        results.Single(r => r.TargetField == target).ErrorMessage.Should().Contain("cannot be changed").And.Contain("nothing was written");
     }
 
     [Fact]

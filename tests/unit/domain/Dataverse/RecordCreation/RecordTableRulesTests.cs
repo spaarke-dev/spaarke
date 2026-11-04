@@ -681,7 +681,7 @@ public class RecordTableRulesTests
 
         refusal.Should().NotBeNull();
         refusal!.RefusalCode.Should().Be(RecordTableRules.FixedAfterCreateReasonCode);
-        refusal.Reason.Should().Contain("not written");
+        refusal.Reason.Should().EndWith("cannot be changed").And.NotContain("not written");
     }
 
     [Theory]

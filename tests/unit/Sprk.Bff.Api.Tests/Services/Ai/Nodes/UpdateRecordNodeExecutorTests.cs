@@ -512,7 +512,7 @@ public class UpdateRecordNodeExecutorTests
         result.ErrorCode.Should().Be(NodeErrorCodes.ValidationFailed);
         result.ErrorMessage.Should().Be(
             "The update was NOT written: sprk_corerecordid of a sprk_decisionrecord is set when the record is created and cannot "
-            + "be changed, so it was not written (record_update.fixed_after_create).");
+            + "be changed (record_update.fixed_after_create).");
         written.Should().BeEmpty("the refusal comes before the write");
         _loggerMock.Invocations.Where(i => i.Method.Name == nameof(ILogger.Log))
             .Select(i => (LogLevel)i.Arguments[0]).Should().Contain(LogLevel.Warning).And.NotContain(LogLevel.Error);
