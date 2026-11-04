@@ -6,7 +6,7 @@ Branch `task/fm-031`. Spec FR-19, NFR-01, NFR-07, ADR-008 path A, ADR-028, ADR-0
 
 | File | Change |
 |---|---|
-| `Api/Events/EventEndpoints.cs` | `CreateEventAsync` creates through `RecordCreationService` as the caller (`RecordCreationPrincipal.ForCaller`). The owner, I-1 stamp, creator person, field mapping, search-index default and owner membership event are the service's. `OwnershipContextFor` and `CreateEventInDataverseAsync` are deleted. The audit-log row is still written by the route after a successful create. |
+| `Api/Events/EventEndpoints.cs` | `CreateEventAsync` creates through `RecordCreationService` as the caller (`RecordCreationPrincipal.ForCaller`). The owner, I-1 stamp, creator person, field mapping and owner membership event are the service's (step 8, the search index, is a recorded no-op since task 041). `OwnershipContextFor` and `CreateEventInDataverseAsync` are deleted. The audit-log row is still written by the route after a successful create. |
 | `Api/Ai/AnalysisEndpoints.cs` | `CreateAnalysis` (now `internal static` so the seam tests can call it) creates through the service. `AssociateScopesAsync` runs only after a successful create. |
 
 Route filters (`.RequireAuthorization()`, the record-route access filter, the analysis create filter) are untouched and the
@@ -19,7 +19,7 @@ called by the service; the endpoints add no inline authorization).
 |---|---|---|
 | No owner resolves (event) | 409, the route's `OwnerRefusalProblem` body and reason code | `EventEndpointsAuthorizationContractTests`, `SecureChildOwnershipEndpointTests`, `TypedRouteCreateInvariantsTests` |
 | No owner resolves (analysis) | 409, `AnalysisOwnerRefusal` | `SecureChildOwnershipWriterTests`, `TypedRouteCreateInvariantsTests` |
-| I-1 stamp underivable / unavailable (event) | 500 `events.regarding_stamp_failed` | `EventEndpointsAuthorizationContractTests` (CoreStampFailure) |
+| I-1 stamp underivable / unavailable / unbindable (event) | 500 `events.regarding_stamp_failed` | `EventEndpointsAuthorizationContractTests` (CoreStampFailure); unbindable: `RecordCreationServicePipelineSeamTests.EventRoute_WhenTheTablesMetadataCannotBindTheDerivedStamp_KeepsTheRoutes500RegardingStampFailed` (fix round 1, F3-low) |
 | Any other service refusal (event) | the route's generic 500 "An error occurred while creating the event" | `TypedRouteCreateInvariantsTests` |
 | Any other service refusal (analysis) | the route's generic 500 "Failed to create analysis record." | `TypedRouteCreateInvariantsTests` |
 | Filter denials (401/403/400) | unchanged, the service is not reached | `AssertServiceNotReached()` in both contract suites |
@@ -78,8 +78,8 @@ outcome. Making Document to Analysis work needs `sprk_document` as an authorizab
 
 ## Other findings (not fixed)
 
-- `DataverseWebApiService.CreateEventAsync` (the `IEventDataverseService` seam) has no caller on this route now: dead code. Census
-  prose rows that mention it are stale. Follow-up to delete it.
+- `DataverseWebApiService.CreateEventAsync` (the `IEventDataverseService` seam) had no caller after this task: deleted in fix
+  round 1 (finding 5 below), with its census prose.
 - The broad `verify-suites.sh` Sprk.Bff.Api.Tests step hung once (testhost above 9 GB, no output) on the first run; see Verification.
 
 ## Placement justification (CLAUDE.md section 10)
@@ -107,7 +107,8 @@ through the service. The RouteAuthorizationGuardTests ledger is unchanged (suite
    gets the profile's values, fill-only and read as the caller. An analysis requests it, but a document source maps nothing yet
    (finding above).
 3. The I-1 core-ancestor stamp and the Access Permission come from the service on both routes.
-4. A new sprk_event row gets the search-index default the service applies (task 039).
+4. No search-index value is written on either route: step 8 is a recorded no-op since task 041 (FR-40), so no default is applied.
+   (Corrected in fix round 1; the first version of this note said a default was written.)
 5. The owner membership event for a new event is published by the service (once, after the create).
 6. The creator person (`sprk_CreatedByPerson`) is the WhoAmI of the caller's token; the event's audit-log row still uses
    `ICallerSystemUserResolver`.
@@ -130,3 +131,128 @@ Note on the broad run: run as ONE filter, `verify-suites.sh`'s Sprk.Bff.Api.Test
 because two copies of my own script were running at once. It is slow, not hung: chunked, every chunk completes. (The chunk that
 ended with exit 1 had its testhost killed by me after its `Passed!` line was printed: 0 failed.) Suggest raising the script's
 patience or chunking it; not changed here.
+
+## Fix round 1 (adversarial review, 2026-11-04)
+
+Commits on `task/fm-031`: `5ab498dbc1` (findings 1 and 2), `7f0739b48e` (finding 3), then the dead-code commit (finding 5) and
+the commit holding this section (finding 4).
+
+### Finding 1 (F1, HIGH): analysis create with a playbook was a 500 for ordinary users
+
+Cause: the service's step 5 asked AppendTo on `sprk_playbook` (a caller-supplied lookup); only Spaarke AI Analysis Admin holds
+`prvAppendTosprk_analysisplaybook` (Core, Basic and AI Analysis User: Read, Global). The route filter already makes the
+playbook-use decision (public, or Read on the row); the old route never asked AppendTo.
+
+Fix (owner decision 2026-11-04, "exempt in code"):
+
+- `RecordCreationRequest.RouteAuthorizedLookupColumns` (`IReadOnlySet<string>?`, default null; normalised like
+  `ServerSetLookupColumns`). Step 5 (`RecordCreationService.cs`, the lookup check only) asks each such lookup's Read as the
+  caller (RetrievePrincipalAccess: missing, unreadable or unanswered is the uniform not-found an AppendTo failure gives) and
+  hands the AppendTo checks a skip set of the server-set columns plus exactly those columns. Only a lookup whose column AND
+  target table are on the list, and whose record in the merged row is the caller's own (fill-only), is skipped.
+- The closed list and the validation live in a new partial, `Services/RecordCreation/RecordCreationService.RouteAuthorized.cs`,
+  to keep the edit in `RecordCreationService.cs` small for the 042c merge (the request property, one validation call next to
+  `ValidateReferenceLookupColumns`, and step 5's two `CheckCallerMayCreateAsync` arguments; the core-pair code is untouched).
+  List: `(sprk_analysis, sprk_playbook, sprk_analysisplaybook)`. `ArgumentException`, before anything is read: a system
+  principal; a filing lookup (`IsFilingLookup`: lineage, FilingParentOf, a root's filing column); a column not on the list; a
+  listed target that is an ownership parent; a column also server-set or an optional reference.
+- `ServerSetLookupColumns` is not reused: the request property is untouched; only the AppendTo-skip argument handed to
+  `CallerWriteAuthorization.CheckCallerMayCreateAsync` (whose only use of it is that skip) is the union.
+- `AnalysisAuthorizationFilter` (AnalysisCreate): the decision is unchanged. It records the decision for the request's own
+  playbook id in `HttpContext.Items` under a private object key, inside the `next` delegate the evaluator calls only after
+  every check passed. `AnalysisEndpoints.CreateAnalysis` sets `{ "sprk_playbook" }` only when that record matches its
+  `PlaybookId`. RouteAuthorizationGuardTests ledger unchanged.
+- **Events: no exemption.** `POST /api/v1/events` makes no route-level decision on the event type (its filters are the shape
+  filter and the record-route access filter on the regarding record), so the event type keeps its AppendTo: review K1.
+  Shipped roles: Core User `prvAppendTosprk_EventType_Ref` Global, Office Add In User Deep, **Basic User none** (Read Deep
+  only). A Basic-only user creating an event with an event type is refused (generic 500). Pinned by
+  `TypedEventRoute_ABasicUser_WithoutAppendToOnTheEventType_IsRefused_KnownLimitK1`; the fix belongs to the owner's
+  roles-alignment task.
+
+Component justification (CLAUDE.md section 11) for `RouteAuthorizedLookupColumns`:
+1. Existing: `ServerSetLookupColumns` (skips AppendTo for lookups that name the caller), `ReferenceLookupColumns` (drops an
+   unusable optional reference), and the filter's playbook-use decision.
+2. Extension: neither option can be extended. Server-set means "names the caller", is never mapped and is guarded as never
+   filing; a reference that fails is dropped, not authorised. A playbook is the caller's own choice of a record the route has
+   already authorised, which needs its own, narrower meaning.
+3. Cost of doing nothing: every user but AI Analysis Admin gets a 500 from `POST /api/ai/analysis/create` with a playbook
+   (the review's F1).
+
+### UAC-r2 conditions (binding, 2026-11-04)
+
+| Condition | How it is met | Evidence (tests) |
+|---|---|---|
+| (a) Route code sets it; never bound from body, query or headers | Property only on the internal `RecordCreationRequest`; no DTO carries it; the handler sets it from the filter's record | `Create_BodyNamingRouteAuthorizedLookupColumns_IsIgnored` (contract: a body with both spellings; the document's AppendTo is still asked; 500, nothing created); `RouteAuthorizedLookupColumnsCallSiteTests.NoBoundTypeCarriesTheOption` |
+| (b) Closed allow-list of (route, table, column) in code; ArchTest ratcheted at the call sites | Service list `RecordCreationService.RouteAuthorizedLookups`; IL scan of the init accessor | `RouteAuthorizedLookupColumnsCallSiteTests.OnlyTheClosedListSetsRouteAuthorizedLookupColumns` (only `AnalysisEndpoints.CreateAnalysis`; a stale entry fails too), `TheServicesClosedListIsTheAnalysisPlaybookOnly`, `Detector_MustFireAndMustNotFire` |
+| (c) For THIS caller and THIS record id; the filter refusal is uniform; nothing distinguishes "exists" from "not authorised" | The filter records the id it authorised, only after every check passed; only the create filter may record it (IL scan). This route's uniform filter refusal is its existing 403 `insufficient_rights` "Access denied" (kept under NFR-07, not turned into a 404); a missing and a not-shared playbook give byte-identical bodies. A Read failure in the service is the uniform not-found, rendered as the route's generic 500 for missing and unreadable alike | `OnlyTheCreateFilterRecordsThePlaybookUseDecision`, `TypedAnalysisRoute_TheFilterAuthorisedAnotherPlaybook_ThisOnesAppendToIsAsked_AndIsRefused`, `Create_PrivateUnsharedAndNonexistentPlaybook_AreTheSameRefusal_ServiceNotReached`, `Create_PrivatePlaybookSharedWithTheCaller_Is201`, `TypedAnalysisRoute_AnAuthorisedPlaybookTheCallerCannotRead_IsTheSameRefusal_NothingCreated` (missing, unreadable) |
+| (d) Skip only AppendTo; keep existence and Read | Read asked as the caller (RetrievePrincipalAccess) before the skip; bind spelling, table check and mapping unchanged | `TypedAnalysisRoute_AnOrdinaryUser_ReadButNoAppendToOnThePlaybook_..._201` (asserts the Read question), `..._CallerCannotRead_...` |
+| (e) A filing lookup or an ownership-parent table throws ArgumentException, a test per table class | Validation before anything is read | `RouteAuthorisedLookups_AnythingButTheListedPlaybook_IsAnArgumentError` (lineage `sprk_todo.sprk_regardingmatter`; ownership-parent filing `sprk_event.sprk_regardingevent`; root filing `sprk_workassignment.sprk_regardingmatter`; off-list `sprk_event.sprk_eventtype_ref`, `sprk_analysis.sprk_actionid`), `RouteAuthorisedLookups_AListedLookupToAnOwnershipParentTable_IsAnArgumentError`, `RouteAuthorisedLookups_TheListedPlaybook_IsAccepted_ButNeverForASystemPrincipal_NorAlsoServerSet`, `RouteAuthorisedLookups_TheServiceThrowsBeforeAskingAnything` |
+| (f) Must-not-fire | The same column without the option keeps AppendTo; another column with the option is still checked | `TypedAnalysisRoute_ThePlaybookWithoutTheFiltersRecord_KeepsItsAppendTo_AndIsRefused`, `TypedAnalysisRoute_WithThePlaybookAuthorised_AnotherLookupIsStillAskedItsAppendTo` |
+| (g) Ordinary user with a public playbook gets 201 (failing first); a private playbook not shared gets the uniform refusal | See failing-first below | `Create_OrdinaryUser_PublicPlaybook_NoAppendToOnIt_Is201`, `TypedAnalysisRoute_AnOrdinaryUser_..._201`, the existing `Create_WithTheG5Rights_Is201AndAnchorsTheDocument`; `Create_PrivateUnsharedAndNonexistentPlaybook_...`, `Create_UnusablePlaybook_Is403` |
+
+### Finding 2 (F3, HIGH): the test doubles hid permission gaps
+
+`SecureChildOwnershipAiToolTests.ScriptedUserClient` granted every right on every record. It now has `TableRights` (per entity
+set), defaulting to the shipped role grants for the configuration targets these routes send: `sprk_analysisplaybooks` = Read
+only. `sprk_eventtype_ref` (entity set added) and `sprk_recordtype_ref` keep AppendTo because the fixture's caller is a Core
+User (Core holds both, Global). The Basic-User case is an explicit negative test (K1 above) and the Core case an explicit
+positive one (`TypedEventRoute_ACoreUser_CreatesWithAnEventType`).
+
+### Finding 3 (F1, low): the stamp bind failure lost `events.regarding_stamp_failed`
+
+`EventEndpoints.RefusalResult` now takes the outcome's step records. It maps `Undecided` / `record_creation.no_decision` to the
+500 `events.regarding_stamp_failed` only when the last step record is `StampAndInheritance` / `Refused`: the service's existing
+step marker, so no new service signal. The same code at any other step stays the generic 500 without `errorCode`. Tests:
+`RecordCreationServicePipelineSeamTests.EventRoute_WhenTheTablesMetadataCannotBindTheDerivedStamp_KeepsTheRoutes500RegardingStampFailed`
+(a real service refusal rendered by the route adapter) and
+`EventRoute_TheGenericNoDecisionRefusalAtAnyOtherStep_StaysTheRoutesGeneric500WithoutAnErrorCode` (must not fire: CallerChecks,
+Owner).
+
+### Finding 4: behaviour change 4 corrected
+
+Step 8 is a recorded no-op since task 041, so no search-index value is written on either route. Corrected above (the "What
+changed" row and behaviour change 4).
+
+### Finding 5: dead code
+
+Deleted: `IEventDataverseService.CreateEventAsync`, `DataverseWebApiService.CreateEventAsync`, the
+`DataverseServiceClientImpl.CreateEventAsync` stub, the test fake's implementation with its never-populated `Creates` list (two
+`Creates.Should().BeEmpty()` assertions that could no longer fail; `AppOnlyCreates` is asserted next to each), and one
+`Verify(CreateEventAsync, Times.Never)`. Census prose updated (`RecordOwnerAssignmentCensusTests`: the sprk_event seam entry,
+the EventEndpoints and AnalysisEndpoints unscanned-writer rows, the builder rows' reasons; the `Models.cs` OwningTeamId doc).
+
+**Not deleted, and why:** `DataverseWebApiService.BuildCreateEventPayload` (with `AddRegardingWriteSet`) and the
+`CreateEventRequest` fields it reads. grep finds five BFF unit-test files that call the builder and pin payload shapes
+(`EventRegardingPayloadTests`, `EventDateOnlyTests`, `EventStatusWritePathTests`, `EventReadPathTests`,
+`EventEndpointsMembershipPublishingTests`), so the brief's condition ("no callers, including tests") does not hold. It has no
+production caller now. Follow-up: re-point those tests at `EventEndpoints.BuildCreatePayload`, then delete the builder, its
+helper and the fields. `ExternalDataService.CreateEventAsync` is untouched: external-access-r3's inventory exception.
+
+### Failing-first evidence (fix round 1)
+
+Seeded on the finished code (`/c/tmp/fm031/fix1/failing-first-seeded.log`): the analysis handler's exemption removed
+(`RouteAuthorizedLookupColumns = null`) and the event adapter's new stamp arm removed, then the affected classes run:
+**5 failed / 369 passed**. The failures: `TypedAnalysisRoute_AnOrdinaryUser_..._201`,
+`Create_OrdinaryUser_PublicPlaybook_NoAppendToOnIt_Is201`, `Create_PrivatePlaybookSharedWithTheCaller_Is201`, the existing
+`Create_WithTheG5Rights_Is201AndAnchorsTheDocument` (it now runs as an ordinary user), and
+`EventRoute_WhenTheTablesMetadataCannotBindTheDerivedStamp_...`. Both files were restored and the set is green again.
+
+### Other findings (reported, not fixed)
+
+- Pre-existing (present at `5f443eaae0`): `AnalysisEndpoints.CreateAnalysis` reads `request.SkillIds/KnowledgeIds/ToolIds.Length`
+  with no null check, outside the handler's try. A body that omits them throws `NullReferenceException`: an unhandled 500, not
+  the route's problem body. The new contract tests send empty arrays.
+
+### Verification (fix round 1, tip `9c3df450c2` plus this notes commit)
+
+| Check | Result |
+|---|---|
+| `dotnet build` (BFF + test projects) | 0 warnings, 0 errors |
+| Focused classes (Event/Analysis endpoints, typed routes, SecureChildOwnership, parity, guard, event payload classes) | 987 / 0 failed |
+| `verify-suites.sh` filter, run in 7 chunks (same terms) | 4318 + 1726 (7 skipped: pre-existing Office contract skips) + 243 + 919 + 248 + 737 + 134 = 8325 passed, 0 failed. Chunks overlap where terms match the same class, so the sum is not a unique-test count |
+| ArchTests (full) | 1916 / 1916 (1911 + 5 in `RouteAuthorizedLookupColumnsCallSiteTests`) |
+| Failing first (seeded) | 5 failed / 369 passed, then restored and green (above) |
+| Publish delta (`publish-delta.ps1`, master `0d4aa87ee0` vs `9c3df450c2`) | 41213283 to 41214255 bytes: +972 bytes; 39.3 MB, 192 files |
+| `dotnet list package --vulnerable --include-transitive` | no vulnerable packages |
+
+Chunk 2 (`Office|SearchIndex|...`) took 33 m 35 s this time, against about 7 minutes before, because another worktree's test hosts were using about 11 GB each on the same machine. It was slow, not hung.
