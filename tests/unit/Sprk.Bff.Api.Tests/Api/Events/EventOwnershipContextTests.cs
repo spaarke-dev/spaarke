@@ -16,6 +16,7 @@ using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
@@ -31,7 +32,6 @@ public class EventOwnershipContextTests
     private static readonly Guid EventId = Guid.Parse("194b0000-0000-4000-8000-0000000000e3");
 
     private readonly RecordOwnershipResolverDouble _ownership = new();
-    private DataverseCreateEventRequest? _created;
 
     [Theory]
     [InlineData(RegardingRecordType.Project)]
@@ -42,7 +42,7 @@ public class EventOwnershipContextTests
     [InlineData(RegardingRecordType.Matter)]
     public async Task AnEventRegardingARecordStampedWithItsMatter_AsksWhatTheReconcilerAsksAboutTheWrittenRow(int regardingType)
     {
-        var result = await RunAsync(regardingType, CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)));
+        var result = await RunAsync(regardingType, TheRegardingIsStampedWithItsMatter(regardingType));
 
         StatusOf(result).Should().Be(StatusCodes.Status201Created);
         var written = Written();
@@ -58,7 +58,7 @@ public class EventOwnershipContextTests
     [Fact]
     public async Task AnEventRegardingNothing_NamesNoParent_AsTheWrittenRowHolds_TheCallersOwnUnitDecides()
     {
-        var result = await RunAsync(regardingType: null, CoreAncestorResolverFixtures.Inert());
+        var result = await RunAsync(regardingType: null, new StampWorld());
 
         StatusOf(result).Should().Be(StatusCodes.Status201Created);
         var asked = _ownership.Requests.Should().ContainSingle().Subject;
@@ -72,15 +72,34 @@ public class EventOwnershipContextTests
     /// <summary>The test's entity sets: a logical name plus "s" (the inverse, in <see cref="Written"/>, strips it).</summary>
     private static string SetOf(string logicalName) => logicalName + "s";
 
-    private Task<IResult> RunAsync(int? regardingType, CoreAncestorResolver coreAncestors)
+    private readonly List<(string Table, Guid Id, Dictionary<string, object?> Fields)> _appCreates = new();
+
+    /// <summary>Task 031: the stamp world of an event filed under a record that is itself stamped with its matter (the column the table holds it in).</summary>
+    private static StampWorld TheRegardingIsStampedWithItsMatter(int regardingType)
     {
+        var world = new StampWorld().Row("sprk_matter", MatterId);
+        return regardingType switch
+        {
+            RegardingRecordType.Analysis => world.Row("sprk_analysis", RegardingId, [("sprk_regardingmatter", "sprk_matter", MatterId)]),
+            RegardingRecordType.Invoice => world.Row("sprk_invoice", RegardingId, [("sprk_matter", "sprk_matter", MatterId)]),
+            RegardingRecordType.Budget => world.Row("sprk_budget", RegardingId, [("sprk_matter", "sprk_matter", MatterId)]),
+            _ => world,
+        };
+    }
+
+    private Task<IResult> RunAsync(int? regardingType, StampWorld stamps)
+    {
+        // Task 031 (FR-19): the row is created by RecordCreationService, whose ONE owner question and ONE app-only create these
+        // tests read; the endpoint no longer asks the owner itself.
         var events = new Mock<IEventDataverseService>(MockBehavior.Strict);
-        events.Setup(s => s.CreateEventAsync(It.IsAny<DataverseCreateEventRequest>(), It.IsAny<CancellationToken>()))
-            .Callback<DataverseCreateEventRequest, CancellationToken>((r, _) => _created = r)
-            .ReturnsAsync((EventId, DateTime.UtcNow));
         events.Setup(s => s.CreateEventLogAsync(
-                EventId, It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Guid.NewGuid());
+        var appOnly = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        appOnly.Setup(a => a.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((t, id, f, _, _) => _appCreates.Add((t, id, f)))
+            .Returns(Task.CompletedTask);
 
         var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
         entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -97,38 +116,56 @@ public class EventOwnershipContextTests
                 "Hearing prep",
                 RegardingRecordId: regardingType is null ? null : RegardingId,
                 RegardingRecordType: regardingType),
+            Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Over(
+                _ownership,
+                appOnly.Object,
+                stamps.Restamper,
+                Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard()
+                    .Synchronizer(new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
+                SecureRootFilingGateFixtures.NothingSecure(),
+                null,
+                Mock.Of<IMembershipEventPublisher>(),
+                entities.Object),
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.SecureChildOwnershipAiToolTests.ScriptedUserClient(
+                Guid.Parse("194b0000-0000-4000-8000-0000000000e9")),
             events.Object,
-            Mock.Of<IMembershipEventPublisher>(),
-            _ownership,
             entities.Object,
             callers.Object,
             Mock.Of<IIdentityNormalizationService>(),
             Mock.Of<ICommunicationDataverseService>(),
-            coreAncestors,
             new DefaultHttpContext(),
             NullLogger<Program>.Instance,
             CancellationToken.None);
     }
 
+    /// <summary>The entity set a logical name has in the scripted caller's Dataverse (the inverse is in <see cref="Written"/>).</summary>
+    private static readonly Dictionary<string, string> Sets = new()
+    {
+        ["sprk_matters"] = "sprk_matter", ["sprk_projects"] = "sprk_project", ["sprk_invoices"] = "sprk_invoice",
+        ["sprk_analysises"] = "sprk_analysis", ["sprk_workassignments"] = "sprk_workassignment", ["sprk_budgets"] = "sprk_budget",
+        ["sprk_events"] = "sprk_event", ["sprk_recordtype_refs"] = "sprk_recordtype_ref", ["contacts"] = "contact",
+    };
+
     /// <summary>
-    /// The row the create wrote, as the reconciler reads it: the Web API body the Dataverse seam POSTs
-    /// (<c>BuildCreateEventPayload</c>, from what the handler handed the seam), each <c>{navigation}@odata.bind</c> read back
-    /// as its lookup column naming its record, and the pair id. The owner bind is the answer, not a parent: left out.
+    /// The row the create wrote, as the reconciler reads it: the Web API body of the ONE app-only create, each
+    /// <c>{navigation}@odata.bind</c> read back as its lookup column naming its record, and the pair id. The owner bind is the
+    /// answer, not a parent: left out.
     /// </summary>
     private Entity Written()
     {
-        _created.Should().NotBeNull("the event was created");
-        var row = new Entity("sprk_event", EventId);
-        foreach (var (key, value) in DataverseWebApiService.BuildCreateEventPayload(_created!))
+        var (_, id, fields) = _appCreates.Should().ContainSingle("the event was created").Subject;
+        var row = new Entity("sprk_event", id);
+        foreach (var (key, value) in fields)
         {
             if (key.EndsWith("@odata.bind", StringComparison.Ordinal) && !key.StartsWith("ownerid", StringComparison.Ordinal))
             {
-                var bind = (string)value!;                                         // "/{set}({id})"
+                var bind = value as string ?? ((System.Text.Json.JsonElement)value!).GetString()!;                                         // "/{set}({id})"
                 var open = bind.IndexOf('(');
                 var set = bind[1..open];
-                set.Should().EndWith("s", "every set in this test is its logical name plus 's'");
+                if (!Sets.TryGetValue(set, out var table))
+                    continue;                                                      // a person (systemusers): not a parent
                 row[key[..^"@odata.bind".Length].ToLowerInvariant()] =
-                    new EntityReference(set[..^1], Guid.Parse(bind[(open + 1)..^1]));
+                    new EntityReference(table, Guid.Parse(bind[(open + 1)..^1]));
             }
             else if (key == "sprk_regardingrecordid")
             {

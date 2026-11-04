@@ -735,6 +735,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["account"] = "accounts",
             // Task 039 (FR-38): the AI search index catalog the six search-indexed tables look up.
             ["sprk_aisearchindex"] = "sprk_aisearchindexes",
+            // Task 031 (FR-19): the typed analysis route's playbook lookup target.
+            ["sprk_analysisplaybook"] = "sprk_analysisplaybooks",
+            // Task 031 fix round 1 (F3): the typed event route's event-type lookup target (user-owned live: Deep Read grants).
+            ["sprk_eventtype_ref"] = "sprk_eventtype_refs",
         };
 
         /// <summary>
@@ -873,6 +877,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 042b fix round 1: the analysis's invoice filing (CoreAncestorResolver.StampSourceColumns),
                 // for WriterBuilderOwnershipParityTests' caller-principal cases.
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                // Field mapping task 031: the typed analysis route's anchor and playbook (live navigation properties).
+                ("sprk_documentid", "sprk_document", "sprk_DocumentId"),
+                ("sprk_playbook", "sprk_analysisplaybook", "sprk_Playbook"),
             },
             // Task 147 r1c (E2, the live inventory of every main form; read-only metadata, spaarkedev1, 2026-10-04): the
             // KPI assessment's and the billing event's lookups. The billing event's matter navigation property is
@@ -932,6 +939,15 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 017 (Phase 2d-1): an event filed under another event, an intermediate, so its I-1 stamp
                 // is derived (live navigation property: Spaarke.Dataverse.Models GetEventNavigationProperty).
                 ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+                // Field mapping task 031: the typed event route's analysis regarding and event type (live navigation properties:
+                // Spaarke.Dataverse.Models GetEventNavigationProperty, DataverseWebApiService.BuildCreateEventPayload).
+                ("sprk_regardinganalysis", "sprk_analysis", "sprk_RegardingAnalysis"),
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_regardingbudget", "sprk_budget", "sprk_RegardingBudget"),
+                ("sprk_regardingaccount", "account", "sprk_RegardingAccount"),
+                ("sprk_regardingcontact", "contact", "sprk_RegardingContact"),
+                ("sprk_eventtype_ref", "sprk_eventtype_ref", "sprk_EventType_Ref"),
             },
             // #2084 round 2: a Signal's core matter (sprk_signal.sprk_matter) and the rule it CITES (sprk_signal.sprk_policy).
             ["sprk_signal"] = new[]
@@ -963,6 +979,21 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();
+
+        /// <summary>
+        /// Task 031 fix round 1 (F3): the caller's rights on EVERY row of a configuration table the typed routes bind, by entity
+        /// set, as the SHIPPED roles grant them (<c>src/dataverse/solutions/SpaarkeMaster/Roles</c>), so a missing AppendTo is
+        /// not hidden by a default of "every right on every record". <c>sprk_analysisplaybook</c>: Spaarke Core, Basic and AI
+        /// Analysis User hold <c>prvReadsprk_analysisplaybook</c> (Global) and no AppendTo — only AI Analysis Admin does. The
+        /// other configuration targets these routes send keep full rights because the fixture's caller is a Core User: Core
+        /// holds <c>prvAppendTosprk_EventType_Ref</c> (Global; Basic does not — the review's K1, pinned in
+        /// <c>TypedRouteCreateInvariantsTests</c> by setting it here) and <c>prvAppendTosprk_RecordType_Ref</c> (organization
+        /// owned: asked by privilege, <see cref="Held"/>). A test that needs another role sets its table here.
+        /// </summary>
+        public Dictionary<string, string> TableRights { get; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_analysisplaybooks"] = "ReadAccess",
+        };
 
         /// <summary>Ontology task 126: the business unit a grant is anchored at unless <see cref="Anchors"/> or
         /// <see cref="Grants"/> say otherwise — the caller's own (a role assigned to them; the fixture's caller sits in the
@@ -1186,7 +1217,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                     return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Does not exist.");
                 var rights = NoAppendTo.Contains(id) || NoAppendToIn.Contains((targetSet, id))
                     ? "ReadAccess,WriteAccess"
-                    : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
+                    : TableRights.TryGetValue(targetSet, out var shipped)
+                        ? shipped
+                        : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
                 return Ok(new { AccessRights = FullAccessOn.Contains(id) ? rights + ",DeleteAccess" : rights });
             }
 
