@@ -193,6 +193,12 @@ Seeding proof (A-d): in `ForRow`, the core is put LAST instead of first (`ordere
 
 ## Verification
 
+Fix round 2 (B'), at `083ca71be3`:
+- `verify-suites.sh`: solution build 0 warnings, 0 errors. ArchTests **1914 / 1914** (the 3 new guard tests). Filtered suites **6933 passed, 0 failed, 7 skipped** (6757 at fix round 1; the new cases).
+- B' service, chat and parity tests: 52 / 52. K2 theory: 128 / 128. `ExistingRowOwnershipParityTests`: 156 / 156. `WriterBuilderOwnershipParityTests`: 70 / 70.
+- Publish delta (`publish-delta.ps1`, master `0d4aa87ee0`, branch `083ca71be3`): **+5,576 bytes** (zip 41,213,260 to 41,218,836; 192 files each side; total 39.31 MB). Under every §10 threshold.
+- CVE (`dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`): no vulnerable packages.
+
 Fix round 1, at `60962dd568` (items A, C-G):
 - `verify-suites.sh`: solution build 0 warnings, 0 errors. ArchTests **1911 / 1911** (`ChildRowOwnershipQuestionsGoThroughTheOneBuilder` passes; it failed at `d13e1cabc7`). Filtered suites **6757 passed, 0 failed, 7 skipped** (6720 before; the new cases).
 - `DisplayName~042c`: 87 / 87.
