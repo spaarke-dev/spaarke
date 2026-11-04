@@ -42,7 +42,7 @@
 4. Firm-name check at intake (INV-2025-05166 prints Garrison and Ellison but sits under Morrison Foerster).
 5. 161 live run S1 ~$26 or S2 ~$22.
 6. A leftover "lint-staged automatic backup" stash entry 1e84ffafed (holds committed changes only); dropping it needs the owner's confirmation.
-7. 089b: the owner said YES (2026-11-03) to Billing Administrator Read on rules organisation-wide. BLOCKED on uac-r2: Global Read on sprk_policy would also expose rules of Secure matters, which are re-owned to the Secure team (config/secure-record-owner-role.json:289-293, D-123). Waiting for uac-r2's design. Until then the 403 stays.
+7. 089b: the owner said YES to rule Read organisation-wide. uac-r2's design is a Billing Rule Readers team in the customer top unit, with Deep Read on sprk_policy, to be built in task 089d. Not Global and not root-held (D-123). The 403 stays until the team exists. -Apply on dev needs the owner's go.
 8. The owner asked whether to make the GitHub repo private. Answered: it is their call; Claude Code keeps working through authenticated gh and git.
 
 ## Peer state

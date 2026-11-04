@@ -316,3 +316,22 @@ Each change was restored afterwards, and the file content was compared to confir
 - All 5 test projects build with 0 warnings, 0 errors (Sprk.Bff.Api.Tests, Spaarke.ArchTests, Sprk.Bff.Api.IntegrationTests, Spe.Integration.Tests, Sprk.Provisioning.ControlPlane.LoadTests).
 - Unit filter `ProcedureAssignment|OperationAccessPolicy|RuleSet`: 633 passed, 0 failed, 0 skipped (`~ProcedureAssignment` alone: 127).
 - ArchTests filter `RouteAuthorizationGuard|RecordOwnerAssignmentCensus|FinanceStepZero|ProcedureRolePrivilege`: 166 passed, 0 failed.
+
+### 089d design (uac-r2, 2026-11-03)
+
+- **Owner's decision:** "yes Billing Administrator can have read on rules across whole organization".
+- **Shapes ruled out (D-123):** Global Read on `sprk_policy`, and Deep Read held in the root, both reach the Secure Record business unit, which is a direct child of the root (INCOMING-145 T2). Deep from a child unit doesn't reach up to the customer's top unit, so it doesn't meet the owner's decision.
+- **Shape chosen:** an owner team **"Billing Rule Readers"** in the customer's top unit (the unit `RestrictedContentOwnerTeam` resolves; never the root).
+  - The team holds one role: Read at Deep on `sprk_policy`. It gets Read on `sprk_policyversion` too only if Exclude reads that table.
+  - Child-unit billing admins become members, so they read every rule owned in the customer unit and its children.
+  - Secure-owned rules sit in Secure Record, a sibling of the customer unit, so the team never reaches them.
+- **Guards:**
+  - Add the role to the role guard's scan.
+  - A verify step checks that the team is not in the root, that no Global depth is granted, and that the role holds no extra privilege.
+  - The Secure census reports any principal that reaches Secure Record.
+- **Setup:** creating the team and role is a per-customer setup step. It goes in the customer deployment guide and is handed to customer-provisioning-orchestration-r1.
+- **Dev check (read-only, 2026-11-04):**
+  - The only Billing rule is BILL-SYSTEM-SUBMISSION, team-owned in Spaarke Business Unit 1, the customer's top unit.
+  - The 6 policies owned in the root "Spaarke" are ontology product rules (POL-TASK-OVERDUE, POL-TASK-DUESOON, POL-WA-RESPONSE, POL-TODO-OVERDUE, POL-MATTER-NOBUDGET, POL-COMMIT-BUDGET), not Billing rules, and Exclude refuses them. No re-owning is needed for Billing rules on dev.
+- **Until the team exists,** a child-unit admin's 403 is correct.
+- **Task:** `tasks/089d-billing-rule-readers-team.poml`.

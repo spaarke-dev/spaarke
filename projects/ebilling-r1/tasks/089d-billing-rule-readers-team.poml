@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="089d" project="ebilling-r1">
+  <metadata>
+    <title>Billing Rule Readers: a team in the customer's top unit, so child-unit billing admins can read and Exclude org-wide rules</title>
+    <phase>3 Rules (follow-up to 089b; owner 2026-11-03)</phase>
+    <gate>owner decided 2026-11-03 ("yes Billing Administrator can have read on rules across whole organization"); design by uac-r2 2026-11-03</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a role, a team and a setup step that grant Read on a hard-deny table; tags include auth and tenant-isolation.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The grant must not reach the Secure Record business unit (D-123); getting the depth and the team's unit wrong is an isolation break.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the uac-r2 role configs and the customer setup script shared with the secure family work.</parallel-reason>
+    <deps>089b</deps>
+    <tags>auth, tenant-isolation, dataverse, provisioning, ebilling</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>The 089b Exclude route requires the caller's own Read on the rule (`sprk_policies`). A billing admin homed in a child business unit gets 403 for a rule owned in the customer's top unit. The owner wants such admins to read rules across the organisation. uac-r2 decided the shape: a team in the customer's top unit that reads down. Global Read is ruled out, and so is Deep Read held in the root, because both reach the Secure Record business unit (a direct child of the root) and break D-123.</prompt>
+
+  <goal>Every customer environment has one owner team, "Billing Rule Readers", in the customer's top business unit: the unit `RestrictedContentOwnerTeam` resolves, never the root. The team holds one small role and nothing else: Read on `sprk_policy` at Deep, plus Read on `sprk_policyversion` at Deep only if the Exclude path reads it (show the evidence). Child-unit billing admins become members. A member can then read every rule owned in the customer unit and its children, and never a rule owned in the Secure Record unit, which is a sibling. The setup is scripted, idempotent, verified, documented in the customer deployment guide, and handed to the provisioning project as a step.</goal>
+
+  <context>
+    <background>
+      Design: uac-r2's message of 2026-11-03, recorded in notes/089-assignment-override-service.md under "089d design (uac-r2)".
+      Existing pattern to copy: the memberless restricted-content team. `config/restricted-content-owner-role.json` is set up by `scripts/Set-CustomerOwnerTeams.ps1`, which finds the customer top unit by walking up to the root's direct child. See docs/guides/UAC-ACCESS-MODEL-GUIDE.md, "Hard-deny tables".
+      Dev evidence (read-only, 2026-11-04): one Billing rule exists, BILL-SYSTEM-SUBMISSION, team-owned in "Spaarke Business Unit 1" (the customer top unit). The six root-owned policies are ontology product rules (POL-TASK-*, POL-WA-RESPONSE, POL-TODO-OVERDUE, POL-MATTER-NOBUDGET, POL-COMMIT-BUDGET), not Billing rules; the Exclude route refuses them as non-Billing. No re-owning is needed on dev for Billing rules. Confirm this still holds when you start, and record any Billing rule owned in the root as a finding. Do not re-own it, and do not put the team in the root to compensate.
+    </background>
+    <relevant-files>
+      <file role="reference">config/restricted-content-owner-role.json and scripts/Set-CustomerOwnerTeams.ps1 (customer-unit team pattern)</file>
+      <file role="modify">a new config/billing-rule-readers-role.json, in the same shape as restricted-content-owner-role.json</file>
+      <file role="modify">scripts/Set-CustomerOwnerTeams.ps1 (extend it; do not add a parallel script), with -WhatIf, -Apply and -Verify</file>
+      <file role="modify">the role-privilege guard ArchTests that scan role configs (ProcedureRolePrivilegeGuardTests and the source-role scan), plus a verify or census step</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (per-customer setup step) and docs/guides/UAC-ACCESS-MODEL-GUIDE.md (one paragraph)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="uac-r2 / D-123">The team's business unit is the customer top unit, never the root and never Secure Record. The role grants no Global depth on any table, and no privilege other than the Read rows named in the goal. The verify step fails if the team sits in the root or in Secure Record, if the role holds any Global depth, or if it holds any extra privilege.</constraint>
+    <constraint source="uac-r2">No custom filter that infers rule rights from Procedure rights. The Exclude route's own Read check on `sprk_policies` stays as 089b built it. Until the team exists in an environment, a child-unit admin's 403 is the correct answer.</constraint>
+    <constraint source="owner standing rule">Creating the team and role and adding members is a per-customer setup step. It goes in the customer deployment guide AND is handed to customer-provisioning-orchestration-r1 as a step (send them a notice; do not edit their code).</constraint>
+    <constraint source="live changes">Creating the team or role on dev, or adding a member, is a live write. Run -WhatIf first. -Apply needs the owner's go typed in the main session, with notices to uac-r2 before and after.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>The role config and the extended setup script exist. -WhatIf on dev shows: the team is created in Spaarke Business Unit 1, the role holds only Read at Deep on sprk_policy (plus sprk_policyversion if the evidence requires it), and nothing changes in the root or in Secure Record.</criterion>
+    <criterion>The guard tests fail (must-fire) for a config that puts the team in the root, gives the role Global depth, or adds another privilege, and pass (must-not-fire) for the shipped config. One seed proof.</criterion>
+    <criterion>The verify step reports the team's unit, the role's privileges and depths, and the member count, and exits non-zero on any constraint above.</criterion>
+    <criterion>The customer deployment guide has the step, the access model guide has the paragraph, and the provisioning notice is sent.</criterion>
+    <criterion>Negative case, recorded with evidence (test or documented reasoning): a member reads a rule owned in a child unit of the customer unit, and cannot read a rule owned by the Secure Record Owners team.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If Deep from the customer top unit does not reach rules owned in its child units, or reaches Secure Record, STOP and bring it to uac-r2 before shipping any other shape.</trigger>
+  </escalation>
+</task>
