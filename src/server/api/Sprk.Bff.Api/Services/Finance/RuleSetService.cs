@@ -2505,12 +2505,30 @@ public class RuleSetService
         (await LoadRuleSetAsync(ruleSetId, ct))?.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id;
 
     /// <summary>
+    /// ebilling-r1 task 089e: the record a record-scoped billing rule set is filed under, read app-only for the by-id routes' authorization
+    /// (<c>RuleSetEndpoints.RequireAccessToTheRuleSet</c>), which asks it only AFTER the caller's own Read on the set. Null when there is no
+    /// billing set at this id or the set is not record-scoped (the route then continues as before). A record-scoped set with no single core
+    /// lookup has a null <see cref="RecordRuleSetHome.CoreTable"/>, which the filter denies. A read fault throws (the filter denies).
+    /// </summary>
+    internal virtual async Task<RecordRuleSetHome?> RecordHomeOfRuleSetAsync(Guid ruleSetId, CancellationToken ct) =>
+        await LoadBillingRuleSetAsync(ruleSetId, ct) is { } set ? RecordRuleSet.HomeOf(set) : null;
+
+    /// <summary>The uniform not found of every by-id route here (the same bytes for a missing set and, since 089e, an unreadable one).</summary>
+    internal static RuleSetOutcome<T> RuleSetNotFound<T>() where T : class =>
+        RuleSetOutcome<T>.Refused(StatusCodes.Status404NotFound, CodeNotFound, "The rule set was not found.");
+
+    /// <summary>
     /// The one read of a rule set by id, under every route and plan here. Task 089c (089a K1): a record-scoped set reads as no set. It is
     /// its record's secure child, changed only through the record's override routes (<c>ProcedureAssignmentService</c>), so every mutation
-    /// and read here answers it as the uniform not found. It is not a 409: the set's id is derived from the record, and a distinct answer
-    /// would tell a caller with no right on the record that the record has a changed rule.
+    /// and read here answers it as the uniform not found. Task 089e: on the by-id routes the route filter answers such a set first (the
+    /// uniform 404 unless the caller can Read the set and its record, then 409 <c>ruleset.record_scoped</c>); this stays the backstop for
+    /// every other caller (plans, the firm clause read).
     /// </summary>
-    private async Task<Entity?> LoadRuleSetAsync(Guid ruleSetId, CancellationToken ct)
+    private async Task<Entity?> LoadRuleSetAsync(Guid ruleSetId, CancellationToken ct) =>
+        await LoadBillingRuleSetAsync(ruleSetId, ct) is { } set && !RecordRuleSet.IsRecordScoped(set) ? set : null;
+
+    /// <summary>The billing rule set at this id, record-scoped or not, or null.</summary>
+    private async Task<Entity?> LoadBillingRuleSetAsync(Guid ruleSetId, CancellationToken ct)
     {
         if (ruleSetId == Guid.Empty)
         {
@@ -2525,7 +2543,7 @@ public class RuleSetService
         };
         RuleDomains.AddBillingFilter(query);
         var rows = await _entities.RetrieveMultipleAsync(query, ct);
-        return rows.Entities.FirstOrDefault(r => r.Id == ruleSetId && RuleDomains.IsBillingRow(r) && !RecordRuleSet.IsRecordScoped(r));
+        return rows.Entities.FirstOrDefault(r => r.Id == ruleSetId && RuleDomains.IsBillingRow(r));
     }
 
     private static QueryExpression PolicyQuery(string column, ConditionOperator op, object[] values)

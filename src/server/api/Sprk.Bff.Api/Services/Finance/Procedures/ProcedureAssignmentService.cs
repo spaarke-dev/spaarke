@@ -81,6 +81,13 @@ public sealed record OverrideRemoved(
 public sealed record OverrideSubject(string EntitySet, Guid Id);
 
 /// <summary>
+/// ebilling-r1 task 089e: the record a record-scoped rule set is filed under (<see cref="RecordRuleSet.HomeOf"/>). <see cref="CoreTable"/> is
+/// the core table's logical name (<c>sprk_matter</c>, <c>sprk_project</c>, <c>sprk_workassignment</c>), or null when the set carries no
+/// single core-record lookup.
+/// </summary>
+public sealed record RecordRuleSetHome(string? CoreTable, Guid CoreId);
+
+/// <summary>
 /// A record-scoped rule set (task 080 schema, model 5.2 and 6.3): the set that holds one record's changed rules. Its scope values live here,
 /// outside the waived <see cref="RuleSetService"/> file (089a K4: the census's record-scope markers fail a waived file that names one).
 /// <see cref="RuleSetService"/> asks <see cref="IsRecordScoped"/> so it can refuse such a set.
@@ -106,6 +113,26 @@ public static class RecordRuleSet
     internal static bool IsRecordScoped(Entity set) =>
         set.GetAttributeValue<OptionSetValue>(ScopeColumn)?.Value is ScopeRecord or ScopeFirmRecord
         || InvoiceFamilyCoreRecordGuard.FilingCoreTables.Any(core => set.GetAttributeValue<EntityReference>(core) is not null);
+
+    /// <summary>
+    /// ebilling-r1 task 089e: where a record-scoped set lives, for the rule-set by-id routes' authorization. Null for a set that is not
+    /// record-scoped. A record-scoped set carrying exactly one core-record lookup names that record; any other shape (none, or more than
+    /// one) has no core table, which the route denies (fail closed).
+    /// </summary>
+    internal static RecordRuleSetHome? HomeOf(Entity set)
+    {
+        ArgumentNullException.ThrowIfNull(set);
+        if (!IsRecordScoped(set))
+        {
+            return null;
+        }
+
+        var cores = InvoiceFamilyCoreRecordGuard.FilingCoreTables
+            .Select(core => (Core: core, Ref: set.GetAttributeValue<EntityReference>(core)))
+            .Where(c => c.Ref is not null && c.Ref.Id != Guid.Empty)
+            .ToList();
+        return cores.Count == 1 ? new RecordRuleSetHome(cores[0].Core, cores[0].Ref!.Id) : new RecordRuleSetHome(null, Guid.Empty);
+    }
 
     /// <summary>
     /// The write validator of every rule-set create (089a K1, <c>SecureChildLineage</c>): a set has one home.

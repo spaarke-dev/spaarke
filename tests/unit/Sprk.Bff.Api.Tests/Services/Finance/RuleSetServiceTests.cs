@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
@@ -816,6 +817,43 @@ public sealed class RuleSetServiceTests
         p.DescriptionText.Should().Contain("at most 10 hours per day");
         p.InForce.Should().BeFalse();
         p.ValidationErrors.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "089e: RecordHomeOfRuleSetAsync names a record-scoped set's one record (the by-id routes' check), and the set still reads as no set here")]
+    public async Task RecordHome_NamesTheRecordOfARecordScopedSet_NullOtherwise_AndTheReadsStillHideIt()
+    {
+        var h = new Harness();
+        var matterId = Guid.NewGuid();
+        var recordSet = h.RuleSet(RuleSetService.RuleSetPublished, scope: RecordRuleSet.ScopeRecord);
+        h.Row("sprk_ruleset", recordSet)["sprk_matter"] = new EntityReference("sprk_matter", matterId);
+        var lookupOnly = h.RuleSet(RuleSetService.RuleSetPublished); // a core lookup without a record scope still counts (fail closed)
+        h.Row("sprk_ruleset", lookupOnly)["sprk_project"] = new EntityReference("sprk_project", matterId);
+        var noCore = h.RuleSet(RuleSetService.RuleSetPublished, scope: RecordRuleSet.ScopeRecord);
+        var twoCores = h.RuleSet(RuleSetService.RuleSetPublished, scope: RecordRuleSet.ScopeRecord);
+        h.Row("sprk_ruleset", twoCores)["sprk_matter"] = new EntityReference("sprk_matter", matterId);
+        h.Row("sprk_ruleset", twoCores)["sprk_workassignment"] = new EntityReference("sprk_workassignment", Guid.NewGuid());
+        var legacy = h.RuleSet(RuleSetService.RuleSetPublished);
+        var ontology = h.RuleSet(domain: RuleDomains.PolicyDomainOntology, scope: RecordRuleSet.ScopeRecord);
+
+        var service = h.Service();
+        (await service.RecordHomeOfRuleSetAsync(recordSet, default)).Should().Be(new RecordRuleSetHome("sprk_matter", matterId));
+        (await service.RecordHomeOfRuleSetAsync(lookupOnly, default)).Should().Be(new RecordRuleSetHome("sprk_project", matterId));
+        (await service.RecordHomeOfRuleSetAsync(noCore, default)).Should().Be(new RecordRuleSetHome(null, Guid.Empty), "no core lookup: the route denies");
+        (await service.RecordHomeOfRuleSetAsync(twoCores, default)).Should().Be(new RecordRuleSetHome(null, Guid.Empty), "two core lookups: the route denies");
+        (await service.RecordHomeOfRuleSetAsync(legacy, default)).Should().BeNull();
+        (await service.RecordHomeOfRuleSetAsync(ontology, default)).Should().BeNull("not a billing set");
+        (await service.RecordHomeOfRuleSetAsync(Guid.NewGuid(), default)).Should().BeNull();
+        (await service.RecordHomeOfRuleSetAsync(Guid.Empty, default)).Should().BeNull();
+
+        foreach (var id in new[] { recordSet, lookupOnly, noCore, twoCores })
+        {
+            var outcome = await service.GetAsync(id, default);
+            outcome.StatusCode.Should().Be(404, "089c: every read here still answers a record-scoped set as no set");
+            (await service.ProcedureOfRuleSetAsync(id, default)).Should().BeNull();
+        }
+
+        (await service.GetAsync(Guid.NewGuid(), default)).Should().BeEquivalentTo(RuleSetService.RuleSetNotFound<RuleSetDetail>(),
+            "the routes' uniform 404 is the service's own not found");
     }
 
     [Fact]

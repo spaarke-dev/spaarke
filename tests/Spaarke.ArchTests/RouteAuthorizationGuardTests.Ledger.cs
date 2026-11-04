@@ -349,7 +349,9 @@ public partial class RouteAuthorizationGuardTests
             + "drafting job (the count of endpoint files is unchanged at 137: a route in an existing file). Each route declares the billing-admin Dataverse table privileges the "
             + "caller must hold (BillingAdminAuthorization via AddFinanceAuthorizationFilter, D-76, fail closed; Write on sprk_ruleset is the marker "
             + "because the Ontology Administrator holds every privilege on the shared policy tables); reads of the proposals are admin-only too. "
-            + "The eBilling kill switch runs after it."),
+            + "The eBilling kill switch runs after it. Task 089e: every route that takes a rule set id then carries RequireAccessToTheRuleSet "
+            + "(the caller's Read on the set and, for a record-scoped set, on its record; the uniform 404 otherwise, 409 ruleset.record_scoped "
+            + "when both pass), before the Procedure filter where the route has one."),
         new GovernedFile("Api/Finance/ProcedureEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/procedures/* (ebilling-r1 task 081, EB-D-148) -- Procedures and their versions. Step 0 on the group "
             + "(RequireInternalFinanceCaller, reads included: Procedures are internal-only). Each route then declares its basis through "
@@ -1213,6 +1215,12 @@ public partial class RouteAuthorizationGuardTests
             "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:172) and CallerReadCheck.CheckAsync "
             + "(:191) asking Read; denied is 403 insufficient_rights, an unanswered question or a read fault 403 system_failure (:178, :200) "
             + "(ebilling-r1 081, uac r2 I-P5)."),
+        new CreditedForm("RequireAccessToTheRuleSet", "Api/Finance/RuleSetEndpoints.cs",
+            "Asks the caller's own Read on the route rule set via CallerReadCheck.CheckAsync (RuleSetEndpoints.cs:574) and answers anything but "
+            + "Readable with the uniform 404 ruleset.not_found (:579) before reading the set; then reads the set's record home app-only "
+            + "(:585, a fault is 403 system_failure :590) and, for a record-scoped set, asks the caller's Read on its core record through "
+            + "FinanceAuthorizationFilter.CallerHoldsRightsAsync, the record routes' own check (:608); a refusal, a fault or no single core "
+            + "record is the same 404 (:602, :619), and only then 409 ruleset.record_scoped (:627) (ebilling-r1 089e)."),
         new CreditedForm("RequireReadOnTheOverridesSubject", "Api/Finance/ProcedureAssignmentEndpoints.cs",
             "Reads the route record's stored override through ProcedureAssignmentService.SubjectOfOverrideAsync "
             + "(ProcedureAssignmentEndpoints.cs:346) and asks the caller's own Read on the Procedure or rule it overrides via "
