@@ -138,6 +138,7 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $global:SetCustomerOwnerTeamsTest_BillingRoleName = $billing.roleName
         $global:SetCustomerOwnerTeamsTest_HolderPrivilege = $billing.holderPrivilege
         $global:SetCustomerOwnerTeamsTest_PolicyReadId = '00000000-0000-4000-8000-000000000014'
+        $global:SetCustomerOwnerTeamsTest_PlatformPrivilegeId = '00000000-0000-4000-8000-000000000016'  # prvReadSdkMessage, added by the platform on role create
         $global:SetCustomerOwnerTeamsTest_ChildId = '00000000-0000-4000-8000-000000000021'          # a child unit of Customer One
         $global:SetCustomerOwnerTeamsTest_OtherCustomerId = '00000000-0000-4000-8000-000000000022'  # another customer's top unit
         $global:SetCustomerOwnerTeamsTest_OtherChildId = '00000000-0000-4000-8000-000000000023'     # a child unit of Customer Two
@@ -191,6 +192,7 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $global:SetCustomerOwnerTeamsTest_WriteBodies = [System.Collections.Generic.List[string]]::new()  # parallel to Writes
         $global:SetCustomerOwnerTeamsTest_Events = [System.Collections.Generic.List[string]]::new()      # org reads and every write, in order
         $global:SetCustomerOwnerTeamsTest_AllowOrgPatch = $false
+        $global:SetCustomerOwnerTeamsTest_SecureUnderCustomer = $false  # K1: Secure Record placed under Customer One instead of the root
         $global:SetCustomerOwnerTeamsTest_AllowRoleWrites = $false  # the role create/patch, privilege add and user assignment change the world
         $global:SetCustomerOwnerTeamsTest_CopyIsInherited = @{}     # per-copy isinherited that differs from the role's (key = unit short name)
         $global:SetCustomerOwnerTeamsTest_OrgReadQueue = [System.Collections.Generic.Queue[string]]::new()  # org reads answered from here first
@@ -217,10 +219,11 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
                 if ($global:SetCustomerOwnerTeamsTest_AllowRoleWrites) {
                     $json = if ($bodyText) { $bodyText | ConvertFrom-Json } else { $null }
                     if ($Method -eq 'Post' -and $u -match '/api/data/v9\.2/roles$') {
-                        # The role is created: no privileges yet, and the role's own isinherited from the body.
+                        # The role is created holding one privilege the platform adds on create (outside the file), and the
+                        # role's own isinherited from the body. The script must take that privilege off.
                         $global:SetCustomerOwnerTeamsTest_RoleExists = $true
                         $global:SetCustomerOwnerTeamsTest_IsInherited = $json.isinherited
-                        $global:SetCustomerOwnerTeamsTest_Held = @()
+                        $global:SetCustomerOwnerTeamsTest_Held = @(@{ Name = 'prvReadSdkMessage'; Id = $global:SetCustomerOwnerTeamsTest_PlatformPrivilegeId; Depth = 'Basic' })
                         return $null
                     }
                     if ($Method -eq 'Patch' -and $u -match '/api/data/v9\.2/roles\(([^)]+)\)$') {
@@ -259,7 +262,7 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
             if ($u -match '/businessunits\?') {
                 return @{ value = @(
                         [pscustomobject]@{ businessunitid = $unit.root; name = 'Spaarke'; _parentbusinessunitid_value = $null }
-                        [pscustomobject]@{ businessunitid = $unit.secure; name = 'Secure Record'; _parentbusinessunitid_value = $unit.root }
+                        [pscustomobject]@{ businessunitid = $unit.secure; name = 'Secure Record'; _parentbusinessunitid_value = $(if ($global:SetCustomerOwnerTeamsTest_SecureUnderCustomer) { $unit.customer } else { $unit.root }) }
                         [pscustomobject]@{ businessunitid = $unit.customer; name = 'Customer One'; _parentbusinessunitid_value = $unit.root }
                         [pscustomobject]@{ businessunitid = $unit.child; name = 'Customer One Litigation'; _parentbusinessunitid_value = $unit.customer }
                         [pscustomobject]@{ businessunitid = $unit.other; name = 'Customer Two'; _parentbusinessunitid_value = $unit.root }
@@ -522,24 +525,59 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $r.Output | Should -Not -Match 'does not hold the Customer One copy after the assignment'
     }
 
-    It 'F3 -Apply with the role missing: creates it in the root with isinherited 0, then adds Read at Deep on prvReadsprk_Policy only' {
+    It 'F3 -Apply with the role missing: creates it in the root with isinherited 0, adds Read at Deep on prvReadsprk_Policy, then takes off the privilege the platform added on create' {
         $global:SetCustomerOwnerTeamsTest_RoleExists = $false
         $global:SetCustomerOwnerTeamsTest_AllowRoleWrites = $true
         $r = Invoke-Billing -Apply
         $r.ExitCode | Should -Be 0 -Because $r.Output
         $w = @($global:SetCustomerOwnerTeamsTest_Writes)
-        $w.Count | Should -Be 2 -Because ($w -join '; ')
-        $w[0] | Should -Be 'Post https://example.crm.dynamics.com/api/data/v9.2/roles'
+        $w.Count | Should -Be 3 -Because ($w -join '; ')
+        $roles = 'https://example.crm.dynamics.com/api/data/v9.2/roles'
+        $rootCopy = $global:SetCustomerOwnerTeamsTest_CopyId.root
+        $w[0] | Should -Be "Post $roles"
         $create = $global:SetCustomerOwnerTeamsTest_WriteBodies[0] | ConvertFrom-Json
         $create.isinherited | Should -Be 0
         $create.name | Should -Be 'Billing Rule Reader'
         $create.'businessunitid@odata.bind' | Should -Be "/businessunits($($global:SetCustomerOwnerTeamsTest_RootId))"
-        $w[1] | Should -Be "Post https://example.crm.dynamics.com/api/data/v9.2/roles($($global:SetCustomerOwnerTeamsTest_CopyId.root))/Microsoft.Dynamics.CRM.AddPrivilegesRole"
+        $w[1] | Should -Be "Post $roles($rootCopy)/Microsoft.Dynamics.CRM.AddPrivilegesRole"
         $add = $global:SetCustomerOwnerTeamsTest_WriteBodies[1] | ConvertFrom-Json
         @($add.Privileges).Count | Should -Be 1
         @($add.Privileges)[0].PrivilegeName | Should -Be 'prvReadsprk_Policy'
         @($add.Privileges)[0].PrivilegeId | Should -Be $global:SetCustomerOwnerTeamsTest_PolicyReadId
         @($add.Privileges)[0].Depth | Should -Be 'Deep'
+        # The strip: the outside privilege the platform added on create comes off, after the add.
+        $w[2] | Should -Be "Post $roles($rootCopy)/Microsoft.Dynamics.CRM.RemovePrivilegeRole"
+        ($global:SetCustomerOwnerTeamsTest_WriteBodies[2] | ConvertFrom-Json).Privilege.privilegeid | Should -Be $global:SetCustomerOwnerTeamsTest_PlatformPrivilegeId
+        @($global:SetCustomerOwnerTeamsTest_Held | ForEach-Object Name) | Should -Be @('prvReadsprk_Policy')
+        @($global:SetCustomerOwnerTeamsTest_Held)[0].Depth | Should -Be 'Deep'
+    }
+
+    It 'F3 -Apply -AssignBillingRuleReader: an outside privilege on the role comes off BEFORE the user assignment write' {
+        $global:SetCustomerOwnerTeamsTest_Held = @(@{ Name = 'prvReadsprk_Policy'; Id = $global:SetCustomerOwnerTeamsTest_PolicyReadId; Depth = 'Deep' }, @{ Name = 'prvReadSdkMessage'; Id = $global:SetCustomerOwnerTeamsTest_PlatformPrivilegeId; Depth = 'Basic' })
+        $global:SetCustomerOwnerTeamsTest_AllowRoleWrites = $true
+        $cand = $global:SetCustomerOwnerTeamsTest_CandidateId
+        $r = Invoke-Billing -Apply -Assign $cand
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        $w = @($global:SetCustomerOwnerTeamsTest_Writes)
+        $w.Count | Should -Be 2 -Because ($w -join '; ')
+        $w[0] | Should -Match 'roles\([^)]+\)/Microsoft\.Dynamics\.CRM\.RemovePrivilegeRole$'
+        ($global:SetCustomerOwnerTeamsTest_WriteBodies[0] | ConvertFrom-Json).Privilege.privilegeid | Should -Be $global:SetCustomerOwnerTeamsTest_PlatformPrivilegeId
+        $w[1] | Should -Match 'systemusers\([^)]+\)/systemuserroles_association/\$ref$'
+        @($global:SetCustomerOwnerTeamsTest_Held | ForEach-Object Name) | Should -Be @('prvReadsprk_Policy')
+    }
+
+    It 'K1 must fire: Secure Record placed under the customer top unit refuses in every mode, before any write' {
+        $global:SetCustomerOwnerTeamsTest_SecureUnderCustomer = $true
+        $global:SetCustomerOwnerTeamsTest_AllowRoleWrites = $true   # if the script wrote, it would succeed: the test must catch it
+        $global:SetCustomerOwnerTeamsTest_AllowOrgPatch = $true
+        foreach ($mode in @{}, @{ Verify = $true }, @{ Apply = $true }, @{ Apply = $true; Assign = $global:SetCustomerOwnerTeamsTest_CandidateId }) {
+            $r = Invoke-Billing @mode
+            $r.ExitCode | Should -Be 1 -Because ($mode.Keys -join ',')
+            $r.Output | Should -Match 'business-unit tree is not the expected shape'
+            $r.Output | Should -Match 'Secure Record must be a direct child of the root and outside every customer subtree \(D-123\)'
+            $r.Output | Should -Not -MatchExactly 'ADDED at|CREATED role|ASSIGNED the|REMOVED from|ORG SETTING : writing'
+        }
+        $global:SetCustomerOwnerTeamsTest_Writes.Count | Should -Be 0
     }
 
     It 'F3 -Apply with the role''s isinherited 1: exactly one PATCH, setting it to 0' {

@@ -250,6 +250,26 @@ First adversarial review of option R, fixed on `task/ebilling-089d-r-fix1` (from
 
 The same command as above, run against `task/ebilling-089d-r-fix1`: exit 0, and the output is identical to the run recorded above (the two owner teams show no drift, the role is still missing, and the plan has the same five steps). The new holder checks are not exercised on dev, because the role does not exist there yet and so has no holder.
 
+## 089d R pass-2 review
+
+Second adversarial review of option R, fixed on `task/ebilling-089d-r-fix2` (from `task/ebilling-089d-r-fix1` at `e5e4187903`). Each finding is a defect and its location only; the disposition follows.
+
+| # | Finding (defect, location) | Disposition |
+|---|---|---|
+| F3 | `tests/scripts/Set-CustomerOwnerTeams.Tests.ps1`, the mock's role create gave the new role no privileges, so disabling the strip in `Set-RolePrivileges` (`Set-CustomerOwnerTeams.ps1`) passed all 32 cases. | **Fixed.** The mock's role create adds `prvReadSdkMessage`, as the platform does. The role-create case asserts the write order (create, `AddPrivilegesRole` for `prvReadsprk_Policy` at Deep, `RemovePrivilegeRole` for the outside privilege) and a final held set of `prvReadsprk_Policy` only. A new `-Apply -AssignBillingRuleReader` case asserts the strip comes before the `systemuserroles_association` write. |
+| K1 | `Set-CustomerOwnerTeams.ps1`, after `$customerSubtree` is built: nothing checked the subtree against `$forbiddenUnits`, so a tree with Secure Record under the customer top unit was not refused. | **Fixed.** The script throws, in every mode and before any write, when a unit of the customer subtree is the root or Secure Record (or below it): "the business-unit tree is not the expected shape: Secure Record must be a direct child of the root and outside every customer subtree (D-123)". Must-fire Pester case over the dry run, `-Verify`, `-Apply` and `-Apply -AssignBillingRuleReader` (no writes); the normal shape is the must-not-fire case (every existing case). |
+| K4 | The failure lists in the deployment guide (the Verify bullet in section 7.11 and the Phase 7a comment) and the provisioning notice draft below omitted the `HOLDER UNIT` condition for a holder of another customer top unit's copy homed outside that unit's subtree. | **Fixed.** One clause added to each list, with the K1 shape check. |
+
+### Pass-2 proofs
+
+| Change | Result |
+|---|---|
+| Seed: the strip disabled (`$false -and` on the outside-privilege filter in `Set-RolePrivileges`) | 2 of 34 Pester fail: the role-create case and the strip-before-assignment case. Restored; hash matches the saved copy. |
+| Seed: the K1 check disabled (`$false -and` on `$misplaced.Count -gt 0`) | 1 of 34 fails: the K1 must-fire case. Restored; hash matches. |
+| Pester 5.7.1, `Set-CustomerOwnerTeams.Tests.ps1` | 34 of 34 pass (was 32). |
+| ArchTests, `RestrictedContentOwnerRoleGuard`, `RecordOwnerAssignmentCensus`, `ProcedureRolePrivilege` | 155 of 155 pass. |
+| `-WhatIf` on dev, read-only (same command as above) | Exit 0. The shape check passes on dev; the output is otherwise as recorded above. |
+
 ## Draft notice for customer-provisioning-orchestration-r1 (the main session sends it)
 
 > **ebilling-r1 089d, option R: a per-customer role and an org setting, for H7c (#2429).** This replaces the earlier
@@ -275,7 +295,11 @@ The same command as above, run against `task/ebilling-089d-r-fix1`: exit 0, and 
 >    - any privilege or depth outside the file;
 >    - any team holding any copy;
 >    - a user holding the root copy, the Secure Record copy, or a copy below a customer top unit;
->    - a holder of the top unit's copy without the marker, or homed outside the customer's units.
+>    - a holder of the top unit's copy without the marker, or homed outside the customer's units;
+>    - a holder of another customer top unit's copy who is homed outside that unit and the units below it.
+>
+>    The script also refuses to run, in every mode and before any write, when the business-unit tree is not the expected
+>    shape: Secure Record must be a direct child of the root and outside every customer subtree (D-123).
 > 5. **The live-proof gate.** Before the first customer with a child unit relies on this, prove it live once. A child-unit
 >    billing admin holding the top unit's copy must be able to read a top-unit Billing rule (the Exclude route is no longer
 >    403), and must NOT be able to read a rule owned by `Secure Record Owners`.

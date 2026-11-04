@@ -397,6 +397,12 @@ try {
     }
     # The customer's own subtree: where a holder of the role is homed.
     $customerSubtree = Get-UnitSubtree $customerId
+    # 089d R pass-2 K1: the tree must be the shape the isolation rests on. Secure Record sits directly under the root and outside
+    # every customer subtree (D-123); the root is never inside one. Runs in every mode, before any write.
+    $misplaced = @($customerSubtree.Keys | Where-Object { $forbiddenUnits.ContainsKey($_) })
+    if ($misplaced.Count -gt 0) {
+        throw "The business-unit tree is not the expected shape: $(($misplaced | ForEach-Object { $forbiddenUnits[$_] }) -join '; ') sits inside the subtree of $($customer.name) ($customerId). Secure Record must be a direct child of the root and outside every customer subtree (D-123). Nothing was written."
+    }
     $unitName = @{}
     foreach ($u in $units) { $unitName[$u.businessunitid] = $u.name }
 

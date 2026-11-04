@@ -1859,8 +1859,11 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 >   above that unit. Admins homed in the customer's unit itself need no assignment.
 > - **Then run `-Verify`.** It fails if the org setting is off; if `isinherited` is not 0; if the role grants anything but Read
 >   at Deep on `sprk_policy`; if any team holds any copy of the role; if a user holds the root copy, the `Secure Record` copy or
->   a copy below a customer top unit; or if a holder of the customer unit's copy lacks the marker or is homed outside the
->   customer's unit and the units below it (another customer's admin would read this customer's rules).
+>   a copy below a customer top unit; if a holder of the customer unit's copy lacks the marker or is homed outside the
+>   customer's unit and the units below it (another customer's admin would read this customer's rules); or if a holder of
+>   **another** customer top unit's copy is homed outside that unit and the units below it. The script also refuses to run, in
+>   every mode and before any write, when the business-unit tree is not the expected shape: `Secure Record` must be a direct
+>   child of the root and outside every customer subtree (D-123).
 > - **Live-proof gate.** Before the first customer with a child unit relies on this, an admin homed in a child unit and holding
 >   the top unit's copy must be able to read (and exclude) a Billing rule owned in the customer's top unit, and must **not** be
 >   able to read a rule owned by `Secure Record Owners` (still 403). See Phase 7a. Until the admin holds the role, that
@@ -2413,7 +2416,9 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 # -Verify fails while the org setting is off, isinherited is not 0, the role grants anything else or another depth, any team
 # holds any copy, a user holds the root copy, the Secure Record copy or a copy below a customer top unit, or a holder of this
 # unit's copy lacks prvWritesprk_ruleset (the billing-admin marker) or is homed outside the customer's unit and the units
-# below it.
+# below it, or a holder of ANOTHER customer top unit's copy is homed outside that unit and the units below it. Every mode
+# refuses to run, before any write, when Secure Record sits inside the customer's subtree (it must be a direct child of the
+# root and outside every customer subtree, D-123).
 # Provisioning's H7c (#2429) replaces this step in a provisioning run: one handler for the two teams and the role, after H7b
 # and before H9, from the files $DeclaredRoleFiles lists (restricted-content-owner-role.json,
 # customer-configuration-owner-role.json, billing-rule-readers-role.json), with its own gate and an H13 re-check.
