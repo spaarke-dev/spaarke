@@ -1564,6 +1564,99 @@ public sealed class ProcedureAssignmentServiceTests
         w.StatusOf(finding).Should().Be(SignalWriter.SignalStatusOpen);
     }
 
+    /// <summary>
+    /// Fix round 3 (F2): stage 3 gives no answer and applies nothing, while a concurrent change of the same rule on the same record (same derived
+    /// version id) writes the record rule's version row meanwhile; <paramref name="edit"/> shapes that row from the one this change would have written.
+    /// </summary>
+    private static async Task<(RuleSetOutcome<RuleChangedView> Outcome, World W, Guid Finding)> ChangeWithAConcurrentVersionRowAsync(Action<Entity> edit)
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var finding = w.Signal(policy, w.Invoice(matter: MatterId));
+        w.H.TransactionGivesNoAnswer = requests =>
+        {
+            if (requests.Count != 3)
+            {
+                return false; // stages 1 and 2 commit
+            }
+
+            var mine = ((Microsoft.Xrm.Sdk.Messages.CreateRequest)requests[1]).Target;
+            var theirs = new Entity(mine.LogicalName, mine.Id);
+            foreach (var attribute in mine.Attributes)
+            {
+                theirs[attribute.Key] = attribute.Value;
+            }
+
+            edit(theirs);
+            w.H.Seed(theirs);
+            return true;
+        };
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        return (outcome, w, finding);
+    }
+
+    [Fact(DisplayName = "089e fix round 3 (F2) must-fire: no answer from stage 3 while the version row at the derived id holds another change's body is not committed: 500, nothing closed")]
+    public async Task Change_WhenTheTransactionGivesNoAnswer_AndTheVersionRowHoldsAnotherBody_Is500_AndClosesNothing()
+    {
+        var (outcome, w, finding) = await ChangeWithAConcurrentVersionRowAsync(v => v["sprk_rulebody"] = CapBodyOf(9));
+
+        outcome.StatusCode.Should().Be(500, "the row at the derived id is another change's, not this one's");
+        outcome.ErrorCode.Should().Be("assignment.write_failed");
+        w.Superseded.Should().BeEmpty();
+        w.SubjectSelections.Should().BeEmpty();
+        w.StatusOf(finding).Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
+    [Fact(DisplayName = "089e fix round 3 (F2) must-fire: another change's text or consequence at the derived id is not committed")]
+    public async Task Change_WhenTheTransactionGivesNoAnswer_AndTheVersionRowHoldsOtherText_Is500()
+    {
+        foreach (var edit in new Action<Entity>[]
+                 {
+                     v => v["sprk_messagetemplate"] = "another template",
+                     v => v["sprk_shortheadline"] = "another headline",
+                     v => v["sprk_consequence"] = new OptionSetValue(((OptionSetValue)v["sprk_consequence"]).Value + 1),
+                     v => v["sprk_basedonversion"] = new EntityReference("sprk_policyversion", Guid.NewGuid()),
+                 })
+        {
+            var (outcome, w, finding) = await ChangeWithAConcurrentVersionRowAsync(edit);
+
+            outcome.StatusCode.Should().Be(500);
+            w.Superseded.Should().BeEmpty();
+            w.StatusOf(finding).Should().Be(SignalWriter.SignalStatusOpen);
+        }
+    }
+
+    [Fact(DisplayName = "089e fix round 3 (F2): no answer from stage 3 while the version row at the derived id holds equal content is committed: Done and the close runs")]
+    public async Task Change_WhenTheTransactionGivesNoAnswer_AndTheVersionRowHoldsEqualContent_IsDone_AndCloses()
+    {
+        var (outcome, w, finding) = await ChangeWithAConcurrentVersionRowAsync(_ => { });
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        w.StatusOf(finding).Should().Be(SignalWriter.SignalStatusResolved, "equal content is a truthful committed, so the close runs");
+    }
+
+    [Fact(DisplayName = "089e fix round 3 (K7): a re-change after a removal whose stage 3 gives no answer and does not commit is not committed, though an earlier version row exists")]
+    public async Task ChangeAgain_AfterARemoval_WhenStageThreeGivesNoAnswer_AndDoesNotCommit_Is500()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var first = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        (await w.Service().RemoveAsync(Matter, MatterId, first.Value!.Override.Id, Token, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var ruleId = first.Value.RecordRule.PolicyId;
+        var finding = w.Signal(policy, w.Invoice(matter: MatterId));
+        w.RowsOf("sprk_policyversion").Should().Contain(v => v.Id == RuleSetService.VersionIdFor(ruleId, 1), "the earlier version row exists");
+        w.H.TransactionGivesNoAnswer = requests => requests.Count == 3;
+
+        var again = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, body: CapBodyOf(14)), CallerOid, Token, default);
+
+        again.StatusCode.Should().Be(500);
+        again.ErrorCode.Should().Be("assignment.write_failed");
+        w.RowsOf("sprk_policyversion").Should().NotContain(v => v.Id == RuleSetService.VersionIdFor(ruleId, 2), "the new version was never written");
+        w.Superseded.Should().BeEmpty();
+        w.StatusOf(finding).Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
     [Fact(DisplayName = "089e fix round 2 (F2): the read-back after no answer is not cancelled by the request's token")]
     public async Task Change_WhenTheTransactionCommitsButGivesNoAnswer_AndTheRequestIsCancelled_StillReadsBack()
     {

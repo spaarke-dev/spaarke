@@ -630,7 +630,7 @@ public class ProcedureAssignmentService
         }
 
         var sent = await SendAsync(new OrganizationRequest[] { excludeCreate.Request!, versionCreate.Request!, switchOn }, exclude.Id, "change rule");
-        if (sent == SendResult.Unknown && await CommittedAfterNoAnswerAsync(exclude.Id, versionId, recordRule.Id))
+        if (sent == SendResult.Unknown && await CommittedAfterNoAnswerAsync(exclude.Id, versionId, recordRule.Id, number, merged, baseVersion.Id))
         {
             sent = SendResult.Done;
         }
@@ -664,18 +664,23 @@ public class ProcedureAssignmentService
     }
 
     /// <summary>
-    /// Task 089e (pass-1 K2; fix round 2, F2): after a stage-3 transaction that gave no answer, whether it committed. The transaction is all
-    /// or nothing, so the row only stage 3 writes is the answer: the record rule's version at its derived id <paramref name="versionId"/>,
-    /// under <paramref name="recordRuleId"/>. The Exclude row is not: a plain Exclude of the same rule writes a row at the same derived id
-    /// (I-A1). The read runs on <see cref="CancellationToken.None"/>: a caller who went away must not turn a committed change into a 500. A
-    /// read fault is no answer, so the change keeps its 500.
+    /// Task 089e (pass-1 K2; fix round 2, F2; fix round 3, F2): after a stage-3 transaction that gave no answer, whether it committed. The
+    /// transaction is all or nothing, so the row only stage 3 writes is the answer: the record rule's version at its derived id
+    /// <paramref name="versionId"/>, under <paramref name="recordRuleId"/>. The Exclude row is not: a plain Exclude of the same rule writes a
+    /// row at the same derived id (I-A1). Two concurrent changes of the same rule on the same record also derive the same version id, so the
+    /// row's content must be the content this change wrote (<paramref name="merged"/>, <paramref name="number"/>,
+    /// <paramref name="basedOnVersionId"/>): equal content is a truthful "committed" (the other change wrote what this one would have); a
+    /// different content is the other change's row, so this one did not commit. The read runs on <see cref="CancellationToken.None"/>: a
+    /// caller who went away must not turn a committed change into a 500. A read fault is no answer, so the change keeps its 500.
     /// </summary>
-    private async Task<bool> CommittedAfterNoAnswerAsync(Guid excludeId, Guid versionId, Guid recordRuleId)
+    private async Task<bool> CommittedAfterNoAnswerAsync(
+        Guid excludeId, Guid versionId, Guid recordRuleId, int number, RuleSetService.VersionRow merged, Guid basedOnVersionId)
     {
         try
         {
-            var version = await LoadByIdAsync(VersionTable, versionId, new[] { "sprk_policy" }, CancellationToken.None);
-            var committed = version?.GetAttributeValue<EntityReference>("sprk_policy")?.Id == recordRuleId;
+            var version = await LoadByIdAsync(VersionTable, versionId, ReadBackVersionColumns, CancellationToken.None);
+            var committed = version?.GetAttributeValue<EntityReference>("sprk_policy")?.Id == recordRuleId
+                && VersionContentMatches(version, number, merged, basedOnVersionId);
             _logger.LogWarning("Override {AssignmentId}: the change rule transaction gave no answer; read back of version {VersionId}: {Committed}",
                 excludeId, versionId, committed ? "committed" : "not committed");
             return committed;
@@ -686,6 +691,29 @@ public class ProcedureAssignmentService
             return false;
         }
     }
+
+    /// <summary>The columns stage 3 writes to the record rule's version from the merged content (read back after a no-answer transaction).</summary>
+    private static readonly string[] ReadBackVersionColumns =
+    {
+        "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline", "sprk_consequence",
+        "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation", BasedOnVersionColumn,
+    };
+
+    /// <summary>Whether a stored record-rule version holds the content stage 3 would have written (a missing and an empty text are the same).</summary>
+    private static bool VersionContentMatches(Entity? v, int number, RuleSetService.VersionRow merged, Guid basedOnVersionId) =>
+        v is not null
+        && (v.GetAttributeValue<int?>("sprk_versionnumber") ?? 0) == number
+        && v.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value == merged.RuleType
+        && SameText(v.GetAttributeValue<string>("sprk_rulebody"), merged.RuleBody)
+        && SameText(v.GetAttributeValue<string>("sprk_messagetemplate"), merged.Template)
+        && SameText(v.GetAttributeValue<string>("sprk_shortheadline"), merged.Headline)
+        && v.GetAttributeValue<OptionSetValue>("sprk_consequence")?.Value == merged.Consequence
+        && v.GetAttributeValue<OptionSetValue>("sprk_proposalstatus")?.Value == (int)ProposalState.Accepted
+        && SameText(v.GetAttributeValue<string>("sprk_clausereference"), merged.ClauseReference)
+        && SameText(v.GetAttributeValue<string>("sprk_clauselocation"), merged.ClauseLocation)
+        && v.GetAttributeValue<EntityReference>(BasedOnVersionColumn)?.Id == basedOnVersionId;
+
+    private static bool SameText(string? a, string? b) => string.Equals(a ?? string.Empty, b ?? string.Empty, StringComparison.Ordinal);
 
     /// <summary>The result message when the change's close of the base rule's findings completed (task 089e, pass-1 F2: it says what it covered).</summary>
     internal const string ChangeCloseCompleteMessage =
