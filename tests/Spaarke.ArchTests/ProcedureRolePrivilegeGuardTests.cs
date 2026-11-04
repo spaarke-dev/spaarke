@@ -43,6 +43,7 @@ public class ProcedureRolePrivilegeGuardTests
     /// </summary>
     private static readonly (string Role, string Privilege, string Level)[] AllowedBeforeTask191 =
     {
+        // uac-r2 agreed 2026-11-04
         ("Spaarke Billing Administrator", "prvReadsprk_procedure", "Deep"),
     };
 

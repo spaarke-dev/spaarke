@@ -1047,7 +1047,6 @@ public class RestrictedContentOwnerRoleGuardTests
 
         var graded = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var censused = privileges.Where(graded.Contains).ToArray();
-        var modelOnly = privileges.Where(p => !graded.Contains(p)).ToArray();
         Assert.Contains("prvReadsprk_ruleset", censused);   // non-vacuity: the census grades the new rule-set Read
         Assert.Contains("prvReadsprk_Policy", censused);
 
@@ -1089,10 +1088,8 @@ public class RestrictedContentOwnerRoleGuardTests
         foreach (var (top, home) in new[] { (Customer, Child), (Customer, Grandchild), (OtherCustomer, OtherCustomer) })
         {
             Assert.Empty(ClauseOne(CopyIn(top), home, depth));
-            foreach (var privilege in privileges)
-            {
-                Assert.False(SecureBuRoleDepthAssertion.Reaches(depth, top, Secure, Tree), $"{privilege} from {top} reaches Secure Record");
-            }
+            // Reaches takes no privilege (089e review K1): it is the depth model alone, the same for every privilege of the file.
+            Assert.False(SecureBuRoleDepthAssertion.Reaches(depth, top, Secure, Tree), $"the file's depth from {top} reaches Secure Record");
         }
 
         // Must-fire: the ruled-out shapes are findings for every graded privilege, and reach Secure Record for every privilege.
@@ -1106,10 +1103,8 @@ public class RestrictedContentOwnerRoleGuardTests
             Assert.Contains(global, f => f.Message.Contains(tableOf[privilege], StringComparison.OrdinalIgnoreCase));
         }
 
-        foreach (var privilege in modelOnly)
-        {
-            Assert.True(SecureBuRoleDepthAssertion.Reaches(depth, Root, Secure, Tree), $"{privilege}: Deep from the root's copy reaches Secure Record");
-            Assert.True(SecureBuRoleDepthAssertion.Reaches(PrivilegeDepth.Global, Customer, Secure, Tree), $"{privilege}: Global reaches Secure Record");
-        }
+        // The depth model takes no privilege (089e review K1), so its must-fire controls are one assertion each, not one per privilege.
+        Assert.True(SecureBuRoleDepthAssertion.Reaches(depth, Root, Secure, Tree), "the file's depth from the root's copy reaches Secure Record");
+        Assert.True(SecureBuRoleDepthAssertion.Reaches(PrivilegeDepth.Global, Customer, Secure, Tree), "Global reaches Secure Record");
     }
 }
