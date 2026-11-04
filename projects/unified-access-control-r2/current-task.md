@@ -35,7 +35,7 @@
 ## Reviews owed / in flight
 - **ebilling** (`spaarke-wt-ebilling-r1-7b`):
   - **095c-5** (5284787e81, running): field-secured `sprk_invoice.sprk_firmhold`; held = invoice hold OR any linked submission hold; binding: read app-only (OBO returns null), tests unlink/delete/reason+firm rewrite → still held; `sprk_invoice.sprk_vendororg` added to generic writers' refused list. `-Apply` needs owner go in ebilling's session, with notices to me.
-  - **089d** (43a5b37051): OK with 2 binding notes (role `isinherited`=0 in -Apply/-Verify/guard; live negative proof before the first customer with a child unit). Who adds members = owner question via ebilling.
+  - **089d** (43a5b37051): OK with 2 binding notes (role `isinherited`=0 in -Apply/-Verify/guard; live negative proof before the first customer with a child unit). Who adds members = owner question via ebilling. **Option R** (direct role assignment in the customer top unit's copy; needs `EnableOwnershipAcrossBusinessUnits`) is acceptable: the census anchors direct grants at the role copy's unit (`SecureBuRoleDepthAssertion` :801, :999). Conditions sent: org setting is a precondition plus -Verify; holder checks; find any BFF code grading reach by home unit; live proof stays.
   - 089b/089c full review (Exclude keeps Read on `sprk_policies`, fail-closed 403; Billing Rule Readers team is 089d).
   - 095a PR conditions; 095c schema notice; 095d full review (Write on invoice + AppendTo on firm; core from invoice; Unreadable 503; assign only, In Review only; typed writer in ParentLineage).
   - Accepted known limits: 086 K1/K-P1 (my 191)/K-P2/K-P3; 089a+086 K3/K4; Add Existing Communication on AP emails subgrid.
