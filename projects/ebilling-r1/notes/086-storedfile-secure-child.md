@@ -218,3 +218,14 @@ All five test projects build with 0 errors. Results:
   - ADR-038: maintenance-class tests at KEEP paths, with seeding proofs.
   - Root §10: +251 B and no package. Root §11: no new surface, only list entries plus one predicate pair.
 - **Pending (main session):** two adversarial passes (tenant isolation), the uac-r2 review of `SecureChildLineage.cs`, `RecordOwnershipResolver.cs`, `RecordCreatorPerson.cs`, the role JSON, the creator-person script and its Pester pin, and the census; then the live steps above.
+
+### uac-r2 answers on the port (2026-11-03)
+- **Source citations dropped:** agreed. Since 194b (R4b-2c), a Stored File's owner question includes `sprk_sourcedocument` and `sprk_sourcecommunication` by design. `CitationLookups` stays as 089a has it, with no Stored File entry.
+- **Role and creator-person -Apply on dev:** runner and time not recorded. The state was proven by -Verify on 2026-11-03: Read at Basic on 40/40 tables, and the creator-person column secured to both BFF profiles.
+- **Family registry:** Stored Files stay out of the displayed family. The baselined edge `sprk_storedfile.sprk_invoice -> sprk_invoice` is accepted. A Stored File is an internal, hard-deny file row, reached only through its document, invoice or batch.
+- **Known limits:** all accepted.
+  - K1: Full Access on the root already allows deleting its children. Add a note in the access model guide.
+  - K-P1: goes to uac-r2 task 191.
+  - K-P2: fails closed.
+  - K-P3: the live census is the backstop.
+- **Gate:** `StoredFileReconcileEnabled` stays false until the deploy carrying 089a and 086 passes uac-r2's gate and the NFR-05 census. The pre-deploy count of Stored Files on invoices of Secure records goes into the deploy request.
