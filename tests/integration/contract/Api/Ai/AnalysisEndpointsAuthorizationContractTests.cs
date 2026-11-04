@@ -623,11 +623,22 @@ public class AnalysisEndpointsAuthorizationContractTests
             var response = await host.SendAsync(Create(new { name = "A", documentId, playbookId, skillIds = Array.Empty<Guid>(), knowledgeIds = Array.Empty<Guid>(), toolIds = Array.Empty<Guid>() }));
 
             await AssertForbiddenAsync(response, "sdap.access.deny.insufficient_rights");
-            bodies.Add(await NormalizedBodyAsync(response));
+            // UAC-r2 (2026-11-04): byte-identical means the status, the reason code and body, AND every header the route
+            // controls (all but Date and per-request correlation/trace ids).
+            var headers = response.Headers.Concat(response.Content.Headers)
+                .Where(h => !h.Key.Equals("Date", StringComparison.OrdinalIgnoreCase)
+                    && !h.Key.Contains("correlation", StringComparison.OrdinalIgnoreCase)
+                    && !h.Key.Contains("trace", StringComparison.OrdinalIgnoreCase)
+                    && !h.Key.Contains("request-id", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(h => $"{h.Key.ToLowerInvariant()}: {string.Join(",", h.Value)}");
+            bodies.Add(string.Join("\n", headers.Prepend(((int)response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture)))
+                + "\n" + await NormalizedBodyAsync(response));
             host.VerifyCreateWroteNothing();
         }
 
-        bodies.Distinct().Should().ContainSingle("nothing distinguishes a playbook that exists from one the caller may not use");
+        bodies.Distinct().Should().ContainSingle("nothing distinguishes a playbook that exists from one the caller may not use: status, headers and body");
+        bodies[0].Should().Contain("content-type: application/problem+json", "the comparison covers the route's headers, not an empty set");
     }
 
     [Fact(DisplayName = "031 fix round 1 (a): a body carrying routeAuthorizedLookupColumns is ignored - the document's AppendTo is still asked and refuses")]

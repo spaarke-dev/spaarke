@@ -256,3 +256,10 @@ Seeded on the finished code (`/c/tmp/fm031/fix1/failing-first-seeded.log`): the 
 | `dotnet list package --vulnerable --include-transitive` | no vulnerable packages |
 
 Chunk 2 (`Office|SearchIndex|...`) took 33 m 35 s this time, against about 7 minutes before, because another worktree's test hosts were using about 11 GB each on the same machine. It was slow, not hung.
+
+### Fix round 1 follow-ups (coordinator, 2026-11-04)
+
+- **Omitted scope ids (the existing NRE above): fixed** in `63af06492d`. `CreateAnalysis` treats a null `skillIds`, `knowledgeIds` or `toolIds` as empty, as the filter already did. Test: `Create_BodyOmittingSkillKnowledgeAndToolIds_Is201_WithNoScopeAssociation`, which failed first with the NullReferenceException; now 201 with no association call.
+- **Uniform 403 (UAC-r2 accepted it, 2026-11-04):** `Create_PrivateUnsharedAndNonexistentPlaybook_AreTheSameRefusal_ServiceNotReached` now compares the status, every header the route controls (all but Date and correlation/trace ids; it asserts `content-type: application/problem+json` is among them) and the normalised body.
+- **Inactive playbook: not treated as unusable by the filter (reported, filter not changed).** `PlaybookAuthorizationFilter.BuildPlaybookUseCheckAsync` decides on `IsPublic` from `PlaybookService.GetPlaybookAsync`, whose `$select` has no `statecode`; `PlaybookResponse` carries no state. So an inactive public playbook passes the filter, and an inactive private one goes to the caller's Read on its row, as an active one does. A deleted playbook is a 404 from that read (`null`), which is the existing "nonexistent" case. The filter's unusable states are therefore exactly "not public and no Read" and "not found", and the test covers both. No inactive case was added.
+- `BuildCreateEventPayload` moves to task 063 (dead code).
