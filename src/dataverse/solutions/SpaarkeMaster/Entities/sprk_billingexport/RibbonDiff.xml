@@ -3,6 +3,7 @@
   <CustomActions>
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_billingexport.Delete.Hide" Location="Mscrm.Form.sprk_billingexport.Delete" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_billingexport.NewRecord.Hide" Location="Mscrm.Form.sprk_billingexport.NewRecord" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_billingexport.SaveAndNew.Hide" Location="Mscrm.Form.sprk_billingexport.SaveAndNew" />
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_billingexport.DeleteMenu.Hide" Location="Mscrm.HomepageGrid.sprk_billingexport.DeleteMenu" />
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_billingexport.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_billingexport.NewRecord" />
     <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_billingexport.AddNewStandard.Hide" Location="Mscrm.SubGrid.sprk_billingexport.AddNewStandard" />

@@ -452,6 +452,7 @@ describe('Billing Export: platform New and Delete are hidden (RibbonDiff)', () =
     'Mscrm.HomepageGrid.sprk_billingexport.DeleteMenu',
     'Mscrm.Form.sprk_billingexport.NewRecord',
     'Mscrm.Form.sprk_billingexport.Delete',
+    'Mscrm.Form.sprk_billingexport.SaveAndNew',
     'Mscrm.SubGrid.sprk_billingexport.AddNewStandard',
     'Mscrm.SubGrid.sprk_billingexport.NewRecord',
   ];
