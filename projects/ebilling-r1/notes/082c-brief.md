@@ -1,6 +1,6 @@
 # 082c brief: loader and evaluator re-keyed onto `ProcedureResolver`
 
-> Status: **in review** (2026-11-04). ontology-r1 reviews 082c-1 (C1 deviation, decision (a) open question, C6 note). uac-r2 and the SPA owner review the warning shape (c) before 082c-2 is coded. Nothing is implemented yet.
+> Status: **in review** (2026-11-04). ontology-r1 reviews 082c-1 (C1 deviation, decision (a) open question, C6 note). uac-r2 (approved with conditions, §7) and External Access R4 review the warning shape (c) before 082c-2 is coded. Nothing is implemented yet.
 > Base: `work/ebilling-r1` at c4b00b5fd7 (082b merged; 089e merged since, at 6bb7d928a9). Paths are under `src/server/api/Sprk.Bff.Api/` unless stated. `SB/` = `Services/Signals/Billing/`, `SF/` = `Services/Finance/`.
 
 ## 1. Scope
@@ -118,4 +118,4 @@ One adversarial pass per slice (tenant isolation and fail-open; C16 and C18 the 
 2. **Two codes: OK.** On the SPA channel uac-r2 prefers one generic warning for both, unless the owner's rule needs them told apart. **Proposed (082c-2):** keep the two texts, because they ask different things of the partner (the gap text asks them to check the record and the work dates; the unresolved text asks nothing). Condition if separate: "unresolved" must not be causable on purpose by the caller. `rows_inconsistent` comes from an internal admin change; `chain_unreadable` comes from the record's stored parent data, which the partner cannot write. 082c-2 adds a test or a written argument for each cause, and falls back to one generic text if either is caller-reachable.
 3. **C16, C17, C18: agreed as written.** Add one ArchTest or source scan for C16 (no `ex.Message` and no `ToString()` of the resolver records on the listed reader surfaces), with a must-fire control.
 4. **C22 is the binding pre-merge gate:** 082c does not go to master until task 114 lifts the `DecidingIndexes.Count == 0` refusal. uac-r2 checks it on the master PR.
-5. **SPA owner:** uac-r2 is finding the current SPA-r3 session; the §3(c) send waits for that.
+5. **SPA owner:** R3 is closed and handed over to **External Access R4** (session `spaarke-wt-spa-external-access-platform-ad`, worktree spaarke-wt-SPA-external-access-platform-r4, in design). §3(c) with uac-r2's conditions sent to R4 on 2026-11-04. R4 asked to be copied on anything that changes the SPA invoice or record-modal UI (082c-2, 082c-3).
