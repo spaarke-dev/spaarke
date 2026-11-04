@@ -486,3 +486,13 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - The enabled filter is what switches off a record rule on removal (D-177(14)).
     - It also stops a policy switched Off by a Procedure retire.
     - It never decides version selection.
+- **Added 2026-11-04 (ebilling 082b fix round, `35eb5310ec`):**
+  - **(8) Episode boundary:** `createdon` of the current Exclude row is accepted, with three conditions:
+    - compare with ≥;
+    - add a same-second test, so a version written in the Exclude row's own transaction counts;
+    - add a source-scan guard that no writer sets `overriddencreatedon` on `sprk_policyversion` or `sprk_procedureassignment` (a backdated create would move the boundary).
+    - Residual known limit: a removal and a re-change of the same rule inside one second.
+    - A sturdier marker (a lookup from the Exclude row to the episode's first version) is a schema change and needs the owner, so it is not asked for in R1.
+  - **(9) A Draft retired without ever being Active (081 cannot refuse it; retire is the only discard).** Preferred fix, with no schema: a Retired Procedure Version counts toward the "not applicable before" date only if it has a Published policy version or a published rate card, because a version that was never Active has neither. If that proves unreliable, the fail-closed known limit stands, releasable by Override.
+  - **(10)** The model §7.1 sentence is ebilling's file. ebilling edits it, citing D-203(5a) and (9).
+  - Follow-vs-Pin where one side gives no version reports `ConflictingParents`, as (1) intended.
