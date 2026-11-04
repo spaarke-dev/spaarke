@@ -737,6 +737,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_aisearchindex"] = "sprk_aisearchindexes",
             // Task 031 (FR-19): the typed analysis route's playbook lookup target.
             ["sprk_analysisplaybook"] = "sprk_analysisplaybooks",
+            // Task 031 fix round 1 (F3): the typed event route's event-type lookup target (user-owned live: Deep Read grants).
+            ["sprk_eventtype_ref"] = "sprk_eventtype_refs",
         };
 
         /// <summary>
@@ -978,6 +980,21 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         public HashSet<Guid> NoAppendTo { get; } = new();
 
+        /// <summary>
+        /// Task 031 fix round 1 (F3): the caller's rights on EVERY row of a configuration table the typed routes bind, by entity
+        /// set, as the SHIPPED roles grant them (<c>src/dataverse/solutions/SpaarkeMaster/Roles</c>), so a missing AppendTo is
+        /// not hidden by a default of "every right on every record". <c>sprk_analysisplaybook</c>: Spaarke Core, Basic and AI
+        /// Analysis User hold <c>prvReadsprk_analysisplaybook</c> (Global) and no AppendTo — only AI Analysis Admin does. The
+        /// other configuration targets these routes send keep full rights because the fixture's caller is a Core User: Core
+        /// holds <c>prvAppendTosprk_EventType_Ref</c> (Global; Basic does not — the review's K1, pinned in
+        /// <c>TypedRouteCreateInvariantsTests</c> by setting it here) and <c>prvAppendTosprk_RecordType_Ref</c> (organization
+        /// owned: asked by privilege, <see cref="Held"/>). A test that needs another role sets its table here.
+        /// </summary>
+        public Dictionary<string, string> TableRights { get; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_analysisplaybooks"] = "ReadAccess",
+        };
+
         /// <summary>Ontology task 126: the business unit a grant is anchored at unless <see cref="Anchors"/> or
         /// <see cref="Grants"/> say otherwise — the caller's own (a role assigned to them; the fixture's caller sits in the
         /// child business unit).</summary>
@@ -1200,7 +1217,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                     return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Does not exist.");
                 var rights = NoAppendTo.Contains(id) || NoAppendToIn.Contains((targetSet, id))
                     ? "ReadAccess,WriteAccess"
-                    : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
+                    : TableRights.TryGetValue(targetSet, out var shipped)
+                        ? shipped
+                        : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
                 return Ok(new { AccessRights = FullAccessOn.Contains(id) ? rights + ",DeleteAccess" : rights });
             }
 

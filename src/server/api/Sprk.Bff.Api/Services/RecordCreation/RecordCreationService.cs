@@ -183,6 +183,7 @@ internal sealed partial class RecordCreationService
         }
 
         ValidateReferenceLookupColumns(table, rule, request);
+        ValidateRouteAuthorizedLookupColumns(table, request, principal);
         var defaults = PostMappingDefaultValues(table, rule, request);
 
         Decision decision;
@@ -630,11 +631,18 @@ internal sealed partial class RecordCreationService
         }
         else
         {
-            // The K-2 guard (a server-set FILING lookup) ran before step 3.
+            // The K-2 guard (a server-set FILING lookup) ran before step 3. Task 031 fix round 1 (F1): a route-authorised
+            // lookup is asked Read as the caller here, and only its AppendTo is skipped below (appendToSkip).
+            var routeAuthorized = await CheckRouteAuthorizedLookupsAsync(
+                user, callerSystemUserId!.Value, table, callerItem, item, request, ct).ConfigureAwait(false);
+            if (routeAuthorized.Refusal is { } routeRefusal)
+                return Decision.Refuse(CallerCheckRefused(routeRefusal, noun));
+            var appendToSkip = routeAuthorized.SkipAppendTo;
+
             if (mappedValues.Count == 0)
             {
                 var check = await CallerWriteAuthorization.CheckCallerMayCreateAsync(
-                    user, callerSystemUserId!.Value, table, item, request.ServerSetLookupColumns, ct).ConfigureAwait(false);
+                    user, callerSystemUserId!.Value, table, item, appendToSkip, ct).ConfigureAwait(false);
                 if (!check.Succeeded)
                     return Decision.Refuse(CallerCheckRefused(check, noun));
 
@@ -644,7 +652,7 @@ internal sealed partial class RecordCreationService
             else
             {
                 var checkedMerge = await CheckMergedPayloadAsync(
-                    table, user, callerSystemUserId!.Value, callerItem, item, mappedValues, request.ServerSetLookupColumns, noun,
+                    table, user, callerSystemUserId!.Value, callerItem, item, mappedValues, appendToSkip, noun,
                     mappingWarnings, ct, defaultColumns).ConfigureAwait(false);
                 if (checkedMerge.Refusal is { } mergedRefusal)
                     return Decision.Refuse(mergedRefusal);
@@ -1957,6 +1965,22 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
             .Where(c => !string.IsNullOrWhiteSpace(c))
             .Select(c => c.Trim().ToLowerInvariant())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private readonly IReadOnlySet<string>? _routeAuthorizedLookupColumns;
+
+    /// <summary>
+    /// Task 031 fix round 1 (F1, owner 2026-11-04): lookups of the CALLER's payload whose target the ROUTE has already
+    /// authorised for this caller and this record id (the analysis create's playbook-use decision). Step 5 asks their Read as
+    /// the caller (existence: the uniform not-found) but not their AppendTo; every other check is the caller's value's. Set
+    /// by route code only, never bound from a request; a CLOSED list (<see cref="RecordCreationService.RouteAuthorizedLookups"/>)
+    /// — any other column, a filing lookup or an ownership-parent target is an argument error. Normalised as
+    /// <see cref="ServerSetLookupColumns"/> is. <c>null</c> (the default): every lookup's AppendTo is asked.
+    /// </summary>
+    public IReadOnlySet<string>? RouteAuthorizedLookupColumns
+    {
+        get => _routeAuthorizedLookupColumns;
+        init => _routeAuthorizedLookupColumns = NormaliseColumns(value);
+    }
 
     /// <summary>The request's trace id (the ProblemDetails <c>correlationId</c>); a fresh one when absent.</summary>
     public string? CorrelationId { get; init; }

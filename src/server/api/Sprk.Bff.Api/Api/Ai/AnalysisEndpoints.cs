@@ -197,6 +197,13 @@ public static class AnalysisEndpoints
                     // FR-19 / FR-03: the mapping profile of the document the analysis is filed under, if one exists; read as
                     // the caller first (FR-04). No profile: a silent no-op. Fill-only: every value of the request wins.
                     Mapping = Sprk.Bff.Api.Api.Events.EventEndpoints.CallerMappingOf(httpContext, logger),
+                    // Task 031 fix round 1 (F1, owner 2026-11-04): the route filter's playbook-use decision (public, or the
+                    // caller's Read on the row) authorised THIS playbook, so the service asks no AppendTo on it (only Spaarke AI
+                    // Analysis Admin holds it). Set only when the filter recorded that decision for this request's id.
+                    RouteAuthorizedLookupColumns =
+                        Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.IsPlaybookUseAuthorized(httpContext, request.PlaybookId)
+                            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { PlaybookColumn }
+                            : null,
                 },
                 RecordCreationPrincipal.ForCaller(
                     user,
@@ -268,6 +275,9 @@ public static class AnalysisEndpoints
     /// <summary>The <c>sprk_analysis</c> table.</summary>
     internal const string AnalysisTable = "sprk_analysis";
 
+    /// <summary><c>sprk_analysis.sprk_playbook</c>: the playbook that produced the analysis (a lookup to sprk_analysisplaybook).</summary>
+    internal const string PlaybookColumn = "sprk_playbook";
+
     /// <summary>
     /// The Web API payload of the new analysis, in column logical names (what <c>CreateAnalysisAsync</c> wrote, minus the
     /// owner and the creator person, which the service owns): the name, Active (statuscode 1), the document it is anchored
@@ -288,7 +298,7 @@ public static class AnalysisEndpoints
 
         if (request.PlaybookId is { } playbookId)
         {
-            payload["sprk_playbook"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            payload[PlaybookColumn] = new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["relatedTable"] = "sprk_analysisplaybook",
                 ["recordId"] = playbookId.ToString("D"),

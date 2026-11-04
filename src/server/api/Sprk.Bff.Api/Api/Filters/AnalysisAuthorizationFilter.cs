@@ -841,8 +841,40 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
             return await EvaluateFaultAsync(context, next, ex, FinanceDenial.Forbidden);
         }
 
-        return await EvaluateAsync(context, next, targets, FinanceDenial.Forbidden);
+        // Field-mapping-server-write-path-r1 task 031 fix round 1 (F1; UAC-r2 condition (c)): the playbook-use decision is
+        // recorded for THIS request's playbook id, and only when the evaluator lets the request through (it calls next only
+        // after every check above passed). The decision itself is unchanged; the handler reads the record to exempt that one
+        // playbook from the create's AppendTo question (RecordCreationRequest.RouteAuthorizedLookupColumns).
+        var allowed = request.PlaybookId is { } decided && decided != Guid.Empty
+            ? new EndpointFilterDelegate(ctx =>
+            {
+                RecordPlaybookUseAuthorized(ctx.HttpContext, decided);
+                return next(ctx);
+            })
+            : next;
+        return await EvaluateAsync(context, allowed, targets, FinanceDenial.Forbidden);
     }
+
+    /// <summary>The <see cref="HttpContext.Items"/> key of the create filter's playbook-use record: a private object, so nothing
+    /// a request carries (body, query, header) can set it.</summary>
+    private static readonly object PlaybookUseAuthorizedKey = new();
+
+    /// <summary>
+    /// Task 031 fix round 1: records that the /create filter authorised <paramref name="playbookId"/> for this caller (public, or
+    /// the caller's Read on the row). Called by <see cref="AuthorizeCreateAsync"/> only, after every check passed
+    /// (<c>RouteAuthorizedLookupColumnsCallSiteTests</c>).
+    /// </summary>
+    internal static void RecordPlaybookUseAuthorized(HttpContext httpContext, Guid playbookId) =>
+        httpContext.Items[PlaybookUseAuthorizedKey] = playbookId;
+
+    /// <summary>
+    /// Task 031 fix round 1: whether the /create filter authorised exactly <paramref name="playbookId"/> on this request. False
+    /// for no playbook, an empty id, another id, or a request the filter did not run on.
+    /// </summary>
+    internal static bool IsPlaybookUseAuthorized(HttpContext httpContext, Guid? playbookId) =>
+        playbookId is { } id && id != Guid.Empty
+        && httpContext.Items.TryGetValue(PlaybookUseAuthorizedKey, out var recorded)
+        && recorded is Guid authorised && authorised == id;
 
     /// <summary>A Record-path Read on each distinct, non-empty scope row id (a null array is none).</summary>
     private static IEnumerable<FinanceAuthorizationCheck> ScopeReadChecks(Guid[]? ids, string entitySet, string source) =>

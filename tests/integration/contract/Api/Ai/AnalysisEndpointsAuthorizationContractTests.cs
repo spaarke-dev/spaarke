@@ -573,6 +573,91 @@ public class AnalysisEndpointsAuthorizationContractTests
         host.VerifyCreateWroteNothing();
     }
 
+    // ---- Task 031 fix round 1 (F1; UAC-r2 conditions (a), (c), (g)): the playbook the filter authorised ----
+
+    [Fact(DisplayName = "031 fix round 1 (g): an ordinary user (Read, no AppendTo on the playbook) creates from a PUBLIC playbook - 201")]
+    public async Task Create_OrdinaryUser_PublicPlaybook_NoAppendToOnIt_Is201()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        var playbookId = host.PublicPlaybook();
+        host.Caller.Inner.TableRights[Playbooks].Should().Be("ReadAccess", "the shipped roles: Read on the playbook, no AppendTo");
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId, playbookId, skillIds = Array.Empty<Guid>(), knowledgeIds = Array.Empty<Guid>(), toolIds = Array.Empty<Guid>() }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var (_, _, fields) = host.AppOnlyCreates.Should().ContainSingle().Subject;
+        BindOf(fields, "sprk_Playbook@odata.bind").Should().Be($"/sprk_analysisplaybooks({playbookId:D})");
+    }
+
+    [Fact(DisplayName = "031 fix round 1 (c): a private playbook SHARED with the caller (Read on its row) is authorised by the filter - 201")]
+    public async Task Create_PrivatePlaybookSharedWithTheCaller_Is201()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        var playbookId = Guid.NewGuid();
+        host.SetPlaybook(playbookId, new PlaybookResponse { Id = playbookId, IsPublic = false });
+        host.Access.Grant(Playbooks, playbookId, AccessRights.Read);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId, playbookId, skillIds = Array.Empty<Guid>(), knowledgeIds = Array.Empty<Guid>(), toolIds = Array.Empty<Guid>() }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        host.Access.Calls.Should().Contain(new FinanceAuthz.AccessCall(FinanceAuthz.AccessPath.Record, Playbooks, playbookId, true));
+        host.AppOnlyCreates.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "031 fix round 1 (c)/(g): a private playbook NOT shared and one that does not exist get byte-identical refusals; the service is never reached")]
+    public async Task Create_PrivateUnsharedAndNonexistentPlaybook_AreTheSameRefusal_ServiceNotReached()
+    {
+        var bodies = new List<string>();
+        foreach (var exists in new[] { true, false })
+        {
+            await using var host = await AnalysisAuthHost.StartAsync();
+            var documentId = Guid.NewGuid();
+            host.Access.Grant(Documents, documentId, ReadAppendTo);
+            var playbookId = Guid.NewGuid();
+            host.SetPlaybook(playbookId, exists ? new PlaybookResponse { Id = playbookId, IsPublic = false } : null);
+
+            var response = await host.SendAsync(Create(new { name = "A", documentId, playbookId, skillIds = Array.Empty<Guid>(), knowledgeIds = Array.Empty<Guid>(), toolIds = Array.Empty<Guid>() }));
+
+            await AssertForbiddenAsync(response, "sdap.access.deny.insufficient_rights");
+            bodies.Add(await NormalizedBodyAsync(response));
+            host.VerifyCreateWroteNothing();
+        }
+
+        bodies.Distinct().Should().ContainSingle("nothing distinguishes a playbook that exists from one the caller may not use");
+    }
+
+    [Fact(DisplayName = "031 fix round 1 (a): a body carrying routeAuthorizedLookupColumns is ignored - the document's AppendTo is still asked and refuses")]
+    public async Task Create_BodyNamingRouteAuthorizedLookupColumns_IsIgnored()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo); // the filter passes...
+        host.Caller.Inner.NoAppendToIn.Add((Documents, documentId)); // ...and the service, as the caller, finds no AppendTo
+        var playbookId = host.PublicPlaybook();
+
+        var response = await host.SendAsync(Create(new Dictionary<string, object>
+        {
+            ["name"] = "A",
+            ["documentId"] = documentId,
+            ["playbookId"] = playbookId,
+            ["skillIds"] = Array.Empty<Guid>(),
+            ["knowledgeIds"] = Array.Empty<Guid>(),
+            ["toolIds"] = Array.Empty<Guid>(),
+            ["routeAuthorizedLookupColumns"] = new[] { "sprk_documentid", "sprk_playbook" },
+            ["RouteAuthorizedLookupColumns"] = new[] { "sprk_documentid" },
+        }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, "the route's existing generic failure for a service refusal");
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["detail"]!.GetValue<string>().Should().Be("Failed to create analysis record.");
+        host.AppOnlyCreates.Should().BeEmpty("nothing a request carries can skip a caller check");
+        host.Analysis.Verify(a => a.AssociateScopesAsync(It.IsAny<Guid>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<IEnumerable<Guid>>(),
+            It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact(DisplayName = "162 f1 create: a fault while declaring the checks (the body playbook's lookup throws) denies 403 system_failure and creates nothing")]
     public async Task Create_CheckDeclarationFault_Denies()
     {
@@ -1525,6 +1610,9 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
 internal sealed class CountingScriptedUserClient(Guid me) : IDataverseUserClient
 {
     private readonly SecureChildOwnershipAiToolTests.ScriptedUserClient _inner = new(me);
+
+    /// <summary>Task 031 fix round 1: the scripted caller itself, to state its rights (counting is unaffected).</summary>
+    public SecureChildOwnershipAiToolTests.ScriptedUserClient Inner => _inner;
 
     public int Calls { get; private set; }
 

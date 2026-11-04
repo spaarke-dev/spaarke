@@ -196,8 +196,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
     // =====================================================================================================================
 
     private async Task<(IResult Result, Mock<IAnalysisDataverseService> Analyses)> RunTypedAnalysisRoute(
-        IRecordOwnershipResolver? ownership = null, Guid[]? skills = null, Guid? document = null)
+        IRecordOwnershipResolver? ownership = null, Guid[]? skills = null, Guid? document = null, Guid? playbook = null,
+        Guid? filterAuthorisedPlaybook = null)
     {
+        // Task 031 fix round 1: the /create filter's playbook-use record, as AnalysisAuthorizationFilter writes it after every
+        // check passed (the filter itself is the contract suite's subject; here only its recorded decision is stated).
+        var http = HttpContextOfCaller();
+        if (filterAuthorisedPlaybook is { } authorised)
+            Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.RecordPlaybookUseAuthorized(http, authorised);
+
         var analyses = new Mock<IAnalysisDataverseService>(MockBehavior.Strict);
         analyses.Setup(a => a.AssociateScopesAsync(
                 It.IsAny<Guid>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<IEnumerable<Guid>>(),
@@ -205,12 +212,12 @@ public sealed partial class SecureChildOwnershipAiToolTests
             .Returns(Task.CompletedTask);
 
         var result = await AnalysisEndpoints.CreateAnalysis(
-            new CreateAnalysisRequest("Analysis - NDA.pdf", document ?? OrdinaryDocument, skills ?? [], [], []),
+            new CreateAnalysisRequest("Analysis - NDA.pdf", document ?? OrdinaryDocument, skills ?? [], [], [], PlaybookId: playbook),
             TypedRouteService(ownership ?? _world.Resolver()),
             _user,
             analyses.Object,
             NullLogger<AnalysisOrchestrationService>.Instance,
-            HttpContextOfCaller(),
+            http,
             CancellationToken.None);
         return (result, analyses);
     }
@@ -265,5 +272,190 @@ public sealed partial class SecureChildOwnershipAiToolTests
         (result as ProblemHttpResult)!.ProblemDetails.Detail.Should().Be("Failed to create analysis record.");
         _appCreates.Should().BeEmpty();
         analyses.Invocations.Should().BeEmpty();
+    }
+
+    // =====================================================================================================================
+    // Task 031 fix round 1 (F1 / F3; UAC-r2 conditions (b) to (g)): the playbook the route filter authorised
+    // =====================================================================================================================
+
+    private static readonly Guid TypedRoutePlaybook = Guid.Parse("a2460000-0000-4000-8000-000000031003");
+
+    /// <summary>Every path the caller's Dataverse client was asked (the harness's GET override, answering nothing itself).</summary>
+    private List<string> RecordCallerReads()
+    {
+        var paths = new List<string>();
+        _user.GetOverride = path =>
+        {
+            paths.Add(path);
+            return null;
+        };
+        return paths;
+    }
+
+    private static bool AsksRightsOn(IEnumerable<string> paths, string entitySet, Guid id) =>
+        paths.Any(p => p.Contains("RetrievePrincipalAccess", StringComparison.Ordinal) && p.Contains($"{entitySet}({id:D})", StringComparison.Ordinal));
+
+    [Fact]
+    public async Task TypedAnalysisRoute_AnOrdinaryUser_ReadButNoAppendToOnThePlaybook_CreatesFromThePlaybookTheFilterAuthorised_201()
+    {
+        // F1 (HIGH): the shipped roles give an ordinary user Read and no AppendTo on sprk_analysisplaybook (the harness's default,
+        // ScriptedUserClient.TableRights). The filter's playbook-use decision authorised this playbook, so the service asks its
+        // Read (existence) and not its AppendTo, and the create stands.
+        var paths = RecordCallerReads();
+
+        var (result, _) = await RunTypedAnalysisRoute(playbook: TypedRoutePlaybook, filterAuthorisedPlaybook: TypedRoutePlaybook);
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        var (_, _, fields) = _appCreates.Should().ContainSingle().Subject;
+        TypedBind(fields, "sprk_Playbook@odata.bind").Should().Be($"/sprk_analysisplaybooks({TypedRoutePlaybook:D})",
+            "the caller's playbook is written as they sent it");
+        AsksRightsOn(paths, "sprk_analysisplaybooks", TypedRoutePlaybook).Should().BeTrue(
+            "UAC-r2 (d): the caller's Read on the playbook is still asked, as the caller");
+    }
+
+    [Fact]
+    public async Task TypedAnalysisRoute_ThePlaybookWithoutTheFiltersRecord_KeepsItsAppendTo_AndIsRefused()
+    {
+        // UAC-r2 (f), must not fire: the same column, no route decision recorded (the option is not set) - AppendTo is asked
+        // as for any caller lookup, and an ordinary user does not hold it.
+        var (result, analyses) = await RunTypedAnalysisRoute(playbook: TypedRoutePlaybook, filterAuthorisedPlaybook: null);
+
+        Status(result).Should().Be(StatusCodes.Status500InternalServerError);
+        (result as ProblemHttpResult)!.ProblemDetails.Detail.Should().Be("Failed to create analysis record.");
+        _appCreates.Should().BeEmpty();
+        analyses.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TypedAnalysisRoute_TheFilterAuthorisedAnotherPlaybook_ThisOnesAppendToIsAsked_AndIsRefused()
+    {
+        // UAC-r2 (c): the filter's decision is for THIS record id only.
+        var (result, _) = await RunTypedAnalysisRoute(playbook: TypedRoutePlaybook, filterAuthorisedPlaybook: Guid.NewGuid());
+
+        Status(result).Should().Be(StatusCodes.Status500InternalServerError);
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TypedAnalysisRoute_WithThePlaybookAuthorised_AnotherLookupIsStillAskedItsAppendTo()
+    {
+        // UAC-r2 (f), must not fire: the option names the playbook only; the document's AppendTo is still the caller's question.
+        _user.NoAppendToIn.Add(("sprk_documents", OrdinaryDocument));
+
+        var (result, analyses) = await RunTypedAnalysisRoute(playbook: TypedRoutePlaybook, filterAuthorisedPlaybook: TypedRoutePlaybook);
+
+        Status(result).Should().Be(StatusCodes.Status500InternalServerError);
+        _appCreates.Should().BeEmpty();
+        analyses.Invocations.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("unreadable")]
+    public async Task TypedAnalysisRoute_AnAuthorisedPlaybookTheCallerCannotRead_IsTheSameRefusal_NothingCreated(string playbookCase)
+    {
+        // UAC-r2 (d): only AppendTo is skipped - existence and Read are still asked as the caller, and a missing row and an
+        // unreadable one answer alike (the service's uniform not-found, which this route renders as its generic 500).
+        if (playbookCase == "missing")
+            _user.Missing.Add(TypedRoutePlaybook);
+        else
+            _user.TableRights["sprk_analysisplaybooks"] = "None";
+
+        var (result, _) = await RunTypedAnalysisRoute(playbook: TypedRoutePlaybook, filterAuthorisedPlaybook: TypedRoutePlaybook);
+
+        Status(result).Should().Be(StatusCodes.Status500InternalServerError);
+        (result as ProblemHttpResult)!.ProblemDetails.Detail.Should().Be("Failed to create analysis record.");
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TypedEventRoute_ACoreUser_CreatesWithAnEventType()
+    {
+        // F3: the event type keeps its AppendTo (no route decision on it). A Core User holds prvAppendTosprk_EventType_Ref (Global).
+        var eventType = Guid.NewGuid();
+
+        var run = await RunTypedEventRoute(new ApiCreateEventRequest("Standalone", EventTypeId: eventType));
+
+        Status(run.Result).Should().Be(StatusCodes.Status201Created, Detail(run.Result));
+        TypedBind(_appCreates.Should().ContainSingle().Subject.Fields, "sprk_EventType_Ref@odata.bind")
+            .Should().Be($"/sprk_eventtype_refs({eventType:D})");
+    }
+
+    [Fact]
+    public async Task TypedEventRoute_ABasicUser_WithoutAppendToOnTheEventType_IsRefused_KnownLimitK1()
+    {
+        // F3 / review K1 (owner 2026-11-04: a roles-alignment task, not an exemption): Spaarke Basic User holds Read and no
+        // AppendTo on sprk_eventtype_ref, and the event route makes no route-level decision on the event type, so its AppendTo
+        // is asked and refused. Pinned so the roles task flips it deliberately.
+        _user.TableRights["sprk_eventtype_refs"] = "ReadAccess";
+
+        var run = await RunTypedEventRoute(new ApiCreateEventRequest("Standalone", EventTypeId: Guid.NewGuid()));
+
+        Status(run.Result).Should().Be(StatusCodes.Status500InternalServerError);
+        (run.Result as ProblemHttpResult)!.ProblemDetails.Detail.Should().Be("An error occurred while creating the event");
+        _appCreates.Should().BeEmpty();
+    }
+
+    // ── UAC-r2 (b), (e): a closed list; a filing lookup or an ownership-parent target is the adapter's defect ──────────────
+
+    private static RecordCreationRequest RouteAuthorised(string table, params string[] columns) =>
+        new(table, new RecordCreationPayload.WebApi(JsonSerializer.SerializeToElement(new { })))
+        {
+            RouteAuthorizedLookupColumns = new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase),
+        };
+
+    private RecordCreationPrincipal TheCaller() => RecordCreationPrincipal.ForCaller(_user, null);
+
+    [Theory]
+    [InlineData("sprk_todo", "sprk_regardingmatter", "files")]               // a lineage (SecureChildLineage) filing lookup
+    [InlineData("sprk_event", "sprk_regardingevent", "files")]               // an ownership-parent filing lookup (an intermediate)
+    [InlineData("sprk_workassignment", "sprk_regardingmatter", "files")]     // a secure root's filing column
+    [InlineData("sprk_event", "sprk_eventtype_ref", "closed list")]          // a configuration lookup no route decision covers
+    [InlineData("sprk_analysis", "sprk_actionid", "closed list")]            // another analysis configuration lookup
+    public void RouteAuthorisedLookups_AnythingButTheListedPlaybook_IsAnArgumentError(string table, string column, string why)
+    {
+        var act = () => RecordCreationService.ValidateRouteAuthorizedLookupColumns(table, RouteAuthorised(table, column), TheCaller());
+
+        act.Should().Throw<ArgumentException>().WithMessage($"*{why}*");
+    }
+
+    [Fact]
+    public void RouteAuthorisedLookups_AListedLookupToAnOwnershipParentTable_IsAnArgumentError()
+    {
+        // The ownership-parent class: even an entry on the list, on a column no filing list names (the reviewer lookup), may not
+        // name an ownership-parent table (a matter here).
+        var act = () => RecordCreationService.ValidateRouteAuthorizedLookupColumns(
+            "sprk_analysis", RouteAuthorised("sprk_analysis", "sprk_reviewerby"), TheCaller(),
+            [("sprk_analysis", "sprk_reviewerby", "sprk_matter")]);
+
+        act.Should().Throw<ArgumentException>().WithMessage("*ownership parent*");
+    }
+
+    [Fact]
+    public void RouteAuthorisedLookups_TheListedPlaybook_IsAccepted_ButNeverForASystemPrincipal_NorAlsoServerSet()
+    {
+        var request = RouteAuthorised("sprk_analysis", "SPRK_Playbook ");
+        RecordCreationService.ValidateRouteAuthorizedLookupColumns("sprk_analysis", request, TheCaller());
+        request.RouteAuthorizedLookupColumns.Should().BeEquivalentTo(["sprk_playbook"], "normalised as the server-set set is");
+
+        var system = () => RecordCreationService.ValidateRouteAuthorizedLookupColumns("sprk_analysis", request, RecordCreationPrincipal.ForSystem());
+        system.Should().Throw<ArgumentException>().WithMessage("*caller's create only*");
+
+        var both = () => RecordCreationService.ValidateRouteAuthorizedLookupColumns(
+            "sprk_analysis", request with { ServerSetLookupColumns = new HashSet<string> { "sprk_playbook" } }, TheCaller());
+        both.Should().Throw<ArgumentException>().WithMessage("*only one*");
+    }
+
+    [Fact]
+    public async Task RouteAuthorisedLookups_TheServiceThrowsBeforeAskingAnything()
+    {
+        var reads = RecordCallerReads();
+
+        var act = () => TypedRouteService(_world.Resolver()).CreateAsync(
+            RouteAuthorised("sprk_event", "sprk_eventtype_ref"), TheCaller(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        reads.Should().BeEmpty("the argument error is thrown before anything is read");
+        _appCreates.Should().BeEmpty();
     }
 }
