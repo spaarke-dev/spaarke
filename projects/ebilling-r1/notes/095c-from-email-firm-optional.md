@@ -1063,3 +1063,21 @@ For option 2, the criterion would be reworded to: "A failure leaves a state that
 - **Re-run in the request:** confirm the re-run makes no AI call. Only the code-set resolver's firm-code step runs again.
 - **Approval afterwards:** Flagged lines need a line decision before approval. Is that what the criterion intends?
 - **word-add-in-r1:** a 095a read or replay returns the new number. The add-in must not cache the number from intake.
+
+### 16.4 Decisions (2026-11-04)
+
+- **Order: option 1, apply then record.** The owner chose it in the main session after reading both peer analyses. They had first picked option 2, then changed to option 1 once the peers' views arrived, and confirmed it ("that's fine as long as have confirmed the decision analysis"). ontology-r1 recorded its reading of D-201 in its `notes/decisions.md` (`269cfd8221`): the record names the stored number, a retry never allocates a second number, and approval already applies first. uac-r2 accepts option 1.
+- **Binding conditions** (ontology-r1 and uac-r2):
+  1. Every permanent refusal is checked before the apply transaction: Preflight, the HumanDecisionSignalClose authorization, the core-record derivation and Read on the firm, as for approval.
+  2. The stored decision goes in the same apply transaction, conditional on the row version. It holds the firm, note, previous and new number, the firm_missing Signal set, its read time and the decider. A repeat rebuilds the identical record (same id and hash) from the row and never reallocates.
+  3. A failure after the apply answers 503 `incomplete` with `failedStep`. The repeat finishes record → close → link → re-run without a second apply, and a repeat that names a different firm is refused.
+  4. The firm_missing Signal is closed only after the record exists (D-122).
+  5. Rows that are applied but have no record are reported by the census or the schema check: INFO inside a stated window, FAIL after it.
+- **Renumber: everything.** The new number goes everywhere it appears: the submission and invoice number columns, the line names, the approval name, the stored-file names and the findings `trackingNumber`.
+- **AI in the re-run** (the owner's direction, relayed by uac-r2 and confirmed here): re-run the AI only where a rule's outcome can change with it. If a rule does not depend on the AI analysis, do not call the AI; if a fresh AI run can change the outcome, re-run it. The PR and notes list each rule in the re-run as "AI: yes/no" with the reason.
+- **Final review before merge:** the main session's adversarial passes, then uac-r2's full review of the diff, then ontology's K-3 view.
+- **word-add-in:** the add-in must not cache the intake number, and the 095a read returns the applied number.
+- **Split:**
+  - 095d-1: renumber, route, atomic apply, record, Signal close, guards, incomplete reporting.
+  - 095d-2: the persister's second evaluation and the rule re-run, after 082 and 092 merge.
+  - 095d-3: the UI.
