@@ -119,7 +119,7 @@ Scope: the four files of commit `4e98e82a10`. No F-class finding.
   - **K1 (fixed here):** the no-multi-hop guard was a deny-list. `CoreRecordChainNoMultiHopGuardTests` is now an allow-list (below).
   - **K2 (fixed here):** the `PairParentAnswer` switch in `CoreRecordChain` had no `default`. It now handles `None` and `NotAFilingParent` explicitly (no parent, no fault), `Unknown` (throws, as before), and `default:` throws `UnreachableException` naming the answer type. **No unit test:** `NamePairParentAsync` / `ReadAsync` has no seam for injecting an answer, so a fake future answer cannot be fed in. (A non-sealed record has a protected copy constructor, so code in the BFF assembly could derive from the base type; the private constructor only stops other assemblies.) The `default` guards a fifth nested record added later.
   - **K3 and K4:** see the 082b and 082c criteria and the census below.
-- Adversarial pass 2: no F; K1, K2 and K4 fixed in <sha>.
+- Adversarial pass 2: no F; K1, K2 and K4 fixed in 42a4af82ee.
 
 ### Fixes in this round
 
