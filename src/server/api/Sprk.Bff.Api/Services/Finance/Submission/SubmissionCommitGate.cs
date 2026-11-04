@@ -65,8 +65,8 @@ public sealed record SubmissionCommitGateResult(SubmissionCommitGateStatus Statu
 /// <para><b>Step 5.</b> For each distinct source document, the source check runs again
 /// (<see cref="InvoiceSubmissionService.CheckSourceFilingAsync"/>: present, filed under the core record only, its flags readable, its
 /// isolation Allowed), and the source's secure roots must be covered by the copy's (source roots ⊆ file roots). The copy's roots are the
-/// invoice's while <c>sprk_storedfile</c> is not a lineage child (<see cref="SecureChildLineage.IsChild"/>; task 086 makes it one, and the
-/// file row is then walked itself). Any fault, any verdict but Allowed and any root not covered is
+/// file rows' own: <c>sprk_storedfile</c> is a lineage child of its invoice (task 086, <see cref="SecureChildLineage"/>), so each file row
+/// is walked itself. Any fault, any verdict but Allowed and any root not covered is
 /// <see cref="SubmissionReasonCodes.SourceCheckFailed"/> (uac-r2 condition 1: a check that cannot be made is a failure). Then every file is
 /// flipped; a definitive flip failure is <see cref="SubmissionReasonCodes.FileUnservable"/>. A flip that meets a concurrent change is tried
 /// once more; a second change, or a fault of the flip or of the file read, throws (the job retries, and the resume runs this gate first).</para>
@@ -227,7 +227,7 @@ public class SubmissionCommitGate
             return false;
         }
 
-        var fileRoots = await FileRootsAsync(invoiceId, files, ct).ConfigureAwait(false);
+        var fileRoots = await FileRootsAsync(files, ct).ConfigureAwait(false);
         if (fileRoots is null)
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: the secure roots of its file could not all be determined; the source check fails", submissionId);
@@ -262,21 +262,13 @@ public class SubmissionCommitGate
     }
 
     /// <summary>
-    /// The copy's secure roots: the file rows' own once <c>sprk_storedfile</c> is a lineage child (task 086), until then the invoice's (the
-    /// file's parent, whose roots it inherits). Empty when the environment isolates nothing; null when any is undetermined or the walk
-    /// failed. A fault propagates.
+    /// The copy's secure roots: the file rows' own (<c>sprk_storedfile</c> is a lineage child of its invoice, task 086, so the walk starts at
+    /// each file row and goes up through the invoice). Empty when the environment isolates nothing; null when any is undetermined or the
+    /// walk failed. A fault propagates.
     /// </summary>
-    private async Task<IReadOnlyList<(string Table, Guid Id)>?> FileRootsAsync(Guid invoiceId, IReadOnlyList<StoredFileRow> files, CancellationToken ct)
+    private async Task<IReadOnlyList<(string Table, Guid Id)>?> FileRootsAsync(IReadOnlyList<StoredFileRow> files, CancellationToken ct)
     {
-        IReadOnlyCollection<Entity> rows;
-        if (SecureChildLineage.IsChild(StoredFileSchema.Entity))
-        {
-            rows = await ReadLineageRowsAsync(StoredFileSchema.Entity, files.Select(f => f.FileId).ToList(), ct).ConfigureAwait(false);
-        }
-        else
-        {
-            rows = await ReadLineageRowsAsync(InvoiceReviewService.InvoiceEntity, [invoiceId], ct).ConfigureAwait(false);
-        }
+        var rows = await ReadLineageRowsAsync(StoredFileSchema.Entity, files.Select(f => f.FileId).ToList(), ct).ConfigureAwait(false);
 
         if (rows.Count == 0)
         {
