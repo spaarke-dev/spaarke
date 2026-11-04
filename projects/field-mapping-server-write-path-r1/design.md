@@ -1103,14 +1103,15 @@ Today's create does not do this. The fix introduces it at create. The reconciler
 | 1–5½ | principal … pre-write rules | none (step 5's AppendTo set is unchanged; the derived root is never asked as the caller) |
 | 6 | secure-root plan | none (stamped tables never `Inherits`, so `isolatedTeam` is always null for them) |
 | **6½** | **I-1 derivation** (moved from 10) | `PlanMissingStampAsync` over the item, app-only, exactly as step 10 runs it today (`:818-850`). Refusals: 400 `stamp_underivable` and 503 `stamp_unavailable`, the same codes, words and trace step (`StampAndInheritance`, begun here). A document is skipped, as today. Runs for every principal. |
-| 7 | owner | `DecideOwnerAsync` takes the derived columns. `ResolveOwnerOverAsync` asks over `LookupsOf(item)` ∪ {derived column → `RecordOwnershipParent(root)`}, through the same `OwnerQuestionOf` / `ForRow`. Fill-only: a stamp the item already holds is never derived, so there are no duplicate keys. |
+| 7 | owner | `DecideOwnerAsync` takes the FULL plan (`PlanStampOfRowAsync`, what the step-12 restamp will write). `ResolveOwnerOverAsync` asks over the lookups **as the row ends** (`AsTheRowEnds`): each stamp column the plan names takes the planned root (a held value that disagrees is REPLACED, a planned clear removes it, a missing one is added); every other lookup, and a held stamp that agrees, is unchanged. Same `OwnerQuestionOf` / `ForRow`. **Amended by 042b fix round 1 (owner decision A', 2026-11-03, "replace, not add"):** the first version was fill-only here, so a caller-sent stamp that disagreed with the intermediate's root decided the owner and the restamp then moved the row from under it (the #2483 state again). |
 | 8 | search index | none in code; it reads the FINAL owning team, which may now be Secure (§15.5) |
 | 9 | creator / defaults | none |
-| 10 | **bind + I-16** | binds the 6½ result as the caller (`BindStampAsync`, `:859-885`; 500 `no_decision` / 503 unchanged, still here) and sets I-16 from the same row (`:889-908`). No second derivation. A system principal still binds after the create (DI-007). |
+| 10 | **bind + I-16** | binds the MISSING part of the 6½ plan (`MissingOf`: fill-only, unchanged by A') as the caller (`BindStampAsync`, `:859-885`; 500 `no_decision` / 503 unchanged, still here) and sets I-16 from the same row (`:889-908`). No second derivation. A system principal still binds after the create (DI-007). A held stamp that disagrees is created as sent and replaced by the step-12 restamp, as before 042b. |
 | 11–12 | create, post-create | none |
 
-- **Shape:** split `StampBeforeCreateAsync` into a plan half (6½) and a bind/I-16 half (10). The derived dictionary is passed through `DecideAsync`'s locals. No new type, enum member, interface, registration or package.
-- **Repair** (`RecordCreationService.Repair.cs:119-133`) has the same order: the owner is decided at `:121` and the stamp is added at `:133`. 042b plans the missing stamp once, before `RepairOwnerAsync`, adds it to `keyed` (`RecordCreationService.cs:1187`) and hands the same result to `RepairStampAsync`. If planning fails, the owner is kept (Skipped, `record_repair.stamp_unavailable`) and never re-owned over the lookups alone (Q2).
+- **Shape:** split `StampBeforeCreateAsync` into a plan half (6½) and a bind/I-16 half (10). The plan is passed through `DecideAsync`'s locals. No new type, enum member, interface, registration or package.
+- **A' (fix round 1):** `CoreAncestorRestamper.PlanStampOfRowAsync` returns the full plan (SET `EntityReference` / CLEAR `DBNull`, the restamp's own `PlanStamp`); `PlanMissingStampAsync` is now `MissingOf(row, PlanStampOfRowAsync(...))`, so its callers are unchanged. This is the one file outside 042b's list (owner-approved; component justification in `notes/task-042b-notes.md`). The bind stays fill-only; the derived root is never probed as the caller; no refusal changes.
+- **Repair** (`RecordCreationService.Repair.cs:119-133`) has the same order: the owner is decided at `:121` and the stamp is added at `:133`. 042b plans the stamp once, before `RepairOwnerAsync`, asks the owner over `AsTheRowEnds(row lookups, plan)` (A', security finding 6: a stale held stamp no longer decides the re-own) and hands the missing part (`MissingOf`) to `RepairStamp`, still fill-only. If planning fails, the owner is kept (Skipped, `record_repair.stamp_unavailable`) and never re-owned over the lookups alone (Q2).
 
 ### 15.4 Refusal parity (NFR-07)
 
@@ -1125,12 +1126,16 @@ A refusal raised by a single condition keeps its code, status and words. Only th
 | 5 | **New:** the root is flagged secure but not isolated | 201, owned ordinary | 409 `SecureParentNotIsolated` (`RecordOwnershipResolver.cs:3876-3889`) | UAC change 3, fail closed (Q1) |
 | 6 | **New:** the root cannot be read at step 7 after 6½ read it (a race) | 201 | 409 `ParentUnresolved` | a race only |
 | 7 | **New (change 1):** a report-card child whose root's BU has no default team | 201 (report card's team) | 409 | rare; the reconciler asks the same question (its outcome is to be confirmed by the parity test) |
+| 8 | **New (042b addendum A):** a Signal or Decision Record under a team-owned intermediate of a Secure root | 201, owned ordinary | 409 `NoOwnerSource` (the existing `OwnerDecided` / `SecureFilingRefused` words; `OwnerDecision.IsSecureOwner` true) | fail closed; UAC-r2 agreed 2026-11-03. These two are not reparentable children, so the "every stamped table" bullet below does not hold for them; their own writers own them into isolation |
+| 9 | **New (042b addendum B):** a create carrying `sprk_communicationthread` whose thread cannot be read at step 7 | 201 (the thread was not read) | 503 `owner_unavailable` | a race or fault only: step 5 already asks AppendTo on the thread as the caller |
+| 10 | **New (042b addendum C, Repair):** a stamp-planning fault on a filed row whose owner is kept for another reason (for example team-owned) | the stamp Skipped, the mapping ran | the stamp Skipped AND the mapping Skipped (`record_repair.mapping_filing_undecided`) | fail closed by design: without the stamp's root the filing's owner is undecided. Repair has no production caller yet (052, DI-008). A permanent planning fault is reported as `stamp_unavailable` (K2: no new enum member) |
+| 11 | **K3 (042b fix round 2, Repair window):** a row Repair re-owned per the PLANNED root still holds the stale stamp until `CoreAncestorStampReconciliationJob` restamps it (`*/5`, `CoreAncestorStampReconciliationJob.cs:74`, registered `MetadataServiceExtensions.cs:48`); `SecureChildReconciliationJob` (`*/2`, `SecureChildReconciliationJob.cs:131`, registered `ExternalAccessModule.cs:734`) is an independent schedule with no ordering between the two, so a reconcile can run first and ask over the stale stamp | — (before A' Repair asked over the stale stamp itself) | owner per the planned root; the stored stamp is stale until the restamp | the recent-changes pass only moves a child INTO isolation, so a Secure re-own is not undone there; only the SWEEP (`SecureChild:Reconciliation:WritesEnabled`, absent = report-only) could move it to the stale stamp's owner, and the next restamp + reconcile moves it back. No job change here; Repair has no production caller yet (052, DI-008) |
 
 - Unchanged:
   - the bind refusals (they stay at step 10);
   - the step-6 refusals;
   - `ownership_exception` (an unfiled row has no source, so nothing is derived);
-  - the secure-filing refusals in `OwnerDecided` (`:1106-1121`): every stamped table is a reparentable child, so a Secure owner is allowed.
+  - the secure-filing refusals in `OwnerDecided` (`:1106-1121`): every stamped table in the access taxonomy is a reparentable child, so a Secure owner is allowed (Signal and Decision Record are not: row 8).
 - **Edges:**
   - route: `ChildRecordEndpoints.RefusalResult`;
   - chat: the tool codes (`ChatCreatedChildStampTests.cs:310-345`);
@@ -1166,11 +1171,10 @@ A refusal raised by a single condition keeps its code, status and words. Only th
     - the written row's ownership parents are exactly the item lookups plus the bound stamp. The creator-person and index lookups are not ownership parents.
     - 042b pins this with a parity test.
   - **Known difference beyond the stamp (to be confirmed by that test):** the reconciler and Repair add a message's record-thread filing (`SecureChildReconciler.cs:3040-3051`, `RecordCreationService.cs:1183-1187`), and the create does not (Q3).
-- **Step 8 index:**
-  - `sprk_event` is search-indexed (`RecordTableRules.cs:256-259`);
-  - an event made Secure at create gets an empty index plus `search_index_unset_for_owner_bu`, as FR-38 says for the Secure Record BU (§13.3);
-  - today it gets the ordinary BU's index, and the reconciler's re-own leaves the index in place;
-  - #2502 retires per-BU routing later.
+- **Step 8 index (updated by task 042b, 2026-11-03):**
+  - task 041 (FR-40, #2502) merged first: step 8 is NoOp. The create writes neither search-index column for any owner, so an event made Secure at create gets no index value from step 8, as an ordinary one does;
+  - there is therefore no step-8 index assertion in 042b's must-fire tests (AC13);
+  - the text this bullet held before 041 (an empty index plus `search_index_unset_for_owner_bu` for the Secure Record BU) no longer describes the code.
 
 ### 15.6 Test plan (ADR-038; KEEP paths; the characterization lands first, alone)
 
@@ -1203,13 +1207,18 @@ A refusal raised by a single condition keeps its code, status and words. Only th
   - **Change 1:** a to-do with no pair under a team-owned report card in BU X, whose matter is in BU Y, is owned by Y's team.
   - **Change 3:** a matter flagged secure but not isolated gives 409 `SecureParentNotIsolated` and no create.
   - **Order:** a root read fault combined with an owner world that refuses gives 503 `stamp_unavailable` (pins row 2).
-  - **Repair:** a user-owned to-do missing its stamp under a team-owned invoice of a Secure matter is re-owned to Secure in the one update. If planning faults, the owner is kept (`stamp_unavailable`).
+  - **Repair:** a user-owned to-do missing its stamp under a team-owned invoice of a Secure matter is re-owned to Secure in the one update. If planning faults, the owner is kept (`stamp_unavailable`) and the mapping is Skipped (`mapping_filing_undecided`).
+  - **A' (fix round 1, F1): a sent stamp that disagrees is replaced in the owner question.**
+    - (a) a sent ORDINARY stamp under a team-owned intermediate of a Secure root is owned by `SecureNamedTeam`, with the sharee mirror at create (route, and a chat twin); the body keeps the sent value (fill-only) and the step-12 restamp replaces it;
+    - (b) a sent SECURE matter under an intermediate whose root is ordinary is owned by the ordinary owner, never the Secure team, and gets no mirror;
+    - Repair: a user-owned to-do holding a stale stamp whose source's root is Secure is re-owned to Secure (same unit) or held by the escalation (another unit), never re-owned to the ordinary team; the held stamp is not overwritten.
+  - **Parity theory, caller principal (fix round 1):** memo, analysis and communication created as the caller bind the stamp in the create body (step 10) and agree with the reconciler.
 - **Must not fire:**
   - `ChatCreatedChildStampTests.cs:106` stays green. Its comment at `:108-110` ("step 10 adds it to the create BODY only, so the owner question is unchanged") is rewritten.
-  - The same report card with the to-do's pair set is owned by X.
+  - The same report card with the to-do's pair set is owned by X. (Does not hold on this code: a report card is not a server to-do regarding-builder target, so the pair names no subject; 042b pins parity with the reconciler instead. Filed as #2556 / DI-017.)
   - Step 5's AppendTo probes are identical. The derived root is never asked as the caller.
   - `EmailDraftRecordCreationTests`: the owner and the AppendTo calls are unchanged.
-  - A browser-sent stamp: nothing is derived and the question is unchanged.
+  - A browser-sent stamp that AGREES with the intermediate's root: the plan is empty, nothing is bound, and the owner and the question are unchanged (AC12 as amended: "a sent stamp that agrees changes nothing; one that disagrees is replaced in the owner question"). Step 6½ still reads the intermediate once when a stamp is sent (AC1 as amended).
   - A document (seam `:229`) and a work assignment (seam `:64`) derive nothing.
   - Single-condition refusals are unchanged: `RouteCreatePreCreateStampTests.cs:64,81`, seam `:84-148`, `ChildRecordCreateRefusalContractTests`, `CrossSurfaceOwnerTests.cs:78-144`, and the Office suites (`OfficeRecordOwnershipTests`, `SecureRootCreateRouteTests.Office*`).
 

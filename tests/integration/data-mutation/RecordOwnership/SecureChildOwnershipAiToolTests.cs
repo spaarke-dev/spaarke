@@ -782,6 +782,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 // Owner decision 2026-10-29: a To Do filed under a work assignment (live navigation property, as TodoRegardingUpdateBuilder binds it).
                 ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                // Field mapping task 042b (change 1): a To Do filed under a report card (live navigation property, TodoRegardingUpdateBuilder).
+                ("sprk_regardingreportcard", "sprk_reportcard", "sprk_RegardingReportCard"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("ownerid", "systemuser", "ownerid"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"), // task 146 c1-r1 schema step
@@ -868,6 +870,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 // Ontology task 126: a caller-chosen systemuser lookup (live navigation property, spaarkedev1 2026-10-16).
                 ("sprk_reviewerby", "systemuser", "sprk_ReviewerBy"),
+                // Field mapping task 042b fix round 1: the analysis's invoice filing (CoreAncestorResolver.StampSourceColumns),
+                // for WriterBuilderOwnershipParityTests' caller-principal cases.
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
             },
             // Task 147 r1c (E2, the live inventory of every main form; read-only metadata, spaarkedev1, 2026-10-04): the
             // KPI assessment's and the billing event's lookups. The billing event's matter navigation property is
@@ -911,6 +916,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+                // Field mapping task 042b fix round 1: the memo's invoice filing (CoreAncestorResolver.StampSourceColumns), for
+                // WriterBuilderOwnershipParityTests' caller-principal cases (live navigation-property casing: the schema name).
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
             },
             ["sprk_event"] = new[]
             {
