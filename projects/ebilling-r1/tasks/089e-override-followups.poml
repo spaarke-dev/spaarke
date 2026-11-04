@@ -4,7 +4,7 @@
     <title>089c follow-ups: close stale base-rule Signals as Superseded on a rule change; a descriptive error for record-scoped rule sets; edit rights for Billing Administrator</title>
     <phase>3 Rules (follow-up to 089c; owner 2026-11-04)</phase>
     <gate>owner decided 2026-11-04 in the main session: STOP option (b); "a more descriptive error is important/useful to the user; also so can be tracked"; "provide edit rights as required"</gate>
-    <status>not-started</status>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what a rule change closes after its commit, the answer of an auth-gated route family, and possibly a security role source; tags include auth.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -65,4 +65,7 @@
     <trigger>Item 3: a needed depth reaches Secure Record, or a needed privilege is forbidden by an existing guard.</trigger>
     <trigger>Item 1: the "nightly run finishes it" premise does not hold for this close; record it and say what a stricter shape would be.</trigger>
   </escalation>
+
+  <notes>Items 1 and 3 done 2026-11-04 (notes/089-assignment-override-service.md, section 089e). Item 1: the change closes the base rule's findings on the record's In Review invoices Superseded, best effort; the nightly run does not finish a failed close. Item 3: no role change needed; dev matches the source. Item 2 STOPPED: no by-id rule-set route checks Read on the set or its core record, so a 409 would leak existence; options A/B/C are in the notes for the owner and uac-r2.
+  rework: none task 089e</notes>
 </task>
