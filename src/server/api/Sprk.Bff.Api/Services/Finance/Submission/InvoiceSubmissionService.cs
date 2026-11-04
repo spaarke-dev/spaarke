@@ -428,8 +428,11 @@ public class InvoiceSubmissionService
     private static readonly string[] ExistingDocumentColumns =
         ["sprk_invoice", "sprk_graphdriveid", "sprk_graphitemid", InvoiceReviewService.DocInvoiceReviewStatus, .. FilingChainColumns];
 
-    /// <summary>Task 094: the source document as steps 3 and 5 read it: the filing chain and its own Restricted state.</summary>
-    private static readonly string[] SourceCheckColumns = [.. FilingChainColumns, DocumentAccessPermission];
+    /// <summary>
+    /// Task 094: the source document as steps 3 and 5 read it: the filing chain and its own Restricted state. Task 118b review 2 (F1): and the
+    /// size it records, which the intake sums over its supporting documents before downloading any (<see cref="SourceFilingCheck.RecordedFileBytes"/>).
+    /// </summary>
+    private static readonly string[] SourceCheckColumns = [.. FilingChainColumns, DocumentAccessPermission, SourceDocumentFileRead.FileSizeColumn];
 
     /// <summary>
     /// The existing-document entry (D-134): a reviewer confirms that a document already stored (an email attachment) is an invoice. It runs the
@@ -815,7 +818,11 @@ public class InvoiceSubmissionService
     /// not configured 422 <see cref="InvoiceSubmissionErrors.StorageNotConfigured"/>), then (review F1-a) each document's filing and isolation
     /// as the invoice document's are judged (<see cref="CheckSupportingFilingAsync"/>), then each document's file through the ONE shared read
     /// (<see cref="InvoiceSubmissionRequest.ReadSupportingDocument"/>, review F1-b: with <see cref="MaxFileBytes"/>; over it is 413
-    /// <see cref="InvoiceSubmissionErrors.TooLarge"/>). Gone, no file or an email archive, storage that cannot be verified, or
+    /// <see cref="InvoiceSubmissionErrors.TooLarge"/>). Review 2, F1: the files together may hold at most <see cref="SupportingBudgetBytes"/>
+    /// (the upload route's request cap): the rows' recorded sizes are summed first (the filing check's own retrieves) and over the budget is
+    /// 413 before anything is downloaded; each read is then given the lesser of the per-file limit and what is left of the budget, and the
+    /// bytes actually read are totalled (over it is 413 <see cref="InvoiceSubmissionErrors.TooLarge"/> in its own words; a file that brings
+    /// the total to exactly the budget is read). Gone, no file or an email archive, storage that cannot be verified, or
     /// a document no longer linked to the route's communication is a permanent 422 <see cref="SubmissionReasonCodes.DocumentUnavailable"/>;
     /// no stream or a read fault is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>. The answers name no document.</item>
     /// </list>
@@ -876,22 +883,40 @@ public class InvoiceSubmissionService
 
         // Task 118b review (F1-a): each supporting document is judged as the invoice document is (step 3) and as the commit gate judges every
         // source again: filed under the core record only, isolated nowhere else. All of them first (cheap, read-only), so no file is
-        // downloaded for a request that is going to be refused.
+        // downloaded for a request that is going to be refused. The same retrieves give each row's recorded size (review 2, F1).
+        var recordedTotal = 0L;
         foreach (var supportingId in supportingIds)
         {
-            if (await CheckSupportingFilingAsync(request.CoreRecord, submissionId, supportingId, ct).ConfigureAwait(false) is { } filingRefusal)
+            var (filingRefusal, recordedBytes) = await CheckSupportingFilingAsync(request.CoreRecord, submissionId, supportingId, ct).ConfigureAwait(false);
+            if (filingRefusal is not null)
             {
                 return filingRefusal;
             }
+
+            var recorded = recordedBytes ?? 0;
+            recordedTotal = recorded > long.MaxValue - recordedTotal ? long.MaxValue : recordedTotal + recorded;
         }
 
+        // Task 118b review 2 (F1): the recorded sizes already add up to more than the whole request may hold in memory: refused before
+        // anything is downloaded. (A row with no recorded size adds nothing here; the loop below counts what is actually read.)
+        if (recordedTotal > SupportingBudgetBytes)
+        {
+            _logger.LogInformation("Invoice submission {SubmissionId}: the supporting documents' recorded sizes exceed the {BudgetMb} MB total; refused (413)",
+                submissionId, SupportingBudgetBytes / BytesPerMb);
+            return SupportingTotalTooLarge();
+        }
+
+        // Task 118b review 2 (F1): a running total of the bytes read, against the per-request budget. Each read is bounded by what is left
+        // of it (and by the per-file limit), so the intake never holds more than the budget, however many documents are named.
+        var totalRead = 0L;
         foreach (var supportingId in supportingIds)
         {
             SourceDocumentFile file;
+            var remaining = SupportingBudgetBytes - totalRead;
             try
             {
-                // Task 118b review (F1-b): the same per-file limit the upload enforces.
-                file = await read(supportingId, MaxFileBytes, ct).ConfigureAwait(false);
+                // Task 118b review (F1-b): the same per-file limit the upload enforces, never more than the budget has left (review 2, F1).
+                file = await read(supportingId, Math.Min(MaxFileBytes, remaining), ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (!IsCallerCancellation(ex, ct))
             {
@@ -903,12 +928,18 @@ public class InvoiceSubmissionService
             switch (file.Outcome)
             {
                 case SourceDocumentFileOutcome.Read when file.Content is not null && file.CommunicationId == request.SourceCommunicationId:
+                    totalRead += file.Content.LongLength;
                     files.Add((supportingId, file));
                     continue;
                 case SourceDocumentFileOutcome.NotDownloaded:
                     _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} could not be downloaded; refused (503)",
                         submissionId, supportingId);
                     return SupportingUnavailable();
+                case SourceDocumentFileOutcome.TooLarge when remaining < MaxFileBytes:
+                    // The limit that stopped the read was what was left of the total (review 2, F1), not the per-file limit.
+                    _logger.LogInformation("Invoice submission {SubmissionId}: supporting document {SupportingId} would take the supporting documents past the {BudgetMb} MB total; refused (413)",
+                        submissionId, supportingId, SupportingBudgetBytes / BytesPerMb);
+                    return SupportingTotalTooLarge();
                 case SourceDocumentFileOutcome.TooLarge:
                     _logger.LogInformation("Invoice submission {SubmissionId}: supporting document {SupportingId} is over the {MaxMb} MB file limit; refused (413)",
                         submissionId, supportingId, _ebilling.CurrentValue.MaxSubmissionFileSizeMb);
@@ -928,6 +959,21 @@ public class InvoiceSubmissionService
                 "A supporting document could not be read right now. Nothing was saved; try again shortly.");
     }
 
+    private const long BytesPerMb = 1024 * 1024;
+
+    /// <summary>
+    /// Task 118b review 2 (F1): the most bytes the supporting documents may add up to in one request: the upload route's whole-request body
+    /// cap (<see cref="Sprk.Bff.Api.Api.Finance.InvoiceSubmissionHttp.MaxRequestBodyBytes"/>), so the from-document route never holds more in
+    /// memory than an upload may carry. The intake keeps every supporting copy in memory between the reads (before step A) and the stages
+    /// (after it); without this total, 49 files at the per-file limit would be up to 49 times it.
+    /// </summary>
+    internal const long SupportingBudgetBytes = Sprk.Bff.Api.Api.Finance.InvoiceSubmissionHttp.MaxRequestBodyBytes;
+
+    /// <summary>413 <see cref="InvoiceSubmissionErrors.TooLarge"/>, in its own words: the supporting documents TOGETHER pass <see cref="SupportingBudgetBytes"/> (no document is named).</summary>
+    private static InvoiceSubmissionOutcome SupportingTotalTooLarge() =>
+        InvoiceSubmissionOutcome.Refused(StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge,
+            $"The supporting documents together are too large (at most {SupportingBudgetBytes / BytesPerMb} MB in all). Nothing was saved.");
+
     /// <summary>The 422 every "this supporting document cannot be copied" refusal answers (no document is named).</summary>
     private static InvoiceSubmissionOutcome SupportingNotCopyable() =>
         InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, SubmissionReasonCodes.DocumentUnavailable,
@@ -941,8 +987,9 @@ public class InvoiceSubmissionService
     /// cannot be placed, is 409 <see cref="InvoiceSubmissionErrors.DocumentCoreRecordMismatch"/>; isolation that cannot be read, or any
     /// fault, is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>; a document that no longer exists is 422
     /// <see cref="SubmissionReasonCodes.DocumentUnavailable"/> (as the shared read answers it). The answers name no document or record.
+    /// Allowed also returns the size the row records (review 2, F1: <see cref="SourceFilingCheck.RecordedFileBytes"/>; null when empty).
     /// </summary>
-    private async Task<InvoiceSubmissionOutcome?> CheckSupportingFilingAsync(
+    private async Task<(InvoiceSubmissionOutcome? Refusal, long? RecordedBytes)> CheckSupportingFilingAsync(
         InvoiceCoreRecord core, Guid submissionId, Guid supportingId, CancellationToken ct)
     {
         SourceFilingCheck check;
@@ -954,27 +1001,27 @@ public class InvoiceSubmissionService
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: the filing of supporting document {SupportingId} could not be checked ({Fault}); refused (503)",
                 submissionId, supportingId, ex.GetType().Name);
-            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
-                "A supporting document could not be checked right now. Nothing was saved; try again shortly.");
+            return (InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                "A supporting document could not be checked right now. Nothing was saved; try again shortly."), null);
         }
 
         switch (check.Verdict)
         {
             case SourceFilingVerdict.Allowed:
-                return null;
+                return (null, check.RecordedFileBytes);
             case SourceFilingVerdict.Gone:
                 _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} no longer exists; refused (422)", submissionId, supportingId);
-                return SupportingNotCopyable();
+                return (SupportingNotCopyable(), null);
             case SourceFilingVerdict.Unavailable:
                 _logger.LogWarning("Invoice submission {SubmissionId}: the isolation of supporting document {SupportingId} could not be read ({Detail}); refused (503)",
                     submissionId, supportingId, check.Detail);
-                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
-                    "Who may see a supporting document could not be checked right now. Nothing was saved; try again shortly.");
+                return (InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "Who may see a supporting document could not be checked right now. Nothing was saved; try again shortly."), null);
             default:
                 _logger.LogInformation("Invoice submission {SubmissionId}: supporting document {SupportingId} is filed or restricted elsewhere ({Detail}); refused (409)",
                     submissionId, supportingId, check.Detail);
-                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
-                    "A supporting document is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved.");
+                return (InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
+                    "A supporting document is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved."), null);
         }
     }
 
@@ -1348,7 +1395,8 @@ public class InvoiceSubmissionService
         var isolated = await isolation.CheckAsync(documentId, core, ct).ConfigureAwait(false);
         return isolated.Verdict switch
         {
-            ExistingDocumentIsolationVerdict.Allowed => new SourceFilingCheck(SourceFilingVerdict.Allowed, null, isolated.Roots, flags),
+            ExistingDocumentIsolationVerdict.Allowed => new SourceFilingCheck(
+                SourceFilingVerdict.Allowed, null, isolated.Roots, flags, SourceDocumentFileRead.RecordedSizeOf(document)),
             ExistingDocumentIsolationVerdict.Unavailable => new SourceFilingCheck(SourceFilingVerdict.Unavailable, isolated.Detail),
             _ => new SourceFilingCheck(SourceFilingVerdict.Mismatch, $"{isolated.Verdict}: {isolated.Detail}"),
         };

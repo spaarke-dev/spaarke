@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Metadata;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -2290,7 +2292,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         GrantInternalSubmit();
         SourceDocumentExists();
         SupportingDocumentExists(SupportingA, SourceCommunicationId);
-        SupportingDocumentExists(SupportingB, SourceCommunicationId, fileSize: int.MaxValue);
+        // 2 MB against the harness's 1 MB limit: over the file's own limit and far under the total, so it is the per-file path (review 2 F1
+        // sums recorded sizes first: a size over the whole request cap would be the total's refusal instead).
+        SupportingDocumentExists(SupportingB, SourceCommunicationId, fileSize: 2 * 1024 * 1024);
 
         var response = await PostFromDocumentAsync(SupportingBody(SupportingA, SupportingB));
 
@@ -2299,6 +2303,42 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         _spe.Verify(s => s.DownloadFileAsync("b!drive", "item-" + SupportingB.ToString("N"), It.IsAny<CancellationToken>()), Times.Never(),
             "the row says it is too big: no download");
         NothingWritten();
+    }
+
+    [Fact(DisplayName = "118b review 2 F1 (must fire): supporting documents whose rows record sizes that add up to more than the upload route's request cap are 413 ebilling.submission.too_large through the route's own binding, in the total's own words; not one is downloaded; nothing staged or created")]
+    public async Task FromDocument_supporting_documents_over_the_total_are_413_nothing_downloaded()
+    {
+        GrantInternalSubmit();
+        SourceDocumentExists();
+        _h.Options.MaxSubmissionFileSizeMb = EbillingOptions.MaxSubmissionFileSizeMbCeiling; // no single file is over its limit
+        var third = (int)(InvoiceSubmissionHttp.MaxRequestBodyBytes / 3) + 1;
+        var ids = new[] { SupportingA, SupportingB, Guid.Parse("118b0000-0000-4000-8000-0000000000c1") };
+        foreach (var id in ids)
+        {
+            SupportingDocumentExists(id, SourceCommunicationId, fileSize: third);
+        }
+
+        var response = await PostFromDocumentAsync(SupportingBody(ids));
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge, await response.Content.ReadAsStringAsync());
+        (await ErrorCodeAsync(response)).Should().Be(InvoiceSubmissionErrors.TooLarge);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("together");
+        _spe.Verify(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never(),
+            "the recorded sizes already pass the cap: no download");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "118b review 2 F4 (must fire): the from-document route's OpenAPI contract lists 413 as a problem response and the description names too_large, document_unavailable and storage_not_configured among its refusals")]
+    public void FromDocument_route_metadata_lists_413_and_the_supporting_document_refusals()
+    {
+        var endpoint = _app.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Single(e => e.RoutePattern.RawText == "/api/finance/invoice-submissions/from-document");
+
+        endpoint.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>().Select(m => m.StatusCode)
+            .Should().Contain(StatusCodes.Status413PayloadTooLarge);
+        endpoint.Metadata.GetMetadata<IEndpointDescriptionMetadata>()!.Description.Should()
+            .Contain("413 too_large").And.Contain("document_unavailable").And.Contain("storage_not_configured");
     }
 
     public static TheoryData<string> SupportingShapeRefusals => new() { "invoice_document", "empty_id", "too_many" };

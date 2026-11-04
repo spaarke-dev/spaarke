@@ -102,8 +102,11 @@ public static class InvoiceSubmissionEndpoints
                 "the core record and firm checks; 404 document_not_found, or (reasonCode record_unavailable) the invoice a Correction " +
                 "names is not one the caller can Write; 409 document_core_record_mismatch, document_already_invoiced, " +
                 "document_rejected, document_already_submitted, submission_already_ended, correction_not_allowed (reason); " +
-                "422 source_communication_mismatch, " +
-                "document_has_no_file; 503 record_unavailable.")
+                "413 too_large (a supporting document over the file limit, or the supporting documents together over the total the " +
+                "upload route allows); 422 source_communication_mismatch, " +
+                "document_has_no_file, document_unavailable (a supporting document with no file that can be copied, or no longer of this " +
+                "communication), storage_not_configured (invoice file storage is not set up, so supporting documents cannot be stored); " +
+                "503 record_unavailable.")
             .Accepts<SubmitInvoiceFromDocumentRequest>("application/json")
             .Produces<InvoiceSubmissionAccepted>(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -111,6 +114,7 @@ public static class InvoiceSubmissionEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
