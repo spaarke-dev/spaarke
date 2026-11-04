@@ -147,6 +147,24 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// <summary>ebilling-r1 (2026-10-30): the external identifier e-billing resolves invoices to matters by.</summary>
     internal const string ExternalIdentifierTable = "sprk_externalidentifier";
 
+    /// <summary>
+    /// Field-mapping-server-write-path-r1 task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): a Signal, a Decision
+    /// Record and a Budget Revision are created only by their writers, so this tool refuses them outright, with the
+    /// <c>sprk_document</c> block's mechanism and shape (<see cref="ToolErrorCodes.ValidationFailed"/>, before any Dataverse call,
+    /// in both <see cref="ValidateChat"/> and <see cref="ExecuteChatAsync"/>). The set is the registry's own flag
+    /// (<see cref="RecordTableRule.CreatedOnlyByItsWriter"/>), which <see cref="RecordCreationService"/> also refuses, so the two
+    /// cannot drift apart.
+    /// </summary>
+    internal static bool IsCreatedOnlyByItsWriter(string tablename) =>
+        RecordTableRules.Find(tablename) is { CreatedOnlyByItsWriter: true };
+
+    /// <summary>The single rejection message for an <see cref="IsCreatedOnlyByItsWriter"/> create (user- and model-facing).</summary>
+    internal static string CreatedOnlyByItsWriterCreateBlockedMessage(string tablename) =>
+        $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
+        "created only by Spaarke itself: a signal when its rule is evaluated, a decision record or a budget revision when a " +
+        $"decision is committed. Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument " +
+        "change makes it valid; work from the signal or its decision instead.";
+
     /// <summary>The single rejection message for a <see cref="ServerWrittenInvoiceFamilyTables"/> create (user- and model-facing).</summary>
     internal static string ServerWrittenInvoiceFamilyCreateBlockedMessage(string tablename) =>
         string.Equals(tablename, ExternalIdentifierTable, StringComparison.Ordinal)
@@ -287,6 +305,10 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (ServerWrittenInvoiceFamilyTables.Contains(tablename))
             return ToolValidationResult.Failure(ServerWrittenInvoiceFamilyCreateBlockedMessage(tablename));
 
+        // Task 042c fix round 4 (owner decision D-204): created only by their writers, the same hard block.
+        if (IsCreatedOnlyByItsWriter(tablename))
+            return ToolValidationResult.Failure(CreatedOnlyByItsWriterCreateBlockedMessage(tablename));
+
         // Task 017 review F-2 (AIR2-034): a column the service refuses at step 2 is refused before the dialog, not after the
         // user confirms it.
         if (BlockedColumnBeforeSuspend(tablename, item) is { } blocked)
@@ -363,6 +385,14 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
         {
             return LogOutcome(context, tablename,
                 Error(tool, ServerWrittenInvoiceFamilyCreateBlockedMessage(tablename), ToolErrorCodes.ValidationFailed, startedAt),
+                stopwatch);
+        }
+
+        // Task 042c fix round 4 (defense in depth — ValidateChat already rejects): created only by their writers.
+        if (IsCreatedOnlyByItsWriter(tablename))
+        {
+            return LogOutcome(context, tablename,
+                Error(tool, CreatedOnlyByItsWriterCreateBlockedMessage(tablename), ToolErrorCodes.ValidationFailed, startedAt),
                 stopwatch);
         }
 

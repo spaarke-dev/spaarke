@@ -669,17 +669,18 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     [Fact]
     public async Task CreateAsync_ANonReparentableRecordUnderASecureMatter_Is409NoOwnerSource_AndCreatesNothing()
     {
-        // sprk_signal is a registry table that is no ownership parent, so it may not take the Secure owner (the G5 core's
-        // second secure-filing refusal). The arm only — the Signal writer itself does not route through this service.
-        _scripted.Held.UnionWith(["prvCreatesprk_signal", "prvAppendsprk_signal"]);
+        // A task is a registry table that is no ownership parent, so it may not take the Secure owner (the G5 core's
+        // second secure-filing refusal). The arm only. Task 042c fix round 4: was sprk_signal, which the service now refuses
+        // before any check (created only by its writer, owner decision D-204); the arm is unchanged, so another of its tables
+        // pins it.
         var outcome = await Service().CreateAsync(
-            await MappedRequest("sprk_signal", new { sprk_name = "Deadline risk", sprk_matter = Lookup("sprk_matter", SecureMatter) }),
+            await MappedRequest("task", new { subject = "Deadline risk", regardingobjectid = Lookup("sprk_matter", SecureMatter) }),
             AsCaller(), CancellationToken.None);
 
         outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved, outcome.Refusal.Detail);
         outcome.Refusal.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
         outcome.Refusal.Detail.Should().Contain("cannot be filed under a secure record").And.Contain("NOT created");
-        Problem(outcome, "sprk_signal").Status.Should().Be(StatusCodes.Status409Conflict);
+        Problem(outcome, "task").Status.Should().Be(StatusCodes.Status409Conflict);
         _createAttempts.Should().BeEmpty();
     }
 
