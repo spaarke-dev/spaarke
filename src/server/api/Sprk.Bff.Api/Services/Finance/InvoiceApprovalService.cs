@@ -63,6 +63,13 @@ public static class InvoiceApprovalCodes
     public const string NotEligible = "ebilling.approver.not_eligible";
     public const string LinesOpen = "ebilling.approve.lines_open";
     public const string Held = "ebilling.approve.held";
+
+    /// <summary>409 (task 095c-4): the invoice has no firm, or a submission of it is held "firm needed" (<see cref="InvoiceFirmHold"/>). A firm set
+    /// natively does not lift it; the firm is assigned through the pipeline (095d). Checked before I-2, so an invoice with no lines is refused too.</summary>
+    public const string FirmMissing = "ebilling.approve.firm_missing";
+
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/>.</summary>
+    public const string FirmMissingDetail = "This invoice has no firm. A reviewer must add the firm before it can be approved.";
     public const string NotInReview = LineDecisionCodes.NotInReview;
     public const string PortionMissing = "ebilling.approval.missing";
     public const string PortionAmbiguous = "ebilling.approval.ambiguous";
@@ -107,7 +114,7 @@ public sealed record ApprovalOpenLinesDto(int Pending, int Flagged)
 /// <param name="EligibilityUnavailable">The live resolution failed; <paramref name="CallerEligible"/> is false until it succeeds.</param>
 /// <param name="CallerEligible">The caller's OWN contact (EB-D-171) is one of the eligible approvers.</param>
 /// <param name="CanApprove">The caller is eligible and holds Write on the invoice, the invoice is In Review and not held, no line is Pending or
-/// Flagged, no correction is waiting for its follow-through (101), the portion is Pending.</param>
+/// Flagged, no correction is waiting for its follow-through (101), the portion is Pending, and the invoice does not need a firm (095c-4).</param>
 /// <param name="UndecidedCleanLines">Clean lines an approve accepts in bulk (D-72).</param>
 public sealed record InvoiceApprovalStateDto(
     Guid InvoiceId,
@@ -125,7 +132,8 @@ public sealed record InvoiceApprovalStateDto(
     string? DecidedBy,
     DateTime? DecidedOn,
     Guid? DecisionRecordId,
-    DateTime? EligibleResolvedOn);
+    DateTime? EligibleResolvedOn,
+    bool FirmNeeded = false);
 
 public sealed record ApprovalResult(
     ApprovalOutcome Outcome,
@@ -200,7 +208,8 @@ public sealed class InvoiceApprovalService
 
     private static readonly string[] InvoiceColumns =
     [
-        "statuscode", InvoiceTotalsService.InvoiceBilledTotal, .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity),
+        "statuscode", InvoiceTotalsService.InvoiceBilledTotal, InvoiceSubmissionPersister.InvoiceVendorOrg,
+        .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity),
     ];
 
     private readonly IGenericEntityService _entities;
@@ -307,6 +316,7 @@ public sealed class InvoiceApprovalService
         var portion = portions.Count == 1 ? portions[0] : null;
         var lines = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);
         var held = await IsHeldAsync(invoiceId, ct).ConfigureAwait(false);
+        var firmNeeded = await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) != InvoiceFirmNeed.None;
         var correctionsPending = (await InvoiceCorrectionReevaluation.ReadUnappliedAsync(_entities, invoiceId, lines, ct).ConfigureAwait(false)).Count > 0;
 
         EligibleApproverSet? set = null;
@@ -362,7 +372,7 @@ public sealed class InvoiceApprovalService
             }
         }
 
-        return State(invoice, portion, lines, held, correctionsPending, set, eligibilityUnavailable: set is null, callerEligible, canDecide, resolvedOn);
+        return State(invoice, portion, lines, held, correctionsPending, set, eligibilityUnavailable: set is null, callerEligible, canDecide, resolvedOn, firmNeeded);
     }
 
     // ── POST approve ──
@@ -511,6 +521,13 @@ public sealed class InvoiceApprovalService
             if (await IsHeldAsync(invoiceId, ct).ConfigureAwait(false))
             {
                 return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.Held, "The invoice is held until its blocked submission is decided.");
+            }
+
+            // ── Task 095c-4: no firm, or a stored "firm needed" hold (a firm set natively does not lift it). Before I-2, so zero lines are refused. ──
+            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
+            {
+                _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice needs a firm ({Need}); nothing changed.", invoiceId, need);
+                return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.FirmMissing, InvoiceApprovalCodes.FirmMissingDetail);
             }
 
             lineRows = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);
@@ -1121,7 +1138,7 @@ public sealed class InvoiceApprovalService
 
     private static InvoiceApprovalStateDto State(
         Entity invoice, Entity? portion, IReadOnlyList<Entity> lines, bool held, bool correctionsPending, EligibleApproverSet? set, bool eligibilityUnavailable,
-        bool callerEligible, bool canDecide, DateTime? resolvedOn)
+        bool callerEligible, bool canDecide, DateTime? resolvedOn, bool firmNeeded)
     {
         var portionStatus = portion is null ? null : StatusOf(portion);
         var status = portion is null ? "None" : portionStatus switch
@@ -1143,7 +1160,7 @@ public sealed class InvoiceApprovalService
             EligibilityUnavailable: eligibilityUnavailable,
             CallerEligible: callerEligible,
             CanApprove: callerEligible && canDecide && portionStatus == PortionPending
-                && InvoiceStatus(invoice) == InvoiceStatusCodes.InReview && !held && !correctionsPending && open.Total == 0,
+                && InvoiceStatus(invoice) == InvoiceStatusCodes.InReview && !held && !firmNeeded && !correctionsPending && open.Total == 0,
             OpenLines: open,
             UndecidedCleanLines: CleanCount(lines),
             Held: held,
@@ -1151,7 +1168,8 @@ public sealed class InvoiceApprovalService
             DecidedBy: decided ? portion!.GetAttributeValue<EntityReference>(PortionDecidedBy)?.Name : null,
             DecidedOn: decided ? portion!.GetAttributeValue<DateTime?>(PortionDecidedOn) : null,
             DecisionRecordId: portion?.GetAttributeValue<EntityReference>(PortionRecord)?.Id,
-            EligibleResolvedOn: resolvedOn);
+            EligibleResolvedOn: resolvedOn,
+            FirmNeeded: firmNeeded);
     }
 
     private static ApprovalOpenLinesDto OpenLines(IEnumerable<Entity> lines)

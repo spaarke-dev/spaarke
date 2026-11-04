@@ -143,6 +143,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
     // ── Reason codes of this step (Retry / Refused) ──
     internal const string TransactionFailedCode = "ebilling.submission.transaction_failed";
+
+    /// <summary>Task 095c-4: the re-read submission carries no row version, so the commit cannot be made conditional on it. Retry.</summary>
+    internal const string SubmissionVersionMissingCode = "ebilling.submission.row_version_missing";
+
+    /// <summary>Task 095c-4 (review K4): the submission changed between the re-read and the commit (its conditional update failed), but neither its
+    /// core record nor its firm did. Retry; the next delivery re-reads it.</summary>
+    internal const string SubmissionChangedCode = "ebilling.submission.changed";
     internal const string TransactionOutcomeUnknownCode = "ebilling.submission.transaction_outcome_unknown";
     internal const string TotalsFailedCode = "ebilling.submission.totals_failed";
     internal const string TooManyLinesCode = "ebilling.submission.too_many_lines";
@@ -210,8 +217,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         _jobs = jobs; // Task 097c: the old invoice's re-index; null only in a test seam (the DI path always supplies the singleton).
     }
 
-    /// <summary>The submission columns the persister re-reads: the snapshot's (core record, link, status), the correlation id and the submitters.</summary>
-    internal static string[] SubmissionColumns { get; } = [.. SubmissionSnapshot.Columns, SubmissionCorrelationId, SubmissionSubmitter, RecordCreatorPerson.Column];
+    /// <summary>The submission columns the persister re-reads: the snapshot's (core record, link, status), the correlation id and the submitters, and
+    /// (task 095c-4, review K4) the row version the commit's submission update is conditional on.</summary>
+    internal static string[] SubmissionColumns { get; } =
+        [.. SubmissionSnapshot.Columns, SubmissionCorrelationId, SubmissionSubmitter, RecordCreatorPerson.Column, InvoiceReviewService.VersionNumber];
 
     /// <summary>The invoice id for a submission: deterministic, so a retry reuses it and can never create a second invoice.</summary>
     public static Guid InvoiceIdFor(Guid submissionId) => IdOf($"ebilling-invoice-{submissionId:D}");
@@ -305,18 +314,17 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         // Task 095c-3: the firm too. Since sprk_vendororg is no longer required it can be set or cleared between the evaluation and the commit,
         // and a firm decides which steps ran (a no-firm evaluation ran no rule; a firm evaluation judged that firm's data): never persist an
         // invoice whose firm is not the one it was evaluated with.
-        var view = InvoiceSubmissionService.ToView(current);
-        var stored = view.CoreRecord;
-        if (stored != outcome.CoreRecord || view.FirmId != outcome.Submission?.FirmId)
+        if (ChangedSinceEvaluation(outcome, current) is { } changedNow)
         {
-            _logger.LogWarning(
-                "Invoice submission {SubmissionId}: the core record or the firm changed since the evaluation; nothing persisted, re-evaluate", submissionId);
-            return new SubmissionPersistResult
-            {
-                Status = SubmissionPersistStatus.ReEvaluate,
-                SubmissionId = submissionId,
-                CurrentSubmission = current,
-            };
+            return changedNow;
+        }
+
+        // Task 095c-4 (review K4): the commit's submission update is conditional on this re-read's row version, so a firm or core-record change
+        // between here and the commit faults it and the whole transaction rolls back (mapped below onto ReEvaluate or Retry).
+        if (RowVersionOf(current) is not { } submissionVersion)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: re-read without a row version; nothing persisted, retry", submissionId);
+            return Result(SubmissionPersistStatus.Retry, submissionId, SubmissionVersionMissingCode);
         }
 
         // Task 094 (procedure-and-file-model 9.1 steps 3-4): a Submit Invoice submission names its SOURCE document, which other writers can
@@ -684,7 +692,12 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         var adminAttention = planRefusals.Count == 0
             ? null
             : AdminAttentionText.Build(planRefusals.Select(r => new AdminAttentionText.Item(r.PolicyCode, r.SubjectEntity, r.SubjectId.ToString("D"), r.Code)));
-        requests.Add(new UpdateRequest { Target = BuildSubmissionUpdate(outcome, invoiceId, findingsJson, adminAttention) });
+        var submissionIndex = requests.Count;
+        requests.Add(new UpdateRequest
+        {
+            Target = BuildSubmissionUpdate(outcome, invoiceId, findingsJson, adminAttention, submissionVersion),
+            ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches,
+        });
 
         if (requests.Count > MaxRequestsPerTransaction)
         {
@@ -746,6 +759,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             if (supersede is not null && await RecheckSupersedeTargetAsync(submissionId, supersede.InvoiceId, ct).ConfigureAwait(false) is { } decidedNow)
             {
                 return decidedNow;
+            }
+
+            // Task 095c-4 (review K4): the submission changed since the re-read. A firm or core-record change re-evaluates (as at the re-read);
+            // any other change is the ordinary Retry.
+            if (ex.FailedRequestIndex == submissionIndex)
+            {
+                return await RecheckSubmissionAsync(outcome, ct).ConfigureAwait(false);
             }
 
             if (guardedSource is not null && ex.FailedRequestIndex == guardIndex)
@@ -1310,6 +1330,67 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             .ToHashSet();
     }
 
+    /// <summary>
+    /// 072 part L and task 095c-3: never persist findings judged under a different core record or firm. Null when neither changed; otherwise the
+    /// ReEvaluate answer, with <see cref="SubmissionReasonCodes.CoreRecordChanged"/> or (the core record unchanged) <see cref="SubmissionReasonCodes.FirmChanged"/>.
+    /// </summary>
+    private SubmissionPersistResult? ChangedSinceEvaluation(SubmissionEvaluationOutcome outcome, Entity current)
+    {
+        // Task 095c-3: the firm too. Since sprk_vendororg is no longer required it can be set or cleared between the evaluation and the commit,
+        // and a firm decides which steps ran (a no-firm evaluation ran no rule; a firm evaluation judged that firm's data).
+        var view = InvoiceSubmissionService.ToView(current);
+        var coreChanged = view.CoreRecord != outcome.CoreRecord;
+        if (!coreChanged && view.FirmId == outcome.Submission?.FirmId)
+        {
+            return null;
+        }
+
+        _logger.LogWarning("Invoice submission {SubmissionId}: the {Changed} changed since the evaluation; nothing persisted, re-evaluate",
+            outcome.SubmissionId, coreChanged ? "core record" : "firm");
+        return new SubmissionPersistResult
+        {
+            Status = SubmissionPersistStatus.ReEvaluate,
+            SubmissionId = outcome.SubmissionId,
+            CurrentSubmission = current,
+            ReasonCode = coreChanged ? SubmissionReasonCodes.CoreRecordChanged : SubmissionReasonCodes.FirmChanged,
+        };
+    }
+
+    /// <summary>Task 095c-4 (review K4): the conditional submission update failed. Re-read it: gone is SubmissionMissing; a firm or core-record change
+    /// is ReEvaluate; anything else (or a re-read fault) is Retry. Nothing was persisted.</summary>
+    private async Task<SubmissionPersistResult> RecheckSubmissionAsync(SubmissionEvaluationOutcome outcome, CancellationToken ct)
+    {
+        Entity? reread;
+        try
+        {
+            reread = await ReadSubmissionAsync(outcome.SubmissionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: it changed before the commit and could not be re-read ({Fault}); retry",
+                outcome.SubmissionId, ex.GetType().Name);
+            return Result(SubmissionPersistStatus.Retry, outcome.SubmissionId, SubmissionChangedCode);
+        }
+
+        if (reread is null)
+        {
+            return new SubmissionPersistResult { Status = SubmissionPersistStatus.SubmissionMissing, SubmissionId = outcome.SubmissionId };
+        }
+
+        if (ChangedSinceEvaluation(outcome, reread) is { } changed)
+        {
+            return changed;
+        }
+
+        _logger.LogInformation("Invoice submission {SubmissionId}: it changed before the commit (not its core record or firm); nothing persisted, retry",
+            outcome.SubmissionId);
+        return Result(SubmissionPersistStatus.Retry, outcome.SubmissionId, SubmissionChangedCode);
+    }
+
+    private static long? RowVersionOf(Entity row) =>
+        row.GetAttributeValue<long?>(InvoiceReviewService.VersionNumber)
+        ?? (long.TryParse(row.RowVersion, NumberStyles.None, CultureInfo.InvariantCulture, out var version) ? version : null);
+
     private async Task<Entity?> ReadSubmissionAsync(Guid submissionId, CancellationToken ct)
     {
         try
@@ -1659,10 +1740,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// write <c>sprk_processingstatus</c> (D-130 a): the submission stays Processing until part D's after-commit steps are done, and part D
     /// writes <see cref="SubmissionPersistResult.TerminalStatus"/> as its last step, so Accepted / Rejected means complete.
     /// </summary>
-    internal static Entity BuildSubmissionUpdate(SubmissionEvaluationOutcome outcome, Guid invoiceId, string findingsJson, string? adminAttention = null)
+    internal static Entity BuildSubmissionUpdate(
+        SubmissionEvaluationOutcome outcome, Guid invoiceId, string findingsJson, string? adminAttention = null, long? rowVersion = null)
     {
         var update = new Entity(FinanceBaseValues.SubmissionEntity, outcome.SubmissionId)
         {
+            // Task 095c-4 (review K4): the version the commit is conditional on (the persister's re-read).
+            RowVersion = rowVersion?.ToString(CultureInfo.InvariantCulture),
             [SubmissionInvoice] = new EntityReference(InvoiceReviewService.InvoiceEntity, invoiceId),
             [SubmissionReasonCode] = TerminalFor(outcome).ReasonCode,
             [SubmissionFindingsJson] = findingsJson,
@@ -1893,7 +1977,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             // F2: a line a refused rule version should have checked (no rule id, no value: the type only).
             if (notChecked.TryGetValue(index, out var notCheckedMessage))
             {
-                lineFindings.Add(LineFindingEntryJson(index, LineFindingRulesNotChecked, notCheckedMessage));
+                var entry = LineFindingEntryJson(index, LineFindingRulesNotChecked, notCheckedMessage);
+                if (outcome.RulesSkippedForNoFirm)
+                {
+                    // Task 095c-4: the cause, so the firm hold reads the line by a code, never by its message (InvoiceFirmHold).
+                    entry[InvoiceFirmHold.LineFindingCauseMember] = SubmissionReasonCodes.FirmMissing;
+                }
+
+                lineFindings.Add(entry);
             }
         }
 

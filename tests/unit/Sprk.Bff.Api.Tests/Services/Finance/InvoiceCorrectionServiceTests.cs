@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Xunit;
 using W = Sprk.Bff.Api.Tests.Services.Finance.CorrectionWorld;
 
@@ -908,5 +909,40 @@ public sealed class InvoiceCorrectionServiceTests
         problem.StatusCode.Should().Be(503);
         problem.ProblemDetails.Extensions["errorCode"].Should().Be("ebilling.correction.incomplete");
         problem.ProblemDetails.Extensions["failedStep"].Should().Be("reevaluation");
+    }
+
+    // =========================================================================================
+    // Task 095c-4: an invoice that needs a firm is not corrected (its rules cannot be re-run)
+    // =========================================================================================
+
+    [Fact(DisplayName = "095c-4: a line or header correction of an invoice with no firm is 409 firm_missing and writes nothing")]
+    public async Task NoFirm_Correction_Is409FirmMissing_WritesNothing()
+    {
+        var world = new CorrectionWorld();
+        world.Invoice.Attributes.Remove("sprk_vendororg");
+
+        var line = await world.Service().CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+        var header = await world.Service().CorrectAsync(Header("TotalDue", "2400"), CancellationToken.None);
+
+        foreach (var result in new[] { line, header })
+        {
+            result.Status.Should().Be(CorrectionStatus.FirmMissing);
+            result.Code.Should().Be(CorrectionCodes.FirmMissing);
+            result.Detail.Should().Be(CorrectionCodes.FirmMissingDetail);
+        }
+
+        NothingWritten(world);
+    }
+
+    [Fact(DisplayName = "095c-4 uac-r2: a correction of an invoice held for a firm (the firm set by a direct write) is 409 firm_missing and writes nothing")]
+    public async Task HeldForAFirm_Correction_Is409FirmMissing_WritesNothing()
+    {
+        var world = new CorrectionWorld();
+        world.Submission!["sprk_outcomereasoncode"] = SubmissionReasonCodes.FirmMissing;
+
+        var result = await world.Service().CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.FirmMissing);
+        NothingWritten(world);
     }
 }

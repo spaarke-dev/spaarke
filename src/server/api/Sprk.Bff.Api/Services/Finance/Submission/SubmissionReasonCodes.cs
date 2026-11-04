@@ -82,6 +82,14 @@ public static class SubmissionReasonCodes
     /// </summary>
     public const string FirmMissing = "ebilling.submission.firm_missing";
 
+    /// <summary>Transient (072 part L): the submission's core record changed between the evaluation and the commit, so the evaluation is
+    /// not persisted and the job re-evaluates (once; a second change under one run retries with this code).</summary>
+    public const string CoreRecordChanged = "ebilling.submission.core_record_changed";
+
+    /// <summary>Transient (task 095c-4): as <see cref="CoreRecordChanged"/>, for the submission's firm (set or cleared since the evaluation; a
+    /// firm decides which steps ran). Its own code so a log or a retry names what changed.</summary>
+    public const string FirmChanged = "ebilling.submission.firm_changed";
+
     /// <summary>FR-05: the submission names no core record, or more than one.</summary>
     public const string CoreRecordMissing = "ebilling.submission.core_record_missing";
 

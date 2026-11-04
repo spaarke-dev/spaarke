@@ -87,6 +87,13 @@ public static class InvoiceRejectReturnCodes
     /// <summary>409: a blocked submission holds the invoice (D-101); Override or Return of the SUBMISSION (105) is the way out.</summary>
     public const string Held = "ebilling.invoice.held";
 
+    /// <summary>409 (task 095c-4): Return to Firm needs a firm to return the invoice to. The invoice has none, or a submission of it is held
+    /// "firm needed" (<see cref="InvoiceFirmHold"/>; a firm set natively does not lift it). Reject stays allowed: it is final and needs no firm.</summary>
+    public const string FirmMissing = "ebilling.invoice.firm_missing";
+
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/>.</summary>
+    public const string FirmMissingDetail = "This invoice has no firm to return it to. Add the firm first, or reject the invoice.";
+
     /// <summary>409: 014 refused the transition.</summary>
     public const string TransitionRefused = "ebilling.invoice.decision_refused";
 
@@ -168,7 +175,8 @@ public sealed class InvoiceRejectReturnService
 
     private static readonly string[] InvoiceColumns =
     [
-        "statuscode", InvoiceTotalsService.InvoiceBilledTotal, .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity),
+        "statuscode", InvoiceTotalsService.InvoiceBilledTotal, InvoiceSubmissionPersister.InvoiceVendorOrg,
+        .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity),
     ];
 
     private readonly IGenericEntityService _entities;
@@ -400,6 +408,15 @@ public sealed class InvoiceRejectReturnService
             {
                 return new InvoiceDecisionResult(InvoiceDecisionOutcome.Held, InvoiceRejectReturnCodes.Held,
                     "The invoice is held until its blocked submission is decided (override or return the submission).");
+            }
+
+            // Task 095c-4: Return to Firm hands the invoice to its firm (the firm notice, the firm's correction); with no firm, or a stored
+            // "firm needed" hold, there is no firm to hand it to. Reject is final and needs none.
+            if (verb.Kind == InvoiceDecisionKind.Return
+                && await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
+            {
+                _logger.LogWarning("Return of invoice {InvoiceId}: the invoice needs a firm ({Need}); nothing changed.", invoiceId, need);
+                return new InvoiceDecisionResult(InvoiceDecisionOutcome.Held, InvoiceRejectReturnCodes.FirmMissing, InvoiceRejectReturnCodes.FirmMissingDetail);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

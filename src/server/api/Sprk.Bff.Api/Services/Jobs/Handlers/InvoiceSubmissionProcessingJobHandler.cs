@@ -82,7 +82,10 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
     internal const int MaxReEvaluations = 1;
 
     /// <summary>The code of a core record that kept changing while the job ran. Transient.</summary>
-    internal const string CoreRecordChangedCode = "ebilling.submission.core_record_changed";
+    internal const string CoreRecordChangedCode = SubmissionReasonCodes.CoreRecordChanged;
+
+    /// <summary>Task 095c-4: the code of a firm that changed again while the job re-evaluated. Transient.</summary>
+    internal const string FirmChangedCode = SubmissionReasonCodes.FirmChanged;
 
     private static readonly string[] StatusColumns = ["sprk_processingstatus", InvoiceSubmissionPersister.SubmissionInvoice];
 
@@ -287,6 +290,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 
         // 2-5. Evaluate, persist, after-steps. A changed core record (072 part L) re-evaluates once.
         var current = row;
+        var changedCode = CoreRecordChangedCode;
         for (var pass = 0; pass <= MaxReEvaluations; pass++)
         {
             // Task 094 (9.1 step 2): the copy a source-document read staged, carried to the persister with the outcome. Fix round F2-b: the
@@ -389,8 +393,10 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                     case SubmissionPersistStatus.ReEvaluate:
                         current = persisted.CurrentSubmission
                             ?? throw new InvalidOperationException("The persister asked to re-evaluate without the current submission.");
-                        _logger.LogInformation("Invoice submission job {JobId}: the core record of submission {SubmissionId} changed; re-evaluating (pass {Pass})",
-                            job.JobId, submissionId, pass + 1);
+                        // Task 095c-4: the firm has its own wording and code (the persister names which changed).
+                        changedCode = persisted.ReasonCode == FirmChangedCode ? FirmChangedCode : CoreRecordChangedCode;
+                        _logger.LogInformation("Invoice submission job {JobId}: the {Changed} of submission {SubmissionId} changed; re-evaluating (pass {Pass})",
+                            job.JobId, changedCode == FirmChangedCode ? "firm" : "core record", submissionId, pass + 1);
                         break;
 
                     default:
@@ -408,7 +414,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         }
 
         // A second change under one run: do not loop. Another delivery judges the new state.
-        return await TransientAsync(job, submissionId, CoreRecordChangedCode, stopwatch, ct).ConfigureAwait(false);
+        return await TransientAsync(job, submissionId, changedCode, stopwatch, ct).ConfigureAwait(false);
     }
 
     // ── Component results -> job outcomes ──

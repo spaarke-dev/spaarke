@@ -117,10 +117,11 @@ public class AccessTableAppOnlyWriterTests
         // ebilling-r1 (master merge): the firm and core record scope the external submission reads.
         // UAC review F4 (on e371dce6bf): + its invoice and tracking number, which D-176's Duplicate withholding reads.
         // ebilling-r1 task 095c: + its tracking scope (typed writer: the allocator), which pairs with the number in the scope key.
+        // ebilling-r1 task 095c-4 (uac-r2): + its outcome reason (typed writers: the pipeline), which stores the firm_missing and Blocked holds.
         ["sprk_invoicesubmission"] =
         [
             "sprk_vendororg", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
-            "sprk_invoice", "sprk_trackingnumber", "sprk_trackingscope",
+            "sprk_invoice", "sprk_trackingnumber", "sprk_trackingscope", "sprk_outcomereasoncode",
         ],
 
         // UAC review F4 / DEF-043: a Signal's frozen core record and its invoice and invoice-line subjects.
@@ -629,6 +630,8 @@ public class AccessTableAppOnlyWriterTests
                 Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn),
             (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
                 Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalClosureService.RegardingInvoiceColumn),
@@ -768,6 +771,43 @@ public class AccessTableAppOnlyWriterTests
         Code("sprk_invoice", "sprk_trackingscope").Should().BeNull("only the submission carries the scope");
         Code(submission, "sprk_trackingscopes").Should().BeNull("a neighbouring name");
         CallerCode(submission, "sprk_trackingscope").Should().BeNull("the caller's own privileges decide");
+    }
+
+    [Fact]
+    public async Task AnAppOnlyWriteOfTheSubmissionsOutcomeReason_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
+    {
+        // ebilling-r1 task 095c-4 (uac-r2 2026-11-03): the outcome reason stores the firm_missing hold (InvoiceFirmHold) and the FR-20 Blocked hold.
+        // A generic write that clears it would let an invoice with no firm be approved and exported; only the pipeline's typed writers set it.
+        const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
+        foreach (var key in new[] { Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode, " SPRK_OutcomeReasonCode " })
+        {
+            Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                submission, Row, new Dictionary<string, object?> { [key] = null },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    submission, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        InheritedAccessPermission.RefuseAppOnlyWrite(submission, ["sprk_outcomereasoncode"])!.Reason
+            .Should().Contain("holds the invoice from approval and export").And.NotContain("who may see");
+
+        // Must not fire: the status (an ordinary column), the same name on another table, and the caller's own write.
+        Code(submission, "sprk_processingstatus").Should().BeNull("an ordinary column");
+        Code("sprk_invoice", "sprk_outcomereasoncode").Should().BeNull("only the submission carries the hold");
+        CallerCode(submission, "sprk_outcomereasoncode").Should().BeNull("the caller's own privileges decide");
     }
 
     [Theory]

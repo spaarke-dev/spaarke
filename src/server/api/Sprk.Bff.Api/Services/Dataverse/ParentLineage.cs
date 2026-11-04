@@ -997,6 +997,11 @@ internal static class InheritedAccessPermission
     /// <c>SubmissionTrackingScopeNotAccessGuardTests</c>), but it decides which sequence a number belongs to, so re-pointed it would let a
     /// later submission take a number the row already holds in its real scope. Its only writer is typed: the allocator writes it at
     /// create, and the schema script backfills it once; no generic writer sets it.</para>
+    /// <para>ebilling-r1 task 095c-4 (uac-r2 2026-11-03): also its outcome reason <c>sprk_outcomereasoncode</c>
+    /// (<c>InvoiceSubmissionPersister.SubmissionReasonCode</c>). It decides no access, but it stores the holds that keep an invoice from
+    /// approval and AP export: <c>ebilling.submission.firm_missing</c> (<c>InvoiceFirmHold</c>) and the FR-20 Blocked hold. Cleared by a
+    /// generic write, an invoice with no firm could be approved. Its writers are typed: the persister and the after-steps (the pipeline),
+    /// the commit gate's undo, the job's failure writes and the blocked-submission decision (<c>SubmissionOverrideService</c>).</para>
     /// <para>No vendor org scopes a Duplicate any more (#2294 removed the number lookup), so neither
     /// <c>sprk_invoice.sprk_vendororg</c> nor the submission's decides a Duplicate's detail; <c>sprk_invoice.sprk_vendororg</c> is
     /// not listed.</para></item>
@@ -1122,7 +1127,8 @@ internal static class InheritedAccessPermission
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmColumn)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn)
-                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn),
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode),
                 StringComparer.OrdinalIgnoreCase),
             [Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -1263,9 +1269,12 @@ internal static class InheritedAccessPermission
             && columns.FirstOrDefault(accessColumns.Contains) is { } accessColumn)
         {
             // ebilling-r1 task 095c: the tracking scope decides no access (it is listed because its only writer is typed); say so.
+            // Task 095c-4: the outcome reason holds the invoice (firm_missing, Blocked); it decides no access either.
             var decides = accessColumn == Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn
                 ? "it decides no access; only the tracking number allocator writes it"
-                : "it decides who may see what";
+                : accessColumn == Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode
+                    ? "it decides no access, but it holds the invoice from approval and export; only the submission pipeline writes it"
+                    : "it decides who may see what";
             return RecordOwnerResolution.Refused(AppOnlyAccessColumnWriteReasonCode,
                 $"{accessColumn} of a {trimmed.ToLowerInvariant()} is set by Spaarke ({decides}), so it was not written");
         }

@@ -374,4 +374,21 @@ public sealed class InvoiceCorrectionReevaluationTests
         final.ContainsKey(InvoiceCorrectionReevaluation.PendingSignalChangesMember).Should().BeFalse();
         StatusOf(world.Line()).Should().Be((int)InvoiceLineStatus.Clean);
     }
+
+    [Fact(DisplayName = "095c-4: the firm cleared between the correction's check and its re-evaluation - the value is saved, the rules are not re-run, 409 firm_missing (no InvalidOperationException, no empty firm id)")]
+    public async Task FirmClearedBeforeTheReevaluation_Is409FirmMissing_FindingsUntouched()
+    {
+        var world = new CorrectionWorld();
+        Store(world, findings: [Finding(0, Cap, FeeIndex, BillingReasonCodes.DailyHoursOverCap)], plan: [Plan(Cap, W.FeeLineId, CapFingerprint)]);
+        var before = world.Submission!.GetAttributeValue<string>("sprk_findingsjson");
+        world.BeforeValueWrite = () => world.Invoice.Attributes.Remove("sprk_vendororg");
+
+        var result = await Service(world, Cap, WholeHours).CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.FirmMissing);
+        result.Code.Should().Be(CorrectionCodes.FirmMissing);
+        result.Detail.Should().Contain("saved");
+        world.Corrections.Should().ContainSingle("the value and its label row are saved");
+        world.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(before, "no rule was re-run");
+    }
 }

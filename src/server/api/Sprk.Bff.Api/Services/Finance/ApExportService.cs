@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -55,6 +56,13 @@ public static class ApExportCodes
     public const string ReasonNotApproved = "invoice_not_approved";
     public const string ReasonAlreadyExported = "invoice_already_exported";
     public const string ReasonNotFound = "invoice_not_found";
+
+    /// <summary>Task 095c-4: the invoice has no firm, or a submission of it is held "firm needed" (<see cref="InvoiceFirmHold"/>). It cannot have been
+    /// approved through the approval gate; export refuses it anyway (defence in depth).</summary>
+    public const string ReasonFirmMissing = "invoice_firm_missing";
+
+    /// <summary>409 (task 095c-4): after the claim, an invoice of the batch had no firm or was held "firm needed"; nothing was exported.</summary>
+    public const string FirmMissing = "ebilling.export.firm_missing";
 }
 
 /// <summary>Stable codes of <c>POST /api/finance/invoices/{invoiceId}/mark-paid</c> (task 151a). A refused move carries the lifecycle's own <see cref="InvoiceTransitionReasons"/> code.</summary>
@@ -314,6 +322,27 @@ public sealed class ApExportService
             return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The selected invoices could not be read. Nothing was exported. Try again.");
         }
 
+        // Task 095c-4: an invoice that needs a firm is never exported, whatever its firm column says now (the stored hold, InvoiceFirmHold).
+        if (selected.Count > 0)
+        {
+            IReadOnlySet<Guid> firmHeld;
+            try
+            {
+                firmHeld = await InvoiceFirmHold.HeldInvoicesAsync(_entities, selected.Select(r => r.Id).ToList(), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "AP export: the firm holds of the selected invoices could not be read; nothing was claimed");
+                return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The selected invoices could not be read. Nothing was exported. Try again.");
+            }
+
+            foreach (var row in selected.Where(r => InvoiceFirmHold.HasNoFirm(r) || firmHeld.Contains(r.Id)).ToList())
+            {
+                selected.Remove(row);
+                refusals.Add(new ApExportInvoiceRefusal(row.Id, ApExportCodes.ReasonFirmMissing));
+            }
+        }
+
         if (refusals.Count > 0)
         {
             return new ApExportResult(ApExportOutcome.SelectionRefused, ApExportCodes.SelectionRefused,
@@ -391,14 +420,26 @@ public sealed class ApExportService
             }
 
             // (7) Still Approved after the claim (a status change does not look at the batch lookup).
+            // Task 095c-4: and still has a firm and no "firm needed" hold. This is the guard of the Sent to AP writer (step 9, the only caller of
+            // the lifecycle's move to Sent to AP): it runs after the claim and before any file or status write, so nothing irreversible follows it.
             foreach (var row in selected)
             {
-                var fresh = await _entities.RetrieveAsync(InvoiceEntity, row.Id, ["statuscode", BatchLookup], ct).ConfigureAwait(false);
+                var fresh = await _entities.RetrieveAsync(InvoiceEntity, row.Id, ["statuscode", BatchLookup, "sprk_vendororg"], ct).ConfigureAwait(false);
                 if (StatusOf(fresh) != InvoiceStatusCodes.Approved || BatchOf(fresh) != batchId)
                 {
                     throw new Stopped(ApExportOutcome.Conflict, ApExportCodes.InvoiceConflict,
                         "An invoice in the selection changed while the export was being prepared. Nothing was exported. Reload and try again.");
                 }
+
+                if (InvoiceFirmHold.HasNoFirm(fresh))
+                {
+                    throw FirmMissingStop();
+                }
+            }
+
+            if ((await InvoiceFirmHold.HeldInvoicesAsync(_entities, selected.Select(r => r.Id).ToList(), ct).ConfigureAwait(false)).Count > 0)
+            {
+                throw FirmMissingStop();
             }
 
             // (8) The values, read once; the files, written once.
@@ -695,6 +736,9 @@ public sealed class ApExportService
     /// Whether the invoice is (or, when its status cannot be read, may be) sent: Sent to AP or Paid. Any other status (still Approved, or moved elsewhere
     /// by someone else) is NOT sent by this batch, so its claim is released. Unknown counts as sent: its claim is kept (fail safe).
     /// </summary>
+    private static Stopped FirmMissingStop() => new(ApExportOutcome.Conflict, ApExportCodes.FirmMissing,
+        "An invoice in the selection has no firm, or is waiting for one. Nothing was exported. A reviewer must add the firm first.");
+
     private async Task<bool> MaybeSentAsync(Guid invoiceId)
     {
         try

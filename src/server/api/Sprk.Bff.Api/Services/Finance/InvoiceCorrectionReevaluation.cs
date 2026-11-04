@@ -32,6 +32,12 @@ internal sealed class CorrectionTotalsRefusedException(string refusalCode)
     public string RefusalCode { get; } = refusalCode;
 }
 
+/// <summary>Task 095c-4: the re-evaluation found the invoice without a firm (the firm's rules cannot be re-run). The correction service answers 409
+/// <see cref="CorrectionCodes.FirmMissing"/>, not the 503 Incomplete: no repeat clears it until the firm is set (095d). Replaces the former
+/// <see cref="InvalidOperationException"/> "The invoice names no firm.".</summary>
+internal sealed class CorrectionFirmMissingException()
+    : Exception("The invoice names no firm, so its billing rules cannot be re-run.");
+
 /// <summary>
 /// The follow-through of a saved correction (ebilling-r1 task 101 part B2b-1; FR-25, FR-31, D-126): re-runs 072's billing rules in memory on the
 /// invoice before and after the correction, patches the stored findings (<c>sprk_invoicesubmission.sprk_findingsjson</c>) with the difference, and
@@ -256,6 +262,10 @@ public sealed class InvoiceCorrectionReevaluation
             {
                 patched = await PatchFindingsAsync(applied, ct).ConfigureAwait(false);
             }
+            catch (CorrectionFirmMissingException)
+            {
+                throw; // a refusal, not a failed step (409, not 503)
+            }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 throw new CorrectionStepException(CorrectionCodes.FindingsStep, ex);
@@ -439,6 +449,13 @@ public sealed class InvoiceCorrectionReevaluation
             ?? throw new InvalidOperationException("The invoice has no submission.");
         var invoice = await ReadInvoiceAsync(applied.InvoiceId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The invoice was not found.");
+
+        // Task 095c-4: with no firm the rules cannot be re-run (095c-3 ran none); refuse before anything is diffed or patched.
+        if (InvoiceFirmHold.HasNoFirm(invoice))
+        {
+            throw new CorrectionFirmMissingException();
+        }
+
         var lines = await ReadLinesAsync(applied.InvoiceId, ct).ConfigureAwait(false);
         var rows = await ReadCorrectionsAsync(applied.InvoiceId, ct).ConfigureAwait(false);
         var json = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
@@ -1425,7 +1442,9 @@ public sealed class InvoiceCorrectionReevaluation
             return new BillingEvaluationRequest
             {
                 SubmissionId = submissionId,
-                FirmId = invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id ?? throw new InvalidOperationException("The invoice names no firm."),
+                FirmId = invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id is { } firm && firm != Guid.Empty
+                    ? firm
+                    : throw new CorrectionFirmMissingException(),
                 CoreRecord = new CoreRecordReference(
                     core.Entity switch { "sprk_matter" => CoreRecordKind.Matter, "sprk_project" => CoreRecordKind.Project, _ => CoreRecordKind.WorkAssignment },
                     core.Id),

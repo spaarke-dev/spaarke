@@ -52,6 +52,10 @@ public enum CorrectionStatus
     /// <summary>The correction row and the value are written but the follow-through after them (the <c>OnValueWrittenAsync</c> seam) did not
     /// finish. Repeating the same request writes no second row and runs the follow-through again.</summary>
     Incomplete,
+
+    /// <summary>Task 095c-4: the invoice has no firm, or is held "firm needed" (<see cref="InvoiceFirmHold"/>). A correction re-runs the firm's billing
+    /// rules, so it waits for the firm (095d). 409; nothing was written (or, when the re-evaluation met it, the follow-through did not run).</summary>
+    FirmMissing,
 }
 
 /// <summary>Stable ProblemDetails codes of the correction routes (ADR-019). Callers branch on these, never on a message.</summary>
@@ -110,6 +114,12 @@ public static class CorrectionCodes
     public const string NoProvenance = "ebilling.correction.no_provenance";
     public const string CodeSetUnavailable = "ebilling.correction.code_set_unavailable";
     public const string InvoiceChanged = "ebilling.invoice.changed";
+
+    /// <summary>409 (task 095c-4): see <see cref="CorrectionStatus.FirmMissing"/>.</summary>
+    public const string FirmMissing = "ebilling.correction.firm_missing";
+
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/>.</summary>
+    public const string FirmMissingDetail = "This invoice has no firm. Add the firm before correcting its values; nothing was changed.";
 }
 
 /// <summary>
@@ -384,6 +394,12 @@ public sealed class InvoiceCorrectionService
             if (invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value != InvoiceStatusCodes.InReview)
             {
                 return new CorrectionResult(CorrectionStatus.NotInReview, CorrectionCodes.NotInReview, "Values can be corrected only while the invoice is In Review.");
+            }
+
+            // Task 095c-4: a correction re-runs the firm's rules (InvoiceCorrectionReevaluation); with no firm, or a stored "firm needed" hold, it waits.
+            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) != InvoiceFirmNeed.None)
+            {
+                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmMissingDetail);
             }
 
             line = await ReadLineAsync(command.InvoiceId, command.LineId!.Value, ct).ConfigureAwait(false);
@@ -673,6 +689,12 @@ public sealed class InvoiceCorrectionService
                 return new CorrectionResult(CorrectionStatus.NotInReview, CorrectionCodes.NotInReview, "Values can be corrected only while the invoice is In Review.");
             }
 
+            // Task 095c-4: a correction re-runs the firm's rules (InvoiceCorrectionReevaluation); with no firm, or a stored "firm needed" hold, it waits.
+            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) != InvoiceFirmNeed.None)
+            {
+                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmMissingDetail);
+            }
+
             prior = await ReadPriorAsync(command.InvoiceId, null, spec.Name, ct).ConfigureAwait(false);
             findingsJson = await ReadFindingsJsonAsync(command.InvoiceId, ct).ConfigureAwait(false);
         }
@@ -904,6 +926,14 @@ public sealed class InvoiceCorrectionService
         try
         {
             await OnValueWrittenAsync(new CorrectionApplied(command.InvoiceId, lineId, spec.Name, dto.Outcome, valueChanged), ct).ConfigureAwait(false);
+        }
+        catch (CorrectionFirmMissingException)
+        {
+            // Task 095c-4: the firm was cleared (a direct write) between the check above and the re-evaluation. The value is saved, its follow-through
+            // is not; the correction stays unapplied, which holds approval (CorrectionsPending), and the repeat completes it once the firm is set.
+            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: saved, but the invoice has no firm, so its rules were not re-run.", spec.Name, command.InvoiceId);
+            return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing,
+                "This invoice has no firm, so the correction was saved but its rules were not re-run. Add the firm, then repeat the correction.");
         }
         catch (CorrectionTotalsRefusedException refused)
         {
