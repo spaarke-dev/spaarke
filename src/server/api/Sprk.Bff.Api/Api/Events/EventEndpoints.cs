@@ -767,7 +767,7 @@ public static class EventEndpoints
                 logger.LogWarning(
                     "Refused event create: {Kind} {Code} (clientStatus={ClientStatus}, correlationId={CorrelationId})",
                     refusal.Kind, refusal.Code, refusal.ClientFailure?.StatusCode, outcome.CorrelationId);
-                return RefusalResult(refusal, httpContext);
+                return RefusalResult(refusal, outcome.Steps, httpContext);
             }
 
             if (outcome.CreatedId is not { } eventId)
@@ -833,15 +833,21 @@ public static class EventEndpoints
     /// <item>no owner: the 409 <see cref="ProblemDetailsHelper.RecordOwnerRefused(RecordOwnerResolution, string, string?)"/>
     /// ("The event was not saved: …", the resolver's <c>reasonCode</c>), body unchanged;</item>
     /// <item>an I-1 stamp that cannot be derived (a data condition or a fault): the 500 <see cref="RegardingStampRefused"/>
-    /// with <see cref="RegardingStampFailedErrorCode"/>, nothing written.</item>
+    /// with <see cref="RegardingStampFailedErrorCode"/>, nothing written. That includes a derived stamp the table's metadata
+    /// cannot bind (task 031 fix round 1, F1-low): the service refuses it as the generic non-retryable
+    /// <see cref="RecordCreationRefusal.NoDecisionCode"/>, told apart only by the step that refused it — the last step record
+    /// is <see cref="RecordCreationStep.StampAndInheritance"/>, <see cref="RecordCreationStepState.Refused"/>
+    /// (<paramref name="steps"/>). The same code at any other step stays the generic failure.</item>
     /// </list>
     /// Any other refusal is one the route never gave before (a caller check that raced the route filter, a faulted check):
     /// it fails closed to the route's existing generic failure — a 500 that names no record and writes nothing — with the
     /// service's kind and code in the log only.
     /// </summary>
-    internal static IResult RefusalResult(RecordCreationRefusal refusal, HttpContext httpContext)
+    internal static IResult RefusalResult(
+        RecordCreationRefusal refusal, IReadOnlyList<RecordCreationStepRecord> steps, HttpContext httpContext)
     {
         ArgumentNullException.ThrowIfNull(refusal);
+        ArgumentNullException.ThrowIfNull(steps);
         return refusal switch
         {
             { Kind: RecordCreationRefusalKind.OwnerUnresolved, OwnerDecision: { } decision } =>
@@ -850,9 +856,15 @@ public static class EventEndpoints
                 ProblemDetailsHelper.RecordOwnerRefused(refusal.Code, refusal.Detail, "event"),
             { Code: RecordCreationRefusal.StampUnderivableCode or RecordCreationRefusal.StampUnavailableCode } =>
                 RegardingStampRefused(httpContext),
+            { Kind: RecordCreationRefusalKind.Undecided, Code: RecordCreationRefusal.NoDecisionCode } when RefusedAtTheStamp(steps) =>
+                RegardingStampRefused(httpContext),
             _ => GenericCreateFailure(),
         };
     }
+
+    /// <summary>Whether the create was refused at step 10, the I-1 stamp bind (the service's own step record).</summary>
+    private static bool RefusedAtTheStamp(IReadOnlyList<RecordCreationStepRecord> steps) =>
+        steps.Count > 0 && steps[^1] is { Step: RecordCreationStep.StampAndInheritance, State: RecordCreationStepState.Refused };
 
     private static Guid? CallerObjectId(HttpContext httpContext) =>
         Guid.TryParse(CallerResolution.ResolveObjectId(httpContext.User), out var oid) && oid != Guid.Empty ? oid : null;
