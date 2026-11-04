@@ -1836,6 +1836,30 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         rig.StatusWrites.Should().NotContain(w => w.Status == Failed);
     }
 
+    [Theory(DisplayName = "095c-4: a ReEvaluate for a firm change is logged and retried as a firm change (ebilling.submission.firm_changed), not as a core record change")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReEvaluate_ForAFirmChange_HasItsOwnWordingAndReason(bool firm)
+    {
+        var rig = new Rig().HappyPath();
+        var reason = firm ? SubmissionReasonCodes.FirmChanged : SubmissionReasonCodes.CoreRecordChanged;
+        rig.Persister.Script.Clear();
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.ReEvaluate, null, reason, SubmissionRow(Processing))));
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.ReEvaluate, null, reason, SubmissionRow(Processing))));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Failed);
+        outcome.ErrorMessage.Should().Be(reason);
+        var reEvaluations = rig.Log.Entries.Where(e => e.Message.Contains("re-evaluat", StringComparison.OrdinalIgnoreCase)).Select(e => e.Message).ToList();
+        reEvaluations.Should().NotBeEmpty();
+        reEvaluations.Should().OnlyContain(m => m.Contains(firm ? "firm" : "core record"));
+        if (firm)
+        {
+            reEvaluations.Should().NotContain(m => m.Contains("core record"), "a firm change is not worded as a core record change");
+        }
+    }
+
     [Fact(DisplayName = "049 E 4: a ReEvaluate whose second pass is a document-level rejection ends as that rejection")]
     public async Task ReEvaluate_ThenUnreadable_IsRejected()
     {

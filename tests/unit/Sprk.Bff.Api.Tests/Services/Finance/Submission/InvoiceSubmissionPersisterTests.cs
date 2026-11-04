@@ -3162,7 +3162,12 @@ public partial class InvoiceSubmissionPersisterTests
             ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Spa),
             ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing),
             ["sprk_createdbyperson"] = new EntityReference("systemuser", Submitter),
+            // Task 095c-4 (review K4): Dataverse's row version; every write of the submission bumps it (Apply, BumpSubmission).
+            ["versionnumber"] = 1L,
         };
+
+        /// <summary>Task 095c-4: a write of the submission by another writer (a direct firm or core-record edit, any column): its version moves.</summary>
+        public void BumpSubmission() => Submission["versionnumber"] = Submission.GetAttributeValue<long>("versionnumber") + 1;
 
         public string MatterNumber { get; init; } = "M-1";
 
@@ -3444,6 +3449,15 @@ public partial class InvoiceSubmissionPersisterTests
                                 "ConcurrencyVersionMismatch", failedRequestIndex: index, outcomeUnknown: false, null));
                         }
 
+                        // Task 095c-4 (review K4): the submission update, conditional on the version the persister re-read.
+                        if (requests[index] is UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } link
+                            && link.Target.LogicalName == "sprk_invoicesubmission"
+                            && link.Target.RowVersion != Submission.GetAttributeValue<long>("versionnumber").ToString(System.Globalization.CultureInfo.InvariantCulture))
+                        {
+                            return Task.FromException(new DataverseTransactionException(
+                                "ConcurrencyVersionMismatch", failedRequestIndex: index, outcomeUnknown: false, null));
+                        }
+
                         // Task 097c: the old invoice's close, conditional on the version the persister read.
                         if (requests[index] is UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } close
                             && close.Target.LogicalName == "sprk_invoice" && !OldInvoiceMatches(close))
@@ -3588,6 +3602,8 @@ public partial class InvoiceSubmissionPersisterTests
                 {
                     Submission[column] = value;
                 }
+
+                BumpSubmission();
             }
         }
 

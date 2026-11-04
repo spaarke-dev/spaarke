@@ -44,6 +44,9 @@ internal sealed class ApprovalWorld
     public static readonly Guid Carol = Guid.Parse("03000000-0000-4000-8000-0000000000c2");
     public static readonly Guid Dan = Guid.Parse("03000000-0000-4000-8000-0000000000d2");
 
+    /// <summary>Task 095c-4: the invoice's firm (an invoice with no firm cannot be approved or returned; <see cref="WithoutFirm"/>).</summary>
+    public static readonly Guid FirmId = Guid.Parse("03000000-0000-4000-8000-0000000000f1");
+
     public readonly Guid InvoiceId = Guid.NewGuid();
     public readonly Guid ApprovalId = Guid.NewGuid();
     public readonly Guid CoreId = Guid.NewGuid();
@@ -115,6 +118,7 @@ internal sealed class ApprovalWorld
         {
             ["statuscode"] = new OptionSetValue(invoiceStatus),
             ["sprk_totalamount"] = new Money(1000m),
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
             [invoiceCoreColumn] = new EntityReference(coreEntity, CoreId),
             ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", Guid.NewGuid()),
             ["sprk_regardingrecordid"] = CoreId.ToString("D"),
@@ -319,6 +323,32 @@ internal sealed class ApprovalWorld
             ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
         };
         return line;
+    }
+
+    /// <summary>Task 095c-4: the invoice names no firm (the from-email no-firm invoice of 095c-3).</summary>
+    public void WithoutFirm() => Rows[("sprk_invoice", InvoiceId)].Attributes.Remove("sprk_vendororg");
+
+    /// <summary>Task 095c-4: the invoice's firm is set natively (a direct Web API write, no pipeline): the column changes, the stored hold does not.</summary>
+    public void SetFirmNatively(Guid firm) => Rows[("sprk_invoice", InvoiceId)]["sprk_vendororg"] = new EntityReference("sprk_organization", firm);
+
+    /// <summary>Task 095c-4: the invoice's submission as 095c-3 leaves a no-firm one: Accepted <c>firm_missing</c>, with the pipeline finding and the
+    /// line marker in its stored findings unless <paramref name="reasonOnly"/>.</summary>
+    public Guid HoldForFirm(bool reasonOnly = false, string? findingsJson = null)
+    {
+        var id = Guid.NewGuid();
+        var row = new Entity("sprk_invoicesubmission", id)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_outcomereasoncode"] = SubmissionReasonCodes.FirmMissing,
+        };
+        if (findingsJson is not null || !reasonOnly)
+        {
+            row["sprk_findingsjson"] = findingsJson ?? """{"pipelineFindings":[{"reasonCode":"ebilling.submission.firm_missing","values":{}}],"lineFindings":[]}""";
+        }
+
+        Put(row);
+        return id;
     }
 
     /// <summary>A blocked submission (FR-20: held from approval until decided).</summary>

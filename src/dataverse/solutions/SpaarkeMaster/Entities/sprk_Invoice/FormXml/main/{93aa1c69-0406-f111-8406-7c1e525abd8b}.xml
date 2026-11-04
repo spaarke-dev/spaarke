@@ -60,7 +60,7 @@
                         <labels>
                           <label description="Vendor Organization" languagecode="1033" />
                         </labels>
-                        <control id="sprk_vendororg" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_vendororg" disabled="false" />
+                        <control id="sprk_vendororg" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_vendororg" disabled="true" />
                       </cell>
                     </row>
                     <row>

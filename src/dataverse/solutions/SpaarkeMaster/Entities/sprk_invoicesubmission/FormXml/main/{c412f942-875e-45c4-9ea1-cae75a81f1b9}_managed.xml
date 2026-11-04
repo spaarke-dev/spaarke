@@ -52,7 +52,7 @@
                         <labels>
                           <label description="" languagecode="1033" />
                         </labels>
-                        <control id="sprk_vendororg" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_vendororg" />
+                        <control id="sprk_vendororg" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_vendororg" disabled="true" />
                       </cell>
                       <cell id="{AABBFCAD-48C4-2F79-9103-02D33DFF9134}">
                         <labels>
@@ -94,7 +94,7 @@
                         <labels>
                           <label description="" languagecode="1033" />
                         </labels>
-                        <control id="sprk_outcomereasoncode" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_outcomereasoncode" />
+                        <control id="sprk_outcomereasoncode" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_outcomereasoncode" disabled="true" />
                       </cell>
                       <cell id="{D3F0C9EE-F204-4193-DA3C-7A8345ED4B19}">
                         <labels>

@@ -48,6 +48,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         typeof(SubmissionCommitGate), // task 094: reads it app-only (IGenericEntityService) to decide whether a commit is left, and clears it in the undo
         typeof(InvoiceCorrectionService), // task 101 B1: reads it app-only (IGenericEntityService) for the header provenance (EB-D-170) of a header correction; never writes it
         typeof(InvoiceCorrectionReevaluation), // task 101 B2b-1: reads and patches it app-only (IGenericEntityService, row-version conditional update) after a correction
+        typeof(InvoiceFirmHold), // task 095c-4: reads it app-only (the IGenericEntityService its callers pass) for the stored firm_missing hold; never writes it
     ];
 
     /// <summary>The assemblies whose types may read Dataverse: the BFF and its data layer.</summary>

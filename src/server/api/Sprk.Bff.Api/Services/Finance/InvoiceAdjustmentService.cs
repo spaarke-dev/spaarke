@@ -51,6 +51,10 @@ public enum AdjustmentStatus
 
     /// <summary>The adjustment row was written (or deactivated) but the totals step did not finish. Repeating the same request finishes it.</summary>
     Incomplete,
+
+    /// <summary>Task 095c-4: the invoice has no firm, so it has no rules to list or cite (409, nothing written). An adjustment that cites no rule
+    /// is still allowed.</summary>
+    FirmMissing,
 }
 
 /// <summary>Stable ProblemDetails codes (ADR-019). Callers branch on these, never on a message.</summary>
@@ -73,6 +77,12 @@ public static class AdjustmentCodes
     public const string OwnerUnresolved = LineDecisionCodes.OwnerUnresolved;
     public const string Unavailable = LineDecisionCodes.Unavailable;
     public const string ReviewerUnresolved = LineDecisionCodes.DeciderUnresolved;
+
+    /// <summary>409 (task 095c-4): see <see cref="AdjustmentStatus.FirmMissing"/>.</summary>
+    public const string FirmMissing = "ebilling.adjustment.firm_missing";
+
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/>.</summary>
+    public const string FirmMissingDetail = "This invoice has no firm, so no billing rule can be cited. Add the firm first, or add the adjustment without a rule.";
 }
 
 /// <summary>An Adjustment line as the reviewer needs it to update the screen without a second read.</summary>
@@ -237,6 +247,12 @@ public sealed class InvoiceAdjustmentService
                 return new AdjustmentRulesResult(AdjustmentStatus.InvoiceNotFound, "ebilling.invoice.not_found");
             }
 
+            // Task 095c-4: the options are the firm's rules; with no firm there are none to offer (never the empty firm's).
+            if (InvoiceFirmHold.HasNoFirm(invoice))
+            {
+                return new AdjustmentRulesResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.FirmMissingDetail);
+            }
+
             var (asOf, rules) = await ReadOptionsAsync(invoice, ct).ConfigureAwait(false);
             return new AdjustmentRulesResult(AdjustmentStatus.Applied, "ok", AsOf: asOf, Rules: rules);
         }
@@ -255,7 +271,12 @@ public sealed class InvoiceAdjustmentService
             return (null, []);
         }
 
-        var firm = invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id ?? Guid.Empty;
+        // Task 095c-4: both callers refuse a no-firm invoice first; the empty firm's rules are never loaded.
+        if (invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id is not { } firm || firm == Guid.Empty)
+        {
+            throw new InvalidOperationException("The invoice names no firm; its rule options cannot be read.");
+        }
+
         var candidates = await _loadRules(firm, ct).ConfigureAwait(false);
 
         // One version per policy, the one in force on the invoice date (the evaluator's own selection). A type the catalogue does not know, a
@@ -432,6 +453,12 @@ public sealed class InvoiceAdjustmentService
         // ── F-8 / D-74: a cited rule must be one of this invoice's options. ──
         if (command.RuleId is { } ruleId)
         {
+            // Task 095c-4: a cited rule is one of the firm's; with no firm there is none to cite.
+            if (InvoiceFirmHold.HasNoFirm(invoice))
+            {
+                return new AdjustmentResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.FirmMissingDetail);
+            }
+
             IReadOnlyList<AdjustmentRuleOptionDto> options;
             try
             {

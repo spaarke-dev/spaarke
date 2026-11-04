@@ -1286,4 +1286,53 @@ public sealed class InvoiceAdjustmentServiceTests
         result.Status.Should().Be(AdjustmentStatus.Unavailable);
         result.Rules.Should().BeNull();
     }
+
+    // =========================================================================================
+    // Task 095c-4: an invoice with no firm - no rule can be cited, an uncited adjustment is allowed
+    // =========================================================================================
+
+    [Fact(DisplayName = "095c-4: the rule options of an invoice with no firm are 409 firm_missing; no firm is asked (never the empty id)")]
+    public async Task NoFirm_ListRules_Is409FirmMissing()
+    {
+        var w = new World();
+        w.Invoice.Attributes.Remove("sprk_vendororg");
+        w.Candidates.Add(Rule());
+
+        var result = await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        result.Rules.Should().BeNull();
+        w.FirmsAsked.Should().BeEmpty("Guid.Empty is never asked for rule sets");
+    }
+
+    [Fact(DisplayName = "095c-4: an adjustment citing a rule on an invoice with no firm is 409 firm_missing and writes nothing")]
+    public async Task NoFirm_CitedAdjustment_Is409_WritesNothing()
+    {
+        var w = new World();
+        w.Invoice.Attributes.Remove("sprk_vendororg");
+        var rule = Rule();
+        w.Candidates.Add(rule);
+
+        var result = await w.Service().AddAsync(Add(w, "percent", 10m, rule: rule.PolicyVersionId), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+        w.FirmsAsked.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095c-4 must not fire: an uncited adjustment on an invoice with no firm is applied, with no firm lookup on the row")]
+    public async Task NoFirm_UncitedAdjustment_IsApplied_WithoutAFirmLookup()
+    {
+        var w = new World();
+        w.Invoice.Attributes.Remove("sprk_vendororg");
+
+        var result = await w.Service().AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied);
+        w.Row(result.Adjustment!.LineId).Contains("sprk_vendororg").Should().BeFalse("no firm lookup, never the empty id");
+        w.Stored("sprk_approvedtotal").Should().Be(850m);
+    }
 }

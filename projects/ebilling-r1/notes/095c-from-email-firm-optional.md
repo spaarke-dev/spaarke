@@ -532,3 +532,178 @@ uac-r2 asked for this decision before 095c-2 goes into a deploy request.
   - The submissions list filters on `sprk_vendororg In callerFirmIds`, so a null firm never matches.
   - The submission read-one (`ExternalInvoiceSubmissionAuthorizationFilter`) and the replacement gate both require `FirmId: { }` and a firm in scope.
   - A no-firm **submission** is therefore never shown to a firm. A no-firm **invoice**, created from 095c-3 on, is visible through the matter or project rule only (`ExternalAccessModule.cs` ~510-518, invoice documents through `RightsThroughParents`). That is the same reach any firm's invoice has.
+
+## 14. Part 095c-4: readers and contract (2026-11-03)
+
+### 14.1 What changed
+
+- **The hold, one definition (`InvoiceFirmHold`, new static reader).** An invoice **needs a firm** while it has no firm, or a submission linked to it (`sprk_invoicesubmission.sprk_invoice`) stores the `firm_missing` hold. The hold is any one of these:
+  - `sprk_outcomereasoncode` = `ebilling.submission.firm_missing`;
+  - a `pipelineFindings[]` entry with that reason;
+  - a `lineFindings[]` entry `rules.not_checked` with the new `cause: "ebilling.submission.firm_missing"`, which the persister now writes on every no-firm line.
+  - Findings that cannot be parsed, or that are not an object, count as held (fail closed).
+  - A firm invoice's `rules.not_checked` line (a refused rule, EB-D-175) has no `cause` and does not hold.
+- **Approval (`InvoiceApprovalService`).**
+  - The approve path, which is the held-approval path (`ApproveHeldAsync`, after the FR-20 check and before I-2), returns 409 `ebilling.approve.firm_missing` "This invoice has no firm. A reviewer must add the firm before it can be approved." It covers an invoice with no lines, so the "Firm needed" Signal is never closed by an approval (EB-D-172).
+  - `GetAsync`: `canApprove` is false and the DTO's new trailing `firmNeeded` is true.
+  - A read fault is the existing 503.
+- **AP export (`ApExportService`).**
+  - The selection (step 4) refuses a no-firm or held invoice per invoice with `invoice_firm_missing`, so the request is `SelectionRefused` and nothing is claimed. A read fault on the holds is `Unavailable`.
+  - The re-check after the claim (step 7) re-reads `sprk_vendororg` and the holds, and answers 409 `ebilling.export.firm_missing` with every claim released. This is the Sent-to-AP writer's guard: `TrySendAsync` (step 9) is the only caller of the lifecycle's move to Sent to AP, and step 7 runs before any file or status write.
+- **Return to Firm (`InvoiceRejectReturnService`).** Return is 409 `ebilling.invoice.firm_missing` "This invoice has no firm to return it to. Add the firm first, or reject the invoice." Reject is allowed.
+- **Corrections (`InvoiceCorrectionService`, `InvoiceCorrectionReevaluation`).**
+  - A line or header correction of an invoice that needs a firm is 409 `ebilling.correction.firm_missing`, with nothing written.
+  - The re-evaluation's `InvalidOperationException` ("The invoice names no firm", ~1428) is now the typed `CorrectionFirmMissingException`, thrown before the findings patch and before the empty id could reach `Build`.
+  - The service maps that exception to 409 `firm_missing` "…the correction was saved but its rules were not re-run…". This is the path where the firm was cleared between the check and the re-evaluation.
+  - The correction stays unapplied, so approval stays held (CorrectionsPending).
+- **Adjustments (`InvoiceAdjustmentService`).**
+  - The rule options, and an adjustment that cites a rule, are 409 `ebilling.adjustment.firm_missing` for an invoice with no firm.
+  - `ReadOptionsAsync` no longer loads rules for `Guid.Empty`.
+  - An adjustment without a rule is allowed, and its row has no firm lookup.
+- **Endpoints.** `CorrectionStatus.FirmMissing` and `AdjustmentStatus.FirmMissing` are added to the existing 409 lists. No new route.
+- **`EligibleApproverResolver`: no change.** It reads no firm: approvers come from the core record's roles, so it is safe with a null firm. Approval itself is refused above.
+- **K4: the persister's submission update is conditional.**
+  - The update now carries `ConcurrencyBehavior.IfRowVersionMatches` on the version re-read (`versionnumber` is added to `SubmissionColumns`).
+  - A fault at that request index re-reads the submission:
+    - gone: `SubmissionMissing`;
+    - firm or core record changed: `ReEvaluate`;
+    - any other change, or a re-read fault: Retry `ebilling.submission.changed`.
+  - A re-read with no row version is Retry `ebilling.submission.row_version_missing`, and no transaction is sent.
+- **Job handler wording.** `ReEvaluate` carries the persister's reason. A firm change is logged as "the firm of submission … changed" and retried as `ebilling.submission.firm_changed`. A core-record change stays `ebilling.submission.core_record_changed`. Both codes are now in `SubmissionReasonCodes`.
+- **uac-r2 (binding, 2026-11-03): the hold cannot be cleared outside the pipeline.**
+  - `sprk_invoicesubmission.sprk_outcomereasoncode` joins the submission's `InheritedAccessPermission.AccessColumns`. The app-only generic writers (output mapping, the Update Record node) are refused it per column, with the message "it decides no access, but it holds the invoice from approval and export; only the submission pipeline writes it".
+  - `sprk_vendororg` was already on that list.
+- **Forms (source only, not deployed).**
+  - `sprk_vendororg` is read-only on the sprk_invoice main form `{93aa1c69…}` and on the sprk_invoicesubmission main form `{c412f942…}`, together with that form's `sprk_outcomereasoncode`. Both the unmanaged and the `_managed` copies are changed.
+  - `Deploy-EbillingFormsViews.ps1` makes the same change: `ForceReadOnly` on the invoice, and `ReadOnly` on the submission's general section. It was not run.
+
+### 14.2 uac-r2 record: the stored hold, not the firm column
+
+- **The form controls are a convenience, not the guard.** A user with Write on the invoice or the submission can still set `sprk_vendororg` through the Web API. The BFF's generic update tools already refuse the submission's `sprk_vendororg` (ParentLineage). Only a direct Dataverse write remains.
+- **The guards key on the stored hold.** That covers approve (`ApproveHeldAsync`), `canApprove` (`GetAsync`), Return to Firm, AP-export selection and re-check, and corrections. "No firm" is an additional condition. A firm set natively neither clears the hold nor unlocks a step. Proved by `FirmSetNatively_WhileHeld_ApproveIsStill409` and `ApExportFirmHoldTests.FirmSetNatively_WhileHeld_IsRefused_NothingWritten`.
+- **No other path clears it.** Every writer of the reason or the findings was checked:
+  - The persister and the after-steps are the pipeline.
+  - The commit gate's undo writes Failed with another code. The invoice is compensated away, and if it lingers, the no-firm and line markers still hold.
+  - `SubmissionOverrideService` acts only on a Blocked submission. An Accepted `firm_missing` submission is refused there (AcceptedByProcessing).
+  - The job's failure writes touch only unlinked or non-terminal submissions.
+  - The correction re-evaluation removes only the coding `HoldCodes`. `firm_missing` stays, and the system Signal is refreshed from `SystemFindings`.
+  - The generic app-only writers are now refused the reason column (above).
+- **Known limit (K-uac, accepted as a direct-write limit):** a user with Write on the submission who rewrites, through the Web API, both `sprk_outcomereasoncode` **and** `sprk_findingsjson`, removing the pipeline finding and every line cause, lifts the hold. While the invoice still has no firm, the "no firm" condition still refuses. The hold is lost only when the same user also sets the invoice's `sprk_vendororg` natively. That is three deliberate direct writes against Spaarke-set columns. Closing it needs field security on the reason, the findings and the firm columns, or a privilege change, which is a uac-r2 decision (see 14.7).
+
+### 14.3 Component justification (CLAUDE.md section 11)
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `InvoiceFirmHold` (static reader, enum `InvoiceFirmNeed`) | `FinanceBaseValues.HeldSubmissionConditions` and each service's `IsHeldAsync` (the FR-20 hold) | FR-20 is a column filter the pending-spend anti-join also uses; the firm hold must also read the stored findings, which FetchXML cannot. One reader keeps one definition for six callers. | A no-firm invoice, or one whose firm was set natively, is approved and exported |
+| The codes `ebilling.approve.firm_missing`, `.export.firm_missing`, `.invoice.firm_missing`, `.correction.firm_missing`, `.adjustment.firm_missing`, and `invoice_firm_missing` | Each service's own code catalogue | Added to those catalogues, not a new type | A reviewer gets a generic 409, or a 500 (the correction's `InvalidOperationException`) |
+| `CorrectionStatus.FirmMissing`, `AdjustmentStatus.FirmMissing` | The status enums the endpoints map | Added members; the existing 409 lists | No status to map, so the endpoints answer 500 |
+| `InvoiceApprovalStateDto.FirmNeeded` (trailing, default false) | `CanApprove` | Additive field | The pane cannot say why approval is off |
+| The line-finding `cause` member | `lineFindings[].code` | Additive member on the existing entry | A firm invoice's refused-rule `rules.not_checked` line would be read as a firm hold (EB-D-175), or a hold whose reason was rewritten would be lost |
+| `SubmissionReasonCodes.CoreRecordChanged` and `.FirmChanged`; the persister's `ebilling.submission.changed` and `row_version_missing` | `CoreRecordChangedCode` in the job handler | Moved into the shared catalogue; two new transient codes | A firm change is logged and retried as a core-record change; a K4 race has no code |
+| `sprk_outcomereasoncode` in `AccessColumns` | The submission's access-column list (firm, invoice, number, scope) | One more entry | A generic tool clears the hold |
+| `CorrectionFirmMissingException` | `CorrectionTotalsRefusedException` (the same pattern) | Same pattern | The 500 stays |
+
+**Placement:** BFF only, inside the existing Finance services in `Sprk.Bff.Api`. No new service, DI registration, endpoint, package or background work.
+
+### 14.4 Reader inventory (section 6): each reader with a null firm
+
+| Reader | With a null firm |
+|---|---|
+| `InvoiceApprovalService` | Refused (above) |
+| `ApExportService` (and its `ValueReader`) | Refused (above); `firm.name` is read null-safe |
+| `InvoiceRejectReturnService` | Return refused, Reject allowed |
+| `InvoiceCorrectionService` (the timekeeper read ~542 included), `InvoiceCorrectionReevaluation` | Refused before any read that needs the firm (above) |
+| `InvoiceAdjustmentService` | Rule options and cited rules refused; the row's firm lookup is written only for a real firm (it already was) |
+| `EligibleApproverResolver` | Reads no firm; no change |
+| `FinanceSummaryService` | `VendorOrgId` is nullable; no change |
+| `InvoiceContextService` | Renders the "firm unresolved" sections; no change |
+| `InvoiceReviewReadService` | The header firm is null; no change |
+| `InvoiceIndexDocument` | `vendorOrgId` is null; no change |
+| `RuleSetService.GetFirmClauseAsync` | `Guid.Empty` gives no text; not reached for a no-firm invoice (the adjustment refuses first) |
+| `InvoiceExtractionJobHandler` | Legacy path; `VendorOrgId` is always null there; no change |
+| `AttachmentClassificationJobHandler` | Uses only the "VendorOrgMatch" label; no change |
+| `BillingFactLoader` | Not called for a no-firm invoice (095c-3: rules are skipped) |
+| `FinanceEndpoints` and `InvoiceReviewService` (the old review route) | Still require `VendorOrgId`; a no-firm invoice is refused there, as before |
+| `FinanceAuthorizationFilter` | A column-name constant only |
+| Intake, allocator, persister, processor, after-steps | Handled in 095c-1 to 095c-3 |
+
+### 14.5 Tests and seed proofs
+
+New:
+
+- `InvoiceApprovalFirmHoldTests`, 10 tests:
+  - zero lines, no firm: 409, and the Signal stays open;
+  - the firm set natively while held: 409, and `canApprove` false;
+  - each stored marker holds alone (four cases, including unreadable findings);
+  - must not fire: a firm invoice with a refused-rule line approves;
+  - must not fire: a firm invoice with zero lines and no hold approves;
+  - Return is refused and Reject is allowed;
+  - the pure `IsHeld` reader.
+- `ApExportFirmHoldTests`, 9 tests:
+  - no firm;
+  - the firm set natively while held;
+  - each marker (three cases);
+  - must not fire: no hold, the invoice exports;
+  - a hold read fault is Unavailable;
+  - a hold that appears, or a firm that is cleared, after the claim: 409 `ebilling.export.firm_missing`, with every claim released and nothing sent or written (two cases).
+- `InvoiceSubmissionPersisterTests.Concurrency.cs`, 6 tests:
+  - the update is `IfRowVersionMatches` on the re-read version;
+  - the firm or core record changed between the re-read and the commit: `ReEvaluate` with `FirmChanged` or `CoreRecordChanged`, nothing persisted (two cases);
+  - any other change: Retry `ebilling.submission.changed`;
+  - no row version: Retry, no transaction;
+  - the no-firm line findings carry the cause, and a firm invoice's committed submission is not held.
+- The persister test store (`Store`) now models the submission's `versionnumber` and faults a stale conditional update.
+- `InvoiceSubmissionProcessingJobHandlerTests`: a firm-change `ReEvaluate` is worded and retried as `firm_changed`; a core change keeps its wording (two cases).
+- Corrections:
+  - no firm: 409 on a line and on a header, nothing written;
+  - held: 409, nothing written;
+  - the firm cleared before the re-evaluation: 409, the value saved, the findings untouched.
+- Adjustments:
+  - rule options with no firm: 409, and no firm is asked;
+  - a cited adjustment: 409, nothing written;
+  - must not fire: an uncited adjustment is applied without a firm lookup.
+- `AccessTableAppOnlyWriterTests`: the reason is refused to the output mapping and to the Update Record node (two spellings). Must not fire: the status column, the same name on the invoice, and the caller's own write. The ArchTest description is updated.
+
+Seed proofs. For each, the guard was mutated, built, and the named tests were run. The file was then restored byte for byte, with the SHA-256 the same before and after.
+
+| Guard | Mutation | Result | SHA-256 (prefix) |
+|---|---|---|---|
+| Approval refusal (zero lines, native firm) | the `CheckAsync` condition made never true | 6 of 10 failed, among them the zero-line and native-firm tests | `57219e889169968d` |
+| The stored hold (not the firm column) | `CheckAsync` skips the hold read | 6 of 10 failed, among them native firm and Return | `00e953d467654481` |
+| AP-export refusal | the selection filter removed | 5 of 9 failed (no firm, native firm, three markers). The step-7 guard still refused them, as 409 rather than 400 | `85a4cc6f6e22c4a1` |
+| K4 concurrency condition | `ConcurrencyBehavior` dropped from the submission update | 4 of 4 failed (firm, core, other change, the condition itself) | `3a38972be21ae44d` |
+
+Gate (on the branch with every change):
+
+- All five BFF test projects build with 0 errors and 0 warnings: `Sprk.Bff.Api.Tests`, `Spaarke.ArchTests`, `Sprk.Bff.Api.IntegrationTests`, `Spe.Integration.Tests` and `Sprk.Provisioning.ControlPlane.NightlyTests`.
+- The filtered `Sprk.Bff.Api.Tests` run, with 095c-3's filter (`FullyQualifiedName~Finance|~Billing|~Submission|~Signals|~Invoice|~Resolution|~Coding`): 10930 passed, 0 failed, 7 skipped. 095c-3's 10780 was measured on its own branch, before the 089b merge; this task adds about 40 of the tests counted. The extra classes outside that filter (`~ApExport|~AccessTableAppOnlyWriter|~ChildAccessPermission|~Jobs.Handlers`): 1957 passed, 0 failed.
+- Full `Spaarke.ArchTests`: 1951 passed, 0 failed (after the fix below).
+  - The first run failed two tests.
+  - `FindingsJsonAppOnlyReadGuardTests` C1 failed, correctly: `InvoiceFirmHold` is a new reader of the field-secured `sprk_findingsjson` (task 122). It reads app-only, so it is now in `ReviewedTypes`, and the task 122 inventory has row 9. C2 and C3 pass for it.
+  - `ContactCreateOwnerPolicyGuardTests` "ISS-005 guard: 60 assignments … in bounded time" failed under the load of the parallel gate. It passes alone, and 095c-4 does not touch it: a pre-existing timing flake, reported.
+- Publish size (bff-hygiene item 4, `dotnet publish -c Release`, zipped with PDBs, from fresh `git archive` trees): PUBLISH_RESULT. No package changed, so there is no new CVE (no `PackageReference` edits in this diff).
+
+### 14.6 Deviations
+
+- **The lifecycle is not guarded itself.** `InvoiceLifecycleService` reads through `IFieldMappingDataverseService`, and its existing tests carry no firm. The Sent-to-AP guard therefore sits in the export's step 7, which is the only caller of that transition and runs before any write.
+- **Adjustments check "no firm" only, not the stored hold.** A cited rule needs a firm id to load rules. A held invoice whose firm was set natively would list that firm's rules. Approval and export still refuse such an invoice.
+- **The submission form's `sprk_outcomereasoncode` is also read-only.** This was not asked for. It makes the reason a typed-writer column on the form too.
+- **The persister answers Retry when the re-read has no row version.** It does this instead of sending an unconditional update (fail closed).
+- **Contract section 9 gains four transient Failed codes.** `core_record_changed` is existing; `firm_changed`, `changed` and `row_version_missing` are new. Section 12 is new. This is additive, and word-add-in-r1 should acknowledge it.
+
+### 14.7 Known limits and decisions needed
+
+- **K-uac (above):** three deliberate direct Web API writes can lift the hold. **uac-r2:** field security on `sprk_invoicesubmission.sprk_outcomereasoncode` and `sprk_findingsjson`, or no Write on submissions for reviewers? (Both are text columns, which can be field-secured.)
+- **The approval DTO's `firmNeeded`** is additive. The reviewer pane does not read it yet; it shows the 409 sentence.
+- **ontology-r1:** no new Signal or reason in 095c-4. The line-finding `cause` member is a findings-document member, not an ontology term.
+- current-task.md, TASK-INDEX.md and the POML status are not updated here; the main session owns them.
+
+### 14.8 095d must (constraints from the 095c-3 review K5, K6 and 095c-4)
+
+1. **Clear the hold only through the pipeline.** Assigning the firm re-runs the submission. The new outcome must remove all three markers: the reason `firm_missing`, the `firm_missing` pipeline finding, and every line finding with `cause: ebilling.submission.firm_missing`. Removing one leaves the invoice held, by design. The assign-firm writer is typed; no generic writer may set the reason (AccessColumns).
+2. **K5: reset the line decisions.** No-firm lines are Flagged `rules.not_checked`, including AcceptedUncoded lines whose codes are still owed, so a reviewer can decide them. 095d must reset line statuses and discard line decisions made while there was no firm. Otherwise decisions on lines no rule checked count toward approval after the re-run. "Firm needed" also outranks "Lines not coded" in the shared Signal: the re-run must restore the coding hold's title.
+3. **K6: Duplicate and supersedes.** Firm submissions find earlier invoices only by firm, so a no-firm copy of the same invoice is invisible to them, and the reverse holds too. 095d must re-run the rules, including Duplicate with its priors, and the supersedes lookup, before approval is possible.
+4. **Renumber into the firm's scope** (section 9).
+5. **Re-check the export.** An invoice assigned a firm after approval cannot exist, because approval is refused while it needs one. 095d must keep that true: no path from held straight to Approved.
+
+rework: none task 095c
