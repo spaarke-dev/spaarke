@@ -297,10 +297,26 @@ public class RecordOwnerAssignmentCensusTests
             + "invoice's core record), so the file is owned with its invoice (uac-r2 194b R4b-2: an ordinary answer is the restricted-content team)."),
         // ebilling-r1 task 089b (procedure model 5.1 / 6.2 / 6.3, EB-D-168): a Procedure assignment or rule Exclude is a secure child of its core record.
         new CensusEntry("ProcedureAssignmentService.cs", "sprk_procedureassignment", 1, Disposition.Routed,
-            "ebilling-r1 task 089b: CreateRowAsync is the one sprk_procedureassignment create (assign, pin, exclude a Procedure; exclude a rule). "
-            + "It builds the row, asks the row's own question (RecordOwnershipContext.ForChild: the core record is its one parent, the Procedure, "
-            + "pinned version and excluded rule are citations) with the caller as RequestedBy, refuses before any write when no team is resolved, "
-            + "and writes the answer with ApplyTo (a hard-deny table: an ordinary record's row goes to the restricted-content owner team)."),
+            "ebilling-r1 task 089b/089c: AssignmentCreateAsync is the one sprk_procedureassignment create (assign, pin, exclude a Procedure; "
+            + "exclude or change a rule). It builds the row, asks the row's own question (RecordOwnershipContext.ForChild: the core record is its "
+            + "one parent, the Procedure, pinned version and excluded rule are citations) with the caller as RequestedBy, refuses before any write "
+            + "when no team is resolved, and writes the answer with ApplyTo (a hard-deny table: an ordinary record's row goes to the "
+            + "restricted-content owner team)."),
+        // ebilling-r1 task 089c (procedure model 5.2 / 6.3, EB-D-168, 089a K1): the change-rule writer of a record's record-scoped set, its
+        // record rule and that rule's versions. Listed Routed, so RuleFamilyWaiverProblems checks the file asks the resolver.
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_ruleset", 1, Disposition.Routed,
+            "ebilling-r1 task 089c: RecordRuleSetCreateAsync is the one record-scoped sprk_ruleset create (a change rule's stage 1). It builds "
+            + "the set with its one core-record lookup and record scope (RecordRuleSet.RequireOneHome), asks the row's own question "
+            + "(ForChild: the core record is its one parent; the firm is no ownership parent) with the caller as RequestedBy, refuses before any "
+            + "write when no team is resolved, and writes the answer with ApplyTo."),
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_policy", 1, Disposition.Routed,
+            "ebilling-r1 task 089c: RecordRuleCreateAsync is the one record-rule sprk_policy create (a change rule's stage 2, after its set "
+            + "exists). It asks the row's own question (ForChild: the record-scoped set is its parent, so the rule follows its record) with the "
+            + "caller as RequestedBy, refuses before any write when no team is resolved, and writes the answer with ApplyTo."),
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_policyversion", 1, Disposition.Routed,
+            "ebilling-r1 task 089c: RecordRuleVersionCreateAsync is the one record-rule sprk_policyversion create (a change rule's stage 3, "
+            + "after its policy exists). It asks the row's own question (ForChild: the record rule is its parent; the base version it names in "
+            + "sprk_basedonversion is no ownership parent) with the caller as RequestedBy, refuses before any write, and writes it with ApplyTo."),
         // WorkAssignmentEndpoints.cs's sprk_workassignment create is gone: task 166 deleted the caller-less route (S-76,
         // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
 
@@ -2345,7 +2361,8 @@ public class RecordOwnerAssignmentCensusTests
 
     /// <summary>
     /// What makes a rule-set, rule or version row record-scoped (model 6.3): a core-record lookup written on it, a record scope
-    /// (<c>sprk_scope</c> Record 100000002 / Firm record 100000003, or a <c>RuleSetScope</c> member for one), or a record-rule code or
+    /// (<c>sprk_scope</c> Record 100000002 / Firm record 100000003, or a <c>RuleSetScope</c> or 089c <c>RecordRuleSet.Scope*</c>
+    /// member for one), or a record-rule code or
     /// key (D-202: <c>BRR-{id:N}</c>, <c>IdOf("ebilling-record-rule-…")</c>). A waived file may hold none of them.
     /// </summary>
     private static readonly (string Name, Regex Pattern)[] RecordScopeMarkers =
@@ -2353,7 +2370,7 @@ public class RecordOwnerAssignmentCensusTests
         ("a core-record lookup", new Regex(@"""sprk_(?:matter|project|workassignment)(?:@odata\.bind)?""\s*(?:\]\s*=|,)", RegexOptions.Compiled)),
         ("a const naming a core-record lookup", new Regex(@"\bconst\s+string\s+\w+\s*=\s*""sprk_(?:matter|project|workassignment)""", RegexOptions.Compiled)),
         ("a record scope", new Regex(
-            @"\bRuleSetScope\s*\.\s*(?:Record|FirmRecord)\b|""sprk_scope""\s*\]\s*=\s*new\s+OptionSetValue\(\s*10000000[23]\s*\)|\benum\s+RuleSetScope\b[^}]*\b10000000[23]\b",
+            @"\bRuleSetScope\s*\.\s*(?:Record|FirmRecord)\b|\bRecordRuleSet\s*\.\s*Scope(?:Record|FirmRecord)\b|""sprk_scope""\s*\]\s*=\s*new\s+OptionSetValue\(\s*10000000[23]\s*\)|\benum\s+RuleSetScope\b[^}]*\b10000000[23]\b",
             RegexOptions.Compiled)),
         ("a record-rule code or key", new Regex(@"""BRR-|ebilling-record-rule-", RegexOptions.Compiled)),
     };
@@ -2455,6 +2472,8 @@ public class RecordOwnerAssignmentCensusTests
             "{",
             "    // a comment naming [\"sprk_matter\"] = is stripped, as in the real scan",
             "    public enum RuleSetScope { ClientDefault = 100000000, Firm = 100000001 }",
+            "    // 089c: the shared one-home guard and the record-scope read are no record scope of their own (must not fire)",
+            "    void Guard(Entity row) { RecordRuleSet.RequireOneHome(row); if (RecordRuleSet.IsRecordScoped(row)) { return; } }",
             "    void Set(Guid procedureId) { var set = new Entity(\"sprk_ruleset\") { [\"sprk_procedure\"] = new EntityReference(\"sprk_procedure\", procedureId),",
             "        [\"sprk_scope\"] = new OptionSetValue(100000001) }; _entities.Create(set); }",
             "    void Rule(Guid setId) { var p = new Entity(\"sprk_policy\") { [\"sprk_ruleset\"] = new EntityReference(\"sprk_ruleset\", setId) };",
@@ -2488,6 +2507,8 @@ public class RecordOwnerAssignmentCensusTests
     [InlineData("private const string CoreLookup = \"sprk_workassignment\";", "a const naming a core-record lookup")]
     [InlineData("row[\"sprk_scope\"] = new OptionSetValue((int)RuleSetScope.FirmRecord);", "a record scope")]
     [InlineData("row[\"sprk_scope\"] = new OptionSetValue(100000003);", "a record scope")]
+    [InlineData("row[\"sprk_scope\"] = new OptionSetValue(RecordRuleSet.ScopeFirmRecord);", "a record scope")]
+    [InlineData("var scope = RecordRuleSet . ScopeRecord;", "a record scope")]
     [InlineData("public enum RuleSetScope { ClientDefault = 100000000, Firm = 100000001, Record = 100000002 }", "a record scope")]
     [InlineData("var id = IdOf($\"ebilling-record-rule-{setId:D}-{baseId:D}\");", "a record-rule code or key")]
     public void RuleFamilyWaiver_EachMarker_Fires(string planted, string marker)
@@ -2959,7 +2980,11 @@ public class RecordOwnerAssignmentCensusTests
         // ebilling-r1 task 086: every Stored File records the person who asked (none for a job or a contact uploader, model 5.2 K6).
         new PersonBearingWriter("StoredFileService.cs", "StageCreateFlipAsync", "the caller (or the app create's requestedBy) as RequestedBy of the file's owner"),
         // ebilling-r1 task 089b: an override row records the calling billing admin (the owner question's RequestedBy, which ApplyTo stamps).
-        new PersonBearingWriter("ProcedureAssignmentService.cs", "CreateRowAsync", "the calling billing admin (oid) of an assignment or rule Exclude"),
+        new PersonBearingWriter("ProcedureAssignmentService.cs", "AssignmentCreateAsync", "the calling billing admin (oid) of an assignment, rule Exclude or rule change"),
+        // ebilling-r1 task 089c: a change rule's record-scoped set, record rule and version record the calling billing admin too.
+        new PersonBearingWriter("ProcedureAssignmentService.cs", "RecordRuleSetCreateAsync", "the calling billing admin (oid) of a record's record-scoped set"),
+        new PersonBearingWriter("ProcedureAssignmentService.cs", "RecordRuleCreateAsync", "the calling billing admin (oid) of a record rule"),
+        new PersonBearingWriter("ProcedureAssignmentService.cs", "RecordRuleVersionCreateAsync", "the calling billing admin (oid) of a record rule's version"),
         new PersonBearingWriter("StoredFileService.cs", "BuildRow", "the person handed in (creatorPersonId), stamped with RecordCreatorPerson"),
     };
 

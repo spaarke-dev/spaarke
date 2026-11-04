@@ -356,6 +356,13 @@ public sealed class RuleSetServiceTests
                         return (unchecked((int)0x80060892), "A record with matching key values already exists.");
                     }
 
+                    // Task 089c: sprk_policy's code key (sprk_policycodekey).
+                    if (target.LogicalName == "sprk_policy" && target.GetAttributeValue<string>("sprk_policycode") is { } code
+                        && Rows.GetValueOrDefault("sprk_policy")?.Any(r => r.GetAttributeValue<string>("sprk_policycode") == code) == true)
+                    {
+                        return (unchecked((int)0x80060892), "A record with matching key values already exists.");
+                    }
+
                     var row = new Entity(target.LogicalName, target.Id == Guid.Empty ? Guid.NewGuid() : target.Id);
                     foreach (var a in target.Attributes) row[a.Key] = a.Value;
                     Writes.Add((Write.Create, row.LogicalName, row.Id, row.Attributes.ToDictionary(a => a.Key, a => a.Value)));
@@ -384,6 +391,21 @@ public sealed class RuleSetServiceTests
                     Writes.Add((Write.Update, target.LogicalName, target.Id, fields));
                     Order.Add("txn-update:" + target.LogicalName);
                     Apply(target.LogicalName, target.Id, fields);
+                    return null;
+                }
+
+                // Task 089c: a delete inside the transaction (rolled back with it); a row that is gone is Dataverse's "Does Not Exist".
+                case Microsoft.Xrm.Sdk.Messages.DeleteRequest delete:
+                {
+                    var target = delete.Target;
+                    if (Rows.GetValueOrDefault(target.LogicalName)?.Any(r => r.Id == target.Id) != true)
+                    {
+                        return (unchecked((int)0x80040217), $"{target.LogicalName} With Id = {target.Id} Does Not Exist");
+                    }
+
+                    Writes.Add((Write.Delete, target.LogicalName, target.Id, new Dictionary<string, object>()));
+                    Order.Add("txn-delete:" + target.LogicalName);
+                    Rows[target.LogicalName].RemoveAll(r => r.Id == target.Id);
                     return null;
                 }
 

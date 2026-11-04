@@ -1,10 +1,13 @@
 using System.Data;
+using System.Globalization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance.Procedures;
@@ -41,6 +44,94 @@ public sealed record OverrideView(
     Guid Id, string Kind, string Mode, Guid? ProcedureId, Guid? PinnedVersionId, Guid? PolicyId, Guid? FirmId, string? Reason);
 
 /// <summary>
+/// Change one rule for a record (task 089c, model 6.3): the rule is excluded for the record and a record rule takes its place, based on the
+/// rule's version in force with these members changed (at least one). The reason is required. <see cref="FirmId"/> limits the change to one
+/// firm's invoices, and must be the rule's own firm when the rule applies to one firm only.
+/// </summary>
+public sealed record RuleChangeRequest(
+    Guid? PolicyId, string? Reason, Guid? FirmId, string? RuleBody, string? MessageTemplate, string? ShortHeadline, string? Consequence);
+
+/// <summary>The record rule a change wrote: its record-scoped set, its policy, and the Published version based on the rule's version in force.</summary>
+public sealed record RecordRuleView(
+    Guid RuleSetId, Guid PolicyId, string Code, Guid VersionId, int VersionNumber, Guid BasedOnVersionId, string Scope, Guid? FirmId);
+
+/// <summary>A changed rule as written: the Exclude row (kind <c>RuleChanged</c>) and the record rule that replaces the rule for the record.</summary>
+public sealed record RuleChangedView(OverrideView Override, RecordRuleView RecordRule);
+
+/// <summary>
+/// The read-only confirmation before an override is removed (task 089c, model 15 answer 2). Only the removal of a changed rule closes
+/// anything. For that removal <see cref="Warning"/> is set, and <see cref="AffectedText"/> says how many open invoices THE CALLER can Read
+/// whose open findings of the record rule would close (null when that cannot be told). A plain removal has no warning and no count.
+/// </summary>
+public sealed record OverrideRemovalPreview(
+    Guid OverrideId, string Kind, bool ClosesRule, string? Warning, string? AffectedText, int? VisibleOpenInvoices);
+
+/// <summary>What a removal did. The row is deleted. For a changed rule, the record rule is also Off and its open findings are closed <c>PolicyRetired</c>.</summary>
+public sealed record OverrideRemoved(
+    Guid OverrideId, string Kind, bool RuleSwitchedOff, bool CloseComplete, string? AffectedText, int? VisibleOpenInvoices, string? Message);
+
+/// <summary>What a stored override row overrides (the Procedure, or the rule it excludes or changes), as the entity set the caller's Read is asked on.</summary>
+public sealed record OverrideSubject(string EntitySet, Guid Id);
+
+/// <summary>
+/// A record-scoped rule set (task 080 schema, model 5.2 and 6.3): the set that holds one record's changed rules. Its scope values live here,
+/// outside the waived <see cref="RuleSetService"/> file (089a K4: the census's record-scope markers fail a waived file that names one).
+/// <see cref="RuleSetService"/> asks <see cref="IsRecordScoped"/> so it can refuse such a set.
+/// </summary>
+public static class RecordRuleSet
+{
+    /// <summary><c>sprk_ruleset.sprk_scope</c> Record (one record, every firm) and Firm record (one record, one firm).</summary>
+    public const int ScopeRecord = 100000002;
+    public const int ScopeFirmRecord = 100000003;
+
+    /// <summary>The name every record-scoped set carries (the set is found by its derived id, never by name).</summary>
+    internal const string Name = "Billing instructions for this record";
+
+    private const string ScopeColumn = "sprk_scope";
+    private const string FirmColumn = "sprk_firm";
+    private const string ProcedureColumn = "sprk_procedure";
+
+    /// <summary>
+    /// True for a rule set that holds one record's rules: a record scope (Record or Firm record), or any core-record lookup. Either alone
+    /// counts, so a set carrying a core lookup without its scope still reads as record-scoped (fail closed; the lineage files a set under its
+    /// core lookup alone).
+    /// </summary>
+    internal static bool IsRecordScoped(Entity set) =>
+        set.GetAttributeValue<OptionSetValue>(ScopeColumn)?.Value is ScopeRecord or ScopeFirmRecord
+        || InvoiceFamilyCoreRecordGuard.FilingCoreTables.Any(core => set.GetAttributeValue<EntityReference>(core) is not null);
+
+    /// <summary>
+    /// The write validator of every rule-set create (089a K1, <c>SecureChildLineage</c>): a set has one home.
+    /// <list type="bullet">
+    /// <item>A Procedure's set carries no core lookup and no record scope.</item>
+    /// <item>A record-scoped set carries exactly one core lookup and a record scope, and it carries a firm exactly when its scope is Firm record.</item>
+    /// <item>A legacy set carries neither.</item>
+    /// </list>
+    /// Anything else is a bug, and is thrown before the write.
+    /// </summary>
+    internal static void RequireOneHome(Entity set)
+    {
+        ArgumentNullException.ThrowIfNull(set);
+        var cores = InvoiceFamilyCoreRecordGuard.FilingCoreTables.Count(core => set.GetAttributeValue<EntityReference>(core) is not null);
+        var scope = set.GetAttributeValue<OptionSetValue>(ScopeColumn)?.Value;
+        var recordScope = scope is ScopeRecord or ScopeFirmRecord;
+        var procedure = set.GetAttributeValue<EntityReference>(ProcedureColumn) is not null;
+        var firm = set.GetAttributeValue<EntityReference>(FirmColumn) is not null;
+
+        var problem = cores > 1 ? "more than one core-record lookup"
+            : procedure && (cores > 0 || recordScope) ? "a Procedure and a record"
+            : cores == 1 && !recordScope ? "a core-record lookup without a record scope"
+            : cores == 0 && recordScope ? "a record scope without a core-record lookup"
+            : recordScope && firm != (scope == ScopeFirmRecord) ? "a record scope that does not match its firm"
+            : null;
+        if (problem is not null)
+        {
+            throw new InvalidOperationException($"A rule set must have one home; this one carries {problem}. Nothing was written.");
+        }
+    }
+}
+
+/// <summary>
 /// The assignment and override service (ebilling-r1 task 089b, EB-D-148; procedure model 5.1, 6.2, 6.3, 6.5 I-A1): assign, pin or exclude a
 /// Procedure for one core record, and exclude one rule for it. Task 089c adds change rule and remove with preview to this service.
 /// </summary>
@@ -58,8 +149,15 @@ public sealed record OverrideView(
 /// <para><b>I-A1 (one row per subject).</b> One row per (record, Procedure) and one per (record, rule), firm or not: a second is 409
 /// <c>assignment.duplicate</c>. The check is a read AND the row id: the id is derived from (core table, record, subject), so two racing
 /// creates collide on the primary key and the second is refused too.</para>
-/// <para><b>Not here</b> (POML 089): change rule and remove (089c), the resolver that reads these rows (082), the read models (084), the
-/// O-17 sweep, delete code.</para>
+/// <para><b>Change rule and remove (task 089c).</b> A change is an Exclude row of the rule (the SAME derived id as a plain Exclude, so the two
+/// collide) plus a record rule. The record rule is a policy in the record's record-scoped set, with one Published version based on the
+/// rule's version in force. Each of the set, the policy and the version is owned through the resolver by its own question (ForChild: the
+/// set's parent is the core record, the policy's is the set, the version's is the policy), so each is written only after its parent exists.
+/// The Exclude row, the version and the switch-on are one transaction. A removal deletes the row (I-A1's duplicate check ignores state, so a
+/// deactivated row would block the subject for ever). For a changed rule, the same transaction switches the record rule Off, and its open
+/// findings then close <c>PolicyRetired</c> through 081's shared close. The base rule's open findings are NOT closed by a change (the stop
+/// in POML 089c; see the 089 notes).</para>
+/// <para><b>Not here</b> (POML 089): the resolver that reads these rows (082), the read models (084), the O-17 sweep, delete code.</para>
 /// <para>§11: <i>Existing</i> — <see cref="RuleSetService"/> writes rule sets without record scope behind admin routes and
 /// <see cref="ProcedureService"/> writes Procedures; neither writes a row under a core record or is caller-checked against one.
 /// <i>Extension</i> — neither can take these writes: their routes are checked against a Procedure or the admin marker only, and the rows here
@@ -78,21 +176,35 @@ public class ProcedureAssignmentService
     internal const string CodeConcurrentEdit = "assignment.concurrent_edit";
     internal const string CodeWriteFailed = "assignment.write_failed";
     internal const string CodeReadFailed = "assignment.read_failed";
+    internal const string CodeRuleNotInForce = "assignment.rule_not_in_force";
+    internal const string CodeRecordRuleConflict = "assignment.record_rule_conflict";
+    internal const string CodeOverrideNotFound = "assignment.override_not_found";
 
     internal const string KindProcedure = "Procedure";
     internal const string KindRuleExcluded = "RuleExcluded";
+    internal const string KindRuleChanged = "RuleChanged";
 
     internal const string DuplicateDetail = "This record already has an override for it. Remove that override first.";
 
+    /// <summary>The confirmation of a changed rule's removal (model 15 answer 2, as the Procedure retire words it).</summary>
+    internal const string RemoveChangedWarning =
+        "Removing this override will close the rule it changed and remove pending decisions on active invoices.";
+
     private const int MaxNameChars = 200;
     private const int MaxReasonChars = 2000;
+    private const int DefaultPriority = 500;
 
-    /// <summary><c>sprk_ruleset.sprk_scope</c> Record and Firm record (task 080): a record-scoped set, whose rules are removed, not overridden.</summary>
-    private const int ScopeRecord = 100000002;
-    private const int ScopeFirmRecord = 100000003;
-
-    // The table this service creates rows of, named here so the ownership census resolves the create to its table in this file.
+    // The tables this service creates rows of, named here so the ownership census resolves each create to its table in this file.
     private const string AssignmentTable = "sprk_procedureassignment";
+    private const string RuleSetTable = "sprk_ruleset";
+    private const string PolicyTable = "sprk_policy";
+    private const string VersionTable = "sprk_policyversion";
+
+    /// <summary><c>sprk_policyversion.sprk_basedonversion</c> (task 080): the base rule's version a record rule's version was made from.</summary>
+    internal const string BasedOnVersionColumn = "sprk_basedonversion";
+
+    /// <summary>The record-rule code prefix (POML 089 D-202: <c>BRR-{policyId:N}</c>, 36 characters).</summary>
+    internal const string RecordRuleCodePrefix = "BRR-";
 
     // The firm existence check selects its key only, as RuleSetService.ExistsAsync does: sprk_organization's primary name is
     // sprk_organizationname, and a $select naming sprk_name fails (089b review 2 F1).
@@ -103,15 +215,24 @@ public class ProcedureAssignmentService
 
     private readonly IGenericEntityService _entities;
     private readonly IRecordOwnershipResolver _ownership;
+    private readonly RuleSetService _ruleSets;
+    private readonly SignalClosureService _closure;
+    private readonly AffectedInvoiceCounter _counter;
     private readonly ILogger<ProcedureAssignmentService> _logger;
 
     public ProcedureAssignmentService(
         IGenericEntityService entities,
         IRecordOwnershipResolver ownership,
+        RuleSetService ruleSets,
+        SignalClosureService closure,
+        AffectedInvoiceCounter counter,
         ILogger<ProcedureAssignmentService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _ruleSets = ruleSets ?? throw new ArgumentNullException(nameof(ruleSets));
+        _closure = closure ?? throw new ArgumentNullException(nameof(closure));
+        _counter = counter ?? throw new ArgumentNullException(nameof(counter));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -261,7 +382,7 @@ public class ProcedureAssignmentService
             return RuleSetOutcome<OverrideView>.Invalid(CodeInvalid, errors);
         }
 
-        var (ruleName, refusal) = await LoadRuleAsync(policyId, ct);
+        var (rule, refusal) = await LoadRuleAsync<OverrideView>(policyId, ct);
         if (refusal is not null)
         {
             return refusal;
@@ -275,7 +396,7 @@ public class ProcedureAssignmentService
         var reason = Trimmed(request.Reason);
         var row = new AssignmentRow(
             AssignmentIdFor(coreTable, recordId, ProcedureAssignmentEntity.ExcludedPolicyColumn, policyId),
-            coreTable, recordId, Name(ruleName, "Excluded rule"), ProcedureAssignmentEntity.ModeExcluded,
+            coreTable, recordId, Name(rule!.Name, "Excluded rule"), ProcedureAssignmentEntity.ModeExcluded,
             ProcedureId: null, PinnedVersionId: null, ExcludedPolicyId: policyId, FirmId: request.FirmId, Reason: reason);
         return await CreateRowAsync(row, callerObjectId, "exclude rule", ct) is { } failed
             ? failed
@@ -284,19 +405,544 @@ public class ProcedureAssignmentService
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
-    // Reads
+    // Rule-level: change (model 6.3, task 089c)
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The rule an Exclude names: an active Billing policy in a Billing rule set that is NOT record-scoped (no record scope and no core lookup:
-    /// a record rule is removed, not overridden), and not the system rule (D-125; refused 409 before a rule set is required, as it has none). Read as the application; the route has already checked the
-    /// caller's Read on the policy. Returns the rule's name, or the refusal.
+    /// Changes one rule for the record (for one firm's invoices when a firm is named): the rule is excluded for the record, and a record rule
+    /// takes its place. The record rule is based on the rule's version in force, with the edited members, and is validated by
+    /// <see cref="PolicyVersionValidator"/> as every billing rule is. The rule must be one an Exclude accepts. A rule that applies to one firm
+    /// only can be changed only for that firm (400).
     /// </summary>
-    private async Task<(string? Name, RuleSetOutcome<OverrideView>? Refusal)> LoadRuleAsync(Guid policyId, CancellationToken ct)
+    /// <remarks>
+    /// <para>Three stages, each written only once its parent exists (the resolver refuses a parent that does not exist yet):</para>
+    /// <list type="number">
+    /// <item>The record's record-scoped set (derived id per record and firm), if it is missing. The core record is its parent. A second
+    /// change of the record reuses it.</item>
+    /// <item>The record rule's policy (derived id per set and rule, code <c>BRR-{id:N}</c>), Off and with no version, if it is missing.
+    /// The set is its parent. A removed record rule is reused here, never created twice.</item>
+    /// <item>ONE transaction: the Exclude row, the record rule's next version (Accepted, Published, based on the rule's version in force),
+    /// and the switch-on (Enabled, current version), conditional on the policy's row version.</item>
+    /// </list>
+    /// <para>A failure in stage 3 leaves neither the Exclude row nor a rule in force. An Off policy and an empty set may stay behind, and
+    /// the next change reuses them. A create that collides on a derived id or the code key is a retry only when the row it collided with
+    /// is the same record's set, or a rule of that set based on THIS rule. Anything else is refused 409.</para>
+    /// </remarks>
+    public virtual async Task<RuleSetOutcome<RuleChangedView>> ChangeRuleAsync(
+        string coreTable, Guid recordId, RuleChangeRequest request, Guid? callerObjectId, CancellationToken ct)
+    {
+        RequireCore(coreTable, recordId);
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            return await ChangeRuleCoreAsync(coreTable, recordId, request, callerObjectId, ct);
+        }
+        catch (ReadFailedException ex)
+        {
+            return ReadFailed<RuleChangedView>(ex, "change rule");
+        }
+    }
+
+    private async Task<RuleSetOutcome<RuleChangedView>> ChangeRuleCoreAsync(
+        string coreTable, Guid recordId, RuleChangeRequest request, Guid? callerObjectId, CancellationToken ct)
+    {
+        var errors = new List<RuleSetError>();
+        if (request.PolicyId is not { } policyId || policyId == Guid.Empty)
+        {
+            errors.Add(Error("policyId", "policyId is required."));
+            policyId = Guid.Empty;
+        }
+
+        CheckReason(errors, request.Reason, required: true);
+        if (request is { RuleBody: null, MessageTemplate: null, ShortHeadline: null, Consequence: null })
+        {
+            errors.Add(Error("edit", "Nothing to change: name at least one of ruleBody, messageTemplate, shortHeadline or consequence."));
+        }
+
+        int? consequence = null;
+        if (request.Consequence is not null)
+        {
+            if (RuleSetService.TryParseConsequence(request.Consequence, out var parsed))
+            {
+                consequence = (int)parsed;
+            }
+            else
+            {
+                errors.Add(Error("consequence", "consequence must be Reject, Flag or SuggestAdjustment."));
+            }
+        }
+
+        if (request.FirmId is { } firm
+            && (firm == Guid.Empty || await LoadByIdAsync(RuleSetService.FirmEntity, firm, new[] { FirmIdColumn }, ct) is null))
+        {
+            errors.Add(Error("firmId", "The firm was not found."));
+        }
+
+        if (errors.Count > 0)
+        {
+            return RuleSetOutcome<RuleChangedView>.Invalid(CodeInvalid, errors);
+        }
+
+        var (rule, refusal) = await LoadRuleAsync<RuleChangedView>(policyId, ct);
+        if (refusal is not null)
+        {
+            return refusal;
+        }
+
+        var baseRule = rule!;
+
+        // A rule of one firm's set checks only that firm's invoices: a change of it for another firm (or for every firm) would widen it.
+        if (baseRule.FirmId is { } ruleFirm && request.FirmId != ruleFirm)
+        {
+            return RuleSetOutcome<RuleChangedView>.Invalid(CodeInvalid, new[]
+            {
+                Error("firmId", "This rule applies to one firm's invoices only; a change of it names that firm."),
+            });
+        }
+
+        var current = baseRule.CurrentVersionId is { } currentId
+            ? await LoadByIdAsync(VersionTable, currentId, BaseVersionColumns, ct)
+            : null;
+        if (current is null || current.GetAttributeValue<EntityReference>("sprk_policy")?.Id != policyId)
+        {
+            return Refused<RuleChangedView>(StatusCodes.Status409Conflict, CodeRuleNotInForce,
+                "The rule has no version in force, so there is nothing to change. Exclude it instead.");
+        }
+
+        // The change is a copy of the version in force with the edited members, validated as every billing rule is (same type).
+        var baseVersion = VersionOf(current);
+        var merged = baseVersion with
+        {
+            RuleBody = request.RuleBody ?? baseVersion.RuleBody,
+            Template = request.MessageTemplate ?? baseVersion.Template,
+            Headline = request.ShortHeadline ?? baseVersion.Headline,
+            Consequence = consequence ?? baseVersion.Consequence,
+            State = (int)ProposalState.Accepted,
+        };
+        var invalid = _ruleSets.ValidateRule(
+            new RuleSetService.PolicyRow(policyId, baseRule.Code, baseRule.Name, baseVersion.Id),
+            merged.RuleType?.ToString(CultureInfo.InvariantCulture), merged);
+        if (merged.RuleType is null)
+        {
+            invalid.Add(Error("ruleType", "The rule's version in force has no type."));
+        }
+
+        if (invalid.Count > 0)
+        {
+            return RuleSetOutcome<RuleChangedView>.Invalid(CodeInvalid, invalid);
+        }
+
+        // I-A1: one row per (record, rule). A plain Exclude and a change of the same rule are the same row.
+        if (await HasRowAsync(coreTable, recordId, ProcedureAssignmentEntity.ExcludedPolicyColumn, policyId, ct))
+        {
+            return Duplicate<RuleChangedView>();
+        }
+
+        // Stage 1: the record's record-scoped set.
+        var (setId, setRefusal) = await EnsureRecordRuleSetAsync(coreTable, recordId, request.FirmId, baseRule.VisibleToFirms, callerObjectId, ct);
+        if (setRefusal is not null)
+        {
+            return setRefusal;
+        }
+
+        // Stage 2: the record rule's policy, Off and versionless until stage 3.
+        var (recordRule, versions, ruleRefusal) = await EnsureRecordRuleAsync(setId, baseRule, callerObjectId, ct);
+        if (ruleRefusal is not null)
+        {
+            return ruleRefusal;
+        }
+
+        // Stage 3, one transaction: the Exclude row, the record rule's next version, and the switch-on.
+        var number = versions.Count == 0 ? 1 : versions.Max(v => v.GetAttributeValue<int?>("sprk_versionnumber") ?? 0) + 1;
+        var versionId = RuleSetService.VersionIdFor(recordRule!.Id, number);
+        var code = RecordRuleCode(recordRule.Id);
+        var reason = Trimmed(request.Reason);
+        var exclude = new AssignmentRow(
+            AssignmentIdFor(coreTable, recordId, ProcedureAssignmentEntity.ExcludedPolicyColumn, policyId),
+            coreTable, recordId, Name(baseRule.Name, "Changed rule"), ProcedureAssignmentEntity.ModeExcluded,
+            ProcedureId: null, PinnedVersionId: null, ExcludedPolicyId: policyId, FirmId: request.FirmId, Reason: reason);
+
+        var excludeCreate = await AssignmentCreateAsync(exclude, callerObjectId, ct);
+        if (excludeCreate.Refused is { } excludeOwner)
+        {
+            return RuleSetOutcome<RuleChangedView>.OwnerRefused(excludeOwner);
+        }
+
+        var versionCreate = await RecordRuleVersionCreateAsync(versionId, recordRule.Id, code, number, merged, baseVersion.Id, callerObjectId, ct);
+        if (versionCreate.Refused is { } versionOwner)
+        {
+            return RuleSetOutcome<RuleChangedView>.OwnerRefused(versionOwner);
+        }
+
+        if (ConditionalUpdate(PolicyTable, recordRule, new Dictionary<string, object>
+            {
+                ["sprk_enabled"] = true,
+                ["sprk_currentversion"] = new EntityReference(VersionTable, versionId),
+            }) is not { } switchOn)
+        {
+            return StageFailed<RuleChangedView>();
+        }
+
+        var sent = await SendAsync(new OrganizationRequest[] { excludeCreate.Request!, versionCreate.Request!, switchOn }, exclude.Id, "change rule");
+        if (sent != SendResult.Done)
+        {
+            return WriteRefused<RuleChangedView>(sent, exclude.Id);
+        }
+
+        _logger.LogInformation("Override {AssignmentId}: rule {PolicyId} changed for {CoreTable} {RecordId}; record rule {RecordRuleId} v{Number} in force",
+            exclude.Id, policyId, coreTable, recordId, recordRule.Id, number);
+        return RuleSetOutcome<RuleChangedView>.Done(new RuleChangedView(
+            new OverrideView(exclude.Id, KindRuleChanged, ModeName(ProcedureAssignmentEntity.ModeExcluded), null, null, policyId, request.FirmId, reason),
+            new RecordRuleView(setId, recordRule.Id, code, versionId, number, baseVersion.Id, request.FirmId is null ? "Record" : "FirmRecord", request.FirmId)));
+    }
+
+    /// <summary>
+    /// Stage 1: the record's record-scoped set (<see cref="RecordRuleSetIdFor"/>), created when missing. A create that collides on the id
+    /// (another change got there first) reads the set back. The set must be THIS record's, of the right scope and firm, or the change is
+    /// refused 409.
+    /// </summary>
+    private async Task<(Guid SetId, RuleSetOutcome<RuleChangedView>? Refusal)> EnsureRecordRuleSetAsync(
+        string coreTable, Guid recordId, Guid? firmId, bool visibleToFirms, Guid? callerObjectId, CancellationToken ct)
+    {
+        var setId = RecordRuleSetIdFor(coreTable, recordId, firmId);
+        var set = await LoadByIdAsync(RuleSetTable, setId, RecordSetColumns, ct);
+        if (set is null)
+        {
+            var create = await RecordRuleSetCreateAsync(setId, coreTable, recordId, firmId, visibleToFirms, callerObjectId, ct);
+            if (create.Refused is { } owner)
+            {
+                return (setId, RuleSetOutcome<RuleChangedView>.OwnerRefused(owner));
+            }
+
+            var sent = await SendAsync(new OrganizationRequest[] { create.Request! }, setId, "create the record's rule set");
+            if (sent is not (SendResult.Done or SendResult.Duplicate))
+            {
+                return (setId, StageFailed<RuleChangedView>());
+            }
+
+            set = await LoadByIdAsync(RuleSetTable, setId, RecordSetColumns, ct);
+        }
+
+        return set is not null && IsTheRecordSet(set, coreTable, recordId, firmId)
+            ? (setId, null)
+            : (setId, RecordRuleConflict<RuleChangedView>());
+    }
+
+    /// <summary>
+    /// Stage 2: the record rule's policy (<see cref="RecordRulePolicyIdFor"/>), created Off and versionless when missing, and its versions.
+    /// An existing policy (a retry, a second change after a removal) is reused only when it is in THIS set, active, carries its derived code,
+    /// and every version it has is based on a version of THIS rule. Otherwise the change is refused 409.
+    /// </summary>
+    private async Task<(Entity? Policy, IReadOnlyList<Entity> Versions, RuleSetOutcome<RuleChangedView>? Refusal)> EnsureRecordRuleAsync(
+        Guid setId, BaseRule baseRule, Guid? callerObjectId, CancellationToken ct)
+    {
+        var none = Array.Empty<Entity>();
+        var recordRuleId = RecordRulePolicyIdFor(setId, baseRule.Id);
+        var policy = await LoadByIdAsync(PolicyTable, recordRuleId, RecordRuleColumns, ct);
+        if (policy is null)
+        {
+            var create = await RecordRuleCreateAsync(recordRuleId, setId, baseRule, callerObjectId, ct);
+            if (create.Refused is { } owner)
+            {
+                return (null, none, RuleSetOutcome<RuleChangedView>.OwnerRefused(owner));
+            }
+
+            var sent = await SendAsync(new OrganizationRequest[] { create.Request! }, recordRuleId, "create the record rule");
+            if (sent is not (SendResult.Done or SendResult.Duplicate))
+            {
+                return (null, none, StageFailed<RuleChangedView>());
+            }
+
+            policy = await LoadByIdAsync(PolicyTable, recordRuleId, RecordRuleColumns, ct);
+        }
+
+        if (policy is null
+            || policy.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id != setId
+            || !string.Equals(policy.GetAttributeValue<string>("sprk_policycode"), RecordRuleCode(recordRuleId), StringComparison.Ordinal)
+            || (policy.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0) != 0
+            || !RuleDomains.IsBillingRow(policy))
+        {
+            return (null, none, RecordRuleConflict<RuleChangedView>());
+        }
+
+        var query = new QueryExpression(VersionTable) { ColumnSet = new ColumnSet("sprk_versionnumber", BasedOnVersionColumn) };
+        query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, recordRuleId);
+        var versions = (await ReadAsync(query, ct)).Entities.ToList();
+        var basedOn = versions.Select(v => v.GetAttributeValue<EntityReference>(BasedOnVersionColumn)?.Id).ToList();
+        if (basedOn.Any(id => id is null))
+        {
+            return (null, none, RecordRuleConflict<RuleChangedView>());
+        }
+
+        var baseIds = basedOn.Select(id => (object)id!.Value).Distinct().ToArray();
+        if (baseIds.Length > 0)
+        {
+            var bases = new QueryExpression(VersionTable) { ColumnSet = new ColumnSet("sprk_policy") };
+            bases.Criteria.AddCondition("sprk_policyversionid", ConditionOperator.In, baseIds);
+            var found = (await ReadAsync(bases, ct)).Entities;
+            if (found.Count != baseIds.Length || found.Any(v => v.GetAttributeValue<EntityReference>("sprk_policy")?.Id != baseRule.Id))
+            {
+                return (null, none, RecordRuleConflict<RuleChangedView>());
+            }
+        }
+
+        return (policy, versions, null);
+    }
+
+    /// <summary>True when <paramref name="set"/> is the record-scoped Billing set of exactly this record and firm, and of no Procedure.</summary>
+    private static bool IsTheRecordSet(Entity set, string coreTable, Guid recordId, Guid? firmId) =>
+        RuleDomains.IsBillingRow(set)
+        && set.GetAttributeValue<EntityReference>(coreTable)?.Id == recordId
+        && InvoiceFamilyCoreRecordGuard.FilingCoreTables.Count(core => set.GetAttributeValue<EntityReference>(core) is not null) == 1
+        && set.GetAttributeValue<OptionSetValue>("sprk_scope")?.Value == (firmId is null ? RecordRuleSet.ScopeRecord : RecordRuleSet.ScopeFirmRecord)
+        && set.GetAttributeValue<EntityReference>("sprk_firm")?.Id == firmId
+        && set.GetAttributeValue<EntityReference>(RuleSetService.ProcedureColumn) is null
+        && (set.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0) == 0;
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+    // Remove, with preview (model 6.3, 15 answer 2; task 089c)
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// What the stored override row overrides, for the route's Read check before a removal or its preview: the Procedure, or the rule it
+    /// excludes or changes. Null when the row is not this record's (the service then answers 404). A row that names neither is a bug, so
+    /// this throws (and the route denies). A read fault throws.
+    /// </summary>
+    public virtual async Task<OverrideSubject?> SubjectOfOverrideAsync(string coreTable, Guid recordId, Guid overrideId, CancellationToken ct)
+    {
+        RequireCore(coreTable, recordId);
+        var row = await LoadOverrideAsync(coreTable, recordId, overrideId, ct);
+        if (row is null)
+        {
+            return null;
+        }
+
+        return row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ProcedureColumn)?.Id is { } procedureId
+            ? new OverrideSubject(ProcedureEntitySet, procedureId)
+            : row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ExcludedPolicyColumn)?.Id is { } policyId
+                ? new OverrideSubject(PolicyEntitySet, policyId)
+                : throw new InvalidOperationException($"Override {overrideId} names neither a Procedure nor a rule.");
+    }
+
+    /// <summary>
+    /// The read-only confirmation of a removal. A plain row closes nothing, so it has no warning and no count. A changed rule's removal
+    /// switches the record rule Off and closes its open findings, so it shows <see cref="RemoveChangedWarning"/> and the caller-scoped count
+    /// of the open invoices those findings are on. The count comes from the close's own selection
+    /// (<see cref="SignalClosureService.SelectOpenSignalsOfPolicyAsync"/>) and is counted by <see cref="AffectedInvoiceCounter"/>. When the
+    /// count cannot be told, the warning shows without it. Writes nothing.
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<OverrideRemovalPreview>> PreviewRemovalAsync(
+        string coreTable, Guid recordId, Guid overrideId, string? callerBearerToken, CancellationToken ct)
+    {
+        RequireCore(coreTable, recordId);
+        try
+        {
+            var row = await LoadOverrideAsync(coreTable, recordId, overrideId, ct);
+            if (row is null)
+            {
+                return OverrideNotFound<OverrideRemovalPreview>();
+            }
+
+            var changed = await ChangedRuleOfAsync(coreTable, recordId, row, ct);
+            if (changed is null)
+            {
+                return RuleSetOutcome<OverrideRemovalPreview>.Done(new OverrideRemovalPreview(row.Id, KindOf(row, changed: false), false, null, null, null));
+            }
+
+            int? count = null;
+            try
+            {
+                var signals = await _closure.SelectOpenSignalsOfPolicyAsync(changed.Id, withBillingSubject: true, ct);
+                count = await _counter.CountVisibleOpenInvoicesAsync(signals, callerBearerToken, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "Override {AssignmentId}: the removal preview could not select the open findings; the warning shows without a count", row.Id);
+            }
+
+            return RuleSetOutcome<OverrideRemovalPreview>.Done(new OverrideRemovalPreview(
+                row.Id, KindRuleChanged, true, RemoveChangedWarning, ProcedureService.AffectedText(count), count));
+        }
+        catch (ReadFailedException ex)
+        {
+            return ReadFailed<OverrideRemovalPreview>(ex, "removal preview");
+        }
+    }
+
+    /// <summary>
+    /// Removes the override (on confirm) by deleting the row, never by deactivating it (I-A1's duplicate check ignores state). For a changed
+    /// rule, the same transaction switches the record rule Off, conditional on its row version. Its open findings then close
+    /// <c>PolicyRetired</c> through <see cref="SignalClosureService.ClosePolicySignalsRetiredAsync"/>, the preview's selection run at
+    /// confirm time. A close that fails leaves the rule Off, so the nightly sweep closes the rest, and the result says the close is
+    /// incomplete. The result's count is the caller-scoped count of the invoices whose findings closed.
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<OverrideRemoved>> RemoveAsync(
+        string coreTable, Guid recordId, Guid overrideId, string? callerBearerToken, CancellationToken ct)
+    {
+        RequireCore(coreTable, recordId);
+        Entity? row;
+        Entity? changed;
+        try
+        {
+            row = await LoadOverrideAsync(coreTable, recordId, overrideId, ct);
+            if (row is null)
+            {
+                return OverrideNotFound<OverrideRemoved>();
+            }
+
+            changed = await ChangedRuleOfAsync(coreTable, recordId, row, ct);
+        }
+        catch (ReadFailedException ex)
+        {
+            return ReadFailed<OverrideRemoved>(ex, "remove");
+        }
+
+        var requests = new List<OrganizationRequest> { new DeleteRequest { Target = new EntityReference(AssignmentTable, row.Id) } };
+        if (changed is not null)
+        {
+            if (ConditionalUpdate(PolicyTable, changed, new Dictionary<string, object> { ["sprk_enabled"] = false }) is not { } switchOff)
+            {
+                return Refused<OverrideRemoved>(StatusCodes.Status500InternalServerError, CodeWriteFailed,
+                    "The override could not be removed and nothing was changed. Try again; if it keeps failing, contact support.");
+            }
+
+            requests.Add(switchOff);
+        }
+
+        var sent = await SendAsync(requests, row.Id, "remove");
+        if (sent == SendResult.Gone)
+        {
+            return OverrideNotFound<OverrideRemoved>();
+        }
+
+        if (sent != SendResult.Done)
+        {
+            return WriteRefused<OverrideRemoved>(sent, row.Id);
+        }
+
+        var kind = KindOf(row, changed is not null);
+        if (changed is null)
+        {
+            _logger.LogInformation("Override {AssignmentId} removed ({Kind}); nothing to close", row.Id, kind);
+            return RuleSetOutcome<OverrideRemoved>.Done(new OverrideRemoved(row.Id, kind, false, true, null, null, null));
+        }
+
+        // The removal is committed and the record rule is Off: nothing from here on may turn that into an error.
+        var outcome = SignalClosureOutcome.None;
+        var closed = new List<OpenPolicySignal>();
+        try
+        {
+            var closure = await _closure.ClosePolicySignalsRetiredAsync(
+                changed.Id, changed.GetAttributeValue<string>("sprk_policycode") ?? RecordRuleCode(changed.Id), withBillingSubject: true, CancellationToken.None);
+            outcome = closure.Outcome;
+            closed.AddRange(closure.Closed);
+        }
+        catch (Exception ex)
+        {
+            outcome = outcome with { PolicyFailures = outcome.PolicyFailures + 1 };
+            _logger.LogError(ex, "Override {AssignmentId} removed; the open findings of record rule {RecordRuleId} could not be closed now. The rule is Off, so the nightly run closes them",
+                row.Id, changed.Id);
+        }
+
+        int? count;
+        try
+        {
+            count = await _counter.CountVisibleOpenInvoicesAsync(closed, callerBearerToken, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Override {AssignmentId} removed; the affected-invoice count could not be made, so none is shown", row.Id);
+            count = null;
+        }
+
+        _logger.LogInformation("Override {AssignmentId} removed (changed rule): record rule {RecordRuleId} Off, {Closed} finding(s) closed, complete={Complete}",
+            row.Id, changed.Id, outcome.Closed, outcome.IsComplete);
+        return RuleSetOutcome<OverrideRemoved>.Done(new OverrideRemoved(
+            row.Id, KindRuleChanged, true, outcome.IsComplete, ProcedureService.AffectedText(count), count,
+            outcome.IsComplete ? null : "Some findings could not be closed now. The rule is off, so the nightly run closes the rest."));
+    }
+
+    /// <summary>This record's override row <paramref name="overrideId"/>, or null (another record's row, or none).</summary>
+    private async Task<Entity?> LoadOverrideAsync(string coreTable, Guid recordId, Guid overrideId, CancellationToken ct)
+    {
+        if (overrideId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var query = new QueryExpression(AssignmentTable)
+        {
+            ColumnSet = new ColumnSet(
+                coreTable, ProcedureAssignmentEntity.ProcedureColumn, ProcedureAssignmentEntity.ExcludedPolicyColumn,
+                ProcedureAssignmentEntity.FirmColumn, ProcedureAssignmentEntity.ModeColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition("sprk_procedureassignmentid", ConditionOperator.Equal, overrideId);
+        query.Criteria.AddCondition(coreTable, ConditionOperator.Equal, recordId);
+        return (await ReadAsync(query, ct)).Entities.FirstOrDefault(
+            r => r.Id == overrideId && r.GetAttributeValue<EntityReference>(coreTable)?.Id == recordId);
+    }
+
+    /// <summary>
+    /// The record rule an Exclude row changed: the policy derived from (the record's set for the row's firm, the excluded rule). It counts only
+    /// when it exists in that set, is active and is switched on. An Off record rule (removed earlier, or left by a failed change) changes
+    /// nothing, so its row is a plain Exclude.
+    /// </summary>
+    private async Task<Entity?> ChangedRuleOfAsync(string coreTable, Guid recordId, Entity row, CancellationToken ct)
+    {
+        if (row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ExcludedPolicyColumn)?.Id is not { } basePolicyId)
+        {
+            return null;
+        }
+
+        var setId = RecordRuleSetIdFor(coreTable, recordId, row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.FirmColumn)?.Id);
+        var policy = await LoadByIdAsync(PolicyTable, RecordRulePolicyIdFor(setId, basePolicyId), RecordRuleColumns, ct);
+        return policy is not null
+            && policy.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id == setId
+            && policy.GetAttributeValue<bool?>("sprk_enabled") == true
+            && (policy.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0) == 0
+                ? policy
+                : null;
+    }
+
+    private static string KindOf(Entity row, bool changed) =>
+        row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ProcedureColumn) is not null ? KindProcedure
+        : changed ? KindRuleChanged
+        : KindRuleExcluded;
+
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+    // Reads
+    // ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The rule an Exclude or a change names, as read (the policy and its rule set).</summary>
+    private sealed record BaseRule(
+        Guid Id, string Name, string Code, Guid? FirmId, bool VisibleToFirms, Guid? CurrentVersionId, int? Priority, int? Lane, int? Severity);
+
+    private static readonly string[] BaseVersionColumns =
+    {
+        "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
+        "sprk_consequence", "sprk_proposalstatus", "sprk_clausereference", "sprk_clauselocation",
+    };
+
+    private static readonly string[] RecordSetColumns =
+        new[] { "sprk_scope", "sprk_firm", "statecode", RuleDomains.PolicyDomainColumn, RuleSetService.ProcedureColumn }
+            .Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray();
+
+    private static readonly string[] RecordRuleColumns =
+        { "sprk_ruleset", "sprk_policycode", "sprk_enabled", "statecode", RuleDomains.PolicyDomainColumn, RuleSetService.RowVersionColumn };
+
+    /// <summary>
+    /// The rule an Exclude or a change names: an active Billing policy in a Billing rule set that is NOT record-scoped (no record scope and no
+    /// core lookup: a record rule is removed, not overridden), and not the system rule (D-125; refused 409 before a rule set is required, as
+    /// it has none). Read as the application; the route has already checked the caller's Read on the policy. Returns the rule, or the refusal.
+    /// </summary>
+    private async Task<(BaseRule? Rule, RuleSetOutcome<T>? Refusal)> LoadRuleAsync<T>(Guid policyId, CancellationToken ct) where T : class
     {
         var query = new QueryExpression(RuleSetService.PolicyEntity)
         {
-            ColumnSet = new ColumnSet("sprk_name", "sprk_policycode", "sprk_ruleset", "sprk_currentversion", RuleDomains.PolicyDomainColumn),
+            ColumnSet = new ColumnSet(
+                "sprk_name", "sprk_policycode", "sprk_ruleset", "sprk_currentversion", RuleDomains.PolicyDomainColumn,
+                "sprk_priority", "sprk_lane", "sprk_severity"),
             TopCount = 1,
         };
         query.Criteria.AddCondition("sprk_policyid", ConditionOperator.Equal, policyId);
@@ -307,20 +953,46 @@ public class ProcedureAssignmentService
         // below would answer it "not found". The caller's Read on the rule has already been checked by the route.
         if (policy is not null && await IsSystemRuleAsync(policy, policyId, ct))
         {
-            return (null, Refused<OverrideView>(StatusCodes.Status409Conflict, CodeSystemRule, "This is a system rule; it cannot be excluded for a record."));
+            return (null, Refused<T>(StatusCodes.Status409Conflict, CodeSystemRule, "This is a system rule; it cannot be excluded or changed for a record."));
         }
 
         var set = policy?.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id is { } setId
             ? await LoadByIdAsync(RuleSetService.RuleSetEntity,
-                setId, new[] { "sprk_scope", RuleDomains.PolicyDomainColumn }.Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray(), ct)
+                setId, new[] { "sprk_scope", "sprk_firm", "sprk_visibletofirms", RuleDomains.PolicyDomainColumn }
+                    .Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray(), ct)
             : null;
-        if (policy is null || set is null || !RuleDomains.IsBillingRow(set) || IsRecordScoped(set))
+        if (policy is null || set is null || !RuleDomains.IsBillingRow(set) || RecordRuleSet.IsRecordScoped(set))
         {
-            return (null, Refused<OverrideView>(StatusCodes.Status404NotFound, CodeRuleNotFound, "The rule was not found."));
+            return (null, Refused<T>(StatusCodes.Status404NotFound, CodeRuleNotFound, "The rule was not found."));
         }
 
-        return (policy.GetAttributeValue<string>("sprk_name") ?? policy.GetAttributeValue<string>("sprk_policycode") ?? policyId.ToString(), null);
+        var code = policy.GetAttributeValue<string>("sprk_policycode") ?? policyId.ToString();
+        return (new BaseRule(
+            policyId,
+            policy.GetAttributeValue<string>("sprk_name") ?? code,
+            code,
+            set.GetAttributeValue<EntityReference>("sprk_firm")?.Id,
+            set.GetAttributeValue<bool?>("sprk_visibletofirms") ?? false,
+            policy.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id,
+            policy.GetAttributeValue<int?>("sprk_priority"),
+            policy.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value,
+            policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value), null);
     }
+
+    /// <summary>A policy version row as the rule-set service's validator reads it.</summary>
+    private static RuleSetService.VersionRow VersionOf(Entity v) => new(
+        v.Id,
+        v.GetAttributeValue<int?>("sprk_versionnumber") ?? 0,
+        v.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value,
+        v.GetAttributeValue<string>("sprk_rulebody"),
+        v.GetAttributeValue<string>("sprk_messagetemplate"),
+        v.GetAttributeValue<string>("sprk_shortheadline"),
+        v.GetAttributeValue<OptionSetValue>("sprk_consequence")?.Value,
+        v.GetAttributeValue<OptionSetValue>("sprk_proposalstatus")?.Value,
+        v.GetAttributeValue<string>("sprk_clausereference"),
+        v.GetAttributeValue<string>("sprk_clauselocation"),
+        null,
+        null);
 
     /// <summary>
     /// True for the system rule (D-125): the policy that carries <see cref="BillingRuleCatalogue.SystemPolicyCode"/> (as
@@ -340,15 +1012,6 @@ public class ProcedureAssignmentService
             && current.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value == (int)RuleType.SubmissionIntegrity;
     }
 
-    /// <summary>
-    /// True for a rule set that holds one record's rules: a record scope (Record or Firm record), or any core-record lookup. Either alone
-    /// counts, so a set carrying a core lookup without its scope still reads as record-scoped (fail closed; the lineage files a set under its
-    /// core lookup alone).
-    /// </summary>
-    private static bool IsRecordScoped(Entity set) =>
-        set.GetAttributeValue<OptionSetValue>("sprk_scope")?.Value is ScopeRecord or ScopeFirmRecord
-        || InvoiceFamilyCoreRecordGuard.FilingCoreTables.Any(core => set.GetAttributeValue<EntityReference>(core) is not null);
-
     /// <summary>True when the record already holds an override row naming <paramref name="subjectId"/> in <paramref name="subjectColumn"/> (I-A1).</summary>
     private async Task<bool> HasRowAsync(string coreTable, Guid recordId, string subjectColumn, Guid subjectId, CancellationToken ct)
     {
@@ -358,7 +1021,7 @@ public class ProcedureAssignmentService
         return (await ReadAsync(query, ct)).Entities.Count > 0;
     }
 
-    /// <summary>A Dataverse read before the write failed (a fault or a timeout); thrown by <see cref="ReadAsync"/>, answered by the two public methods as 503.</summary>
+    /// <summary>A Dataverse read before the write failed (a fault or a timeout); thrown by <see cref="ReadAsync"/>, answered by the public methods as 503.</summary>
     private sealed class ReadFailedException(string entity, Exception inner)
         : Exception($"Reading {entity} failed ({inner.GetType().Name}).", inner)
     {
@@ -412,11 +1075,31 @@ public class ProcedureAssignmentService
         Guid? FirmId, string? Reason);
 
     /// <summary>
-    /// Builds the row, asks its owner (the row's own question, with the caller as RequestedBy), writes the owner onto it and creates it, in
-    /// one member so the census sees the row, its owner write and its create together. Returns null when the row was created, else the
-    /// refusal. A refused owner writes nothing.
+    /// Creates one override row in its own transaction (assign, exclude rule). Returns null when the row was created, else the refusal. A
+    /// refused owner writes nothing.
     /// </summary>
     private async Task<RuleSetOutcome<OverrideView>?> CreateRowAsync(AssignmentRow spec, Guid? callerObjectId, string what, CancellationToken ct)
+    {
+        var create = await AssignmentCreateAsync(spec, callerObjectId, ct);
+        if (create.Refused is { } owner)
+        {
+            _logger.LogWarning("Override {AssignmentId}: the {What} was refused, no owner ({RefusalCode}); nothing was written",
+                spec.Id, what, owner.RefusalCode);
+            return RuleSetOutcome<OverrideView>.OwnerRefused(owner);
+        }
+
+        var sent = await SendAsync(new OrganizationRequest[] { create.Request! }, spec.Id, what);
+        return sent == SendResult.Done ? null : WriteRefused<OverrideView>(sent, spec.Id);
+    }
+
+    /// <summary>A built create, owner applied, or the owner refusal (nothing was built to write).</summary>
+    private sealed record BuiltCreate(CreateRequest? Request, RecordOwnerResolution? Refused);
+
+    /// <summary>
+    /// Builds the override row, asks its owner (the row's own question, with the caller as RequestedBy), writes the owner onto it and wraps
+    /// it in its create, in one member, so the census sees the row, its owner write and its create together. The caller sends it.
+    /// </summary>
+    private async Task<BuiltCreate> AssignmentCreateAsync(AssignmentRow spec, Guid? callerObjectId, CancellationToken ct)
     {
         var row = new Entity(AssignmentTable, spec.Id)
         {
@@ -460,31 +1143,192 @@ public class ProcedureAssignmentService
             ct);
         if (!owner.IsOwned)
         {
-            _logger.LogWarning("Override {AssignmentId}: the {What} was refused, no owner ({RefusalCode}); nothing was written",
-                spec.Id, what, owner.RefusalCode);
-            return RuleSetOutcome<OverrideView>.OwnerRefused(owner);
+            return new BuiltCreate(null, owner);
         }
 
         owner.ApplyTo(row);
-        return await SendAsync(new OrganizationRequest[] { new CreateRequest { Target = row } }, spec.Id, what) switch
-        {
-            SendResult.Done => null,
-            SendResult.Duplicate => Duplicate<OverrideView>(),
-            SendResult.Conflict => Refused<OverrideView>(StatusCodes.Status409Conflict, CodeConcurrentEdit,
-                "The record's overrides changed while this was being saved, so nothing was written. Reload and try again."),
-            // Never "nothing was saved" here: a retry could find its own row. The id lets the caller look before retrying.
-            SendResult.Unknown => Refused<OverrideView>(StatusCodes.Status500InternalServerError, CodeWriteFailed,
-                $"The override may or may not have been saved (id {spec.Id}). Reload the record before trying again."),
-            _ => Refused<OverrideView>(StatusCodes.Status500InternalServerError, CodeWriteFailed,
-                "The override could not be saved and nothing was written. Try again; if it keeps failing, contact support."),
-        };
+        return new BuiltCreate(new CreateRequest { Target = row }, null);
     }
+
+    /// <summary>
+    /// Builds the record's record-scoped set (stage 1 of a change): Billing, Published, the record scope (Firm record with the firm, else
+    /// Record), the core-record lookup, and the clause-visibility flag of the rule it first takes. Checked by
+    /// <see cref="RecordRuleSet.RequireOneHome"/>, and owned by its own question (ForChild: the core record is its one parent; the firm is no
+    /// ownership parent) with the caller as RequestedBy. The caller sends it.
+    /// </summary>
+    private async Task<BuiltCreate> RecordRuleSetCreateAsync(
+        Guid setId, string coreTable, Guid recordId, Guid? firmId, bool visibleToFirms, Guid? callerObjectId, CancellationToken ct)
+    {
+        var set = new Entity(RuleSetTable, setId)
+        {
+            ["sprk_name"] = RecordRuleSet.Name,
+            [RuleDomains.PolicyDomainColumn] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
+            ["sprk_scope"] = new OptionSetValue(firmId is null ? RecordRuleSet.ScopeRecord : RecordRuleSet.ScopeFirmRecord),
+            [coreTable] = new EntityReference(coreTable, recordId),
+            ["sprk_visibletofirms"] = visibleToFirms,
+            ["sprk_effectivefrom"] = DateTime.UtcNow.Date,
+            ["statecode"] = new OptionSetValue(0),
+            ["statuscode"] = new OptionSetValue(RuleSetService.RuleSetPublished),
+        };
+        if (firmId is { } firm)
+        {
+            set["sprk_firm"] = new EntityReference(RuleSetService.FirmEntity, firm);
+        }
+
+        RecordRuleSet.RequireOneHome(set);
+        var owner = await _ownership.ResolveOwnerAsync(
+            RecordOwnershipContext.ForChild(set) with
+            {
+                CallerObjectId = callerObjectId,
+                RequestedBy = RecordRequester.Of(objectId: callerObjectId),
+            },
+            ct);
+        if (!owner.IsOwned)
+        {
+            return new BuiltCreate(null, owner);
+        }
+
+        owner.ApplyTo(set);
+        return new BuiltCreate(new CreateRequest { Target = set }, null);
+    }
+
+    /// <summary>
+    /// Builds the record rule's policy (stage 2 of a change): Off and with no version (stage 3 puts one in force), the derived code, the base
+    /// rule's name, priority, lane and severity, Billing, in the record's set. Owned by its own question (ForChild: the set is its parent)
+    /// with the caller as RequestedBy. The caller sends it.
+    /// </summary>
+    private async Task<BuiltCreate> RecordRuleCreateAsync(Guid policyId, Guid setId, BaseRule baseRule, Guid? callerObjectId, CancellationToken ct)
+    {
+        var policy = new Entity(PolicyTable, policyId)
+        {
+            ["sprk_name"] = baseRule.Name,
+            ["sprk_policycode"] = RecordRuleCode(policyId),
+            ["sprk_enabled"] = false,
+            ["sprk_priority"] = baseRule.Priority ?? DefaultPriority,
+            ["sprk_lane"] = new OptionSetValue(baseRule.Lane ?? (int)DecisionLane.Decide),
+            [RuleDomains.PolicyDomainColumn] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
+            ["sprk_ruleset"] = new EntityReference(RuleSetTable, setId),
+        };
+        if (baseRule.Severity is { } severity)
+        {
+            policy["sprk_severity"] = new OptionSetValue(severity);
+        }
+
+        var owner = await _ownership.ResolveOwnerAsync(
+            RecordOwnershipContext.ForChild(policy) with
+            {
+                CallerObjectId = callerObjectId,
+                RequestedBy = RecordRequester.Of(objectId: callerObjectId),
+            },
+            ct);
+        if (!owner.IsOwned)
+        {
+            return new BuiltCreate(null, owner);
+        }
+
+        owner.ApplyTo(policy);
+        return new BuiltCreate(new CreateRequest { Target = policy }, null);
+    }
+
+    /// <summary>
+    /// Builds the record rule's next version (stage 3 of a change): the edited copy of the base rule's version in force, Accepted and
+    /// Published, in force from now, with <c>sprk_basedonversion</c> naming that version. Owned by its own question (ForChild: the record
+    /// rule is its parent; the base version is no ownership parent) with the caller as RequestedBy. The caller sends it.
+    /// </summary>
+    private async Task<BuiltCreate> RecordRuleVersionCreateAsync(
+        Guid versionId, Guid policyId, string code, int number, RuleSetService.VersionRow content, Guid basedOnVersionId, Guid? callerObjectId,
+        CancellationToken ct)
+    {
+        var version = new Entity(VersionTable, versionId)
+        {
+            ["sprk_name"] = $"{code} v{number.ToString(CultureInfo.InvariantCulture)}",
+            ["sprk_policy"] = new EntityReference(PolicyTable, policyId),
+            ["sprk_versionnumber"] = number,
+            ["sprk_ruletype"] = new OptionSetValue(content.RuleType!.Value),
+            ["sprk_rulebody"] = content.RuleBody!,
+            ["sprk_messagetemplate"] = content.Template!,
+            ["sprk_shortheadline"] = content.Headline!,
+            ["sprk_consequence"] = new OptionSetValue(content.Consequence!.Value),
+            ["sprk_proposedaction"] = RuleSetService.ProposedActionText(content.Consequence),
+            ["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Accepted),
+            ["sprk_inforcefrom"] = DateTime.UtcNow,
+            [RuleSetService.PublishStateColumn] = new OptionSetValue(RuleSetService.PublishStatePublished),
+            [BasedOnVersionColumn] = new EntityReference(VersionTable, basedOnVersionId),
+        };
+        if (content.ClauseReference is not null)
+        {
+            version["sprk_clausereference"] = content.ClauseReference;
+        }
+
+        if (content.ClauseLocation is not null)
+        {
+            version["sprk_clauselocation"] = content.ClauseLocation;
+        }
+
+        var owner = await _ownership.ResolveOwnerAsync(
+            RecordOwnershipContext.ForChild(version) with
+            {
+                CallerObjectId = callerObjectId,
+                RequestedBy = RecordRequester.Of(objectId: callerObjectId),
+            },
+            ct);
+        if (!owner.IsOwned)
+        {
+            return new BuiltCreate(null, owner);
+        }
+
+        owner.ApplyTo(version);
+        return new BuiltCreate(new CreateRequest { Target = version }, null);
+    }
+
+    /// <summary>An update of <paramref name="row"/> conditional on its row version as read; null when the row was read without one.</summary>
+    private static UpdateRequest? ConditionalUpdate(string entity, Entity row, IReadOnlyDictionary<string, object> fields)
+    {
+        if (row.GetAttributeValue<long?>(RuleSetService.RowVersionColumn) is not { } rowVersion)
+        {
+            return null;
+        }
+
+        var target = new Entity(entity, row.Id) { RowVersion = rowVersion.ToString(CultureInfo.InvariantCulture) };
+        foreach (var (column, value) in fields)
+        {
+            target[column] = value;
+        }
+
+        return new UpdateRequest { Target = target, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches };
+    }
+
+    /// <summary>The refusal of a write that did not commit, by what the transaction answered.</summary>
+    private static RuleSetOutcome<T> WriteRefused<T>(SendResult sent, Guid id) where T : class => sent switch
+    {
+        SendResult.Duplicate => Duplicate<T>(),
+        SendResult.Conflict => Refused<T>(StatusCodes.Status409Conflict, CodeConcurrentEdit,
+            "The record's overrides changed while this was being saved, so nothing was written. Reload and try again."),
+        // Never "nothing was saved" here: a retry could find its own row. The id lets the caller look before retrying.
+        SendResult.Unknown => Refused<T>(StatusCodes.Status500InternalServerError, CodeWriteFailed,
+            $"The override may or may not have been saved (id {id}). Reload the record before trying again."),
+        _ => Refused<T>(StatusCodes.Status500InternalServerError, CodeWriteFailed,
+            "The override could not be saved and nothing was written. Try again; if it keeps failing, contact support."),
+    };
+
+    /// <summary>A change's stage 1 or 2 did not complete. Nothing is in force yet, so how the record's invoices are checked has not changed.</summary>
+    private static RuleSetOutcome<T> StageFailed<T>() where T : class =>
+        Refused<T>(StatusCodes.Status500InternalServerError, CodeWriteFailed,
+            "The rule could not be changed, and how this record's invoices are checked has not changed. Try again; if it keeps failing, contact support.");
+
+    private static RuleSetOutcome<T> RecordRuleConflict<T>() where T : class =>
+        Refused<T>(StatusCodes.Status409Conflict, CodeRecordRuleConflict,
+            "This record's rule data is not in the expected state, so the rule was not changed. Contact support.");
+
+    private static RuleSetOutcome<T> OverrideNotFound<T>() where T : class =>
+        Refused<T>(StatusCodes.Status404NotFound, CodeOverrideNotFound, "The override was not found on this record.");
 
     private enum SendResult
     {
         Done,
         Conflict,
         Duplicate,
+        Gone,
         Failed,
         Unknown,
     }
@@ -497,10 +1341,15 @@ public class ProcedureAssignmentService
             await _entities.ExecuteTransactionAsync(requests, CancellationToken.None);
             return SendResult.Done;
         }
-        catch (Exception ex) when (IsPrimaryKeyDuplicate(ex))
+        catch (Exception ex) when (HasFaultCode(ex, DuplicatePrimaryKey) || HasFaultCode(ex, DuplicateAlternateKey))
         {
-            _logger.LogWarning("Override {AssignmentId}: the {What} was refused; a row with its derived id exists. Nothing was written", assignmentId, what);
+            _logger.LogWarning("Override {AssignmentId}: the {What} was refused; a row with its derived id or key exists. Nothing was written", assignmentId, what);
             return SendResult.Duplicate;
+        }
+        catch (Exception ex) when (HasFaultCode(ex, DoesNotExist))
+        {
+            _logger.LogWarning("Override {AssignmentId}: the {What} was refused; a row it names no longer exists. Nothing was written", assignmentId, what);
+            return SendResult.Gone;
         }
         catch (Exception ex) when (ex is DBConcurrencyException || SignalWriter.IsConcurrencyVersionMismatch(ex))
         {
@@ -524,12 +1373,17 @@ public class ProcedureAssignmentService
         }
     }
 
-    /// <summary>Dataverse's "Cannot insert duplicate key" (<c>0x80040237</c>) anywhere in the chain, as <c>TrackingNumberAllocator</c> reads it.</summary>
-    private static bool IsPrimaryKeyDuplicate(Exception ex)
+    // Dataverse fault codes: "Cannot insert duplicate key", a matching alternate key (sprk_policy's code key), "Does Not Exist".
+    private const int DuplicatePrimaryKey = unchecked((int)0x80040237);
+    private const int DuplicateAlternateKey = unchecked((int)0x80060892);
+    private const int DoesNotExist = unchecked((int)0x80040217);
+
+    /// <summary>The Dataverse fault <paramref name="code"/> anywhere in the chain, as <c>TrackingNumberAllocator</c> reads it.</summary>
+    private static bool HasFaultCode(Exception ex, int code)
     {
         for (var e = ex; e is not null; e = e.InnerException)
         {
-            if (e is System.ServiceModel.FaultException<OrganizationServiceFault> fault && fault.Detail?.ErrorCode == unchecked((int)0x80040237))
+            if (e is System.ServiceModel.FaultException<OrganizationServiceFault> fault && fault.Detail?.ErrorCode == code)
             {
                 return true;
             }
@@ -559,6 +1413,21 @@ public class ProcedureAssignmentService
     /// <summary>The id of the one override row of (record, subject): I-A1's second guard, after the read.</summary>
     internal static Guid AssignmentIdFor(string coreTable, Guid recordId, string subjectColumn, Guid subjectId) =>
         DerivedId($"sprk_procedureassignment:{coreTable}:{recordId:D}:{subjectColumn}:{subjectId:D}");
+
+    /// <summary>The id of the record's record-scoped set: one per (core table, record, firm or none).</summary>
+    internal static Guid RecordRuleSetIdFor(string coreTable, Guid recordId, Guid? firmId) =>
+        DerivedId($"sprk_ruleset:record:{coreTable}:{recordId:D}:{(firmId is { } f ? f.ToString("D") : "all-firms")}");
+
+    /// <summary>The id of the record rule of <paramref name="basePolicyId"/> in the record's set (POML 089 D-202: <c>IdOf("ebilling-record-rule-{set:D}-{base:D}")</c>).</summary>
+    internal static Guid RecordRulePolicyIdFor(Guid recordRuleSetId, Guid basePolicyId) =>
+        InvoiceSubmissionPersister.IdOf($"ebilling-record-rule-{recordRuleSetId:D}-{basePolicyId:D}");
+
+    /// <summary>The record rule's code: <c>BRR-</c> and its id as 32 lower-case hex digits (36 characters; unique by <c>sprk_policycodekey</c>).</summary>
+    internal static string RecordRuleCode(Guid recordRulePolicyId) => RecordRuleCodePrefix + recordRulePolicyId.ToString("N");
+
+    // The entity sets the route's Read before a removal is asked on (the same sets the assign and exclude routes check).
+    private const string ProcedureEntitySet = "sprk_procedures";
+    private const string PolicyEntitySet = "sprk_policies";
 
     /// <summary>A version-5 UUID (SHA-1) of <paramref name="name"/> in <see cref="RowIdNamespace"/>, as <see cref="RuleSetService.VersionIdFor"/>.</summary>
     private static Guid DerivedId(string name)
