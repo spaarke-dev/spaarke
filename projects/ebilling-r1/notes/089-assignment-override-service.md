@@ -773,6 +773,18 @@ Branch `task/ebilling-089e`, from `work/ebilling-r1` at `4a5f78ece0`. POML `task
   - ADR-038: the tests are unit tests in the existing maintain-class files, and nothing is deleted under a KEEP path.
   - The diff has no Graph, `IMemoryCache`, AI, DI or interface hits.
 - **Placement (CLAUDE.md §10):** in the BFF, inside the existing `ProcedureAssignmentService`, the owner of the change route. There is no new endpoint, registration, package or background work.
+- **Gates:**
+
+  | Run | Result |
+  |---|---|
+  | Build (BFF) | 0 warnings, 0 errors |
+  | Unit filter `ProcedureAssignment\|RuleSetService\|SignalClosure\|Signal` | 4760 passed, 3 skipped, 0 failed |
+  | ArchTests `RouteAuthorizationGuard\|RecordOwnerAssignmentCensus\|ProcedureRolePrivilege\|FinanceStepZero\|SignalClosureServiceDerivation\|ProcedureRetireSelection\|RuleSetRolePrivilege` | 180 passed |
+  | Publish size (`-c Release`, `Compress-Archive`, 192 files each, short paths `C:\wt089e{m,a,b}`) | See below |
+
+- **Publish size, no package added:**
+  - **Against a fresh master** (`0d4aa87ee0`: 136,945,320 B raw, 41,208,838 B zip): the branch is 137,268,940 B raw and 41,310,785 B zip, **+323,620 B raw (+101,947 B zip)**. Most of that is ebilling-r1 work not yet on master.
+  - **This task alone**, against the base `4a5f78ece0` (137,254,820 B raw, 41,304,287 B zip): **+14,120 B raw (+6,498 B zip)**; the dll grows 12,288 B.
 
 ### Item 2: a descriptive error for record-scoped rule sets (STOPPED, nothing changed)
 
