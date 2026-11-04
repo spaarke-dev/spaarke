@@ -31,7 +31,8 @@
 | 019 | [W2 deploy, live checks, adversarial review](019-w2-deploy-and-adversarial-review.poml) | NFR-01, NFR-05 | sonnet / high | FULL | none | 017, 018, 039 | ✅ |
 | 041 | [Index routing follows the content type (#2502)](041-content-type-index-routing.poml) | FR-40 (FR-10, FR-38) | opus / high | FULL | none | 019, 039 | ✅ (#2541, 249809ce0b) |
 | 042a | [#2483 window characterization (tests only; lands alone)](042a-stamp-before-owner-characterization.poml) | FR-41 | sonnet / high | STANDARD | none | none | ✅ (#2521) |
-| 042b | [Derive the stamp before the owner (#2483, DI-009)](042b-stamp-before-owner-fix.poml) | FR-41 | opus / high | FULL | none | 042a, 019 | 🔄 PR #2562 (auto-merge; UAC-r2 AC15 OK with notes) |
+| 042b | [Derive the stamp before the owner (#2483, DI-009)](042b-stamp-before-owner-fix.poml) | FR-41 | opus / high | FULL | none | 042a, 019 | ✅ (#2562, 0d4aa87ee0) |
+| 042c | [Signal / DR core record: caller AppendTo + core first in the owner question (#2561, DI-019)](042c-core-record-owner-and-appendto.poml) | FR-41 | opus / high | FULL | none | 042b | 🔲 UAC-r2 ruled F 2026-11-04; awaiting owner OK |
 
 ## Phase 3 — W3 Product creators onto the service
 
@@ -109,7 +110,7 @@
 | W2-A | 012 (∥ 011 only if 011 does not touch the same file) | 010 | 011 is `parallel-safe=false` (hot `OwnedChildWrite.cs`) |
 | W2 core (sequential) | 013 → 014 → 015 → 016 → {017, 018} → 019 | 011, 012 (+002, 003 for 014) | One core file; no parallelism |
 | W3-server | 030, 031, 032, 033, 034 | 019 | Separate callers; run `/conflict-check` for ontology/UAC files |
-| W2 follow-ups | 041; 042a → 042b | 019 (+039 for 041) | 041 and 042b both edit `RecordCreationService*.cs`: not parallel; whichever lands second rebases and reconciles design §15.5. 042a (tests only) may run beside 041 and lands alone |
+| W2 follow-ups | 041; 042a → 042b → 042c | 019 (+039 for 041) | 041 and 042b both edit `RecordCreationService*.cs`: not parallel; whichever lands second rebases and reconciles design §15.5. 042a (tests only) may run beside 041 and lands alone |
 | W3-wizards (sequential) | 020 → 021 → … → 029 | 019, 041 | FR-16: one wizard at a time, live-verified. 041 first: W3 cannot verify "the wizard sends no index" against a server that still copies the BU value |
 | W4 | 040 | 001, 005, 019 | Parallel with Phase 3 |
 | W5-A | 050 | 019 | Read-only investigation |

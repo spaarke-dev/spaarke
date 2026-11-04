@@ -92,6 +92,7 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2483 |
 | **Class** | K2: the same as the deleted core for the route and chat; email.draft keeps its stamp in the item (a′) |
 | **Owner task** | Follow-up after 017; needs UAC-r2 (changes owner decisions) |
+| **Status** | **Closed 2026-11-04** by task 042b, PR #2562 (0d4aa87ee0); #2483 closed |
 | **Failure** | Step 7 decides the owner from the item, and step 10 binds the derived stamp only into the create body. A child of a team-owned invoice in the reconcile window, whose secure matter is reachable only through that stamp, is owned without secure-if-any. Fix: derive the stamp before step 7 and add its root to the owner question |
 
 ## DI-010 — Budget inquiry preflight is looser than the create it precedes
@@ -191,5 +192,5 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Found** | 2026-11-04, task 042b fix round 1 (review item 3), by inspection, in passing |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2561 |
 | **Class** | **F (UAC-r2, 2026-11-04)**: a real path (chat). Pre-existing; 042b did not change it and is not held |
-| **Owner task** | A follow-up task straight after 042b. The fix is option 1: in step 7, read the catalog and put the core first in the owner question. It adds the caller's AppendTo on the core record (the same refusal shape, an unresolvable type fails closed). No create path checks that today: only lookups and the regarding pair (`OwnedChildWrite.PairOf`). Tests: Signal and DR, each with a secure core, no AppendTo on the core, and an agreeing core |
+| **Owner task** | Task 042c (POML written 2026-11-04), straight after 042b. The fix is option 1: in step 7, read the catalog and put the core first in the owner question. It adds the caller's AppendTo on the core record (the same refusal shape, an unresolvable type fails closed). No create path checks that today: only lookups and the regarding pair (`OwnedChildWrite.PairOf`). Tests: Signal and DR, each with a secure core, no AppendTo on the core, and an agreeing core |
 | **Failure** | Chat `dataverse.create_record` of a Signal or DR naming a core pair: the create asks lookups only (`ForRow`), the reconciler asks the core record first (`ForExistingRowAsync`), so the owner can differ until the reconciler re-owns it; under a Secure core with an ordinary subject the row is ordinary-team owned for that window. The ontology writers are not affected |
