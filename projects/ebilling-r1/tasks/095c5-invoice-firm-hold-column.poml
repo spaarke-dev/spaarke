@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095c-5" project="ebilling-r1">
+  <metadata>
+    <title>The firm hold lives on the invoice too: a field-secured sprk_invoice.sprk_firmhold, so unlinking or deleting the submission cannot lift it</title>
+    <phase>3 Rules (095c follow-up; uac-r2 2026-11-04)</phase>
+    <gate>uac-r2 preferred shape, 2026-11-04; blocks the master PR</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a field-secured column and changes the approval and export guard; tags include auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A fail-closed guard whose bypass is an approval and payment path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same files as 095c-4 and its review fixes.</parallel-reason>
+    <deps>095c-4</deps>
+    <tags>bff-api, auth, dataverse, ebilling</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>095c-4 finds the stored firm_missing hold through the submissions linked to the invoice (`InvoiceFirmHold.IsHeldAsync`, `sprk_invoicesubmission.sprk_invoice In [invoiceId]`). That link is not field-secured on dev, so a direct Dataverse write that removes or repoints it hides the hold. If reviewers hold Delete on submissions, deleting the submission does the same. uac-r2 prefers putting the hold on the invoice itself (notes/095c-from-email-firm-optional.md, section 14.x).</prompt>
+
+  <goal>`sprk_invoice` gets one new field-secured column, `sprk_firmhold`. Only the persister (095c-3's held outcome) and the typed writers set or clear it. 095d's assign-firm is the only clearer. `InvoiceFirmHold.IsHeld*` returns held when the invoice's own `sprk_firmhold` is set OR any linked submission holds firm_missing (unchanged, still fail-closed). Every consumer 095c-4 guarded (approve, held-approve, canApprove, Return to Firm, both AP-export checks, corrections, re-evaluation) reads the combined answer.</goal>
+
+  <context>
+    <background>
+      The column type is your choice: Two Options, or a reason-code string. State why. It must be field-secured with the existing profiles only: "Spaarke BFF-Managed Field Writers" (read, create, update) and "Spaarke BFF-Managed Field Readers" (read). Do not create a new profile.
+      Pattern to copy: `scripts/ebilling/Set-EbillingFindingsJsonFieldSecurity.ps1` (and `Set-EbillingResubmissionOfFieldSecurity.ps1`). Follow their preconditions, -WhatIf / -Apply / -Verify, fail-closed grant and solution membership.
+      Also add the column to the generic writers' refused list (ParentLineage / `InheritedAccessPermission.AccessColumns`, as 095c-4 did for `sprk_outcomereasoncode`), and to the CreatorPerson / findings-JSON-style reviewed-reader guard if one applies. Add it to SpaarkeMaster source as well (Entity.xml, IsSecured=1).
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="uac-r2">The hold must survive each of these direct writes, each proven by a test: (1) the submission's `sprk_invoice` is cleared or repointed; (2) the submission is deleted; (3) the reason code is rewritten and the invoice firm is set while the findings JSON is unchanged. In each case approval stays 409 and export stays refused.</constraint>
+    <constraint source="fail closed">If the invoice's `sprk_firmhold` cannot be read (a fault, or the column is missing in an environment that has not run the script), the answer is held, not "not held". Say how a P0/P1 environment behaves: there are no no-firm invoices there, so the column can be absent without blocking ordinary approval. Prove that ordinary firm invoices still approve, with a must-not-fire test.</constraint>
+    <constraint source="backfill">The script counts invoices whose linked submissions hold firm_missing, then sets `sprk_firmhold` on them (-Apply only). Dev is expected to have 0, because no no-firm invoice has been deployed. Report the count.</constraint>
+    <constraint source="live changes">-WhatIf on dev only. -Apply (column create, profile grants, backfill) needs the owner's go typed in the main session, with notices to uac-r2 before and after. Do not run -Apply.</constraint>
+    <constraint source="public repo">Notes describe access defects as defect plus location only. No step-by-step bypass.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>The column exists in source (Entity.xml) and in the idempotent script, with -WhatIf output on dev pasted into the notes.</criterion>
+    <criterion>The persister sets it in the same transaction as the held outcome. A test fails if the persister stops setting it.</criterion>
+    <criterion>The three direct-write tests above pass. One seed proof: remove the invoice-side read and the unlink and delete tests fail.</criterion>
+    <criterion>The must-not-fire test passes: a firm invoice with no hold approves and exports.</criterion>
+    <criterion>The column is refused to the generic writers, with a guard test.</criterion>
+    <criterion>095d's "must" list in the 095c notes says assign-firm clears `sprk_firmhold` through the typed writer, in the same write as the renumber.</criterion>
+    <criterion>The filtered unit gate and the ArchTests pass. Publish size is measured against a fresh master.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If field security on `sprk_invoice` would blank or break an existing reader that is not in the Readers profile (a form, view, the SPA, or a report), STOP and bring it to uac-r2 with the list.</trigger>
+  </escalation>
+</task>
