@@ -747,3 +747,19 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
   - 36 migrated (20 empty, 16 One-time), 0 failed, VERIFY PASS;
   - a second pass found 0 to migrate.
   - Detail is in task-005-notes.
+
+## 2026-11-03 — 042b F1: a caller-sent stamp is replaced by the derived one in the owner question (owner: A')
+
+**Finding:** both 042b adversarial passes independently found the same F1 (the correctness pass confirmed it with a probe). Step 6½ is fill-only, so a caller-sent `sprk_regardingmatter` that disagrees with the intermediate's root is used for the owner decision. The step-12 restamp then overwrites it, which leaves the #2483 state for 2–4 minutes. This predates 042b.
+
+**UAC-r2 (2026-11-03):** A with one change, "replace, not add": step 7 asks over the values the row ends with. The derived value replaces a disagreeing held stamp, and an agreeing stamp is kept unchanged. "Add" gets the reverse case wrong (a sent secure matter would make its owner briefly own a row stamped with an ordinary root). B (a new 400) is not recommended. C is not acceptable.
+
+**Owner (2026-11-03, in this session): A' (replace).**
+- The bind stays fill-only.
+- The derived root is never probed as the caller, and no refusal changes.
+- `CoreAncestorRestamper.PlanMissingStampAsync` (or a sibling) returns the full plan. That is one file outside 042b's two-file scope, justified in the task notes.
+- AC12 is amended: a sent stamp that agrees changes nothing; one that disagrees is replaced in the owner question.
+- Repair gets the same fix (security finding 6).
+- Tests cover both directions plus the agreeing case.
+
+Also agreed with UAC-r2: Signal / Decision Record under a team-owned intermediate of a Secure root refuse 409 `NoOwnerSource` (fail closed). This is K1 and gets a §15.4 row. #2556 (DI-017) and #2557 (DI-018) are filed for the owner.

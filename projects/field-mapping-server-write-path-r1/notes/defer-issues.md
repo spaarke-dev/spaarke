@@ -163,3 +163,33 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Out of scope, pre-existing: seen 2026-10-28 before this project's #2541 deployed; not this project's code |
 | **Owner task** | Unassigned (BFF platform / deploy owners) |
 | **Failure** | `Logger.ThrowLoggingError` → BadImageFormatException at instance startup (4× 2026-11-03 22:26:37Z) and in a 2026-10-28 burst (14×). Log entries in those windows are lost; no 5xx followed |
+
+## DI-017 — The server to-do regarding map lacks sprk_reportcard, which the client writes
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 042b implementer (Q1, proposed DI-P1) and correctness review (finding 5), in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2556 |
+| **Class** | Out of scope, pre-existing: fixing it changes `TodoRegardingBuilder`, outside `OwnerQuestionOf` / `ForRow`. Needs an owner decision |
+| **Owner task** | Unassigned; owner decision, then UAC-r2 review |
+| **Failure** | A to-do with a report-card pair is owned by the matter's team, not the report card's (create and reconciler agree; 042b AC3's second half cannot hold). `AllRegardingLookups` does not clear a set report-card lookup |
+
+## DI-018 — A communication's thread filing is ignored by chat create and the service's OwnershipException check
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 042b security review (finding 4) and correctness review (findings 2, 6), in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2557 |
+| **Class** | Out of scope, pre-existing: the chat path (`OwnedChildWrite.PathFor`, `DataverseCreateRecordHandler`) is outside 042b's two files, and the service check is an ownership refusal (NFR-07) |
+| **Owner task** | Unassigned; UAC-r2 review |
+| **Failure** | Under a Secure matter's thread, a thread-only communication is either created caller-owned (chat; the reconciler moves it 2–4 min later) or refused 409 `ownership_exception` (service). A missing thread gives a retryable-looking 503 |
+
+## DI-019 — The service's create of a Signal or Decision Record ignores its core record in the owner question
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-04, task 042b fix round 1 (review item 3), by inspection, in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2561 |
+| **Class** | **F (UAC-r2, 2026-11-04)**: a real path (chat). Pre-existing; 042b did not change it and is not held |
+| **Owner task** | A follow-up task straight after 042b. The fix is option 1: in step 7, read the catalog and put the core first in the owner question. It adds the caller's AppendTo on the core record (the same refusal shape, an unresolvable type fails closed). No create path checks that today: only lookups and the regarding pair (`OwnedChildWrite.PairOf`). Tests: Signal and DR, each with a secure core, no AppendTo on the core, and an agreeing core |
+| **Failure** | Chat `dataverse.create_record` of a Signal or DR naming a core pair: the create asks lookups only (`ForRow`), the reconciler asks the core record first (`ForExistingRowAsync`), so the owner can differ until the reconciler re-owns it; under a Secure core with an ordinary subject the row is ordinary-team owned for that window. The ontology writers are not affected |
