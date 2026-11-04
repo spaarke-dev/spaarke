@@ -420,7 +420,8 @@ public static class RuleSetEndpoints
     /// 089e fix round 2 (F1 ii): the list keeps only the sets the caller can Read, asked as the caller on each <c>sprk_ruleset</c> row
     /// (<see cref="CallerReadCheck.ScanAsync{T}"/>) - the same question (A) of <see cref="RequireAccessToTheRuleSet"/> asks on every by-id route,
     /// so a set the list shows is one its own routes answer, and a set its routes hide is not listed. A known deny leaves the set out; an answer
-    /// missing for ANY set, or more sets than <see cref="MaxRuleSetReadChecks"/>, makes the list 403 <c>system_failure</c>, as the Procedure checks do.
+    /// missing for ANY set makes the list 403 <c>system_failure</c>, as the Procedure checks do. More sets than <see cref="MaxRuleSetReadChecks"/>
+    /// is not a rights failure but a result too large to answer in one pass: 422 <c>result_truncated</c>, as the service's own cap (089e K2).
     /// </summary>
     private static async Task<IResult> ReadableSetsOnlyAsync(
         IReadOnlyList<RuleSetSummary> sets, AuthorizationService authorization, InvoiceContextService.InvoiceCaller caller,
@@ -429,9 +430,12 @@ public static class RuleSetEndpoints
         if (sets.Count > MaxRuleSetReadChecks)
         {
             logger.LogWarning(
-                "Rule set list: {Sets} sets exceed the {Cap} rights checks the list may ask; the list is refused (fail closed)",
+                "Rule set list: {Sets} sets exceed the {Cap} rights checks the list may ask; the list is refused as truncated",
                 sets.Count, MaxRuleSetReadChecks);
-            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            return Map(
+                RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Refused(
+                    StatusCodes.Status422UnprocessableEntity, RuleSetService.CodeResultTruncated, RuleSetService.TooManyRuleSetsMessage),
+                http);
         }
 
         var scan = await CallerReadCheck.ScanAsync(

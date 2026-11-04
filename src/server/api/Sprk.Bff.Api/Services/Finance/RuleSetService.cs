@@ -259,6 +259,10 @@ public class RuleSetService
     internal const string CodeInForce = "ruleset.proposal_in_force";
     internal const string CodeContainerNotConfigured = "ruleset.container_not_configured";
     internal const string CodeResultTruncated = "ruleset.result_truncated";
+
+    /// <summary>The detail of <see cref="CodeResultTruncated"/> when the list holds more rule sets than one pass reads (also the list route's, task 089e K2).</summary>
+    internal const string TooManyRuleSetsMessage = "There are more rule sets than can be listed in one pass.";
+
     internal const string CodeWriteFailed = "ruleset.write_failed";
     internal const string CodeSourceMissing = "ruleset.source_missing";
     internal const string CodeAlreadyDrafted = "ruleset.already_drafted";
@@ -571,7 +575,7 @@ public class RuleSetService
         if (sets.MoreRecords)
         {
             return RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Refused(
-                StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, "There are more rule sets than can be listed in one pass.");
+                StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, TooManyRuleSetsMessage);
         }
 
         // Task 089c: a record-scoped set is its record's secure child, changed only through the record's override routes; never listed here.

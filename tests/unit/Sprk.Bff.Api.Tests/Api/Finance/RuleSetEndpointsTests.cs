@@ -720,8 +720,8 @@ public sealed class RuleSetEndpointsTests
         (await response.Content.ReadAsStringAsync()).Should().NotContain(known.Id.ToString());
     }
 
-    [Fact(DisplayName = "089e F1 ii must-fire: more sets than the cap is 403 system_failure and asks no Read question on a set")]
-    public async Task List_WithMoreSetsThanTheCap_IsSystemFailure_AndAsksNoSetQuestion()
+    [Fact(DisplayName = "089e F1 ii / K2 must-fire: more sets than the cap is 422 result_truncated (not a 403) and asks no Read question on a set")]
+    public async Task List_WithMoreSetsThanTheCap_IsResultTruncated_AndAsksNoSetQuestion()
     {
         await using var host = await Host.StartAsync();
         var sets = Enumerable.Range(0, RuleSetEndpoints.MaxRuleSetReadChecks + 1).Select(_ => Readable(host, SummaryOf(Guid.NewGuid(), null))[0]).ToArray();
@@ -730,8 +730,10 @@ public sealed class RuleSetEndpointsTests
 
         var response = await host.Client.SendAsync(Req("GET", Base));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(RuleSetService.CodeResultTruncated).And.Contain(RuleSetService.TooManyRuleSetsMessage);
+        body.Should().NotContain(FinanceAuthorizationFilter.SystemFailureReasonCode);
         host.Access.Calls.Count(c => c.Set == "sprk_rulesets").Should().Be(0, "the cap is checked before any rights question");
     }
 
