@@ -305,3 +305,22 @@ Second adversarial review of option R, fixed on `task/ebilling-089d-r-fix2` (fro
 >    403), and must NOT be able to read a rule owned by `Secure Record Owners`.
 >
 > The customer deployment guide has the interim steps: §7.11 and §12.2 Phase 7a.
+
+## Applied on dev (2026-11-04)
+
+- **Owner go**, typed in the main session: "for 089 creating the role for our dev environment should be in this project--only the steps required for customer provisioning should go to the provisioning-r1 project", plus "proceed with the work items". uac-r2 got a notice before and after (session 20).
+- **Ran** `scripts/Set-CustomerOwnerTeams.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -CustomerBusinessUnitName 'Spaarke Business Unit 1' -Apply` from work `dfcc9b7355`. It exited 0 with "APPLIED and read back: no drift".
+- **`-Verify`** exited 0 with VERIFY PASS at 2026-11-04T15:55:43Z.
+- **The role** is "Billing Rule Reader", root role `bed10b10-68d8-f111-84e8-00224829aef9`, with `isinherited` = 0 on all 6 copies:
+  - root;
+  - Secure Record (`5d47dfe6-…`);
+  - Spaarke Business Unit 1 (`82fec998-…`), the customer copy;
+  - Demo, Dev 1 and Test 1.
+- **Holders**, read independently with SQL over the copies by `parentrootroleid`: `systemuserroles` 0 rows and `teamroles` 0 rows on every copy.
+- **Privileges:** `roleprivileges` holds a single row, on the root role: `prvReadsprk_Policy` with depth mask 4 (Deep). The copies inherit it.
+- **Unchanged:**
+  - the org setting (already true);
+  - both owner teams (no drift);
+  - no assignment (dev has no child-unit billing admins, because every dev business unit is a direct child of the root);
+  - no live-proof unit.
+- **Still open:** the live proof (a test child unit under BU1, a test admin, the helper, two probes, cleanup) needs its own owner go. It is required before the first customer with a child unit relies on R.
