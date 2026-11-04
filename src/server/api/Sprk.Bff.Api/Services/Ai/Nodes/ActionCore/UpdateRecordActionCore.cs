@@ -211,6 +211,14 @@ internal sealed class UpdateRecordActionCore
             throw new RecordOwnerUnresolvedException(input.EntityLogicalName, documentRefusal);
         }
 
+        // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths
+        // (RecordTableRule.FixedAfterCreateColumns): asked of every payload, a confirmed proposal included, on its shape alone,
+        // before any row is read or written. On a Signal the refusal above answers first for the app-only payloads.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(input.EntityLogicalName, updatePayload.Keys) is { } fixedRefusal)
+        {
+            throw new RecordOwnerUnresolvedException(input.EntityLogicalName, fixedRefusal);
+        }
+
         async Task Patch(CancellationToken ct)
         {
             // ebilling-r1 #2081: an invoice or line is written UPDATE-ONLY (If-Match: *, impersonation kept). The guard below

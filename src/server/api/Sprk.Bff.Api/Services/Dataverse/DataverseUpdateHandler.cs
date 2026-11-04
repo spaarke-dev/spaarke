@@ -100,6 +100,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
         }
 
+        // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths
+        // (RecordTableRule.FixedAfterCreateColumns): a playbook's output mapping is a configuration payload for any table, so it
+        // is asked on its shape alone, before any read or write. On a Signal the refusal above answers first.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(entityLogicalName, fields.Keys) is { } fixedRefusal)
+        {
+            throw new RecordOwnerUnresolvedException(entityLogicalName, fixedRefusal);
+        }
+
         // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
         // and an invoice re-file keeps its lines (D-96). Decided on the stored lookups overlaid with this write, before it.
         // #2257 (master merge): a person's write answers "not found" as "could not be read" (the guard reads as the app).

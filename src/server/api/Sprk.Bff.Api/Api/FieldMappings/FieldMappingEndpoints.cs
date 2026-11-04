@@ -1072,6 +1072,21 @@ public static class FieldMappingEndpoints
                         continue;
                     }
 
+                    // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths
+                    // (RecordTableRule.FixedAfterCreateColumns): a rule aimed at either is skipped, as above, and the rest applies.
+                    if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseFixedAfterCreateColumns(
+                            targetEntity, [rule.TargetField]) is { } fixedAfterCreate)
+                    {
+                        recordFieldResults.Add(new FieldMappingResultDto
+                        {
+                            SourceField = rule.SourceField,
+                            TargetField = rule.TargetField,
+                            Status = FieldMappingStatus.Skipped,
+                            ErrorMessage = fixedAfterCreate.Reason,
+                        });
+                        continue;
+                    }
+
                     // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes
                     // them from the owning business unit), so a rule aimed at either is skipped — never written, never an error —
                     // and the dropped value is logged, ids only (the rule is applied to a scratch payload to read it).
