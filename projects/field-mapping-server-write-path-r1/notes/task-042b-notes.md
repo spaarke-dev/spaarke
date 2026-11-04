@@ -140,6 +140,26 @@ Decision: `notes/decisions.md` "2026-11-03 — 042b F1" on the work branch (`c14
 - Publish delta (`publish-delta.ps1 -MasterSha cfebe65f9b -BranchSha c0fbc125ee`, `Compress-Archive -CompressionLevel Optimal`): master 41,212,610 bytes / 192 files; branch 41,213,439 bytes / 192 files; **delta +829 bytes**; total 39.3 MB. (The master zip differs by 26 bytes from round 0's measurement of the same commit: archive nondeterminism.)
 - CVE: `dotnet list package --vulnerable --include-transitive`: no vulnerable packages. No new HIGH CVE.
 
+## Fix round 2 (2026-11-04)
+
+A scoped re-check of `c0fbc125ee` found no F-class finding; round 2 is five small items.
+
+1. **Dead code removed.** `CoreAncestorRestamper.PlanMissingStampAsync` had no caller in src or tests (grep over `*.cs`): deleted. Its fill-only doc moved to `MissingOf`; the references in `PlanStampOfRowAsync`'s remarks, `CoreAncestorStampUnderivableException`'s summary (CoreAncestorRestamper.cs, the "~:962" reference) and `RecordCreationService.Repair.cs` (`RepairStamp`'s summary) now name `PlanStampOfRowAsync` / `MissingOf`. There was no reference in `RecordCreationService.cs`.
+2. **I-16 before the create follows the planned root.** `StampBeforeCreateAsync` now takes the full plan too and, for I-16 only, applies it to the merged row (SET replaces, CLEAR removes) before `ResolveInheritedAccessPermissionAsync`. No extra read or probe: the resolver reads the parents the row names, and a replace swaps one parent for another (a clear removes one); the column probe is unchanged. Test: `ChatCreate_ASentStampThatDisagrees_DoesNotSetI16FromTheSentRoot_ButFromThePlannedOne` (event under an event of the ordinary matter, Standard; the item sends the Secure matter, Restricted, as its stamp): I-16 is Standard and the sent bind is kept (fill-only). Failing first: with the plan application disabled it fails (`Expected ... 100000000 ... but found 100000002`, Restricted from the sent root). No K2 line needed.
+3. **Two-column "agrees" case.** `TheOwnerQuestion_KeepsAnAgreeingStampColumn_AndTakesThePlannedValueForAnother` (theory, 2 cases) in RouteCreatePreCreateStampTests: the intermediate event's root is the Secure matter AND a project; the item sends the matter (agrees) and either another project (replaced) or none (added). Asserts the real plan names only the project, the owner question (`AsTheRowEnds`) keeps the matter as sent and takes the planned project, the event lookup is unchanged, and the bind (`MissingOf`) stays fill-only. It passes on round-1 code (it pins A', not a new behaviour).
+4. **Parity harness guard.** `CreateParityWorld.CreateAsAsync` asserts that a created row holds every lookup the item names (the written row is built from the body's binds, so a body that bound nothing could pass as an unfiled row). Must-fire control: with the item's binds dropped from the materialized body, 20 parity creates fail on the guard; restored, all pass.
+5. **Repair ordering (confirm and note).** `CoreAncestorStampReconciliationJob` (`*/5`, CoreAncestorStampReconciliationJob.cs:74, registered MetadataServiceExtensions.cs:48) and `SecureChildReconciliationJob` (`*/2`, SecureChildReconciliationJob.cs:131, registered ExternalAccessModule.cs:734) are independent schedules with no ordering, so a reconcile CAN run before the restamp of a row Repair re-owned per the planned root; its recent-changes pass only moves a child into isolation, and only the sweep (gated by `SecureChild:Reconciliation:WritesEnabled`, absent = report-only) could move it to the stale stamp's owner until the next restamp. design.md section 15.4 row 11 (K3). No job change.
+
+**Existing-test exceptions (round 2).** No existing assertion changed. Harness: `WriterBuilderOwnershipParityTests.CreateParityWorld.CreateAsAsync` gained the item-lookups guard (item 4). New tests only otherwise (items 2 and 3).
+
+**Verification (round 2), at fix commit `89027b1a76`.**
+- Build: `dotnet build Spaarke.sln` (via verify-suites.sh): 0 errors, 0 warnings.
+- AC14 filter: **785 passed / 0 failed** (782 + the I-16 fact + the two-column theory x2).
+- `verify-suites.sh` project set (log dir `scratchpad/verify-042b-r2`): **6670 passed / 0 failed / 7 skipped** (the same `OfficeEndpointsContractTests` skips), 20 m 6 s.
+- ArchTests (rebuilt first): **1911 passed / 0 failed**.
+- Publish delta vs `cfebe65f9b`: master 41,212,586 bytes / 192 files; branch 41,213,350 bytes / 192 files; **delta +764 bytes**; total 39.3 MB.
+- CVE: no vulnerable packages.
+
 ## Proposed DI entries (the main session files them)
 
 - **DI-P1 (found in passing): a to-do's report-card pair is never its subject.** `TodoRegardingBuilder.RegardingLookupByEntity` (server, 11 targets) lacks `sprk_reportcard`, which the client `TodoRegardingUpdateBuilder.ts` writes as its 12th target. `RecordOwnershipContext.SubjectColumnOf` therefore never ranks a report card first on a to-do, for the create, the reconciler or Office. Owner decision needed (Q1). Class: K-candidate (pre-existing; create and reconciler agree). Filed as #2556 / DI-017.
