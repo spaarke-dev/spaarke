@@ -6,7 +6,7 @@ namespace Spaarke.ArchTests;
 /// <summary>
 /// ebilling-r1 task 081 (ontology review, 2026-10-22): <see cref="SignalClosureService"/> is not sealed only so the Procedure retire tests
 /// can run its real selection and observe its close (<c>SelectOpenSignalsOfPolicyAsync</c> and <c>ClosePolicySignalsRetiredAsync</c> are
-/// virtual; task 089e adds <c>SupersedeInPassAsync</c>, for the record-rule change's tests). No production type may derive from it: an override would let one caller select or close a different Signal set from the one
+/// virtual; task 089e adds <c>SupersedeInPassAsync</c> and <c>SelectOpenSignalsOfPolicyOnSubjectsAsync</c>, for the record-rule change's tests). No production type may derive from it: an override would let one caller select or close a different Signal set from the one
 /// the sweep, the admin retire close and the Procedure retire preview share ("preview = sweep").
 /// </summary>
 /// <remarks>

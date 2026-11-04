@@ -289,7 +289,7 @@ public sealed class RuleSetServiceTests
                 .Returns((IReadOnlyList<OrganizationRequest> requests, CancellationToken _) =>
                 {
                     Transactions.Add(requests.ToList());
-                    if (TransactionOutcomeUnknown)
+                    if (TransactionOutcomeUnknown || TransactionGivesNoAnswer?.Invoke(requests) == true)
                     {
                         throw new DataverseTransactionException("simulated timeout: no fault came back", null, true, new TimeoutException());
                     }
@@ -317,6 +317,11 @@ public sealed class RuleSetServiceTests
                         }
                     }
 
+                    if (TransactionCommitsButAnswersUnknown?.Invoke(requests) == true)
+                    {
+                        throw new DataverseTransactionException("simulated timeout after the commit: no answer came back", null, true, new TimeoutException());
+                    }
+
                     return Task.CompletedTask;
                 });
         }
@@ -332,6 +337,12 @@ public sealed class RuleSetServiceTests
 
         /// <summary>The transaction returns no fault at all (a timeout): <see cref="DataverseTransactionException.OutcomeUnknown"/>, nothing applied.</summary>
         public bool TransactionOutcomeUnknown;
+
+        /// <summary>Task 089e (K2): a transaction this answers true for is APPLIED, then answers no fault at all (<see cref="DataverseTransactionException.OutcomeUnknown"/>).</summary>
+        public Func<IReadOnlyList<OrganizationRequest>, bool>? TransactionCommitsButAnswersUnknown;
+
+        /// <summary>Task 089e (K2): a transaction this answers true for gives no answer and applies nothing (as <see cref="TransactionOutcomeUnknown"/>, for one transaction).</summary>
+        public Func<IReadOnlyList<OrganizationRequest>, bool>? TransactionGivesNoAnswer;
 
         /// <summary>The transaction throws this exception as is, nothing applied (e.g. an HttpClient timeout's TaskCanceledException).</summary>
         public Exception? TransactionThrows;
