@@ -1841,20 +1841,37 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 > the rows stay with the seeding identity, and an operator re-owns them to this team after setup. Users keep reading the
 > rows through their own roles (`Spaarke Core User`, Deep).
 >
-> **The same run also sets up the `Billing Rule Readers` team (ebilling-r1 task 089d; owner 2026-11-03).** A billing admin
-> may exclude a billing rule for one record only if they can read that rule (`sprk_policy`). Billing Administrator reads rules
-> at Deep from the unit the admin is homed in, so an admin homed in a **child** unit of the customer's unit cannot read the
-> rules owned in the customer's unit and gets 403. The fix is a team in the customer's own business unit (never the root,
-> never `Secure Record`) holding that unit's copy of the role `Billing Rule Reader` (created once in the root; Read at
-> **Deep** on `sprk_policy` only, `config/billing-rule-readers-role.json`). Unlike the two owner teams, this team **has
-> members**: add each of the customer's child-unit billing admins to it after `-Apply` (Power Platform admin center, the
-> environment's Teams, `Billing Rule Readers`, Add members). The script never adds or removes a member. A team's Deep is
-> evaluated from the team's unit, so a member reads every rule owned in the customer's unit and the units below it, and no
-> rule owned by `Secure Record Owners`. `-Verify` fails while the team sits in the root or in `Secure Record`, the role holds
-> any other privilege or depth, or a member lacks the billing-admin privilege (`prvWritesprk_ruleset`) or is homed outside
-> the customer's unit and the units below it (another customer's admin would read this customer's rules). Until the team exists
-> and the admin is a member, that admin's 403 is the correct answer. Admins homed in the customer's unit itself need no
-> membership.
+> **The same run also sets up the `Billing Rule Reader` role and the org setting it needs (ebilling-r1 task 089d, option R;
+> owner 2026-11-04: "use direct role approach").** A billing admin may exclude a billing rule for one record only if they can
+> read that rule (`sprk_policy`). Billing Administrator reads rules at Deep from the unit the admin is homed in, so an admin
+> homed in a **child** unit of the customer's unit cannot read the rules owned in the customer's unit and gets 403. The fix is
+> one small role, `Billing Rule Reader` (created once in the root with `isinherited` 0; Read at **Deep** on `sprk_policy`
+> only, `config/billing-rule-readers-role.json`), assigned **directly** to each child-unit billing admin. No team holds it.
+> - **Provisioning creates the role and sets the org setting.** Assigning a user a role copy from a unit other than their own
+>   needs `EnableOwnershipAcrossBusinessUnits` (Power Platform admin center: "Record ownership across business units"). The
+>   script's `-Apply` sets it as its own logged step, an **org-wide** write: it changes that one element of
+>   `organization.orgdborgsettings`, writes the rest back as read, prints the old and new value and reads it back. `-Verify`
+>   fails while it is off.
+> - **An operator assigns the role to each child-unit billing admin, with the script:** `-AssignBillingRuleReader
+>   <systemuserid>[,...]`, dry run first, then `-Apply`. It assigns the **customer top unit's copy** of the role, after checking
+>   that the user holds the billing-admin marker (`prvWritesprk_ruleset`) and is homed in the customer's unit or a unit below
+>   it. Do not assign it in the admin UI: the UI offers the copy in the user's own unit first, and that copy reaches nothing
+>   above that unit. Admins homed in the customer's unit itself need no assignment.
+> - **Then run `-Verify`.** It fails if the org setting is off; if `isinherited` is not 0; if the role grants anything but Read
+>   at Deep on `sprk_policy`; if any team holds any copy of the role; if a user holds the root copy, the `Secure Record` copy or
+>   a copy below a customer top unit; if a holder of the customer unit's copy lacks the marker or is homed outside the
+>   customer's unit and the units below it (another customer's admin would read this customer's rules); or if a holder of
+>   **another** customer top unit's copy is homed outside that unit and the units below it. The script also refuses to run, in
+>   every mode and before any write, when the business-unit tree is not the expected shape: `Secure Record` must be a direct
+>   child of the root and outside every customer subtree (D-123).
+> - **Live-proof gate.** Before the first customer with a child unit relies on this, an admin homed in a child unit and holding
+>   the top unit's copy must be able to read (and exclude) a Billing rule owned in the customer's top unit, and must **not** be
+>   able to read a rule owned by `Secure Record Owners` (still 403). See Phase 7a. Until the admin holds the role, that
+>   admin's 403 is the correct answer.
+>
+> The depth of a role is measured from the business unit of the role **copy** a user holds, not from the user's home unit. The
+> copy is the customer's top unit's, so the holder reads every rule owned there and below, and never a rule in `Secure Record`,
+> which is a sibling of that unit.
 >
 > **Product configuration is read at Global (owner decision 2026-10-29).** Spaarke product data stays owned in the root
 > (owner round 136), and people work in the customer's business unit below it, where a Read at Deep does not reach the
@@ -2392,17 +2409,30 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 # BFF does not resolve it. Field-mapping's seeder (task 004) and provisioning's H12b seeder (FR-39) WILL own new
 # configuration rows to this team; until they ship, the rows stay with the seeding identity and an operator re-owns them
 # to this team after setup.
-# (3) The 'Billing Rule Readers' team in the same unit (ebilling-r1 task 089d), holding that unit's copy of the role 'Billing
-# Rule Reader' (Read at Deep on sprk_policy only, config/billing-rule-readers-role.json). It HAS members: after -Apply, add
-# each child-unit billing admin to it by hand (the script never adds or removes one), then run -Verify again. -Verify fails
-# while the team sits in the root or Secure Record, the role holds anything else or another depth, or a member lacks
-# prvWritesprk_ruleset (the billing-admin marker) or is homed outside the customer's unit and the units below it.
-# Provisioning's H7c (#2429) replaces this step in a provisioning run: one handler for all three teams, after H7b and before
-# H9, from the same config/*-role.json files ($DeclaredRoleFiles), with its own gate and an H13 re-check.
-.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>"            # dry run: the plan for all three teams, no writes (exit 1 = an owner decision is needed first)
-.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Apply     # create each team (and each role once), add its tables, strip the rest, assign
-# then: add the child-unit billing admins to 'Billing Rule Readers' (by hand; not the script)
-.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Verify    # MUST exit 0 (no drift in any team); the Phase 6 BFF writes hard-deny rows only from then on
+# (3) The role 'Billing Rule Reader' (ebilling-r1 task 089d, option R; Read at Deep on sprk_policy only, isinherited 0,
+# config/billing-rule-readers-role.json). NO team holds it: it is assigned directly to each child-unit billing admin, using
+# the CUSTOMER TOP UNIT's copy. -Apply also sets the org setting EnableOwnershipAcrossBusinessUnits if it is off: an
+# ORG-WIDE write, logged as its own step (one orgdborgsettings element changes; the rest is written back as read).
+# -Verify fails while the org setting is off, isinherited is not 0, the role grants anything else or another depth, any team
+# holds any copy, a user holds the root copy, the Secure Record copy or a copy below a customer top unit, or a holder of this
+# unit's copy lacks prvWritesprk_ruleset (the billing-admin marker) or is homed outside the customer's unit and the units
+# below it, or a holder of ANOTHER customer top unit's copy is homed outside that unit and the units below it. Every mode
+# refuses to run, before any write, when Secure Record sits inside the customer's subtree (it must be a direct child of the
+# root and outside every customer subtree, D-123).
+# Provisioning's H7c (#2429) replaces this step in a provisioning run: one handler for the two teams and the role, after H7b
+# and before H9, from the files $DeclaredRoleFiles lists (restricted-content-owner-role.json,
+# customer-configuration-owner-role.json, billing-rule-readers-role.json), with its own gate and an H13 re-check.
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>"            # dry run: the plan for the org setting, both teams and the role, no writes (exit 1 = an owner decision is needed first)
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Apply     # set the org setting (own step), create each team and each role once, add its tables, strip the rest, assign the owner roles
+# then, for each child-unit billing admin (the script assigns the TOP unit's copy; never the admin UI, which offers the user's own unit's copy):
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -AssignBillingRuleReader "<systemuserid>"          # dry run: checks the marker and the home unit, prints the plan
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -AssignBillingRuleReader "<systemuserid>" -Apply   # assigns the customer top unit's copy
+.\scripts\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerBusinessUnitId "<customerBusinessUnitId>" -Verify    # MUST exit 0 (no drift); the Phase 6 BFF writes hard-deny rows only from then on
+# LIVE-PROOF GATE (uac-r2, 089d): before the FIRST customer with a child unit relies on 'Billing Rule Reader', prove it live
+# once: a billing admin homed in a child unit and holding the top unit's copy (1) can Read a Billing rule owned in the
+# customer's top unit (rule-exclude on it is no longer 403; a system rule answers 409 assignment.system_rule), and (2) can NOT
+# Read a rule owned by 'Secure Record Owners' (still 403). Record the result in the environment's notes. Until it is proven,
+# do not tell such a customer that child-unit billing admins can exclude rules.
 
 # Phase 7b — B2B guests who are outsiders are flagged external (unified-access-control-r2 task 114, owner round 67;
 # Model 1 rule: spaarkeai-word-add-in-r1 task 126, owner 2026-10-13 — per environment, after the users exist, and again
@@ -2838,7 +2868,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-23 | §6.5.2: contact access-level and identity bookkeeping columns are field-secured — `scripts/Set-ExternalAccessContactSecuritySchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the `sprk_identitycollision*` columns and adds three BFF-only columns; the H6 path for a new stamp applies once SpaarkeMaster 1.2.4.0 is published; §7.11: H7b S18 covers the plane and collision columns, S19 verifies the access-level lock and the whole standing-grant lock (Standing Grant Administrators 4/4/4; no other writer but System Administrator — `secure_setup.standing_grant_lock_other_writer`), S22 verifies the three BFF-only columns' locks once a release carries them; an H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the control plane is deployed | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice A) |
 | 2026-10-23 | §6.5.2 rollout note: rollout order — the contact security schema is applied and `-Verify` passes (stamp columns and proof reads) on every environment BEFORE a BFF build that requires the invite stamp is deployed; without the stamp columns every email bind (CIAM and Workforce) is refused; an email bind needs a current invite stamp (invited address and, for work accounts, the invited tenant unless `xms_edov` is boolean true); invites take an optional `invitedTenantId` (GUID); Workforce contacts never invited through the BFF, or invited before this release, need a re-invite naming their tenant | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice B) |
 | 2026-10-28 | §7.11 + §12.2: the customer owner teams step is **Phase 7a**, after Phase 7 (H10 creates the unit) and before Phase 8 — no longer "Phase 5d" before Phase 6; the Phase 6 BFF refuses ordinary hard-deny writes until its `-Verify` exits 0. The configuration-team seeders are future work (field-mapping task 004, H12b FR-39); until then an operator re-owns the rows | `unified-access-control-r2` task 194b R4b-4 |
-| 2026-11-04 | §7.11 + §12.2 Phase 7a: the same run sets up a third team, `Billing Rule Readers` (Read at Deep on `sprk_policy` only, `config/billing-rule-readers-role.json`), in the customer's unit; it has members (the child-unit billing admins, added by hand after `-Apply`), so they can read and exclude the rules owned in the customer's unit; `-Verify` fails on a team in the root or Secure Record, any other privilege or depth, or a member without `prvWritesprk_ruleset` or homed outside the customer's units. Handed to `customer-provisioning-orchestration-r1` for H7c (#2429) | `ebilling-r1` task 089d (owner 2026-11-03; design unified-access-control-r2) |
+| 2026-11-04 | §7.11 + §12.2 Phase 7a: the same run sets up the role `Billing Rule Reader` (Read at Deep on `sprk_policy` only, `isinherited` 0, `config/billing-rule-readers-role.json`), assigned directly to each child-unit billing admin from the customer top unit's copy (`-AssignBillingRuleReader`), so they can read and exclude the rules owned in the customer's unit; no team holds it (option R replaced the `Billing Rule Readers` team before it was applied anywhere). `-Apply` sets the org setting `EnableOwnershipAcrossBusinessUnits` as its own logged, org-wide step; `-Verify` fails on the setting off, `isinherited` 1, any other privilege or depth, a team holder, the root, Secure Record or a lower unit's copy assigned, or a holder without `prvWritesprk_ruleset` or homed outside the customer's units. Live-proof gate before the first customer with a child unit relies on it. Handed to `customer-provisioning-orchestration-r1` for H7c (#2429) | `ebilling-r1` task 089d (owner 2026-11-03 and 2026-11-04; uac-r2's five conditions) |
 
 ---
 
