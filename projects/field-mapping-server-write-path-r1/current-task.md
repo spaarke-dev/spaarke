@@ -18,7 +18,7 @@
   - Failing-first 5/10 → 10/10; AC14 782/0; verify-suites 6667/0/7; ArchTests 1911; publish +829 B vs cfebe65f9b; no CVE.
   - design §15.3/15.4 (rows 8–10)/15.6 updated.
   - Review item 3 (the Signal/DR core pair) is outside OwnerQuestionOf, so it was filed as **#2561 / DI-019** (7e7613eeb3), not fixed.
-- **Scoped Sonnet re-check** of 20bdd9f7e5..c0fbc125ee is running (agent `fm-042b-recheck1`).
+- **Scoped Sonnet re-check done: no F-class findings.** Fix round 2, small K items, sent to fm-042b 2026-11-04: delete the dead `PlanMissingStampAsync`, I-16 from the plan-applied row (or a K2 row), a two-column agrees test, the parity harness guard, Repair restamp/reconcile ordering (note, or a K3 row). After round 2: read its diff, then send the full diff to UAC-r2.
 - Filed from the reviews: #2556 / DI-017 (report-card regarding; AC3 second half), #2557 / DI-018 (thread-only communication), #2561 / DI-019.
 - **Then:**
   1. Fix any F-findings through SendMessage to fm-042b.
@@ -65,7 +65,7 @@
 | **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
-| **Waiting on** | - fm-042b-recheck1 (scoped re-check); then uac-r2 (042b full pass).
+| **Waiting on** | - fm-042b (fix round 2); then uac-r2 (042b full pass).
 - Owner: the Family 1.0.56 look (the four #2513 items on dev) and the 076 narrower-user pass. **Done 2026-11-03:** 005 `-Apply` on dev (36 migrated, VERIFY PASS, idempotent); pid 53128 (the pre-crash session) stopped on the owner's "kill it".
 - 041 live proof: dev BFF d763dc120e (carries #2541) is live since 2026-11-03T22:26:31Z. The post-deploy check passed on what existed (0 5xx; no index or child-records traffic; no rows since the deploy). The startup logger exception is pre-existing (#2549, DI-016). After the next real upload or create on dev, re-run the read-only checks (document `sprk_searchindexname` = spaarke-files-index; no `sprk_ai_search_index` on new rows). Send the results to **uac-r2** (it now runs dev deploys), and copy R3 (`spa-external-access-platform-f2`) only for its rollout record §17.
 - Rows to delete later: see `notes/task-019-notes.md` (the check-C event is the owner's and stays).
