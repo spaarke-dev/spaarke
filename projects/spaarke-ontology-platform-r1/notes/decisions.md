@@ -436,6 +436,13 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Decision id:** namespaced per verb, like override and return: `IdOf("ebilling-assign-firm-{submissionId}")`. Reusing the override's id would be refused as another code under the same id.
 - **Signals:** firm_missing is a system finding under `BILL-SYSTEM-SUBMISSION` (SubmissionIntegrity), like the invoice-number mismatch. No new policy row. The decision resolves the firm_missing Signal(s) only, not every Signal on the invoice as override and return do. They are closed as Acted and linked to the record.
 - **Not ontology's call:** what setting the firm opens to the firm's external users is for uac-r2. Findings that need a firm are re-evaluated after the firm is set; they are new Signals, not part of this decision.
+- **Clarified 2026-11-04 (ebilling 095d asked whether option 2, reserve → record → apply, satisfies this).** "Stored before the record and reused on retry" means the record names the number that is persisted and never a second allocation. It does **not** mean record-before-effect. Billing decisions already apply first and then record: approval runs transition → portion → record → Signals → link, line decisions write the lines and then record (074 K-3). The concurrency-safe apply transaction therefore satisfies this decision, provided that:
+  1. every permanent refusal is checked before it;
+  2. the same transaction stores the decision (firm, note, previous and new number, the firm_missing Signal set and read time) so that a repeat rebuilds the identical record without reallocating;
+  3. a failure after the apply answers 503 incomplete and leaves the firm_missing Signal open, so the gap stays visible;
+  4. Signals close only after the record.
+
+  Ontology prefers option 1 over option 2. Option 2 can leave an append-only record, and possibly an Acted Signal, for a firm assignment that was never applied, plus a scope that does not match the firm.
 
 ## D-202 — Record-rule policy code: `BRR-{recordRulePolicyId:N}` (ontology position, 2026-11-03)
 
