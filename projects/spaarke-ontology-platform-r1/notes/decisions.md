@@ -443,7 +443,7 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   4. Signals close only after the record.
 
   Ontology prefers option 1 over option 2. Option 2 can leave an append-only record, and possibly an Acted Signal, for a firm assignment that was never applied, plus a scope that does not match the firm.
-  uac-r2 (2026-11-04) accepts option 1's window, in which the firm sees the submission before the record exists. They add a fifth condition: the census or schema check reports "applied, no record yet" rows with their age, INFO inside a set window and FAIL after it. The owner chooses.
+  uac-r2 (2026-11-04) accepts option 1's window, in which the firm sees the submission before the record exists. They add a fifth condition: the census or schema check reports "applied, no record yet" rows with their age, INFO inside a set window and FAIL after it. **The owner chose option 1** (2026-11-04, in uac-r2's session, relayed by uac-r2 `-20`). The owner also wants an ontology K-3 review of the 095d diff before merge. AI re-run rule (owner): re-run the AI only where a rule's outcome can change with it.
 
 ## D-202 — Record-rule policy code: `BRR-{recordRulePolicyId:N}` (ontology position, 2026-11-03)
 
