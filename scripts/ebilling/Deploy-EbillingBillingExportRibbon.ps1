@@ -91,6 +91,51 @@ while ($next) {
 }
 $storedIds = @($rows | ForEach-Object { "$($_.diffid)" })
 
+# The full stored definitions (diff rows, commands, rules): saved for rollback, and compared with the checked-in diff by CONTENT, so the import
+# (which replaces them) loses nothing on dev (ribbon-edit skill: export first).
+function Get-All([string]$Url) {
+    $all = @(); $n = $Url
+    while ($n) { $p = Invoke-RestMethod -Headers $headers -Uri $n; $all += $p.value; $n = $p.'@odata.nextLink' }
+    $all
+}
+$storedDiffs = Get-All "$api/ribbondiffs?`$filter=entity eq '$Table'&`$select=diffid,difftype,rdx"
+$storedCommands = Get-All "$api/ribboncommands?`$filter=entity eq '$Table'&`$select=command,commanddefinition"
+$storedRules = Get-All "$api/ribbonrules?`$filter=entity eq '$Table'&`$select=ruleid,ruledefinition"
+
+$rollbackDir = Join-Path ([System.IO.Path]::GetTempPath()) ("$SolutionName-rollback-{0}" -f (Get-Date -Format 'yyyyMMddHHmmss'))
+New-Item -ItemType Directory -Path $rollbackDir -Force | Out-Null
+$ribbon.Save((Join-Path $rollbackDir "$Table-effective-ribbon.xml"))
+[pscustomobject]@{ environment = $BaseUrl; table = $Table; savedAt = (Get-Date).ToUniversalTime().ToString('o')
+    ribbondiffs = $storedDiffs; ribboncommands = $storedCommands; ribbonrules = $storedRules } |
+    ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $rollbackDir "$Table-stored-ribbon.json") -Encoding utf8
+Write-Host "Rollback copy of dev's ribbon for ${Table}: $rollbackDir (effective ribbon XML + stored diff, command and rule rows)."
+
+# Canonical form: attributes sorted, whitespace-only text dropped, so formatting and attribute order never count as a difference.
+function ConvertTo-Canonical([System.Xml.XmlNode]$Node) {
+    if ($Node.NodeType -eq [System.Xml.XmlNodeType]::Text) { return [System.Security.SecurityElement]::Escape($Node.Value.Trim()) }
+    if ($Node.NodeType -ne [System.Xml.XmlNodeType]::Element) { return '' }
+    $attrs = @($Node.Attributes | Where-Object { $_.Name -notlike 'xmlns*' } | Sort-Object Name | ForEach-Object { "$($_.Name)=`"$($_.Value)`"" }) -join ' '
+    $kids = @($Node.ChildNodes | ForEach-Object { ConvertTo-Canonical $_ }) -join ''
+    "<$($Node.LocalName) $attrs>$kids</$($Node.LocalName)>"
+}
+# The DEFINITION of an id, never a reference to it (a command names its rules by Id too).
+function Find-SourceNode([string]$Id, [string]$Kind) {
+    switch ($Kind) {
+        'command' { $diffXml.SelectSingleNode("//CommandDefinitions/CommandDefinition[@Id='$Id']") }
+        'rule'    { $diffXml.SelectSingleNode("//RuleDefinitions/*/*[@Id='$Id']") }
+        default   { $diffXml.SelectSingleNode("//CustomActions/*[@Id='$Id' or @HideActionId='$Id'] | //LocLabels/LocLabel[@Id='$Id']") }
+    }
+}
+$drift = @()
+foreach ($d in $storedDiffs) { $s = Find-SourceNode $d.diffid 'diff'; if ($s) { [xml]$x = $d.rdx; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += "ribbondiff $($d.diffid)" } } }
+foreach ($c in $storedCommands) { $s = Find-SourceNode $c.command 'command'; if (-not $s) { $drift += "command $($c.command) (not in the checked-in diff)" } else { [xml]$x = $c.commanddefinition; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += "command $($c.command)" } } }
+foreach ($r in $storedRules) { $s = Find-SourceNode $r.ruleid 'rule'; if (-not $s) { $drift += "rule $($r.ruleid) (not in the checked-in diff)" } else { [xml]$x = $r.ruledefinition; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += "rule $($r.ruleid)" } } }
+Write-Host "Stored definitions compared by content: $($storedDiffs.Count) diff rows, $($storedCommands.Count) commands, $($storedRules.Count) rules; differing from the checked-in diff: $($drift.Count)"
+if ($drift.Count -gt 0) {
+    Write-Host "REFUSED: dev's stored ribbon for $Table differs from the checked-in diff, and the import would replace it: $($drift -join '; '). Merge dev's version into $SourceDiff first (the rollback copy has it). Nothing was changed." -ForegroundColor Red
+    exit 2
+}
+
 # Every Location must be a control the published ribbon has now, or one this diff already hides (its HideActionId is a stored row).
 $unknown = @($hides | Where-Object { -not $ribbon.SelectSingleNode("//*[@Id='$($_.Location)']") -and ($storedIds -notcontains $_.Id) })
 Write-Host "Hidden controls in the diff: $($hides.Count); in the effective ribbon now: $($present.Count); already hidden by a stored row: $(@($hides | Where-Object { $storedIds -contains $_.Id }).Count)"
