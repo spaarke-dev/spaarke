@@ -176,7 +176,39 @@ The prototype contract (`src/template/types.ts`) is adopted with these changes:
 | **Message threads** (#2453) | Show messages as threads, as the model-driven app does. |
 | **Matter events: task type and assignee** (#2445, ontology D-199) | Show the task type and assignee on a matter's events; optional event deep link. |
 | **Teams mobile layout** (#2466) | The Teams tab loads on phones but is not adapted to the surface (R3 071). |
-| **Grant email to a workforce contact** (#2458, ISS-024) | Only if the owner moves it out of R3: the grant notifier must not email a home-linked workforce contact as an external person. Owner decision pending. |
+| ~~Grant email to a workforce contact~~ (#2458, ISS-024) | **Not R4.** R3 fixed it in task 079 (PR #2500, dev `fcf01480f4`, 2026-11-01); the issue is closed. Its follow-ups #2499 and #2508 are listed in this section. |
+| **Documents with no file** (#1886, R3 ISS-011) | Owner decision 2026-10-14: list them but hide Download and versions. Add `hasFile` to the external document DTO (BFF) and read it in the SPA. Pairs with #2490 and the Document preview. |
+
+### 7.1 Carried from the R3 hand-off (R3 `README.md` "Hand-off: open issues", checked 2026-11-04)
+
+R3 sends these open issues to "R4 backlog". None was in this design before. Each still needs an owner call: in R4 scope or deferred again. The ones marked † are outside the record-modal theme.
+
+| Issue | R3 id | What | Note |
+|---|---|---|---|
+| #1650 | ISS-004 | Internal document delete orphans the SPE file when the file delete fails | Documents |
+| #1839 | ISS-007 | Service-request documents are indexed with no parent, so they can't be found from the record | Documents and search; relevant to the Service Request template |
+| #1636 | ISS-003 | The shared `sanitizeEmailHtml` keeps style positioning and remote images | Shared UI; affects Messages (#2453 threads) |
+| #1623 | ISS-001 | `AuthorizationModule`: the Copilot audience merge runs once per process, not per options instance | † BFF auth, so it needs auth review (§6) |
+| #1673 | ISS-005 | Binder-created contacts have no BU-team owner | † With provisioning (BU configuration). Related: #2278 (backfill existing contacts) and #2270 (contacts in a foreign environment have no owner; owner decision needed). Neither is in R3's hand-off table. |
+| #1737 | DEF-002 | Incident alerting for Policy Questions | † Blocked on the per-customer mailbox (#1562) |
+| #1840 | ISS-008 | Unused `sprk_communication_send` web resource | † Cleanup |
+| #1930 | ISS-012 | WorkforceHome scheme tests are order-dependent | † Test hygiene |
+| #2499 | ISS-028 | The in-memory contact store diverges from `ContactSelect` | † Test debt; the gate file is ontology's |
+| #2534 | ISS-031 | Auth architecture doc predates ADR-028 A9 | † R4 only if spaarke-auth-system-of-record-r1 doesn't resume |
+
+**Open R3 issues with no home in the R3 hand-off** (each issue body says "Owner: R3"; confirmation asked of the R3 session 2026-11-04):
+
+| Issue | What |
+|---|---|
+| #2269 | Retryable workforce binder faults (`contact_lookup_failed` / `_create_failed` / `_bind_failed`) answer 403, not 503; the SPA should retry on 503. UAC to review. |
+| #2271 | The document-lock 409 has no ProblemDetails title or status, so clients show generic text |
+| #2275 | `no-mock-identity.test.tsx` fails on its first run after an edit (cold Vite transform hits the 60 s timeout) |
+
+**Inherited state, not issues:**
+- `85fbba3f64` (registration shows "not set up" for operator-only 500s) is on master but **not deployed** to the dev SPA. It ships with R4's first SPA deploy.
+- R3 was to review ebilling's 095a/095b PR before merge: does `ExternalInvoiceVisibility` still hide an invoice whose source email is restricted? If R3 is archived first, R4 owns this review.
+- Known limits K2 and K3 from R3 task 090 (`notes/task-090-notes.md`): two unread counts for a user who signs in both ways, and a licensed user linked to a WorkforceHome contact's home pair loses that contact's grants. Revisit with #2508.
+- Since 2026-11-03, uac-r2 coordinates dev BFF deploys (`docs/procedures/dev-bff-deploy-coordination.md`). R4's two event routes and allow-list columns go through it.
 
 ## 8. ADR touchpoints
 
