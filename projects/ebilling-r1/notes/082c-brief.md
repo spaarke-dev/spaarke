@@ -104,3 +104,18 @@ The contract C1-C18, plus: order-swap determinism; Replace tie; a refused higher
 One adversarial pass per slice (tenant isolation and fail-open; C16 and C18 the focus). ontology-r1 owner review of 082c-1, including the C1 deviation and the (a) open question. uac-r2 and the SPA owner review (c) before 082c-2 is coded.
 
 **Not verified by the brief:** the legacy set count on dev (no Dataverse read); how `BuildFindingsJson` shows a finding with `rejects=true` under the Accepted kind (needed for C11 on SPA; add a test).
+
+## 7. Review answers
+
+### uac-r2 (2026-11-04): shape (c), C11, C14, C16, C18, C22 approved, with conditions (binding)
+
+1. **The SPA 202 pre-check** (app-only Procedure reads for an external caller) is allowed only if:
+   - (a) it runs only AFTER the submission's own authorization has passed for that caller;
+   - (b) the core record and firm it asks about come from the authorized submission context (the record the caller is granted to submit for, and the caller's own firm), never from request fields the caller can vary independently. **Test:** a body naming another record or firm changes neither the warning nor the outcome;
+   - (c) the answer is one fixed sentence: gap or no warning is the only variation; no counts, dates or Procedure names;
+   - (d) a fault omits the warning and is never a distinct answer.
+   - **Known limit (record it):** the warning tells the partner that the record's billing terms for that date are incomplete. The owner's rule requires that; it names nothing.
+2. **Two codes: OK.** On the SPA channel uac-r2 prefers one generic warning for both, unless the owner's rule needs them told apart. **Proposed (082c-2):** keep the two texts, because they ask different things of the partner (the gap text asks them to check the record and the work dates; the unresolved text asks nothing). Condition if separate: "unresolved" must not be causable on purpose by the caller. `rows_inconsistent` comes from an internal admin change; `chain_unreadable` comes from the record's stored parent data, which the partner cannot write. 082c-2 adds a test or a written argument for each cause, and falls back to one generic text if either is caller-reachable.
+3. **C16, C17, C18: agreed as written.** Add one ArchTest or source scan for C16 (no `ex.Message` and no `ToString()` of the resolver records on the listed reader surfaces), with a must-fire control.
+4. **C22 is the binding pre-merge gate:** 082c does not go to master until task 114 lifts the `DecidingIndexes.Count == 0` refusal. uac-r2 checks it on the master PR.
+5. **SPA owner:** uac-r2 is finding the current SPA-r3 session; the §3(c) send waits for that.
