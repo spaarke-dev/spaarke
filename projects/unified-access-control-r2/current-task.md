@@ -26,7 +26,7 @@
 - Demo export OK: batch **14680609-b198-48e2-8391-3ada84fda689** (21:55:05Z, Completed, 2 invoices, $20,517.83, owned by BU1 team; 2 Stored Files csv/json). Failed batches f6788e95 (root caller) and ac07ec43 are kept.
 - Owner added the billing tables in the Matter Management app designer at 22:13Z; ebilling synced source to match (reviewed OK, no role-map change).
 - Billing Exports ribbon hides applied by ebilling 04:36Z (owner go in ebilling's session); I verified: 7 hidden controls absent from Form/HomepageGrid/SubGrid ribbons; 4 ApExport form buttons present. Rollback `%TEMP%\BillingExportRibbons-rollback-20261103233623`.
-- Owner's screenshots so far were of the GRID; Email to AP is form-only. Waiting for the owner to open the form and click it.
+- Owner still sees no ApExport form buttons after clearing the cache (11-04). Server side verified OK: published Form ribbon has all 4 buttons + rules; script/icon present; batchIsCompleted returns true (VM run of live JS); no appaction override; both imports published. Asked owner for: URL (org/app), InPrivate retry, `&ribbondebug=true` Command checker on Email to AP. ebilling told.
 - ebilling AP export owner-unit fix (82786ce7f3..fad65a79ad): four-point check PASSED; live BU1 proof comes with the first export after its deploy (record in 153's notes).
 
 ## Done this stretch (owner go in this session)
@@ -41,7 +41,7 @@
   - Accepted known limits: 086 K1/K-P1 (my 191)/K-P2/K-P3; 089a+086 K3/K4; Add Existing Communication on AP emails subgrid.
   - Owner decisions taken in ebilling's session: no-firm invoices stay externally visible; Billing Administrator may read rules org-wide (delivered by 089d, not Global).
 - **field-mapping** (`spaarke-wt-field-mapping-server-write-pa-5c`):
-  - **042b** (task/fm-042b, fix c0fbc125ee): A' done (owner chose it in field-mapping's session); full AC15 pass when cfebe65f9b..tip arrives.
+  - **042b** AC15 DONE 2026-11-04: OK with notes on cfebe65f9b..4eef7f7f00 (row 11 K3 accepted; create twin K3 row to add; Q3 thread filing named in PR; #2561 next). Watch: their PR carries my verdict line.
   - **#2561** class F, follow-up task right after 042b: core record first in step 7's owner question (catalog) **plus** the caller's AppendTo check on the named core (confirmed missing). Tests: Secure core + ordinary subject → core's owner; no AppendTo on core → refused; agree → unchanged; Signal and DR each.
   - 042a; 043 (create-path link write, #2524 sibling); any #2523 change.
 
