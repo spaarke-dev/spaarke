@@ -1110,3 +1110,60 @@ Task file: `tasks/095d1-set-firm-apply.poml`. It is scoped to 095d-1. It takes i
 - **095d-1c:** the completion step. The record, then the close (per decision 1), the link, 503 incomplete with failedStep and the repeat, and the `-Verify` INFO/FAIL window. A seeded failure at each step, then a repeat. Then the code-review and adr-check gates over 1a-1c, and the publish-size measurement.
 
 rework: none task 095d-1
+
+### 16.6 095d-1a (2026-11-04): the allocator renumber
+
+Branch `task/ebilling-095d-1a` (from `work/ebilling-r1` 0a37980d9d). Only the allocator, its interface, its tests and one ArchTests fixture changed. `InvoiceSubmissionPersister.cs` is untouched (its constant is referenced, not copied). No package, no DI registration, so no publish-size measurement for 1a; 1c measures 1a-1c together.
+
+**The API 1b calls** (`ITrackingNumberAllocator`):
+
+```csharp
+Task<RenumberResult> RenumberSubmissionAsync(
+    Guid submissionId, string rowVersion, Guid firmId, string firmInvoiceNumber,
+    Func<RenumberCandidate, RenumberApply> buildApply, CancellationToken ct = default);
+
+record RenumberCandidate(string TrackingNumber, int Sequence);
+record RenumberApply(IReadOnlyDictionary<string, object>? SubmissionFields, IReadOnlyList<OrganizationRequest> Requests);
+record RenumberResult(RenumberOutcome Outcome, string? TrackingNumber, int? Sequence, string? Reason);
+enum RenumberOutcome { Renumbered, Conflict, Refused }
+
+// The ceiling, asked before the apply:
+static bool TrackingNumberAllocator.FitsRenumberTransaction(int callerRequestCount);
+const int TrackingNumberAllocator.MaxRenumberCallerRequests; // InvoiceSubmissionPersister.MaxRequestsPerTransaction - 1 = 999
+```
+
+- **Who sends the transaction.** The brief said the method "returns the request(s) the caller adds to its apply transaction", and also that the allocator retries a lost race. Only the sender can retry, so the shape is the one 16.5 states: 1b BUILDS its part of the transaction per number (`buildApply`), and the allocator SENDS the one transaction. The transaction is the submission update (index 0: firm, scope, sequence, tracking number, plus 1b's `SubmissionFields`, at `rowVersion` with `IfRowVersionMatches`), then 1b's `Requests` in order.
+- **What 1b puts where.** The findings `trackingNumber` and the stored decision go in `SubmissionFields`, because one row cannot be updated twice in one transaction under its row version. The invoice (firm, tracking-number column, `sprk_firmhold` clear, at its row version), the lines, the approval and the file renames go in `Requests`. A request that targets `sprk_invoicesubmission`, or `SubmissionFields` that name an owned column (`sprk_vendororg`, `sprk_trackingscope`, `sprk_submissionsequence`, `sprk_trackingnumber`, `sprk_firminvoicenumber`, the id), throws `ArgumentException` before anything is sent.
+- **The builder is called once per attempt** with that attempt's number, so every name 1b builds always matches the number written. It must be side-effect free. The stored decision's "new number" is `candidate.TrackingNumber`.
+- **Outcomes 1b maps:**
+  - `Renumbered`: committed; the result carries the number.
+  - `Conflict`: a row-version mismatch anywhere in the transaction (the submission's or a caller row's). It is never retried, and nothing is written. 1b re-reads and answers "already applied for this firm" (finish) or 409. A repeat at the old version is always `Conflict`, so it never allocates twice.
+  - `Refused` + `ebilling.tracking.unavailable`: the retry bound was exhausted (`MaxAttempts` = 10 lost races, or `MaxHiddenSkips` = 64 skips). Retryable 503.
+  - `Refused` + `ebilling.tracking.scope_key_inactive` (new): not P2. 503 (the "not phase P2" refusal in the 1b list). 1b checks it before the apply; this is the allocator's own fail-closed copy.
+  - `Refused` + `ebilling.tracking.too_many_requests` (new): more than 999 caller requests. 1b refuses first with `FitsRenumberTransaction`; this is the fail-closed copy.
+  - Any other fault propagates on the first attempt, including an unknown outcome (a timeout). That is 045's rule; 1b's re-read decides.
+- **Race.** It copies `CreateSubmissionAsync`'s loop: read the highest sequence in the firm's scope (P2: `sprk_trackingscope` = the firm id) for the firm invoice number, write n+1, and let the scope key (and the firm key, while it is not retired) refuse a taken number on update. A refused transaction rolls back whole, including 1b's apply. Only an alternate-key fault on the submission update (index 0, or no index) is a race. A key fault on a caller request propagates.
+- **Collision in the firm scope.** As 045 (task 094): a visible `{number}.{n}` is passed by the highest-sequence read; a number held by an undone attempt (its firm invoice number cleared, so the read cannot see it) is refused by the key, then skipped (`floor`), within `MaxHiddenSkips`, not counted as a lost race.
+- **Fault classification.** `DataverseServiceClientImpl.IsRowVersionMismatch` is checked first. The key duplicate is `0x80060892` on the fault or any inner fault, then `IsAlternateKeyDuplicate`. The inner-fault walk is new: in an `ExecuteTransactionFault`, the request's own code can be the inner fault, which `IsAlternateKeyDuplicate` does not walk. **Known limit (K3):** that this is where Dataverse puts the code for a key fault on update inside a transaction is not measured live. 1a makes no live writes. 1b or 1c adds one live seam test (two renumbers into one firm scope) before merge.
+
+**Justification (CLAUDE.md 11).**
+- **Existing:** `CreateSubmissionAsync` numbers only at create.
+- **Extension:** this is that extension, in the same class, because the allocator is the only writer of the number columns (D-37, ADR-002). A second writer elsewhere would split the loop.
+- **Cost of doing nothing:** assign-firm cannot renumber race-safely, because the number must be written under the scope key in the one apply transaction.
+- The two reason codes are new contract strings. `FitsRenumberTransaction` reuses the persister's constant.
+
+**Tests** (`tests/integration/data-mutation/FinanceSubmission/TrackingNumberAllocatorTests.Renumber.cs`, a partial of the 045 suite, whose in-memory table now also models a transaction: the row version, then both keys, on update, all or nothing, faults mapped by the real `MapTransactionFailure`):
+- the happy path in the firm scope, and `.1` for a firm with no such number;
+- a lost race retried to the next n, with one apply;
+- the bound at 9 and 10 lost races;
+- a row-version conflict on the submission, on a caller row, and a repeat at the old version;
+- the hidden skip, and its bound;
+- the ceiling at 999 (a 1000-request transaction runs) and at 1000 (refused, nothing sent), plus the static check;
+- P0 and P1 refused;
+- a caller key fault and another fault propagate;
+- owned columns and submission targets refused;
+- bad arguments.
+
+**Seed proof.** With the key-duplicate `catch` removed, 5 of the 23 renumber tests fail (the lost race, the bound at 9 and 10, the hidden skip and its bound: the key fault propagates). Restored, all 24 pass (the 23 and the static ceiling test).
+
+rework: none task 095d-1a
