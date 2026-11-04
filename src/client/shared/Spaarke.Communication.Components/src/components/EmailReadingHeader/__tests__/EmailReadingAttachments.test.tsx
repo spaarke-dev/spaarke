@@ -304,6 +304,31 @@ describe('EmailReadingAttachments', () => {
       expect(screen.queryByTestId('rich-file-preview-dialog')).not.toBeInTheDocument();
     });
 
+    it('negative: a flagged attachment that is not a PDF keeps the badge but offers no "Submit as invoice"', async () => {
+      const dataService = makeDataService(
+        [row('a1', 'Invoice-scan.docx', 'doc-1'), row('a2', 'Invoice-10044725.PDF', 'doc-2')],
+        [
+          { sprk_documentid: 'doc-1', sprk_hasfile: true, sprk_documenttype: DOCUMENT_TYPE_INVOICE },
+          { sprk_documentid: 'doc-2', sprk_hasfile: true, sprk_documenttype: DOCUMENT_TYPE_INVOICE },
+        ]
+      );
+      renderWithProvider(
+        <EmailReadingAttachments
+          selectedId="comm-1"
+          dataService={dataService}
+          navigation={makeNavigation()}
+          apiBaseUrl="https://bff.example.com"
+          onSubmitAsInvoice={jest.fn()}
+        />
+      );
+      await waitFor(() => expect(screen.getByText('Invoice-scan.docx')).toBeInTheDocument());
+      expect(screen.getAllByTestId('attachment-invoice-badge')).toHaveLength(2);
+      const docxRow = screen.getByText('Invoice-scan.docx').closest('[role="listitem"]') as HTMLElement;
+      const pdfRow = screen.getByText('Invoice-10044725.PDF').closest('[role="listitem"]') as HTMLElement;
+      expect(docxRow.querySelector('[data-testid="attachment-submit-as-invoice"]')).toBeNull();
+      expect(pdfRow.querySelector('[data-testid="attachment-submit-as-invoice"]')).not.toBeNull();
+    });
+
     it('without a handler the badge still shows and there is no action', async () => {
       renderFlagged(undefined);
       await waitFor(() => expect(screen.getByTestId('attachment-invoice-badge')).toBeInTheDocument());
