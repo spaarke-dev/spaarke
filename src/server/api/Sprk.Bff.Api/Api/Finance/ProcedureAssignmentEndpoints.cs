@@ -32,10 +32,10 @@ namespace Sprk.Bff.Api.Api.Finance;
 ///   <item>Removal preview: the billing-admin privilege. Remove: the billing-admin privilege and Write on <c>sprk_policy</c> (a changed
 ///   rule's removal switches the record rule Off).</item>
 ///   </list></item>
+/// <item>The eBilling flag.</item>
 /// <item>Removal and its preview only: Read on what the stored row overrides (<see cref="RequireReadOnTheOverridesSubject{TBuilder}"/>). The
 /// request does not name it, so the filter reads the row and asks the caller's own Read on that Procedure or rule. It is never inferred from
-/// the caller's rights on anything else (uac-r2 decision, 2026-11-03).</item>
-/// <item>The eBilling flag.</item>
+/// the caller's rights on anything else (uac-r2 decision, 2026-11-03). Unreadable answers the 404 a missing row gets, not a 403.</item>
 /// </list>
 /// <para>The write then runs as the BFF application user: no role holds a privilege on the assignment table, and its core lookups are
 /// field-secured.</para>
@@ -45,7 +45,7 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <list type="bullet">
 /// <item>401: no caller, or an <c>oid</c> that is not a GUID (the service is never run with no requester).</item>
 /// <item>404: step 0, or the uniform record not found.</item>
-/// <item>403: <c>sdap.access.deny.*</c>.</item>
+/// <item>403: <c>sdap.access.deny.*</c> (not for an unreadable override subject: that is the 404 below).</item>
 /// <item>400: a missing body id.</item>
 /// <item>503: <c>ebilling.disabled</c>.</item>
 /// <item>From the service:
@@ -116,8 +116,8 @@ public static class ProcedureAssignmentEndpoints
                     AsCaller(http, () => service.PreviewRemovalAsync(MatterTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(PreviewRemovalTargets, FinanceDenial.Forbidden)
-            .RequireReadOnTheOverridesSubject(MatterTable)
             .RequireEbillingEnabled()
+            .RequireReadOnTheOverridesSubject(MatterTable)
             .WithName("PreviewOverrideRemovalForMatter")
             .WithSummary("What removing this override would close (read-only)")
             .ProducesOverride<OverrideRemovalPreview>(StatusCodes.Status200OK);
@@ -127,8 +127,8 @@ public static class ProcedureAssignmentEndpoints
                     AsCaller(http, () => service.RemoveAsync(MatterTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(RemoveTargets, FinanceDenial.Forbidden)
-            .RequireReadOnTheOverridesSubject(MatterTable)
             .RequireEbillingEnabled()
+            .RequireReadOnTheOverridesSubject(MatterTable)
             .WithName("RemoveOverrideForMatter")
             .WithSummary("Remove this override (a changed rule's removal closes its record rule)")
             .ProducesOverride<OverrideRemoved>(StatusCodes.Status200OK);
@@ -169,8 +169,8 @@ public static class ProcedureAssignmentEndpoints
                     AsCaller(http, () => service.PreviewRemovalAsync(ProjectTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(PreviewRemovalTargets, FinanceDenial.Forbidden)
-            .RequireReadOnTheOverridesSubject(ProjectTable)
             .RequireEbillingEnabled()
+            .RequireReadOnTheOverridesSubject(ProjectTable)
             .WithName("PreviewOverrideRemovalForProject")
             .WithSummary("What removing this override would close (read-only)")
             .ProducesOverride<OverrideRemovalPreview>(StatusCodes.Status200OK);
@@ -180,8 +180,8 @@ public static class ProcedureAssignmentEndpoints
                     AsCaller(http, () => service.RemoveAsync(ProjectTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(RemoveTargets, FinanceDenial.Forbidden)
-            .RequireReadOnTheOverridesSubject(ProjectTable)
             .RequireEbillingEnabled()
+            .RequireReadOnTheOverridesSubject(ProjectTable)
             .WithName("RemoveOverrideForProject")
             .WithSummary("Remove this override (a changed rule's removal closes its record rule)")
             .ProducesOverride<OverrideRemoved>(StatusCodes.Status200OK);
@@ -222,8 +222,8 @@ public static class ProcedureAssignmentEndpoints
                     AsCaller(http, () => service.PreviewRemovalAsync(WorkAssignmentTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(PreviewRemovalTargets, FinanceDenial.Forbidden)
-            .RequireReadOnTheOverridesSubject(WorkAssignmentTable)
             .RequireEbillingEnabled()
+            .RequireReadOnTheOverridesSubject(WorkAssignmentTable)
             .WithName("PreviewOverrideRemovalForWorkAssignment")
             .WithSummary("What removing this override would close (read-only)")
             .ProducesOverride<OverrideRemovalPreview>(StatusCodes.Status200OK);
@@ -233,8 +233,8 @@ public static class ProcedureAssignmentEndpoints
                     AsCaller(http, () => service.RemoveAsync(WorkAssignmentTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(RemoveTargets, FinanceDenial.Forbidden)
-            .RequireReadOnTheOverridesSubject(WorkAssignmentTable)
             .RequireEbillingEnabled()
+            .RequireReadOnTheOverridesSubject(WorkAssignmentTable)
             .WithName("RemoveOverrideForWorkAssignment")
             .WithSummary("Remove this override (a changed rule's removal closes its record rule)")
             .ProducesOverride<OverrideRemoved>(StatusCodes.Status200OK);
@@ -313,9 +313,11 @@ public static class ProcedureAssignmentEndpoints
     /// is the Procedure it assigns, pins or excludes, or the rule it excludes or changes. The request does not name it, so this filter reads
     /// the row (app-only, through <see cref="ProcedureAssignmentService.SubjectOfOverrideAsync"/>, for THIS route's record) and asks the
     /// right of Dataverse as the caller through <see cref="CallerReadCheck"/> (the same Record-path question the assign and exclude routes
-    /// declare). Refused is 403 <c>insufficient_rights</c>; a fault reading the row, or no answer, is 403 <c>system_failure</c>. A row that
-    /// is not this record's passes on, and the service answers its 404 (the record check has already run). Added after the route's two
-    /// <c>AddFinanceAuthorizationFilter</c> declarations (step 0, the record, the billing-admin privileges).
+    /// declare). Refused is the SAME 404 <c>assignment.override_not_found</c> a missing row gets (override ids are derived, so a different
+    /// answer would show whether an override exists for a subject the caller cannot Read); a fault reading the row, or no answer, is 403
+    /// <c>system_failure</c>. A row that is not this record's passes on, and the service answers its 404 (the record check has already run).
+    /// Added after the route's two <c>AddFinanceAuthorizationFilter</c> declarations (step 0, the record, the billing-admin privileges) and
+    /// after <c>RequireEbillingEnabled</c>, so a switched-off eBilling answers 503 before this filter reads Dataverse.
     /// </summary>
     /// <remarks>§11: <i>Existing</i> — <see cref="FinanceAuthorizationFilter"/> evaluates a Record check, but its target declaration is
     /// synchronous and cannot read the stored row; <see cref="BillingAdminAuthorization.RequireReadOnTheRuleSetsProcedure{TBuilder}"/>
@@ -364,11 +366,10 @@ public static class ProcedureAssignmentEndpoints
                 return await next(context);
             }
 
+            // Override ids are derived (AssignmentIdFor), so a 403 here against a 404 for a missing row would tell a caller whether an override
+            // exists for a subject they cannot Read. An unreadable subject therefore answers exactly what a missing row does (089c review K1).
             return outcome == CallerReadOutcome.Refused
-                ? ProblemDetailsHelper.Forbidden(
-                    FinanceAuthorizationFilter.InsufficientRightsReasonCode,
-                    detail: "You need Read on the Procedure or rule this override is for.",
-                    traceId: http.TraceIdentifier)
+                ? Map(ProcedureAssignmentService.OverrideNotFound<object>(), http)
                 : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
         });
 

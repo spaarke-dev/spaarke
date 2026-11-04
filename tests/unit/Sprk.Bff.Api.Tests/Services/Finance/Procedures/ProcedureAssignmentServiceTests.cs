@@ -857,6 +857,64 @@ public sealed class ProcedureAssignmentServiceTests
         w.H.Transactions.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "089c review F1 must-fire: a rule switched off by a retired Procedure (sprk_enabled=false, statecode 0, version kept) is 409 rule_not_in_force and no record rule is created")]
+    public async Task Change_ARuleSwitchedOffByARetiredProcedure_Is409_AndCreatesNoRecordRule()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var row = w.H.Row("sprk_policy", policy);
+        row["sprk_enabled"] = false; // what retiring a Procedure leaves: off, still active (statecode 0), current version kept
+        row["statecode"] = new OptionSetValue(0);
+        row.GetAttributeValue<EntityReference>("sprk_currentversion").Should().NotBeNull();
+        var (setId, ruleId) = RecordRuleOf(policy);
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, default);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("assignment.rule_not_in_force");
+        w.H.Transactions.Should().BeEmpty();
+        w.H.Writes.Should().BeEmpty();
+        w.Rows.Should().BeEmpty();
+        w.RowsOf("sprk_ruleset").Should().NotContain(r => r.Id == setId);
+        w.RowsOf("sprk_policy").Should().NotContain(r => r.Id == ruleId);
+    }
+
+    [Theory(DisplayName = "089c review F1 must-fire: a rule whose set is not Published is 409 rule_not_in_force and writes nothing; an enabled rule of a Published set is changed (must not fire)")]
+    [InlineData(RuleSetService.RuleSetDraft, false)]
+    [InlineData(RuleSetService.RuleSetPublished, true)]
+    public async Task Change_ARuleOfASetThatIsNotPublished_Is409(int setStatus, bool changes)
+    {
+        var w = new World();
+        var set = w.H.RuleSet(setStatus);
+        var policy = w.H.Rule(set, "BILL-S", ProposalState.Accepted, current: true).Policy;
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, default);
+
+        if (changes)
+        {
+            outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+            return;
+        }
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("assignment.rule_not_in_force");
+        w.H.Transactions.Should().BeEmpty();
+        w.Rows.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "089c review F1 (scope): Exclude still accepts a rule that is switched off or in an unpublished set")]
+    public async Task Exclude_StillAcceptsARuleThatIsNotInForce()
+    {
+        var w = new World();
+        var off = w.Rule("BILL-OFF");
+        w.H.Row("sprk_policy", off)["sprk_enabled"] = false;
+        var draftSet = w.H.RuleSet(RuleSetService.RuleSetDraft);
+        var unpublished = w.H.Rule(draftSet, "BILL-D", ProposalState.Accepted, current: true).Policy;
+
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(off, "x", null), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(unpublished, "x", null), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+    }
+
     [Fact(DisplayName = "089c must-fire: a row at the record rule's id that is not this record's rule of this base rule is refused 409, never reused")]
     public async Task Change_WhenTheDerivedPolicyIsAnotherRulesRow_Is409()
     {

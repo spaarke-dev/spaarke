@@ -500,13 +500,15 @@ public class ProcedureAssignmentService
             });
         }
 
-        var current = baseRule.CurrentVersionId is { } currentId
+        // In force = switched on, in a Published set, with a version of its own (089c review F1): retiring a Procedure switches its rules off
+        // (sprk_enabled=false) but leaves statecode and the current version, so the version alone would copy a retired rule.
+        var current = baseRule is { Enabled: true, SetPublished: true } && baseRule.CurrentVersionId is { } currentId
             ? await LoadByIdAsync(VersionTable, currentId, BaseVersionColumns, ct)
             : null;
         if (current is null || current.GetAttributeValue<EntityReference>("sprk_policy")?.Id != policyId)
         {
             return Refused<RuleChangedView>(StatusCodes.Status409Conflict, CodeRuleNotInForce,
-                "The rule has no version in force, so there is nothing to change. Exclude it instead.");
+                "The rule is not in force (switched off, its rule set not Published, or no version in force), so there is nothing to change. Exclude it instead.");
         }
 
         // The change is a copy of the version in force with the edited members, validated as every billing rule is (same type).
@@ -916,7 +918,8 @@ public class ProcedureAssignmentService
 
     /// <summary>The rule an Exclude or a change names, as read (the policy and its rule set).</summary>
     private sealed record BaseRule(
-        Guid Id, string Name, string Code, Guid? FirmId, bool VisibleToFirms, Guid? CurrentVersionId, int? Priority, int? Lane, int? Severity);
+        Guid Id, string Name, string Code, Guid? FirmId, bool VisibleToFirms, Guid? CurrentVersionId, int? Priority, int? Lane, int? Severity,
+        bool Enabled, bool SetPublished);
 
     private static readonly string[] BaseVersionColumns =
     {
@@ -942,7 +945,7 @@ public class ProcedureAssignmentService
         {
             ColumnSet = new ColumnSet(
                 "sprk_name", "sprk_policycode", "sprk_ruleset", "sprk_currentversion", RuleDomains.PolicyDomainColumn,
-                "sprk_priority", "sprk_lane", "sprk_severity"),
+                "sprk_priority", "sprk_lane", "sprk_severity", "sprk_enabled"),
             TopCount = 1,
         };
         query.Criteria.AddCondition("sprk_policyid", ConditionOperator.Equal, policyId);
@@ -958,7 +961,7 @@ public class ProcedureAssignmentService
 
         var set = policy?.GetAttributeValue<EntityReference>("sprk_ruleset")?.Id is { } setId
             ? await LoadByIdAsync(RuleSetService.RuleSetEntity,
-                setId, new[] { "sprk_scope", "sprk_firm", "sprk_visibletofirms", RuleDomains.PolicyDomainColumn }
+                setId, new[] { "sprk_scope", "sprk_firm", "sprk_visibletofirms", "statuscode", RuleDomains.PolicyDomainColumn }
                     .Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray(), ct)
             : null;
         if (policy is null || set is null || !RuleDomains.IsBillingRow(set) || RecordRuleSet.IsRecordScoped(set))
@@ -976,7 +979,9 @@ public class ProcedureAssignmentService
             policy.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id,
             policy.GetAttributeValue<int?>("sprk_priority"),
             policy.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value,
-            policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value), null);
+            policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
+            policy.GetAttributeValue<bool?>("sprk_enabled") == true,
+            set.GetAttributeValue<OptionSetValue>("statuscode")?.Value == RuleSetService.RuleSetPublished), null);
     }
 
     /// <summary>A policy version row as the rule-set service's validator reads it.</summary>
@@ -1320,7 +1325,8 @@ public class ProcedureAssignmentService
         Refused<T>(StatusCodes.Status409Conflict, CodeRecordRuleConflict,
             "This record's rule data is not in the expected state, so the rule was not changed. Contact support.");
 
-    private static RuleSetOutcome<T> OverrideNotFound<T>() where T : class =>
+    // Also the route's answer for an override whose subject the caller cannot Read (089c review K1): the two must not differ.
+    internal static RuleSetOutcome<T> OverrideNotFound<T>() where T : class =>
         Refused<T>(StatusCodes.Status404NotFound, CodeOverrideNotFound, "The override was not found on this record.");
 
     private enum SendResult

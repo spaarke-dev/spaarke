@@ -369,7 +369,7 @@ public partial class RouteAuthorizationGuardTests
             + "filter, then Read on the body's policy plus Create and Write on sprk_ruleset, sprk_policy and sprk_policyversion), GET "
             + ".../overrides/{overrideId}/removal-preview (record filter, Admin()) and DELETE .../overrides/{overrideId} (record filter, "
             + "Admin() plus Write on sprk_policy); both removal routes then carry RequireReadOnTheOverridesSubject (the caller's Read on "
-            + "the stored row's Procedure or rule, 403). The eBilling kill switch runs after them."),
+            + "the stored row's Procedure or rule; unreadable is the 404 a missing row gets), after the eBilling kill switch (review K2)."),
         new GovernedFile("Api/Finance/InvoiceAdjustmentEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId} (ebilling-r1 task 102, "
             + "FR-32) -- the invoice-level adjustments. Every route carries AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail "
@@ -1215,9 +1215,10 @@ public partial class RouteAuthorizationGuardTests
             + "(ebilling-r1 081, uac r2 I-P5)."),
         new CreditedForm("RequireReadOnTheOverridesSubject", "Api/Finance/ProcedureAssignmentEndpoints.cs",
             "Reads the route record's stored override through ProcedureAssignmentService.SubjectOfOverrideAsync "
-            + "(ProcedureAssignmentEndpoints.cs:342) and asks the caller's own Read on the Procedure or rule it overrides via "
-            + "CallerReadCheck.CheckAsync with AuthorizationService (:357); denied is 403 insufficient_rights (:367), an unparseable id, a "
-            + "read fault or an unanswered question 403 system_failure (:335, :347, :370) (ebilling-r1 089c)."),
+            + "(ProcedureAssignmentEndpoints.cs:346) and asks the caller's own Read on the Procedure or rule it overrides via "
+            + "CallerReadCheck.CheckAsync with AuthorizationService (:361); denied is the same 404 assignment.override_not_found a missing "
+            + "row gets (:372; review K1), an unparseable id, a read fault or an unanswered question 403 system_failure (:339, :351, :373) "
+            + "(ebilling-r1 089c)."),
         new CreditedForm("AddStoredFileAccessFilter", "Api/Finance/StoredFileEndpoints.cs",
             "StoredFileAccessFilter decides before the handler: step 0 via FinanceAuthorizationFilter.EvaluateStepZeroAsync "
             + "(StoredFileEndpoints.cs:241, 403), then RetrievePrincipalAccess as the caller over OBO via "
