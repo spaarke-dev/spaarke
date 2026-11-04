@@ -2214,6 +2214,26 @@ public partial class InvoiceSubmissionPersisterTests
         store.Submission.GetAttributeValue<string>("sprk_ponumber").Should().Be("PO-1");
     }
 
+    [Fact(DisplayName = "095d-1b (uac-r2): the firm invoice number is an access column refused to the generic writers, and the commit gate's undo still clears it")]
+    public async Task Gate_Undo_StillClearsTheFirmInvoiceNumber_AfterItIsListedInAccessColumns()
+    {
+        // The listing refuses the app-only GENERIC writers (output mapping, Update Record node, field mapping, Repair). The undo is a typed
+        // writer on IGenericEntityService and asks no refusal list, so it must still clear the column.
+        InheritedAccessPermission.RefuseAppOnlyWrite(TrackingNumberAllocator.SubmissionEntity, [TrackingNumberAllocator.FirmInvoiceNumberColumn])
+            .Should().NotBeNull("095d-1b lists sprk_firminvoicenumber in AccessColumns");
+
+        var store = new Store
+        {
+            AfterCommit = s => s.DocumentRow = new Entity("sprk_document", Document) { ["sprk_matter"] = new EntityReference("sprk_matter", OtherMatter) },
+        };
+        store.Submission[TrackingNumberAllocator.FirmInvoiceNumberColumn] = "INV-100";
+        var outcome = AsSource(await new ProcessorHarness().RunAsync(), store);
+
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Undone);
+
+        store.Submission.Attributes.Should().NotContainKey(TrackingNumberAllocator.FirmInvoiceNumberColumn, "the undo clears it");
+    }
+
     // ── 050a review round 3 (uac-r2 F1-b): the isolation rule is decided again at commit, and again after a rolled-back transaction ──
 
     private static readonly Guid SecureMatterS = Guid.Parse("050a0003-0000-4000-8000-0000000000a5");

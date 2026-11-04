@@ -1000,8 +1000,11 @@ internal static class InheritedAccessPermission
     /// <para>ebilling-r1 task 095d-1a: also its sequence <c>sprk_submissionsequence</c> (<c>TrackingNumberAllocator.SequenceColumn</c>) and the
     /// none-scope sequence a renumber gives up <c>sprk_previoussequence</c> (<c>TrackingNumberAllocator.PreviousSequenceColumn</c>). They decide
     /// no access; they decide which tracking numbers are taken, so a generic write could make a number be issued twice. Their only writer is the
-    /// allocator (at create and at the renumber). The firm invoice number <c>sprk_firminvoicenumber</c> is the allocator's too but is NOT listed:
-    /// <c>SubmissionCommitGate</c>'s undo clears it, a second typed writer.</para>
+    /// allocator (at create and at the renumber). Task 095d-1b (uac-r2, binding): also the firm invoice number <c>sprk_firminvoicenumber</c>
+    /// (<c>TrackingNumberAllocator.FirmInvoiceNumberColumn</c>), the allocator's at create; it decides no access, but it is the stem of every
+    /// tracking number of the row. Its only other writer is typed: <c>SubmissionCommitGate</c>'s undo clears it (095d-1a). The renumber of
+    /// Set firm (<c>InvoiceAssignFirmService</c> through <c>TrackingNumberAllocator.RenumberSubmissionAsync</c>) is the second typed writer
+    /// of the firm, the scope, the sequence, the previous sequence and the tracking number.</para>
     /// <para>ebilling-r1 task 095c-4 (uac-r2 2026-11-03): also its outcome reason <c>sprk_outcomereasoncode</c>
     /// (<c>InvoiceSubmissionPersister.SubmissionReasonCode</c>). It decides no access, but it stores the holds that keep an invoice from
     /// approval and AP export: <c>ebilling.submission.firm_missing</c> (<c>InvoiceFirmHold</c>) and the FR-20 Blocked hold. Cleared by a
@@ -1014,7 +1017,8 @@ internal static class InheritedAccessPermission
     /// (<c>InvoiceSubmissionPersister.InvoiceVendorOrg</c>). Neither decides access, but both decide whether the invoice can be approved,
     /// returned, corrected and exported: cleared by a generic write, the hold would no longer keep a no-firm invoice from approval; a firm
     /// set by one would be a firm no pipeline resolved. Their writers are typed: the persister writes both in the invoice's create (the
-    /// firm, or the hold when there is none), and 095d's assign-firm will set the firm and clear the hold through its own typed writer. No
+    /// firm, or the hold when there is none), and Set firm (task 095d-1b, <c>InvoiceAssignFirmService</c>) sets the firm and clears the hold
+    /// in its one renumber transaction. No
     /// playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</item>
     /// <para>Not listed: <c>sprk_billingevent.sprk_invoice</c>. A same-invoice repeat Duplicate about a line is judged by the
     /// line's current invoice, the event's invoice (read as the caller), so the column is read. It is not refused because
@@ -1139,7 +1143,8 @@ internal static class InheritedAccessPermission
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn)
-                    // allocator-owned (095d-1a); sprk_firminvoicenumber is not listed: SubmissionCommitGate's undo also writes it (notes 16.6.1)
+                    // allocator-owned; SubmissionCommitGate undo clears it (095d-1a)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmInvoiceNumberColumn)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SequenceColumn)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.PreviousSequenceColumn)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode),
@@ -1292,7 +1297,10 @@ internal static class InheritedAccessPermission
             // Task 095c-5: on an invoice, the firm hold and the firm hold it from approval and export; neither decides access.
             var isInvoice = string.Equals(trimmed, Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity, StringComparison.OrdinalIgnoreCase);
             // 095d-1a: the sequence and the previous sequence are the allocator's too, and decide no access.
-            var decides = !isInvoice && (string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn, StringComparison.OrdinalIgnoreCase)
+            // 095d-1b: so is the firm invoice number (set by the allocator; an undone submission clears it).
+            var decides = !isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmInvoiceNumberColumn, StringComparison.OrdinalIgnoreCase)
+                ? "it decides no access; only the tracking number allocator sets it"
+                : !isInvoice && (string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SequenceColumn, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.PreviousSequenceColumn, StringComparison.OrdinalIgnoreCase))
                 ? "it decides no access; only the tracking number allocator writes it"

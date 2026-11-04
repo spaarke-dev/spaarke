@@ -119,11 +119,12 @@ public class AccessTableAppOnlyWriterTests
         // ebilling-r1 task 095c: + its tracking scope (typed writer: the allocator), which pairs with the number in the scope key.
         // ebilling-r1 task 095c-4 (uac-r2): + its outcome reason (typed writers: the pipeline), which stores the firm_missing and Blocked holds.
         // ebilling-r1 task 095d-1a: + its sequence and previous sequence (typed writer: the allocator), the numbers a tracking number is built from.
+        // ebilling-r1 task 095d-1b (uac-r2, binding): + its firm invoice number (typed writers: the allocator; the commit gate's undo clears it).
         ["sprk_invoicesubmission"] =
         [
             "sprk_vendororg", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
             "sprk_invoice", "sprk_trackingnumber", "sprk_trackingscope", "sprk_outcomereasoncode",
-            "sprk_submissionsequence", "sprk_previoussequence",
+            "sprk_submissionsequence", "sprk_previoussequence", "sprk_firminvoicenumber",
         ],
 
         // ebilling-r1 095c-4 review fix + task 095c-5 (uac-r2 2026-11-04): an invoice's firm and its own field-secured firm hold. Neither decides
@@ -641,6 +642,8 @@ public class AccessTableAppOnlyWriterTests
             (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
                 Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.PreviousSequenceColumn),
             (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmInvoiceNumberColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
                 Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn),
@@ -857,6 +860,45 @@ public class AccessTableAppOnlyWriterTests
         var update = sent.Should().ContainSingle().Which.Should().BeOfType<Microsoft.Xrm.Sdk.Messages.UpdateRequest>().Subject.Target;
         update.Contains(column).Should().BeTrue($"the allocator's own renumber writes {column}");
         update.GetAttributeValue<int?>(column).Should().Be(column == "sprk_previoussequence" ? 3 : 1, "the gave-up none sequence, or the firm scope's first number");
+    }
+
+    [Fact(DisplayName = "095d-1b: an app-only write of the submission's firm invoice number is refused by the output mapping and the Update Record node")]
+    public async Task AnAppOnlyWriteOfTheSubmissionsFirmInvoiceNumber_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
+    {
+        // ebilling-r1 task 095d-1b (uac-r2, binding): the firm invoice number is the stem of every tracking number of the row ({number}.{n}).
+        // Its writers are typed: the allocator sets it at create (a renumber keeps it) and SubmissionCommitGate's undo clears it; a generic
+        // write would re-stem the next number. (The undo still clears it after the listing: InvoiceSubmissionPersisterTests.)
+        const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
+        foreach (var key in new[] { Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmInvoiceNumberColumn, " SPRK_FirmInvoiceNumber " })
+        {
+            Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                submission, Row, new Dictionary<string, object?> { [key] = "INV-OTHER" },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    submission, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "INV-OTHER" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        // The refusal says what the column is: it decides no access and the allocator sets it.
+        InheritedAccessPermission.RefuseAppOnlyWrite(submission, ["sprk_firminvoicenumber"])!.Reason
+            .Should().Contain("decides no access").And.Contain("only the tracking number allocator sets it").And.NotContain("who may see");
+
+        // Must not fire: the same column name on another table, a neighbouring name, and the caller's own write.
+        Code("sprk_invoice", "sprk_firminvoicenumber").Should().BeNull("only the submission's firm invoice number is listed");
+        Code(submission, "sprk_firminvoicenumbers").Should().BeNull("a neighbouring name");
+        CallerCode(submission, "sprk_firminvoicenumber").Should().BeNull("the caller's own privileges decide");
     }
 
     [Fact]
