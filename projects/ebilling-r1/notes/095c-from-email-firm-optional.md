@@ -898,3 +898,15 @@ Branch `task/ebilling-095c-5-fix1`. Findings are described as defect and locatio
 | K6 | The app-only read depends on the BFF user's profile | notes 15.8 | **Notes only.** Bullet added to 15.8. |
 
 Publish size: no new package, endpoint or DI registration, so no publish-size delta applies.
+
+### 15.11 Applied on dev (2026-11-04)
+
+- **Owner go** typed in the main session on 2026-11-04 ("095c - yes proceed"). The owner also accepted the 503 on the approval-state GET and the AP candidates GET wherever the column is missing ("two read pages - yes proceed"). This resolves the pending decision in 15.3. The mitigation is the pre-check in 15.9, plus the SpaarkeMaster import on new environments.
+- **Ran** `Set-EbillingInvoiceFirmHoldColumn.ps1 -BffApplicationIds 5967251e-…,1e40baad-… -Apply`:
+  - The column was created in SpaarkeMaster and secured.
+  - Writers hold read, create and update; Readers hold read only. No other profile can create or update it.
+  - The column was masked for 27.1 s while the grants were applied.
+  - Only `sprk_invoice` was published.
+  - The backfill set the hold on 8 invoices: 0 held through a submission, 8 with no firm.
+- **`-Verify` passed** at 2026-11-04T14:16:03Z with 0 gaps remaining.
+- **uac-r2 was notified** before and after (session 20; the copy sent to session 09 was held by that session).
