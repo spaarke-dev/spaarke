@@ -919,3 +919,84 @@ The uac-r2 design, binding. `RuleSetEndpoints.RequireAccessToTheRuleSet` runs on
 
 - **ADR notes:** ADR-008 (an endpoint filter for resource authorization); ADR-019 (ProblemDetails with a stable `errorCode`); ADR-028 (every new check is asked as the caller, never app-only; the one app-only read, the set's home, runs only after the caller's Read on the set); ADR-010 (no DI or interface change; the new members are virtual seams in existing concrete classes). No Dataverse write, no live call, no deploy, no role change on dev.
 - **Not reviewed yet:** this round has had no adversarial pass of its own. The auth change on eight routes warrants the two passes the auth rule asks for.
+
+## 089e auth pass 1 and fix round 2 (2026-11-04)
+
+### Findings (defect and location)
+
+| Id | Defect | Location | Outcome |
+|---|---|---|---|
+| F1 | The set filter's step (A) refuses billing admins homed in a child unit of the customer's top unit: their role reads `sprk_ruleset` and `sprk_procedure` at Deep from their own unit only. The rule-set list did not ask the caller's Read on each set, so the list and the by-id routes could disagree. | `RuleSetEndpoints.cs:574-580` (step A); `config/billing-rule-readers-role.json` (held `sprk_policy` only); `RuleSetEndpoints.ListRuleSets` | Fixed (role extended; list filtered) |
+| F2 | `-Verify`'s "never held by a team" check read the holders of the root role only. | `scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1:332-336` | Fixed |
+| F2 | When stage 3 of a change gave no answer, the read-back proved the commit by the Exclude row, which a plain Exclude also writes at the same id. | `ProcedureAssignmentService.cs:632-635`, `CommittedAfterNoAnswerAsync` (`:669-683`) | Fixed |
+| F3 | The by-id route theory list was written by hand; a new by-id route without the set filter would not be covered. | `RuleSetEndpointsTests.ByIdRoutes` | Fixed (route guard) |
+| F4 | Step (B) is Dataverse's Read answer only; it applies no per-user No Access deny. | `RuleSetEndpoints.cs:608` | Known limit (below); no change |
+| K6 | Possible cost difference between an unknown and an unreadable set id. | `DataverseAccessDataSource.cs:474-497` | Checked by uac-r2: unknown and unreadable ids cost the same; no change. |
+| K7 | `sprk_procedure` Read at Deep from the holder's own unit misses a Procedure owned in the customer's top unit. | Billing Administrator role | Fixed with F1 |
+
+### Owner decision (verbatim)
+
+- "Approve role + dev apply" (2026-11-04). The owner applies the role on dev after review. This branch changes the source only; no Dataverse write and no role change on dev was made.
+
+### Item 1: Billing Rule Reader holds Read at Deep on `sprk_ruleset` and `sprk_procedure` (`38e8ea9ab2`)
+
+- **`config/billing-rule-readers-role.json`.** The role now holds exactly: `prvReadsprk_Policy` Deep, `prvReadsprk_ruleset` Deep, `prvReadsprk_procedure` Deep. `isinherited` 0, users only, the customer top unit's copy. Evidence is read-only dev metadata (privilege ids and `CanBeDeep`, 2026-11-04).
+- **Both roles carry `prvReadsprk_procedure` Deep, on purpose.** Billing Administrator's copy is held in the admin's own unit and covers that unit's tree. Billing Rule Reader's copy is the customer top unit's and covers the top unit's tree, which a child-unit admin's own copy does not reach. Billing Administrator keeps its entry unchanged (uac-r2 agreed 2026-11-04).
+- **Guards.** `RestrictedContentOwnerRoleGuardTests` expects the three tables, with new must-fire controls (Write on a set, each table missing, another depth, a fourth table). `Set-CustomerOwnerTeams.ps1` is data-driven from the file; its header and `tests/scripts/Set-CustomerOwnerTeams.Tests.ps1` cover the three privileges in `-Verify` and `-Apply`.
+- **uac-r2's condition (binding): the role passes `SecureBuRoleDepthAssertion` from every unit copy holders are assigned from, and its reach covers no Secure Record row.** New ArchTest `TheExtendedBillingRuleReader_PassesTheSecureCensus_FromEveryCustomerTopUnitsCopy_AndNeverReachesSecureRecord`, on the D-123 tree shape (Secure Record a direct child of the root, the customer top units siblings of it):
+  - **Result: passes.** `Evaluate` clause 1 gives no finding for the role at Deep from the copies of Customer, its Child and Grandchild, and OtherCustomer.
+  - Must-fire: the root's copy, and Global from a customer copy, give a finding naming each graded table.
+  - **Coverage note.** The census grades `prvReadsprk_Policy` and `prvReadsprk_ruleset` (`RestrictedContentPrivileges`). It does not grade `prvReadsprk_procedure`. For that privilege the test asserts reach directly through `SecureBuRoleDepthAssertion.Reaches`: false into Secure Record from every customer copy at Deep, true from the root's copy (the must-fire). Adding `sprk_procedure` to the census lists is a change to the census, not part of this round.
+- **Dev, read-only `-Verify` (2026-11-04).** `Set-CustomerOwnerTeams.ps1 -Verify` for Spaarke Business Unit 1 reports the role with `prvReadsprk_Policy` at Deep, no holders, and two drift lines: `prvReadsprk_ruleset` and `prvReadsprk_procedure` missing. That is expected until the owner applies the role.
+
+### Item 1 (ii): the rule-set list keeps only the sets the caller can Read (`2dc3decefb`)
+
+- `ListRuleSets` asks the caller's Read on each listed `sprk_ruleset` row (`CallerReadCheck.ScanAsync`, as the caller), after the Procedure check. A known deny leaves the set out. A missing answer for any set, or more sets than `MaxRuleSetReadChecks` (1000, the same ceiling as the Procedure check), is 403 `system_failure`; the cap is checked before any question.
+- **Deviation:** the filter is in the endpoint, not in `RuleSetService.ListAsync`. The endpoint is `ListAsync`'s only caller and already holds the Procedure filter; the service reads as the application and has no caller.
+- Section 11: `MaxRuleSetReadChecks` and `ReadableSetsOnlyAsync` are new private surface in an existing file. Existing: the Procedure check in the same method. Extension: it reuses `CallerReadCheck.ScanAsync` and the Procedure check's answer shapes. Cost of doing nothing: the list shows sets whose own routes answer 404.
+- Tests: an unreadable set is absent and one question is asked per set; the list and the by-id GET agree (an omitted set is the uniform 404 there); an unknown answer is 403; more than the cap is 403 with no question; exactly the cap is answered in full. The existing list tests now grant Read on their sets.
+
+### F2: deploy script (`d0c0c23266`)
+
+- `-Verify` loops the root role and every business-unit copy (`Get-RoleCopies`), reading both `teamroles_association` and `systemuserroles_association`, and names the copy in a team finding. The script parses with no error. There is no Pester file for this script.
+- Dev, read-only `-Verify`: 0 users and 0 teams across the root role and 5 copies. Its two gaps are `prvReadsprk_procedure` at Deep, not yet applied (owner).
+
+### F2: read-back (`4cd1aa8a82`)
+
+- On no answer from stage 3, the commit is proven only by what stage 3 alone writes: the version row at `RuleSetService.VersionIdFor(recordRule.Id, number)` whose `sprk_policy` is the record rule. The Exclude row is not evidence; a plain Exclude writes it at the same id.
+- The read-back and the close use `CancellationToken.None`.
+- Tests: an Exclude row from a plain Exclude with no version row is 500 `assignment.write_failed`, with no close and the finding left open. A committed change whose request is cancelled during stage 3 still reads back with an uncancellable token and closes.
+
+### F3: route coverage guard (`5221f855c7`)
+
+- **Choice: an in-host guard over the routing table, not a source scan.** `EveryMappedByIdRoute_ASetTheCallerCannotRead_IsTheUniform404` reads `EndpointDataSource` on the test host (`MapRuleSetEndpoints`) for patterns containing `{ruleSetId`, sends each with no Read on the set, and requires the uniform 404 bytes. It sees routes as mapped (group prefix and filters applied) and tests behaviour, so a filter that is attached but bypassed also fails it. It also requires the hand-written `ByIdRoutes` theory list to equal the routing table (8 routes), so every other theory covers every by-id route. Limit: it sees the routes `MapRuleSetEndpoints` maps; on 2026-11-04 no other mapper has a `{ruleSetId` route.
+- Must-fire control (kept): `TheRouteGuard_ReportsAByIdRouteWithoutTheSetFilter` maps an extra by-id route without the filter and requires the guard to report it (200).
+
+### F4: known limit
+
+- Step (B) uses Dataverse's Read answer on the record, as the caller, and applies no per-user No Access deny. References: uac-r2 owner decision N2 ("access a No Access wall can't remove per user is reported and hidden, not revoked") and uac-r2 round 77. It is the same as the internal record routes: `RecordRouteAccessAuthorizationFilter`, through `CallerRecordAccessProbe`, uses Dataverse's answer only. No call to `IsRecordAccessibleAsync` was added.
+
+### Seeding proofs (each file restored after)
+
+| Seed | Result |
+|---|---|
+| Read-back: old `ProcedureAssignmentService.cs` | both new tests failed; after the fix, 29/29 `Change_` passed |
+| Read-back: a cancellable read-back token | the cancellation test failed |
+| Role file at HEAD before item 1, against the new ArchTests | 4 failed |
+| Census test: Global depth | failed |
+| Role file at HEAD before item 1, against the new Pester tests | 30 passed, 5 failed |
+| List: the endpoint before (ii) | 4 failed (the exactly-the-cap must-not-fire passes, as it should) |
+| Route guard: an extra by-id route without the set filter in `MapRuleSetEndpoints` | guard failed, reporting that route (200) |
+| Route guard: the set filter removed from the publish route | guard failed |
+
+### Gates
+
+| Run | Result |
+|---|---|
+| Build (BFF) | 0 warnings, 0 errors |
+| Unit filter `RuleSet\|ProcedureAssignment\|SignalClosure\|BillingAdmin\|CallerReadCheck` | 882 passed, 0 failed |
+| ArchTests `RouteAuthorizationGuard\|RuleSetRolePrivilege\|ProcedureRolePrivilege\|RestrictedContentOwnerRole\|SecureBu\|RecordOwnerAssignmentCensus` | 262 passed, 0 failed |
+| Pester `Set-CustomerOwnerTeams.Tests.ps1` (Pester 5.7.1) | 35 passed, 0 failed |
+| Publish size (`git archive` short-path trees, `-c Release -r linux-x64`, `Compress-Archive`, 192 files each), this round vs the branch before it (`01924f383d`) | 137,287,256 B raw / 41,314,368 B zip to 137,290,092 B raw / 41,315,940 B zip: **+2,836 B raw (+1,572 B zip)**. No package. |
+
+- No Dataverse write, no role change on dev, no deploy. Dev reads were read-only (`-Verify`, metadata and row counts).
