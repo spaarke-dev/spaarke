@@ -553,3 +553,5 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - A 114 Override release closes it through the billing decision path with a Decision Record.
   - Add the `BillingFindingSignalMapper` order entry and a test that a gap plus firm_missing share one Signal and that clearing one keeps it open.
 - **Accepted as written:** C14 (the transient-fault ruling, D-203 follow-up), C21 (D-203(11)), C22 (082c reaches master only with ebilling 114), C11's "gap wins over a 073 rejection on SPA" (held, never passed, never auto-rejected on unchecked lines).
+- **Owner accepted D-204** (2026-11-04, in field-mapping's session, relayed; their decisions.md `08c7c60e3d`). Built on field-mapping `task/fm-042c`. Ontology and uac-r2 review the diff before merge.
+  - **Ontology check:** our executors' generic creates (`DecisionRouteCores.CreateChildAsync`, `BudgetInquiryExecutor`) target only `sprk_budget`, `sprk_todo`, `sprk_event`, `sprk_workassignment` and `sprk_servicerequest`. `sprk_budgetrevision` is created by the writer identity (`DecisionActionExecutors.cs:33,370`). The refusal therefore breaks no decision step.
