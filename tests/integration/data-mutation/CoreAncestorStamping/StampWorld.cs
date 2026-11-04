@@ -162,6 +162,7 @@ internal sealed class StampWorld
                     else row[column] = value;
                 }
 
+                AfterUpdate?.Invoke(entity, id, fields);
                 return Task.CompletedTask;
             });
 
@@ -244,6 +245,12 @@ internal sealed class StampWorld
 
     /// <summary>Every PATCH, in order, with its fields as sent.</summary>
     public List<(string Entity, Guid Id, Dictionary<string, object> Fields)> Patches { get; } = [];
+
+    /// <summary>
+    /// Field mapping task 042b fix round 1: called after each PATCH is applied (entity, id, fields as sent), so a test can
+    /// carry a restamp into another world that holds the same row (the route harness's share world). Default: nothing.
+    /// </summary>
+    public Action<string, Guid, IReadOnlyDictionary<string, object>>? AfterUpdate { get; set; }
 
     /// <summary>Every FetchXML scan sent.</summary>
     public List<string> FetchXml { get; } = [];

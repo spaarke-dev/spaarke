@@ -327,6 +327,39 @@ public sealed class RecordRepairModeTests
         write.Fields["sprk_regardingmatter"].Should().Be(new EntityReference("sprk_matter", RepairWorld.SecureMatter));
     }
 
+    // ── 042b fix round 1 (F1, owner decision A'; security finding 6): a HELD stamp that disagrees with the source's root ──
+
+    [Fact]
+    public async Task AUserOwnedToDoHoldingAStaleStampUnderATeamOwnedInvoiceOfASecureMatter_IsReOwnedToSecure_AndItsStampIsKept()
+    {
+        // Before the fix the owner question held the stale ordinary matter, which ranks above the invoice in the to-do's
+        // lineage order: the to-do was re-owned to an ordinary team, then the reconciliation job's restamp left it there.
+        var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.SecureBu, heldMatterStamp: RepairWorld.OtherMatter);
+
+        var outcome = await _world.RepairAsync("sprk_todo", id);
+
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.SecureNamedTeam),
+            "the owner question holds the root the row ends under (the invoice's Secure matter), not the stale stamp");
+        write.Fields.Should().NotContainKey("sprk_regardingmatter",
+            "Repair is fill-only: a held stamp, even a stale one, is the reconciliation job's to replace");
+        Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Repaired);
+    }
+
+    [Fact]
+    public async Task AUserOwnedToDoInAnotherUnitHoldingAStaleStampUnderATeamOwnedInvoiceOfASecureMatter_IsNeverReOwnedToTheOrdinaryTeam()
+    {
+        var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.ChildBu, heldMatterStamp: RepairWorld.OtherMatter);
+
+        var outcome = await _world.RepairAsync("sprk_todo", id);
+
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit,
+            "the answer is the Secure team, a move to another unit that task 016's escalation does not write on a to-do");
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["ownerid", "sprk_regardingmatter"]);
+        _world.Directory.Row("sprk_todo", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild), "never re-owned to the ordinary team");
+    }
+
     [Fact]
     public async Task WhenTheMissingStampCannotBePlanned_TheOwnerIsKept_ReportedStampUnavailable_AndLoggedWithTheRowId()
     {
@@ -340,6 +373,9 @@ public sealed class RecordRepairModeTests
         owner.ReasonCode.Should().Be(RecordRepairReason.StampUnavailable, "never re-owned over the lookups alone");
         outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.CoreAncestorStamp
             && f.State == RecordRepairFieldState.Skipped && f.ReasonCode == RecordRepairReason.StampUnavailable);
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+                && f.State == RecordRepairFieldState.Skipped && f.ReasonCode == RecordRepairReason.MappingFilingUndecided,
+            "fix round 1: an unplanned stamp leaves the filing undecided, so nothing is copied from it (it could be secure)");
         _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["ownerid", "sprk_regardingmatter"]);
         _world.Directory.Row("sprk_todo", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
@@ -1375,9 +1411,10 @@ internal sealed class RepairWorld
 
     /// <summary>
     /// Task 042b: a to-do in <paramref name="owningUnit"/>, owned by the person in the child unit, filed under
-    /// <see cref="TeamOwnedInvoice"/> of the isolated <see cref="SecureMatter"/>, and missing its I-1 stamp.
+    /// <see cref="TeamOwnedInvoice"/> of the isolated <see cref="SecureMatter"/>, and missing its I-1 stamp — or, fix round 1,
+    /// holding <paramref name="heldMatterStamp"/> as a stale one.
     /// </summary>
-    public Guid ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Guid owningUnit)
+    public Guid ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Guid owningUnit, Guid? heldMatterStamp = null)
     {
         Directory.WithSecureRoot("sprk_matter", SecureMatter)
             .WithRecord("sprk_invoice", TeamOwnedInvoice, Directory.ChildBu, owningTeam: Directory.ChildTeam,
@@ -1385,11 +1422,14 @@ internal sealed class RepairWorld
         _stamps.Row("sprk_matter", SecureMatter)
             .Row("sprk_invoice", TeamOwnedInvoice, [("sprk_matter", "sprk_matter", SecureMatter)]);
         var id = Guid.NewGuid();
-        Directory.WithRecord("sprk_todo", id, owningUnit, extra: new Dictionary<string, object>
+        var extra = new Dictionary<string, object>
         {
             ["ownerid"] = new EntityReference("systemuser", PersonInChild),
             ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", TeamOwnedInvoice),
-        });
+        };
+        if (heldMatterStamp is { } held)
+            extra["sprk_regardingmatter"] = new EntityReference("sprk_matter", held);
+        Directory.WithRecord("sprk_todo", id, owningUnit, extra: extra);
         return id;
     }
 

@@ -523,6 +523,24 @@ public sealed class CoreAncestorRestamper
     /// <see cref="PlanStamp"/>, and adds only the fill-only filter, on the existing component; Cost of doing nothing — Repair
     /// either cannot add a missing I-1 stamp in its one fill-only update, or overwrites a present stamp.</remarks>
     internal async Task<Dictionary<string, object>?> PlanMissingStampAsync(
+        string entityLogicalName, Entity row, CancellationToken ct) =>
+        MissingOf(row, await PlanStampOfRowAsync(entityLogicalName, row, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 042b (F1, owner decision A' 2026-11-03): the FULL stamp plan for
+    /// <paramref name="row"/> — exactly what <see cref="RestampChildAsync"/> writes for a row filed under an intermediate
+    /// (<see cref="StampSourceKind.Source"/>): each stamp column whose value differs from the source's current root, SET to
+    /// that root (<see cref="EntityReference"/>) or CLEARED (<see cref="DBNull.Value"/>). A column already holding the root is
+    /// absent. Nothing is written. <c>null</c>: nothing would change, the table carries no stamp, or the row is not filed under
+    /// an intermediate. The owner question asks over the row as it ENDS (a held value that disagrees is replaced), while the
+    /// bind stays fill-only (<see cref="MissingOf"/>).
+    /// </summary>
+    /// <exception cref="CoreAncestorStampUnderivableException">As <see cref="PlanMissingStampAsync"/>.</exception>
+    /// <remarks>Component justification (CLAUDE.md §11): Existing — <see cref="PlanMissingStampAsync"/> computed this plan and
+    /// dropped all but the missing columns; Extension — that method is now this one plus the fill-only filter, so there is one
+    /// plan; Cost of doing nothing — a caller-sent stamp that disagrees with the intermediate's root decides the owner, and the
+    /// step-12 restamp then overwrites it (042b F1, the #2483 state again).</remarks>
+    internal async Task<Dictionary<string, object>?> PlanStampOfRowAsync(
         string entityLogicalName, Entity row, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -549,7 +567,16 @@ public sealed class CoreAncestorRestamper
                 $"the root of its {decision.Source.Intermediate} could not be derived: {root.Error}", root.IsPermanent, root.RefusalKind);
         }
 
-        var planned = PlanStamp(row, CoreAncestorResolver.CarriableRootTypes(decision.Source.Intermediate), root.Stamps, host);
+        return PlanStamp(row, CoreAncestorResolver.CarriableRootTypes(decision.Source.Intermediate), root.Stamps, host);
+    }
+
+    /// <summary>
+    /// The fill-only part of a <see cref="PlanStampOfRowAsync"/> plan: the columns <paramref name="row"/> holds no value in and
+    /// the plan SETS. <c>null</c> when none.
+    /// </summary>
+    internal static Dictionary<string, object>? MissingOf(Entity row, IReadOnlyDictionary<string, object>? planned)
+    {
+        ArgumentNullException.ThrowIfNull(row);
         if (planned is null)
         {
             return null;

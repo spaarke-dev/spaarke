@@ -256,6 +256,27 @@ public class WriterBuilderOwnershipParityTests
         outcome.OwningTeamId.Should().Be(reconciler.OwningTeamId);
     }
 
+    [Theory(DisplayName = "042b parity (fix round 1, caller principal): a caller's create under a team-owned invoice of a Secure matter binds the stamp in the create body (step 10) and is owned as the reconciler owns the written row")]
+    [InlineData("sprk_memo")]
+    [InlineData("sprk_analysis")]
+    [InlineData("sprk_communication")]
+    public async Task ACallersCreateUnderATeamOwnedIntermediateOfASecureMatter_BindsTheStamp_AndIsOwnedAsTheReconcilerOwnsTheWrittenRow(string table)
+    {
+        var world = new CreateParityWorld();
+        world.InvoiceUnder(world.SecureMatter);
+
+        var (outcome, written) = await world.CreateAsCallerAsync(table, ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice));
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = world.Creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().ContainKey("sprk_RegardingMatter@odata.bind")
+            .WhoseValue.Should().Be($"/sprk_matters({world.SecureMatter:D})", "step 10 binds the planned stamp into the create body");
+        written!.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id.Should().Be(world.SecureMatter);
+        var reconciler = await world.ReconcilerAnswerAsync(written);
+        reconciler.OwningTeamId.Should().Be(Directory.SecureNamedTeam);
+        outcome.OwningTeamId.Should().Be(reconciler.OwningTeamId, "the create asks the reconciler's question (#2483)");
+    }
+
     /// <summary>The report-card column of each table the report card files (memo's is sprk_reportcard; SecureChildLineage).</summary>
     public static readonly TheoryData<string, string> ReportCardChildren = new()
     {
@@ -337,7 +358,8 @@ public class WriterBuilderOwnershipParityTests
         private readonly Mock<IFieldMappingDataverseService> _appOnly =
             new(MockBehavior.Strict);
 
-        public List<(string Table, Guid Id)> Creates { get; } = [];
+        /// <summary>Every app-only create, with the fields of its body as sent (fix round 1: the theory reads what was written).</summary>
+        public List<(string Table, Guid Id, Dictionary<string, object?> Fields)> Creates { get; } = [];
 
         public CreateParityWorld()
         {
@@ -353,15 +375,39 @@ public class WriterBuilderOwnershipParityTests
                 .Setup(a => a.UpdateRecordFieldsAsync(
                     It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(),
                     It.IsAny<CancellationToken>(), null))
-                .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, _, _, _) =>
+                .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) =>
                 {
-                    Creates.Add((table, id));
-                    _stamps.Row(table, id, [.. _lookups]); // the row as Dataverse stores it: the lookups the body binds
+                    Creates.Add((table, id, new Dictionary<string, object?>(fields)));
+                    _stamps.Row(table, id, [.. BindsOf(fields)]); // the row as Dataverse stores it: every lookup the body binds
                 })
                 .Returns(Task.CompletedTask);
         }
 
         private (string Column, string Target, Guid Id)[] _lookups = [];
+
+        /// <summary>
+        /// Fix round 1 (review item 1): the lookups a create BODY binds, as the columns they set — the item's own and any stamp
+        /// step 10 bound (a caller's create binds the stamp into the body; the system principal's is bound after the create).
+        /// The owner bind and a systemuser bind are not filing.
+        /// </summary>
+        private IEnumerable<(string Column, string Target, Guid Id)> BindsOf(Dictionary<string, object?> fields)
+        {
+            foreach (var (key, value) in fields)
+            {
+                if (!key.EndsWith("@odata.bind", StringComparison.Ordinal) || key == "ownerid@odata.bind")
+                    continue;
+                var path = value is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element
+                    ? element.GetString()
+                    : value as string;
+                if (path is null || path.TrimStart('/').StartsWith("systemusers(", StringComparison.Ordinal))
+                    continue;
+                var column = key[..^"@odata.bind".Length].ToLowerInvariant();
+                var target = _lookups.FirstOrDefault(l => l.Column == column).Target
+                             ?? CoreAncestorResolver.CoreAncestorLookups.FirstOrDefault(l => l.LookupAttribute == column).EntityType
+                             ?? throw new InvalidOperationException($"Test: no target is known for the bound column {column}.");
+                yield return (column, target, Guid.Parse(path[(path.IndexOf('(') + 1)..path.IndexOf(')')]));
+            }
+        }
 
         /// <summary>The invoice, team-owned by the child unit's team (not yet reached by Make Secure), filed under <paramref name="matter"/>.</summary>
         public void InvoiceUnder(Guid matter)
@@ -389,8 +435,23 @@ public class WriterBuilderOwnershipParityTests
                 });
 
         /// <summary>Creates a <paramref name="table"/> row naming <paramref name="lookups"/>, as the system principal; the written row (null when refused).</summary>
-        public async Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateAsync(
-            string table, params (string Column, string Target, Guid Id)[] lookups)
+        public Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateAsync(
+            string table, params (string Column, string Target, Guid Id)[] lookups) =>
+            CreateAsAsync(RecordCreationPrincipal.ForSystem(), table, lookups);
+
+        /// <summary>
+        /// Fix round 1 (review item 1): the same create as the CALLER (<see cref="Directory.CallerUserId"/>, over the route
+        /// harness's scripted Dataverse), so step 10 binds the planned stamp into the create body before the create.
+        /// </summary>
+        public Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateAsCallerAsync(
+            string table, params (string Column, string Target, Guid Id)[] lookups) =>
+            CreateAsAsync(
+                RecordCreationPrincipal.ForCaller(
+                    new SecureChildOwnershipAiToolTests.ScriptedUserClient(Directory.CallerUserId), Directory.CallerOid),
+                table, lookups);
+
+        private async Task<(RecordCreationOutcome Outcome, Entity? Written)> CreateAsAsync(
+            RecordCreationPrincipal principal, string table, (string Column, string Target, Guid Id)[] lookups)
         {
             _lookups = lookups;
             var item = new DataverseWriteItemMapper.MappedItem(
@@ -408,7 +469,7 @@ public class WriterBuilderOwnershipParityTests
                 .CreateAsync(
                     new RecordCreationRequest(
                         table, new RecordCreationPayload.Mapped(item)),
-                    RecordCreationPrincipal.ForSystem(), CancellationToken.None);
+                    principal, CancellationToken.None);
             return (outcome, outcome.CreatedId is { } id ? _stamps.RowOf(table, id) : null);
         }
 
@@ -425,6 +486,13 @@ public class WriterBuilderOwnershipParityTests
         /// The reconciler's answer for <paramref name="written"/>: its question (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>),
         /// with a message's record-thread filing as <c>SecureChildReconciler.ContextFor</c> adds it, through the same resolver.
         /// </summary>
+        /// <remarks>
+        /// Fix round 1 (review item 1): the thread half is a COPY of <c>SecureChildReconciler.ContextFor</c>'s thread filing
+        /// (SecureChildReconciler.cs ~:3049-3053: <c>RecordThreadFiling.ThreadOf(row)</c>, then
+        /// <c>RecordThreadFiling.QuestionWithThreadFiling(row, RecordThreadFiling.ParentsOf(thread)).Parents</c>, distinct),
+        /// because the real one is a private method of the private nested <c>Pass</c> class and cannot be called from a test.
+        /// Change both together: a change there that is not made here makes this theory compare against a stale question.
+        /// </remarks>
         public async Task<RecordOwnerResolution> ReconcilerAnswerAsync(Entity written)
         {
             var question = await RecordOwnershipContext.ForExistingRowAsync(

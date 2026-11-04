@@ -149,6 +149,32 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Posts.Should().BeEmpty("never created as the caller");
     }
 
+    /// <summary>
+    /// Task 042b fix round 1 (F1 (a), owner decision A'): the chat twin of the route's sent-ordinary-stamp case. The chat item
+    /// names the team-owned event of the Secure matter AND an ordinary matter as its stamp; the restamp will replace the stamp
+    /// with the Secure matter, so step 7 asks over that and the event is owned by the Secure team, with the mirror at create.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_ASentOrdinaryStampUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheSecureTeam_WithTheShareeMirrorAtCreate()
+    {
+        var stamps = TheTeamOwnedEventIsFiledUnderTheSecureMatter();
+        TheCreatedRowIsRestampedInTheShareWorldToo(stamps);
+
+        var result = await Chat(ChatHandlerOver(stamps), "sprk_event",
+            Lookup("sprk_regardingevent", "sprk_event", Event), Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var (_, id, fields) = _appCreates.Should().ContainSingle().Subject;
+        Owner(fields).Should().Be(Directory.SecureNamedTeam, "step 7 asks over the stamp the row ends with (042b F1)");
+        Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({OrdinaryMatter:D})",
+            "the bind is fill-only: the item's value is created as sent");
+        stamps.RowOf("sprk_event", id).GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(SecureMatter,
+            "step 12's restamp replaces it");
+        _shareTable.MaskOf("sprk_event", id, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "the Secure matter's sharee sees the chat-created event at create");
+        _user.Posts.Should().BeEmpty("never created as the caller");
+    }
+
     [Fact]
     public async Task ChatCreate_AToDoUnderASecureMatter_GetsItsSecureParentsShareesMirror_AtCreate()
     {

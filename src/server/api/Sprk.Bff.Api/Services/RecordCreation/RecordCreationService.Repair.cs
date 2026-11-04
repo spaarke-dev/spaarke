@@ -115,14 +115,15 @@ internal sealed partial class RecordCreationService
         var report = new List<RecordRepairField>();
         var warnings = new List<string>();
 
-        // FR-41 (#2483, task 042b): the I-1 stamp the row is missing is planned ONCE, before the owner, so the owner question
-        // includes its root; the stamp step adds the same result. A fault keeps the owner (RepairOwnerAsync) and adds no stamp.
-        (IReadOnlyDictionary<string, object>? Missing, bool Faulted) stamp = (null, false);
+        // FR-41 (#2483, task 042b): the I-1 stamp is planned ONCE, before the owner. The owner question asks over the row as it
+        // ends (042b F1, owner decision A': a held stamp that disagrees is replaced); the stamp step adds the fill-only part of
+        // the same plan. A fault keeps the owner (RepairOwnerAsync) and adds no stamp.
+        (IReadOnlyDictionary<string, object>? Plan, bool Faulted) stamp = (null, false);
         if (CoreAncestorResolver.StampSourceColumns.ContainsKey(table))
         {
             try
             {
-                stamp = (await _restamper.PlanMissingStampAsync(table, row, ct).ConfigureAwait(false), false);
+                stamp = (await _restamper.PlanStampOfRowAsync(table, row, ct).ConfigureAwait(false), false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -149,7 +150,7 @@ internal sealed partial class RecordCreationService
         }
 
         // No search-index step (task 041, FR-40): the index follows the content type, so Repair writes neither column.
-        RepairStamp(table, stamp, patch, report);
+        RepairStamp(table, row, stamp, patch, report);
 
         RecordRepairOutcome Outcome(RecordRepairStatus status, string? reason) => new()
         {
@@ -636,7 +637,7 @@ internal sealed partial class RecordCreationService
     /// <see cref="CoreAncestorStampReconciliationJob"/>'s.
     /// </summary>
     private static void RepairStamp(
-        string table, (IReadOnlyDictionary<string, object>? Missing, bool Faulted) stamp, Dictionary<string, object> patch,
+        string table, Entity row, (IReadOnlyDictionary<string, object>? Plan, bool Faulted) stamp, Dictionary<string, object> patch,
         List<RecordRepairField> report)
     {
         if (!CoreAncestorResolver.StampSourceColumns.ContainsKey(table))
@@ -648,7 +649,7 @@ internal sealed partial class RecordCreationService
             return;
         }
 
-        if (stamp.Missing is not { } missing)
+        if (CoreAncestorRestamper.MissingOf(row, stamp.Plan) is not { } missing)
         {
             report.Add(RecordRepairField.Present(RecordRepairPart.CoreAncestorStamp, null, RecordRepairReason.StampNothingMissing));
             return;

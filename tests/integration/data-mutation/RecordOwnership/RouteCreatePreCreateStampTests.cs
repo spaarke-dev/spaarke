@@ -175,6 +175,91 @@ public sealed partial class SecureChildOwnershipAiToolTests
         Owner(fields).Should().Be(answer.OwningTeamId!.Value, "the create and the reconciler agree (#2483 closed)");
     }
 
+    // ── 042b fix round 1 (F1, owner decision A' 2026-11-03): a stamp the caller SENT that disagrees with the root ────────
+    // Step 10's bind stays fill-only, so the caller's stamp is created as sent and step 12's restamp replaces it with the
+    // intermediate's root. Step 7 therefore asks over the stamp as the row ENDS (the planned value, not the sent one).
+
+    /// <summary>
+    /// The restamp's world holds the created row as the create stored it, and every stamp PATCH it gets lands on the share
+    /// world's copy too (in Dataverse they are the same row), so step 12's sharee mirror reads the row as the restamp left it.
+    /// </summary>
+    private void TheCreatedRowIsRestampedInTheShareWorldToo(StampWorld stamps)
+    {
+        _onAppCreate = (table, id, fields) => stamps.Row(table, id, TheWrittenRow(table, id, fields).Attributes
+            .Select(a => (a.Key, ((EntityReference)a.Value).LogicalName, ((EntityReference)a.Value).Id))
+            .ToArray());
+        stamps.AfterUpdate = (table, id, fields) =>
+        {
+            var stampsOnly = fields
+                .Where(f => CoreAncestorResolver.CoreAncestorLookups.Any(l =>
+                    string.Equals(l.LookupAttribute, f.Key, StringComparison.OrdinalIgnoreCase)))
+                .ToDictionary(f => f.Key, f => f.Value);
+            if (stampsOnly.Count > 0)
+                ShareWorld.ApplyStampWrite(table, id, stampsOnly);
+        };
+    }
+
+    /// <summary>
+    /// F1 (a): the caller sends an ORDINARY matter as the event's stamp, under the team-owned event of the Secure matter. The
+    /// restamp will replace it with the Secure matter, so the owner is <see cref="Directory.SecureNamedTeam"/> and the Secure
+    /// matter's sharee mirror is written at create (before the fix: the event's ordinary team, the #2483 state). The bind is
+    /// fill-only (the caller's value is created as sent); step 5 asks AppendTo on what the caller sent and never on the
+    /// derived root (AC12, amended).
+    /// </summary>
+    [Fact]
+    public async Task RouteCreate_ASentOrdinaryStampUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheSecureTeam_WithTheShareeMirrorAtCreate()
+    {
+        var stamps = TheTeamOwnedEventIsFiledUnderTheSecureMatter();
+        TheCreatedRowIsRestampedInTheShareWorldToo(stamps);
+        var probes = AppendToProbes();
+        var payload = AnEventUnderTheEvent();
+        payload["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})";
+
+        var result = await CreateChildOverStamps("sprk_event", payload, stamps);
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        var (_, id, fields) = _appCreates.Should().ContainSingle().Subject;
+        Owner(fields).Should().Be(Directory.SecureNamedTeam,
+            "step 7 asks over the stamp the row ends with (the Secure matter), not the one the caller sent (042b F1)");
+        Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({OrdinaryMatter:D})",
+            "step 10's bind is fill-only: the caller's value is created as sent");
+        stamps.RowOf("sprk_event", id).GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(SecureMatter,
+            "step 12's restamp replaces the disagreeing stamp with the intermediate's root");
+        _shareTable.MaskOf("sprk_event", id, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "the Secure matter's sharee sees the new event at create");
+        probes.Should().Contain(p => p.Contains(OrdinaryMatter.ToString("D"), StringComparison.OrdinalIgnoreCase),
+            "a stamp the caller sent is a record the caller names: step 5 asks AppendTo on it, as before");
+        probes.Should().NotContain(p => p.Contains(SecureMatter.ToString("D"), StringComparison.OrdinalIgnoreCase),
+            "the derived root is never asked as the caller (AC12)");
+    }
+
+    /// <summary>
+    /// F1 (b): the caller sends the SECURE matter as the stamp of an event under an event whose root is the ORDINARY matter.
+    /// The restamp replaces it with the ordinary matter, so the owner is the ordinary owner (the event's team), never the
+    /// Secure team, and no sharee of the Secure matter is mirrored onto the row.
+    /// </summary>
+    [Fact]
+    public async Task RouteCreate_ASentSecureMatterStampUnderAnEventOfAnOrdinaryMatter_IsOwnedByTheOrdinaryTeam_NeverTheSecureTeam()
+    {
+        TheEventIsFiledUnderTheOrdinaryMatter();
+        var stamps = new StampWorld().Row("sprk_matter", OrdinaryMatter)
+            .Row("sprk_event", Event, [("sprk_regardingmatter", "sprk_matter", OrdinaryMatter)]);
+        TheCreatedRowIsRestampedInTheShareWorldToo(stamps);
+        var payload = AnEventUnderTheEvent();
+        payload["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})";
+
+        var result = await CreateChildOverStamps("sprk_event", payload, stamps);
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        var (_, id, fields) = _appCreates.Should().ContainSingle().Subject;
+        Owner(fields).Should().Be(Directory.ChildTeam, "the row ends under the ordinary matter: the event's team, record-first");
+        Owner(fields).Should().NotBe(Directory.SecureNamedTeam, "never the Secure team of a matter the row will not be filed under");
+        stamps.RowOf("sprk_event", id).GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(OrdinaryMatter,
+            "step 12's restamp replaces the sent Secure matter with the intermediate's root");
+        _shareTable.MaskOf("sprk_event", id, DataversePrincipalRef.User(Sharee)).Should().BeNull(
+            "no sharee of the Secure matter is mirrored onto a row filed under the ordinary matter");
+    }
+
     // ── 042b row 5 (UAC-r2 conditions (a) and (b)): the derived root is flagged secure but not isolated ──────────────────
 
     private static readonly Guid FlaggedMatter = Guid.Parse("a2470000-0000-4000-8000-0000000004b5");
@@ -327,6 +412,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
     {
         var stamps = TheTeamOwnedEventIsFiledUnderTheSecureMatter();
         var probes = AppendToProbes();
+        var intermediateReadsBeforeTheCreate = -1;
+        _onAppCreate = (_, _, _) => intermediateReadsBeforeTheCreate = IntermediateReads(stamps);
         var payload = AnEventUnderTheEvent();
         payload["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})";
 
@@ -335,6 +422,23 @@ public sealed partial class SecureChildOwnershipAiToolTests
         Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
         var (_, _, fields) = _appCreates.Should().ContainSingle().Subject;
         Owner(fields).Should().Be(Directory.SecureNamedTeam, "the stamp the caller sent was already in the owner question");
+
+        // Fix round 1 (AC1 and AC12 amended): step 6½ plans even when a stamp is sent (one read of the intermediate), and an
+        // AGREEING stamp plans nothing, so step 7's question is the item's own lookups, unchanged.
+        intermediateReadsBeforeTheCreate.Should().Be(1, "step 6½ plans once, a stamp sent or not (AC1 amended)");
+        var merged = new Entity("sprk_event")
+        {
+            ["sprk_regardingevent"] = new EntityReference("sprk_event", Event),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        };
+        (await stamps.Restamper.PlanStampOfRowAsync("sprk_event", merged, CancellationToken.None)).Should().BeNull(
+            "a sent stamp that agrees with the intermediate's root changes nothing");
+        var lookups = new[]
+        {
+            KeyValuePair.Create("sprk_regardingevent", (RecordOwnershipParent?)new RecordOwnershipParent("sprk_event", Event)),
+            KeyValuePair.Create("sprk_regardingmatter", (RecordOwnershipParent?)new RecordOwnershipParent("sprk_matter", SecureMatter)),
+        };
+        RecordCreationService.AsTheRowEnds(lookups, null).Should().Equal(lookups, "no plan: the question is the item's lookups");
         Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({SecureMatter:D})", "the caller's own bind");
         probes.Should().Contain(p => p.Contains(SecureMatter.ToString("D"), StringComparison.OrdinalIgnoreCase),
             "a stamp the caller SENT is a record the caller names, so step 5 asks AppendTo on it, as before");
