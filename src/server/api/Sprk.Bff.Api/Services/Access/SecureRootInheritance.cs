@@ -310,7 +310,7 @@ public sealed record FiledRootsWalk(IReadOnlyList<FiledRootRef> Roots, bool Dept
 
 /// <summary>
 /// ebilling-r1 task 082 (uac-r2 review item 8; round 2 items 082.1 / 082.2): what a row's ADR-024 pair names on its own
-/// (<see cref="SecureRootInheritance.NamePairParentAsync"/>). A closed set of four answers: the base type cannot be derived outside it.
+/// (<see cref="SecureRootInheritance.NamePairParentAsync"/>). A closed set of four answers: the base constructor is private, so no type outside it can derive. A record also has a protected copy constructor, so code in this assembly could still derive; the callers' `default` arms (here and in billing's CoreRecordChain) guard that.
 /// </summary>
 internal abstract record PairParentAnswer
 {
@@ -4039,6 +4039,13 @@ public sealed partial class SecureRootInheritance
             case PairParentAnswer.Unknown why:
                 unknown ??= why.Reason;
                 break;
+            case PairParentAnswer.None:
+            case PairParentAnswer.NotAFilingParent:
+                break; // no pair, a repeat, or a readable type that is not a parent (reason-less): names nothing
+            default:
+                // A closed set of four; a fifth must be decided here on purpose, never dropped as "names nothing".
+                throw new System.Diagnostics.UnreachableException(
+                    $"Unexpected pair answer {pair.GetType().Name} for {facts.Table}; NameParentsAsync must handle it explicitly.");
         }
 
         return new NamedParents(named, unknown, unrepeated, viaIntermediate)

@@ -36,7 +36,7 @@ public sealed record CoreRecordLink(string Table, Guid Id, int Distance);
 /// <item><b>Matter:</b> itself only. A matter is filed under no core record, so nothing is read.</item>
 /// <item><b>Project:</b> itself, then the matter or project its BFF-managed ADR-024 pair names. The pair is resolved ONLY through
 /// uac-r2's <see cref="SecureRootInheritance.NamePairParentAsync"/>: <c>Parent</c> is the distance-1 record; <c>None</c> and
-/// <c>NotAFilingParent</c> (a readable type that is not a core record) give no parent and no fault; <c>Unknown</c> fails closed (the
+/// <c>NotAFilingParent</c> (a type that is not a matter or project) give no parent and no fault; <c>Unknown</c> fails closed (the
 /// chain read throws, as an unreadable row does).</item>
 /// <item><b>Work assignment:</b> itself, then each core record a TYPED filing lookup names (<see cref="SecureRootInheritance.TypedFilingColumns"/>).
 /// Its pair is not read: on a work assignment the pair files under nothing on its own (#1616).</item>
@@ -112,13 +112,14 @@ public static class CoreRecordChain
                     break;
                 case PairParentAnswer.None:
                 case PairParentAnswer.NotAFilingParent:
-                    break; // no pair, a repeat, or a readable type that is not a core record: no parent and no fault
+                    break; // no pair, a repeat, or a type that is not a matter or project: no parent and no fault
                 case PairParentAnswer.Unknown unknown:
                     throw new CoreRecordChainUnreadableException(
                         $"What the invoice's core record {table} {core.Id} is filed under cannot be told: {unknown.Reason}.");
                 default:
-                    // The answer type is a closed set of four (private base constructor); a fifth must be decided here on purpose, never
-                    // dropped as "no parent", which would judge the invoice on a shortened chain.
+                    // The answer type is a closed set of four (a private base constructor stops other assemblies; a record's protected copy
+                    // constructor still lets code in this one derive). A fifth must be decided here on purpose, never dropped as "no parent",
+                    // which would judge the invoice on a shortened chain.
                     throw new UnreachableException(
                         $"Unexpected pair answer {answer.GetType().Name} for core record {table} {core.Id}; CoreRecordChain must handle it explicitly.");
             }

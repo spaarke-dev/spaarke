@@ -117,8 +117,9 @@ Scope: the four files of commit `4e98e82a10`. No F-class finding.
   - **The K1 proposal (item 2 under "Questions before 082c") is CONFIRMED** by ontology (D-177 (1), (2), (14); D-175; D-202): a rule applies on a date only with a Published version under that date's Procedure Version, regardless of `sprk_enabled`. A record rule runs only where its base rule is resolved for that date, before exclusion. This also closes 089c K3.
 - **Adversarial pass 1: no F.** Four known-limit findings, K1 to K4.
   - **K1 (fixed here):** the no-multi-hop guard was a deny-list. `CoreRecordChainNoMultiHopGuardTests` is now an allow-list (below).
-  - **K2 (fixed here):** the `PairParentAnswer` switch in `CoreRecordChain` had no `default`. It now handles `None` and `NotAFilingParent` explicitly (no parent, no fault), `Unknown` (throws, as before), and `default:` throws `UnreachableException` naming the answer type. **No unit test:** the base record has a private constructor, so no type outside `PairParentAnswer` can derive from it and a fake future answer cannot be built. The `default` guards a fifth nested record added later.
+  - **K2 (fixed here):** the `PairParentAnswer` switch in `CoreRecordChain` had no `default`. It now handles `None` and `NotAFilingParent` explicitly (no parent, no fault), `Unknown` (throws, as before), and `default:` throws `UnreachableException` naming the answer type. **No unit test:** `NamePairParentAsync` / `ReadAsync` has no seam for injecting an answer, so a fake future answer cannot be fed in. (A non-sealed record has a protected copy constructor, so code in the BFF assembly could derive from the base type; the private constructor only stops other assemblies.) The `default` guards a fifth nested record added later.
   - **K3 and K4:** see the 082b and 082c criteria and the census below.
+- Adversarial pass 2: no F; K1, K2 and K4 fixed in <sha>.
 
 ### Fixes in this round
 

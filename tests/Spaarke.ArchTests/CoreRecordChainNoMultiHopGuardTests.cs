@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Services.Access;
 using Xunit;
@@ -16,23 +17,24 @@ namespace Spaarke.ArchTests;
 /// uac-r2 adds later is refused until someone decides it here; (2) no reference to <c>CoreAncestorResolver</c> (the intermediate-root
 /// topology); (3) no intermediate lookup column or intermediate table literal, taken live from
 /// <c>SecureRootInheritance.IntermediateFilingColumns</c> (a hand-written read of an invoice or event is a second hop by another
-/// route); (4) the by-name list <see cref="Forbidden"/> stays as a second net for an instance call or a member reached under another
-/// qualifier; (5) the chain still resolves the pair through <c>NamePairParentAsync</c> and reuses <c>TypedFilingColumns</c>. Line
-/// comments are ignored, so the file can name what it must not call. Controls: one planted line per class fires; the sanctioned shape
-/// and the real file do not.</para>
-/// <para><b>Not covered:</b> a call through a helper in another file. The chain's only Dataverse reads are its own query and
-/// <c>NamePairParentAsync</c>; a new helper would show in review.</para>
+/// route); (4) a LIVE by-name net (082a round 2 K1): every member <c>SecureRootInheritance</c> declares (read by reflection, public
+/// and non-public, static and instance, compiler-generated names dropped) that is not in <see cref="AllowedMembers"/>, matched as a
+/// whole word anywhere in the comment-stripped text. It catches an unqualified call, an instance call, a member reached under another
+/// qualifier and reflection by name (<c>GetMethod("...")</c>), because strings are not stripped, and it grows with the class so no
+/// hand-written list can go stale; (5) a <c>using static ...SecureRootInheritance</c> directive or a <c>using X = ...SecureRootInheritance</c>
+/// alias fails outright, since either lets a member be named without the qualifier (4) reads; (6) the chain still resolves the pair
+/// through <c>NamePairParentAsync</c> and reuses <c>TypedFilingColumns</c>. Line comments are ignored, so the file can name what it
+/// must not call. Controls: one planted line per class fires (a qualified member, <c>using static</c>, an alias, an unqualified call,
+/// reflection by name); the sanctioned shape and the real file do not.</para>
+/// <para><b>Not covered:</b> a call through a helper in another file (the chain's only Dataverse reads are its own query and
+/// <c>NamePairParentAsync</c>; a new helper would show in review); a member name built at run time (concatenated or computed) and then
+/// reflected; a <c>//</c> inside a string literal, which hides the rest of that line from the scan (<c>SourceScan.CodeText</c> cuts at the
+/// first <c>//</c>); a member of a class other than <c>SecureRootInheritance</c> that reaches the same data.</para>
 /// </remarks>
 public sealed class CoreRecordChainNoMultiHopGuardTests
 {
     private static readonly string ChainFile = Path.Combine(
         SourceScan.RepoRoot, "src", "server", "api", "Sprk.Bff.Api", "Services", "Signals", "Billing", "CoreRecordChain.cs");
-
-    private static readonly string[] Forbidden =
-    [
-        "NameParentsAsync", "FindFilingParentsAsync", "IntermediateFilingColumns", "IntermediateParentColumns", "TypedLookupsOf",
-        "ReadSecureParentsAsync",
-    ];
 
     /// <summary>The <c>SecureRootInheritance</c> members <c>CoreRecordChain.cs</c> may reference: the typed-filing map, the BFF-managed-pair
     /// test and the pair's two columns, the pair-only rule, and the three core table names. Anything else fails.</summary>
@@ -40,6 +42,15 @@ public sealed class CoreRecordChainNoMultiHopGuardTests
     {
         "TypedFilingColumns", "PairNamesAParentOnItsOwn", "PairIdColumn", "PairTypeColumn", "NamePairParentAsync",
         "Matter", "Project", "WorkAssignment",
+    };
+
+    /// <summary>Member names of <c>SecureRootInheritance</c> that are also ordinary words in <c>CoreRecordChain.cs</c> and so would fail the
+    /// real file by collision, with the reason each is safe to exclude. Empty unless a collision is proven: every entry weakens the live net.</summary>
+    private static readonly Dictionary<string, string> CollisionExclusions = new(StringComparer.Ordinal)
+    {
+        // A private helper that builds a QueryExpression; the chain's `using Microsoft.Xrm.Sdk.Query;` and its own QueryExpression are the
+        // same word. It reads nothing past the direct parent on its own, and an unqualified call would need `using static`, which fails.
+        ["Query"] = "collides with the Microsoft.Xrm.Sdk.Query namespace the chain imports",
     };
 
     private static readonly string[] CoreTables =
@@ -57,16 +68,38 @@ public sealed class CoreRecordChainNoMultiHopGuardTests
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+    /// <summary>Every member name <c>SecureRootInheritance</c> declares (any visibility, static or instance, nested types included) minus
+    /// compiler-generated names, constructors, <see cref="AllowedMembers"/> and <see cref="CollisionExclusions"/>: the names
+    /// <c>CoreRecordChain.cs</c> must not contain anywhere.</summary>
+    internal static IReadOnlyList<string> RestrictedMembers() =>
+        typeof(SecureRootInheritance)
+            .GetMembers(BindingFlags.DeclaredOnly | BindingFlags.Static | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Select(m => m.Name)
+            .Where(name => !name.StartsWith('.') && !name.Contains('<') && !name.Contains('$'))
+            .Where(name => !AllowedMembers.Contains(name) && !CollisionExclusions.ContainsKey(name))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
     internal static IReadOnlyList<string> Violations(IEnumerable<string> lines)
     {
         var code = SourceScan.CodeText(lines);
         var found = new List<string>();
-        foreach (var member in Forbidden)
+        foreach (var member in RestrictedMembers())
         {
-            foreach (Match match in Regex.Matches(code, $@"\b{member}\b"))
+            foreach (Match match in Regex.Matches(code, $@"\b{Regex.Escape(member)}\b", RegexOptions.CultureInvariant))
             {
-                found.Add($"line {SourceScan.LineOf(code, match.Index)}: {member}");
+                found.Add($"line {SourceScan.LineOf(code, match.Index)}: {member} (a SecureRootInheritance member outside the allow-list)");
             }
+        }
+
+        foreach (Match match in Regex.Matches(code, @"\busing\s+static\s+[\w.]*\bSecureRootInheritance\b"))
+        {
+            found.Add($"line {SourceScan.LineOf(code, match.Index)}: using static SecureRootInheritance (names a member without the qualifier)");
+        }
+
+        foreach (Match match in Regex.Matches(code, @"\busing\s+\w+\s*=\s*[\w.]*\bSecureRootInheritance\b"))
+        {
+            found.Add($"line {SourceScan.LineOf(code, match.Index)}: using alias for SecureRootInheritance (names a member under another qualifier)");
         }
 
         foreach (Match match in Regex.Matches(code, @"\bSecureRootInheritance\s*\.\s*(?<member>\w+)"))
@@ -129,8 +162,68 @@ public sealed class CoreRecordChainNoMultiHopGuardTests
         const string member = "WalkEverythingAsync";
         var lines = File.ReadAllLines(ChainFile).Append($"var future = await SecureRootInheritance.{member}(entities, logger, table, id, ct);");
 
-        Assert.DoesNotContain(member, Forbidden);
+        Assert.DoesNotContain(member, RestrictedMembers());
         Assert.Contains(Violations(lines), v => v.Contains(member, StringComparison.Ordinal) && v.Contains("allow-list", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Task 082a: the live by-name net covers the members the old hand-written list named, and none of the allowed ones (K1 round 2)")]
+    public void TheLiveList_CoversTheKnownMultiHopMembers_AndNoAllowedOne()
+    {
+        var restricted = RestrictedMembers();
+
+        foreach (var name in new[]
+        {
+            "NameParentsAsync", "FindFilingParentsAsync", "IntermediateFilingColumns", "IntermediateParentColumns", "TypedLookupsOf",
+            "ReadSecureParentsAsync", "OwnerLookupsThroughIntermediatesAsync",
+        })
+        {
+            Assert.Contains(name, restricted);
+        }
+
+        Assert.DoesNotContain(restricted, name => AllowedMembers.Contains(name));
+        Assert.DoesNotContain(restricted, name => name.Contains('<') || name.Contains('$') || name.StartsWith('.'));
+        foreach (var allowed in AllowedMembers)
+        {
+            Assert.True(
+                typeof(SecureRootInheritance).GetMember(allowed, BindingFlags.Static | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Length > 0,
+                $"AllowedMembers names {allowed}, which SecureRootInheritance no longer declares; the allow-list has drifted.");
+        }
+    }
+
+    [Fact(DisplayName = "Task 082a: the guard fires on a using static directive for SecureRootInheritance (must-fire control, K1 round 2)")]
+    public void TheGuard_FiresOnAUsingStatic()
+    {
+        var lines = new[] { "using static Sprk.Bff.Api.Services.Access.SecureRootInheritance;" }.Concat(File.ReadAllLines(ChainFile));
+
+        Assert.Contains(Violations(lines), v => v.Contains("using static", StringComparison.Ordinal));
+    }
+
+    [Theory(DisplayName = "Task 082a: the guard fires on an alias for SecureRootInheritance (must-fire control, K1 round 2)")]
+    [InlineData("using Sri = Sprk.Bff.Api.Services.Access.SecureRootInheritance;")]
+    [InlineData("using Sri=SecureRootInheritance;")]
+    public void TheGuard_FiresOnAnAlias(string planted)
+    {
+        var lines = new[] { planted }.Concat(File.ReadAllLines(ChainFile));
+
+        Assert.Contains(Violations(lines), v => v.Contains("alias", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Task 082a: the guard fires on an unqualified member call (must-fire control, K1 round 2)")]
+    public void TheGuard_FiresOnAnUnqualifiedCall()
+    {
+        var lines = File.ReadAllLines(ChainFile)
+            .Append("var owners = await OwnerLookupsThroughIntermediatesAsync(entities, logger, table, id, ct);");
+
+        Assert.Contains(Violations(lines), v => v.Contains("OwnerLookupsThroughIntermediatesAsync", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Task 082a: the guard fires on reflection by member name (must-fire control, K1 round 2)")]
+    public void TheGuard_FiresOnReflectionByName()
+    {
+        var lines = File.ReadAllLines(ChainFile)
+            .Append("var m = typeof(SecureRootInheritance).GetMethod(\"OwnerLookupsThroughIntermediatesAsync\", BindingFlags.NonPublic | BindingFlags.Static);");
+
+        Assert.Contains(Violations(lines), v => v.Contains("OwnerLookupsThroughIntermediatesAsync", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "Task 082a: the guard fires on a CoreAncestorResolver reference (must-fire control, K1)")]
