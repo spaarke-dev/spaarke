@@ -94,4 +94,8 @@ Seeding proof (A-d): in `ForRow`, the core is put LAST instead of first (`ordere
 
 ## Verification
 
-(filled in below after the runs)
+Fix round 1, at `60962dd568` (items A, C-G):
+- `verify-suites.sh`: solution build 0 warnings, 0 errors. ArchTests **1911 / 1911** (`ChildRowOwnershipQuestionsGoThroughTheOneBuilder` passes; it failed at `d13e1cabc7`). Filtered suites **6757 passed, 0 failed, 7 skipped** (6720 before; the new cases).
+- `DisplayName~042c`: 87 / 87.
+- Publish delta (`publish-delta.ps1`, master `0d4aa87ee0`, branch `60962dd568`): **+3,182 bytes** (zip 41,213,292 to 41,216,474; 192 files each side; total 39.31 MB). Under every §10 threshold.
+- CVE (`dotnet list package --vulnerable --include-transitive` on the branch's `Sprk.Bff.Api`): no vulnerable packages.
