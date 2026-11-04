@@ -82,7 +82,7 @@ internal static class SourceDocumentFileRead
     ];
 
     /// <summary>The row's recorded file size in bytes (<c>sprk_filesize</c>, a Whole Number; empty on rows written before it was kept).</summary>
-    private const string FileSizeColumn = "sprk_filesize";
+    internal const string FileSizeColumn = "sprk_filesize";
 
     /// <summary>
     /// Reads the file of <paramref name="documentId"/> (see the type's summary for the order). <paramref name="maxBytes"/> (task 118b review,
@@ -171,8 +171,11 @@ internal static class SourceDocumentFileRead
             string.IsNullOrWhiteSpace(fileName) ? null : fileName);
     }
 
-    /// <summary>The <c>sprk_filesize</c> the row records, whatever integer width the retrieve returned it in; null when empty, not a number or not positive.</summary>
-    private static long? RecordedSizeOf(Entity document) => document.Contains(FileSizeColumn)
+    /// <summary>
+    /// The <c>sprk_filesize</c> the row records, whatever integer width the retrieve returned it in; null when empty, not a number or not positive.
+    /// Task 118b review 2 (F1): the intake's filing check reads it too, to sum the supporting documents' recorded sizes before any download.
+    /// </summary>
+    internal static long? RecordedSizeOf(Entity document) => document.Contains(FileSizeColumn)
         ? document[FileSizeColumn] switch
         {
             int whole when whole > 0 => whole,

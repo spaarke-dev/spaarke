@@ -92,6 +92,13 @@ public sealed class InvoiceSubmissionSupportingDocumentsTests
         /// <summary>The per-file limit each read was asked to enforce (task 118b review F1-b).</summary>
         public List<long> MaxBytes { get; } = new();
 
+        /// <summary>
+        /// Task 118b review 2 (F1): documents whose stream is this many bytes. Read as that many zero bytes, or as
+        /// <see cref="SourceDocumentFileOutcome.TooLarge"/> when over the limit the read was asked to enforce, as the shared read answers it
+        /// (<see cref="SourceDocumentFileRead"/>; nothing is allocated for a refused one).
+        /// </summary>
+        public Dictionary<Guid, long> StreamSizes { get; } = new();
+
         public static byte[] BytesOf(Guid id) => System.Text.Encoding.ASCII.GetBytes("supporting " + id.ToString("N"));
 
         public static SourceDocumentFile Readable(Guid id, long version = 3) =>
@@ -101,7 +108,17 @@ public sealed class InvoiceSubmissionSupportingDocumentsTests
         {
             Events.Add("read " + id);
             MaxBytes.Add(maxBytes);
-            return Fault is { } fault ? Task.FromException<SourceDocumentFile>(fault) : Task.FromResult(Files.TryGetValue(id, out var file) ? file : Readable(id));
+            if (Fault is { } fault)
+            {
+                return Task.FromException<SourceDocumentFile>(fault);
+            }
+
+            if (StreamSizes.TryGetValue(id, out var size))
+            {
+                return Task.FromResult(size > maxBytes ? new SourceDocumentFile(SourceDocumentFileOutcome.TooLarge) : Readable(id) with { Content = new byte[size] });
+            }
+
+            return Task.FromResult(Files.TryGetValue(id, out var file) ? file : Readable(id));
         }
     }
 
@@ -330,6 +347,122 @@ public sealed class InvoiceSubmissionSupportingDocumentsTests
         (await h.Build().SubmitExistingDocumentAsync(Submit(documents, A, B), CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
 
         documents.MaxBytes.Should().Equal(3L * 1024 * 1024, 3L * 1024 * 1024);
+    }
+
+    // ── Task 118b review 2 (F1): the supporting documents may hold at most the upload route's request cap IN ALL ──
+
+    /// <summary>The upload route's whole-request cap: the budget the supporting documents share (referenced, never copied).</summary>
+    private static long Budget => Sprk.Bff.Api.Api.Finance.InvoiceSubmissionHttp.MaxRequestBodyBytes;
+
+    /// <summary>A supporting document's row as the filing check reads it: only the columns asked for (as Dataverse answers), so a column dropped from the read fails a test.</summary>
+    private static void SeedRow(Harness h, Guid id, long? recordedBytes)
+    {
+        var row = new Entity("sprk_document", id);
+        if (recordedBytes is { } recorded)
+        {
+            row["sprk_filesize"] = checked((int)recorded);
+        }
+
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_document", id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid _, string[] columns, CancellationToken _) =>
+            {
+                var answer = new Entity(row.LogicalName, row.Id);
+                foreach (var column in columns.Where(row.Contains))
+                {
+                    answer[column] = row[column];
+                }
+
+                return answer;
+            });
+    }
+
+    [Fact(DisplayName = "118b review 2 F1 (seed-proof, the total; must fire): supporting documents whose RECORDED sizes add up to more than the upload route's request cap are 413 too_large in the total's own words, before any file is downloaded or step A; nothing staged, created or queued")]
+    public async Task NewAttempt_RecordedSizesOverTheTotal_Is413_NothingDownloaded()
+    {
+        var h = NewHarness();
+        h.Options.MaxSubmissionFileSizeMb = Sprk.Bff.Api.Configuration.EbillingOptions.MaxSubmissionFileSizeMbCeiling; // no single file is over its limit
+        var third = Budget / 3 + 1;
+        foreach (var id in new[] { A, B, C })
+        {
+            SeedRow(h, id, third);
+        }
+
+        var documents = new Documents();
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Submit(documents, A, B, C), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status413PayloadTooLarge);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.TooLarge);
+        outcome.Detail.Should().Contain("together", "the total has its own text, not the per-file one");
+        documents.Events.Should().BeEmpty("the recorded sizes already add up to more than the budget: nothing is downloaded, and step A does not run");
+        outcome.Detail.Should().NotContain(A.ToString()).And.NotContain(B.ToString()).And.NotContain(C.ToString(), "the answer names no document");
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "118b review 2 F1 (seed-proof, the running total; must fire): supporting documents with NO recorded size whose streams add up to more than the request cap are 413 too_large in the total's own words: each read is given what is left of the budget, the one that does not fit is refused, step A never runs, nothing is staged")]
+    public async Task NewAttempt_StreamSizesOverTheTotal_Is413_NothingStaged()
+    {
+        var h = NewHarness();
+        h.Options.MaxSubmissionFileSizeMb = Sprk.Bff.Api.Configuration.EbillingOptions.MaxSubmissionFileSizeMbCeiling;
+        const long First = 51L * 1024 * 1024;
+        var second = Budget - First + 1; // one byte too many
+        SeedRow(h, A, recordedBytes: null);
+        SeedRow(h, B, recordedBytes: null);
+        var documents = new Documents();
+        documents.StreamSizes[A] = First;
+        documents.StreamSizes[B] = second;
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Submit(documents, A, B), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status413PayloadTooLarge);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.TooLarge);
+        outcome.Detail.Should().Contain("together");
+        documents.Events.Should().Equal("read " + A, "read " + B);
+        documents.MaxBytes.Should().Equal(
+            new[] { 100L * 1024 * 1024, Budget - First },
+            "the first read is bounded by the per-file limit, the second by what is left of the budget");
+        outcome.Detail.Should().NotContain(A.ToString()).And.NotContain(B.ToString());
+        ShouldHaveWrittenNothing(h);
+    }
+
+    [Fact(DisplayName = "118b review 2 F1 (must not fire): supporting documents that add up to EXACTLY the request cap (recorded and streamed) pass: both are read and staged, then the submission and its job")]
+    public async Task NewAttempt_ExactlyAtTheBudget_Passes()
+    {
+        var h = NewHarness();
+        h.Options.MaxSubmissionFileSizeMb = Sprk.Bff.Api.Configuration.EbillingOptions.MaxSubmissionFileSizeMbCeiling;
+        const long First = 50L * 1024 * 1024;
+        var second = Budget - First;
+        SeedRow(h, A, First);
+        SeedRow(h, B, second);
+        var documents = new Documents();
+        documents.StreamSizes[A] = First;
+        documents.StreamSizes[B] = second;
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Submit(documents, A, B), CancellationToken.None);
+
+        outcome.Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received, outcome.Detail);
+        documents.Events.Should().Equal("read " + A, "read " + B, "step A");
+        documents.MaxBytes.Should().Equal(new[] { 100L * 1024 * 1024, second }, "the last file may take exactly what is left");
+        h.Stages.Should().HaveCount(2);
+        h.Allocations.Should().ContainSingle();
+        h.JobsSent.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "118b review 2 F1 (must not fire): the per-file limit still answers in its own words when it, not the budget, stopped the read")]
+    public async Task NewAttempt_AFileOverThePerFileLimit_StaysThePerFileRefusal()
+    {
+        var h = NewHarness();
+        h.Options.MaxSubmissionFileSizeMb = 3;
+        SeedRow(h, A, recordedBytes: null);
+        var documents = new Documents();
+        documents.StreamSizes[A] = 4L * 1024 * 1024;
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(Submit(documents, A), CancellationToken.None);
+
+        outcome.StatusCode.Should().Be(StatusCodes.Status413PayloadTooLarge);
+        outcome.ErrorCode.Should().Be(InvoiceSubmissionErrors.TooLarge);
+        outcome.Detail.Should().Contain("at most 3 MB").And.NotContain("together");
+        ShouldHaveWrittenNothing(h);
     }
 
     /// <summary>The refusal shape every supporting-document check shares: before any file is read or step A, nothing written, no document named.</summary>

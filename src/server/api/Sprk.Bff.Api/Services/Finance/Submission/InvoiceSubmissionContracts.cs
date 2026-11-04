@@ -176,8 +176,9 @@ public sealed record InvoiceSubmissionRequest
     /// (<see cref="SourceDocumentFileRead.ReadAsync"/>, app-only, the pointer's container verified first) to its own SharePoint Embedded and
     /// container seams, which the intake does not take (it never reaches SharePoint Embedded itself, task 092). Required when
     /// <see cref="SupportingDocumentIds"/> is not empty and the request makes a new attempt; a fault throws. The <c>long</c> is the file size
-    /// limit the read enforces (<see cref="InvoiceSubmissionService.MaxFileBytes"/>, task 118b review F1-b): a file over it answers
-    /// <see cref="SourceDocumentFileOutcome.TooLarge"/>.
+    /// limit the read enforces (the lesser of <see cref="InvoiceSubmissionService.MaxFileBytes"/> and what is left of
+    /// <see cref="InvoiceSubmissionService.SupportingBudgetBytes"/> after the documents already read; task 118b review F1-b and review 2 F1):
+    /// a file over it answers <see cref="SourceDocumentFileOutcome.TooLarge"/>.
     /// </summary>
     internal Func<Guid, long, CancellationToken, Task<SourceDocumentFile>>? ReadSupportingDocument { get; init; }
 }
