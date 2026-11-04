@@ -21,11 +21,11 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// then runs as the BFF application user (no role holds a privilege on the assignment table; its core lookups are field-secured).</para>
 /// <para><b>An override only restricts.</b> It changes which rules check the record's invoices; it grants no one any access (no
 /// access-conferring column is written: <c>BillingLookupsConferNoAccessTests</c>).</para>
-/// <para><b>Refusal shapes.</b> 401; 404 step 0 or the uniform record not found; 403 <c>sdap.access.deny.*</c>; 400 a missing body id; 503
+/// <para><b>Refusal shapes.</b> 401 (also an <c>oid</c> that is not a GUID: the service is never run with no requester); 404 step 0 or the uniform record not found; 403 <c>sdap.access.deny.*</c>; 400 a missing body id; 503
 /// <c>ebilling.disabled</c>; then, from the service: 400 <c>assignment.invalid</c> with <c>errors</c>; 404
 /// <c>assignment.procedure_not_found</c> / <c>assignment.rule_not_found</c>; 409 <c>assignment.duplicate</c>,
 /// <c>assignment.procedure_retired</c>, <c>assignment.system_rule</c>, <c>assignment.concurrent_edit</c> or the owner reason code; 500
-/// <c>assignment.write_failed</c>.</para>
+/// <c>assignment.write_failed</c>; 503 <c>assignment.read_failed</c> (a Dataverse read before the write faulted; nothing was written).</para>
 /// </remarks>
 public static class ProcedureAssignmentEndpoints
 {
@@ -50,7 +50,7 @@ public static class ProcedureAssignmentEndpoints
         // ── Matter ──────────────────────────────────────────────────────────────────────────────────────────────
         group.MapPost("/matters/{recordId:guid}/procedure-assignments",
                 (Guid recordId, ProcedureAssignmentRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(service.AssignProcedureAsync(MatterTable, recordId, body, CallerOid(http), ct), http))
+                    Created(http, oid => service.AssignProcedureAsync(MatterTable, recordId, body, oid, ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(AssignTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -60,7 +60,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/matters/{recordId:guid}/rule-overrides/exclude",
                 (Guid recordId, RuleExcludeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(service.ExcludeRuleAsync(MatterTable, recordId, body, CallerOid(http), ct), http))
+                    Created(http, oid => service.ExcludeRuleAsync(MatterTable, recordId, body, oid, ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ExcludeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -71,7 +71,7 @@ public static class ProcedureAssignmentEndpoints
         // ── Project ──────────────────────────────────────────────────────────────────────────────────────────────
         group.MapPost("/projects/{recordId:guid}/procedure-assignments",
                 (Guid recordId, ProcedureAssignmentRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(service.AssignProcedureAsync(ProjectTable, recordId, body, CallerOid(http), ct), http))
+                    Created(http, oid => service.AssignProcedureAsync(ProjectTable, recordId, body, oid, ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(AssignTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -81,7 +81,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/projects/{recordId:guid}/rule-overrides/exclude",
                 (Guid recordId, RuleExcludeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(service.ExcludeRuleAsync(ProjectTable, recordId, body, CallerOid(http), ct), http))
+                    Created(http, oid => service.ExcludeRuleAsync(ProjectTable, recordId, body, oid, ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ExcludeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -92,7 +92,7 @@ public static class ProcedureAssignmentEndpoints
         // ── Work assignment ──────────────────────────────────────────────────────────────────────────────────────
         group.MapPost("/workassignments/{recordId:guid}/procedure-assignments",
                 (Guid recordId, ProcedureAssignmentRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(service.AssignProcedureAsync(WorkAssignmentTable, recordId, body, CallerOid(http), ct), http))
+                    Created(http, oid => service.AssignProcedureAsync(WorkAssignmentTable, recordId, body, oid, ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(AssignTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -102,7 +102,7 @@ public static class ProcedureAssignmentEndpoints
 
         group.MapPost("/workassignments/{recordId:guid}/rule-overrides/exclude",
                 (Guid recordId, RuleExcludeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
-                    Created(service.ExcludeRuleAsync(WorkAssignmentTable, recordId, body, CallerOid(http), ct), http))
+                    Created(http, oid => service.ExcludeRuleAsync(WorkAssignmentTable, recordId, body, oid, ct)))
             .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ExcludeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
@@ -152,9 +152,22 @@ public static class ProcedureAssignmentEndpoints
     // Responses (ADR-019: ProblemDetails with a stable errorCode)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private static async Task<IResult> Created(Task<RuleSetOutcome<OverrideView>> pending, HttpContext http)
+    /// <summary>
+    /// Runs the service call as the caller. A caller whose <c>oid</c> is not a GUID is 401 (CallerResolution: "null means 401"): the service
+    /// is never run with no requester, as the owner write stamps the creator person from it.
+    /// </summary>
+    private static async Task<IResult> Created(HttpContext http, Func<Guid, Task<RuleSetOutcome<OverrideView>>> call)
     {
-        var outcome = await pending;
+        if (CallerOid(http) is not { } callerOid)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Unauthorized",
+                detail: "User identity not found",
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
+        }
+
+        var outcome = await call(callerOid);
         return outcome.Kind == RuleSetOutcomeKind.Done
             ? Results.Created($"{http.Request.Path}/{outcome.Value!.Id}", outcome.Value)
             : Map(outcome, http);

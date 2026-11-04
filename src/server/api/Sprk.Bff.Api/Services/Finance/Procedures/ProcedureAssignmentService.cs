@@ -77,6 +77,7 @@ public class ProcedureAssignmentService
     internal const string CodeSystemRule = "assignment.system_rule";
     internal const string CodeConcurrentEdit = "assignment.concurrent_edit";
     internal const string CodeWriteFailed = "assignment.write_failed";
+    internal const string CodeReadFailed = "assignment.read_failed";
 
     internal const string KindProcedure = "Procedure";
     internal const string KindRuleExcluded = "RuleExcluded";
@@ -92,6 +93,10 @@ public class ProcedureAssignmentService
 
     // The table this service creates rows of, named here so the ownership census resolves the create to its table in this file.
     private const string AssignmentTable = "sprk_procedureassignment";
+
+    // The firm existence check selects its key only, as RuleSetService.ExistsAsync does: sprk_organization's primary name is
+    // sprk_organizationname, and a $select naming sprk_name fails (089b review 2 F1).
+    private const string FirmIdColumn = "sprk_organizationid";
 
     /// <summary>The namespace of the derived row ids (version-5 UUIDs, as <see cref="RuleSetService.VersionIdFor"/>).</summary>
     internal static readonly Guid RowIdNamespace = new("a4c2e8f1-7b3d-4e59-9c06-1d8f2b7e3a90");
@@ -124,6 +129,19 @@ public class ProcedureAssignmentService
     {
         RequireCore(coreTable, recordId);
         ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            return await AssignProcedureCoreAsync(coreTable, recordId, request, callerObjectId, ct);
+        }
+        catch (ReadFailedException ex)
+        {
+            return ReadFailed<OverrideView>(ex, "assign");
+        }
+    }
+
+    private async Task<RuleSetOutcome<OverrideView>> AssignProcedureCoreAsync(
+        string coreTable, Guid recordId, ProcedureAssignmentRequest request, Guid? callerObjectId, CancellationToken ct)
+    {
 
         var errors = new List<RuleSetError>();
         if (request.ProcedureId is not { } procedureId || procedureId == Guid.Empty)
@@ -210,6 +228,19 @@ public class ProcedureAssignmentService
     {
         RequireCore(coreTable, recordId);
         ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            return await ExcludeRuleCoreAsync(coreTable, recordId, request, callerObjectId, ct);
+        }
+        catch (ReadFailedException ex)
+        {
+            return ReadFailed<OverrideView>(ex, "exclude rule");
+        }
+    }
+
+    private async Task<RuleSetOutcome<OverrideView>> ExcludeRuleCoreAsync(
+        string coreTable, Guid recordId, RuleExcludeRequest request, Guid? callerObjectId, CancellationToken ct)
+    {
 
         var errors = new List<RuleSetError>();
         if (request.PolicyId is not { } policyId || policyId == Guid.Empty)
@@ -220,7 +251,7 @@ public class ProcedureAssignmentService
 
         CheckReason(errors, request.Reason, required: true);
         if (request.FirmId is { } firm
-            && (firm == Guid.Empty || await LoadByIdAsync(RuleSetService.FirmEntity, firm, new[] { "sprk_name" }, ct) is null))
+            && (firm == Guid.Empty || await LoadByIdAsync(RuleSetService.FirmEntity, firm, new[] { FirmIdColumn }, ct) is null))
         {
             errors.Add(Error("firmId", "The firm was not found."));
         }
@@ -271,7 +302,7 @@ public class ProcedureAssignmentService
         query.Criteria.AddCondition("sprk_policyid", ConditionOperator.Equal, policyId);
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
         RuleDomains.AddBillingFilter(query);
-        var policy = (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(p => p.Id == policyId && RuleDomains.IsBillingRow(p));
+        var policy = (await ReadAsync(query, ct)).Entities.FirstOrDefault(p => p.Id == policyId && RuleDomains.IsBillingRow(p));
         // The system rule first, BEFORE a rule set is required: it belongs to no rule set (Seed-BillingSystemPolicy.ps1), so the set check
         // below would answer it "not found". The caller's Read on the rule has already been checked by the route.
         if (policy is not null && await IsSystemRuleAsync(policy, policyId, ct))
@@ -324,7 +355,39 @@ public class ProcedureAssignmentService
         var query = new QueryExpression(ProcedureAssignmentEntity.Entity) { ColumnSet = new ColumnSet(subjectColumn), TopCount = 1 };
         query.Criteria.AddCondition(coreTable, ConditionOperator.Equal, recordId);
         query.Criteria.AddCondition(subjectColumn, ConditionOperator.Equal, subjectId);
-        return (await _entities.RetrieveMultipleAsync(query, ct)).Entities.Count > 0;
+        return (await ReadAsync(query, ct)).Entities.Count > 0;
+    }
+
+    /// <summary>A Dataverse read before the write failed (a fault or a timeout); thrown by <see cref="ReadAsync"/>, answered by the two public methods as 503.</summary>
+    private sealed class ReadFailedException(string entity, Exception inner)
+        : Exception($"Reading {entity} failed ({inner.GetType().Name}).", inner)
+    {
+        public string Entity { get; } = entity;
+    }
+
+    /// <summary>
+    /// Every read before the write goes through here. A fault becomes <see cref="ReadFailedException"/> (stable 503, ADR-019) instead of an
+    /// unhandled 500; the caller's own cancellation still propagates. The transaction write is not read here: its fault mapping is
+    /// <see cref="SendAsync"/>.
+    /// </summary>
+    private async Task<EntityCollection> ReadAsync(QueryExpression query, CancellationToken ct)
+    {
+        try
+        {
+            return await _entities.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            throw new ReadFailedException(query.EntityName, ex);
+        }
+    }
+
+    private RuleSetOutcome<T> ReadFailed<T>(ReadFailedException ex, string what) where T : class
+    {
+        _logger.LogError(ex.InnerException, "Override: the {What} could not read {Entity} ({ExceptionType}); nothing was written",
+            what, ex.Entity, ex.InnerException?.GetType().Name);
+        return Refused<T>(StatusCodes.Status503ServiceUnavailable, CodeReadFailed,
+            "The override could not be checked right now and nothing was written. Try again; if it keeps failing, contact support.");
     }
 
     private async Task<Entity?> LoadByIdAsync(string entity, Guid id, string[] columns, CancellationToken ct)
@@ -336,7 +399,7 @@ public class ProcedureAssignmentService
 
         var query = new QueryExpression(entity) { ColumnSet = new ColumnSet(columns), TopCount = 1 };
         query.Criteria.AddCondition(entity + "id", ConditionOperator.Equal, id);
-        return (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(r => r.Id == id);
+        return (await ReadAsync(query, ct)).Entities.FirstOrDefault(r => r.Id == id);
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────

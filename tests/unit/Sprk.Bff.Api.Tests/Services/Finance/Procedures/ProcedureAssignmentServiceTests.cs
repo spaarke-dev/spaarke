@@ -39,7 +39,21 @@ public sealed class ProcedureAssignmentServiceTests
         {
             H.Seed(new Entity("sprk_organization", FirmId), new Entity(Matter, MatterId));
             H.OwnerAnswer = RecordOwnerResolution.Owned(TeamId) with { CreatedByPerson = CallerUserId };
+
+            // 089b review 2 F1: the fake used to answer any column set on sprk_organization, so a $select naming sprk_name (which production
+            // refuses) passed. Refuse a column the table does not have, as Dataverse does.
+            H.AfterQuery = q =>
+            {
+                var unknown = q.EntityName == "sprk_organization" ? q.ColumnSet.Columns.Except(OrganizationColumns).ToArray() : Array.Empty<string>();
+                if (unknown.Length > 0)
+                {
+                    throw new InvalidOperationException($"sprk_organization has no column {string.Join(", ", unknown)} (its primary name is sprk_organizationname).");
+                }
+            };
         }
+
+        /// <summary>The columns of <c>sprk_organization</c> a query here may name (the key and the primary name; Entities/sprk_Organization/Entity.xml).</summary>
+        private static readonly string[] OrganizationColumns = { "sprk_organizationid", "sprk_organizationname" };
 
         public ProcedureAssignmentService Service(IRecordOwnershipResolver? ownership = null) =>
             new(H.Entities.Object, ownership ?? H.Ownership.Object, NullLogger<ProcedureAssignmentService>.Instance);
@@ -362,6 +376,41 @@ public sealed class ProcedureAssignmentServiceTests
         noFirm.Errors.Should().ContainSingle(e => e.Field == "firmId");
         noPolicy.Errors.Should().ContainSingle(e => e.Field == "policyId");
         w.H.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "089b review 2 F1 must-fire: the firm existence check selects only sprk_organizationid (sprk_organization has no sprk_name), so an exclude naming a firm succeeds")]
+    public async Task ExcludeRule_TheFirmCheck_SelectsOnlyTheKey_NeverSprkName()
+    {
+        var w = new World();
+        var policy = w.Rule();
+
+        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", FirmId), CallerOid, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        var firmQuery = w.H.Queries.Where(q => q.EntityName == "sprk_organization").Should().ContainSingle().Subject;
+        firmQuery.ColumnSet.Columns.Should().Equal(new[] { "sprk_organizationid" });
+        firmQuery.ColumnSet.Columns.Should().NotContain("sprk_name");
+    }
+
+    [Theory(DisplayName = "089b review 2 K2 must-fire: a Dataverse read that faults before the write is the stable 503 assignment.read_failed, and nothing is written")]
+    [InlineData("assign")]
+    [InlineData("exclude")]
+    public async Task APreWriteRead_ThatFaults_Is503ReadFailed_AndWritesNothing(string route)
+    {
+        var w = new World();
+        var procedure = w.Procedure();
+        var policy = w.Rule();
+        w.H.AfterQuery = _ => throw new TimeoutException("simulated Dataverse read fault");
+
+        var outcome = route == "assign"
+            ? await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default)
+            : await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused);
+        outcome.StatusCode.Should().Be(503);
+        outcome.ErrorCode.Should().Be("assignment.read_failed");
+        w.H.Transactions.Should().BeEmpty();
+        w.OwnerContexts.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "089b review F1 must-fire: the system rule, which belongs to NO rule set (as in production), is 409 system_rule, not 404 rule_not_found")]
