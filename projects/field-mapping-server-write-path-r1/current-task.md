@@ -1,6 +1,6 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-11-03 (main session checkpoint). Recovery: read Quick Recovery first.
+> **Last updated**: 2026-11-04 (main session checkpoint). Recovery: read Quick Recovery first.
 > **Done on master**: 001–006, 010–016, 017, 018, 037, 039, 038, 070, 071, 072, 073, 074. The work branch was merged to master as #2435 (6b0c1e2fed); later doc commits are on the work branch.
 > **Live on dev:** BFF 5796774091 since 2026-11-03T13:29Z (R3; carries 039, #2514, #2519, #2520; 019 live A/B ran on 3740e1a105). 017 (b083d62183, #2486) first went live 2026-10-31T19:52:25Z (UAC-r2 deploy; gate PASS: 23 req, 0 5xx, 0 OWNERSHIP-REFUSED, the reconciler wrote nothing). TrackingFieldTrio 1.0.55. SpaarkeMaster 1.2.4.0 is published but not imported. Check that the BU→Matter index map is gone after the model1-prod upgrade or the next provisioning run (H6).
 
@@ -12,15 +12,23 @@
 - Its numbers:
   - AC1–AC14 met except the AC3 pair half;
   - verify-suites 6659/0/7; ArchTests 1911; publish delta +811 B; no CVE.
-- **Both adversarial passes are done** and found the same **F1**: a caller-sent stamp that disagrees with the intermediate's root keeps the #2483 window open (step 7 asks only over missing stamps; the step-12 restamp then writes S).
-  - Fix options were sent to UAC-r2 and the owner: **A (recommended)** add the disagreeing derived root to step 7; this needs `CoreAncestorRestamper.PlanMissingStampAsync` to return the full plan (+1 file) and an AC12 amendment. B: refuse with 400. C: accept as a known limit.
-  - **Waiting on:** the owner and UAC-r2 to choose the path.
-  - The fix round to fm-042b follows that choice. It also covers: an F1 must-fire test; a user-principal parity case; the AC8 fault test asserting Mapping Skipped; §15.4 rows for Signal/DR (409 NoOwnerSource, K1) and addenda B/C.
-- Filed from the reviews: #2556 / DI-017 (report-card regarding; AC3 second half) and #2557 / DI-018 (thread-only communication).
-- **Then:** fix F-findings through SendMessage to fm-042b → send the diff to UAC-r2 for its full pass (AC15) → merge to the work branch → PR.
+- **Both adversarial passes are done** and found the same **F1**: a caller-sent stamp that disagrees with the intermediate's root keeps the #2483 window open. **Owner chose A' (replace)** 2026-11-03 (decisions.md, c1428c181d); UAC-r2 agrees.
+- **Fix round 1 done:** tip **f37c63ef1c** (fix c0fbc125ee + docs).
+  - `CoreAncestorRestamper.PlanStampOfRowAsync` (full plan) and `RecordCreationService.AsTheRowEnds` (step 7 and Repair).
+  - Failing-first 5/10 → 10/10; AC14 782/0; verify-suites 6667/0/7; ArchTests 1911; publish +829 B vs cfebe65f9b; no CVE.
+  - design §15.3/15.4 (rows 8–10)/15.6 updated.
+  - Review item 3 (the Signal/DR core pair) is outside OwnerQuestionOf, so it was filed as **#2561 / DI-019** (7e7613eeb3), not fixed.
+- **Scoped Sonnet re-check** of 20bdd9f7e5..c0fbc125ee is running (agent `fm-042b-recheck1`).
+- Filed from the reviews: #2556 / DI-017 (report-card regarding; AC3 second half), #2557 / DI-018 (thread-only communication), #2561 / DI-019.
+- **Then:**
+  1. Fix any F-findings through SendMessage to fm-042b.
+  2. Send the full diff cfebe65f9b..tip to UAC-r2 for its full pass (AC15).
+  3. Merge to the work branch `--no-ff` and run verify-suites.
+  4. Open the PR: ADR-008 path A, §15.4 K lines, UAC-r2 verdict, Closes #2483, DI-009 closed. Enable auto-merge.
 - **Open questions:**
   - Q1: the AC3 pair half cannot hold, because `TodoRegardingBuilder.RegardingLookupByEntity` lacks `sprk_reportcard` while the client writes it. Proposed DI-P1, for an owner decision.
-  - Q2: Signal and Decision Record are now refused 409 NoOwnerSource under a team-owned intermediate of a Secure root. UAC-r2 to confirm; ontology impact to be checked; §15.4 needs a row. Session 5c is the only field-mapping session (the pre-crash pid 53128 was stopped 2026-11-03).
+  - Q2 (closed): Signal / DR 409 NoOwnerSource under a team-owned intermediate of a Secure root is K1, agreed by UAC-r2. It is §15.4 row 8. No real writer is affected.
+  - Note: the shared stash top `lint-staged automatic backup` (1e84ffafed, 2026-11-04 00:19Z, ebilling files) belongs to ebilling-r1's session, not this one. Leave it.
 - **020 so far:**
   - the route creates sprk_matter and sprk_project;
   - the optional mapping source is passed as query params;
@@ -46,20 +54,17 @@
 - **041 ✅** PR #2541 merged 249809ce0b (2026-11-03T19:50Z). It is not on the dev BFF yet; that needs an R3 deploy.
 - **005 `-Apply` done on dev 2026-11-03** (36 migrated, VERIFY PASS, idempotent).
 - **019 ✅, 042a ✅.** |
-| **Next Action** | 1. When fm-020 reports round 3:
-   - read the fix diff, or run a scoped Sonnet re-check if it is large;
-   - merge `origin/task/fm-020` into the work branch `--no-ff` (the work branch is level with master after #2541);
-   - verify with `scripts/verify-suites.sh`, plus jest for the adapter;
-   - push, then open the PR. Cite ADR-008 path A. Placement Justification: extends an existing route. Include the §11 answer for `mappingSource`. Release note: the route creates matter and project; a caller-named `sprk_issecure` on a matter create is now refused 403 `sdap.access.secure_flag_transition_only`. Then enable auto-merge. If Classify Tier 1 times out (#2350), rerun the failed jobs.
-2. After the merge:
-   - TASK-INDEX 020 ✅, POML completed, run the drift check;
-   - the live check on dev: a Matter/Project create via the route (needs an R3 deploy with the owner's go).
-3. Next tasks: 042b (sequential; full UAC-r2 review). Then W3 021 onward. Item #2 must be fixed in 021 before cutover.
-4. Fix the stale wording in POMLs 020–034 as each task starts. |
+| **Next Action** | 1. 042b: read the fm-042b-recheck1 report. F-findings go to fm-042b (SendMessage).
+   - Then send the full 042b diff to uac-r2 for AC15.
+   - Then merge `task/fm-042b` into the work branch `--no-ff`, run verify-suites, push, and open the PR.
+   - Then TASK-INDEX 042b ✅ and the POML marked completed.
+2. After uac-r2 deploys #2551: read-only route checks (5xx on POST /api/v1/child-records/*), then ask the owner HERE for an OK on Matter/Project test rows.
+3. After a real dev upload: re-run the 041 read-only checks and send them to uac-r2.
+4. Next: W3, starting with 021 (fix item #2, ReferenceLookupColumns / PostMappingDefaults, before cutover). |
 | **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
-| **Waiting on** | - fm-020 (round 3).
+| **Waiting on** | - fm-042b-recheck1 (scoped re-check); then uac-r2 (042b full pass).
 - Owner: the Family 1.0.56 look (the four #2513 items on dev) and the 076 narrower-user pass. **Done 2026-11-03:** 005 `-Apply` on dev (36 migrated, VERIFY PASS, idempotent); pid 53128 (the pre-crash session) stopped on the owner's "kill it".
 - 041 live proof: dev BFF d763dc120e (carries #2541) is live since 2026-11-03T22:26:31Z. The post-deploy check passed on what existed (0 5xx; no index or child-records traffic; no rows since the deploy). The startup logger exception is pre-existing (#2549, DI-016). After the next real upload or create on dev, re-run the read-only checks (document `sprk_searchindexname` = spaarke-files-index; no `sprk_ai_search_index` on new rows). Send the results to **uac-r2** (it now runs dev deploys), and copy R3 (`spa-external-access-platform-f2`) only for its rollout record §17.
 - Rows to delete later: see `notes/task-019-notes.md` (the check-C event is the owner's and stays).
