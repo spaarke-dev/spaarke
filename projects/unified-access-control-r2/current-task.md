@@ -57,6 +57,7 @@
   - the NFR-05 census after the next deploy;
   - 086's follow-up adds `prvReadsprk_StoredFile` to `config/secure-record-owner-role.json`.
 - **field-mapping:**
+  - #2561 (pre-existing; Signal and Decision Record create ignore the core pair in the owner question; reachable via chat create_record): I classed it **F**, a follow-up task after 042b that doesn't hold 042b. Fix: option 1 (core first in step 7 via the catalog) plus the caller's AppendTo check on the named core (to confirm whether it exists). Tests listed;
   - 042b F1: the owner chose A' (replace) in field-mapping's session (decisions c1428c181d). Step 7 asks over the planned values for every column the restamp will write; tests in both directions plus "agrees"; Repair gets the same; §15.4 Signal/DR 409 row. Full pass (AC15) when the whole 042b diff arrives;
   - 042a, and 042b with a full review;
   - 043 (the #2524 create-path link write);
