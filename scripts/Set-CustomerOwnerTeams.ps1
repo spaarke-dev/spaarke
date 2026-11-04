@@ -1,9 +1,10 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Sets up the declared memberless owner teams in ONE customer's top business unit (a direct child of the root, never the
-    root and never Secure Record), each with its own role holding Read at User (Basic) depth on exactly the tables its config
-    file declares. Dry run by default.
+    Sets up the declared teams in ONE customer's top business unit (a direct child of the root, never the root and never
+    Secure Record): the memberless owner teams, each with its own role holding Read at User (Basic) depth on exactly the
+    tables its config file declares, and the 'Billing Rule Readers' member team, whose role holds Read at Deep on
+    sprk_policy only. Dry run by default.
 
 .DESCRIPTION
     The Spaarke root business unit holds only Spaarke product data; customer records and customer configuration belong to
@@ -27,6 +28,18 @@
 
     Every customer top unit needs both set up BEFORE a BFF with the rule, or a seeder, writes its rows.
 
+    The same run also sets up one team that HAS members (ebilling-r1 task 089d; owner 2026-11-03):
+
+      billing-rule-readers-role.json          'Billing Rule Readers' / 'Billing Rule Reader'
+          Read at Deep on sprk_policy only. Its members are the customer's child-unit billing admins: a team's Deep
+          privilege is evaluated against the TEAM's business unit, so each member reads every rule owned in the customer's
+          top unit and the units below it, and none in Secure Record (a sibling). The script never adds or removes a member;
+          -Verify fails while a member lacks the config's memberPrivilege (the billing-admin marker) or is homed outside
+          this customer's units (a member from another customer's unit would read this customer's rules).
+
+    A config file without 'membership' (or with 'none') declares a memberless owner team at Basic; 'membership': 'members'
+    declares a member team at Deep. No other combination is accepted, and no file may ask for Global.
+
     THE ROLES. Dataverse creates a role in the root business unit and copies it into every child unit; a team can hold only
     its own unit's copy, and the privileges are the root role's. So each role is created once, in the root (a role is
     configuration, not a record), and the customer unit's COPY is assigned to that unit's team. The root role itself is
@@ -35,24 +48,31 @@
     MODES
       (default)  Dry run. Reads everything and prints the plan for each declared team. Zero writes.
       -Apply     For each declared team: creates the team in the named customer unit if it is missing (teamtype 0), creates
-                 its role in the root if it is missing, adds each declared Read privilege at Basic, takes off every other
+                 its role in the root if it is missing, adds each declared Read privilege at its declared depth (Basic, or
+                 Deep for a member team), takes off every other
                  privilege of THAT role (the platform injects some on create and on every AddPrivilegesRole; setup guide
                  SECURE-PROJECT-ENVIRONMENT-SETUP.md section 5.4), assigns the customer unit's copy of the role to the team,
-                 then reads everything back and checks it as -Verify does. It never removes a member, moves a team, takes a
-                 role off another principal or takes another role off a team: each of those is drift an owner decides, and
-                 -Apply refuses before writing anything, for every declared team.
+                 then reads everything back and checks it as -Verify does. It never adds or removes a member, moves or
+                 deletes a team, takes a role off another principal or takes another role off a team: each of those is
+                 drift an owner decides, and -Apply refuses before writing anything, for every declared team.
                  A dry run exits 0 with the plan, or exits 1 with the OWNER DECISION NEEDED summary when any drift is
-                 one -Apply refuses (a member, another role, the wrong team type, a default team, a role assigned
-                 elsewhere): such a plan cannot be applied as it stands.
-      -Verify    Read-only. Exits 1 and names each drift of the NAMED customer unit, per declared team: the team or role
-                 missing; the team not an Owner team or a default team; any member; any other role on the team; the role
-                 (or a copy of it) assigned to anything but a team of its name in a customer top unit; a declared privilege
-                 missing or at another depth; any privilege outside the file. Every OTHER direct child of the root that lacks
-                 a team is listed as information only (not a failure). Exits 0 when the named unit has no drift.
+                 one -Apply refuses (a member of a memberless team, a member of a member team without its memberPrivilege
+                 or homed outside the customer's units, a team of the name in the root or Secure Record, another role, the wrong team type, a default team, a
+                 role assigned elsewhere): such a plan cannot be applied as it stands.
+      -Verify    Read-only. Prints, per declared team, its business unit, its member count and each privilege its role
+                 holds with the depth. Exits 1 and names each drift of the NAMED customer unit, per declared team: the team
+                 or role missing; the team not an Owner team or a default team; any member of a memberless team; a member
+                 of a member team without its memberPrivilege, or homed outside the customer's top unit and the units
+                 below it; a team of the name anywhere in the root or Secure Record;
+                 any other role on the team; the role (or a copy of it) assigned to anything but a team of its name in a
+                 customer top unit; a declared privilege missing or at another depth; any privilege outside the file. Every
+                 OTHER direct child of the root that lacks a team is listed as information only (not a failure). Exits 0
+                 when the named unit has no drift.
 
     REFUSED: a customer unit that is the root, that is the Secure Record unit, or that is not a direct child of the root;
     no business unit, or more than one, named -SecureBusinessUnitName (Secure Record exists by this step, H7b, so a name
-    that matches nothing is a wrong name and would let the Secure Record unit pass as a customer unit); two config files that declare the same team, the same role or the same table.
+    that matches nothing is a wrong name and would let the Secure Record unit pass as a customer unit); two config files that declare the same team or the same role; two memberless owner
+    configs that declare the same table (a member team's table may also be an owner team's: it reads, it never owns).
 
     FAIL CLOSED: every read that fails stops the run (exit 1); nothing is decided on a partial read.
 
@@ -84,11 +104,11 @@
 
 .EXAMPLE
     .\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -CustomerBusinessUnitName 'Spaarke Business Unit 1'
-    Dry run: the plan for both teams, with no writes.
+    Dry run: the plan for every declared team, with no writes.
 
 .EXAMPLE
     .\Set-CustomerOwnerTeams.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -CustomerBusinessUnitId <id> -Verify
-    Exit 0 = no drift in that unit for either team; exit 1 = drift (each named) or a read failed.
+    Exit 0 = no drift in that unit for any declared team; exit 1 = drift (each named) or a read failed.
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'ByName')]
@@ -117,7 +137,8 @@ param(
 # entries) to EQUAL the guard's declared set: no declared file missing, no other file added.
 $DeclaredRoleFiles = @(
     'restricted-content-owner-role.json',
-    'customer-configuration-owner-role.json'
+    'customer-configuration-owner-role.json',
+    'billing-rule-readers-role.json'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -136,9 +157,24 @@ function Read-Config([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { throw "Config not found: $Path" }
     $c = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($c.schemaVersion -ne 1) { throw "Unsupported schemaVersion '$($c.schemaVersion)' in $Path" }
-    if ($c.access -ne 'Read' -or $c.depth -ne 'Basic') {
-        throw "Config $Path asks for access '$($c.access)' at depth '$($c.depth)'. Only Read at Basic is supported, by design."
+    # 089d: 'membership' absent or 'none' = a memberless owner team (Read at Basic); 'members' = a member team (Read at
+    # Deep, held in the customer's top unit, so it reaches that unit and below and never Secure Record or the root).
+    $membership = if ($null -eq $c.membership) { 'none' } else { [string]$c.membership }
+    $c | Add-Member -NotePropertyName membership -NotePropertyValue $membership -Force
+    if ($c.access -ne 'Read') {
+        throw "Config $Path asks for access '$($c.access)'. Only Read is supported, by design."
     }
+    if ($membership -eq 'none') {
+        if ($c.depth -ne 'Basic') { throw "Config $Path declares a memberless owner team at depth '$($c.depth)'. Only Basic is supported, by design." }
+        if ($null -ne $c.memberPrivilege) { throw "Config $Path declares a memberless owner team with a memberPrivilege." }
+    }
+    elseif ($membership -eq 'members') {
+        if ($c.depth -ne 'Deep') {
+            throw "Config $Path declares a member team at depth '$($c.depth)'. Only Deep is supported: Global and the root reach Secure Record (D-123), Business Unit misses the child units."
+        }
+        if ([string]::IsNullOrWhiteSpace($c.memberPrivilege)) { throw "Config $Path declares a member team with no memberPrivilege (the privilege every member must hold)." }
+    }
+    else { throw "Config $Path names membership '$membership'. Only 'none' (or absent) and 'members' are supported." }
     if ($c.businessUnit -ne 'customer') {
         throw "Config $Path names business unit '$($c.businessUnit)'. Only 'customer' (each customer's top business unit) is supported, by design (owner round 136)."
     }
@@ -171,9 +207,12 @@ try {
         $dupes = @($defs | Group-Object { $_.Config.$key } | Where-Object Count -gt 1)
         if ($dupes.Count -gt 0) { throw "Two config files declare the same $key '$($dupes[0].Name)'. Each team and role is declared once." }
     }
-    $tableDupes = @($defs | ForEach-Object { $d = $_; @($d.Config.tables) | ForEach-Object { [pscustomobject]@{ Table = $_.logicalName; File = $d.File } } } |
+    # Two OWNER teams may not declare the same table (whose would its rows be?). A member team only reads, so its table may
+    # also be an owner team's (089d: sprk_policy is the restricted-content team's too).
+    $tableDupes = @($defs | Where-Object { $_.Config.membership -eq 'none' } |
+        ForEach-Object { $d = $_; @($d.Config.tables) | ForEach-Object { [pscustomobject]@{ Table = $_.logicalName; File = $d.File } } } |
         Group-Object Table | Where-Object Count -gt 1)
-    if ($tableDupes.Count -gt 0) { throw "A table is declared by two roles: $(($tableDupes | ForEach-Object { "$($_.Name) ($(($_.Group | ForEach-Object File) -join ', '))" }) -join '; ')." }
+    if ($tableDupes.Count -gt 0) { throw "A table is declared by two owner roles: $(($tableDupes | ForEach-Object { "$($_.Name) ($(($_.Group | ForEach-Object File) -join ', '))" }) -join '; ')." }
 
     $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
     if (-not $token) { throw "No Dataverse token for $EnvironmentUrl. Run 'az login' and retry." }
@@ -241,6 +280,35 @@ try {
     # Every customer top unit: a direct child of the root that is not the Secure Record unit.
     $customerTops = @($units | Where-Object { $_._parentbusinessunitid_value -eq $rootId -and $_.businessunitid -ne $secureId })
 
+    # 089d: the units no declared team may sit in: the root, Secure Record and every unit below Secure Record.
+    $forbiddenUnits = @{ $rootId = 'the ROOT business unit'; $secureId = 'the Secure Record business unit' }
+    $grew = $true
+    while ($grew) {
+        $grew = $false
+        foreach ($u in $units) {
+            if (-not $forbiddenUnits.ContainsKey($u.businessunitid) -and $u._parentbusinessunitid_value -and
+                $u._parentbusinessunitid_value -ne $rootId -and $forbiddenUnits.ContainsKey($u._parentbusinessunitid_value)) {
+                $forbiddenUnits[$u.businessunitid] = "'$($u.name)', below the Secure Record business unit"
+                $grew = $true
+            }
+        }
+    }
+
+    # 089d: the customer's own subtree (its top unit and every unit below it): where a member team's members are homed.
+    $customerSubtree = @{ $customerId = $true }
+    $grew = $true
+    while ($grew) {
+        $grew = $false
+        foreach ($u in $units) {
+            if (-not $customerSubtree.ContainsKey($u.businessunitid) -and $u._parentbusinessunitid_value -and $customerSubtree.ContainsKey($u._parentbusinessunitid_value)) {
+                $customerSubtree[$u.businessunitid] = $true
+                $grew = $true
+            }
+        }
+    }
+    $unitName = @{}
+    foreach ($u in $units) { $unitName[$u.businessunitid] = $u.name }
+
     # ── Each table's Read privilege, from METADATA ──────────────────────────────────────────────────────────
     foreach ($d in $defs) {
         $d.Wanted = @(foreach ($t in @($d.Config.tables)) {
@@ -258,15 +326,22 @@ try {
     # ── Read the current state of one declared team ─────────────────────────────────────────────────────────
     function Get-State($d) {
         $config = $d.Config
-        $s = [ordered]@{ Team = $null; Members = @(); TeamRoles = @(); Role = $null; Copies = @(); Copy = $null; Assigned = @(); Held = @(); AllTeams = @() }
+        $s = [ordered]@{ Team = $null; Members = @(); MembersWithout = @(); TeamRoles = @(); Role = $null; Copies = @(); Copy = $null; Assigned = @(); Held = @(); AllTeams = @() }
         # Every team of this name, wherever it is: the named unit's is checked; the others decide which assignments are allowed.
         $s.AllTeams = @(Get-DvAll "teams?`$select=teamid,name,teamtype,isdefault,_businessunitid_value&`$filter=name eq '$(Q $config.teamName)'")
         $teams = @($s.AllTeams | Where-Object { $_._businessunitid_value -eq $customerId })
         if ($teams.Count -gt 1) { throw "Expected at most one team named '$($config.teamName)' in $($customer.name); found $($teams.Count). Resolve it by hand (owner decision)." }
         if ($teams.Count -eq 1) {
             $s.Team = $teams[0]
-            $s.Members = @(Get-DvAll "teams($($s.Team.teamid))/teammembership_association?`$select=systemuserid,fullname")
+            $s.Members = @(Get-DvAll "teams($($s.Team.teamid))/teammembership_association?`$select=systemuserid,fullname,_businessunitid_value")
             $s.TeamRoles = @(Get-DvAll "teams($($s.Team.teamid))/teamroles_association?`$select=roleid,name")
+            if ($config.membership -eq 'members') {
+                # 089d: each member must hold the memberPrivilege (the billing-admin marker) through its own roles or teams.
+                $s.MembersWithout = @(foreach ($m in $s.Members) {
+                        $privs = @((Invoke-DvGet "systemusers($($m.systemuserid))/Microsoft.Dynamics.CRM.RetrieveUserPrivileges()").RolePrivileges)
+                        if (-not @($privs | Where-Object { $_.PrivilegeName -eq $config.memberPrivilege })) { $m }
+                    })
+            }
         }
 
         $roles = @((Invoke-DvGet "roles?`$select=roleid,name,_parentrootroleid_value&`$filter=name eq '$(Q $config.roleName)' and _businessunitid_value eq $rootId").value)
@@ -296,11 +371,25 @@ try {
     function Get-Drift($d, $s) {
         $config = $d.Config
         $r = [System.Collections.Generic.List[string]]::new()
+        # 089d: a team of this name in the root or in Secure Record (or below it) is drift wherever this run's unit is.
+        foreach ($t in @($s.AllTeams | Where-Object { $forbiddenUnits.ContainsKey($_._businessunitid_value) })) {
+            $r.Add("TEAM PLACE: a team named '$($config.teamName)' ($($t.teamid)) sits in $($forbiddenUnits[$t._businessunitid_value]); declared teams live only in a customer's top unit.")
+        }
         if ($null -eq $s.Team) { $r.Add("TEAM MISSING: no team named '$($config.teamName)' in $($customer.name).") }
         else {
             if ($s.Team.teamtype -ne 0) { $r.Add("TEAM TYPE: '$($config.teamName)' is teamtype $($s.Team.teamtype), expected 0 (Owner).") }
             if ($s.Team.isdefault) { $r.Add("TEAM DEFAULT: '$($config.teamName)' is a business unit's default team.") }
-            if ($s.Members.Count -gt 0) { $r.Add("TEAM MEMBERS: '$($config.teamName)' has $($s.Members.Count) member(s); it must have none.") }
+            if ($config.membership -eq 'none' -and $s.Members.Count -gt 0) { $r.Add("TEAM MEMBERS: '$($config.teamName)' has $($s.Members.Count) member(s); it must have none.") }
+            foreach ($m in $s.MembersWithout) {
+                $r.Add("MEMBER PRIVILEGE: '$($config.teamName)' member '$($m.fullname)' ($($m.systemuserid)) does not hold $($config.memberPrivilege); only billing admins may be members.")
+            }
+            if ($config.membership -eq 'members') {
+                # A member homed outside this customer's units (another customer's unit, the root, Secure Record) would read
+                # this customer's rules through the team.
+                foreach ($m in @($s.Members | Where-Object { -not $customerSubtree.ContainsKey([string]$_._businessunitid_value) })) {
+                    $r.Add("MEMBER UNIT: '$($config.teamName)' member '$($m.fullname)' ($($m.systemuserid)) is homed in '$($unitName[[string]$m._businessunitid_value])' ($($m._businessunitid_value)), outside $($customer.name) and the units below it.")
+                }
+            }
             $roleIds = @(@($s.Role | ForEach-Object roleid) + @($s.Copies | ForEach-Object roleid))
             $otherRoles = @($s.TeamRoles | Where-Object { $roleIds -notcontains $_.roleid })
             foreach ($o in $otherRoles) { $r.Add("TEAM ROLE: '$($config.teamName)' holds another role '$($o.name)' ($($o.roleid)).") }
@@ -328,7 +417,7 @@ try {
             foreach ($w in $d.Wanted) {
                 $h = $heldById[$w.Id]
                 if ($null -eq $h) { $r.Add("PRIVILEGE MISSING: $($w.Name) ($($w.Table)).") }
-                elseif ($h.Depth -ne 'Basic') { $r.Add("PRIVILEGE DEPTH: $($w.Name) ($($w.Table)) at $($h.Depth), expected Basic.") }
+                elseif ($h.Depth -ne $config.depth) { $r.Add("PRIVILEGE DEPTH: $($w.Name) ($($w.Table)) at $($h.Depth), expected $($config.depth).") }
             }
             foreach ($o in @($s.Held | Where-Object { $d.WantedIds -notcontains $_.PrivilegeId.ToString().ToLowerInvariant() } | Sort-Object PrivilegeName)) {
                 $r.Add("PRIVILEGE OUTSIDE THE FILE: '$($config.roleName)' holds $($o.PrivilegeName) at $($o.Depth).")
@@ -341,13 +430,16 @@ try {
         $config = $d.Config
         Write-Host ''
         Write-Host "== $($config.teamName) ($($d.File))"
+        $wantedMembers = if ($config.membership -eq 'members') { "members allowed, each holding $($config.memberPrivilege)" } else { 'memberless' }
+        Write-Host "Declared    : Read at $($config.depth) on $((@($config.tables) | ForEach-Object logicalName) -join ', '); $wantedMembers"
         if ($s.Team) {
-            Write-Host "Team        : $($s.Team.name) ($($s.Team.teamid)) teamtype=$($s.Team.teamtype) isdefault=$($s.Team.isdefault) bu=$($s.Team._businessunitid_value) members=$($s.Members.Count) roles=$($s.TeamRoles.Count)"
+            Write-Host "Team        : $($s.Team.name) ($($s.Team.teamid)) teamtype=$($s.Team.teamtype) isdefault=$($s.Team.isdefault) bu=$($customer.name) ($($s.Team._businessunitid_value)) members=$($s.Members.Count) roles=$($s.TeamRoles.Count)"
         }
         else { Write-Host "Team        : (none named '$($config.teamName)' in $($customer.name))" }
         if ($s.Role) {
             $copy = if ($s.Copy) { $s.Copy.roleid } else { '(none)' }
             Write-Host "Role        : $($s.Role.name) ($($s.Role.roleid)) customer-unit copy=$copy copies=$($s.Copies.Count) assignments=$($s.Assigned.Count) privileges=$($s.Held.Count)"
+            foreach ($h in @($s.Held | Sort-Object PrivilegeName)) { Write-Host "Privilege   : $($h.PrivilegeName) at $($h.Depth)" }
         }
         else { Write-Host "Role        : (none named '$($config.roleName)' in the root business unit)" }
         # Information only: the other customer top units that do not have the team yet (each is set up by its own run).
@@ -366,15 +458,18 @@ try {
     function Get-Plan($d, $s) {
         $config = $d.Config
         $p = [System.Collections.Generic.List[string]]::new()
-        if ($null -eq $s.Team) { $p.Add("create the Owner team '$($config.teamName)' in $($customer.name) (teamtype 0), with no members") }
-        if ($null -eq $s.Role) { $p.Add("create the role '$($config.roleName)' in the root business unit (Dataverse copies it into every child unit)") }
-        $missing = @($d.Wanted | Where-Object { $w = $_; $null -eq $s.Role -or -not @($s.Held | Where-Object { $_.PrivilegeId.ToString().ToLowerInvariant() -eq $w.Id -and $_.Depth -eq 'Basic' }) })
-        if ($missing.Count -gt 0) { $p.Add("add Read at Basic to '$($config.roleName)': $(($missing | ForEach-Object Name) -join ', ')") }
+        if ($null -eq $s.Team) { $p.Add("create the Owner team '$($config.teamName)' in $($customer.name) ($customerId) (teamtype 0), with no members") }
+        if ($null -eq $s.Role) { $p.Add("create the role '$($config.roleName)' in the root business unit (Dataverse copies it into every child unit; the root copy is assigned to nobody)") }
+        $missing = @($d.Wanted | Where-Object { $w = $_; $null -eq $s.Role -or -not @($s.Held | Where-Object { $_.PrivilegeId.ToString().ToLowerInvariant() -eq $w.Id -and $_.Depth -eq $config.depth }) })
+        if ($missing.Count -gt 0) { $p.Add("add Read at $($config.depth) to '$($config.roleName)': $(($missing | ForEach-Object Name) -join ', ')") }
         $p.Add("take off every privilege of '$($config.roleName)' outside $($d.File), including any the platform injects (setup guide 5.4)")
         if ($null -eq $s.Team -or $null -eq $s.Copy -or -not @($s.Assigned | Where-Object { $_.Kind -eq 'team' -and $_.Id -eq $s.Team.teamid -and $_.RoleId -eq $s.Copy.roleid })) {
             $p.Add("assign the $($customer.name) copy of '$($config.roleName)' to '$($config.teamName)'")
         }
         $p.Add("read '$($config.teamName)' back and check it as -Verify does")
+        if ($config.membership -eq 'members') {
+            $p.Add("(not this script) an operator adds each of $($customer.name)'s child-unit billing admins (holding $($config.memberPrivilege)) to '$($config.teamName)', then re-runs -Verify")
+        }
         return , $p
     }
 
@@ -388,7 +483,10 @@ try {
                 teamtype                     = 0
                 'businessunitid@odata.bind'  = "/businessunits($customerId)"
                 'administratorid@odata.bind' = "/systemusers($me)"
-                description                  = "Memberless owner team for the tables of config/$($d.File) in this customer business unit. MUST NEVER have a member or any other role."
+                description                  = $(if ($config.membership -eq 'members') {
+                        "Read at $($config.depth) on the tables of config/$($d.File) for this customer business unit and the units below it. Members: billing admins only (each holds $($config.memberPrivilege)). MUST NEVER hold any other role or move to the root or Secure Record."
+                    }
+                    else { "Memberless owner team for the tables of config/$($d.File) in this customer business unit. MUST NEVER have a member or any other role." })
             } | Out-Null
             $createdTeam = $true
             Write-Host "CREATED team '$($config.teamName)' in $($customer.name)." -ForegroundColor Green
@@ -397,7 +495,10 @@ try {
             Invoke-DvPost 'roles' @{
                 name                        = $config.roleName
                 'businessunitid@odata.bind' = "/businessunits($rootId)"
-                description                 = "Read at Basic on the tables of config/$($d.File) only, so each customer unit's memberless $($config.teamName) team can own their rows. Its copies are assigned to those teams only. MUST NOT be granted to any user or any other team."
+                description                 = $(if ($config.membership -eq 'members') {
+                        "Read at $($config.depth) on the tables of config/$($d.File) only, for each customer unit's $($config.teamName) team. Its copies are assigned to those teams only; the root copy to nobody. MUST NOT be granted to any user or any other team."
+                    }
+                    else { "Read at Basic on the tables of config/$($d.File) only, so each customer unit's memberless $($config.teamName) team can own their rows. Its copies are assigned to those teams only. MUST NOT be granted to any user or any other team." })
             } | Out-Null
             Write-Host "CREATED role '$($config.roleName)'." -ForegroundColor Green
         }
@@ -417,20 +518,20 @@ try {
 
         $heldById = @{}
         foreach ($h in $s.Held) { $heldById[$h.PrivilegeId.ToString().ToLowerInvariant()] = $h }
-        $toAdd = @($d.Wanted | Where-Object { $null -eq $heldById[$_.Id] -or $heldById[$_.Id].Depth -ne 'Basic' })
+        $toAdd = @($d.Wanted | Where-Object { $null -eq $heldById[$_.Id] -or $heldById[$_.Id].Depth -ne $config.depth })
         if ($toAdd.Count -gt 0) {
             foreach ($w in @($toAdd | Where-Object { $null -ne $heldById[$_.Id] })) {
-                # Narrowing a declared privilege to Basic: take it off, then add it at Basic below.
+                # Setting a declared privilege to its declared depth: take it off, then add it at that depth below.
                 Invoke-DvPost "roles($roleId)/Microsoft.Dynamics.CRM.RemovePrivilegeRole" @{
                     Privilege = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.privilege'; privilegeid = $w.Id }
                 } | Out-Null
             }
             Invoke-DvPost "roles($roleId)/Microsoft.Dynamics.CRM.AddPrivilegesRole" @{
                 Privileges = @($toAdd | ForEach-Object {
-                        @{ '@odata.type' = 'Microsoft.Dynamics.CRM.RolePrivilege'; Depth = 'Basic'; PrivilegeId = $_.Id; PrivilegeName = $_.Name; BusinessUnitId = $rootId }
+                        @{ '@odata.type' = 'Microsoft.Dynamics.CRM.RolePrivilege'; Depth = $config.depth; PrivilegeId = $_.Id; PrivilegeName = $_.Name; BusinessUnitId = $rootId }
                     })
             } | Out-Null
-            Write-Host "ADDED at Basic to '$($config.roleName)': $(($toAdd | ForEach-Object Name) -join ', ')" -ForegroundColor Green
+            Write-Host "ADDED at $($config.depth) to '$($config.roleName)': $(($toAdd | ForEach-Object Name) -join ', ')" -ForegroundColor Green
         }
 
         # After AddPrivilegesRole, which re-injects platform privileges: everything outside the file comes off this role.
@@ -463,7 +564,7 @@ try {
     # ── Verify ──────────────────────────────────────────────────────────────────────────────────────────────
     if ($Verify) {
         if ($driftCount -eq 0) {
-            Write-Host "`nVERIFY PASS: in $($customer.name) each declared team is memberless and holds only that unit's copy of its role, which holds Read at Basic on exactly its declared tables." -ForegroundColor Green
+            Write-Host "`nVERIFY PASS: in $($customer.name) each declared team holds only that unit's copy of its role, which holds Read at its declared depth on exactly its declared tables; each owner team is memberless, and every member of a member team holds its memberPrivilege. No declared team sits in the root or Secure Record." -ForegroundColor Green
             exit 0
         }
         Write-Host "`nVERIFY FAIL: $driftCount drift finding(s) above." -ForegroundColor Red
@@ -472,7 +573,7 @@ try {
 
     # ── What -Apply may and may not change ──────────────────────────────────────────────────────────────────
     # Owner decisions, never changed here: refuse before anything is written, for every declared team.
-    $ownerOnly = @($results | ForEach-Object { $_.Drift } | Where-Object { $_ -match '^(TEAM TYPE|TEAM DEFAULT|TEAM MEMBERS|TEAM ROLE|ROLE ASSIGNED ELSEWHERE):' })
+    $ownerOnly = @($results | ForEach-Object { $_.Drift } | Where-Object { $_ -match '^(TEAM PLACE|TEAM TYPE|TEAM DEFAULT|TEAM MEMBERS|MEMBER PRIVILEGE|MEMBER UNIT|TEAM ROLE|ROLE ASSIGNED ELSEWHERE):' })
     Write-Host ''
     if ($ownerOnly.Count -gt 0) {
         Write-Host "OWNER DECISION NEEDED: -Apply never changes these; it refuses while they stand:" -ForegroundColor Red

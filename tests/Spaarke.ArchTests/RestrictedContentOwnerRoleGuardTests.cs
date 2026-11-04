@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -25,8 +26,13 @@ namespace Spaarke.ArchTests;
 /// a hard-deny table, an ownership parent or a secure-child table: those are customer records whose owner the resolver
 /// decides.</item>
 /// </list>
-/// The two files declare different teams and roles (each pinned by name, neither the Secure Record owner role) and no table in
-/// common, and the script's <c>$DeclaredRoleFiles</c> equals the declared file set (R4b-4: none missing, none extra).
+/// <para>ebilling-r1 task 089d adds a third declared role that is NOT an owner role: <c>config/billing-rule-readers-role.json</c>,
+/// the <c>Billing Rule Readers</c> team, which HAS members (child-unit billing admins) and whose role holds Read at Deep on
+/// <c>sprk_policy</c> only. Held by a team in the customer's top unit, Deep reaches that unit and its children and never Secure
+/// Record (a sibling); Global, or Deep held in the root, would reach Secure Record (D-123). Its file must say <c>Deep</c>,
+/// <c>customer</c>, <c>membership: members</c> and the billing-admin marker as <c>memberPrivilege</c>, and list no other table.</para>
+/// The files declare different teams and roles (each pinned by name, none the Secure Record owner role), the owner roles no
+/// table in common, and the script's <c>$DeclaredRoleFiles</c> equals the declared file set (R4b-4: none missing, none extra).
 /// Enforced by: this guard (the live files must give no finding; each seeded bad document must give its finding).
 /// </summary>
 public class RestrictedContentOwnerRoleGuardTests
@@ -51,10 +57,22 @@ public class RestrictedContentOwnerRoleGuardTests
     /// <summary>R4b-4 (B-K1): the customer configuration owner role's name, pinned as the team name is.</summary>
     internal const string CustomerConfigurationRoleName = "Customer Configuration Owner";
 
-    /// <summary>A declared owner role: its file, the team and role names it must carry, its exact tables, and why a table may never be in it.</summary>
+    /// <summary>089d: the Billing Rule Readers team and role names, pinned as the owner teams' are.</summary>
+    internal const string BillingRuleReadersTeamName = "Billing Rule Readers";
+
+    internal const string BillingRuleReaderRoleName = "Billing Rule Reader";
+
+    /// <summary>
+    /// A declared role: its file, the team and role names it must carry, its exact tables, why a table may never be in it, its one
+    /// depth, and, for a member team, the privilege every member must hold (<c>null</c>: a memberless owner team).
+    /// </summary>
     internal sealed record DeclaredRole(
         string FileName, string TeamName, string TeamNameSource, IReadOnlyCollection<string> Tables, string TablesSource,
-        Func<string, string?> NeverListed, string RoleName);
+        Func<string, string?> NeverListed, string RoleName, string Depth = "Basic", string? MemberPrivilege = null)
+    {
+        /// <summary>A memberless owner team (it owns rows); otherwise a member team (it only reads).</summary>
+        public bool IsOwnerTeam => MemberPrivilege is null;
+    }
 
     internal static readonly DeclaredRole RestrictedContent = new(
         "restricted-content-owner-role.json",
@@ -80,7 +98,22 @@ public class RestrictedContentOwnerRoleGuardTests
                     : null,
         CustomerConfigurationRoleName);
 
-    internal static readonly DeclaredRole[] Declared = [RestrictedContent, CustomerConfiguration];
+    /// <summary>
+    /// 089d: Read at Deep on <c>sprk_policy</c> only (the Exclude route's caller check; <c>sprk_policyversion</c> is read there as
+    /// the application, so it is not listed). Members must hold the billing-admin marker the BFF checks.
+    /// </summary>
+    internal static readonly DeclaredRole BillingRuleReaders = new(
+        "billing-rule-readers-role.json",
+        BillingRuleReadersTeamName,
+        "the declared",
+        ["sprk_policy"],
+        "the rule table the Exclude route checks as the caller (sprk_policy)",
+        _ => null,
+        BillingRuleReaderRoleName,
+        Depth: "Deep",
+        MemberPrivilege: BillingAdminAuthorization.WriteRuleSetPrivilege);
+
+    internal static readonly DeclaredRole[] Declared = [RestrictedContent, CustomerConfiguration, BillingRuleReaders];
 
     private static string LiveJson(DeclaredRole role) =>
         File.ReadAllText(Path.Combine(SourceScan.RepoRoot, "config", role.FileName));
@@ -116,8 +149,23 @@ public class RestrictedContentOwnerRoleGuardTests
             findings.Add("schemaVersion is not 1");
         if (Text(file, "access") != "Read")
             findings.Add($"access is '{Text(file, "access")}', not Read");
-        if (Text(file, "depth") != "Basic")
-            findings.Add($"depth is '{Text(file, "depth")}', not Basic");
+        if (Text(file, "depth") != role.Depth)
+            findings.Add($"depth is '{Text(file, "depth")}', not {role.Depth}");
+        // 089d: a memberless owner team names no membership (or 'none') and no member privilege; a member team names both.
+        if (role.IsOwnerTeam)
+        {
+            if (file["membership"] is not null && Text(file, "membership") != "none")
+                findings.Add($"membership is '{Text(file, "membership")}', not none (an owner team has no members)");
+            if (file["memberPrivilege"] is not null)
+                findings.Add("memberPrivilege is set on a memberless owner team");
+        }
+        else
+        {
+            if (Text(file, "membership") != "members")
+                findings.Add($"membership is '{Text(file, "membership")}', not members");
+            if (Text(file, "memberPrivilege") != role.MemberPrivilege)
+                findings.Add($"memberPrivilege is '{Text(file, "memberPrivilege")}', not the billing-admin marker '{role.MemberPrivilege}'");
+        }
         if (Text(file, "businessUnit") != "customer")
             findings.Add($"businessUnit is '{Text(file, "businessUnit")}', not customer");
         if (Text(file, "teamName") != role.TeamName)
@@ -196,13 +244,27 @@ public class RestrictedContentOwnerRoleGuardTests
     }
 
     [Fact]
-    public void TheTwoRoles_DeclareDifferentTeamsAndRoles_AndNoTableInCommon()
+    public void TheLiveBillingRuleReadersFile_HoldsReadAtDeep_OnSprkPolicyOnly_ForBillingAdminMembers()
+    {
+        Assert.Empty(Findings(LiveJson(BillingRuleReaders), BillingRuleReaders));
+    }
+
+    /// <summary>
+    /// The declared roles name different teams and roles; the OWNER roles share no table (whose would the row be?). A member team
+    /// only reads, so its table may also be an owner team's (089d: sprk_policy is the restricted-content team's too); the script
+    /// applies the same rule.
+    /// </summary>
+    [Fact]
+    public void TheRoles_DeclareDifferentTeamsAndRoles_AndTheOwnerRolesNoTableInCommon()
     {
         var files = Declared.Select(role => JsonNode.Parse(LiveJson(role))!.AsObject()).ToArray();
         Assert.Equal(files.Length, files.Select(f => Text(f, "teamName")).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         Assert.Equal(files.Length, files.Select(f => Text(f, "roleName")).Distinct(StringComparer.OrdinalIgnoreCase).Count());
-        var tables = files.SelectMany(f => f["tables"]!.AsArray().Select(e => Text(e!.AsObject(), "logicalName"))).ToArray();
+        var tables = Declared.Where(r => r.IsOwnerTeam)
+            .SelectMany(r => JsonNode.Parse(LiveJson(r))!["tables"]!.AsArray().Select(e => Text(e!.AsObject(), "logicalName")))
+            .ToArray();
         Assert.Equal(tables.Length, tables.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(2, Declared.Count(r => r.IsOwnerTeam)); // non-vacuity: the owner-table check covers both owner roles
     }
 
     [Fact]
@@ -300,6 +362,7 @@ public class RestrictedContentOwnerRoleGuardTests
 
     private const string ConfigurationEntry = "    'customer-configuration-owner-role.json'";
     private const string RestrictedEntry = "    'restricted-content-owner-role.json',";
+    private const string BillingEntry = "    'billing-rule-readers-role.json'";
 
     public static TheoryData<string, string> ScriptMustFire() => new()
     {
@@ -310,6 +373,10 @@ public class RestrictedContentOwnerRoleGuardTests
         {
             "(E) the configuration entry commented out",
             LiveScript().Replace(ConfigurationEntry, "#" + ConfigurationEntry, StringComparison.Ordinal)
+        },
+        {
+            "(089d) the billing rule readers entry commented out",
+            LiveScript().Replace(BillingEntry, "#" + BillingEntry, StringComparison.Ordinal)
         },
         {
             "the restricted-content entry commented out after its indent",
@@ -566,5 +633,104 @@ public class RestrictedContentOwnerRoleGuardTests
         Assert.Contains(Of(f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_fieldmappingrule"))),
             f => f.StartsWith("sprk_fieldmappingrule: a declared customer configuration table", StringComparison.Ordinal));
         Assert.Contains(Of(f => f["teamName"] = "x"), f => f.StartsWith("teamName is", StringComparison.Ordinal));
+    }
+
+    // ── 089d: the Billing Rule Readers member team ─────────────────────────────────────────────────────────────────────────────
+
+    public static TheoryData<string, string> BillingRuleReadersMustFire() => new()
+    {
+        { "the team in the root", Mutated(BillingRuleReaders, f => f["businessUnit"] = "root") },
+        { "the team in Secure Record", Mutated(BillingRuleReaders, f => f["businessUnit"] = "secure") },
+        { "Global depth (the file's)", Mutated(BillingRuleReaders, f => f["depth"] = "Global") },
+        { "Business Unit depth (misses the child units)", Mutated(BillingRuleReaders, f => f["depth"] = "Local") },
+        { "Basic depth", Mutated(BillingRuleReaders, f => f["depth"] = "Basic") },
+        { "a depth on one entry", Mutated(BillingRuleReaders, f => EntryFor(f, "sprk_policy")["depth"] = "Global") },
+        { "an extra privilege (Read on sprk_policyversion)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_policyversion", "prvReadsprk_PolicyVersion"))) },
+        { "an extra privilege (Write on sprk_policy)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_policy", "prvWritesprk_Policy"))) },
+        { "an extra table (sprk_ruleset)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_ruleset", "prvReadsprk_ruleset"))) },
+        { "another access type", Mutated(BillingRuleReaders, f => f["access"] = "Write") },
+        { "sprk_policy's entry naming another table's Read", Mutated(BillingRuleReaders, f => EntryFor(f, "sprk_policy")["privilegeName"] = "prvReadsprk_PolicyVersion") },
+        { "sprk_policy missing", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Clear()) },
+        { "membership none (an owner team at Deep)", Mutated(BillingRuleReaders, f => f["membership"] = "none") },
+        { "membership missing", Mutated(BillingRuleReaders, f => f.Remove("membership")) },
+        { "memberPrivilege missing (any user could be a member)", Mutated(BillingRuleReaders, f => f.Remove("memberPrivilege")) },
+        { "memberPrivilege other than the billing-admin marker", Mutated(BillingRuleReaders, f => f["memberPrivilege"] = "prvReadsprk_Policy") },
+        { "a team name other than the declared one", Mutated(BillingRuleReaders, f => f["teamName"] = RestrictedContentOwnerTeam.DefaultOwnerTeamName) },
+        { "a role name other than the declared one", Mutated(BillingRuleReaders, f => f["roleName"] = "Spaarke Billing Administrator") },
+    };
+
+    [Theory]
+    [MemberData(nameof(BillingRuleReadersMustFire))]
+    public void ASeededBadBillingRuleReadersDocument_GivesAFinding(string what, string json)
+    {
+        Assert.NotEqual(LiveJson(BillingRuleReaders), json);
+        Assert.True(Findings(json, BillingRuleReaders).Count > 0, $"must fire on {what}");
+    }
+
+    [Fact]
+    public void TheBillingRuleReadersMustFireControls_EachNameTheirOwnBreak()
+    {
+        IReadOnlyList<string> Of(Action<JsonObject> change) => Findings(Mutated(BillingRuleReaders, change), BillingRuleReaders);
+
+        Assert.Contains(Of(f => f["businessUnit"] = "root"), f => f == "businessUnit is 'root', not customer");
+        Assert.Contains(Of(f => f["depth"] = "Global"), f => f == "depth is 'Global', not Deep");
+        Assert.Contains(Of(f => f["tables"]!.AsArray().Add(Entry("sprk_policyversion", "prvReadsprk_PolicyVersion"))),
+            f => f.StartsWith("sprk_policyversion: not the rule table", StringComparison.Ordinal));
+        Assert.Contains(Of(f => f["tables"]!.AsArray().Add(Entry("sprk_policy", "prvWritesprk_Policy"))),
+            f => f == "sprk_policy: prvWritesprk_Policy is not this table's Read privilege");
+        Assert.Contains(Of(f => f["membership"] = "none"), f => f == "membership is 'none', not members");
+        Assert.Contains(Of(f => f.Remove("memberPrivilege")), f => f.StartsWith("memberPrivilege is ''", StringComparison.Ordinal));
+        // The owner teams' rule in the other direction: a memberless owner file that grows members is refused.
+        Assert.Contains(Findings(Mutated(f => f["membership"] = "members")),
+            f => f.StartsWith("membership is 'members', not none", StringComparison.Ordinal));
+        Assert.Contains(Findings(Mutated(f => f["memberPrivilege"] = BillingAdminAuthorization.WriteRuleSetPrivilege)),
+            f => f == "memberPrivilege is set on a memberless owner team");
+    }
+
+    /// <summary>The member privilege is the one the BFF's billing-admin marker checks (Exclude's second filter), not a copy.</summary>
+    [Fact]
+    public void TheBillingRuleReadersMemberPrivilege_IsTheBffsBillingAdminMarker()
+    {
+        Assert.Equal("prvWritesprk_ruleset", BillingRuleReaders.MemberPrivilege);
+        Assert.Equal(BillingAdminAuthorization.WriteRuleSetPrivilege, Text(JsonNode.Parse(LiveJson(BillingRuleReaders))!.AsObject(), "memberPrivilege"));
+    }
+
+    /// <summary>
+    /// 089d negative case, through the Secure census's own depth model (<see cref="SecureBuRoleDepthAssertion.Reaches(PrivilegeDepth, Guid, Guid, IReadOnlyList{BusinessUnitNode})"/>,
+    /// a team-held grant anchored at the TEAM's unit): the team's Deep Read, held in the customer's top unit, reaches a rule owned in
+    /// a child unit of it and never one owned in Secure Record, a sibling. The two shapes uac-r2 ruled out (D-123), Global and Deep
+    /// held in the root, both reach Secure Record, so the census would report either.
+    /// </summary>
+    [Fact]
+    public void TheBillingRuleReadersTeam_DeepFromTheCustomerTopUnit_ReachesItsChildUnits_AndNeverSecureRecord()
+    {
+        var root = Guid.NewGuid();
+        var secure = Guid.NewGuid();
+        var customer = Guid.NewGuid();
+        var child = Guid.NewGuid();
+        var grandchild = Guid.NewGuid();
+        var otherCustomer = Guid.NewGuid();
+        BusinessUnitNode[] tree =
+        [
+            new(root, "Spaarke", null),
+            new(secure, "Secure Record", root),
+            new(customer, "Customer One", root),
+            new(child, "Customer One / Litigation", customer),
+            new(grandchild, "Customer One / Litigation / West", child),
+            new(otherCustomer, "Customer Two", root),
+        ];
+        var depth = Enum.Parse<PrivilegeDepth>(Text(JsonNode.Parse(LiveJson(BillingRuleReaders))!.AsObject(), "depth")!);
+        bool Reaches(PrivilegeDepth d, Guid anchor, Guid owner) => SecureBuRoleDepthAssertion.Reaches(d, anchor, owner, tree);
+
+        Assert.Equal(PrivilegeDepth.Deep, depth);
+        Assert.True(Reaches(depth, customer, customer));    // a rule owned in the customer's top unit
+        Assert.True(Reaches(depth, customer, child));       // ... in a child unit (the child-unit admin's 403 goes away)
+        Assert.True(Reaches(depth, customer, grandchild));  // ... and below
+        Assert.False(Reaches(depth, customer, secure));     // never a rule owned by the Secure Record Owners team
+        Assert.False(Reaches(depth, customer, root));       // never the root's product rules
+        Assert.False(Reaches(depth, customer, otherCustomer)); // never another customer's unit
+        Assert.False(Reaches(PrivilegeDepth.Deep, child, customer)); // why a child-unit admin's own Deep Read is not enough
+        Assert.True(Reaches(PrivilegeDepth.Deep, root, secure));     // ruled out: Deep held in the root
+        Assert.True(Reaches(PrivilegeDepth.Global, customer, secure)); // ruled out: Global
     }
 }
