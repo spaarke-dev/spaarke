@@ -687,9 +687,9 @@ public sealed class ProcedureAssignmentEndpointsTests
         }
     }
 
-    [Theory(DisplayName = "089c must-fire: before a removal or its preview, the caller's own Read on what the stored row overrides; without it 403 insufficient_rights and nothing is removed")]
+    [Theory(DisplayName = "089c must-fire: before a removal or its preview, the caller's own Read on what the stored row overrides; without it 404 override_not_found (K1: the answer of a missing row) and nothing is removed")]
     [MemberData(nameof(RemovalRoutesBySubject))]
-    public async Task Removal_WithoutReadOnTheStoredSubject_Returns403(string method, string url, string set, string subjectSet, string subjectId)
+    public async Task Removal_WithoutReadOnTheStoredSubject_Returns404_TheAnswerOfAMissingRow(string method, string url, string set, string subjectSet, string subjectId)
     {
         await using var host = await Host.StartAsync();
         var subject = new OverrideSubject(subjectSet, Guid.Parse(subjectId));
@@ -698,11 +698,34 @@ public sealed class ProcedureAssignmentEndpointsTests
 
         var response = await host.Client.SendAsync(Send(method, url));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("assignment.override_not_found");
         host.Access.Calls.Should().Contain(c => c.Set == subjectSet && c.Id == subject.Id && c.HasToken, "asked as the caller, about the stored subject");
         host.Service.Verify(s => s.SubjectOfOverrideAsync(TableOf(set), RecordId, OverrideId, It.IsAny<CancellationToken>()), Times.Once, "the row is read for THIS route's record");
         host.NoWrites();
+    }
+
+    [Theory(DisplayName = "089c review K1 must-fire: an override whose subject the caller cannot Read answers byte-identically to an override that does not exist (override ids are derived, so a difference is an existence oracle)")]
+    [MemberData(nameof(RemovalRoutesBySubject))]
+    public async Task Removal_OfAnUnreadableSubject_IsIdenticalToAMissingRow(string method, string url, string _, string subjectSet, string subjectId)
+    {
+        await using var unreadable = await Host.StartAsync();
+        var subject = new OverrideSubject(subjectSet, Guid.Parse(subjectId));
+        StoredRowOverrides(unreadable, subject);
+        unreadable.Access.Grant(subjectSet, subject.Id, AccessRights.None);
+
+        await using var missing = await Host.StartAsync();
+        StoredRowOverrides(missing, null);
+        missing.Service.Setup(s => s.RemoveAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ProcedureAssignmentService.OverrideNotFound<OverrideRemoved>());
+        missing.Service.Setup(s => s.PreviewRemovalAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ProcedureAssignmentService.OverrideNotFound<OverrideRemovalPreview>());
+
+        var unreadableResponse = await unreadable.Client.SendAsync(Send(method, url));
+        var missingResponse = await missing.Client.SendAsync(Send(method, url));
+
+        missingResponse.StatusCode.Should().Be(HttpStatusCode.NotFound, "the control: a missing row is the service's 404");
+        (await ShapeOf(unreadableResponse)).Should().Be(await ShapeOf(missingResponse));
     }
 
     [Theory(DisplayName = "089c must-not-fire: with Read on the stored subject, the removal and its preview reach the service with the route's table")]
@@ -762,6 +785,23 @@ public sealed class ProcedureAssignmentEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("assignment.override_not_found");
+    }
+
+    [Theory(DisplayName = "089c review K2 must-fire: with eBilling off, a removal whose subject the caller cannot Read is 503, not 403/404, and the stored row is never read")]
+    [MemberData(nameof(RemovalRoutes))]
+    public async Task Removal_WhenEbillingIsOff_IsRefusedBeforeTheRowIsRead(string method, string url, string _)
+    {
+        await using var host = await Host.StartAsync(ebillingEnabled: false);
+        StoredRowOverrides(host, new OverrideSubject(PolicySet, PolicyId));
+        host.Access.Grant(PolicySet, PolicyId, AccessRights.None);
+
+        var response = await host.Client.SendAsync(Send(method, url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ebilling.disabled");
+        host.Service.Verify(s => s.SubjectOfOverrideAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Access.Calls.Should().NotContain(c => c.Set == PolicySet, "no Read on the subject is asked");
+        host.NoWrites();
     }
 
     [Theory]
