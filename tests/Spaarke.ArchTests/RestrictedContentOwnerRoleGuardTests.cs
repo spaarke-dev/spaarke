@@ -549,6 +549,7 @@ public class RestrictedContentOwnerRoleGuardTests
     [MemberData(nameof(MustFire))]
     public void ASeededBadDocument_GivesAFinding(string what, string json)
     {
+        AssertTheSeededChangeLanded(RestrictedContent, json);
         Assert.True(Findings(json).Count > 0, $"must fire on {what}");
     }
 
@@ -620,6 +621,7 @@ public class RestrictedContentOwnerRoleGuardTests
     [MemberData(nameof(ConfigurationMustFire))]
     public void ASeededBadConfigurationDocument_GivesAFinding(string what, string json)
     {
+        AssertTheSeededChangeLanded(CustomerConfiguration, json);
         Assert.True(Findings(json, CustomerConfiguration).Count > 0, $"must fire on {what}");
     }
 
@@ -696,8 +698,30 @@ public class RestrictedContentOwnerRoleGuardTests
     [MemberData(nameof(BillingRuleReadersMustFire))]
     public void ASeededBadBillingRuleReaderDocument_GivesAFinding(string what, string json)
     {
-        Assert.NotEqual(LiveJson(BillingRuleReaders), json);
+        AssertTheSeededChangeLanded(BillingRuleReaders, json);
         Assert.True(Findings(json, BillingRuleReaders).Count > 0, $"must fire on {what}");
+    }
+
+    /// <summary>
+    /// A seeded document must differ from the live file AS PARSED. Comparing the live file's text with <c>Mutated</c>'s
+    /// output cannot fail: <c>Mutated</c> re-serialises with <c>ToJsonString()</c> (compact), which never equals the
+    /// file's own text, even when the change did nothing. Comparing the nodes can.
+    /// </summary>
+    private static void AssertTheSeededChangeLanded(DeclaredRole role, string json) =>
+        Assert.False(
+            JsonNode.DeepEquals(JsonNode.Parse(LiveJson(role)), JsonNode.Parse(json)),
+            "the seeded change did not change the document");
+
+    [Fact]
+    public void TheSeededChangeCheck_CanFail_OnAChangeThatChangesNothing()
+    {
+        var noChange = Mutated(BillingRuleReaders, _ => { });
+        // The old check passed here (re-serialised text never equals the file's text), so it could not catch a no-op change.
+        Assert.NotEqual(LiveJson(BillingRuleReaders), noChange);
+        // The node comparison sees the no-op, so the check fails on it.
+        Assert.Throws<Xunit.Sdk.FalseException>(() => AssertTheSeededChangeLanded(BillingRuleReaders, noChange));
+        // ... and holds on a real change.
+        AssertTheSeededChangeLanded(BillingRuleReaders, Mutated(BillingRuleReaders, f => f["isinherited"] = 1));
     }
 
     [Fact]
@@ -821,6 +845,65 @@ public class RestrictedContentOwnerRoleGuardTests
     {
         Assert.NotEqual(LiveScriptLf(), script); // the seeded change landed
         Assert.True(ScriptTeamHolderFindings(script).Count > 0, $"must fire on {what}");
+    }
+
+    // ── 089d: the assignment writes the customer top unit's copy, never the root's (pass-1 F3) ────────────────────────────────
+    // The write that decides isolation is the user-role association in Invoke-ApplyRole. A copy other than the customer top
+    // unit's (the root role: Deep from the root reaches Secure Record) would break isolation. The Pester suite proves the
+    // behaviour against a mocked Dataverse; this scan keeps the source from changing quietly.
+
+    /// <summary>Every <c>@odata.id</c> the assign path writes names <c>$s.Copy.roleid</c> (the customer top unit's copy), and there is a user-role write.</summary>
+    internal static IReadOnlyList<string> ScriptAssignCopyFindings(string script)
+    {
+        var applyRole = FunctionBody(WithoutBlockComments(script), "Invoke-ApplyRole");
+        if (applyRole is null)
+            return ["Invoke-ApplyRole is missing (the scan cannot place the user-role write)"];
+        var code = CodeOnly(applyRole);
+        var findings = new List<string>();
+        if (!code.Contains("systemuserroles_association", StringComparison.Ordinal))
+            findings.Add("Invoke-ApplyRole has no systemuserroles_association write (the scan cannot see the assignment)");
+        var refs = Regex.Matches(code, @"'@odata\.id'\s*=[^\r\n]*").Select(m => m.Value.Trim()).ToList();
+        if (refs.Count == 0)
+            findings.Add("Invoke-ApplyRole names no @odata.id (the scan cannot see which copy is assigned)");
+        foreach (var r in refs.Where(r => !r.Contains("$s.Copy.roleid", StringComparison.Ordinal)))
+            findings.Add($"the user-role write does not name $s.Copy.roleid (the customer top unit's copy): {r}");
+        return findings;
+    }
+
+    [Fact]
+    public void TheSetupScript_AssignsOnlyTheCustomerTopUnitsCopy()
+    {
+        Assert.Empty(ScriptAssignCopyFindings(LiveScript()));
+    }
+
+    public static TheoryData<string, string> ScriptAssignCopyMustFire() => new()
+    {
+        {
+            "the root role is assigned",
+            LiveScriptLf().Replace(
+                "'@odata.id' = \"$Api/roles($($s.Copy.roleid))\" }\n            Invoke-DvPost \"systemusers(",
+                "'@odata.id' = \"$Api/roles($roleId)\" }\n            Invoke-DvPost \"systemusers(",
+                StringComparison.Ordinal)
+        },
+        {
+            "the role as read (the root) is assigned",
+            LiveScriptLf().Replace(
+                "'@odata.id' = \"$Api/roles($($s.Copy.roleid))\" }\n            Invoke-DvPost \"systemusers(",
+                "'@odata.id' = \"$Api/roles($($s.Role.roleid))\" }\n            Invoke-DvPost \"systemusers(",
+                StringComparison.Ordinal)
+        },
+        {
+            "the user-role write is gone",
+            LiveScriptLf().Replace("systemuserroles_association", "systemuserroles_x", StringComparison.Ordinal)
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(ScriptAssignCopyMustFire))]
+    public void ASeededScriptThatAssignsAnotherCopy_GivesAFinding(string what, string script)
+    {
+        Assert.NotEqual(LiveScriptLf(), script); // the seeded change landed
+        Assert.True(ScriptAssignCopyFindings(script).Count > 0, $"must fire on {what}");
     }
 
     // ── 089d: the reach model (uac-r2's census) ────────────────────────────────────────────────────────────────────────────────

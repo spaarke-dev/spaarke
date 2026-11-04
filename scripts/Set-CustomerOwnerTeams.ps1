@@ -50,8 +50,9 @@
 
     THE ORG SETTING. With a config whose assignment is 'users', the run reads organization.orgdborgsettings and requires
     EnableOwnershipAcrossBusinessUnits = true. -Verify fails while it is off. -Apply sets it as its own, separately logged
-    step (an org-wide write): it changes that one element of orgdborgsettings, writes the rest back as read, prints the old
-    and new value, and reads it back to check that nothing else changed.
+    step (an org-wide write): it reads orgdborgsettings again immediately before the write and stops, writing nothing, if
+    it differs from the read at the start of the run; it changes that one element, writes the rest back as read (from that
+    fresh read), prints the old and new value, and reads it back to check that nothing else changed.
 
     MODES
       (default)  Dry run. Reads everything and prints the plan: the org setting, each declared team, the role, and the
@@ -80,9 +81,11 @@
                  outside the file. For the directly assigned role also: the org setting off; isinherited not 0; any team
                  holding any copy; a user holding the root copy, the Secure Record copy or a copy below a customer top unit;
                  a holder of this unit's copy without the holderPrivilege (the billing-admin marker) or homed outside this
-                 customer's top unit and the units below it. Every OTHER direct child of the root that lacks a team, or
-                 whose copy of the directly assigned role has holders, is listed as information only (that unit's own run
-                 checks it). Exits 0 when the named unit has no drift.
+                 customer's top unit and the units below it. A holder of ANOTHER customer top unit's copy who is homed
+                 outside that unit and the units below it is also HOLDER UNIT drift. Every OTHER direct child of the root
+                 that lacks a team, or whose copy of the directly assigned role is held by users homed in that unit's own
+                 subtree, is listed as information only (that unit's own run checks it). Exits 0 when the named unit has
+                 no drift.
 
     REFUSED: a customer unit that is the root, that is the Secure Record unit, or that is not a direct child of the root;
     no business unit, or more than one, named -SecureBusinessUnitName (Secure Record exists by this step, H7b, so a name
@@ -377,18 +380,23 @@ try {
         }
     }
 
-    # 089d: the customer's own subtree (its top unit and every unit below it): where a holder of the role is homed.
-    $customerSubtree = @{ $customerId = $true }
-    $grew = $true
-    while ($grew) {
-        $grew = $false
-        foreach ($u in $units) {
-            if (-not $customerSubtree.ContainsKey($u.businessunitid) -and $u._parentbusinessunitid_value -and $customerSubtree.ContainsKey($u._parentbusinessunitid_value)) {
-                $customerSubtree[$u.businessunitid] = $true
-                $grew = $true
+    # 089d: one unit's subtree (the unit and every unit below it), from the units already read (no extra call).
+    function Get-UnitSubtree([string]$TopUnitId) {
+        $tree = @{ $TopUnitId = $true }
+        $grew = $true
+        while ($grew) {
+            $grew = $false
+            foreach ($u in $units) {
+                if (-not $tree.ContainsKey($u.businessunitid) -and $u._parentbusinessunitid_value -and $tree.ContainsKey($u._parentbusinessunitid_value)) {
+                    $tree[$u.businessunitid] = $true
+                    $grew = $true
+                }
             }
         }
+        return $tree
     }
+    # The customer's own subtree: where a holder of the role is homed.
+    $customerSubtree = Get-UnitSubtree $customerId
     $unitName = @{}
     foreach ($u in $units) { $unitName[$u.businessunitid] = $u.name }
 
@@ -643,6 +651,13 @@ try {
         return 'below'
     }
 
+    # The subtree of another customer top unit, from the units already read (cached per run).
+    $otherTopSubtrees = @{}
+    function Get-OtherTopSubtree([string]$TopUnitId) {
+        if (-not $otherTopSubtrees.ContainsKey($TopUnitId)) { $otherTopSubtrees[$TopUnitId] = Get-UnitSubtree $TopUnitId }
+        return $otherTopSubtrees[$TopUnitId]
+    }
+
     function Get-RoleState($d) {
         $config = $d.Config
         $s = [ordered]@{ Role = $null; Copies = @(); Copy = $null; TeamHolders = @(); UserHolders = @(); Holders = @(); HoldersWithout = @(); Held = @() }
@@ -678,6 +693,12 @@ try {
         return [pscustomobject]$s
     }
 
+    # One condition for the plan and for -Apply: the root role or any copy has isinherited other than 0. Copies follow the
+    # root, so the fix is one PATCH of the root role.
+    function Test-InheritedDrift($s) {
+        return ("$($s.Role.isinherited)" -ne '0') -or (@($s.Copies | Where-Object { "$($_.isinherited)" -ne '0' }).Count -gt 0)
+    }
+
     function Get-RoleDrift($d, $s) {
         $config = $d.Config
         $r = [System.Collections.Generic.List[string]]::new()
@@ -700,6 +721,13 @@ try {
                 'root' { $r.Add("ROLE ASSIGNED ELSEWHERE: user '$($u.Name)' ($($u.Id)) holds the ROOT copy of '$($config.roleName)' ($($u.RoleId)); Deep from the root reaches Secure Record. The root copy is assigned to nobody.") }
                 'secure' { $r.Add("ROLE ASSIGNED ELSEWHERE: user '$($u.Name)' ($($u.Id)) holds the '$($unitName[[string]$u.CopyUnit])' copy of '$($config.roleName)' ($($u.RoleId)), in or below Secure Record.") }
                 'below' { $r.Add("ROLE ASSIGNED ELSEWHERE: user '$($u.Name)' ($($u.Id)) holds the '$($unitName[[string]$u.CopyUnit])' copy of '$($config.roleName)' ($($u.RoleId)), a unit below a customer top unit; it reaches nothing above that unit. Assign the customer top unit's copy (-AssignBillingRuleReader).") }
+                'othertop' {
+                    # Another customer's copy is that customer's to check, but a holder homed outside THAT unit's subtree
+                    # (for example one of this customer's users) reads that customer's rules: drift here too.
+                    if (-not (Get-OtherTopSubtree ([string]$u.CopyUnit)).ContainsKey([string]$u.Home)) {
+                        $r.Add("HOLDER UNIT: user '$($u.Name)' ($($u.Id)) holds the '$($unitName[[string]$u.CopyUnit])' copy of '$($config.roleName)' ($($u.RoleId)), another customer top unit's, but is homed in '$($unitName[[string]$u.Home])' ($($u.Home)), outside that unit and the units below it.")
+                    }
+                }
             }
         }
         foreach ($h in $s.HoldersWithout) {
@@ -728,8 +756,10 @@ try {
                 $marker = if (@($s.HoldersWithout | Where-Object Id -eq $h.Id)) { 'no' } else { 'yes' }
                 Write-Host "Holder      : '$($h.Name)' ($($h.Id)) homed in '$($unitName[$h.Home])' ($($h.Home)); $($config.holderPrivilege): $marker"
             }
-            foreach ($g in @($s.UserHolders | Where-Object { (Get-CopyPlace $_.CopyUnit) -eq 'othertop' } | Group-Object CopyUnit)) {
-                Write-Host "INFO        : $($g.Count) user(s) hold the '$($unitName[[string]$g.Name])' copy (another customer top unit; that unit's own run checks them, not a failure here)."
+            # Another customer top unit's copy, held by users homed in THAT unit's subtree: that unit's own run checks them.
+            # A holder homed anywhere else is HOLDER UNIT drift (Get-RoleDrift), not information.
+            foreach ($g in @($s.UserHolders | Where-Object { (Get-CopyPlace $_.CopyUnit) -eq 'othertop' -and (Get-OtherTopSubtree ([string]$_.CopyUnit)).ContainsKey([string]$_.Home) } | Group-Object CopyUnit)) {
+                Write-Host "INFO        : $($g.Count) user(s) hold the '$($unitName[[string]$g.Name])' copy, homed in that unit or below (another customer top unit; that unit's own run checks them, not a failure here)."
             }
         }
         else {
@@ -745,7 +775,7 @@ try {
         if ($null -eq $s.Role) {
             $p.Add("create the role '$($config.roleName)' in the root business unit with isinherited 0 (Dataverse copies it into every child unit; the root copy is assigned to nobody)")
         }
-        elseif (@($s.Copies | Where-Object { "$($_.isinherited)" -ne '0' })) { $p.Add("set isinherited to 0 (Team privileges only) on '$($config.roleName)'") }
+        elseif (Test-InheritedDrift $s) { $p.Add("set isinherited to 0 (Team privileges only) on '$($config.roleName)'") }
         $missing = @($d.Wanted | Where-Object { $w = $_; $null -eq $s.Role -or -not @($s.Held | Where-Object { $_.PrivilegeId.ToString().ToLowerInvariant() -eq $w.Id -and $_.Depth -eq $config.depth }) })
         if ($missing.Count -gt 0) { $p.Add("add Read at $($config.depth) to '$($config.roleName)': $(($missing | ForEach-Object Name) -join ', ')") }
         $p.Add("take off every privilege of '$($config.roleName)' outside $($d.File), including any the platform injects (setup guide 5.4)")
@@ -793,7 +823,7 @@ try {
             if ($null -eq $s.Role) { throw "'$($config.roleName)' could not be read back after it was created." }
         }
         $roleId = $s.Role.roleid
-        if ("$($s.Role.isinherited)" -ne '0') {
+        if (Test-InheritedDrift $s) {
             Invoke-DvPatch "roles($roleId)" @{ isinherited = 0 } | Out-Null
             Write-Host "SET isinherited 0 (Team privileges only) on '$($config.roleName)' ($roleId)." -ForegroundColor Green
         }
@@ -838,7 +868,7 @@ try {
         if ($driftCount -eq 0) {
             $pass = @()
             if ($teamDefs.Count -gt 0) { $pass += "each declared owner team is memberless and holds only that unit's copy of its role, which holds Read at Basic on exactly its declared tables; no declared team sits in the root or Secure Record." }
-            if ($userDefs.Count -gt 0) { $pass += "$CrossUnitOrgSetting is on; each directly assigned role has isinherited 0 and holds Read at its declared depth on exactly its declared tables; no team holds it; its root copy is assigned to nobody; every holder of the $($customer.name) copy holds its holderPrivilege and is homed in $($customer.name) or below." }
+            if ($userDefs.Count -gt 0) { $pass += "$CrossUnitOrgSetting is on; each directly assigned role has isinherited 0 and holds Read at its declared depth on exactly its declared tables; no team holds it; its root copy is assigned to nobody; every holder of the $($customer.name) copy holds its holderPrivilege and is homed in $($customer.name) or below; every holder of another customer top unit's copy is homed in that unit or below." }
             Write-Host "`nVERIFY PASS: in $($customer.name) $($pass -join ' ')" -ForegroundColor Green
             exit 0
         }
@@ -882,7 +912,14 @@ try {
     # ── Apply ───────────────────────────────────────────────────────────────────────────────────────────────
     if ($orgDrift.Count -gt 0) {
         # 089d (option R): an ORG-WIDE write, logged as its own step. One element changes; the rest is written back as read.
-        $before = [string]$org.orgdborgsettings
+        # The first read is from the start of the run, before every other read. Read again immediately before the write, and
+        # stop if anyone changed it in between. The new document and the read-back comparison are built from the fresh read.
+        $fresh = @((Invoke-DvGet 'organizations?$select=organizationid,name,orgdborgsettings').value)[0]
+        if ([string]$fresh.organizationid -ne [string]$org.organizationid) { throw 'The organization row read again before the org-setting write is a different row; nothing was written.' }
+        $before = [string]$fresh.orgdborgsettings
+        if ($before -cne [string]$org.orgdborgsettings) {
+            throw "orgdborgsettings changed since this run first read it (someone else wrote it during the run). Nothing was written, the org setting included; re-run to plan from the current value."
+        }
         $after = Set-OrgSettingValue $before $CrossUnitOrgSetting 'true'
         Write-Host "ORG SETTING : writing organization '$($org.name)' ($($org.organizationid)).orgdborgsettings: $CrossUnitOrgSetting $(if ($null -eq $orgSettingValue) { '(absent)' } else { "'$orgSettingValue'" }) -> 'true'." -ForegroundColor Yellow
         Invoke-DvPatch "organizations($($org.organizationid))" @{ orgdborgsettings = $after } | Out-Null

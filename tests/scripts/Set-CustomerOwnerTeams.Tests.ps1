@@ -140,13 +140,16 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $global:SetCustomerOwnerTeamsTest_PolicyReadId = '00000000-0000-4000-8000-000000000014'
         $global:SetCustomerOwnerTeamsTest_ChildId = '00000000-0000-4000-8000-000000000021'          # a child unit of Customer One
         $global:SetCustomerOwnerTeamsTest_OtherCustomerId = '00000000-0000-4000-8000-000000000022'  # another customer's top unit
-        # One copy of the role per unit (the root copy is the role itself), keyed by a short name the tests use.
+        $global:SetCustomerOwnerTeamsTest_OtherChildId = '00000000-0000-4000-8000-000000000023'     # a child unit of Customer Two
+        # One copy of the role per unit (the root copy is the role itself), keyed by a short name the tests use. 'otherchild'
+        # is a unit only (a holder's home); it has no entry in CopyId, so the role has no copy in it here.
         $global:SetCustomerOwnerTeamsTest_Unit = @{
-            root     = $global:SetCustomerOwnerTeamsTest_RootId
-            secure   = $global:SetCustomerOwnerTeamsTest_SecureId
-            customer = $global:SetCustomerOwnerTeamsTest_CustomerId
-            child    = $global:SetCustomerOwnerTeamsTest_ChildId
-            other    = $global:SetCustomerOwnerTeamsTest_OtherCustomerId
+            root       = $global:SetCustomerOwnerTeamsTest_RootId
+            secure     = $global:SetCustomerOwnerTeamsTest_SecureId
+            customer   = $global:SetCustomerOwnerTeamsTest_CustomerId
+            child      = $global:SetCustomerOwnerTeamsTest_ChildId
+            other      = $global:SetCustomerOwnerTeamsTest_OtherCustomerId
+            otherchild = $global:SetCustomerOwnerTeamsTest_OtherChildId
         }
         $global:SetCustomerOwnerTeamsTest_CopyId = @{
             root     = '00000000-0000-4000-8000-000000000101'
@@ -185,7 +188,12 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         # The user -AssignBillingRuleReader names.
         $global:SetCustomerOwnerTeamsTest_Candidate = @{ Home = 'child'; Admin = $true }
         $global:SetCustomerOwnerTeamsTest_Writes = [System.Collections.Generic.List[string]]::new()
+        $global:SetCustomerOwnerTeamsTest_WriteBodies = [System.Collections.Generic.List[string]]::new()  # parallel to Writes
+        $global:SetCustomerOwnerTeamsTest_Events = [System.Collections.Generic.List[string]]::new()      # org reads and every write, in order
         $global:SetCustomerOwnerTeamsTest_AllowOrgPatch = $false
+        $global:SetCustomerOwnerTeamsTest_AllowRoleWrites = $false  # the role create/patch, privilege add and user assignment change the world
+        $global:SetCustomerOwnerTeamsTest_CopyIsInherited = @{}     # per-copy isinherited that differs from the role's (key = unit short name)
+        $global:SetCustomerOwnerTeamsTest_OrgReadQueue = [System.Collections.Generic.Queue[string]]::new()  # org reads answered from here first
         Mock az { 'test-token' }
         Mock Invoke-RestMethod {
             $u = [uri]::UnescapeDataString([string]$Uri)
@@ -198,14 +206,56 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
                 @{ RolePrivileges = @($names | ForEach-Object { [pscustomobject]@{ PrivilegeName = $_; Depth = 'Basic'; PrivilegeId = [guid]::NewGuid() } }) }
             }
             if ($Method -ne 'Get') {
+                $bodyText = if ($null -ne $Body) { [Text.Encoding]::UTF8.GetString($Body) } else { '' }
                 $global:SetCustomerOwnerTeamsTest_Writes.Add("$Method $u")
+                $global:SetCustomerOwnerTeamsTest_WriteBodies.Add($bodyText)
+                $global:SetCustomerOwnerTeamsTest_Events.Add("$Method $u")
                 if ($global:SetCustomerOwnerTeamsTest_AllowOrgPatch -and $Method -eq 'Patch' -and $u -match '/organizations\(') {
-                    $global:SetCustomerOwnerTeamsTest_OrgSettings = ([Text.Encoding]::UTF8.GetString($Body) | ConvertFrom-Json).orgdborgsettings
+                    $global:SetCustomerOwnerTeamsTest_OrgSettings = ($bodyText | ConvertFrom-Json).orgdborgsettings
                     return $null
+                }
+                if ($global:SetCustomerOwnerTeamsTest_AllowRoleWrites) {
+                    $json = if ($bodyText) { $bodyText | ConvertFrom-Json } else { $null }
+                    if ($Method -eq 'Post' -and $u -match '/api/data/v9\.2/roles$') {
+                        # The role is created: no privileges yet, and the role's own isinherited from the body.
+                        $global:SetCustomerOwnerTeamsTest_RoleExists = $true
+                        $global:SetCustomerOwnerTeamsTest_IsInherited = $json.isinherited
+                        $global:SetCustomerOwnerTeamsTest_Held = @()
+                        return $null
+                    }
+                    if ($Method -eq 'Patch' -and $u -match '/api/data/v9\.2/roles\(([^)]+)\)$') {
+                        # Copies follow the root role.
+                        $global:SetCustomerOwnerTeamsTest_IsInherited = $json.isinherited
+                        $global:SetCustomerOwnerTeamsTest_CopyIsInherited = @{}
+                        return $null
+                    }
+                    if ($Method -eq 'Post' -and $u -match 'roles\(([^)]+)\)/Microsoft\.Dynamics\.CRM\.AddPrivilegesRole$') {
+                        $global:SetCustomerOwnerTeamsTest_Held = @($global:SetCustomerOwnerTeamsTest_Held) + @($json.Privileges | ForEach-Object { @{ Name = $_.PrivilegeName; Id = $_.PrivilegeId; Depth = $_.Depth } })
+                        return $null
+                    }
+                    if ($Method -eq 'Post' -and $u -match 'roles\(([^)]+)\)/Microsoft\.Dynamics\.CRM\.RemovePrivilegeRole$') {
+                        $gone = [string]$json.Privilege.privilegeid
+                        $global:SetCustomerOwnerTeamsTest_Held = @($global:SetCustomerOwnerTeamsTest_Held | Where-Object { $_.Id -ne $gone })
+                        return $null
+                    }
+                    if ($Method -eq 'Post' -and $u -match 'systemusers\(([^)]+)\)/systemuserroles_association/\$ref$') {
+                        # The user now holds whichever copy the body names (a copy the mock does not know is held as 'unknown').
+                        $userId = $Matches[1]
+                        $copyId = if ([string]$json.'@odata.id' -match 'roles\(([^)]+)\)$') { $Matches[1] } else { '' }
+                        $key = @($global:SetCustomerOwnerTeamsTest_CopyId.Keys | Where-Object { $global:SetCustomerOwnerTeamsTest_CopyId[$_] -eq $copyId })[0]
+                        $global:SetCustomerOwnerTeamsTest_UserHolders = @($global:SetCustomerOwnerTeamsTest_UserHolders) + @(@{
+                                Id = $userId; Copy = $(if ($key) { $key } else { 'unknown' }); Home = $global:SetCustomerOwnerTeamsTest_Candidate.Home; Admin = $global:SetCustomerOwnerTeamsTest_Candidate.Admin
+                            })
+                        return $null
+                    }
                 }
                 throw "Test: the script wrote ($Method $u)."
             }
-            if ($u -match '/organizations\?') { return @{ value = @([pscustomobject]@{ organizationid = $global:SetCustomerOwnerTeamsTest_OrgId; name = 'test'; orgdborgsettings = $global:SetCustomerOwnerTeamsTest_OrgSettings }) } }
+            if ($u -match '/organizations\?') {
+                $global:SetCustomerOwnerTeamsTest_Events.Add('Get organizations')
+                $settings = if ($global:SetCustomerOwnerTeamsTest_OrgReadQueue.Count -gt 0) { $global:SetCustomerOwnerTeamsTest_OrgReadQueue.Dequeue() } else { $global:SetCustomerOwnerTeamsTest_OrgSettings }
+                return @{ value = @([pscustomobject]@{ organizationid = $global:SetCustomerOwnerTeamsTest_OrgId; name = 'test'; orgdborgsettings = $settings }) }
+            }
             if ($u -match '/businessunits\?') {
                 return @{ value = @(
                         [pscustomobject]@{ businessunitid = $unit.root; name = 'Spaarke'; _parentbusinessunitid_value = $null }
@@ -213,6 +263,7 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
                         [pscustomobject]@{ businessunitid = $unit.customer; name = 'Customer One'; _parentbusinessunitid_value = $unit.root }
                         [pscustomobject]@{ businessunitid = $unit.child; name = 'Customer One Litigation'; _parentbusinessunitid_value = $unit.customer }
                         [pscustomobject]@{ businessunitid = $unit.other; name = 'Customer Two'; _parentbusinessunitid_value = $unit.root }
+                        [pscustomobject]@{ businessunitid = $unit.otherchild; name = 'Customer Two Litigation'; _parentbusinessunitid_value = $unit.other }
                     )
                 }
             }
@@ -225,7 +276,8 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
             }
             if ($u -match '/roles\?.*_parentrootroleid_value eq') {
                 return @{ value = @(foreach ($k in 'root', 'secure', 'customer', 'child', 'other') {
-                            [pscustomobject]@{ roleid = $copy[$k]; isinherited = $global:SetCustomerOwnerTeamsTest_IsInherited; _businessunitid_value = $unit[$k] }
+                            $inh = if ($global:SetCustomerOwnerTeamsTest_CopyIsInherited.ContainsKey($k)) { $global:SetCustomerOwnerTeamsTest_CopyIsInherited[$k] } else { $global:SetCustomerOwnerTeamsTest_IsInherited }
+                            [pscustomobject]@{ roleid = $copy[$k]; isinherited = $inh; _businessunitid_value = $unit[$k] }
                         })
                 }
             }
@@ -241,13 +293,15 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
                 $id = $Matches[1]; $i = 0
                 return @{ value = @(foreach ($h in $global:SetCustomerOwnerTeamsTest_UserHolders) {
                             $i++
-                            if ($copy[$h.Copy] -eq $id) { [pscustomobject]@{ systemuserid = (UserId $i); fullname = "holder $i"; _businessunitid_value = $unit[$h.Home] } }
+                            if ($copy[$h.Copy] -eq $id) { [pscustomobject]@{ systemuserid = $(if ($h.Id) { $h.Id } else { UserId $i }); fullname = "holder $i"; _businessunitid_value = $unit[$h.Home] } }
                         })
                 }
             }
             if ($u -match '/systemusers\(([^)]+)\)/Microsoft\.Dynamics\.CRM\.RetrieveUserPrivileges') {
                 $id = $Matches[1]
                 if ($id -eq $global:SetCustomerOwnerTeamsTest_CandidateId) { return PrivilegesOf $global:SetCustomerOwnerTeamsTest_Candidate.Admin }
+                $named = @($global:SetCustomerOwnerTeamsTest_UserHolders | Where-Object { $_.Id -and $_.Id -eq $id })
+                if ($named.Count -gt 0) { return PrivilegesOf $named[0].Admin }  # a holder added by an assignment
                 $i = [int]($id.Substring($id.Length - 12))
                 return PrivilegesOf (@($global:SetCustomerOwnerTeamsTest_UserHolders)[$i - 1].Admin)
             }
@@ -422,6 +476,133 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $r = Invoke-Billing -Verify -Assign $global:SetCustomerOwnerTeamsTest_CandidateId
         $r.ExitCode | Should -Be 1
         $r.Output | Should -Match '-Verify is read-only'
+    }
+
+    # ── pass-1 review (089d R): the writes that decide isolation, and the other customer's copy ─────────────────────────────────
+
+    It 'F2 must fire: a holder of ANOTHER customer top unit''s copy who is homed outside THAT unit''s subtree (here: in this customer) is HOLDER UNIT drift and an owner decision' {
+        foreach ($homeUnit in 'child', 'customer', 'root', 'secure') {
+            $global:SetCustomerOwnerTeamsTest_UserHolders = @(@{ Copy = 'other'; Home = $homeUnit; Admin = $true })
+            $r = Invoke-Billing -Verify
+            $r.ExitCode | Should -Be 1 -Because $homeUnit
+            $r.Output | Should -Match "HOLDER UNIT: user 'holder 1' .* holds the 'Customer Two' copy .* but is homed in '.*' .*, outside that unit and the units below it"
+            $r.Output | Should -Not -Match 'INFO        : .* hold the .Customer Two. copy'
+            $dry = Invoke-Billing
+            $dry.ExitCode | Should -Be 1 -Because $homeUnit
+            $dry.Output | Should -Match 'OWNER DECISION NEEDED'
+        }
+        $global:SetCustomerOwnerTeamsTest_Writes.Count | Should -Be 0
+    }
+
+    It 'F2 must not fire: holders of another customer top unit''s copy homed in THAT unit or a child of it are INFO and -Verify passes' {
+        $global:SetCustomerOwnerTeamsTest_UserHolders = @(@{ Copy = 'customer'; Home = 'child'; Admin = $true }, @{ Copy = 'other'; Home = 'otherchild'; Admin = $true }, @{ Copy = 'other'; Home = 'other'; Admin = $true })
+        $r = Invoke-Billing -Verify
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        $r.Output | Should -Match "INFO        : 2 user\(s\) hold the 'Customer Two' copy, homed in that unit or below"
+        $r.Output | Should -Not -Match 'HOLDER UNIT'
+    }
+
+    It 'F3 -Apply -AssignBillingRuleReader: the one write assigns the CUSTOMER TOP UNIT''s copy (never the root''s), and the read-back shows the holder' {
+        $global:SetCustomerOwnerTeamsTest_AllowRoleWrites = $true
+        $cand = $global:SetCustomerOwnerTeamsTest_CandidateId
+        $copyId = $global:SetCustomerOwnerTeamsTest_CopyId
+        $copyId.customer | Should -Not -Be $copyId.root
+        $r = Invoke-Billing -Apply -Assign $cand
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        $r.Output | Should -Match 'APPLIED and read back: no drift'
+        $global:SetCustomerOwnerTeamsTest_Writes.Count | Should -Be 1 -Because ($global:SetCustomerOwnerTeamsTest_Writes -join '; ')
+        $global:SetCustomerOwnerTeamsTest_Writes[0] | Should -Be ('Post https://example.crm.dynamics.com/api/data/v9.2/systemusers(' + $cand + ')/systemuserroles_association/$ref')
+        $body = $global:SetCustomerOwnerTeamsTest_WriteBodies[0] | ConvertFrom-Json
+        $body.'@odata.id' | Should -BeLike ('*roles(' + $copyId.customer + ')')
+        $body.'@odata.id' | Should -Not -BeLike ('*roles(' + $copyId.root + ')*')
+        @($global:SetCustomerOwnerTeamsTest_UserHolders | Where-Object { $_.Id -eq $cand })[0].Copy | Should -Be 'customer'
+        # The read-back (after the write) shows the new holder of the customer's copy, and the run did not end in drift.
+        $r.Output | Should -Match 'Holders     : 2 of the Customer One copy'
+        $r.Output | Should -Match "Holder      : 'holder 2' \($cand\) homed in 'Customer One Litigation'"
+        $r.Output | Should -Not -Match 'does not hold the Customer One copy after the assignment'
+    }
+
+    It 'F3 -Apply with the role missing: creates it in the root with isinherited 0, then adds Read at Deep on prvReadsprk_Policy only' {
+        $global:SetCustomerOwnerTeamsTest_RoleExists = $false
+        $global:SetCustomerOwnerTeamsTest_AllowRoleWrites = $true
+        $r = Invoke-Billing -Apply
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        $w = @($global:SetCustomerOwnerTeamsTest_Writes)
+        $w.Count | Should -Be 2 -Because ($w -join '; ')
+        $w[0] | Should -Be 'Post https://example.crm.dynamics.com/api/data/v9.2/roles'
+        $create = $global:SetCustomerOwnerTeamsTest_WriteBodies[0] | ConvertFrom-Json
+        $create.isinherited | Should -Be 0
+        $create.name | Should -Be 'Billing Rule Reader'
+        $create.'businessunitid@odata.bind' | Should -Be "/businessunits($($global:SetCustomerOwnerTeamsTest_RootId))"
+        $w[1] | Should -Be "Post https://example.crm.dynamics.com/api/data/v9.2/roles($($global:SetCustomerOwnerTeamsTest_CopyId.root))/Microsoft.Dynamics.CRM.AddPrivilegesRole"
+        $add = $global:SetCustomerOwnerTeamsTest_WriteBodies[1] | ConvertFrom-Json
+        @($add.Privileges).Count | Should -Be 1
+        @($add.Privileges)[0].PrivilegeName | Should -Be 'prvReadsprk_Policy'
+        @($add.Privileges)[0].PrivilegeId | Should -Be $global:SetCustomerOwnerTeamsTest_PolicyReadId
+        @($add.Privileges)[0].Depth | Should -Be 'Deep'
+    }
+
+    It 'F3 -Apply with the role''s isinherited 1: exactly one PATCH, setting it to 0' {
+        $global:SetCustomerOwnerTeamsTest_IsInherited = 1
+        $global:SetCustomerOwnerTeamsTest_AllowRoleWrites = $true
+        $r = Invoke-Billing -Apply
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        @($global:SetCustomerOwnerTeamsTest_Writes) | Should -Be @("Patch https://example.crm.dynamics.com/api/data/v9.2/roles($($global:SetCustomerOwnerTeamsTest_CopyId.root))")
+        ($global:SetCustomerOwnerTeamsTest_WriteBodies[0] | ConvertFrom-Json).isinherited | Should -Be 0
+    }
+
+    It 'K2: the plan and -Apply agree on isinherited: the root OR any copy differs means the root is patched; neither differs means no step and no write' {
+        # A copy differs (the root is right): the plan lists the step AND -Apply patches the root (copies follow it).
+        $global:SetCustomerOwnerTeamsTest_CopyIsInherited = @{ customer = 1 }
+        $dry = Invoke-Billing
+        $dry.ExitCode | Should -Be 0 -Because $dry.Output
+        $dry.Output | Should -Match "set isinherited to 0 \(Team privileges only\) on 'Billing Rule Reader'"
+        $global:SetCustomerOwnerTeamsTest_AllowRoleWrites = $true
+        $r = Invoke-Billing -Apply
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        @($global:SetCustomerOwnerTeamsTest_Writes) | Should -Be @("Patch https://example.crm.dynamics.com/api/data/v9.2/roles($($global:SetCustomerOwnerTeamsTest_CopyId.root))")
+        # Neither differs: no plan step, no write.
+        $global:SetCustomerOwnerTeamsTest_Writes.Clear()
+        $global:SetCustomerOwnerTeamsTest_CopyIsInherited = @{}
+        $ok = Invoke-Billing -Apply
+        $ok.ExitCode | Should -Be 0 -Because $ok.Output
+        $ok.Output | Should -Not -Match 'set isinherited to 0'
+        $global:SetCustomerOwnerTeamsTest_Writes.Count | Should -Be 0
+    }
+
+    It 'F2 (stale read) must fire: orgdborgsettings read again just before the write differs from the first read -> no PATCH, a failure that says so' {
+        $off = '<OrgSettings><MaxRecordsForExportToExcel>100000</MaxRecordsForExportToExcel><EnableOwnershipAcrossBusinessUnits>false</EnableOwnershipAcrossBusinessUnits></OrgSettings>'
+        $changed = @(
+            '<OrgSettings><MaxRecordsForExportToExcel>5</MaxRecordsForExportToExcel><EnableOwnershipAcrossBusinessUnits>false</EnableOwnershipAcrossBusinessUnits></OrgSettings>'  # someone changed another element
+            '<OrgSettings><MaxRecordsForExportToExcel>100000</MaxRecordsForExportToExcel><EnableOwnershipAcrossBusinessUnits>true</EnableOwnershipAcrossBusinessUnits></OrgSettings>'   # someone turned the setting on
+        )
+        foreach ($second in $changed) {
+            $global:SetCustomerOwnerTeamsTest_Writes.Clear()
+            $global:SetCustomerOwnerTeamsTest_OrgSettings = $off
+            $global:SetCustomerOwnerTeamsTest_AllowOrgPatch = $true   # if the script wrote, it would succeed: the test must catch it
+            $global:SetCustomerOwnerTeamsTest_OrgReadQueue.Enqueue($off)
+            $global:SetCustomerOwnerTeamsTest_OrgReadQueue.Enqueue($second)
+            $r = Invoke-Billing -Apply
+            $r.ExitCode | Should -Be 1 -Because $r.Output
+            $r.Output | Should -Match 'orgdborgsettings changed since this run first read it'
+            $r.Output | Should -Match 'Nothing was written'
+            $global:SetCustomerOwnerTeamsTest_Writes.Count | Should -Be 0 -Because $second
+            $global:SetCustomerOwnerTeamsTest_OrgReadQueue.Clear()
+        }
+    }
+
+    It 'F2 (stale read) must not fire: identical reads and the setting off -> one PATCH, built from a read made immediately before it, changing only EnableOwnershipAcrossBusinessUnits' {
+        $global:SetCustomerOwnerTeamsTest_OrgSettings = '<OrgSettings><MaxRecordsForExportToExcel>100000</MaxRecordsForExportToExcel><EnableOwnershipAcrossBusinessUnits>false</EnableOwnershipAcrossBusinessUnits></OrgSettings>'
+        $global:SetCustomerOwnerTeamsTest_AllowOrgPatch = $true
+        $r = Invoke-Billing -Apply
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        $global:SetCustomerOwnerTeamsTest_Writes.Count | Should -Be 1
+        $events = @($global:SetCustomerOwnerTeamsTest_Events)
+        $patchAt = [array]::FindIndex($events, [Predicate[string]] { param($e) $e -like 'Patch *organizations(*' })
+        $patchAt | Should -BeGreaterThan 1
+        $events[$patchAt - 1] | Should -Be 'Get organizations'   # the re-read is the call right before the write
+        @($events[0..($patchAt - 1)] | Where-Object { $_ -eq 'Get organizations' }).Count | Should -Be 2   # the first read, then the fresh one
+        $global:SetCustomerOwnerTeamsTest_OrgSettings | Should -Be '<OrgSettings><MaxRecordsForExportToExcel>100000</MaxRecordsForExportToExcel><EnableOwnershipAcrossBusinessUnits>true</EnableOwnershipAcrossBusinessUnits></OrgSettings>'
     }
 
     It 'must fire: a config with a team, isinherited 1, Global depth, a member list or the root as its unit is refused before any read' {

@@ -1,6 +1,6 @@
 # Task 089d (option R) - the Billing Rule Reader role, assigned directly
 
-Branch `task/ebilling-089d-r`, from `work/ebilling-r1` at `9a5fa1bf51`. Not merged into work. **Nothing was written to Dataverse**: the only live call was the read-only `-WhatIf` below. `-Apply` (the role, the org setting if it is off, and any assignment) is the main session's, after the owner's go and the uac-r2 notices.
+Branch `task/ebilling-089d-r`, from `work/ebilling-r1` at `9a5fa1bf51`. Pass-1 review fixes are on `task/ebilling-089d-r-fix1` (see "089d R pass-1 review"). Not merged into work. **Nothing was written to Dataverse**: the only live calls were the read-only `-WhatIf` runs below. `-Apply` (the role, the org setting if it is off, and any assignment) is the main session's, after the owner's go and the uac-r2 notices.
 
 This file replaces the team design recorded in `089-assignment-override-service.md` ("089d - Billing Rule Readers team"). That file is not edited here.
 
@@ -32,11 +32,11 @@ This file replaces the team design recorded in `089-assignment-override-service.
 
 | # | Condition | Enforced by |
 |---|---|---|
-| 1 | The org setting is a provisioning precondition, and `-Verify` checks it. | **Script.** `-Verify` reads `organization.orgdborgsettings` and reports `ORG SETTING` drift (exit 1) when `EnableOwnershipAcrossBusinessUnits` is off or absent. `-Apply` sets it as its own step: it prints `ORG SETTING : writing organization '<name>' (<id>).orgdborgsettings: EnableOwnershipAcrossBusinessUnits '<old>' -> 'true'`, changes that one element, writes every other element back as read, reads back and fails if anything else changed. The dry-run plan lists it first, as "ORG-WIDE WRITE, its own step". **Pester:** off, absent and empty make `-Verify` fail; the dry run plans the step; `-Apply` makes exactly one PATCH to `organizations(<id>)` and the other element survives. **Config and guard:** `requiresOrgSetting` is pinned. |
-| 2 | `-Verify` checks five things and fails on any break: only the top unit's copy is assigned; every holder has the marker; every holder is homed in the subtree; no team holds the role; and the grant is Deep Read on `sprk_policy` only. | **Script**, `Get-RoleDrift`. Each break below is an owner decision, so `-Apply` refuses: <br>- `ROLE ASSIGNED ELSEWHERE`: a user holds the root copy, the Secure Record copy (or a copy below it), or a copy below a customer top unit. <br>- `HOLDER PRIVILEGE`: a holder of this unit's copy lacks `prvWritesprk_ruleset` (checked with `RetrieveUserPrivileges`). <br>- `HOLDER UNIT`: a holder is homed outside the customer top unit and its children. That covers the root, Secure Record and other customers. <br>- `ROLE HELD BY TEAM`: a team holds any copy. <br>- `PRIVILEGE DEPTH` / `PRIVILEGE MISSING` / `PRIVILEGE OUTSIDE THE FILE`: these `-Apply` fixes. <br>**Pester:** each break has its own must-fire case, plus a must-not-fire case for a correct setup. **Guard:** the config's depth, table and privilege are pinned. |
+| 1 | The org setting is a provisioning precondition, and `-Verify` checks it. | **Script.** `-Verify` reads `organization.orgdborgsettings` and reports `ORG SETTING` drift (exit 1) when `EnableOwnershipAcrossBusinessUnits` is off or absent. `-Apply` sets it as its own step: it prints `ORG SETTING : writing organization '<name>' (<id>).orgdborgsettings: EnableOwnershipAcrossBusinessUnits '<old>' -> 'true'`, changes that one element, writes every other element back as read, reads back and fails if anything else changed. Immediately before the PATCH it reads `organizations` again and stops, writing nothing, if `orgdborgsettings` differs from the read at the start of the run; the new document and the read-back comparison come from that fresh read. The dry-run plan lists it first, as "ORG-WIDE WRITE, its own step". **Pester:** off, absent and empty make `-Verify` fail; the dry run plans the step; `-Apply` makes exactly one PATCH to `organizations(<id>)` and the other element survives; a second read that differs makes no PATCH and fails; identical reads make one PATCH, directly after the second read. **Config and guard:** `requiresOrgSetting` is pinned. |
+| 2 | `-Verify` checks five things and fails on any break: only the top unit's copy is assigned; every holder has the marker; every holder is homed in the subtree; no team holds the role; and the grant is Deep Read on `sprk_policy` only. | **Script**, `Get-RoleDrift`. Each break below is an owner decision, so `-Apply` refuses: <br>- `ROLE ASSIGNED ELSEWHERE`: a user holds the root copy, the Secure Record copy (or a copy below it), or a copy below a customer top unit. <br>- `HOLDER PRIVILEGE`: a holder of this unit's copy lacks `prvWritesprk_ruleset` (checked with `RetrieveUserPrivileges`). <br>- `HOLDER UNIT`: a holder of this unit's copy is homed outside the customer top unit and its children (the root, Secure Record, other customers); or a holder of **another** customer top unit's copy is homed outside THAT unit's subtree (for example one of this customer's users holding the other customer's copy). A holder of another top unit's copy homed in that unit or below is INFO. <br>- `ROLE HELD BY TEAM`: a team holds any copy. <br>- `PRIVILEGE DEPTH` / `PRIVILEGE MISSING` / `PRIVILEGE OUTSIDE THE FILE`: these `-Apply` fixes. <br>**Pester:** each break has its own must-fire case, plus a must-not-fire case for a correct setup. **Guard:** the config's depth, table and privilege are pinned. |
 | 3 | List the BFF code that judges reach by `systemuser.businessunitid`. | Below ("Condition 3"). No code was changed. |
 | 4 | The live proof stays a precondition. | Deployment guide §7.11 ("Live-proof gate") and §12.2 Phase 7a (a `LIVE-PROOF GATE` comment block). This file, under "Gates". The provisioning notice. It was not run: see "Live proof on dev". |
-| 5 | Pin `isinherited` = 0. Keep the "no team holds the role" guard. | **Script:** `-Apply` creates the role with `isinherited` 0, or PATCHes it to 0. `-Verify` reports `ROLE INHERITED` when it is not 0, on the root role, or on a copy that differs from it. `Read-Config` refuses a config whose `isinherited` is not 0. **Guard:** must-fire for `isinherited` 1, for it missing, and for it as text. **Pester:** `-Verify` fails, and the dry run plans "set isinherited to 0". **No-team guard:** the config must-fire covers `teamName`, `assignment: team` and `membership`. A script scan (`ScriptTeamHolderFindings`) adds four must-fire cases: `Invoke-ApplyRole` writes a team role, `Invoke-ApplyRole` creates a team, a team-role write outside `Invoke-ApplyTeam`, and `Invoke-ApplyTeam` running without the owner-team filter. A must-not-fire case covers the live script. This also covers the team version's pass-1 F4 finding. |
+| 5 | Pin `isinherited` = 0. Keep the "no team holds the role" guard. | **Script:** `-Apply` creates the role with `isinherited` 0, or PATCHes the root role to 0 when the root or any copy differs (the plan uses the same condition, `Test-InheritedDrift`; copies follow the root). `-Verify` reports `ROLE INHERITED` when it is not 0, on the root role, or on a copy that differs from it. `Read-Config` refuses a config whose `isinherited` is not 0. **Guard:** must-fire for `isinherited` 1, for it missing, and for it as text. **Pester:** `-Verify` fails, and the dry run plans "set isinherited to 0". **No-team guard:** the config must-fire covers `teamName`, `assignment: team` and `membership`. A script scan (`ScriptTeamHolderFindings`) adds four must-fire cases: `Invoke-ApplyRole` writes a team role, `Invoke-ApplyRole` creates a team, a team-role write outside `Invoke-ApplyTeam`, and `Invoke-ApplyTeam` running without the owner-team filter. A must-not-fire case covers the live script. This also covers the team version's pass-1 F4 finding. |
 
 ## Condition 3: BFF code that reads a user's home business unit
 
@@ -56,6 +56,8 @@ Grep of `src/server` (test projects and the provisioning control plane excluded)
 | `Services/Ai/Context/UserOrgContextReader.cs:168` | The home unit's name, used for prompt context only. | No. Nothing is decided from it. |
 | `Services/ExternalAccess/SecureRecordIsolationCensus.cs:115-125` | Reads `systemuser.businessunitid` for clause 4 ("no user homed in Secure Record"). | No. Grants are anchored at the role copy's unit, so R's grant is anchored at the top unit and does not reach Secure Record (ArchTest below). |
 
+| `Infrastructure/ExternalAccess/AccessibleRecordSetService.cs:2485` | The flag-off membership walk's owning-business-unit match (`owningbusinessunit` equals the user's unit). It grades record-table reach by home unit, through `MembershipResolverService`, and is an approximation that ignores role depth. | No. It is not `sprk_policy`, and R does not move the home unit, so its answer is unchanged. |
+
 Related, not keyed on the home unit:
 
 | Location | What it does | Does R break it? |
@@ -65,7 +67,7 @@ Related, not keyed on the home unit:
 
 Correction to the mapper's first pass: it said the census "would flag" a top-unit Deep grant. It does not, because Secure Record is a sibling of the top unit, not below it.
 
-**Doc note for uac-r2 (not edited; it is uac-r2's file):** the remark on `SecureBuRoleDepthAssertion.Reaches` (`Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs:712-714`) says "Dataverse only lets a user hold the copy that lives in their own BU". With matrix business units that is no longer true. The code is right: `AddGrants` anchors at `role.BusinessUnitId`, the copy's unit, not the user's home. Only the remark is stale. The new ArchTest `TheSecureCensus_AnchorsTheCrossUnitAssignmentAtTheCopysUnit_AndReportsOnlyTheRuledOutShapes` pins the behaviour.
+**Doc note for uac-r2 (not edited; it is uac-r2's file):** the remark on `SecureBuRoleDepthAssertion.Reaches` (`Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs:712-714`) says "Dataverse only lets a user hold the copy that lives in their own BU". With matrix business units that is no longer true. The code is right: `AddGrants` anchors at `role.BusinessUnitId`, the copy's unit, not the user's home. Only the remark is stale. The new ArchTest `TheSecureCensus_AnchorsTheCrossUnitAssignmentAtTheCopysUnit_AndReportsOnlyTheRuledOutShapes` pins the behaviour. Nothing relies on the stale remark. It has been reported to uac-r2 (the pass-1 review asked for that; the main session sends it, this pass does not edit their file).
 
 ## Census
 
@@ -147,10 +149,10 @@ Read against the brief:
 
 | Gate | Result |
 |---|---|
-| ArchTests filter `RestrictedContentOwnerRoleGuard\|RecordOwnerAssignmentCensus\|ProcedureRolePrivilege` | 150 passed, 0 failed |
-| `RestrictedContentOwnerRoleGuardTests` alone | 87 passed |
-| `tests/Spaarke.ArchTests` (full) | 1998 passed, 0 failed |
-| Pester 5.7.1, `tests/scripts/Set-CustomerOwnerTeams.Tests.ps1` | 24 passed, 0 failed |
+| ArchTests filter `RestrictedContentOwnerRoleGuard\|RecordOwnerAssignmentCensus\|ProcedureRolePrivilege` | 155 passed, 0 failed (was 150 before pass 1) |
+| `RestrictedContentOwnerRoleGuardTests` alone | 92 passed (was 87) |
+| `tests/Spaarke.ArchTests` (full) | not re-run in full in pass 1 (1998 passed at the first pass; only the guard file changed, and its filtered suites are above) |
+| Pester 5.7.1, `tests/scripts/Set-CustomerOwnerTeams.Tests.ps1` | 32 passed, 0 failed (was 24) |
 | BFF code | none changed, so the publish-size check is skipped |
 
 ### Before and after proofs
@@ -190,9 +192,9 @@ Notices to uac-r2 before and after, as for every live change.
 ## Decisions made in this rework
 
 1. **`TEAM PLACE` stays for the two owner teams.** It came with the team version, applies to every declared team, and is not membership logic. Its Pester cases moved to the owner-team Describe.
-2. **Another customer top unit's copy, held by users, is INFO, not drift, in this run.** `-Verify` runs once per customer top unit, and dev has four. Failing customer one's run because customer two has billing admins would make `-Verify` unusable in a shared environment. Each top unit's own run checks its holders, so a holder of customer two's copy homed in customer one's units fails customer two's `-Verify` (`HOLDER UNIT`). A **team** holding any copy, and a user holding the root, Secure Record or a lower unit's copy, are always drift.
+2. **Another customer top unit's copy, held by users, is INFO only when the holder is homed in THAT unit's subtree; otherwise it is `HOLDER UNIT` drift in this run too** (revised in pass 1, F2; the first version reported every holder of another top unit's copy as INFO, so customer A's `-Verify` passed while one of A's users held B's copy). `-Verify` runs once per customer top unit, and dev has four. Failing customer one's run because customer two has billing admins would make `-Verify` unusable in a shared environment, so customer two's own admins (homed in customer two's unit or below) stay INFO. For each other top unit the script builds that unit's subtree from the business units it already read (no extra call) and fails any holder of its copy homed outside it, whichever customer's run finds it. The same holder also fails customer two's own run. A **team** holding any copy, and a user holding the root, Secure Record or a lower unit's copy, are always drift.
 3. **The assignment helper is all or nothing.** If any user it names fails a check, the run is an owner decision. The dry run exits 1, and `-Apply` writes nothing, not even the org setting or the role. A user who already holds the copy is reported as "nothing to do".
-4. **The org setting is written back as the whole `orgdborgsettings` document with one element changed,** then read back and compared element by element. If anything else differs, the run stops.
+4. **The org setting is written back as the whole `orgdborgsettings` document with one element changed,** then read back and compared element by element. If anything else differs, the run stops. Since pass 1 (F2) the document is built from a read made immediately before the PATCH, and the run stops without writing if that read differs from the first.
 5. **`Read-Config` refuses `membership` and `memberPrivilege` in any file,** so the team design cannot come back by config alone.
 6. **`Set-RolePrivileges` is shared.** The add-then-strip privilege code moved out of `Invoke-ApplyTeam` so the owner roles and the direct role use the same one. No behaviour changed for the owner roles; the Pester owner cases are unchanged and pass.
 
@@ -210,12 +212,43 @@ Notices to uac-r2 before and after, as for every live change.
     - Until someone runs `-Verify`, a user moved out keeps Read on this customer's rules. That is the point-in-time limit above.
     - A user moved **into** Secure Record is also reported by the Secure census (clause 4: no user in Secure Record).
 - **K: the org setting's reversibility was not checked.** Learn documents how to turn it on. Whether turning it off later is supported, and what it does to existing cross-unit assignments, is outside this task. Provisioning sets it once; nothing here turns it off.
-- **K: `orgdborgsettings` is written as a whole document.** A concurrent change by someone else between the read and the PATCH would be overwritten. The read-back comparison catches a difference only against this run's own read. The window is one call.
+- **K: `orgdborgsettings` is written as a whole document.** A concurrent change by someone else between the fresh read and the PATCH would still be overwritten. The window is now the span from the fresh read (the call immediately before the PATCH) to the PATCH itself, not the whole run, and not one call: the PATCH is one request, sent with `If-Match: *` (no ETag). Sending the row's `@odata.etag` would close the window; it is not done here. A change made between the first read and the fresh read is caught (the run stops). The read-back comparison catches a difference only against the fresh read.
+- **K: `ScriptTeamHolderFindings` is a text scan.** Its regex (`TeamRoleWrite`) matches only the backtick form `` teamroles_association/`$ref `` plus `AddMembersTeam` and `Invoke-DvPost 'teams'`. A team-role write built another way (a variable for the path, a different quoting, or a helper function) is not seen. The Pester suite and the live `-Verify` still catch the result (any team holding any copy is `ROLE HELD BY TEAM`). `ScriptAssignCopyFindings` is a text scan in the same way: it checks each `'@odata.id'` in `Invoke-ApplyRole`, not what is posted.
 
 ## Other things noticed (not changed)
 
-- The guard's `Assert.NotEqual(LiveJson(...), json)` in the must-fire theories cannot fail: `Mutated` re-serialises with `ToJsonString()`, which never equals the file's own text. The same pattern was in the team version and is in the owner-team theories. A real check would compare parsed nodes. Not changed (out of scope).
 - The `SecureBuRoleDepthAssertion.Reaches` remark is stale (see Condition 3, "Doc note for uac-r2").
+
+## 089d R pass-1 review
+
+First adversarial review of option R, fixed on `task/ebilling-089d-r-fix1` (from `task/ebilling-089d-r` at `11b05a62c1`). Each finding is a defect and its location only; the disposition follows.
+
+| # | Finding (defect, location) | Disposition |
+|---|---|---|
+| F3 | No test covers the user-role assignment (`Set-CustomerOwnerTeams.ps1`, `Invoke-ApplyRole`, the `systemuserroles_association` write), or the role create and the `isinherited` PATCH. A mutant that assigns the root copy passed all 24 Pester cases. | **Fixed.** Three Pester cases (assignment, role create, `isinherited` PATCH) and an ArchTest source scan (`ScriptAssignCopyFindings`). Seed proofs below. |
+| F2 | `Get-RoleDrift` and `Write-RoleState`: a holder of another customer top unit's copy is INFO only, so customer A's `-Verify` passed while one of A's users held B's copy. | **Fixed.** Each other top unit's subtree is computed from the units already read; a holder homed outside it is `HOLDER UNIT`. B's own admins stay INFO. Decision 2 and the UAC guide updated. |
+| F2 | `Set-CustomerOwnerTeams.ps1`, the org-setting write: the PATCH was built from the read at the start of the run, after every other read. | **Fixed.** Re-read immediately before the write; the run stops without writing if it differs from the first read; the document and the read-back comparison use the fresh read. The remaining window is described under Known limits. |
+| K2 | `Get-RolePlan` planned `isinherited` when any copy differed; `Invoke-ApplyRole` patched only when the root differed. | **Fixed.** One shared condition (`Test-InheritedDrift`): patch the root when it or any copy differs. |
+| K3 | `RestrictedContentOwnerRoleGuardTests.cs`, the seeded-change assertion in the billing theory: it compared re-serialised JSON with the file's text and could not fail. The owner-team JSON theories had no such assertion at all. | **Fixed.** `AssertTheSeededChangeLanded` uses `JsonNode.DeepEquals` and runs in all three JSON theories; a Fact shows a no-op change passes the old comparison and fails the new one. The two script theories already compared raw text and were left. |
+| K3 | `ScriptTeamHolderFindings` is a text scan; its regex matches only the backtick form. | **Documented** under Known limits. No change. |
+| K4 | Condition 3 list lacked `Infrastructure/ExternalAccess/AccessibleRecordSetService.cs:2485` (the flag-off owning-business-unit match, via `MembershipResolverService`). | **Added** to the Condition 3 table: not `sprk_policy`, R breaks nothing. |
+| K4 | `SecureBuRoleDepthAssertion.cs:712-714`, a stale remark (uac-r2's file). | **Reported to uac-r2; not edited here.** Nothing relies on it. |
+
+### Pass-1 proofs
+
+| Change | Result |
+|---|---|
+| Seed: the assignment writes `roles($roleId)` (the root) | 1 of 32 Pester fails: the assignment case. The script was restored; its hash matches the saved copy. |
+| Seed: the role create sends `isinherited` 1 | 1 of 32 fails: the role-create case. Restored; hash matches. |
+| Seed: no re-read before the org write | 2 of 32 fail: the stale-read must-fire and the re-read-immediately-before case. Restored; hash matches. |
+| Seed: `-Apply` patches only when the root differs (the old condition) | 1 of 32 fails: the K2 case. Restored; hash matches. |
+| Seed: another top unit's holder adds no drift | 1 of 32 fails: the F2 must-fire case. Restored; hash matches. |
+| Seed (ArchTest): the no-op change under the old and the new check | The old comparison passes a no-op; `AssertTheSeededChangeLanded` throws on it (`TheSeededChangeCheck_CanFail_OnAChangeThatChangesNothing`). |
+| ArchTest scan: the assignment names the root role, or `$s.Role.roleid`, or has no user-role write | 3 must-fire cases pass; the live script gives no finding. |
+
+### -WhatIf on dev after the fixes (2026-11-04, read-only)
+
+The same command as above, run against `task/ebilling-089d-r-fix1`: exit 0, and the output is identical to the run recorded above (the two owner teams show no drift, the role is still missing, and the plan has the same five steps). The new holder checks are not exercised on dev, because the role does not exist there yet and so has no holder.
 
 ## Draft notice for customer-provisioning-orchestration-r1 (the main session sends it)
 

@@ -451,9 +451,13 @@ least as strict as the matter.
   would reach Secure Record and is not allowed; the admin's own unit's copy would not reach the top unit at all. The one
   definition is `config/billing-rule-readers-role.json`. `scripts/Set-CustomerOwnerTeams.ps1` creates the role, sets the
   org setting, assigns the right copy (`-AssignBillingRuleReader`), and its `-Verify` fails on the org setting off,
-  `isinherited` not 0, any other privilege or depth, a team holder, a wrong copy assigned, or a holder who lacks the
-  billing-admin privilege or is homed outside the customer's units. The Secure census anchors a directly assigned grant at
-  the copy's unit in the same way, so it would report a wrong copy that reaches Secure Record.
+  `isinherited` not 0, any other privilege or depth, any team holding any copy, a user holding the root copy, the Secure
+  Record copy (or a copy below it) or the copy of a unit below a customer top unit, a holder of the customer's top unit copy
+  who lacks the billing-admin privilege or is homed outside the customer's units, and a holder of another customer top
+  unit's copy who is homed outside that unit and the units below it. It does **not** fail on a holder of another customer top
+  unit's copy who is homed in that unit or below: that is the other customer's own admin, listed as information and checked by
+  that customer's run. The Secure census anchors a directly assigned grant at the copy's unit in the same way, so it would
+  report a copy that reaches Secure Record.
 - **A Decision Record** is also filed under the subject of every Signal it resolved (the ids its `sprk_steps` lists). A
   Secure pass reaches it through those Signals even when it lies outside the record's own family, so it moves into
   isolation, or out, with them.
