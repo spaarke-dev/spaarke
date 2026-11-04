@@ -714,3 +714,13 @@ Branch `task/ebilling-089c-fix2`, from `work/ebilling-r1` at `916e2f80ba`. No Da
 |---|---|---|---|---|
 | Fix round 1 (pass-1 review, `task/ebilling-089c-fix1`) | 0 errors | 578/578 | 168/168 | Not measured: no package or registration changed |
 | Fix round 2 (pass-2 review, `task/ebilling-089c-fix2`) | 0 warnings, 0 errors | 583/583 (5 new cases) | 168/168 | Not measured: no package or registration changed (`LoadRuleAsync` gained one optional parameter and a Procedure read) |
+
+### 089c fix-2 re-check and close (2026-11-04)
+
+A scoped re-check (Sonnet) of merge 593c70f2b5 found no fix-now finding. Unit tests 583/583, ArchTests `RouteAuthorizationGuard|RecordOwnerAssignmentCensus` 152/152. Known limits, accepted:
+
+- **K2:** a request with no oid to an unknown row now gets 404 from the filter, where it used to get the handler's 401 (`ProcedureAssignmentEndpoints.cs:354-360`). In production this cannot happen: `FinanceAuthorizationFilter` (`:415-423`) answers 401 to a missing oid before any record read, and step 0 refuses a non-GUID oid. The 404 is what every caller with no row gets.
+- **K1:** a dangling Procedure reference on a set counts as "not retired" (`ProcedureAssignmentService.cs:977-980`). Dataverse referential integrity makes this unreachable.
+- **K1 (test):** the byte-identity test (`ProcedureAssignmentEndpointsTests.cs:708-729`) now compares the filter's 404 with itself. Both answers come from the same `Map(OverrideNotFound<object>())` call, so they stay identical by construction.
+
+**089c is complete:** two adversarial passes, two fix rounds and a scoped re-check. Still open for the owner: the stale-Signals STOP, (a) or (b), and confirmation of deviations 1 and 2.
