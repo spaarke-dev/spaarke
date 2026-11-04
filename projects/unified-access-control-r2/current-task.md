@@ -4,7 +4,7 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file (checkpoints #88–#90, 2026-11-03/04).
 
-> **Last Updated**: 2026-11-04 ~05:30Z (checkpoint #90: R3 hand-over done, d763dc120e gate PASS, mailbox users moved to BU1, ebilling and field-mapping reviews in flight).
+> **Last Updated**: 2026-11-04 ~13:00 local (checkpoint #91: core-pair fix round done ce2bed5f70, pass 2 next; duplicate sessions closed; many peer rulings).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -13,7 +13,7 @@
 | **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green: `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys and settings changes need the owner's go IN THIS SESSION. Peers (ebilling, field-mapping) take the owner's go for THEIR live writes in THEIR own sessions. |
 | **Active task** | None in progress. Reviewing and gating for peers; orchestrating dev BFF deploys. |
 | **Dev state** | BFF = **d763dc120e** since 2026-11-03 22:26:31Z (R3's final deploy; my gate PASSED: `$TEMP/uacmerge/uacg/gated763_30m.txt`, script `gated763.sh`). Rollback: R3's `deploy/rollback/wwwroot-20261103T220358Z` (kept until my next deploy passes its gate) or redeploy 5796774091. Dev SPA = b083d62183. |
-| **Next action** | 1. Owner: click Email to AP on batch 14680609 (or send the form's command-bar screenshot); then run `$TEMP/uacmerge/uacg/apsend_check.sh SINCE UNTIL 14680609-b198-48e2-8391-3ada84fda689` and report. 2. Review diffs as they arrive (list below). 3. Own code: #2560, then #2524. |
+| **Next action** | 1. Core-pair fix (C:/wtcore, `fix/uac-core-pair-update`, commits f90529a016, 2b8667a691, ce2bed5f70, NOT pushed): launch adversarial pass 2 (Opus, security); allow-list entry TopicRegistryWorkProductPersister stays K (pass 1: host types fixed allow-list, corerecordid 100 chars vs JSON envelope). Then push, PR (neutral wording; Router + Client lint green; merge-tree; squash --match-head-commit), queue for next dev deploy. 2. Owner: Email to AP diagnostics still owed (URL, InPrivate, ribbondebug Command checker on the Completed batch 14680609). 3. Reviews as diffs arrive: fm 042c (B' + K2 order theory), fm 031, ebilling 089e, 082b-d, 095d-1. |
 
 ## Dev BFF deploy role (owner confirmed 2026-11-03; R3 rollout record §17, PR #2554)
 - **Each deploy:** owner's go per build in THIS session; peer OKs on the master SHA; pre-checks (`Set-ChildRecordCreatorPersonSchema.ps1 -Verify`, 225-name settings check, ebilling's 6 keys, both write switches true); `scripts/Save-BffDevRollbackSnapshot.ps1`; deploy; `scripts/Test-BffDevDeployReadback.ps1`; my 30-minute gate (copy `gated763.sh`); record in `docs/procedures/dev-bff-deploy-coordination.md`.
