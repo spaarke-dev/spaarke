@@ -1036,3 +1036,12 @@ The uac-r2 design, binding. `RuleSetEndpoints.RequireAccessToTheRuleSet` runs on
 | Pester `Set-CustomerOwnerTeams.Tests.ps1` (Pester 5.7.1) | 35 passed, 0 failed |
 
 - No Dataverse write, no role change on dev, no deploy.
+
+## 089e merge and dev role apply (2026-11-04)
+
+- **uac-r2 full review:** "uac-r2 reviewed 089e 2b6b027a63: approved, no F; assertion list option (a) (2026-11-04)". `sprk_procedure` is catalog data, not restricted content: it stays out of `SecureBuRoleDepthAssertion.RestrictedContentPrivileges` and the resolver's hard-deny set; its depth stays on the direct `Reaches` assertions in `RestrictedContentOwnerRoleGuardTests`. Merged into work at 6bb7d928a9; the filtered suite on the combined tip passes (1284/0 unit, 214/0 ArchTests).
+- **Dev role apply (spaarkedev1; owner go typed in session: "Add to role file + apply on dev", "Approve role + dev apply"; uac-r2 notified before and after):**
+  1. `scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1`: changed 1 (Spaarke Billing Administrator + `prvReadsprk_procedure` Deep), held or skipped 19; `-Verify` PASS, exit 0.
+  2. `scripts/Set-CustomerOwnerTeams.ps1 -CustomerBusinessUnitName 'Spaarke Business Unit 1' -Apply`: Billing Rule Reader + `prvReadsprk_ruleset` and `prvReadsprk_procedure` Deep ("APPLIED and read back: no drift"); `-Verify` PASS, exit 0. 0 holders; both owner teams drift none.
+  3. Read-back: every roleprivileges row snapshotted before and after (853 roles, 34,165 to 34,168 rows). The diff is exactly the three added rows above, on the root roles, at Deep; nothing removed or changed.
+- **K3 deploy order is met on dev.** Not done: the `-AssignBillingRuleReader` runs, one per child-unit billing admin, each a separate owner go.
