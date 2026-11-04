@@ -189,24 +189,29 @@ R3 sends these open issues to "R4 backlog". None was in this design before. Each
 | #1839 | ISS-007 | Service-request documents are indexed with no parent, so they can't be found from the record | Documents and search; relevant to the Service Request template |
 | #1636 | ISS-003 | The shared `sanitizeEmailHtml` keeps style positioning and remote images | Shared UI; affects Messages (#2453 threads) |
 | #1623 | ISS-001 | `AuthorizationModule`: the Copilot audience merge runs once per process, not per options instance | † BFF auth, so it needs auth review (§6) |
-| #1673 | ISS-005 | Binder-created contacts have no BU-team owner | † With provisioning (BU configuration). Related: #2278 (backfill existing contacts) and #2270 (contacts in a foreign environment have no owner; owner decision needed). Neither is in R3's hand-off table. |
+| #1673 | ISS-005 | Binder-created contacts have no BU-team owner | † With provisioning (BU configuration). Pairs with #2278 and #2270 below. |
 | #1737 | DEF-002 | Incident alerting for Policy Questions | † Blocked on the per-customer mailbox (#1562) |
 | #1840 | ISS-008 | Unused `sprk_communication_send` web resource | † Cleanup |
 | #1930 | ISS-012 | WorkforceHome scheme tests are order-dependent | † Test hygiene |
 | #2499 | ISS-028 | The in-memory contact store diverges from `ContactSelect` | † Test debt; the gate file is ontology's |
 | #2534 | ISS-031 | Auth architecture doc predates ADR-028 A9 | † R4 only if spaarke-auth-system-of-record-r1 doesn't resume |
 
-**Open R3 issues with no home in the R3 hand-off** (each issue body says "Owner: R3"; confirmation asked of the R3 session 2026-11-04):
+**Filed in R3 but never scheduled.** These were raised during the ISS-004/005 work on 2026-10-22. R3 confirmed on 2026-11-04 that they are R4's: they are now in R3's hand-off table (`91fb4843ca`, PR #2554), and each issue has a hand-off comment. All five are still unfixed on master.
 
 | Issue | What |
 |---|---|
 | #2269 | Retryable workforce binder faults (`contact_lookup_failed` / `_create_failed` / `_bind_failed`) answer 403, not 503; the SPA should retry on 503. UAC to review. |
+| #2270 | Contacts that `ContactIdentityBinderFactory` creates in a foreign Dataverse environment have no owner. **Owner decision:** where does a foreign environment's owner team come from? |
 | #2271 | The document-lock 409 has no ProblemDetails title or status, so clients show generic text |
 | #2275 | `no-mock-identity.test.tsx` fails on its first run after an edit (cold Vite transform hits the 60 s timeout) |
+| #2278 | Backfill the owner of contacts that already exist (`scripts/Backfill-RecordOwnership.ps1` doesn't cover `contact`). Pairs with #1673. |
 
-**Inherited state, not issues:**
+**Inherited state, not issues** (confirmed with R3, 2026-11-04):
 - `85fbba3f64` (registration shows "not set up" for operator-only 500s) is on master but **not deployed** to the dev SPA. It ships with R4's first SPA deploy.
-- R3 was to review ebilling's 095a/095b PR before merge: does `ExternalInvoiceVisibility` still hide an invoice whose source email is restricted? If R3 is archived first, R4 owns this review.
+- **Check in R4's first E2E:** R3's last change has no live proof on dev, because there was no invite traffic in the gate window. The change: inviting a WorkforceHome contact answers 409 `sdap.access.invite.workforce_home_contact` and writes no collision flag.
+- PR #2550 is a doc-comment fix in `ExternalUserContextEndpoint` plus a route-ledger cite. It ships with uac-r2's next BFF deploy.
+- The dev BFF rollback snapshot for `d763dc120e` is in the R3 worktree (`deploy/rollback/wwwroot-20261103T220358Z`). Keep that worktree until uac-r2's next deploy passes its gate.
+- Not R4: the ebilling invoice-visibility review. R3 checked it: `ExternalInvoiceVisibility` is unchanged and there is no access change. uac-r2 owns that watch. R3 closed #1566 and #1568 as completed.
 - Known limits K2 and K3 from R3 task 090 (`notes/task-090-notes.md`): two unread counts for a user who signs in both ways, and a licensed user linked to a WorkforceHome contact's home pair loses that contact's grants. Revisit with #2508.
 - Since 2026-11-03, uac-r2 coordinates dev BFF deploys (`docs/procedures/dev-bff-deploy-coordination.md`). R4's two event routes and allow-list columns go through it.
 
