@@ -329,11 +329,16 @@ try {
         if ($bad.Count) { $Gaps.Add("$RoleName business-unit copies without the set: $($bad -join '; ')"); Write-Host "  WARNING: business-unit copies without the set: $($bad -join '; ')" -ForegroundColor DarkYellow }
         else { Write-Host "  business-unit copies ($($copies.Count)) hold the set" -ForegroundColor Green }
 
-        # uac-r2 K-1: users only, never a team.
-        $teams = @((Invoke-Dv "roles($RoleId)/teamroles_association?`$select=name").value)
-        $users = @((Invoke-Dv "roles($RoleId)/systemuserroles_association?`$select=fullname").value)
-        Write-Host "  held by $($users.Count) user(s) directly, $($teams.Count) team(s)"
-        if ($teams.Count) { $Gaps.Add("$RoleName is held by team(s) $(($teams | ForEach-Object { $_.name }) -join ', '): assign it to users directly, never to a team (uac-r2 K-1)") }
+        # uac-r2 K-1: users only, never a team. 089e fix round 2 (F2): the holders of the root role AND of every business-unit copy, both
+        # associations for each (a team or a user holds the copy in its own unit, so the root role's holders alone miss them).
+        $teams = [System.Collections.Generic.List[object]]::new()
+        $users = [System.Collections.Generic.List[object]]::new()
+        foreach ($holderRoleId in @($RoleId) + @($copies | ForEach-Object { ([string]$_.roleid).ToLower() })) {
+            foreach ($tm in @((Invoke-Dv "roles($holderRoleId)/teamroles_association?`$select=name").value)) { $teams.Add([pscustomobject]@{ name = $tm.name; RoleId = $holderRoleId }) }
+            foreach ($u in @((Invoke-Dv "roles($holderRoleId)/systemuserroles_association?`$select=fullname").value)) { $users.Add([pscustomobject]@{ fullname = $u.fullname; RoleId = $holderRoleId }) }
+        }
+        Write-Host "  held by $($users.Count) user(s) directly, $($teams.Count) team(s), across the root role and $($copies.Count) business-unit copies"
+        if ($teams.Count) { $Gaps.Add("$RoleName is held by team(s) $(($teams | ForEach-Object { "$($_.name) (role copy $($_.RoleId))" }) -join ', '): assign it to users directly, never to a team (uac-r2 K-1)") }
     }
 
     # --- 4. Core and Basic User lose Read on sprk_ruleset ------------------------------------------------------------
