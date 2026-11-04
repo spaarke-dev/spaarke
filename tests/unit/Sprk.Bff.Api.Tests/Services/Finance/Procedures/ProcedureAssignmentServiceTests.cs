@@ -902,6 +902,84 @@ public sealed class ProcedureAssignmentServiceTests
         w.Rows.Should().BeEmpty();
     }
 
+    /// <summary>Makes the Procedure the owner of the set the rule belongs to (a Procedure-owned set), as a published Procedure's rules are.</summary>
+    private static void OwnedBy(World w, Guid policy, Guid procedure) =>
+        w.H.Row("sprk_ruleset", w.H.Row("sprk_policy", policy).GetAttributeValue<EntityReference>("sprk_ruleset").Id)["sprk_procedure"] =
+            new EntityReference("sprk_procedure", procedure);
+
+    [Theory(DisplayName = "089c pass 2 F1 must-fire: a rule of a RETIRED Procedure's Published set is 409 rule_not_in_force even while the rule is still enabled (a failed later retire chunk) and writes nothing; an active Procedure's rule is changed (must not fire)")]
+    [InlineData(ProcedureEntity.StatusRetired, false)]
+    [InlineData(ProcedureEntity.StatusActive, true)]
+    public async Task Change_ARuleOfARetiredProcedure_Is409_WhateverTheRuleFlagsSay(int procedureStatus, bool changes)
+    {
+        var w = new World();
+        var policy = w.Rule();
+        OwnedBy(w, policy, w.Procedure(procedureStatus));
+        w.H.Row("sprk_policy", policy).GetAttributeValue<bool?>("sprk_enabled").Should().BeTrue("the partly retired shape: the Procedure is retired, the rule is still on");
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, default);
+
+        if (changes)
+        {
+            outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+            return;
+        }
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("assignment.rule_not_in_force");
+        w.H.Transactions.Should().BeEmpty();
+        w.H.Writes.Should().BeEmpty();
+        w.Rows.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "089c pass 2 F1: a rule of a set with no Procedure keeps its behaviour (changed), and the Procedure is not read")]
+    public async Task Change_ARuleOfASetWithNoProcedure_IsChanged_AndReadsNoProcedure()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var procedureReads = 0;
+        var inner = w.H.AfterQuery;
+        w.H.AfterQuery = q =>
+        {
+            if (q.EntityName == "sprk_procedure") procedureReads++;
+            inner?.Invoke(q);
+        };
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        procedureReads.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "089c pass 2 F1: a fault reading the owning Procedure is the stable 503 assignment.read_failed and nothing is written")]
+    public async Task Change_WhenTheProcedureReadFaults_Is503()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        OwnedBy(w, policy, w.Procedure());
+        w.H.AfterQuery = q =>
+        {
+            if (q.EntityName == "sprk_procedure") throw new HttpRequestException("simulated fault");
+        };
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, default);
+
+        outcome.StatusCode.Should().Be(503);
+        outcome.ErrorCode.Should().Be("assignment.read_failed");
+        w.H.Transactions.Should().BeEmpty();
+        w.Rows.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "089c pass 2 F1 (scope): Exclude still accepts a rule of a retired Procedure")]
+    public async Task Exclude_StillAcceptsARuleOfARetiredProcedure()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        OwnedBy(w, policy, w.Procedure(ProcedureEntity.StatusRetired));
+
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+    }
+
     [Fact(DisplayName = "089c review F1 (scope): Exclude still accepts a rule that is switched off or in an unpublished set")]
     public async Task Exclude_StillAcceptsARuleThatIsNotInForce()
     {
@@ -959,7 +1037,9 @@ public sealed class ProcedureAssignmentServiceTests
         var policy = w.Rule();
         w.H.AfterQuery = q =>
         {
-            if (q.EntityName == "sprk_ruleset" && q.ColumnSet.Columns.Contains("sprk_procedure")) throw new HttpRequestException("simulated fault");
+            // The record-scoped set check's read (RecordSetColumns), not the base rule's set read (which names sprk_visibletofirms).
+            if (q.EntityName == "sprk_ruleset" && q.ColumnSet.Columns.Contains("sprk_procedure") && !q.ColumnSet.Columns.Contains("sprk_visibletofirms"))
+                throw new HttpRequestException("simulated fault");
         };
 
         var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, default);

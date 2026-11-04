@@ -770,21 +770,20 @@ public sealed class ProcedureAssignmentEndpointsTests
         }
     }
 
-    [Theory(DisplayName = "089c: a row that is not this record's passes the subject filter and the service answers its 404")]
+    [Theory(DisplayName = "089c pass 2 must-fire: a row that is not this record's is answered 404 override_not_found by the filter, and the service's remove and preview never run (no second read of the row)")]
     [MemberData(nameof(RemovalRoutes))]
-    public async Task Removal_OfAnUnknownRow_IsTheServices404(string method, string url, string _)
+    public async Task Removal_OfAnUnknownRow_IsTheFilters404_AndTheServiceNeverRuns(string method, string url, string _)
     {
         await using var host = await Host.StartAsync();
         StoredRowOverrides(host, null);
-        var notFound = RuleSetOutcome<OverrideRemoved>.Refused(404, "assignment.override_not_found", "The override was not found on this record.");
-        host.Service.Setup(s => s.RemoveAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(notFound);
-        host.Service.Setup(s => s.PreviewRemovalAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<OverrideRemovalPreview>.Refused(404, "assignment.override_not_found", "The override was not found on this record."));
 
         var response = await host.Client.SendAsync(Send(method, url));
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("assignment.override_not_found");
+        host.Service.Verify(s => s.RemoveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Service.Verify(s => s.PreviewRemovalAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.NoWrites();
     }
 
     [Theory(DisplayName = "089c review K2 must-fire: with eBilling off, a removal whose subject the caller cannot Read is 503, not 403/404, and the stored row is never read")]

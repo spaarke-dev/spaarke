@@ -1216,8 +1216,8 @@ public partial class RouteAuthorizationGuardTests
         new CreditedForm("RequireReadOnTheOverridesSubject", "Api/Finance/ProcedureAssignmentEndpoints.cs",
             "Reads the route record's stored override through ProcedureAssignmentService.SubjectOfOverrideAsync "
             + "(ProcedureAssignmentEndpoints.cs:346) and asks the caller's own Read on the Procedure or rule it overrides via "
-            + "CallerReadCheck.CheckAsync with AuthorizationService (:361); denied is the same 404 assignment.override_not_found a missing "
-            + "row gets (:372; review K1), an unparseable id, a read fault or an unanswered question 403 system_failure (:339, :351, :373) "
+            + "CallerReadCheck.CheckAsync with AuthorizationService (:364); denied is the same 404 assignment.override_not_found a missing "
+            + "row gets, also when there is no row at all and the filter answers it itself (:359, :375; review K1, pass 2), an unparseable id, a read fault or an unanswered question 403 system_failure (:339, :351, :376) "
             + "(ebilling-r1 089c)."),
         new CreditedForm("AddStoredFileAccessFilter", "Api/Finance/StoredFileEndpoints.cs",
             "StoredFileAccessFilter decides before the handler: step 0 via FinanceAuthorizationFilter.EvaluateStepZeroAsync "
