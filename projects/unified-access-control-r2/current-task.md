@@ -53,6 +53,7 @@
   - the NFR-05 census after the next deploy;
   - 086's follow-up adds `prvReadsprk_StoredFile` to `config/secure-record-owner-role.json`.
 - **field-mapping:**
+  - 042b F1: the owner chose A' (replace) in field-mapping's session (decisions c1428c181d). Step 7 asks over the planned values for every column the restamp will write; tests in both directions plus "agrees"; Repair gets the same; §15.4 Signal/DR 409 row. Full pass (AC15) when the whole 042b diff arrives;
   - 042a, and 042b with a full review;
   - 043 (the #2524 create-path link write);
   - any #2523 change to how grants run.
