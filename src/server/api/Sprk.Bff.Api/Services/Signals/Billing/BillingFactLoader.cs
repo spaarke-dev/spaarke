@@ -73,6 +73,18 @@ public sealed record BillingEvaluationRequest
     public string? SubmittedFirmInvoiceNumber { get; init; }
 }
 
+/// <summary>Where a <see cref="BillingRuleCandidate"/> came from (ebilling-r1 082c).</summary>
+public enum BillingRuleSource
+{
+    /// <summary>A legacy rule set (no <c>sprk_procedure</c>), Client default or Firm: read by <c>LoadLegacyRulesAsync</c>, selected per
+    /// date by <see cref="InvoiceComplianceEvaluator.SelectVersion"/>.</summary>
+    Legacy,
+
+    /// <summary>A Procedure rule or a record rule in a Procedure rule's slot: chosen per date by <see cref="ProcedureResolution.RulesOn"/>,
+    /// never by the legacy version chain.</summary>
+    Procedure,
+}
+
 /// <summary>
 /// One published billing rule version as read (task 019 store, task 076 publish): the policy, its version, its rule set's scope,
 /// and the row values the gate (<see cref="PolicyVersionValidator.TryPrepareBillingRule"/>) and the Signal mapping need. Raw:
@@ -88,8 +100,26 @@ public sealed record BillingRuleCandidate
 
     public required Guid RuleSetId { get; init; }
 
-    /// <summary>Client default or Firm (<c>sprk_ruleset.sprk_scope</c>). A firm rule overrides a client-default rule of the same type (D-39).</summary>
-    public required RuleSetScope Scope { get; init; }
+    /// <summary>Client default or Firm (<c>sprk_ruleset.sprk_scope</c>) for a legacy rule; <c>null</c> for a Procedure rule (082c), which has no
+    /// legacy scope. Display only: precedence reads <see cref="Rank"/>, never this (082c C5).</summary>
+    public required RuleSetScope? Scope { get; init; }
+
+    /// <summary>082c: a legacy rule set's rule, or a Procedure's (the resolver's).</summary>
+    public BillingRuleSource Source { get; init; } = BillingRuleSource.Legacy;
+
+    /// <summary>
+    /// 082c C5: the rank precedence compares (model 6.5, 7.3). A legacy Client default rule is (All records, 0, not firm-specific), the default; a
+    /// legacy Firm rule (Firm, 0, firm-specific) (<see cref="BillingFactLoader.LegacyRank"/>); a Procedure rule its Procedure's
+    /// <see cref="AppliedProcedure.Rank"/>; a record rule its base rule's.
+    /// </summary>
+    public ProcedureRank Rank { get; init; }
+
+    /// <summary>082c: the Procedure whose slot the rule takes (a record rule's is its base rule's); <c>null</c> for a legacy rule.</summary>
+    public Guid? ProcedureId { get; init; }
+
+    /// <summary>082c: the Procedure Version that published this policy version (<c>sprk_policyversion.sprk_procedureversion</c>); <c>null</c> for a
+    /// legacy rule and for a record rule's own version.</summary>
+    public Guid? ProcedureVersionId { get; init; }
 
     /// <summary><c>sprk_ruletype</c> as the gate reads it: the option value in invariant text.</summary>
     public string? RuleType { get; init; }
@@ -155,8 +185,13 @@ public sealed record BillingRuleCandidate
 /// <summary>What <see cref="BillingFactLoader.LoadAsync"/> read for one submission.</summary>
 public sealed record BillingLoadedFacts
 {
-    /// <summary>Every version of every enabled billing policy in a Published rule set that applies to the firm, and that can be in force.</summary>
+    /// <summary>The LEGACY rules (<see cref="BillingRuleSource.Legacy"/> only): every version of every enabled billing policy in a Published
+    /// legacy rule set (no <c>sprk_procedure</c>) that applies to the firm, and that can be in force.</summary>
     public required IReadOnlyList<BillingRuleCandidate> Rules { get; init; }
+
+    /// <summary>082c: the Procedure stream, read once (<see cref="ProcedureResolver.ReadAsync"/>); the evaluator resolves each distinct subject
+    /// date with <see cref="ProcedureResolution.RulesOn"/>. Disjoint from <see cref="Rules"/> (C4).</summary>
+    public required ProcedureResolution Procedures { get; init; }
 
     /// <summary>The core record's dates and state; <c>null</c> when the submission has none or it was not found.</summary>
     public BillingCoreRecordFacts? CoreRecord { get; init; }
@@ -184,11 +219,12 @@ public sealed record BillingLoadedFacts
 /// rule names a line match field, and only of Active priors: 072 review B1), and
 /// the secure-root walk (one run of <see cref="SecureChildShareSynchronizer.SecureRootsAboveEachAsync"/> for the invoice and every
 /// prior). Id lists are chunked at <see cref="MaxInValues"/>; each query pages.</para>
-/// <para><b>Rules.</b> <c>sprk_ruleset</c> rows with domain Billing, status Published, and scope Client default or Firm with
-/// <c>sprk_firm</c> = the firm; their enabled, active billing policies; and those policies' versions that can be in force (the
-/// current version or one with an end date, task 076 K3). The domain is filtered in the query and re-checked on every row
-/// (<see cref="RuleDomains.IsBillingRow"/>), as task 076 does. Rules are not narrowed by core record: the store (task 019) scopes a
-/// rule set to the client default or a firm only.</para>
+/// <para><b>Rules.</b> Two disjoint streams (082c, decision a). Legacy: <c>sprk_ruleset</c> rows with domain Billing, status Published, no
+/// <c>sprk_procedure</c> (the partition), and scope Client default or Firm with <c>sprk_firm</c> = the firm; their enabled, active billing
+/// policies; and those policies' versions that can be in force (the current version or one with an end date, task 076 K3). The domain is
+/// filtered in the query and re-checked on every row (<see cref="RuleDomains.IsBillingRow"/>), as task 076 does; legacy rules are not
+/// narrowed by core record. Procedure: <see cref="ProcedureResolver.ReadAsync"/>, once, for the core record and firm
+/// (<see cref="BillingLoadedFacts.Procedures"/>).</para>
 /// <para><b>Priors (D-112, FR-36).</b> Every submission of the firm except this one, from both sides of the secure wall. A Failed
 /// submission or a Cancelled invoice never reached the firm as a payable invoice and is not loaded; nor is a Superseded invoice, which
 /// its correction replaced under the same firm number (task 097a). Status: the invoice's status when the submission has one (Rejected,
@@ -225,7 +261,8 @@ public sealed class BillingFactLoader
     internal const string InvoiceEntity = "sprk_invoice";
     internal const string LineEntity = "sprk_billingevent";
 
-    /// <summary>ebilling-r1 task 081: <c>sprk_ruleset.sprk_procedure</c>, set on a Procedure's rule set (not read here until task 082).</summary>
+    /// <summary>ebilling-r1 task 081: <c>sprk_ruleset.sprk_procedure</c>, set on a Procedure's rule set. 082c: the legacy read's partition (a set
+    /// that names a Procedure is the resolver's).</summary>
     internal const string ProcedureColumn = "sprk_procedure";
 
     private const int RuleSetPublished = 659490000;
@@ -269,14 +306,23 @@ public sealed class BillingFactLoader
         if (request.FirmId == Guid.Empty) throw new ArgumentException("FirmId must not be empty.", nameof(request));
 
         var settings = await _settings.GetAsync(ct).ConfigureAwait(false);
-        var rules = await LoadRulesAsync(request.FirmId, ct).ConfigureAwait(false);
+        var rules = await LoadLegacyRulesAsync(request.FirmId, ct).ConfigureAwait(false);
+        // 082c (decision a, C1): the Procedure stream beside the legacy one, read once per invoice (C9). Its faults propagate
+        // (ProcedureResolutionFaultException, CoreRecordChainUnreadableException, a Dataverse fault): nothing is judged on a partial set.
+        var procedures = await ProcedureResolver.ReadAsync(_entities, _logger, request.CoreRecord, request.FirmId, ct).ConfigureAwait(false);
+        RequireDisjoint(rules, procedures);
         var coreRecord = request.CoreRecord is { } core ? await LoadCoreRecordAsync(core, ct).ConfigureAwait(false) : null;
 
         IReadOnlyList<BillingPriorSubmission> priors = [];
         IReadOnlySet<Guid>? invoiceRoots = null;
-        if (rules.Any(r => IsRuleType(r, Signals.RuleType.Duplicate)))
+        // C10: either stream's Duplicate rule makes the priors worth reading (a superset of what judges any date, as for legacy).
+        var duplicates = rules.Select(r => (r.RuleType, r.RuleBody))
+            .Concat(procedures.PolicyVersions.Select(v => (v.RuleType, v.RuleBody)))
+            .Where(r => IsRuleType(r.RuleType, Signals.RuleType.Duplicate))
+            .ToList();
+        if (duplicates.Count > 0)
         {
-            var read = await LoadPriorsAsync(request, ComparesLines(rules), ct).ConfigureAwait(false);
+            var read = await LoadPriorsAsync(request, duplicates.Any(d => NamesALineMatchField(d.RuleBody)), ct).ConfigureAwait(false);
             var roots = await SecureRootsAsync(request, read, ct).ConfigureAwait(false);
             invoiceRoots = roots[0];
             priors = read.Select((p, i) => p.Prior with { SecureRoots = roots[i + 1] }).ToList();
@@ -285,6 +331,7 @@ public sealed class BillingFactLoader
         return new BillingLoadedFacts
         {
             Rules = rules,
+            Procedures = procedures,
             CoreRecord = coreRecord,
             PriorSubmissions = priors,
             InvoiceSecureRoots = invoiceRoots,
@@ -292,13 +339,99 @@ public sealed class BillingFactLoader
         };
     }
 
-    private static bool IsRuleType(BillingRuleCandidate candidate, RuleType type) =>
-        RuleBodySchemaValidator.TryParseRuleType(candidate.RuleType, out var parsed) && parsed == type;
+    private static bool IsRuleType(string? ruleType, RuleType type) =>
+        RuleBodySchemaValidator.TryParseRuleType(ruleType, out var parsed) && parsed == type;
 
     // ── Rules ────────────────────────────────────────────────────────────────────────────────────────────────
 
-    // Internal since ebilling-r1 task 102: the invoice-adjustment rule list (D-74, F-8) uses the evaluator's own selection, not a second copy.
-    internal async Task<IReadOnlyList<BillingRuleCandidate>> LoadRulesAsync(Guid firmId, CancellationToken ct)
+    /// <summary>082c C5: a legacy rule's rank. Client default = (All records, 0, not firm-specific); Firm = (Firm, 0, firm-specific). So a legacy
+    /// Firm rule outranks a legacy Client default rule (D-39), and ties a Procedure that applies to the firm and names it.</summary>
+    internal static ProcedureRank LegacyRank(RuleSetScope scope) => scope == RuleSetScope.Firm
+        ? new ProcedureRank(ProcedureLevel.Firm, 0, FirmSpecific: true)
+        : new ProcedureRank(ProcedureLevel.AllRecords, 0, FirmSpecific: false);
+
+    /// <summary>
+    /// 082c: a rule the resolver put in force on a date, as the evaluator's candidate. It never goes through <see cref="BillingRuleCandidate.IsInForceOn"/>
+    /// or <see cref="InvoiceComplianceEvaluator.SelectVersion"/> (C9): the resolver chose it for the date. Its rank is the Procedure whose slot it takes
+    /// (a record rule's is its base rule's, C5). Everything here is fixed per policy version, whatever the date, so one version maps to one candidate.
+    /// </summary>
+    internal static BillingRuleCandidate ProcedureCandidate(ResolvedRule rule)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        var version = rule.Version;
+        return new BillingRuleCandidate
+        {
+            PolicyId = version.PolicyId,
+            PolicyCode = version.PolicyCode,
+            PolicyVersionId = version.PolicyVersionId,
+            RuleSetId = version.RuleSetId,
+            Scope = null,
+            Source = BillingRuleSource.Procedure,
+            Rank = rule.Procedure.Rank,
+            ProcedureId = rule.Procedure.ProcedureId,
+            ProcedureVersionId = version.ProcedureVersionId,
+            RuleType = version.RuleType,
+            RuleBody = version.RuleBody,
+            MessageTemplate = version.MessageTemplate,
+            ShortHeadline = version.ShortHeadline,
+            ClauseReference = version.ClauseReference,
+            ClauseLocation = version.ClauseLocation,
+            InForceFrom = version.InForceFrom,
+            VersionNumber = version.VersionNumber,
+            Lane = version.Lane,
+            Severity = version.Severity,
+            Consequence = version.Consequence,
+        };
+    }
+
+    /// <summary>
+    /// 082c C4: the two streams are disjoint. A version in both would be judged twice, under two ranks; the partition (no <c>sprk_procedure</c> on a
+    /// legacy set) makes it impossible, so seeing one means the rows are inconsistent: <see cref="ProcedureResolutionFaultException"/> (operator text).
+    /// </summary>
+    internal static void RequireDisjoint(IReadOnlyList<BillingRuleCandidate> legacy, ProcedureResolution procedures)
+    {
+        ArgumentNullException.ThrowIfNull(legacy);
+        ArgumentNullException.ThrowIfNull(procedures);
+        var legacyVersions = legacy.Select(r => r.PolicyVersionId).ToHashSet();
+        if (procedures.PolicyVersions.FirstOrDefault(v => legacyVersions.Contains(v.PolicyVersionId)) is { } both)
+        {
+            throw new ProcedureResolutionFaultException(
+                $"Policy version {both.PolicyVersionId} was read both as a legacy rule and as a Procedure rule; the rules that judge the invoice cannot be told.");
+        }
+    }
+
+    /// <summary>
+    /// 082c (brief section 1, the adjustment caller): the rules of <paramref name="firmId"/>'s invoice on <paramref name="core"/> that are in force on
+    /// <paramref name="date"/>, one version per policy: the legacy version <see cref="InvoiceComplianceEvaluator.SelectVersion"/> picks, and every rule
+    /// <see cref="ProcedureResolution.RulesOn"/> puts in force. No precedence (a reviewer may cite any rule in force); a gap only means fewer rules.
+    /// </summary>
+    internal async Task<IReadOnlyList<BillingRuleCandidate>> LoadRulesOnAsync(Guid firmId, CoreRecordReference? core, DateOnly date, CancellationToken ct)
+    {
+        var legacy = await LoadLegacyRulesAsync(firmId, ct).ConfigureAwait(false);
+        var procedures = await ProcedureResolver.ReadAsync(_entities, _logger, core, firmId, ct).ConfigureAwait(false);
+        RequireDisjoint(legacy, procedures);
+        return RulesInForceOn(legacy, procedures, date);
+    }
+
+    /// <summary>The pure half of <see cref="LoadRulesOnAsync"/> (the adjustment tests drive it over their own rows).</summary>
+    internal static IReadOnlyList<BillingRuleCandidate> RulesInForceOn(
+        IReadOnlyList<BillingRuleCandidate> legacy, ProcedureResolution procedures, DateOnly date)
+    {
+        ArgumentNullException.ThrowIfNull(legacy);
+        ArgumentNullException.ThrowIfNull(procedures);
+        return legacy
+            .GroupBy(c => c.PolicyId)
+            .Select(g => InvoiceComplianceEvaluator.SelectVersion(g.ToList(), date))
+            .OfType<BillingRuleCandidate>()
+            .Concat(procedures.RulesOn(date).Rules.Select(ProcedureCandidate))
+            .ToList();
+    }
+
+    /// <summary>
+    /// The legacy rules (082c: renamed from <c>LoadRulesAsync</c>): Published rule sets with no <c>sprk_procedure</c>, Client default or this
+    /// firm's. Every one of its versions that can be in force (task 076 K3); the evaluator picks one per date.
+    /// </summary>
+    internal async Task<IReadOnlyList<BillingRuleCandidate>> LoadLegacyRulesAsync(Guid firmId, CancellationToken ct)
     {
         var setQuery = new QueryExpression(RuleSetEntity)
         {
@@ -307,9 +440,11 @@ public sealed class BillingFactLoader
         };
         RuleDomains.AddBillingFilter(setQuery);
         setQuery.Criteria.AddCondition("statuscode", ConditionOperator.Equal, RuleSetPublished);
-        // ebilling-r1 task 081 (EB-D-148): a Procedure's rule set is in force per Procedure Version (its window, its Applies to, the rules the
-        // version kept), which this set-level reader cannot honour: it would apply an "Assigned records only" Procedure to every invoice and
-        // keep a dropped rule firing. Until the resolver (task 082) reads Procedure Versions, a Procedure's set is not evaluated here at all.
+        // ebilling-r1 082c (C1, D-205 item 1): a PARTITION, not a skip. A Procedure's rule set is judged, through ProcedureResolver (LoadAsync
+        // reads both streams). It is in force per Procedure Version (its window, its Applies to, the rules the version kept), which this set-level
+        // read cannot honour; and Procedure sets are written with scope Client default or Firm (RuleSetService), so without this condition the
+        // read below would also apply an "Assigned records only" Procedure to every invoice and keep a dropped rule firing. The condition goes
+        // together with this legacy read at task 075's copy-forward.
         setQuery.Criteria.AddCondition(ProcedureColumn, ConditionOperator.Null);
         var scope = new FilterExpression(LogicalOperator.Or);
         scope.AddCondition("sprk_scope", ConditionOperator.Equal, (int)RuleSetScope.ClientDefault);
@@ -319,7 +454,7 @@ public sealed class BillingFactLoader
         scope.AddFilter(firm);
         setQuery.Criteria.AddFilter(scope);
 
-        // Second layer, as task 076 does: a row the query should not have returned is dropped here.
+        // Second layer, as task 076 does: a row the query should not have returned is dropped here (a Procedure's set included: the partition).
         var sets = new Dictionary<Guid, RuleSetScope>();
         foreach (var row in await AllAsync(setQuery, ct).ConfigureAwait(false))
         {
@@ -398,6 +533,8 @@ public sealed class BillingFactLoader
                     PolicyVersionId = row.Id,
                     RuleSetId = policy.GetAttributeValue<EntityReference>("sprk_ruleset").Id,
                     Scope = sets[policy.GetAttributeValue<EntityReference>("sprk_ruleset").Id],
+                    Source = BillingRuleSource.Legacy,
+                    Rank = LegacyRank(sets[policy.GetAttributeValue<EntityReference>("sprk_ruleset").Id]),
                     RuleType = row.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     RuleBody = row.GetAttributeValue<string>("sprk_rulebody"),
                     MessageTemplate = row.GetAttributeValue<string>("sprk_messagetemplate"),
@@ -493,7 +630,7 @@ public sealed class BillingFactLoader
     /// that does not parse counts as naming one (the gate refuses it anyway; this only decides whether to read).
     /// </summary>
     internal static bool ComparesLines(IEnumerable<BillingRuleCandidate> rules) =>
-        rules.Any(r => IsRuleType(r, Signals.RuleType.Duplicate) && NamesALineMatchField(r.RuleBody));
+        rules.Any(r => IsRuleType(r.RuleType, Signals.RuleType.Duplicate) && NamesALineMatchField(r.RuleBody));
 
     private static bool NamesALineMatchField(string? body)
     {
