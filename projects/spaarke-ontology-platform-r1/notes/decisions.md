@@ -555,3 +555,12 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Accepted as written:** C14 (the transient-fault ruling, D-203 follow-up), C21 (D-203(11)), C22 (082c reaches master only with ebilling 114), C11's "gap wins over a 073 rejection on SPA" (held, never passed, never auto-rejected on unchecked lines).
 - **Owner accepted D-204** (2026-11-04, in field-mapping's session, relayed; their decisions.md `08c7c60e3d`). Built on field-mapping `task/fm-042c`. Ontology and uac-r2 review the diff before merge.
   - **Ontology check:** our executors' generic creates (`DecisionRouteCores.CreateChildAsync`, `BudgetInquiryExecutor`) target only `sprk_budget`, `sprk_todo`, `sprk_event`, `sprk_workassignment` and `sprk_servicerequest`. `sprk_budgetrevision` is created by the writer identity (`DecisionActionExecutors.cs:33,370`). The refusal therefore breaks no decision step.
+- **Reviewed 2026-11-04: field-mapping 042c fix round 4 (`task/fm-042c` `4b45ba3cc5`): ontology PASS.**
+  - The registry flag `CreatedOnlyByItsWriter` sits on the three tables.
+  - `RecordCreationService` refuses them at the first registry read, before any read or write, for the caller and the system principal. The chat create refuses them in both validate and execute.
+  - Decision-commit seam tests pass (Create Budget, Revise Budget, Assign Task).
+  - A writer-guard ArchTest has both controls.
+- **Follow-up (private, not in public issues):** the playbook UpdateRecord node runs as the BFF identity, which holds System Administrator. It can upsert-create, and can also UPDATE, these three tables. That bypasses the append-only privilege guarantee for Decision Records and SignalWriter's lifecycle for Signals.
+  - Ontology's position: refuse all three as UpdateRecord targets, for update and upsert alike, not only upsert-create.
+  - First, field-mapping runs a read-only census of configured playbook nodes targeting them.
+  - This extends D-204 from create to update, so the owner decides through field-mapping. uac-r2 classifies it.
