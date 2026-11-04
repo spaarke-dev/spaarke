@@ -356,6 +356,22 @@ describe('ReconciliationWorkspace', () => {
       expect(await screen.findByTestId('submit-invoice-flow')).toBeInTheDocument();
     });
 
+    it('reads the email attachments once: the tab-presence probe is not repeated and the opened tab reuses its list', async () => {
+      const dataService = odataFor(['invoice-2026.pdf', 'cover.docx']);
+      renderWorkspace({ dataService });
+      await openFirstRow();
+
+      fireEvent.click(await screen.findByTestId('reconcile-tab-invoice'));
+      // The flow lists the cached attachments (a text span; no second read).
+      await waitFor(() =>
+        expect(screen.getAllByText('invoice-2026.pdf', { selector: 'span' }).length).toBeGreaterThanOrEqual(1)
+      );
+      const attachmentReads = (dataService.retrieveMultipleRecords as jest.Mock).mock.calls.filter(
+        c => c[0] === 'sprk_communicationattachment'
+      );
+      expect(attachmentReads).toHaveLength(1);
+    });
+
     it('negative: no "Invoice" tab when the email has no PDF attachment', async () => {
       const dataService = odataFor(['cover.docx', 'logo.png']);
       renderWorkspace({ dataService });

@@ -787,6 +787,8 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
         <SubmitInvoiceDialogR16
           open={invoiceOpen}
           onClose={() => setInvoiceOpen(false)}
+          // Accepting files the email under the chosen record: refresh the form so Related to shows it.
+          onAccepted={() => void refreshHostForm()}
           communicationId={communicationId}
           submission={invoiceSubmission}
           initialRecord={invoiceInitialRecord}

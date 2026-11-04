@@ -536,6 +536,8 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
         <SubmitInvoiceDialog
           open
           onClose={() => setInvoiceFlow(null)}
+          // Accepting files the email under the chosen record: re-read it so the Related-to and attachments show it.
+          onAccepted={record.reload}
           communicationId={invoiceFlow.communicationId}
           preMarkedInvoiceId={invoiceFlow.preMarkedInvoiceId}
           submission={invoiceSubmission}

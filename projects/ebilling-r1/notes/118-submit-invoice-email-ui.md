@@ -42,3 +42,23 @@ Records / firms / status come from `createInternalInvoiceSubmission` (task 052),
 ## Tests
 
 `SubmitInvoiceFromEmail.test.tsx` (29), `emailInvoiceSubmission.test.ts` (20), additions to `EmailWorkspace`, `ReconciliationWorkspace`, `EmailReadingAttachments`, `EmailReadingPaneShell` and the PCF `launchCreate.test.ts`. Package suite: 40 suites, 405 tests. PCF suite: 6 suites, 34 tests.
+
+## Review fix round (adversarial review, 2026-11-03)
+
+Fixed:
+
+- **PCF deploy artifacts (F4/F1).** The Solution `Controls/.../bundle.js` was still the 1.3.20 build ("Link Invoice") and `pack.ps1` still said 1.3.20. Rebuilt with `scripts/Invoke-PcfBuildProd.ps1`, copied `bundle.js`, `ControlManifest.xml` and `styles.css` from `out/controls/CommunicationActions/`, and set `pack.ps1` `$version = "1.3.21"`. The Solution bundle holds "Submit Invoice" and no "Link Invoice". Not packed, not imported (deploy is task 112).
+- **404 wording (F1).** The submit route answers one uniform 404 (`reasonCode sdap.access.deny.record_unavailable`, no `errorCode`, detail "The requested record was not found.") for the chosen record AND for a marked document the caller cannot read. The transport (`fromProblem` in `emailInvoiceSubmission.ts`) now maps that 404 to `SUBMIT_NOT_FOUND_TEXT`, so the screen no longer blames the record alone; marks and details stay. The mapping is in the transport because `InvoiceSubmissionError` carries no `reasonCode`; a 404 with an `errorCode`, another reason code, or another status keeps the server detail.
+- **Refresh after a submission (F1).** New `onAccepted` prop on `SubmitInvoiceFromEmail` (called once on Accepted, never on a refusal; a throwing host callback cannot turn an accepted submission into a shown refusal), passed through `SubmitInvoiceDialog` and `InvoiceSubmitTab`. `EmailWorkspace` -> `record.reload`; `ReconciliationWorkspace` -> `enrichRow(id)` + the review's `onAssociationsChanged`; the PCF -> `refreshHostForm()`.
+- **PCF button test (F3).** `CommunicationActions/__tests__/submitInvoiceButton.test.tsx`: the button opens the flow, `Xrm.Navigation.navigateTo` is not called, the button is disabled without a record id, Accepted refreshes the form. The shared dialog and transport are stand-ins there (covered in the shared package).
+- **Refusal tests.** The 413 and 422 cases now use the server's own sentences (`InvoiceSubmissionService` supporting-document refusals).
+- **"Submit as invoice"** shows only for a `.pdf` name; the Invoice badge still shows on any flagged attachment.
+- **Duplicate reads.** `ReconciliationWorkspace` tracks in-flight attachment reads by id and hands the Invoice tab the list the presence probe already read (`withCachedAttachments`), so one email costs one attachment read.
+
+Gate after the fix round: `Spaarke.Communication.Components` jest 40 suites / 416 tests, `tsc --noEmit` clean; CommunicationActions PCF jest 7 suites / 38 tests; `Invoke-PcfBuildProd.ps1` build succeeded (bundle 831 KB).
+
+Known limits (not fixed; the owner decides):
+
+- A submission is all-or-nothing: one marked attachment the caller cannot open or the server cannot copy refuses the whole submission. The user's way out is to mark that attachment Don't save.
+- The Invoice tab can show the starting record by its GUID when only the confirmed Related-to id is known (`InvoiceSubmitTab.tsx`, `recordName: ''`). Cosmetic.
+- Pre-existing, filed as #2555: `ReconciliationWorkspace.resolveAttachments` / `resolveEmlArchive` pass OData option strings to an `IDataverseClient` whose `retrieveMultipleRecords` is FetchXML-only. Not touched here.

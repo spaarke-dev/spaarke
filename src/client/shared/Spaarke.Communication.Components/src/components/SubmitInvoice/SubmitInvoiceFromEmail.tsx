@@ -116,6 +116,11 @@ export interface SubmitInvoiceFromEmailProps {
   onClose?: () => void;
   /** Called with true while a submit request is in flight, false otherwise (a dialog host holds its close button). */
   onBusyChange?: (busy: boolean) => void;
+  /**
+   * Called once when the server accepts the submission (never on a refusal). Accepting files the email under the
+   * chosen record, so a host refreshes what it shows about the email here.
+   */
+  onAccepted?: () => void;
   /** Milliseconds between status reads while the submission is processed. Default 2000. */
   pollIntervalMs?: number;
 }
@@ -129,6 +134,7 @@ export const SubmitInvoiceFromEmail: React.FC<SubmitInvoiceFromEmailProps> = ({
   initialRecord,
   onClose,
   onBusyChange,
+  onAccepted,
   pollIntervalMs,
 }) => {
   const s = useStyles();
@@ -136,6 +142,8 @@ export const SubmitInvoiceFromEmail: React.FC<SubmitInvoiceFromEmailProps> = ({
   // The latest transport, without reloading everything when the host re-renders with a new object identity.
   const submissionRef = React.useRef(submission);
   submissionRef.current = submission;
+  const onAcceptedRef = React.useRef(onAccepted);
+  onAcceptedRef.current = onAccepted;
 
   const [attachments, setAttachments] = React.useState<Loaded<MarkableAttachment[]>>({ status: 'loading' });
   const [marking, setMarking] = React.useState<Record<string, InvoiceAttachmentRole>>({});
@@ -274,6 +282,12 @@ export const SubmitInvoiceFromEmail: React.FC<SubmitInvoiceFromEmailProps> = ({
       })
       .then(result => {
         if (mounted.current) setAccepted(result);
+        // Outside the mounted guard: the server did accept, so the host refreshes even if the dialog was closed meanwhile.
+        try {
+          onAcceptedRef.current?.();
+        } catch {
+          // A host refresh that fails must not turn an accepted submission into a shown refusal.
+        }
       })
       .catch(err => {
         // A refusal leaves the marks and the details where they are; the user fixes what the server named and submits again.
