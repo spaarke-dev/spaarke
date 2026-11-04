@@ -26,6 +26,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
@@ -37,6 +38,9 @@ using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
+using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
+using Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using FinanceAuthz = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
 
@@ -429,6 +433,12 @@ public class AnalysisEndpointsAuthorizationContractTests
 
     private static HttpRequestMessage Create(object body) => Json(HttpMethod.Post, "/api/ai/analysis/create", body);
 
+    /// <summary>A bind of the service's create body as text (the service writes a bind as a string, or as a JSON string).</summary>
+    private static string? BindOf(IReadOnlyDictionary<string, object?> fields, string key) =>
+        fields.TryGetValue(key, out var value)
+            ? value as string ?? (value is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element ? element.GetString() : null)
+            : null;
+
     [Fact(DisplayName = "162 f1 create: with the Create privilege, Read+AppendTo on the document and Read on every scope row is 201, and the new row is anchored to the document")]
     public async Task Create_WithTheG5Rights_Is201AndAnchorsTheDocument()
     {
@@ -450,8 +460,16 @@ public class AnalysisEndpointsAuthorizationContractTests
         }));
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        host.Analysis.Verify(a => a.CreateAnalysisAsync(documentId, "Analysis - NDA.pdf", playbookId, null, It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
-            Times.Once, "the analysis created in a document's context records that document as its anchor");
+        // Task 031 (FR-19): the capture seam moved. The row is created by RecordCreationService (its ONE app-only create), so "the
+        // new row is anchored to the document" is read from that create's body - the document and playbook binds and the name -
+        // not from IAnalysisDataverseService.CreateAnalysisAsync, which this route no longer calls.
+        var (table, _, fields) = host.AppOnlyCreates.Should().ContainSingle("the analysis created in a document's context records that document as its anchor").Subject;
+        table.Should().Be("sprk_analysis");
+        BindOf(fields, "sprk_DocumentId@odata.bind").Should().Be($"/sprk_documents({documentId:D})");
+        BindOf(fields, "sprk_Playbook@odata.bind").Should().Be($"/sprk_analysisplaybooks({playbookId:D})");
+        host.Analysis.Verify(a => a.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(),
+            It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the direct create is gone from this route");
         host.Analysis.Verify(a => a.AssociateScopesAsync(It.IsAny<Guid>(),
             It.Is<IEnumerable<Guid>>(s => s.Single() == skill), It.Is<IEnumerable<Guid>>(k => k.Single() == knowledge),
             It.Is<IEnumerable<Guid>>(t => t.Single() == tool), It.IsAny<CancellationToken>()), Times.Once);
@@ -1105,6 +1123,7 @@ public class AnalysisEndpointsAuthorizationContractTests
 
         host.Analysis.Verify(a => a.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(),
             It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.AssertServiceNotReached();
         host.Orchestration.VerifyNoOtherCalls();
         host.VerifyNoRunSideEffect();
     }
@@ -1216,6 +1235,30 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
     public ChatSessionManager Sessions { get; private set; } = null!;
 
     /// <summary>
+    /// Field-mapping-server-write-path-r1 task 031 (FR-19): the caller's Dataverse client the REAL <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>
+    /// asks first (WhoAmI, its own as-caller checks and metadata). Every question is counted, so "the service was not reached when the
+    /// route filter denied" is asserted, not assumed.
+    /// </summary>
+    public CountingScriptedUserClient Caller { get; } = new(Guid.Parse(AnalysisAuthzTestAuthHandler.CallerObjectId));
+
+    /// <summary>Task 031: every app-only create the service makes (its upsert of a client-chosen id): table, id, Web API body.</summary>
+    public List<(string Table, Guid Id, Dictionary<string, object?> Fields)> AppOnlyCreates { get; } = new();
+
+    /// <summary>Task 031: the service's app-only writer (loose: reads answer nothing; its one create is captured).</summary>
+    public Mock<IFieldMappingDataverseService> AppOnly { get; } = new(MockBehavior.Loose);
+
+    /// <summary>
+    /// Task 031 (AC "service not invoked when the filter denies"): nothing the service does is visible anywhere - no owner question,
+    /// no question to the caller's Dataverse, no app-only write.
+    /// </summary>
+    public void AssertServiceNotReached()
+    {
+        Ownership.Requests.Should().BeEmpty("the route filter answered before the service was reached");
+        Caller.Calls.Should().Be(0, "the service asks the caller's Dataverse first; a denied request never gets there");
+        AppOnlyCreates.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// Task 188 round 4a: who the caller is for THE external document narrowing (default: a resolved internal systemuser,
     /// so the narrowing makes no call and these tests stay about the routes' own decisions) and what the BFF's app-only
     /// identity reads (<see cref="Sprk.Bff.Api.Tests.Services.Ai.Handlers.AppOnlyDocumentWorld"/>). Pointer:
@@ -1302,6 +1345,12 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
         builder.Services.AddSingleton<NotificationService>();
         builder.Services.AddSingleton<IChatDataverseRepository>(ChatRepo);
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
+        AppOnly.Setup(a => a.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) => AppOnlyCreates.Add((table, id, fields)))
+            .Returns(Task.CompletedTask);
+        builder.Services.AddSingleton<IDataverseUserClient>(Caller);
+        builder.Services.AddSingleton(RouteRecordCreation.Default(Ownership, AppOnly.Object));
         Sessions = new ChatSessionManager(
             cache: _cache,
             dataverseRepository: ChatRepo,
@@ -1400,6 +1449,9 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
             It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
         Analysis.Verify(a => a.AssociateScopesAsync(It.IsAny<Guid>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<IEnumerable<Guid>>(),
             It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()), Times.Never);
+        // Task 031: the row is created by RecordCreationService now; a denied create must not have reached it (which would also
+        // mean it had written, or tried to write, the row).
+        AssertServiceNotReached();
     }
 
     public Task<ChatSession> SeedOwnSessionAsync(Guid? documentId) =>
@@ -1463,6 +1515,47 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
             await _app.StopAsync();
             await _app.DisposeAsync();
         }
+    }
+}
+
+/// <summary>
+/// Task 031: the harness's scripted caller Dataverse (<see cref="SecureChildOwnershipAiToolTests.ScriptedUserClient"/>) with every
+/// question counted - the create service asks it first, so a count of zero proves the service was never reached.
+/// </summary>
+internal sealed class CountingScriptedUserClient(Guid me) : IDataverseUserClient
+{
+    private readonly SecureChildOwnershipAiToolTests.ScriptedUserClient _inner = new(me);
+
+    public int Calls { get; private set; }
+
+    public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return _inner.GetAsync(relativePath, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return _inner.PostAsync(absoluteApiPath, jsonBody, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, bool preferRepresentation, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return _inner.PostAsync(absoluteApiPath, jsonBody, preferRepresentation, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return _inner.PatchAsync(relativePath, jsonBody, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return _inner.DeleteAsync(relativePath, cancellationToken);
     }
 }
 

@@ -2598,10 +2598,12 @@ public class RecordOwnerAssignmentCensusTests
             "the submitter of an invoice (ebilling-r1 task 044; the one decision both SubmitAsync and 050a's SubmitExistingDocumentAsync "
             + "call): the internal caller (oid) or a workforce SPA caller (systemuser); a CIAM contact is recorded as sprk_submitter "
             + "(task 092: an upload creates no document; the Stored File the persister creates carries the workforce submitter as its creator person, none for a contact)"),
-        new PersonBearingWriter("EventEndpoints.cs", "OwnershipContextFor", "POST /api/v1/events caller (oid)"),
-        new PersonBearingWriter("EventEndpoints.cs", "CreateEventInDataverseAsync", "the event and its creation log row"),
+        // Field-mapping task 031 (FR-19): POST /api/v1/events and POST /api/ai/analysis/create create their row through
+        // RecordCreationService (the row above: DecideOwnerAsync names the caller via WhoAmI), so EventEndpoints.OwnershipContextFor,
+        // EventEndpoints.CreateEventInDataverseAsync and AnalysisEndpoints.CreateAnalysis no longer create or decide an owner and
+        // left this list. The event's creation LOG row (below, and here) still names the person whose create it records.
+        new PersonBearingWriter("EventEndpoints.cs", "WriteCreatedAuditLogAsync", "the caller whose create the event's creation log row records"),
         new PersonBearingWriter("EventEndpoints.cs", "ResolveEventLogOwnerAsync", "the caller whose change a log row records"),
-        new PersonBearingWriter("AnalysisEndpoints.cs", "CreateAnalysis", "POST /api/ai/analysis/create caller"),
         // (ForkAnalysis left with POST /api/ai/analysis/fork, deleted by task 162 under owner round 10 item 1.)
         new PersonBearingWriter("AnalysisEndpoints.cs", "PromoteSession", "promote caller"),
         new PersonBearingWriter("AnalysisResultPersistence.cs", "StoreDocumentProfileOutputsAsync", "the user who ran the profile"),

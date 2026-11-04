@@ -735,6 +735,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["account"] = "accounts",
             // Task 039 (FR-38): the AI search index catalog the six search-indexed tables look up.
             ["sprk_aisearchindex"] = "sprk_aisearchindexes",
+            // Task 031 (FR-19): the typed analysis route's playbook lookup target.
+            ["sprk_analysisplaybook"] = "sprk_analysisplaybooks",
         };
 
         /// <summary>
@@ -873,6 +875,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 042b fix round 1: the analysis's invoice filing (CoreAncestorResolver.StampSourceColumns),
                 // for WriterBuilderOwnershipParityTests' caller-principal cases.
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                // Field mapping task 031: the typed analysis route's anchor and playbook (live navigation properties).
+                ("sprk_documentid", "sprk_document", "sprk_DocumentId"),
+                ("sprk_playbook", "sprk_analysisplaybook", "sprk_Playbook"),
             },
             // Task 147 r1c (E2, the live inventory of every main form; read-only metadata, spaarkedev1, 2026-10-04): the
             // KPI assessment's and the billing event's lookups. The billing event's matter navigation property is
@@ -932,6 +937,15 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 017 (Phase 2d-1): an event filed under another event, an intermediate, so its I-1 stamp
                 // is derived (live navigation property: Spaarke.Dataverse.Models GetEventNavigationProperty).
                 ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+                // Field mapping task 031: the typed event route's analysis regarding and event type (live navigation properties:
+                // Spaarke.Dataverse.Models GetEventNavigationProperty, DataverseWebApiService.BuildCreateEventPayload).
+                ("sprk_regardinganalysis", "sprk_analysis", "sprk_RegardingAnalysis"),
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_regardingbudget", "sprk_budget", "sprk_RegardingBudget"),
+                ("sprk_regardingaccount", "account", "sprk_RegardingAccount"),
+                ("sprk_regardingcontact", "contact", "sprk_RegardingContact"),
+                ("sprk_eventtype_ref", "sprk_eventtype_ref", "sprk_EventType_Ref"),
             },
             // #2084 round 2: a Signal's core matter (sprk_signal.sprk_matter) and the rule it CITES (sprk_signal.sprk_policy).
             ["sprk_signal"] = new[]

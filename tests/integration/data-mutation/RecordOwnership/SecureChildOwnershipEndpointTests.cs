@@ -99,6 +99,7 @@ public class SecureChildOwnershipEndpointTests
 
         response.StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
         host.Events.Creates.Should().BeEmpty();
+        host.AppOnlyCreates.Should().BeEmpty("task 031: the service's one create is the create now");
         host.Events.StatusUpdates.Should().BeEmpty();
         host.Events.LogOwners.Should().BeEmpty();
         world.Assignments.Should().BeEmpty();
@@ -113,8 +114,13 @@ public class SecureChildOwnershipEndpointTests
         var response = await host.SendAsync(Authenticated(HttpMethod.Post, "/api/v1/events",
             new { subject = "Filing deadline", regardingRecordType = 0, regardingRecordId = SecureProject }));
 
+        // Task 031 (FR-19): the capture seam moved. The row is created by RecordCreationService (its ONE app-only create), so the owner
+        // it was written with is read from that create's body, not from IEventDataverseService.CreateEventAsync (this route no
+        // longer calls it). The asserted facts are unchanged: the named secure team owns the event, and so does its log row.
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        host.Events.Creates.Should().ContainSingle().Which.OwningTeamId.Should().Be(Directory.SecureNamedTeam);
+        var (table, _, fields) = host.AppOnlyCreates.Should().ContainSingle().Subject;
+        table.Should().Be("sprk_event");
+        BindOf(fields, "ownerid@odata.bind").Should().Be($"/teams({Directory.SecureNamedTeam:D})");
         host.Events.LogOwners.Should().Equal(Directory.SecureNamedTeam);
     }
 
@@ -125,14 +131,17 @@ public class SecureChildOwnershipEndpointTests
         // looked up by their object id — is recorded as sprk_createdbyperson on both rows.
         var callerSystemUser = Guid.Parse("c1c1c1c1-0000-4000-8000-000000000146");
         var world = World().WithUser(callerSystemUser, Guid.Parse(FinanceAuthzTestAuthHandler.CallerObjectId), Directory.ChildBu);
-        await using var host = await EventsHost.StartAsync(world.Resolver());
+        // Task 031: the log row's person is the caller the route resolves (ICallerSystemUserResolver) - the same person the owner
+        // resolver names from the same oid in production - so this host's resolver names them too.
+        await using var host = await EventsHost.StartAsync(world.Resolver(), callerSystemUser);
         host.MayCreateEventsUnder(Projects, SecureProject);
 
         var response = await host.SendAsync(Authenticated(HttpMethod.Post, "/api/v1/events",
             new { subject = "Filing deadline", regardingRecordType = 0, regardingRecordId = SecureProject }));
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        host.Events.Creates.Should().ContainSingle().Which.CreatedByPersonId.Should().Be(callerSystemUser);
+        var (_, _, fields) = host.AppOnlyCreates.Should().ContainSingle().Subject;
+        BindOf(fields, "sprk_CreatedByPerson@odata.bind").Should().Be($"/systemusers({callerSystemUser:D})");
         host.Events.LogPersons.Should().Equal(callerSystemUser);
     }
 
@@ -148,7 +157,15 @@ public class SecureChildOwnershipEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await ReasonCode(response)).Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
         host.Events.Creates.Should().BeEmpty();
+        host.AppOnlyCreates.Should().BeEmpty("task 031: nothing is created, by the service or anything else");
+        host.Events.LogOwners.Should().BeEmpty("no audit row for an event that was never created");
     }
+
+    /// <summary>A bind of the service's create body as text; the service writes a bind as a string, or as a JSON string.</summary>
+    private static string? BindOf(IReadOnlyDictionary<string, object?> fields, string key) =>
+        fields.TryGetValue(key, out var value)
+            ? value as string ?? (value is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element ? element.GetString() : null)
+            : null;
 
     // =====================================================================================
     // POST /api/ai/document-intelligence/associate-record — DELETED (task 164, owner round 10 item 1)
@@ -346,9 +363,14 @@ public class SecureChildOwnershipEndpointTests
     {
         public RecordingEventService Events { get; } = new();
 
-        public static async Task<EventsHost> StartAsync(IRecordOwnershipResolver resolver)
+        /// <summary>Task 031: every app-only create RecordCreationService makes (table, id, Web API body).</summary>
+        public List<(string Table, Guid Id, Dictionary<string, object?> Fields)> AppOnlyCreates { get; } = new();
+
+        private Guid? _callerSystemUser;
+
+        public static async Task<EventsHost> StartAsync(IRecordOwnershipResolver resolver, Guid? callerSystemUser = null)
         {
-            var host = new EventsHost();
+            var host = new EventsHost { _callerSystemUser = callerSystemUser };
             await host.InitializeAsync(resolver);
             return host;
         }
@@ -385,13 +407,36 @@ public class SecureChildOwnershipEndpointTests
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<CoreAncestorResolver>.Instance));
 
             // Task 152 (merged after 146): the create also names the person the event is FOR (sprk_assignedto). Not
-            // under test here — the caller resolves to no systemuser, so it is left blank.
+            // under test here - the caller resolves to no linked contact, so it is left blank. Task 031: unless a test names the
+            // caller's systemuser (the audit row's person), the caller resolves to none.
             var callerResolver = new Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>();
             callerResolver
                 .Setup(r => r.ResolveAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolution.Unresolved("not under test"));
+                .ReturnsAsync(_callerSystemUser is { } me
+                    ? Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolution.Resolved(me.ToString("D"))
+                    : Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolution.Unresolved("not under test"));
             services.AddSingleton(callerResolver.Object);
             services.AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact());
+
+            // Task 031 (FR-19): the create is the ONE server create, as the caller, over this host's REAL owner resolver and stamp
+            // derivation; its one app-only create is captured.
+            var appOnly = new Mock<IFieldMappingDataverseService>(MockBehavior.Loose);
+            appOnly.Setup(a => a.UpdateRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) => AppOnlyCreates.Add((table, id, fields)))
+                .Returns(Task.CompletedTask);
+            services.AddSingleton<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(
+                new SecureChildOwnershipAiToolTests.ScriptedUserClient(_callerSystemUser ?? Guid.Parse("c1c1c1c1-0000-4000-8000-0000000000e2")));
+            services.AddSingleton(sp => RouteRecordCreation.Over(
+                sp.GetRequiredService<IRecordOwnershipResolver>(),
+                appOnly.Object,
+                new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
+                Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard()
+                    .Synchronizer(new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
+                Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(),
+                null,
+                sp.GetRequiredService<IMembershipEventPublisher>(),
+                entities.Object));
         }
 
         protected override void Map(WebApplication app) => app.MapEventEndpoints();
