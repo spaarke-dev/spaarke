@@ -3536,15 +3536,16 @@ public partial class InvoiceSubmissionPersisterTests
                     case "sprk_invoice":
                         CreatedRows.Add(("sprk_invoice", create.Target.Id));
                         CreatedInvoices[create.Target.Id] = Copy(create.Target);
-                        if (create.Target.GetAttributeValue<EntityReference>("sprk_matter") is { } matter)
+                        if (CoreLookupOf(create.Target) is { } found)
                         {
-                            if (Isolation.ValueOf<bool>("sprk_matter", matter.Id, "sprk_issecure"))
+                            var (coreColumn, core) = found;
+                            if (Isolation.ValueOf<bool>(core.LogicalName, core.Id, "sprk_issecure"))
                             {
-                                Isolation.SecureChild("sprk_invoice", create.Target.Id, ("sprk_matter", "sprk_matter", matter.Id));
+                                Isolation.SecureChild("sprk_invoice", create.Target.Id, (coreColumn, core.LogicalName, core.Id));
                             }
                             else
                             {
-                                Isolation.OrdinaryChild("sprk_invoice", create.Target.Id, ("sprk_matter", "sprk_matter", matter.Id));
+                                Isolation.OrdinaryChild("sprk_invoice", create.Target.Id, (coreColumn, core.LogicalName, core.Id));
                             }
                         }
 
@@ -3556,24 +3557,28 @@ public partial class InvoiceSubmissionPersisterTests
             }
 
             // Task 086: sprk_storedfile is a lineage child of sprk_invoice, so the commit gate walks the copy's roots up from its file rows
-            // (SubmissionCommitGate.FileRootsAsync). Each file goes into the isolation world filed under its invoice, owned as the
-            // transaction owns it: the Secure team under a Secure matter, else an ordinary team.
+            // (SubmissionCommitGate.FileRootsAsync). Each file goes into the isolation world filed under its invoice and owned as the
+            // transaction owns it (its own ownerid: the answer of the persister's Stored File question), whatever the invoice's core
+            // record is: a matter, a project or a work assignment (CoreLookupOf).
             foreach (var create in requests.OfType<CreateRequest>().Where(c => c.Target.LogicalName == StoredFileSchema.Entity))
             {
                 if (create.Target.GetAttributeValue<EntityReference>("sprk_invoice") is not { } invoice
                     || !CreatedInvoices.TryGetValue(invoice.Id, out var created)
-                    || created.GetAttributeValue<EntityReference>("sprk_matter") is not { } fileMatter)
+                    || CoreLookupOf(created) is null)
                 {
                     continue;
                 }
 
-                if (Isolation.ValueOf<bool>("sprk_matter", fileMatter.Id, "sprk_issecure"))
+                var invoiceLookup = ("sprk_invoice", (object)new EntityReference("sprk_invoice", invoice.Id));
+                if (create.Target.GetAttributeValue<EntityReference>("ownerid") is { } owner)
                 {
-                    Isolation.SecureChild(StoredFileSchema.Entity, create.Target.Id, ("sprk_invoice", "sprk_invoice", invoice.Id));
+                    var ownerColumn = string.Equals(owner.LogicalName, "team", StringComparison.OrdinalIgnoreCase) ? "owningteam" : "owninguser";
+                    Isolation.Add(StoredFileSchema.Entity, create.Target.Id,
+                        (ownerColumn, new EntityReference(owner.LogicalName, owner.Id)), invoiceLookup);
                 }
                 else
                 {
-                    Isolation.OrdinaryChild(StoredFileSchema.Entity, create.Target.Id, ("sprk_invoice", "sprk_invoice", invoice.Id));
+                    Isolation.Add(StoredFileSchema.Entity, create.Target.Id, invoiceLookup);
                 }
             }
 
@@ -3589,6 +3594,20 @@ public partial class InvoiceSubmissionPersisterTests
                     Submission[column] = value;
                 }
             }
+        }
+
+        /// <summary>The core record an invoice is filed under, from any of its three core lookups (matter, project, work assignment).</summary>
+        private static (string Column, EntityReference Core)? CoreLookupOf(Entity invoice)
+        {
+            foreach (var column in new[] { "sprk_matter", "sprk_project", CoreAncestorResolver.StampColumnFor("sprk_workassignment") })
+            {
+                if (invoice.GetAttributeValue<EntityReference>(column) is { } core)
+                {
+                    return (column, core);
+                }
+            }
+
+            return null;
         }
 
         /// <summary>

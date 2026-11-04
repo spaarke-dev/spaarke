@@ -23,17 +23,23 @@ public class StoredFileOwnerPinTests
 {
     private static readonly Guid SecureTeam = SecureChildShareWorld.SecureTeam;
     private static readonly Guid ContentTeam = SecureChildShareWorld.RestrictedContentTeam;
-    private static readonly Guid CustomerBu = SecureChildShareWorld.CustomerBu;
     private static readonly Guid CustomerTeam = SecureChildShareWorld.CustomerTeam;
     private static readonly Guid OtherBu = Guid.Parse("20860000-0000-4000-8000-0000000000c1");
     private static readonly Guid OtherBuTeam = Guid.Parse("20860000-0000-4000-8000-0000000000c2");
     private static readonly Guid Caller = Guid.Parse("20860000-0000-4000-8000-0000000000c3");
+    private static readonly Guid OtherContentTeam = Guid.Parse("20860000-0000-4000-8000-0000000000c4");
     private static readonly byte[] Pdf = "%PDF-1.7 086 owner pin"u8.ToArray();
 
-    // The caller sits in a business unit of their own under the customer's top unit, so "never the caller's team" can fire.
+    // The caller sits under a SECOND customer top unit (a direct child of the root, beside the invoice's customer unit, which holds
+    // ContentTeam), and that unit has a restricted-content owner team of its own. So "the invoice's customer team, not the caller's"
+    // can fail: an owner question that followed the caller's business unit would answer OtherContentTeam (or OtherBuTeam), not
+    // ContentTeam. Were the caller under CustomerBu, the caller's top unit and the invoice's would be one, and no wrong pick could show.
     private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard()
-        .Add("businessunit", OtherBu, ("name", "Billing"), ("parentbusinessunitid", new EntityReference("businessunit", CustomerBu)))
+        .Add("businessunit", OtherBu, ("name", "Billing"),
+            ("parentbusinessunitid", new EntityReference("businessunit", SecureChildShareWorld.GeneralBu)))
         .Team(OtherBuTeam, OtherBu, "Billing", isDefault: true, teamType: 0)
+        .Team(OtherContentTeam, OtherBu, Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeam.DefaultOwnerTeamName,
+            isDefault: false, teamType: 0)
         .User(Caller, OtherBu);
 
     private int _questions;
@@ -132,6 +138,7 @@ public class StoredFileOwnerPinTests
         var owner = rig.Dataverse.Rows[result.FileId!.Value].GetAttributeValue<EntityReference>("ownerid");
         owner.Should().BeEquivalentTo(new EntityReference("team", ContentTeam), "sprk_storedfile is a hard-deny table (uac-r2 194b R4b-2)");
         owner.Id.Should().NotBe(OtherBuTeam, "the caller's business-unit team never owns it");
+        owner.Id.Should().NotBe(OtherContentTeam, "nor the restricted-content team of the caller's own customer top unit");
         _questions.Should().Be(1);
     }
 

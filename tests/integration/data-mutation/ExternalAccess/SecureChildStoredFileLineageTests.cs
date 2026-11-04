@@ -46,7 +46,10 @@ public class SecureChildStoredFileLineageTests
         _world.SecureRoot("sprk_matter", matter)
             .UserOwnedChild("sprk_invoice", invoice, ("sprk_matter", "sprk_matter", matter))
             .UserOwnedChild("sprk_document", document, ("sprk_matter", "sprk_matter", matter))
-            .UserOwnedChild("sprk_storedfile", file, ("sprk_invoice", "sprk_invoice", invoice), ("sprk_sourcedocument", "sprk_document", document))
+            // In production an ordinary invoice's file is owned by the restricted-content team (a hard-deny table), not its author.
+            .Add("sprk_storedfile", file, ("owningteam", new EntityReference("team", ContentTeam)),
+                ("sprk_invoice", new EntityReference("sprk_invoice", invoice)),
+                ("sprk_sourcedocument", new EntityReference("sprk_document", document)))
             .UserOwnedChild("sprk_storedfile", procedureFile,
                 ("sprk_procedureversion", "sprk_procedureversion", Guid.NewGuid()), ("sprk_sourcedocument", "sprk_document", document));
 
@@ -88,6 +91,36 @@ public class SecureChildStoredFileLineageTests
             "the file leaves isolation with its invoice, to the restricted-content team of the invoice's customer unit");
         _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(OtherBuTeam), "a source document is never reached");
         _world.OwnerOf("sprk_communication", communication).Should().Be(DataversePrincipalRef.Team(OtherBuTeam), "a source communication is never reached");
+    }
+
+    [Fact(DisplayName = "086 must-fire: when the file's invoice AND its source document both leave isolation with the matter, the file moves once, after both, to the restricted-content team")]
+    public async Task AMatterLeavingIsolation_WhenTheInvoiceAndTheSourceDocumentBothMove_TheFileWaitsOnBothParents()
+    {
+        // The source document is filed under the SAME matter as the invoice, so it is isolated and leaves in the same pass. The
+        // file names both (its question reads the invoice and the source document as parents), so it must be released only after
+        // both have left: never while either is still Secure-owned (secure-if-any), and never to a customer team (hard-deny table).
+        var (matter, invoice, file, document) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _world.Add("sprk_matter", matter, ("owningteam", new EntityReference("team", CustomerTeam)), ("sprk_issecure", true))
+            .SecureChild("sprk_invoice", invoice, ("sprk_matter", "sprk_matter", matter))
+            .SecureChild("sprk_document", document, ("sprk_matter", "sprk_matter", matter))
+            .SecureChild("sprk_storedfile", file,
+                ("sprk_sourcedocument", "sprk_document", document),
+                ("sprk_invoice", "sprk_invoice", invoice));
+
+        var report = await Reconciler().ReconcileAsync(
+            "sprk_matter", matter, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        report.Status.Should().Be(SecureChildReconcileStatus.Completed, string.Join("; ", report.Changes.Select(c => c.Detail)));
+        _world.OwnerOf("sprk_invoice", invoice).Should().Be(DataversePrincipalRef.Team(CustomerTeam));
+        _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(CustomerTeam));
+        _world.OwnerOf("sprk_storedfile", file).Should().Be(DataversePrincipalRef.Team(ContentTeam),
+            "the file leaves isolation with its invoice and its source document, to the restricted-content team");
+        var writes = _world.OwnerWrites;
+        var fileWrites = writes.Where(w => w.Id == file).ToArray();
+        fileWrites.Should().ContainSingle("the file is released once, not once per parent");
+        var fileAt = writes.IndexOf(fileWrites[0]);
+        writes.FindIndex(w => w.Id == invoice).Should().BeLessThan(fileAt, "the file waits on its invoice");
+        writes.FindIndex(w => w.Id == document).Should().BeLessThan(fileAt, "the file waits on its source document");
     }
 
     [Fact(DisplayName = "086 must-not-fire: a Procedure-source and an export Stored File, and an ordinary invoice's file, keep their owner")]
