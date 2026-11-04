@@ -537,6 +537,17 @@ public sealed class RuleSetEndpointsTests
     private static RuleSetSummary SummaryOf(Guid id, Guid? procedureId) =>
         new RuleSetSummary(id, "Set " + id.ToString()[..4], "Draft", "ClientDefault", null, true, null, null, 1) { ProcedureId = procedureId };
 
+    /// <summary>089e fix round 2: the list asks the caller's Read on every set it keeps; these sets are readable.</summary>
+    private static RuleSetSummary[] Readable(Host host, params RuleSetSummary[] sets)
+    {
+        foreach (var set in sets)
+        {
+            host.Access.Grant("sprk_rulesets", set.Id, AccessRights.Read);
+        }
+
+        return sets;
+    }
+
     [Fact(DisplayName = "081 uac r2 I-P5 must-not-fire (round 3 F2): a deny-only list is 200 without the denied set; legacy sets stay; one question per DISTINCT Procedure")]
     public async Task List_LeavesOutProcedureSetsTheCallerCannotRead_AndAsksOncePerDistinctProcedure()
     {
@@ -550,7 +561,7 @@ public sealed class RuleSetEndpointsTests
         host.Access.Grant("sprk_procedures", readableProcedure, AccessRights.Read);
         host.Access.Grant("sprk_procedures", deniedProcedure, AccessRights.None);
         host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(new[] { legacy, readable, readableToo, denied }));
+            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(Readable(host, legacy, readable, readableToo, denied)));
 
         var response = await host.Client.SendAsync(Req("GET", Base));
 
@@ -591,7 +602,7 @@ public sealed class RuleSetEndpointsTests
         {
             var procedureId = Guid.NewGuid();
             host.Access.Grant("sprk_procedures", procedureId, AccessRights.Read);
-            sets[i] = SummaryOf(Guid.NewGuid(), procedureId);
+            sets[i] = Readable(host, SummaryOf(Guid.NewGuid(), procedureId))[0];
         }
 
         return sets;
@@ -632,13 +643,103 @@ public sealed class RuleSetEndpointsTests
     {
         await using var host = await Host.StartAsync();
         host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(new[] { SummaryOf(Guid.NewGuid(), null), SummaryOf(Guid.NewGuid(), null) }));
+            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(Readable(host, SummaryOf(Guid.NewGuid(), null), SummaryOf(Guid.NewGuid(), null))));
 
         var response = await host.Client.SendAsync(Req("GET", Base));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await response.Content.ReadFromJsonAsync<JsonArray>())!.Should().HaveCount(2);
         host.Access.Calls.Should().NotContain(c => c.Set == "sprk_procedures");
+    }
+
+    [Fact(DisplayName = "089e F1 ii must-fire: a set the caller cannot Read is absent from the list; one question per set the Procedure check kept")]
+    public async Task List_LeavesOutSetsTheCallerCannotRead_AndAsksOncePerSet()
+    {
+        await using var host = await Host.StartAsync();
+        var procedureId = Guid.NewGuid();
+        host.Access.Grant("sprk_procedures", procedureId, AccessRights.Read);
+        var legacyReadable = Readable(host, SummaryOf(Guid.NewGuid(), null))[0];
+        var legacyUnreadable = SummaryOf(Guid.NewGuid(), null);
+        var procedureReadable = Readable(host, SummaryOf(Guid.NewGuid(), procedureId))[0];
+        var procedureUnreadable = SummaryOf(Guid.NewGuid(), procedureId);
+        host.Access.Grant("sprk_rulesets", legacyUnreadable.Id, AccessRights.None); // Dataverse answered: no Read
+        host.Access.Grant("sprk_rulesets", procedureUnreadable.Id, AccessRights.Write); // rights, but not Read
+        host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(new[] { legacyReadable, legacyUnreadable, procedureReadable, procedureUnreadable }));
+
+        var response = await host.Client.SendAsync(Req("GET", Base));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var ids = (await response.Content.ReadFromJsonAsync<JsonArray>())!.Select(n => n!["id"]!.GetValue<Guid>()).ToList();
+        ids.Should().Equal(legacyReadable.Id, procedureReadable.Id);
+        host.Access.Calls.Where(c => c.Set == "sprk_rulesets").Select(c => c.Id).Should().BeEquivalentTo(
+            new[] { legacyReadable.Id, legacyUnreadable.Id, procedureReadable.Id, procedureUnreadable.Id }, "one Read question per listed set");
+        host.Access.Calls.Where(c => c.Set == "sprk_rulesets").Should().OnlyContain(c => c.HasToken, "asked as the caller");
+    }
+
+    [Fact(DisplayName = "089e F1 ii: the list and the by-id read agree - a set the list leaves out is the by-id route's uniform 404")]
+    public async Task List_And_TheByIdRead_Agree_OnASetTheCallerCannotRead()
+    {
+        var missing = await MissingSetAnswer("GET", $"{Base}/{SetId}");
+        await using var host = await Host.StartAsync();
+        host.Access.Grant("sprk_rulesets", SetId, AccessRights.None);
+        host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(new[] { Summary() }));
+
+        var list = await host.Client.SendAsync(Req("GET", Base));
+        var get = await host.Client.SendAsync(Req("GET", $"{Base}/{SetId}"));
+
+        list.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await list.Content.ReadFromJsonAsync<JsonArray>())!.Should().BeEmpty();
+        get.StatusCode.Should().Be(missing.Status);
+        (await get.Content.ReadAsStringAsync()).Should().Be(missing.Body);
+    }
+
+    [Fact(DisplayName = "089e F1 ii must-fire: ONE unknown Read answer on a set makes the list 403 system_failure, with no list")]
+    public async Task List_WhenAnySetRightsAreUnknown_IsSystemFailure_AndReturnsNoList()
+    {
+        await using var host = await Host.StartAsync();
+        var known = Readable(host, SummaryOf(Guid.NewGuid(), null))[0];
+        var unknown = SummaryOf(Guid.NewGuid(), null);
+        host.Access.Fault("sprk_rulesets", unknown.Id);
+        host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(new[] { known, unknown }));
+
+        var response = await host.Client.SendAsync(Req("GET", Base));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await Json(response);
+        problem["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain(known.Id.ToString());
+    }
+
+    [Fact(DisplayName = "089e F1 ii must-fire: more sets than the cap is 403 system_failure and asks no Read question on a set")]
+    public async Task List_WithMoreSetsThanTheCap_IsSystemFailure_AndAsksNoSetQuestion()
+    {
+        await using var host = await Host.StartAsync();
+        var sets = Enumerable.Range(0, RuleSetEndpoints.MaxRuleSetReadChecks + 1).Select(_ => Readable(host, SummaryOf(Guid.NewGuid(), null))[0]).ToArray();
+        host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(sets));
+
+        var response = await host.Client.SendAsync(Req("GET", Base));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Access.Calls.Count(c => c.Set == "sprk_rulesets").Should().Be(0, "the cap is checked before any rights question");
+    }
+
+    [Fact(DisplayName = "089e F1 ii must-not-fire: exactly the cap of readable sets is answered in full")]
+    public async Task List_WithExactlyTheCapOfSets_IsAnsweredInFull()
+    {
+        await using var host = await Host.StartAsync();
+        var sets = Enumerable.Range(0, RuleSetEndpoints.MaxRuleSetReadChecks).Select(_ => Readable(host, SummaryOf(Guid.NewGuid(), null))[0]).ToArray();
+        host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(sets));
+
+        var response = await host.Client.SendAsync(Req("GET", Base));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadFromJsonAsync<JsonArray>())!.Should().HaveCount(RuleSetEndpoints.MaxRuleSetReadChecks);
     }
 
     [Fact(DisplayName = "081 uac r2 I-P5: the Procedure id is internal; the list response never carries it")]
@@ -648,7 +749,7 @@ public sealed class RuleSetEndpointsTests
         var procedureId = Guid.NewGuid();
         host.Access.Grant("sprk_procedures", procedureId, AccessRights.Read);
         host.Service.Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(new[] { SummaryOf(Guid.NewGuid(), procedureId) }));
+            .ReturnsAsync(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(Readable(host, SummaryOf(Guid.NewGuid(), procedureId))));
 
         var response = await host.Client.SendAsync(Req("GET", Base));
 

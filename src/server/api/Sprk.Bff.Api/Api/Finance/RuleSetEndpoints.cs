@@ -363,9 +363,16 @@ public static class RuleSetEndpoints
         RuleSetService service, AuthorizationService authorization, ILogger<RuleSetService> logger, HttpContext http, CancellationToken ct)
     {
         var outcome = await service.ListAsync(ct);
-        if (outcome.Kind != RuleSetOutcomeKind.Done || outcome.Value is not { } sets || !sets.Any(s => s.ProcedureId is not null))
+        if (outcome.Kind != RuleSetOutcomeKind.Done || outcome.Value is not { } sets)
         {
             return Map(outcome, http);
+        }
+
+        var caller = new InvoiceContextService.InvoiceCaller(
+            CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
+        if (!sets.Any(s => s.ProcedureId is not null))
+        {
+            return await ReadableSetsOnlyAsync(sets, authorization, caller, logger, http, ct);
         }
 
         var procedures = sets.Where(s => s.ProcedureId is not null).Select(s => s.ProcedureId!.Value).Distinct().ToList();
@@ -377,8 +384,6 @@ public static class RuleSetEndpoints
             return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
         }
 
-        var caller = new InvoiceContextService.InvoiceCaller(
-            CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
         using var gate = new SemaphoreSlim(CallerReadCheck.Parallelism);
         var answers = await Task.WhenAll(procedures.Select(async id =>
         {
@@ -405,7 +410,39 @@ public static class RuleSetEndpoints
 
         var readable = answers.ToDictionary(a => a.Id, a => a.Outcome == CallerReadOutcome.Readable); // a known deny leaves the set out
         IReadOnlyList<RuleSetSummary> kept = sets.Where(s => s.ProcedureId is not { } id || readable[id]).ToList();
-        return Map(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(kept), http);
+        return await ReadableSetsOnlyAsync(kept, authorization, caller, logger, http, ct);
+    }
+
+    /// <summary>The most rule sets the list asks the caller's Read on (the same ceiling as the Procedure checks above).</summary>
+    internal const int MaxRuleSetReadChecks = InvoiceContextService.MaxSiblingAccessChecks;
+
+    /// <summary>
+    /// 089e fix round 2 (F1 ii): the list keeps only the sets the caller can Read, asked as the caller on each <c>sprk_ruleset</c> row
+    /// (<see cref="CallerReadCheck.ScanAsync{T}"/>) - the same question (A) of <see cref="RequireAccessToTheRuleSet"/> asks on every by-id route,
+    /// so a set the list shows is one its own routes answer, and a set its routes hide is not listed. A known deny leaves the set out; an answer
+    /// missing for ANY set, or more sets than <see cref="MaxRuleSetReadChecks"/>, makes the list 403 <c>system_failure</c>, as the Procedure checks do.
+    /// </summary>
+    private static async Task<IResult> ReadableSetsOnlyAsync(
+        IReadOnlyList<RuleSetSummary> sets, AuthorizationService authorization, InvoiceContextService.InvoiceCaller caller,
+        ILogger logger, HttpContext http, CancellationToken ct)
+    {
+        if (sets.Count > MaxRuleSetReadChecks)
+        {
+            logger.LogWarning(
+                "Rule set list: {Sets} sets exceed the {Cap} rights checks the list may ask; the list is refused (fail closed)",
+                sets.Count, MaxRuleSetReadChecks);
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        }
+
+        var scan = await CallerReadCheck.ScanAsync(
+            authorization, caller, "sprk_rulesets", "read", sets, s => s.Id, int.MaxValue, MaxRuleSetReadChecks, logger,
+            "Rule set list: caller read on a set", ct);
+        if (scan.Failed || !scan.AllExamined)
+        {
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        }
+
+        return Map(RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Done(scan.Readable), http);
     }
 
     private static async Task<IResult> GetRuleSet(Guid ruleSetId, RuleSetService service, HttpContext http, CancellationToken ct) =>
