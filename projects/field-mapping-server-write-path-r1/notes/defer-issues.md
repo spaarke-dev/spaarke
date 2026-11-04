@@ -183,3 +183,13 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Out of scope, pre-existing: the chat path (`OwnedChildWrite.PathFor`, `DataverseCreateRecordHandler`) is outside 042b's two files, and the service check is an ownership refusal (NFR-07) |
 | **Owner task** | Unassigned; UAC-r2 review |
 | **Failure** | Under a Secure matter's thread, a thread-only communication is either created caller-owned (chat; the reconciler moves it 2–4 min later) or refused 409 `ownership_exception` (service). A missing thread gives a retryable-looking 503 |
+
+## DI-019 — The service's create of a Signal or Decision Record ignores its core record in the owner question
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-04, task 042b fix round 1 (review item 3), by inspection, in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2561 |
+| **Class** | Out of scope, pre-existing: the fix needs a record-type catalog read in step 7, outside `OwnerQuestionOf` / `ForRow`; 042b did not change it |
+| **Owner task** | Unassigned; UAC-r2 review, ontology-r1 if the fix refuses chat creates |
+| **Failure** | Chat `dataverse.create_record` of a Signal or DR naming a core pair: the create asks lookups only (`ForRow`), the reconciler asks the core record first (`ForExistingRowAsync`), so the owner can differ until the reconciler re-owns it; under a Secure core with an ordinary subject the row is ordinary-team owned for that window. The ontology writers are not affected |
