@@ -3,8 +3,8 @@
   <metadata>
     <title>089c follow-ups: close stale base-rule Signals as Superseded on a rule change; a descriptive error for record-scoped rule sets; edit rights for Billing Administrator</title>
     <phase>3 Rules (follow-up to 089c; owner 2026-11-04)</phase>
-    <gate>owner decided 2026-11-04 in the main session: STOP option (b); "a more descriptive error is important/useful to the user; also so can be tracked"; "provide edit rights as required"</gate>
-    <status>blocked</status>
+    <gate>owner decided 2026-11-04 in the main session: STOP option (b); "a more descriptive error is important/useful to the user; also so can be tracked"; "provide edit rights as required". Then (fix round): item 2 "Approve (A)+(B) on all 9 routes"; the role "Add to role file + apply on dev" (the owner applies it on dev)</gate>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what a rule change closes after its commit, the answer of an auth-gated route family, and possibly a security role source; tags include auth.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -20,7 +20,7 @@
   <prompt>Three closed follow-ups to 089c. Read notes/089-assignment-override-service.md, section "089c": "Decisions and deviations", "STOP: stale base-code Signals (POML)" and the two review subsections. Nothing else is in scope.</prompt>
 
   <goal>
-    1. A record-level rule change (`ChangeRuleCoreAsync`) closes, after its commit and best effort, the open Signals the BASE rule raised on that record's In Review invoices, as Superseded, through the existing SignalClosureService / SignalWriter close, naming the record rule's Policy Version that the change put in force. The response says whether the close completed and how many of those invoices the caller can see.
+    1. A record-level rule change (`ChangeRuleCoreAsync`) closes, after its commit and best effort, the open Signals the BASE rule raised on the In Review invoices filed directly on that record, as Superseded, through the existing SignalClosureService / SignalWriter close. (Correction, 089e pass 1 F3: the close does not record the record rule's version; the writer stores the resolution only.) The response says whether the close completed, what it covered (the record's own invoices only, pass 1 F2), and how many of those invoices the caller can see.
     2. A rule-set by-id route answers a record-scoped set with 409 and a new stable code (`ruleset.record_scoped`), a message naming the override routes and the record kind, logged under the code, ONLY when the caller passes the route's existing Read check on the set or its core record. A caller without that Read still gets the uniform 404. Firm-facing readers (`GetFirmClauseAsync` and any external path) keep hiding record-scoped sets.
     3. The Billing Administrator role source holds every privilege the change and removal routes check, at the depth each check needs, with file:line evidence for every check. Anything missing is added to the role SOURCE only, with the guard test updated.
   </goal>
@@ -50,7 +50,7 @@
   </constraints>
 
   <acceptance-criteria>
-    <criterion>Item 1 must-fire: an open base-rule Signal on an In Review invoice of this record is Resolved/Superseded after a change; the close names the record rule's new version.</criterion>
+    <criterion>Item 1 must-fire: an open base-rule Signal on an In Review invoice of this record is Resolved/Superseded after a change. (Corrected, pass 1 F3: the close names no version; none is stored.)</criterion>
     <criterion>Item 1 must-not-fire: another record's invoice, another rule's Signal, a Pending or closed invoice, and (firm-scoped change) another firm's invoice keep their Signals open.</criterion>
     <criterion>Item 1 fault: a close fault leaves the change committed (201, record rule in force) and answers `closeComplete=false` with a message.</criterion>
     <criterion>Item 1: the response count is the caller-visible count; an unreadable invoice is not counted.</criterion>
@@ -67,5 +67,6 @@
   </escalation>
 
   <notes>Items 1 and 3 done 2026-11-04 (notes/089-assignment-override-service.md, section 089e). Item 1: the change closes the base rule's findings on the record's In Review invoices Superseded, best effort; the nightly run does not finish a failed close. Item 3: no role change needed; dev matches the source. Item 2 STOPPED: no by-id rule-set route checks Read on the set or its core record, so a 409 would leak existence; options A/B/C are in the notes for the owner and uac-r2.
+  Fix round and item 2 (2026-11-04, notes section "089e fix round"): owner "Approve (A)+(B) on all 9 routes" - the rule-set by-id routes authorise the set and its record (eight routes exist; all eight carry it); owner "Add to role file + apply on dev" - Billing Administrator role source gains Read on sprk_procedure at Deep (dev apply by the owner); pass-1 F2/F3/K2/K4 fixed. Awaiting the main session's review and the dev role apply.
   rework: none task 089e</notes>
 </task>
