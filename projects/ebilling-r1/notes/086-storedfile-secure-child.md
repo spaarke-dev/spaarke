@@ -229,3 +229,8 @@ All five test projects build with 0 errors. Results:
   - K-P2: fails closed.
   - K-P3: the live census is the backstop.
 - **Gate:** `StoredFileReconcileEnabled` stays false until the deploy carrying 089a and 086 passes uac-r2's gate and the NFR-05 census. The pre-deploy count of Stored Files on invoices of Secure records goes into the deploy request.
+
+### Access review (089a+086) dispositions with uac-r2 (2026-11-03)
+- **Share mirror, #2559:** owned by uac-r2. For `RestrictedContentTables` the mirror will pass Read only, before uac-r2 task 191. Do not write this fix on the ebilling side. The owner decides how #2559 is tracked; do not edit it until then.
+- **K3:** a Stored File owned by the restricted-content team stays with the old customer when its parent moves across top units. It is reported, not moved (194b's behaviour). Accepted.
+- **K4:** Stored Files placed before 086 on matters that were already Secure. If the pre-deploy count is above 0, the deploy request asks for the backfill run after the gate. Accepted.

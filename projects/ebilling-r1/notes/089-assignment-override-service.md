@@ -253,3 +253,8 @@ Each change was restored afterwards, and the file content was compared to confir
 - **Check Read on what the stored row overrides before removing it.** The request body does not name that subject, so this needs a custom filter. If one is added, give it a credited form for the route ledger.
 - **Move the record-scope constants if the new writer needs them.** `ScopeRecord` and `ScopeFirmRecord` are private to this service; a shared place must respect the census marker rule (089a K4).
 - **Remove by deleting the row, not deactivating it** (see the limit above).
+
+### 089b: uac-r2 decisions (2026-11-03)
+- **Exclude route:** keep the caller's Read check on `sprk_policies` and its fail-closed 403. Do **not** add a custom filter that infers rule rights from Procedure rights; that would be a second, softer authorization path to the same rows.
+- **Child-unit admins:** a billing admin in a child business unit may get 403 for a rule held in the top unit. If the owner wants such admins to be able to exclude top-unit rules, the fix is in the role: Billing Administrator gets Read on `sprk_policy` at Global (rules are org-wide configuration), set in the role config and checked by the census. This is an open owner question. Until the owner answers, the 403 is correct.
+- **UI constraint (084 and any UI that offers Exclude):** offer Exclude only on rules the caller can Read. Otherwise the 403 looks like a bug. On 2026-11-03 no client code calls these routes.

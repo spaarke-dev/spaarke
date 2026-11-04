@@ -42,6 +42,8 @@
 4. Firm-name check at intake (INV-2025-05166 prints Garrison and Ellison but sits under Morrison Foerster).
 5. 161 live run S1 ~$26 or S2 ~$22.
 6. A leftover "lint-staged automatic backup" stash entry 1e84ffafed (holds committed changes only); dropping it needs the owner's confirmation.
+7. 089b: should Billing Administrator get Read on sprk_policy at Global, so child-unit admins can Exclude top-unit rules? Until then the 403 is correct (uac-r2: a role change, not a filter).
+8. #2559 contains an access-escalation scenario in a public repo; uac-r2 has taken to the owner how it is tracked. Do not edit it until the owner decides.
 
 ## Peer state
 - uac-r2 (38): runs ALL dev BFF deploys now (R3 stopped); the procedure is docs/procedures/dev-bff-deploy-coordination.md. Deploy requests carry the master SHA, the PRs and the pre-checks; the next deploy also carries #2550. It waits for the Email to AP UTC time, the master PR, and the NFR-05 census after deploy.
