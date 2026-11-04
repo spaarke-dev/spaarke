@@ -37,6 +37,9 @@ public sealed class InvoiceFirmHoldAppOnlyGuardTests
     [
         typeof(InvoiceFirmHold), // READER: HeldInvoicesAsync queries sprk_invoice for the column through the IGenericEntityService its callers pass (app-only)
         typeof(InvoiceSubmissionPersister), // WRITER: sets it in the invoice create of the held outcome, inside the app-only ExecuteTransactionAsync
+        // WRITER (095d-1b): clears it in the invoice update of Set firm's one renumber transaction, sent by the allocator's app-only
+        // ExecuteTransactionAsync; it reads the hold only through InvoiceFirmHold.IsHeldAsync over its own IGenericEntityService (app-only).
+        typeof(Sprk.Bff.Api.Services.Finance.InvoiceAssignFirmService),
     ];
 
     /// <summary>Types that name the column without reading or writing a row: held to C1 and C2, not C3.</summary>

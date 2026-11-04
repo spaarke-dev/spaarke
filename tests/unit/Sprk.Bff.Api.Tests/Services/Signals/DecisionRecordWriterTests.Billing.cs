@@ -173,6 +173,7 @@ public sealed partial class DecisionRecordWriterTests
     [InlineData("approve-invoice", "sprk_matter")]
     [InlineData("accept-line", "sprk_todo")]
     [InlineData("override-submission", "sprk_invoicesubmission")]
+    [InlineData("assign-firm", "sprk_invoicesubmission")] // 095d-1b: Set firm files under the invoice, never the submission
     public async Task Billing_C2_ASubjectThatIsNotTheCodesTable_IsRefused_WithZeroReaderCallsAndZeroCreates(string code, string table)
     {
         var h = BillingHarness();
@@ -192,7 +193,7 @@ public sealed partial class DecisionRecordWriterTests
         {
             ("accept-line", "sprk_billingevent"), ("reduce-line", "sprk_billingevent"), ("disallow-line", "sprk_billingevent"),
             ("approve-invoice", "sprk_invoice"), ("reject-invoice", "sprk_invoice"), ("return-to-firm", "sprk_invoice"),
-            ("override-submission", "sprk_invoice"),
+            ("override-submission", "sprk_invoice"), ("assign-firm", "sprk_invoice"),
         }, "D-75, D-101: no submission subject; the override and the automatic rejection file under the invoice");
         DecisionRecordWriter.BillingSubjectEntityOf("mark-complete").Should().BeNull("a Signals code has no billing subject");
         DecisionActionCatalog.BillingActions.Should().OnlyContain(d => !d.Code.Contains('_') && !d.Code.Contains('%') && !d.Code.Contains('['),

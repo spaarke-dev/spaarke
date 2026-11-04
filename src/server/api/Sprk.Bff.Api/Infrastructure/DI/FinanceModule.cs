@@ -211,6 +211,11 @@ public static class FinanceModule
         services.AddScoped<EligibleApproverResolver>();
         services.AddScoped<InvoiceApprovalService>();
 
+        // Set firm on a held no-firm invoice (ebilling-r1 task 095d-1b, notes 095c 16.4-16.7): concrete (ADR-010), scoped like its scoped
+        // dependencies (IGenericEntityService, InvoiceSubmissionService, CoreAncestorResolver). It hands its one-transaction apply to the
+        // allocator (095d-1a), the number columns' only writer. Unconditional (flag rule above); the route reads the kill switch.
+        services.AddScoped<InvoiceAssignFirmService>();
+
         // Reject and Return to Firm of an invoice (ebilling-r1 task 104, FR-36): concrete (ADR-010), scoped like the approval service it follows.
         services.AddScoped<InvoiceRejectReturnService>();
 
