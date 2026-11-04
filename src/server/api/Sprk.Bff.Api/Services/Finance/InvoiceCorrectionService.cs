@@ -118,8 +118,15 @@ public static class CorrectionCodes
     /// <summary>409 (task 095c-4): see <see cref="CorrectionStatus.FirmMissing"/>.</summary>
     public const string FirmMissing = "ebilling.correction.firm_missing";
 
-    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/>.</summary>
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/> when the invoice names no firm (<see cref="InvoiceFirmNeed.NoFirm"/>).</summary>
     public const string FirmMissingDetail = "This invoice has no firm. Add the firm before correcting its values; nothing was changed.";
+
+    /// <summary>095c-4 review K1: the sentence with <see cref="FirmMissing"/> when the invoice shows a firm but is held for one
+    /// (<see cref="InvoiceFirmNeed.Held"/>).</summary>
+    public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned. Its values can be corrected once the firm is assigned; nothing was changed.";
+
+    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
+    public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
 }
 
 /// <summary>
@@ -397,9 +404,9 @@ public sealed class InvoiceCorrectionService
             }
 
             // Task 095c-4: a correction re-runs the firm's rules (InvoiceCorrectionReevaluation); with no firm, or a stored "firm needed" hold, it waits.
-            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) != InvoiceFirmNeed.None)
+            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
             {
-                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmMissingDetail);
+                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmDetailFor(need));
             }
 
             line = await ReadLineAsync(command.InvoiceId, command.LineId!.Value, ct).ConfigureAwait(false);
@@ -690,9 +697,9 @@ public sealed class InvoiceCorrectionService
             }
 
             // Task 095c-4: a correction re-runs the firm's rules (InvoiceCorrectionReevaluation); with no firm, or a stored "firm needed" hold, it waits.
-            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) != InvoiceFirmNeed.None)
+            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
             {
-                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmMissingDetail);
+                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmDetailFor(need));
             }
 
             prior = await ReadPriorAsync(command.InvoiceId, null, spec.Name, ct).ConfigureAwait(false);

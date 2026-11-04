@@ -351,6 +351,13 @@ internal sealed class ApprovalWorld
         return id;
     }
 
+    /// <summary>Task 095c-5: the invoice's own field-secured firm hold (<c>sprk_invoice.sprk_firmhold</c>), as the persister writes it with the held
+    /// outcome. Read app-only by <see cref="InvoiceFirmHold"/>; this world is the app-only store.</summary>
+    public void HoldInvoiceForFirm() => Rows[("sprk_invoice", InvoiceId)][InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;
+
+    /// <summary>Task 095c-5: columns this environment does not have (a script not yet run): a query that names one faults, as Dataverse does.</summary>
+    public readonly HashSet<string> MissingColumns = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>A blocked submission (FR-20: held from approval until decided).</summary>
     public void Hold() => Put(new Entity("sprk_invoicesubmission", Guid.NewGuid())
     {
@@ -557,6 +564,12 @@ internal sealed class ApprovalWorld
         if (TakeFault("read:" + query.EntityName) is { } fault)
         {
             return Task.FromException<EntityCollection>(fault);
+        }
+
+        if (query.ColumnSet?.Columns.FirstOrDefault(MissingColumns.Contains) is { } missing)
+        {
+            return Task.FromException<EntityCollection>(new InvalidOperationException(
+                $"'{query.EntityName}' entity doesn't contain attribute with Name = '{missing}' (simulated: the column's script has not run)"));
         }
 
         lock (Gate)

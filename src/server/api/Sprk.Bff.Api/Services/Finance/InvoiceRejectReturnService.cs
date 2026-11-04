@@ -91,8 +91,15 @@ public static class InvoiceRejectReturnCodes
     /// "firm needed" (<see cref="InvoiceFirmHold"/>; a firm set natively does not lift it). Reject stays allowed: it is final and needs no firm.</summary>
     public const string FirmMissing = "ebilling.invoice.firm_missing";
 
-    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/>.</summary>
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/> when the invoice names no firm (<see cref="InvoiceFirmNeed.NoFirm"/>).</summary>
     public const string FirmMissingDetail = "This invoice has no firm to return it to. Add the firm first, or reject the invoice.";
+
+    /// <summary>095c-4 review K1: the sentence with <see cref="FirmMissing"/> when the invoice shows a firm but is held for one
+    /// (<see cref="InvoiceFirmNeed.Held"/>).</summary>
+    public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned, so it cannot be returned to a firm yet. Reject it, or return it once the firm is assigned.";
+
+    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
+    public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
 
     /// <summary>409: 014 refused the transition.</summary>
     public const string TransitionRefused = "ebilling.invoice.decision_refused";
@@ -416,7 +423,7 @@ public sealed class InvoiceRejectReturnService
                 && await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
             {
                 _logger.LogWarning("Return of invoice {InvoiceId}: the invoice needs a firm ({Need}); nothing changed.", invoiceId, need);
-                return new InvoiceDecisionResult(InvoiceDecisionOutcome.Held, InvoiceRejectReturnCodes.FirmMissing, InvoiceRejectReturnCodes.FirmMissingDetail);
+                return new InvoiceDecisionResult(InvoiceDecisionOutcome.Held, InvoiceRejectReturnCodes.FirmMissing, InvoiceRejectReturnCodes.FirmDetailFor(need));
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

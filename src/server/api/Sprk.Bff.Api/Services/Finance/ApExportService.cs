@@ -345,8 +345,7 @@ public sealed class ApExportService
 
         if (refusals.Count > 0)
         {
-            return new ApExportResult(ApExportOutcome.SelectionRefused, ApExportCodes.SelectionRefused,
-                "Only Approved invoices that are not yet in an export batch can be exported. Nothing was exported.", null, refusals, null);
+            return new ApExportResult(ApExportOutcome.SelectionRefused, ApExportCodes.SelectionRefused, SelectionRefusedDetail(refusals), null, refusals, null);
         }
 
         // The batch total, computed once here: it is written to the batch at the very end, after the invoices were sent to AP, so a total the column
@@ -433,13 +432,14 @@ public sealed class ApExportService
 
                 if (InvoiceFirmHold.HasNoFirm(fresh))
                 {
-                    throw FirmMissingStop();
+                    throw FirmMissingStop(InvoiceFirmNeed.NoFirm);
                 }
             }
 
+            // Task 095c-5: the invoice's own hold and the submissions' (InvoiceFirmHold), read app-only.
             if ((await InvoiceFirmHold.HeldInvoicesAsync(_entities, selected.Select(r => r.Id).ToList(), ct).ConfigureAwait(false)).Count > 0)
             {
-                throw FirmMissingStop();
+                throw FirmMissingStop(InvoiceFirmNeed.Held);
             }
 
             // (8) The values, read once; the files, written once.
@@ -567,6 +567,14 @@ public sealed class ApExportService
         var rows = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.ToList();
         var truncated = rows.Count > CandidateCap;
         rows = rows.Take(CandidateCap).ToList();
+
+        // 095c-4 review K2: an invoice the export would refuse (no firm, or held for one by its own hold or a submission's, task 095c-5) is
+        // not offered. The same reader as the selection, app-only; a read fault throws (the route answers unavailable, nothing is shown).
+        if (rows.Count > 0)
+        {
+            var firmHeld = await InvoiceFirmHold.HeldInvoicesAsync(_entities, rows.Select(r => r.Id).ToList(), ct).ConfigureAwait(false);
+            rows = rows.Where(r => !InvoiceFirmHold.HasNoFirm(r) && !firmHeld.Contains(r.Id)).ToList();
+        }
 
         var allowed = await _authorization.FilterExportableAsync(caller, rows.Select(r => r.Id).ToList(), ct).ConfigureAwait(false);
         if (allowed is null)
@@ -732,13 +740,29 @@ public sealed class ApExportService
         throw new InvalidOperationException($"Invoice {invoiceId} kept changing; its claim by batch {batchId} could not be released.");
     }
 
+    /// <summary>The 409 <see cref="ApExportCodes.FirmMissing"/> of step 7, worded for why the invoice needs a firm (095c-4 review K1).</summary>
+    private static Stopped FirmMissingStop(InvoiceFirmNeed need) => new(ApExportOutcome.Conflict, ApExportCodes.FirmMissing, need == InvoiceFirmNeed.Held
+        ? "An invoice in the selection is waiting for its firm to be assigned. Nothing was exported. A reviewer must add the firm first."
+        : "An invoice in the selection has no firm. Nothing was exported. A reviewer must add the firm first.");
+
+    /// <summary>
+    /// The sentence of a 400 <see cref="ApExportCodes.SelectionRefused"/>, fitted to the reasons (095c-4 review F1): a selection refused only for a
+    /// missing firm does not say "only Approved invoices".
+    /// </summary>
+    internal static string SelectionRefusedDetail(IReadOnlyCollection<ApExportInvoiceRefusal> refusals)
+    {
+        var firm = refusals.Count(r => r.Reason == ApExportCodes.ReasonFirmMissing);
+        return firm == 0
+            ? "Only Approved invoices that are not yet in an export batch can be exported. Nothing was exported."
+            : firm == refusals.Count
+                ? "An invoice in the selection has no firm, or is waiting for one: a reviewer must add the firm first. Nothing was exported."
+                : "Only Approved invoices that have a firm and are not yet in an export batch can be exported. Nothing was exported.";
+    }
+
     /// <summary>
     /// Whether the invoice is (or, when its status cannot be read, may be) sent: Sent to AP or Paid. Any other status (still Approved, or moved elsewhere
     /// by someone else) is NOT sent by this batch, so its claim is released. Unknown counts as sent: its claim is kept (fail safe).
     /// </summary>
-    private static Stopped FirmMissingStop() => new(ApExportOutcome.Conflict, ApExportCodes.FirmMissing,
-        "An invoice in the selection has no firm, or is waiting for one. Nothing was exported. A reviewer must add the firm first.");
-
     private async Task<bool> MaybeSentAsync(Guid invoiceId)
     {
         try

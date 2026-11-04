@@ -943,6 +943,7 @@ public sealed class InvoiceCorrectionServiceTests
         var result = await world.Service().CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
 
         result.Status.Should().Be(CorrectionStatus.FirmMissing);
+        result.Detail.Should().Be(CorrectionCodes.FirmHeldDetail, "095c-4 review K1: the invoice shows a firm, so the sentence says it is waiting for one");
         NothingWritten(world);
     }
 }

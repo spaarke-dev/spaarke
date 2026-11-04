@@ -1438,6 +1438,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         {
             invoice[InvoiceVendorOrg] = new EntityReference("sprk_organization", firmId);
         }
+        else
+        {
+            // Task 095c-5 (uac-r2 2026-11-04): the invoice's own field-secured hold, in this same create (the one transaction that writes the
+            // held outcome; Validate refuses a no-firm outcome that is not exactly the firm_missing hold). It outlives an unlinked, repointed
+            // or deleted submission. A firm outcome never names the column, so an environment that has not run the column's script still
+            // persists firm submissions; a no-firm one fails there, which writes nothing (fail closed).
+            invoice[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;
+        }
 
         // Task 094: the invoice never names a document (sprk_document): its PDF is the invoice's Stored File on every channel (an upload, a
         // Submit Invoice copy), and the source stays where it is filed (the copy rule; owner K keeps the copy out of indexing).

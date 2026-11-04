@@ -716,6 +716,7 @@ Gate (on the branch with every change):
 3. **K6: Duplicate and supersedes.** Firm submissions find earlier invoices only by firm, so a no-firm copy of the same invoice is invisible to them, and the reverse holds too. 095d must re-run the rules, including Duplicate with its priors, and the supersedes lookup, before approval is possible.
 4. **Renumber into the firm's scope** (section 9).
 5. **Re-check the export.** An invoice assigned a firm after approval cannot exist, because approval is refused while it needs one. 095d must keep that true: no path from held straight to Approved.
+6. **Clear the invoice's own hold (095c-5).** Assign-firm clears `sprk_invoice.sprk_firmhold` through its typed, app-only writer, in the same write as the renumber. No other writer clears it (AccessColumns refuses the generic writers), and the assign-firm type must be added to `InvoiceFirmHoldAppOnlyGuardTests`' reviewed list. Clearing the submission markers without the column, or the column without the markers, leaves the invoice held, by design.
 
 rework: none task 095c
 
@@ -725,4 +726,119 @@ rework: none task 095c
 - **The hold condition** (`InvoiceFirmHold.IsHeld`, `InvoiceFirmHold.cs:115-149`) holds when **any one** of these is true: the reason is `firm_missing`, the findings have the `firm_missing` pipeline finding, or the findings have a `rules.not_checked` line with cause `firm_missing`. The persister stores every no-firm outcome with the `firm_missing` pipeline finding (`InvoiceSubmissionPersister.cs:2203-2214`).
 - **Result (corrected, uac-r2 2026-11-04):** the findings-JSON path is closed by existing field security, but (c) does NOT hold. `IsHeldAsync` finds the hold through the submission's link to the invoice (`sprk_invoicesubmission.sprk_invoice`), which is not field-secured, so the hold can be hidden by clearing or repointing that link, or by deleting the submission. Removing reviewers' Write was rejected, because reviewers need Write for their real work.
 - **Fix:** task 095c-5 (`tasks/095c5-invoice-firm-hold-column.poml`) adds a field-secured `sprk_invoice.sprk_firmhold`. Held = the invoice's own hold OR any linked submission's hold. It blocks the master PR.
-- **To add in the 095c-4 review fix round:** a test that rewrites the reason, sets the invoice firm and leaves the findings unchanged. Approval must stay 409 and export must stay refused.
+- **Done (095c-5, section 15):** the column, its reader, the persister write, the generic-writer refusal and the script are in place. The column exists on an environment only after the script's `-Apply` (main session).
+- **To add in the 095c-4 review fix round:** a test that rewrites the reason, sets the invoice firm and leaves the findings unchanged. Approval must stay 409 and export must stay refused. Done (section 15.6, Pin).
+
+## 15. Part 095c-5: the invoice's own firm hold (2026-11-04)
+
+Task `tasks/095c5-invoice-firm-hold-column.poml` (uac-r2 binding, section 14.x). The defect it closes: the hold was found only through the submission's
+link to the invoice, so unlinking, repointing or deleting the submission hid it (`InvoiceFirmHold.HeldInvoicesAsync`, before this task).
+
+### 15.1 What changed
+
+- **New column `sprk_invoice.sprk_firmhold`** (text, 100, field-secured). SpaarkeMaster `Entities/sprk_Invoice/Entity.xml` (`IsSecured=1`) and
+  `Other/FieldSecurityProfiles.xml`: Writers read/create/update, Readers read. No other profile.
+- **Held = the invoice's own hold OR any linked submission's hold.** `InvoiceFirmHold.HeldInvoicesAsync` first reads `sprk_firmhold` of the invoices
+  (app-only, `IGenericEntityService`), then the submissions as before. `IsInvoiceHeld`: null or blank does not hold; any other value or shape holds.
+  The value is always re-read app-only; the caller's row is never used for it (a caller-token read of a secured column is null, not an error).
+- **The persister sets it** on the invoice create of a held (no-firm) outcome, in the same `ExecuteTransaction` as the held submission update. A
+  firm invoice's create does not name the column. 095d's assign-firm is the only clearer (14.8 item 6).
+- **Generic writers refuse it.** `InheritedAccessPermission.AccessColumns` gains `sprk_invoice`: `sprk_firmhold` and `sprk_vendororg` (095c-4 review,
+  15.6). Comparisons are now case-insensitive.
+- **Script** `scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1` (modelled on `Set-EbillingFindingsJsonFieldSecurity.ps1` and the ResubmissionOf
+  script): `-WhatIf` / `-Apply` / `-Verify`. It creates the column in the solution, secures it with the grants in the same step (a failed grant
+  reverts the securing, so no BFF identity is left masked), fails when any other profile (System Administrator excepted) can create or update it, publishes, and backfills invoices whose linked
+  submission is held (the same three markers as `IsHeld`; an unreadable findings document holds).
+- **Guards:** `InvoiceFirmHoldAppOnlyGuardTests` (ArchTest, the findings-JSON guard's C1/C2/C3 shape) and
+  `InvoiceFirmHoldFieldSecurityAgreementTests` (script, solution source and BFF constants agree).
+
+**Column type.** Text, not Boolean or BigInt: it stores the hold's reason (`ebilling.submission.firm_missing`, the value the outcome uses), and
+BigInt cannot be field-secured. Any non-blank value holds, so an unknown future value fails closed.
+
+### 15.2 Reviewed readers and writers (the guard's list)
+
+| Type | Use | Identity |
+|---|---|---|
+| `InvoiceFirmHold` | reads it (`HeldInvoicesAsync`, called by `CheckAsync` from approval, Return to Firm, correction, AP export re-check, selection and candidates) | app-only `IGenericEntityService` |
+| `InvoiceSubmissionPersister` | writes it on the held invoice create | app-only transaction |
+| `InheritedAccessPermission` | names it only to refuse it to the generic writers | (registration only) |
+| 095d assign-firm (planned) | clears it | must be typed, app-only; must be added to the guard's reviewed list |
+
+### 15.3 P0/P1 environments, and a deviation
+
+At P0 and P1 a no-firm submission is refused at intake, so the persister never writes the column and firm creates never name it: a P0/P1
+environment without the column still persists submissions. **Deviation:** the readers name the column for every invoice, so in an environment where
+the column does not exist yet, approve, Return to Firm, correction and AP export answer 503 (fail closed) until the script runs or SpaarkeMaster is
+imported. The POML expected P0/P1 to work without the column. I did not gate the read on the phase, because a phase probe that reads wrong would then
+skip the hold. **Order:** run the script (or import SpaarkeMaster) before deploying this BFF build. Owner choice if that order cannot be kept: a
+phase-gated read at P0/P1.
+
+### 15.4 Component justification (CLAUDE.md section 11)
+
+- **`sprk_firmhold`.** Existing: the submission's stored hold. Extension: not enough, because the link from submission to invoice is the bypass. Cost
+  of nothing: an unlinked, repointed or deleted submission lets an invoice without a firm be approved and exported.
+- **`IsInvoiceHeld`, `InvoiceHoldColumn`, `InvoiceHoldValue`** extend the existing `InvoiceFirmHold`.
+- **`FirmDetailFor` in the approval, Return and correction codes, and `FirmMissingStop` / `SelectionRefusedDetail` in AP export** are new methods in
+  existing classes. Cost of nothing: a held invoice that shows a firm is told it "has no firm" (K1).
+- **The script.** Existing: the findings-JSON script secures an existing column; this one must also create and backfill. Cost of nothing: no way to
+  create the column on an environment.
+- **The ArchTest and the agreement test.** Existing: the findings-JSON guard, which is fixed to its column. Cost of nothing: a new caller-token reader
+  reads null and lets a held invoice through; or the script and the source drift apart silently.
+
+### 15.5 -WhatIf on spaarkedev1 (read-only)
+
+Column absent. Preconditions all OK; both BFF application users are System Administrators. 6 submissions are linked to invoices; 0 of their
+invoices are held. **BACKFILL COUNT 0.** 8 invoices have no firm (legacy rows; already refused as no firm). No form or view binds the column, and no
+other profile names it, so the escalation trigger (an existing reader blanked) did not fire. "DRY RUN complete - nothing was written."
+
+Main session, with the owner's go and the uac-r2 notice:
+
+```
+pwsh scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply
+pwsh scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Verify
+```
+
+### 15.6 095c-4 review fixes
+
+- **F1.** The AP Export page shows its own text for `invoice_firm_missing` (`exportFlow.ts`, jest test), and the `apExportApi.ts` comment lists it.
+  The selection sentence now fits the reasons (contract section 12).
+- **Related: `sprk_invoice.sprk_vendororg` refused to the generic writers** (AccessColumns; `AccessTableAppOnlyWriterTests`). The legitimate BFF
+  writers, none of which goes through a generic writer: the persister's invoice create (`InvoiceSubmissionPersister.FillInvoice`, app-only
+  transaction); 095d's assign-firm (planned, typed); the SPA intake writes the submission's firm through the allocator, not the invoice's;
+  `InvoiceExtractionJobHandler` (legacy) does not write it. Client code (ApExport, LegalWorkspace, SmartTodo) only reads it. The field-mapping push asks
+  as the caller, so it is unaffected.
+- **K1.** Each route chooses its sentence by `InvoiceFirmNeed`: NoFirm keeps the 095c-4 sentence, Held says the invoice is waiting for its firm to
+  be assigned (approve, Return to Firm, correction, AP export re-check). Contract section 12 has both columns.
+- **K2.** `ApExportService.ListCandidatesAsync` leaves out no-firm and held invoices, using the same reader. A hold read fault throws (503), never the
+  unfiltered list.
+- **K3.** `IsHeld` also treats `ArgumentException` and `InvalidOperationException` from reading the findings as held (a duplicated member throws
+  lazily on read). Duplicate-key test added.
+- **K4.** Contract section 12: "Every refusal writes nothing" now names its one exception, the "firm cleared after the check" row, which saves the
+  value and does not re-run the rules.
+- **Pin.** The reason rewritten and the invoice firm set with the findings unchanged: approval stays 409 and the export stays refused (unit and
+  integration tests).
+
+### 15.7 Tests and seed proofs
+
+New: `InvoiceFirmHoldColumnTests` (unit), `ApExportFirmHoldColumnTests`, `InvoiceFirmHoldFieldSecurityAgreementTests`,
+`InvoiceFirmHoldAppOnlyGuardTests`, the persister test `HeldOutcome_SetsTheInvoiceHold_InTheSameTransaction`, the AccessTableAppOnlyWriter invoice
+test and the jest firm-missing test. Changed: the AccessTableAppOnlyWriter map pin and its must-not-fire cases (the invoice's `sprk_vendororg` is now
+refused), and the correction Held test (its sentence).
+
+Seed proofs (each mutation applied, built, the named tests run, the file restored and its SHA-256 checked):
+
+| Seed | Mutation | Result | File SHA-256 (restored, same) |
+|---|---|---|---|
+| M1 | `InvoiceFirmHold`: the invoice-side read ignored | 10 of 26 fail (`InvoiceFirmHoldColumnTests`, `ApExportFirmHoldColumnTests`: unlinked, repointed, deleted, invoice hold alone, caller-token null) | c62c914c944c257c |
+| M2 | `InvoiceFirmHold`: the invoice read fault swallowed | 3 of 26 fail (missing column, read fault) | c62c914c944c257c |
+| M3 | `IsHeld` catches only `JsonException` (K3) | 3 of 3 fail (`DuplicateKeys_Hold`) | c62c914c944c257c |
+| M4 | the persister stops setting `sprk_firmhold` | 1 of 1 fails (`HeldOutcome_SetsTheInvoiceHold_InTheSameTransaction`) | 0ee16de7bbf2aaeb |
+| M5 | `AccessColumns` without the invoice's two columns | 2 of 2 fail (the invoice write refusal, the map pin) | 89e0e97141400797 |
+| M6 | `ListCandidatesAsync` unfiltered (K2) | 1 of 1 fails (`Candidates_LeaveOutEveryInvoiceTheExportRefuses`) | 5381d3ea69a8e089 |
+| M7 | a new unreviewed type names `sprk_firmhold` | 1 of 9 fails (ArchTest C1) | 7c93408449f49bae |
+
+### 15.8 Known limits
+
+- The deviation in 15.3.
+- Adjustments still check "no firm" only (14.6); approval and export refuse a held invoice.
+- current-task.md, TASK-INDEX.md and the POML status are not updated here; the main session owns them.
