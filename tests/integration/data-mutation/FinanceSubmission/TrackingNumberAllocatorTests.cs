@@ -852,6 +852,7 @@ public sealed partial class TrackingNumberAllocatorTests
         private readonly Dictionary<Guid, Entity> _rows = [];
         private int _createCalls;
         private int _sequenceReads;
+        private int _idReads;
 
         public SubmissionStore()
         {
@@ -877,6 +878,11 @@ public sealed partial class TrackingNumberAllocatorTests
                         if (!byId)
                         {
                             _sequenceReads++;
+                        }
+
+                        if (query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_invoicesubmissionid"))
+                        {
+                            _idReads++;
                         }
 
                         answer = Run(query);
@@ -1034,15 +1040,26 @@ public sealed partial class TrackingNumberAllocatorTests
             Applied.AddRange(requests.Where(r => r is not UpdateRequest { Target.LogicalName: "sprk_invoicesubmission" }));
         }
 
-        private static DataverseTransactionException TransactionFault(IReadOnlyList<OrganizationRequest> requests, int index, int code, string message) =>
-            DataverseServiceClientImpl.MapTransactionFailure(requests, new FaultException<OrganizationServiceFault>(
-                new ExecuteTransactionFault
-                {
-                    FaultedRequestIndex = index,
-                    Message = "The transaction failed.",
-                    InnerFault = new OrganizationServiceFault { ErrorCode = code, Message = message },
-                },
-                new FaultReason("The transaction failed.")));
+        /// <summary>
+        /// The failure the SDK client raises for a transaction: with an <paramref name="index"/>, an <c>ExecuteTransactionFault</c> naming that
+        /// request with the request's own code as its inner fault; with none, a plain fault carrying the code and no faulted request (what
+        /// Dataverse sends when it does not say which request faulted, GitHub #971), mapped by the real <c>MapTransactionFailure</c>.
+        /// </summary>
+        public static DataverseTransactionException TransactionFault(IReadOnlyList<OrganizationRequest> requests, int? index, int code, string message) =>
+            DataverseServiceClientImpl.MapTransactionFailure(
+                requests,
+                index is { } faulted
+                    ? new FaultException<OrganizationServiceFault>(
+                        new ExecuteTransactionFault
+                        {
+                            FaultedRequestIndex = faulted,
+                            Message = "The transaction failed.",
+                            InnerFault = new OrganizationServiceFault { ErrorCode = code, Message = message },
+                        },
+                        new FaultReason("The transaction failed."))
+                    : new FaultException<OrganizationServiceFault>(
+                        new OrganizationServiceFault { ErrorCode = code, Message = message },
+                        new FaultReason("The transaction failed.")));
 
         private int _transactionCalls;
 
@@ -1097,6 +1114,9 @@ public sealed partial class TrackingNumberAllocatorTests
         public int CreateCalls => Volatile.Read(ref _createCalls);
 
         public int SequenceReads => Volatile.Read(ref _sequenceReads);
+
+        /// <summary>Task 095d-1a (review F4): the reads of a row by its id (the idempotency read of a create, the precondition read of a renumber).</summary>
+        public int IdReads => Volatile.Read(ref _idReads);
 
         public int RowCount
         {
@@ -1177,6 +1197,17 @@ public sealed partial class TrackingNumberAllocatorTests
             lock (_gate)
             {
                 _rows[id].Attributes.Remove("sprk_firminvoicenumber");
+            }
+
+            return id;
+        }
+
+        /// <summary>Task 095d-1a (review F4): the row <paramref name="id"/> as it is with <paramref name="column"/> not set; returns the id.</summary>
+        public Guid WithoutColumn(Guid id, string column)
+        {
+            lock (_gate)
+            {
+                _rows[id].Attributes.Remove(column);
             }
 
             return id;

@@ -152,11 +152,40 @@ public sealed partial class TrackingNumberAllocatorTests
         }
     }
 
-    [Fact(DisplayName = "095d-1a (must not fire): a row-version conflict on the submission is a Conflict, never retried as a race")]
-    public async Task Renumber_ARowVersionConflictOnTheSubmission_IsAConflict_NotARetry()
+    [Fact(DisplayName = "095d-1a (F4, must not fire): a stale version is a Conflict at the precondition read: nothing is read for a number, nothing is sent")]
+    public async Task Renumber_AStaleVersion_IsAConflictAtThePreconditionRead_NothingIsSent()
     {
         var submission = HeldNoFirmSubmission();
         _store.Touch(submission); // another write since the caller read version 1
+        var built = false;
+
+        var result = await CreateService().RenumberSubmissionAsync(submission, "1", FirmA, Number, c =>
+        {
+            built = true;
+            return ApplyFor(c, Guid.NewGuid());
+        });
+
+        result.Should().Be(new RenumberResult(RenumberOutcome.Conflict, null, null, null));
+        _store.IdReads.Should().Be(1, "the precondition read decided it");
+        _store.TransactionCalls.Should().Be(0, "nothing is sent");
+        _store.SequenceReads.Should().Be(0, "no number is read for a row that changed");
+        built.Should().BeFalse();
+        _store.Applied.Should().BeEmpty();
+        _store.Row(submission).GetAttributeValue<string>("sprk_trackingscope").Should().Be("none");
+    }
+
+    [Fact(DisplayName = "095d-1a (must not fire): a change between the precondition read and the write is the transaction's Conflict, never retried as a race")]
+    public async Task Renumber_AChangeAfterThePreconditionRead_IsTheTransactionsConflict_NotARetry()
+    {
+        var submission = HeldNoFirmSubmission();
+        // Another write lands after the allocator read the row at version 1 and before its conditional update is checked.
+        _store.BeforeTransaction = (call, _) =>
+        {
+            if (call == 1)
+            {
+                _store.Touch(submission);
+            }
+        };
 
         var result = await CreateService().RenumberSubmissionAsync(submission, "1", FirmA, Number, c => ApplyFor(c, Guid.NewGuid()));
 
@@ -165,6 +194,18 @@ public sealed partial class TrackingNumberAllocatorTests
         _store.SequenceReads.Should().Be(1);
         _store.Applied.Should().BeEmpty();
         _store.Row(submission).GetAttributeValue<string>("sprk_trackingscope").Should().Be("none");
+    }
+
+    [Fact(DisplayName = "095d-1a: a submission that no longer exists is a Conflict, nothing is sent")]
+    public async Task Renumber_AMissingSubmission_IsAConflict()
+    {
+        InPhase(TrackingScopePhase.P2ScopeKeyActive);
+
+        var result = await CreateService().RenumberSubmissionAsync(Guid.NewGuid(), "1", FirmA, Number, c => ApplyFor(c, Guid.NewGuid()));
+
+        result.Outcome.Should().Be(RenumberOutcome.Conflict);
+        _store.TransactionCalls.Should().Be(0);
+        _store.SequenceReads.Should().Be(0);
     }
 
     [Fact(DisplayName = "095d-1a (must not fire): a repeat at the version the first renumber replaced is a Conflict, never a second number")]
@@ -177,6 +218,7 @@ public sealed partial class TrackingNumberAllocatorTests
         var repeat = await service.RenumberSubmissionAsync(submission, "1", FirmA, Number, c => ApplyFor(c, Guid.NewGuid()));
 
         repeat.Outcome.Should().Be(RenumberOutcome.Conflict);
+        _store.TransactionCalls.Should().Be(1, "the repeat sent nothing");
         _store.Row(submission).GetAttributeValue<string>("sprk_trackingnumber").Should().Be("INV-7.1");
         _store.Applied.Should().ContainSingle();
     }
@@ -273,6 +315,7 @@ public sealed partial class TrackingNumberAllocatorTests
 
         result.Should().Be(new RenumberResult(RenumberOutcome.Refused, null, null, TrackingNumberReasons.ScopeKeyInactive));
         built.Should().BeFalse();
+        _store.IdReads.Should().Be(0, "no row is read before P2");
         _store.SequenceReads.Should().Be(0);
         _store.TransactionCalls.Should().Be(0);
     }
@@ -306,6 +349,9 @@ public sealed partial class TrackingNumberAllocatorTests
     [InlineData("sprk_trackingnumber", false)]
     [InlineData("sprk_trackingscope", false)]
     [InlineData("sprk_vendororg", false)]
+    [InlineData("sprk_submissionsequence", false)]
+    [InlineData("sprk_firminvoicenumber", false)]
+    [InlineData("sprk_invoicesubmissionid", false)]
     [InlineData(null, true)]
     public async Task Renumber_TheCallerCannotWriteTheNumberColumnsOrASubmission(string? ownedColumn, bool submissionRequest)
     {
@@ -322,19 +368,237 @@ public sealed partial class TrackingNumberAllocatorTests
         _store.TransactionCalls.Should().Be(0);
     }
 
-    [Theory(DisplayName = "095d-1a: an empty id, an empty firm or a blank version is refused before any read")]
-    [InlineData(true, false, "1")]
-    [InlineData(false, true, "1")]
-    [InlineData(false, false, " ")]
-    public async Task Renumber_BadArguments_AreRefusedBeforeAnyRead(bool emptySubmission, bool emptyFirm, string version)
+    [Theory(DisplayName = "095d-1a: an empty id, an empty firm, a blank version or firm invoice number, or no builder is refused before any read")]
+    [InlineData(true, false, "1", Number, false)]
+    [InlineData(false, true, "1", Number, false)]
+    [InlineData(false, false, " ", Number, false)]
+    [InlineData(false, false, "1", " ", false)]
+    [InlineData(false, false, "1", Number, true)]
+    public async Task Renumber_BadArguments_AreRefusedBeforeAnyRead(
+        bool emptySubmission, bool emptyFirm, string version, string firmInvoiceNumber, bool noBuilder)
     {
         InPhase(TrackingScopePhase.P2ScopeKeyActive);
 
         var act = () => CreateService().RenumberSubmissionAsync(
-            emptySubmission ? Guid.Empty : Guid.NewGuid(), version, emptyFirm ? Guid.Empty : FirmA, Number, c => ApplyFor(c, Guid.NewGuid()));
+            emptySubmission ? Guid.Empty : Guid.NewGuid(),
+            version,
+            emptyFirm ? Guid.Empty : FirmA,
+            firmInvoiceNumber,
+            noBuilder ? null! : c => ApplyFor(c, Guid.NewGuid()));
 
         await act.Should().ThrowAsync<ArgumentException>();
+        _store.IdReads.Should().Be(0);
         _store.SequenceReads.Should().Be(0);
+        _store.TransactionCalls.Should().Be(0);
         _phaseReads.Should().Be(0);
+    }
+
+    // ── Review F4: the precondition read ─────────────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "095d-1a (F4, must fire): a repeat at the version the commit left returns the held number, sends nothing and allocates no second number")]
+    public async Task Renumber_ARepeatAtThePostCommitVersion_ReturnsTheHeldNumber_SendsNothing_AndAllocatesNoSecondNumber()
+    {
+        var submission = HeldNoFirmSubmission();
+        var service = CreateService();
+        var first = await service.RenumberSubmissionAsync(submission, "1", FirmA, Number, c => ApplyFor(c, Guid.NewGuid()));
+        first.Should().Be(new RenumberResult(RenumberOutcome.Renumbered, "INV-7.1", 1, null));
+        var postCommitVersion = _store.Row(submission).RowVersion;
+        postCommitVersion.Should().NotBe("1", "the commit moved the version on");
+        _store.AddScoped(FirmA, Number, 2); // a later arrival of the firm: the next number would now be .3
+        var transactions = _store.TransactionCalls;
+        var sequenceReads = _store.SequenceReads;
+        var built = false;
+
+        var repeat = await service.RenumberSubmissionAsync(submission, postCommitVersion, FirmA, Number, c =>
+        {
+            built = true;
+            return ApplyFor(c, Guid.NewGuid());
+        });
+
+        repeat.Should().Be(new RenumberResult(RenumberOutcome.AlreadyRenumbered, "INV-7.1", 1, null), "the held number, not a second one");
+        built.Should().BeFalse("nothing is built for an apply that is not sent");
+        _store.TransactionCalls.Should().Be(transactions, "nothing is sent");
+        _store.SequenceReads.Should().Be(sequenceReads, "no number is read");
+        _store.Applied.Should().ContainSingle("the first commit's apply stands, and the repeat applied nothing");
+        var row = _store.Row(submission);
+        row.GetAttributeValue<string>("sprk_trackingnumber").Should().Be("INV-7.1");
+        row.GetAttributeValue<int?>("sprk_submissionsequence").Should().Be(1);
+        row.RowVersion.Should().Be(postCommitVersion, "the repeat wrote nothing");
+    }
+
+    [Fact(DisplayName = "095d-1a (F4): a repeat at the post-commit version that names another firm is refused NotUnnumbered, nothing sent")]
+    public async Task Renumber_ARepeatAtThePostCommitVersionNamingAnotherFirm_IsRefused()
+    {
+        var submission = HeldNoFirmSubmission();
+        var service = CreateService();
+        (await service.RenumberSubmissionAsync(submission, "1", FirmA, Number, c => ApplyFor(c, Guid.NewGuid()))).TrackingNumber.Should().Be("INV-7.1");
+        var postCommitVersion = _store.Row(submission).RowVersion;
+        var transactions = _store.TransactionCalls;
+
+        var repeat = await service.RenumberSubmissionAsync(submission, postCommitVersion, FirmB, Number, c => ApplyFor(c, Guid.NewGuid()));
+
+        repeat.Should().Be(new RenumberResult(RenumberOutcome.Refused, null, null, TrackingNumberReasons.NotUnnumbered));
+        _store.TransactionCalls.Should().Be(transactions, "nothing is sent");
+        var row = _store.Row(submission);
+        row.GetAttributeValue<EntityReference>("sprk_vendororg").Id.Should().Be(FirmA, "the firm it was renumbered into stands");
+        row.GetAttributeValue<string>("sprk_trackingnumber").Should().Be("INV-7.1");
+        _store.Applied.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "095d-1a (F4): a submission that is not a no-firm row in the none scope is refused NotUnnumbered, reading no number and sending nothing")]
+    [InlineData("another firm's row")]
+    [InlineData("this firm, filed in the none scope")]
+    [InlineData("no firm, another firm's scope")]
+    [InlineData("this firm and scope, no sequence held")]
+    public async Task Renumber_ASubmissionThatIsNotUnnumbered_IsRefused(string state)
+    {
+        InPhase(TrackingScopePhase.P2ScopeKeyActive);
+        var submission = state switch
+        {
+            "another firm's row" => _store.AddScoped(FirmB, Number, 1),
+            "this firm, filed in the none scope" => _store.AddWithScope(FirmA, "none", Number, 1),
+            "no firm, another firm's scope" => _store.AddWithScope(null, FirmB.ToString("D"), Number, 1),
+            _ => _store.WithoutColumn(_store.AddScoped(FirmA, Number, 1), "sprk_submissionsequence"),
+        };
+        var before = _store.Row(submission);
+        var built = false;
+
+        var result = await CreateService().RenumberSubmissionAsync(submission, "1", FirmA, Number, c =>
+        {
+            built = true;
+            return ApplyFor(c, Guid.NewGuid());
+        });
+
+        result.Should().Be(new RenumberResult(RenumberOutcome.Refused, null, null, TrackingNumberReasons.NotUnnumbered));
+        built.Should().BeFalse();
+        _store.TransactionCalls.Should().Be(0);
+        _store.SequenceReads.Should().Be(0);
+        var after = _store.Row(submission);
+        after.Attributes.Should().BeEquivalentTo(before.Attributes, "the row is as it was");
+        after.RowVersion.Should().Be(before.RowVersion);
+    }
+
+    [Theory(DisplayName = "095d-1a (F4): a firm invoice number that is not the submission's own throws ArgumentException before any number is read or anything is sent")]
+    [InlineData("INV-8")]
+    [InlineData("inv-7")]
+    public async Task Renumber_AFirmInvoiceNumberThatIsNotTheRows_Throws(string firmInvoiceNumber)
+    {
+        var submission = HeldNoFirmSubmission();
+        var before = _store.Row(submission);
+
+        var act = () => CreateService().RenumberSubmissionAsync(submission, "1", FirmA, firmInvoiceNumber, c => ApplyFor(c, Guid.NewGuid()));
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        _store.TransactionCalls.Should().Be(0);
+        _store.SequenceReads.Should().Be(0);
+        _store.Row(submission).Attributes.Should().BeEquivalentTo(before.Attributes);
+    }
+
+    // ── Review K1, K2: which key faults are a race ───────────────────────────────────────────────────────────
+
+    [Theory(DisplayName = "095d-1a (K1, K2): a key duplicate is a lost race only on the submission update (0x80060892 at index 0 or none, 0x80040237 at index 0); anywhere else it propagates")]
+    [InlineData(unchecked((int)0x80060892), null, true)]
+    [InlineData(unchecked((int)0x80040237), 0, true)]
+    [InlineData(unchecked((int)0x80040237), 1, false)]
+    [InlineData(unchecked((int)0x80040237), null, false)]
+    public async Task Renumber_AKeyDuplicate_IsARaceOnlyOnTheSubmissionUpdate(int code, int? faultedIndex, bool expectRace)
+    {
+        var submission = HeldNoFirmSubmission();
+        _store.BeforeTransaction = (call, requests) =>
+        {
+            if (call == 1)
+            {
+                throw SubmissionStore.TransactionFault(requests, faultedIndex, code, "Cannot insert duplicate key.");
+            }
+        };
+        var candidates = new List<RenumberCandidate>();
+        var act = () => CreateService().RenumberSubmissionAsync(submission, "1", FirmA, Number, c =>
+        {
+            candidates.Add(c);
+            return ApplyFor(c, Guid.NewGuid());
+        });
+
+        if (expectRace)
+        {
+            var result = await act();
+
+            result.Outcome.Should().Be(RenumberOutcome.Renumbered);
+            candidates.Select(c => c.TrackingNumber).Should().Equal("INV-7.1", "INV-7.2");
+            _store.TransactionCalls.Should().Be(2, "the refused transaction is retried once, with the next n");
+            _store.Applied.Should().ContainSingle("the refused attempt applied nothing");
+        }
+        else
+        {
+            (await act.Should().ThrowAsync<DataverseTransactionException>()).Which.FailedRequestIndex.Should().Be(faultedIndex);
+            candidates.Should().ContainSingle("no retry");
+            _store.TransactionCalls.Should().Be(1);
+            _store.Applied.Should().BeEmpty();
+            _store.Row(submission).GetAttributeValue<string>("sprk_trackingscope").Should().Be("none");
+        }
+    }
+
+    // ── Review K3: the caller's requests are an allowlist ────────────────────────────────────────────────────
+
+    private static OrganizationRequest CallerRequest(string kind, Guid id) => kind switch
+    {
+        "update, another table" => new UpdateRequest { Target = new Entity("sprk_invoice", id) { ["sprk_name"] = "x" } },
+        "create, another table" => new CreateRequest { Target = new Entity("sprk_invoiceline", id) { ["sprk_name"] = "x" } },
+        "create, the submission table" => new CreateRequest { Target = new Entity("sprk_invoicesubmission", id) { ["sprk_name"] = "x" } },
+        "update, no target" => new UpdateRequest(),
+        "delete" => new DeleteRequest { Target = new EntityReference("sprk_invoiceline", id) },
+        "associate" => new AssociateRequest
+        {
+            Target = new EntityReference("sprk_invoice", id),
+            Relationship = new Relationship("sprk_invoice_sprk_invoiceline"),
+            RelatedEntities = new EntityReferenceCollection { new EntityReference("sprk_invoiceline", Guid.NewGuid()) },
+        },
+        "set state of the submission" => new Microsoft.Crm.Sdk.Messages.SetStateRequest
+        {
+            EntityMoniker = new EntityReference("sprk_invoicesubmission", id),
+            State = new OptionSetValue(1),
+            Status = new OptionSetValue(2),
+        },
+        "unknown request" => new OrganizationRequest("sprk_Anything"),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+
+    [Theory(DisplayName = "095d-1a (K3): only an UpdateRequest or CreateRequest on another table is accepted; any other request type, or a create of a submission, is refused before anything is sent")]
+    [InlineData("update, another table", true)]
+    [InlineData("create, another table", true)]
+    [InlineData("create, the submission table", false)]
+    [InlineData("update, no target", false)]
+    [InlineData("delete", false)]
+    [InlineData("associate", false)]
+    [InlineData("set state of the submission", false)]
+    [InlineData("unknown request", false)]
+    public async Task Renumber_TheCallersRequests_AreAnAllowlist(string kind, bool accepted)
+    {
+        var submission = HeldNoFirmSubmission();
+        var request = CallerRequest(kind, Guid.NewGuid());
+
+        var act = () => CreateService().RenumberSubmissionAsync(submission, "1", FirmA, Number, _ => new RenumberApply(null, [request]));
+
+        if (accepted)
+        {
+            (await act()).Outcome.Should().Be(RenumberOutcome.Renumbered);
+            _store.Applied.Should().ContainSingle().Which.Should().BeSameAs(request);
+        }
+        else
+        {
+            await act.Should().ThrowAsync<ArgumentException>();
+            _store.TransactionCalls.Should().Be(0);
+            _store.Row(submission).GetAttributeValue<string>("sprk_trackingscope").Should().Be("none");
+        }
+    }
+
+    [Fact(DisplayName = "095d-1a (K3): a null request in the apply is refused before anything is sent")]
+    public async Task Renumber_ANullRequest_IsRefused()
+    {
+        var submission = HeldNoFirmSubmission();
+
+        var act = () => CreateService().RenumberSubmissionAsync(submission, "1", FirmA, Number, _ => new RenumberApply(null, [null!]));
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        _store.TransactionCalls.Should().Be(0);
     }
 }

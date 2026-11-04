@@ -112,12 +112,23 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
 
     private static readonly string[] ExistingRowColumns = [FirmColumn, FirmInvoiceNumberColumn, SequenceColumn, TrackingNumberColumn];
 
+    /// <summary>Task 095d-1a (F4): the platform's row version column, read the way the persister reads it (<c>InvoiceSubmissionPersister.SubmissionColumns</c>).</summary>
+    private const string VersionNumberColumn = "versionnumber";
+
+    /// <summary>Task 095d-1a (F4): what the renumber's precondition read needs: the row version, the scope and the firm, the sequence and the
+    /// numbers the row holds. Read only at P2, where the scope column exists.</summary>
+    private static readonly string[] RenumberRowColumns =
+        [VersionNumberColumn, ScopeColumn, FirmColumn, FirmInvoiceNumberColumn, SequenceColumn, TrackingNumberColumn];
+
     /// <summary>Task 095c: "Attribute 'x' cannot be NULL", <c>0x80040200</c>: a SystemRequired column was missing from the write (measured in
     /// dev, notes/022 and notes/027). Dataverse refuses the write whole.</summary>
     private const int RequiredColumnNullFault = unchecked((int)0x80040200);
 
     /// <summary>The alternate-key duplicate, <c>0x80060892</c> (the code <see cref="DataverseServiceClientImpl.IsAlternateKeyDuplicate"/> types on).</summary>
     private const int AlternateKeyDuplicateFault = unchecked((int)0x80060892);
+
+    /// <summary>"Cannot insert duplicate key", <c>0x80040237</c>: a unique index refused the write (see <see cref="IsPrimaryKeyDuplicate"/>).</summary>
+    private const int PrimaryKeyDuplicateFault = unchecked((int)0x80040237);
 
     private readonly IGenericEntityService _entities;
     private readonly Func<CancellationToken, Task<TrackingScopePhase?>> _readPhase;
@@ -289,9 +300,18 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     /// Task 095d-1a. The loop is <see cref="CreateSubmissionAsync"/>'s: re-read the highest sequence in the scope, write, and treat only the
     /// alternate-key duplicate as a lost race (Dataverse refuses the transaction whole, so a retry cannot double-write). It differs in three
     /// ways. The write is one transaction (the submission update first, then the caller's requests), so a lost race rolls back the caller's
-    /// apply with it. A row-version mismatch is checked first and answered as <see cref="RenumberOutcome.Conflict"/>: the submission's version is
-    /// the idempotency guard of a renumber (a repeat at the old version cannot apply twice), the way the submission id is at create. And it
-    /// runs only at P2, where the target scope's key exists.
+    /// apply with it. A row-version mismatch is <see cref="RenumberOutcome.Conflict"/>, never a retry. And it runs only at P2, where the target
+    /// scope's key exists.
+    /// <para><b>Precondition read (review F4).</b> The submission's version is the idempotency guard of a renumber, the way its id is at create, but
+    /// a version alone cannot tell a repeat that must finish from a request that must refuse: a caller that re-read after a <c>Conflict</c> holds the
+    /// post-commit version, at which the conditional update would succeed and allocate a second number. So before the loop the row is read by id
+    /// and its state decided (<see cref="DecideFromStateAsync"/>): a missing row or a stale version is <see cref="RenumberOutcome.Conflict"/>; a
+    /// firm invoice number that is not the row's is an <see cref="ArgumentException"/>; a row already in this firm's scope holding a sequence is
+    /// <see cref="RenumberOutcome.AlreadyRenumbered"/> (its held number, nothing sent, no second number); a row that is not a no-firm row in the
+    /// <c>none</c> scope is refused (<see cref="TrackingNumberReasons.NotUnnumbered"/>). The update's <c>IfRowVersionMatches</c> then pins the
+    /// state that was read at write time, so a change between the read and the write is the transaction's <c>Conflict</c>.</para>
+    /// <para><b>Lost race.</b> A key fault on the submission update (index 0, or no index) is a race, as is <c>0x80040237</c> at index 0: on that
+    /// update the only unique indexes are the two keys (<see cref="IsLostRaceOnTheSubmissionUpdate"/>). Both are refused whole.</para>
     /// </remarks>
     public async Task<RenumberResult> RenumberSubmissionAsync(
         Guid submissionId,
@@ -327,6 +347,11 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
                 "{Code}: submission={SubmissionId} phase={Phase} - a submission is renumbered only once the scope key is Active; nothing written",
                 TrackingNumberReasons.ScopeKeyInactive, submissionId, phase);
             return RenumberResult.Refused(TrackingNumberReasons.ScopeKeyInactive);
+        }
+
+        if (await DecideFromStateAsync(submissionId, rowVersion, firmId, number, ct).ConfigureAwait(false) is { } decided)
+        {
+            return decided;
         }
 
         var floor = 0;
@@ -370,7 +395,7 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
                     submissionId, (ex as DataverseTransactionException)?.FailedRequestIndex, requests.Count);
                 return RenumberResult.Conflict();
             }
-            catch (DataverseTransactionException ex) when (!ex.OutcomeUnknown && ex.FailedRequestIndex is null or 0 && IsKeyDuplicate(ex))
+            catch (DataverseTransactionException ex) when (IsLostRaceOnTheSubmissionUpdate(ex))
             {
                 // The scope key refused the submission update, so the whole transaction rolled back. A key fault on a caller request is not
                 // a race for this number and propagates.
@@ -415,6 +440,87 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     }
 
     /// <summary>
+    /// Task 095d-1a (review F4): reads the submission by id before the loop and decides from its state, or null to go on and renumber. The
+    /// outcomes are in the order they are checked, and each writes nothing:
+    /// <list type="number">
+    /// <item>No such row, or a row version that is not <paramref name="rowVersion"/>: <see cref="RenumberOutcome.Conflict"/> (the row changed
+    /// since the caller read it; the caller re-reads).</item>
+    /// <item>A firm invoice number that is not the row's: <see cref="ArgumentException"/> (the caller's read was of another row's number, a bug;
+    /// compared after trimming, exactly: the number is the row's own, read with its version).</item>
+    /// <item>The row is already in <paramref name="firmId"/>'s scope, with that firm, and holds a sequence: <see cref="RenumberOutcome.AlreadyRenumbered"/>
+    /// with the held number. This is a repeat after a commit whose reply was lost, at the version the commit left.</item>
+    /// <item>Anything but a no-firm row in the <c>none</c> scope (another firm's row, this firm's row in some other scope, a row in another
+    /// firm's scope): <see cref="RenumberOutcome.Refused"/> with <see cref="TrackingNumberReasons.NotUnnumbered"/>. A renumber moves a
+    /// no-firm submission into a firm's scope and nothing else: it never moves a firm's submission to another firm.</item>
+    /// </list>
+    /// </summary>
+    private async Task<RenumberResult?> DecideFromStateAsync(
+        Guid submissionId, string rowVersion, Guid firmId, string firmInvoiceNumber, CancellationToken ct)
+    {
+        var existing = await FindExistingAsync(submissionId, RenumberRowColumns, ct).ConfigureAwait(false);
+        if (existing is null)
+        {
+            _logger.LogWarning("Submission {SubmissionId}: renumber refused, the row no longer exists; nothing written", submissionId);
+            return RenumberResult.Conflict();
+        }
+
+        var heldVersion = existing.GetAttributeValue<long?>(VersionNumberColumn)?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            ?? existing.RowVersion
+            ?? throw new InvalidOperationException($"Submission {submissionId} was read without a row version, so it was not renumbered safely.");
+        if (!string.Equals(heldVersion, rowVersion.Trim(), StringComparison.Ordinal))
+        {
+            _logger.LogWarning("Submission {SubmissionId}: renumber refused, the row changed since the caller read it; nothing written", submissionId);
+            return RenumberResult.Conflict();
+        }
+
+        if (!string.Equals(existing.GetAttributeValue<string>(FirmInvoiceNumberColumn)?.Trim(), firmInvoiceNumber, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"The firm invoice number is not the one submission {submissionId} holds, so it was not renumbered.", nameof(firmInvoiceNumber));
+        }
+
+        var firm = existing.GetAttributeValue<EntityReference>(FirmColumn)?.Id;
+        var scope = existing.GetAttributeValue<string>(ScopeColumn);
+        if (firm == firmId && string.Equals(scope, ScopeOf(firmId), StringComparison.OrdinalIgnoreCase)
+            && existing.GetAttributeValue<int?>(SequenceColumn) is { } heldSequence)
+        {
+            var heldNumber = existing.GetAttributeValue<string>(TrackingNumberColumn) ?? Format(firmInvoiceNumber, heldSequence);
+            _logger.LogInformation(
+                "Submission {SubmissionId} is already renumbered into its firm's scope with tracking sequence {Sequence}; nothing written", submissionId, heldSequence);
+            _logger.LogDebug("Submission {SubmissionId} tracking number {TrackingNumber}", submissionId, heldNumber);
+            return RenumberResult.AlreadyRenumbered(heldNumber, heldSequence);
+        }
+
+        if (firm is not null || !string.Equals(scope, NoFirmScope, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "{Code}: submission={SubmissionId} - it is not a no-firm submission in the none scope; nothing written",
+                TrackingNumberReasons.NotUnnumbered, submissionId);
+            return RenumberResult.Refused(TrackingNumberReasons.NotUnnumbered);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Task 095d-1a (review K1, K2): whether <paramref name="ex"/> says the scope key (or the firm key, until it is retired) refused the
+    /// submission update, so the whole transaction rolled back and the number was taken: a retry cannot double-write.
+    /// <list type="bullet">
+    /// <item>The alternate-key duplicate (<c>0x80060892</c>) at index 0 or with no index (<b>known limit K1:</b> a fault with no index may be a
+    /// concurrent request's, GitHub #971 - the retry is then a wasted attempt that skips a number, never a double write, because the retry's
+    /// update is conditioned on the row version, so a first transaction that did commit makes it a Conflict; 045's create shares the exposure).</item>
+    /// <item><c>0x80040237</c> ("Cannot insert duplicate key") at index 0: on a submission update the primary key cannot be inserted twice, so
+    /// the only unique indexes left are the two keys, and a platform that words their violation this way is a lost race too. At another
+    /// index, or with none, it propagates: only the submission update is known to fault on these keys.</item>
+    /// </list>
+    /// An unknown outcome (no fault at all) is never a race.
+    /// </summary>
+    private static bool IsLostRaceOnTheSubmissionUpdate(DataverseTransactionException ex) =>
+        !ex.OutcomeUnknown
+        && ((ex.FailedRequestIndex is null or 0 && IsKeyDuplicate(ex))
+            || (ex.FailedRequestIndex == 0 && HasFaultCodeInChain(ex, PrimaryKeyDuplicateFault)));
+
+    /// <summary>
     /// Task 095d-1a: the renumber's submission update. The firm, its scope, the sequence and the number, at the caller's row version; the firm
     /// invoice number is not written (it does not change).
     /// </summary>
@@ -438,21 +544,31 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     }
 
     /// <summary>
-    /// Task 095d-1a: the caller's requests never write a submission. Its own columns go in <see cref="RenumberApply.SubmissionFields"/> (a second
-    /// update of the row would fail its row version), and this service is the only writer of any submission's number.
+    /// Task 095d-1a (review K3): the caller's requests are an allowlist, not a denylist: an <see cref="UpdateRequest"/> or a
+    /// <see cref="CreateRequest"/> whose target table is not <c>sprk_invoicesubmission</c>. Any other request type (an association, a state
+    /// change, a delete, an upsert) could reach a submission, or lose the row version, without naming the table in a place a denylist reads,
+    /// so it is refused with the rest. The submission's own columns go in <see cref="RenumberApply.SubmissionFields"/> (a second update of
+    /// the row would fail its row version), and this service is the only writer of any submission's number.
     /// </summary>
     private static void RejectSubmissionTargets(IReadOnlyList<OrganizationRequest> requests)
     {
         ArgumentNullException.ThrowIfNull(requests);
         for (var index = 0; index < requests.Count; index++)
         {
-            var target = requests[index]?.Parameters.TryGetValue("Target", out var value) == true ? value : null;
-            var table = target switch
+            var table = requests[index] switch
             {
-                Entity entity => entity.LogicalName,
-                EntityReference reference => reference.LogicalName,
-                _ => null,
+                UpdateRequest update => update.Target?.LogicalName,
+                CreateRequest create => create.Target?.LogicalName,
+                null => throw new ArgumentException($"The renumber's request at index {index} is null.", nameof(requests)),
+                var other => throw new ArgumentException(
+                    $"The renumber's request at index {index} is a {other.GetType().Name}; only an UpdateRequest or a CreateRequest on another table is accepted.",
+                    nameof(requests)),
             };
+            if (string.IsNullOrWhiteSpace(table))
+            {
+                throw new ArgumentException($"The renumber's request at index {index} names no target table.", nameof(requests));
+            }
+
             if (string.Equals(table, SubmissionEntity, StringComparison.OrdinalIgnoreCase))
             {
                 throw new ArgumentException(
@@ -467,7 +583,15 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     /// fault can be the inner fault, which <see cref="DataverseServiceClientImpl.IsAlternateKeyDuplicate"/> does not walk, so the fault chain is
     /// walked here too.
     /// </summary>
-    private static bool IsKeyDuplicate(Exception ex)
+    private static bool IsKeyDuplicate(Exception ex) =>
+        HasFaultCodeInChain(ex, AlternateKeyDuplicateFault) || DataverseServiceClientImpl.IsAlternateKeyDuplicate(ex);
+
+    /// <summary>
+    /// Task 095d-1a: true when <paramref name="ex"/> or an inner exception is an <see cref="OrganizationServiceFault"/> whose own code, or whose
+    /// inner fault's code at any depth, is exactly <paramref name="code"/>. Unlike <see cref="HasFaultCode"/> it walks the inner faults: in an
+    /// <c>ExecuteTransactionFault</c> the faulted request's own code can be the inner fault.
+    /// </summary>
+    private static bool HasFaultCodeInChain(Exception ex, int code)
     {
         for (var e = ex; e is not null; e = e.InnerException)
         {
@@ -475,7 +599,7 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
             {
                 for (var fault = faultException.Detail; fault is not null; fault = fault.InnerFault)
                 {
-                    if (fault.ErrorCode == AlternateKeyDuplicateFault)
+                    if (fault.ErrorCode == code)
                     {
                         return true;
                     }
@@ -483,7 +607,7 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
             }
         }
 
-        return DataverseServiceClientImpl.IsAlternateKeyDuplicate(ex);
+        return false;
     }
 
     /// <summary>
@@ -542,7 +666,7 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     /// or not the tracking number is also taken (the primary key is checked before the alternate key), and not matched by
     /// <see cref="DataverseServiceClientImpl.IsAlternateKeyDuplicate"/>. The typed fault code only, as an exact match.
     /// </summary>
-    private static bool IsPrimaryKeyDuplicate(Exception ex) => HasFaultCode(ex, unchecked((int)0x80040237));
+    private static bool IsPrimaryKeyDuplicate(Exception ex) => HasFaultCode(ex, PrimaryKeyDuplicateFault);
 
     /// <summary>True when <paramref name="ex"/> or an inner exception is an <see cref="OrganizationServiceFault"/> with exactly this code.</summary>
     private static bool HasFaultCode(Exception ex, int code)
@@ -633,11 +757,14 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     }
 
     /// <summary>The submission with this id as it stands, or null. A query (not a retrieve), so "no such row" is an empty answer and not a fault.</summary>
-    private async Task<Entity?> FindExistingAsync(Guid submissionId, CancellationToken ct)
+    private async Task<Entity?> FindExistingAsync(Guid submissionId, CancellationToken ct) =>
+        await FindExistingAsync(submissionId, ExistingRowColumns, ct).ConfigureAwait(false);
+
+    private async Task<Entity?> FindExistingAsync(Guid submissionId, string[] columns, CancellationToken ct)
     {
         var query = new QueryExpression(SubmissionEntity)
         {
-            ColumnSet = new ColumnSet(ExistingRowColumns),
+            ColumnSet = new ColumnSet(columns),
             TopCount = 1,
         };
         query.Criteria.AddCondition(SubmissionIdColumn, ConditionOperator.Equal, submissionId);
