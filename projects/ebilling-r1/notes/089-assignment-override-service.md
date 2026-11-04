@@ -490,3 +490,13 @@ uac-r2 approved 089d (43a5b37051) with two binding notes. Both are to be done in
    - For a proof on dev earlier, a test child unit under BU1 is needed, which is a live change and needs the owner's go.
 
 **Who adds members:** this is an owner question. The proposed default is that an operator adds each child-unit billing admin following guide Phase 7a, and `-Verify` catches mistakes.
+
+### 089d: owner answers and an alternative (2026-11-04)
+
+- **Members (owner):** Billing Admin is a security role explicitly assigned to a limited set of users. An operator adds billing admins by hand; the default stands.
+- **Owner's question:** why use a team rather than the role assignment? On dev, `OrgDBOrgSettings.EnableOwnershipAcrossBusinessUnits` is true, so a role can be assigned to a user in another business unit's context.
+- **Option R (no team):** assign "Billing Rule Reader" (Read at Deep on `sprk_policy`, `isinherited`=0) directly to each child-unit billing admin, in the customer top unit's context.
+  - The isolation argument is the same as for the team.
+  - R depends on two things the team does not: the org setting must be on in every customer environment, and the uac-r2 census must model role assignments made in another unit's context.
+  - Do not add the Read to the existing Billing Admin role. Re-homing that role's assignment would move all its other privileges as well.
+- **Status:** sent to uac-r2. The 089d fix round (adversarial pass 1: the `isinherited` pin, the live-proof gate in the guide, removing the operator straight after the team is created, the file-pattern wording) is held until uac-r2 chooses between the team and R.
