@@ -276,6 +276,11 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             case TrackingNumberOutcome.AlreadyCreated:
                 _logger.LogInformation("From-email submission {SubmissionId} already existed (a concurrent request of the same attempt)", submissionId);
                 return FromEmailSubmitResult.AlreadyCreated(filed);
+            case TrackingNumberOutcome.Refused when allocation.Reason == TrackingNumberReasons.FirmRequired:
+                // Task 095c-2: defence in depth. The route refuses a no-firm request before anything is saved while the scope key is not
+                // Active; the allocator holds the same rule on its own (nothing written), answered with the route's own 400.
+                _logger.LogWarning("From-email submission {SubmissionId}: the allocator refused a submission with no firm ({Reason})", submissionId, allocation.Reason);
+                return Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.", filed);
             case TrackingNumberOutcome.Refused:
                 _logger.LogWarning("From-email submission {SubmissionId}: no tracking number could be allocated ({Reason})", submissionId, allocation.Reason);
                 return Refused(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.Unavailable,

@@ -103,4 +103,13 @@ public interface ITrackingNumberAllocator
         string firmInvoiceNumber,
         IReadOnlyDictionary<string, object>? fields = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Task 095c-2: whether <see cref="CreateSubmissionAsync"/> would number a submission with no firm now, that is, whether this environment's
+    /// scope key is Active (<see cref="TrackingScopePhase.P2ScopeKeyActive"/>). The intake asks it before it saves or files anything, so a
+    /// request with no firm in P0 or P1 is refused with nothing written (notes/095c-from-email-firm-optional.md section 8.2). The same
+    /// process-wide, forward-only phase cache the create reads; never throws for an unreadable phase (that reads as the cached one, and P0 is
+    /// "no"). The create still refuses on its own (<see cref="TrackingNumberReasons.FirmRequired"/>), so this answer is never what guards a number.
+    /// </summary>
+    Task<bool> NumbersSubmissionsWithoutFirmAsync(CancellationToken ct = default);
 }

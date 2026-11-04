@@ -133,7 +133,13 @@ internal sealed record FromEmailSubmissionInput
 
     public required EmailMetadata Email { get; init; }
     public required IReadOnlyList<FromEmailMark> Marks { get; init; }
-    public required Guid FirmId { get; init; }
+
+    /// <summary>
+    /// The firm, or null for none (task 095c-2, owner 2026-11-03): mode New may be sent without a firm, and a Correction of a no-firm invoice
+    /// is sent without one. Null is accepted only once the tracking-scope key is Active (P2); before that it is 400 firm_invalid "A firm is
+    /// required.". A firm that is sent is checked as before (active, linked). The empty id is never "no firm" (400 firm_invalid).
+    /// </summary>
+    public required Guid? FirmId { get; init; }
     public string? FirmInvoiceNumber { get; init; }
     public string? PoNumber { get; init; }
     public required string Mode { get; init; }
@@ -330,12 +336,14 @@ internal static class FromEmailSubmissionKey
     /// <summary>
     /// The value the <c>X-Idempotency-Key</c> response cache is bound to (the filter hashes it): K plus the firm and the trimmed firm invoice
     /// number, so a header reused on a request with another firm or number is never answered with the first request's cached 202; it
-    /// reaches the handler, which answers it from K (contract section 5).
+    /// reaches the handler, which answers it from K (contract section 5). Task 095c-2: no firm (null or absent) binds as an empty value, so
+    /// a replay with <c>firmId</c> null or absent is the same request; K is unchanged.
     /// </summary>
     public static string CacheBinding(FromEmailSubmissionInput input) =>
-        Of(input) + "|" + input.FirmId.ToString("D") + "|" + (input.FirmInvoiceNumber?.Trim() ?? string.Empty);
+        Of(input) + "|" + (input.FirmId is { } firm ? firm.ToString("D") : string.Empty) + "|" + (input.FirmInvoiceNumber?.Trim() ?? string.Empty);
 
-    /// <summary>Whether an attempt row recorded exactly this firm and trimmed firm invoice number (the details K does not carry).</summary>
+    /// <summary>Whether an attempt row recorded exactly this firm and trimmed firm invoice number (the details K does not carry). Task 095c-2:
+    /// a row with no firm and a request with no firm have the same firm detail; a firm on one side only is another detail.</summary>
     public static bool SameFirmDetails(Guid? rowFirm, string? rowNumber, FromEmailSubmissionInput input) =>
         rowFirm == input.FirmId
         && string.Equals(rowNumber?.Trim(), input.FirmInvoiceNumber?.Trim(), StringComparison.Ordinal);
@@ -370,7 +378,7 @@ public sealed record CoreRecordFirm(Guid FirmId, string Name);
 
 /// <summary>The 200 body of <c>GET /api/finance/invoices/{invoiceId}/correction-prefill</c> (ebilling-r1 task 097e; contract section 10).</summary>
 /// <param name="InvoiceId">The invoice asked about.</param>
-/// <param name="Firm">The invoice's firm.</param>
+/// <param name="Firm">The invoice's firm; null when it has none (task 095c-2, contract section 10: the property is sent as <c>null</c>).</param>
 /// <param name="CoreRecord">The invoice's one core record.</param>
 /// <param name="InvoiceStatus">The <c>InvoiceLifecycleStatus</c> name; null for a status this lifecycle does not know.</param>
 /// <param name="TrackingNumber">The invoice's own submission's tracking number; null when it has none.</param>
@@ -380,7 +388,7 @@ public sealed record CoreRecordFirm(Guid FirmId, string Name);
 /// <param name="ReplacedBy">When the invoice is Superseded: its direct replacement, if the caller can read it; else null.</param>
 public sealed record CorrectionPrefillResponse(
     Guid InvoiceId,
-    CorrectionPrefillFirm Firm,
+    CorrectionPrefillFirm? Firm,
     CorrectionPrefillCoreRecord CoreRecord,
     string? InvoiceStatus,
     string? TrackingNumber,

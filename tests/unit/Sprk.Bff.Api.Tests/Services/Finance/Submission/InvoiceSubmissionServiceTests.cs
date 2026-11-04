@@ -76,7 +76,7 @@ public sealed class InvoiceSubmissionServiceTests
         public StoredFileRig Files { get; set; } = new();
 
         public readonly List<(string Entity, Guid Id)> Deleted = new();
-        public readonly List<(Guid SubmissionId, Guid FirmId, string Number, IReadOnlyDictionary<string, object>? Fields)> Allocations = new();
+        public readonly List<(Guid SubmissionId, Guid? FirmId, string Number, IReadOnlyDictionary<string, object>? Fields)> Allocations = new();
         public readonly List<JobContract> JobsSent = new();
         public readonly List<RecordOwnershipContext> OwnerContexts = new();
         public readonly List<CancellationToken> WriteTokens = new();
@@ -340,7 +340,7 @@ public sealed class InvoiceSubmissionServiceTests
                     It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Guid id, Guid? firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken ct) =>
                 {
-                    Allocations.Add((id, firm!.Value, number, fields));
+                    Allocations.Add((id, firm, number, fields));
                     WriteTokens.Add(ct);
                     if (AllocatorFailure is { } failure)
                     {
@@ -705,6 +705,29 @@ public sealed class InvoiceSubmissionServiceTests
 
         outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == 400 && o.ErrorCode == InvoiceSubmissionErrors.FirmInvalid);
         h.Writes.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "095c-2 (must fire): the SPA upload, the internal upload and the existing-document entry (from-document, confirm) refuse no firm as 400 firm_invalid, reading and writing nothing")]
+    [InlineData("spa")]
+    [InlineData("internal")]
+    [InlineData("existing-document")]
+    public async Task No_firm_outside_the_from_email_entry_is_400_firm_invalid(string entry)
+    {
+        var h = new Harness();
+        var service = h.Build();
+
+        var outcome = entry switch
+        {
+            "spa" => await service.SubmitAsync(Spa() with { FirmId = null }, CancellationToken.None),
+            "internal" => await service.SubmitAsync(Internal() with { FirmId = null }, CancellationToken.None),
+            _ => await service.SubmitExistingDocumentAsync(
+                Internal() with { FirmId = null, File = null, ExistingDocumentId = Guid.NewGuid() }, CancellationToken.None),
+        };
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o =>
+            o.StatusCode == 400 && o.ErrorCode == InvoiceSubmissionErrors.FirmInvalid && o.Detail == "A firm is required.");
+        h.Writes.Should().Be(0);
+        h.Entities.Invocations.Should().BeEmpty("the field check refuses before anything is read");
     }
 
     [Fact]

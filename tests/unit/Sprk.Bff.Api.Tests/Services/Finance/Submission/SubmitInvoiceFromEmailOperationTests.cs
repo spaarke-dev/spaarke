@@ -583,6 +583,31 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         H.JobsSent.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "095c-2: a submission with no firm is decided with no firm read or linked, and created with no firm")]
+    public async Task Submit_NoFirm_IsDecidedWithoutAFirm_AndCreatedWithNoFirm()
+    {
+        var result = await Build().SubmitAsync(Input() with { FirmId = null }, CancellationToken.None);
+
+        result.Outcome.Should().Be(FromEmailSubmitOutcome.Received);
+        H.Allocations.Should().ContainSingle().Which.FirmId.Should().BeNull("no firm is the allocator's null, never the empty id");
+        H.Entities.Verify(e => e.RetrieveAsync("sprk_organization", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never(), "there is no firm to check");
+        H.OwnerContexts.Should().ContainSingle("the record and its owner are decided as for any submission");
+    }
+
+    [Fact(DisplayName = "095c-2 (defence in depth): the allocator's firm_required (no scope key yet) is the route's 400 firm_invalid, with no job")]
+    public async Task Submit_TheAllocatorRefusesNoFirm_Is400FirmInvalid()
+    {
+        H.Allocation = TrackingNumberResult.Refused(TrackingNumberReasons.FirmRequired);
+
+        var result = await Build().SubmitAsync(Input() with { FirmId = null }, CancellationToken.None);
+
+        (result.Outcome, result.Status, result.ErrorCode).Should().Be(
+            (FromEmailSubmitOutcome.Refused, StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid));
+        result.Detail.Should().StartWith("A firm is required.");
+        H.JobsSent.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Submit_OtherBytesAreStagedUnderThisAttempt_Is409DocumentAlreadySubmitted_NoRow()
     {

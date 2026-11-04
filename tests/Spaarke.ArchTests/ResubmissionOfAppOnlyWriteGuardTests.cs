@@ -254,6 +254,8 @@ internal static class ResubmissionOfWriteControlFixtures
             await user.PostAsync("sprk_invoicesubmissions", "{}", ct);
             return TrackingNumberResult.Refused("control");
         }
+
+        public Task<bool> NumbersSubmissionsWithoutFirmAsync(CancellationToken ct = default) => Task.FromResult(false);
     }
 
     /// <summary>A table and no client: the shape of <c>SecureChildLineage</c>. Also names the column (C1's must-fire).</summary>
