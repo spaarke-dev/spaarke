@@ -33,6 +33,10 @@
 | 042a | [#2483 window characterization (tests only; lands alone)](042a-stamp-before-owner-characterization.poml) | FR-41 | sonnet / high | STANDARD | none | none | ✅ (#2521) |
 | 042b | [Derive the stamp before the owner (#2483, DI-009)](042b-stamp-before-owner-fix.poml) | FR-41 | opus / high | FULL | none | 042a, 019 | ✅ (#2562, 0d4aa87ee0) |
 | 042c | [Signal / DR core record: caller AppendTo + core first in the owner question (#2561, DI-019)](042c-core-record-owner-and-appendto.poml) | FR-41 | opus / high | FULL | none | 042b | 🔄 code on task/fm-042c 37215df6ee; verification running; AC2 amended (owner + UAC-r2) |
+| 043 | [A Document is a field-mapping source (owner 2026-11-04)](043-document-as-mapping-source.poml) | FR-03, FR-04, FR-19 | opus / high | FULL | none | 031 | 🔲 [open] |
+| 044 | [Core pair written whole, only by the server and the ledger writers: field security (owner 2026-11-04)](044-core-pair-server-only-field-security.poml) | FR-41 | opus / high | FULL | none | 042c; dev import gated on the owner's go in UAC-r2's session | 🔲 [open] |
+| 045 | [Regarding pair always complete and propagated: inventory + design first (owner 2026-11-04)](045-regarding-pair-complete-and-propagated.poml) | FR-23, FR-41 | opus / high | FULL | none | 042c, 044; part B after owner approval | 🔲 [open] |
+| 046 | [Feature permission matrix, proposed role changes (UAC-r2), role guard (owner 2026-11-04)](046-feature-permission-matrix-and-role-guard.poml) | FR-08, FR-26 | opus / high | FULL | none | 031, 042c | 🔲 [open] |
 
 ## Phase 3 — W3 Product creators onto the service
 
@@ -111,6 +115,7 @@
 | W2 core (sequential) | 013 → 014 → 015 → 016 → {017, 018} → 019 | 011, 012 (+002, 003 for 014) | One core file; no parallelism |
 | W3-server | 030, 031, 032, 033, 034 | 019 | Separate callers; run `/conflict-check` for ontology/UAC files |
 | W2 follow-ups | 041; 042a → 042b → 042c | 019 (+039 for 041) | 041 and 042b both edit `RecordCreationService*.cs`: not parallel; whichever lands second rebases and reconciles design §15.5. 042a (tests only) may run beside 041 and lands alone |
+| W2 follow-ups (2026-11-04) | 043; 042c → 044 → 045; 046 | 031 (043, 046), 042c (044, 046) | 044 and 045 both edit `CallerWriteAuthorization.cs`: sequential. 046 writes no `src/` file and may run beside any of them. 045 stops after its inventory for the owner |
 | W3-wizards (sequential) | 020 → 021 → … → 029 | 019, 041 | FR-16: one wizard at a time, live-verified. 041 first: W3 cannot verify "the wizard sends no index" against a server that still copies the BU value |
 | W4 | 040 | 001, 005, 019 | Parallel with Phase 3 |
 | W5-A | 050 | 019 | Read-only investigation |
