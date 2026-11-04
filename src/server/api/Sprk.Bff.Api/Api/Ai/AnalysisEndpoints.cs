@@ -179,10 +179,15 @@ public static class AnalysisEndpoints
             return invalid;
         }
 
+        // An omitted skillIds, knowledgeIds or toolIds binds as null: it means "none", as the filter already reads it.
+        var skillIds = request.SkillIds ?? [];
+        var knowledgeIds = request.KnowledgeIds ?? [];
+        var toolIds = request.ToolIds ?? [];
+
         logger.LogInformation(
             "Creating analysis '{Name}' for document {DocumentId} with {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
             request.Name, request.DocumentId,
-            request.SkillIds.Length, request.KnowledgeIds.Length, request.ToolIds.Length);
+            skillIds.Length, knowledgeIds.Length, toolIds.Length);
 
         try
         {
@@ -233,13 +238,13 @@ public static class AnalysisEndpoints
             }
 
             // Step 2: Associate N:N scope items (skills, knowledge, tools)
-            if (request.SkillIds.Length > 0 || request.KnowledgeIds.Length > 0 || request.ToolIds.Length > 0)
+            if (skillIds.Length > 0 || knowledgeIds.Length > 0 || toolIds.Length > 0)
             {
                 await dataverseService.AssociateScopesAsync(
                     analysisId,
-                    request.SkillIds,
-                    request.KnowledgeIds,
-                    request.ToolIds,
+                    skillIds,
+                    knowledgeIds,
+                    toolIds,
                     cancellationToken);
             }
 

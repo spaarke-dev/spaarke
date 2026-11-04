@@ -658,6 +658,21 @@ public class AnalysisEndpointsAuthorizationContractTests
             It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact(DisplayName = "031: a body that omits skillIds, knowledgeIds and toolIds is 201 with no scope association (omitted is empty, not a 500)")]
+    public async Task Create_BodyOmittingSkillKnowledgeAndToolIds_Is201_WithNoScopeAssociation()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        host.AppOnlyCreates.Should().ContainSingle();
+        host.Analysis.Verify(a => a.AssociateScopesAsync(It.IsAny<Guid>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<IEnumerable<Guid>>(),
+            It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()), Times.Never, "no scope ids were sent");
+    }
+
     [Fact(DisplayName = "162 f1 create: a fault while declaring the checks (the body playbook's lookup throws) denies 403 system_failure and creates nothing")]
     public async Task Create_CheckDeclarationFault_Denies()
     {
