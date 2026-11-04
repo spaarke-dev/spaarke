@@ -1417,6 +1417,9 @@ public sealed class SecureChildShareSynchronizer
         // kept: it propagates as any parent read fault does, and the next run reads again.
         private readonly Dictionary<Guid, string?> _coreTables = new();
 
+        // The record types already warned about this run as mapping to no core table (one warning per type per run).
+        private readonly HashSet<Guid> _unknownTypesWarned = new();
+
         private int _granted, _changed, _revoked;
 
         public Run(SecureChildShareSynchronizer owner, Guid secureTeamId, CancellationToken ct)
@@ -1740,9 +1743,10 @@ public sealed class SecureChildShareSynchronizer
 
         /// <summary>
         /// A row's parents for the walk: its lookups, and the root its core record pair names (<see cref="SecureChildLineage.CorePairParent"/>,
-        /// de-duplicated against the lookups). A malformed pair sets <paramref name="undetermined"/>; a service-request core,
-        /// or a type the catalog maps to no core table, adds nothing. <paramref name="misses"/>: a type not in the run's cache
-        /// is added (as a catalog reference) and the pair is not followed.
+        /// de-duplicated against the lookups). A malformed pair, or a type the catalog maps to no core table (a blank or non-core
+        /// table name: a data error, warned once per type per run), sets <paramref name="undetermined"/>; a service-request core
+        /// adds nothing (D-36). <paramref name="misses"/>: a type not in the run's cache is added (as a catalog reference) and the
+        /// pair is not followed; that walk is the prefetch's, whose answer decides nothing.
         /// </summary>
         private async Task<IReadOnlyList<RowRef>> ParentsOfAsync(Row row, HashSet<RowRef>? misses, Action<string> undetermined)
         {
@@ -1761,7 +1765,22 @@ public sealed class SecureChildShareSynchronizer
                 return row.Parents;
             }
 
-            return SecureChildLineage.CorePairParent(await CoreTableAsync(pair.Type).ConfigureAwait(false), pair.Core) is { } core
+            var coreTable = await CoreTableAsync(pair.Type).ConfigureAwait(false);
+            if (coreTable is null)
+            {
+                // The core tables are a closed set, so a type naming none is a data error: held, as the ownership question
+                // holds it (ForExistingRowAsync), and seen. The type id only: the row and its core are not named.
+                if (_unknownTypesWarned.Add(pair.Type))
+                {
+                    Log.LogWarning("[SECURE-CHILD-SHARES] Record type {RecordType} maps to no core record table in the " +
+                        "record-type catalog; every row whose core record pair names it is held.", pair.Type);
+                }
+
+                undetermined(SecureChildLineage.UnknownCoreRecordType);
+                return row.Parents;
+            }
+
+            return SecureChildLineage.CorePairParent(coreTable, pair.Core) is { } core
                 ? row.Parents.Append(new RowRef(core.Table, core.Id)).Distinct().ToArray()
                 : row.Parents;
         }

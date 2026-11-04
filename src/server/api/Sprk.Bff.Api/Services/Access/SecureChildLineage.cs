@@ -42,11 +42,12 @@ namespace Sprk.Bff.Api.Services.Access;
 /// through the subject's stamp, and re-filing the subject (D-123) dropped the core from its roots. So every walk reads the pair
 /// beside the lookups (<see cref="Table.LineageColumns"/>) and adds the record it names as a parent
 /// (<see cref="CorePairParent"/>): a root when the catalog names a matter, project or work assignment; nothing for a service
-/// request (D-36: a root the resolver does not look through, as the remarks above) or for a type the catalog maps to no core
-/// table (it cannot name one of the three roots, so leaving it out drops no root, and a new catalog type needs no code, D-36);
-/// undetermined for a malformed pair (<c>ForExistingRowAsync</c>'s words). The ownership question is stricter on the last
-/// two: it holds a row whose type maps to no core table as undetermined. A catalog read that faults, a missing catalog row
-/// included, is a read fault like any other parent read: it propagates, and the walk's caller retries. The pair is the same rule on both
+/// request (D-36: a root the resolver does not look through, as the remarks above); undetermined for a malformed pair
+/// (<see cref="MalformedCorePair"/>) and for a type the catalog maps to no core table, its table name blank or not one of the
+/// closed set of core tables (<see cref="UnknownCoreRecordType"/>): <c>ForExistingRowAsync</c>'s words and rule, so the walk
+/// holds such a row as the ownership question does, and the data error is seen (a warning per type per run). A catalog read
+/// that faults, a missing catalog row included, is a read fault like any other parent read: it propagates, and the walk's
+/// caller retries. The pair is the same rule on both
 /// tables; a Decision Record whose typed core lookup names the same record adds no second root. Adding a root can only narrow
 /// the intersection, so the pair never widens what a child receives. The pair is kept OUT of <see cref="Table.Lookups"/>:
 /// readers of the map as an edge registry (ownership order, filing edges, the form library) see only lookups.</para>
@@ -87,15 +88,27 @@ internal static class SecureChildLineage
     /// <summary>Why a row whose core record pair is malformed has undetermined roots (<c>ForExistingRowAsync</c>'s words).</summary>
     internal const string MalformedCorePair = "its core record pair is malformed";
 
+    /// <summary>Why a row whose core record pair's type maps to no core table (a blank or non-core <c>sprk_recordlogicalname</c>)
+    /// has undetermined roots (<c>ForExistingRowAsync</c>'s words).</summary>
+    internal const string UnknownCoreRecordType = "its core record type is not a core record table in the record-type catalog";
+
+    /// <summary>
+    /// The text forms of a core id the downward walk matches <c>sprk_corerecordid</c> against: every form <c>Guid.TryParse</c>
+    /// (<c>RecordOwnershipContext.CorePairOf</c>) accepts that a writer could plausibly store — <c>D</c> (its writers' form),
+    /// <c>B</c> (<c>{...}</c>), <c>P</c> (<c>(...)</c>) and <c>N</c> (32 hex digits). The hex-structure <c>X</c> form is left out:
+    /// no writer stores it.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> StoredCoreIdFormats = ["D", "B", "P", "N"];
+
     /// <summary>True for a table whose rows name a core record in a pair: <c>RecordOwnershipContext.CorePairTables</c>.</summary>
     internal static bool HoldsCorePair(string? logicalName) =>
         logicalName is not null && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.CorePairTables.Contains(logicalName);
 
     /// <summary>
     /// The parent a whole core record pair adds to a row's lineage once its type has been read through the catalog
-    /// (<c>CoreAncestorResolver.CoreTableOfRecordTypeAsync</c>, which answers <c>null</c> for a table that is not a core
-    /// record): the core record when it is one of the three roots; <c>null</c> for a service request and for a type that maps
-    /// to no core table (see the class remarks). A malformed pair never reaches here: it is undetermined
+    /// (<c>CoreAncestorResolver.CoreTableOfRecordTypeAsync</c>): the core record when it is one of the three roots; <c>null</c>
+    /// for a service request (D-36). A type the catalog maps to no core table (<c>null</c> here) is the caller's to hold as
+    /// undetermined (<see cref="UnknownCoreRecordType"/>) before it asks; a malformed pair never reaches here either
     /// (<see cref="MalformedCorePair"/>). Pure.
     /// </summary>
     internal static (string Table, Guid Id)? CorePairParent(string? coreTable, Guid coreId) =>
@@ -103,18 +116,29 @@ internal static class SecureChildLineage
 
     /// <summary>
     /// The conditions a DOWNWARD walk adds to a query of <paramref name="table"/> to find its rows whose core record pair names
-    /// one of <paramref name="frontier"/>'s roots: (<c>sprk_corerecordid</c>, the id as its writers store it, lowercase
-    /// <c>D</c>; Dataverse compares text case-insensitively). Empty for a table with no pair or a frontier with no root. The
-    /// type is not matched here: each row found is decided by its own upward walk (or ownership question), which reads the type.
+    /// one of <paramref name="frontier"/>'s roots: (<c>sprk_corerecordid</c>, the id in each of
+    /// <see cref="StoredCoreIdFormats"/>, lowercase; Dataverse compares text case-insensitively). Empty for a table with no pair
+    /// or a frontier with no root. The type is not matched here: each row found is decided by its own upward walk (or ownership
+    /// question), which reads the type. <paramref name="alsoServiceRequests"/>: the ORDINARY-parent-move pass only (F4-b), whose
+    /// root can be a service request and whose ownership question takes a service-request core as the row's primary parent;
+    /// the secure walks never pass it (D-36: a service request is no secure root).
     /// </summary>
+    /// <remarks>Known limits. A stored id with leading or trailing whitespace is not matched (the text compare is exact; the
+    /// upward walk and the ownership question still read it, as <c>CorePairOf</c> trims). <c>sprk_corerecordid</c> is an
+    /// unindexed text column, so the <c>In</c> condition scans the table: acceptable at today's volumes, to revisit for
+    /// production volume.</remarks>
     internal static IEnumerable<(string Column, object Value)> CorePairMatches(
-        string table, IEnumerable<(string Table, Guid Id)> frontier) =>
+        string table, IEnumerable<(string Table, Guid Id)> frontier, bool alsoServiceRequests = false) =>
         HoldsCorePair(table)
             ? frontier
-                .Where(r => IsRoot(r.Table))
-                .Select(r => (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.CoreRecordIdColumn,
-                    (object)r.Id.ToString("D", System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant()))
+                .Where(r => IsRoot(r.Table)
+                    || (alsoServiceRequests && string.Equals(r.Table, ServiceRequest, StringComparison.OrdinalIgnoreCase)))
+                .SelectMany(r => StoredCoreIdFormats.Select(format =>
+                    (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.CoreRecordIdColumn,
+                        (object)r.Id.ToString(format, System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant())))
             : [];
+
+    private const string ServiceRequest = "sprk_servicerequest";
 
     private const string Project = "sprk_project";
     private const string Matter = "sprk_matter";

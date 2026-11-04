@@ -333,7 +333,10 @@ public partial class SignalSuppressionTests
             results.Add((await s.Service.ApplyAsync(PolicyId, Code, SuppressionGrain.ForCore(type, id), default)).SuppressedUntil);
         }
 
-        results.Select(r => r is not null).Should().Equal(true, true, false, true);
+        // The four core types are counted independently and the service names none of them (D-36). The fifth type is the core
+        // record pair lineage's data error (K1): the core tables are a closed set, so a type the catalog maps to no core table
+        // holds its Signals (undetermined), and the undetermined bucket is fail closed: never stamped, never muting.
+        results.Select(r => r is not null).Should().Equal(true, true, false, false);
     }
 
     [Fact]
@@ -1890,7 +1893,8 @@ public partial class SignalSuppressionTests
         }
 
         /// <summary>The record-type catalog: each core type's table; <see cref="FifthCoreType"/> names a table the resolver does not
-        /// know as a core record (a type added to the catalog later, D-36).</summary>
+        /// know as a core record (a type added to the catalog later): a data error, as the core tables are a closed set, so the
+        /// lineage holds its Signals (K1).</summary>
         private static readonly IReadOnlyDictionary<Guid, string> CatalogTables = new Dictionary<Guid, string>
         {
             [MatterType] = "sprk_matter",

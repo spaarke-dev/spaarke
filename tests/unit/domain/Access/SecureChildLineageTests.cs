@@ -286,7 +286,7 @@ public class SecureChildLineageTests
     [InlineData("sprk_workassignment", true)]
     [InlineData("SPRK_PROJECT", true)]
     [InlineData("sprk_servicerequest", false)] // D-36: not a root, so the pair adds nothing
-    [InlineData(null, false)]                  // the catalog names no core table
+    [InlineData(null, false)]                  // the catalog names no core table: the caller holds it before asking
     public void CorePairParent_IsTheCoreRecord_OnlyWhenItIsARoot(string? coreTable, bool isParent)
     {
         var core = Guid.NewGuid();
@@ -306,10 +306,40 @@ public class SecureChildLineageTests
         (string, Guid)[] frontier = [("sprk_project", project), ("sprk_event", Guid.NewGuid()), ("sprk_matter", matter)];
 
         SecureChildLineage.CorePairMatches("sprk_signal", frontier).Should().Equal(
-            ("sprk_corerecordid", project.ToString("D").ToLowerInvariant()), ("sprk_corerecordid", matter.ToString("D").ToLowerInvariant()));
-        SecureChildLineage.CorePairMatches("SPRK_DECISIONRECORD", frontier).Should().HaveCount(2);
+            new[] { "D", "B", "P", "N" }.Select(f => ("sprk_corerecordid", (object)project.ToString(f).ToLowerInvariant()))
+                .Concat(new[] { "D", "B", "P", "N" }.Select(f => ("sprk_corerecordid", (object)matter.ToString(f).ToLowerInvariant()))),
+            "every form Guid.TryParse reads that a writer could store: D, {B}, (P) and N");
+        SecureChildLineage.CorePairMatches("SPRK_DECISIONRECORD", frontier).Should().HaveCount(8);
         SecureChildLineage.CorePairMatches("sprk_event", frontier).Should().BeEmpty("an event has no pair");
         SecureChildLineage.CorePairMatches("sprk_signal", [("sprk_event", Guid.NewGuid())]).Should().BeEmpty("a child is never a core record");
+    }
+
+    [Fact]
+    public void CorePairMatches_EveryStoredForm_ParsesBackToTheRoot_AsTheUpwardReadReadsIt()
+    {
+        var project = Guid.NewGuid();
+
+        foreach (var (_, value) in SecureChildLineage.CorePairMatches("sprk_signal", [("sprk_project", project)]))
+        {
+            var row = new Microsoft.Xrm.Sdk.Entity("sprk_signal", Guid.NewGuid())
+            {
+                ["sprk_corerecordtype"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", Guid.NewGuid()),
+                ["sprk_corerecordid"] = (string)value,
+            };
+            RecordOwnershipContext.CorePairOf(row).CoreId.Should().Be(project, $"{value} is a form the upward read accepts");
+        }
+    }
+
+    [Fact]
+    public void CorePairMatches_AServiceRequestRoot_IsMatchedOnlyForTheOrdinaryPass()
+    {
+        var request = Guid.NewGuid();
+        (string, Guid)[] frontier = [("sprk_servicerequest", request)];
+
+        SecureChildLineage.CorePairMatches("sprk_signal", frontier).Should().BeEmpty("D-36: a service request is no secure root");
+        SecureChildLineage.CorePairMatches("sprk_signal", frontier, alsoServiceRequests: true).Select(m => m.Value)
+            .Should().Equal(new[] { "D", "B", "P", "N" }.Select(f => (object)request.ToString(f).ToLowerInvariant()));
+        SecureChildLineage.CorePairMatches("sprk_event", frontier, alsoServiceRequests: true).Should().BeEmpty("an event has no pair");
     }
 
     // ── What a child receives (Dataverse AccessRights values as literals) ────────────────────────────────────────────

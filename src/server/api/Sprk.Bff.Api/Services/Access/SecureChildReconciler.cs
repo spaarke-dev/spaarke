@@ -1755,11 +1755,12 @@ public sealed class SecureChildReconciler
                         : table.Lookups.Concat(OrdinaryOnlyServiceRequestLookups(table.LogicalName));
                     // A Signal or Decision Record whose core record pair names a root of this level is filed under it too
                     // (SecureChildLineage.CorePairMatches): its question asks that core first (ForExistingRowAsync), and no
-                    // lookup may name it once its subject was re-filed (D-123).
+                    // lookup may name it once its subject was re-filed (D-123). The ordinary pass also matches a service-request
+                    // root (F4-b): its question takes a service-request core as the row's primary parent too.
                     var pairs = lookups
                         .Where(l => idsByTable.ContainsKey(l.Value))
                         .SelectMany(l => idsByTable[l.Value].Select(id => (Column: l.Key, Value: (object)id)))
-                        .Concat(SecureChildLineage.CorePairMatches(table.LogicalName, frontier))
+                        .Concat(SecureChildLineage.CorePairMatches(table.LogicalName, frontier, alsoServiceRequests: _ordinary is not null))
                         .ToArray();
 
                     foreach (var chunk in pairs.Chunk(SecureChildShareSynchronizer.DescendantConditionsPerQuery))
