@@ -158,7 +158,7 @@ This is the "skills-only plugin plus code-only plugin" idea in a form the platfo
 | T-P6 | Does the Legal plugin import a Restrict-Editing-protected or labelled .docx? | Import variants in Word desktop |
 | T-P7 | Does Word load *any* third-party skills package (instruction-only)? | T-14 admin deploy plus a one-skill harmless probe plugin |
 | T-P8 | Does admin deployment (T-14) change where plugins appear (Cowork, Word, PowerPoint "Organization")? | T-14 |
-| T-P9 | Is Harvey's Word package skill folders or labelled MCP tools? | Admin center › Agents / Connectors › Harvey › components |
+| T-P9 | Is Harvey's Word package skill folders or labelled MCP tools? | ✅ 2026-11-02: both. There is one RemoteMCPServer tool with 5 operations, plus 5 thin skills (one routing line each, no procedure), and no instructions (results L26). So Word reach most likely comes from the MCP tool, which supports §7 |
 | T-P10 | Can Word (Attach from Cloud) and a Cowork skill read a playbook from a SharePoint library where the attorney has Read only? | Put the A/B .docx and the .md in a read-only library; import in Word; point the profile at it in Cowork |
 
 ## 9. Ownership summary

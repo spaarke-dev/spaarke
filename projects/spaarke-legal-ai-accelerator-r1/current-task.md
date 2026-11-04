@@ -11,9 +11,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | NDA MVP spike: tenant tests per `notes/mvp-nda/runbook.md` (no POML tasks; pre-pipeline spike) |
-| **Step** | Protocol drafted (v0.2); browser checks + T-14 not started |
-| **Status** | blocked on the browser: a new session with Claude in Chrome connected is needed (it dropped out of the previous session) |
-| **Next Action** | In Chrome (new tab; leave the owner's tabs alone): admin.cloud.microsoft › Agents › All agents › "Harvey" → record its components (skill folders vs 5 MCP tools) = T-P9. Then search "Spaarke" in Agents › All agents, Agents › Tools, Copilot › Connectors, Teams › Apps › Manage your apps; screenshot leftovers, delete nothing without asking |
+| **Step** | Protocol drafted (v0.2). T-P9 and the leftover check are done (2026-11-02, results L26/L27). T-14 not started |
+| **Status** | waiting for the owner to review protocol v0.2 (K/E split) before the build split and T-14 |
+| **Next Action** | Owner review of `notes/component-protocol.md` v0.2. Then do Next Actions 2–3. T-14 can also try the admin route Agents › Tools › Skills › **Upload** (L26) |
 
 ### Critical Context
 - **Word has never run our plugin.** No third-party skill loader is documented for Word (L25). But we have never tested a correctly built, instruction-only plugin there, and Harvey appears in Word.
@@ -46,7 +46,10 @@
 - **MCP connector** (Dataverse/SPE) = v2. It should extend the existing "Spaarke Dataverse MCP" agent.
 
 ## Next Actions (in order)
-1. **T-P9 + leftovers check** (Quick Recovery above).
+1. ~~**T-P9 + leftovers check**~~ ✅ done 2026-11-02:
+   - Harvey = 1 RemoteMCPServer tool (5 operations) + 5 thin skills, with no instructions (L26).
+   - No accelerator copies remain in the tenant (L27).
+   - An owner item is still open: the Spaarke portal submission `5d88b948…` (Teams, pending since 2026-10-29).
 2. **After the owner reviews protocol v0.2:**
    - Split the build into K and E plugins (separate GUIDs and names).
    - Build a one-skill harmless Word probe plugin (T-P7).
