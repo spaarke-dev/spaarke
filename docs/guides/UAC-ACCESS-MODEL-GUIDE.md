@@ -455,10 +455,16 @@ the container of the document row's own business unit — set from its parent's 
 
 ### What is in the Secure family
 
-When a record becomes Secure, **28 child tables** move with it (`SecureChildLineage`; `config/secure-record-owner-role.json`
-lists them plus the three core tables and the grant table — 32 in all), including documents and file versions, invoices, budgets and budget revisions,
+When a record becomes Secure, **36 child tables** move with it (`SecureChildLineage`; `config/secure-record-owner-role.json`
+lists them plus the three core tables and the grant table — 40 in all), including documents and file versions, invoices, budgets and budget revisions,
 events, to-dos, communications, memos, analyses, signals and decision records. Service requests are deliberately not in
 the family; a service request is a core record of its own.
+
+**Stored files** (`sprk_storedfile`, ebilling 086) are a leaf child of their invoice: a Stored File on an invoice of a
+Secure record is Secure too and is owned by Secure Record Owners. A Stored File is an internal, hard-deny file row, so it is
+not in the displayed family; it is reached only through its document, invoice or billing export batch. Known limit (K1):
+Full Access on the root already lets a person delete the root's children, so it also lets them delete a Stored File under
+one of its invoices; 086 adds no new delete right.
 
 **Where in the code**: `Services/Dataverse/CoreAncestorResolver.cs` (core / child lists, stamps),
 `Services/Dataverse/RecordOwnershipResolver.cs` (ownership), `Services/Access/SecureChildLineage.cs`,
