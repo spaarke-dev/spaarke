@@ -997,6 +997,11 @@ internal static class InheritedAccessPermission
     /// <c>SubmissionTrackingScopeNotAccessGuardTests</c>), but it decides which sequence a number belongs to, so re-pointed it would let a
     /// later submission take a number the row already holds in its real scope. Its only writer is typed: the allocator writes it at
     /// create, and the schema script backfills it once; no generic writer sets it.</para>
+    /// <para>ebilling-r1 task 095d-1a: also its sequence <c>sprk_submissionsequence</c> (<c>TrackingNumberAllocator.SequenceColumn</c>) and the
+    /// none-scope sequence a renumber gives up <c>sprk_previoussequence</c> (<c>TrackingNumberAllocator.PreviousSequenceColumn</c>). They decide
+    /// no access; they decide which tracking numbers are taken, so a generic write could make a number be issued twice. Their only writer is the
+    /// allocator (at create and at the renumber). The firm invoice number <c>sprk_firminvoicenumber</c> is the allocator's too but is NOT listed:
+    /// <c>SubmissionCommitGate</c>'s undo clears it, a second typed writer.</para>
     /// <para>ebilling-r1 task 095c-4 (uac-r2 2026-11-03): also its outcome reason <c>sprk_outcomereasoncode</c>
     /// (<c>InvoiceSubmissionPersister.SubmissionReasonCode</c>). It decides no access, but it stores the holds that keep an invoice from
     /// approval and AP export: <c>ebilling.submission.firm_missing</c> (<c>InvoiceFirmHold</c>) and the FR-20 Blocked hold. Cleared by a
@@ -1134,6 +1139,9 @@ internal static class InheritedAccessPermission
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn)
+                    // allocator-owned (095d-1a); sprk_firminvoicenumber is not listed: SubmissionCommitGate's undo also writes it (notes 16.6.1)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SequenceColumn)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.PreviousSequenceColumn)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode),
                 StringComparer.OrdinalIgnoreCase),
             [Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -1283,7 +1291,10 @@ internal static class InheritedAccessPermission
             // Task 095c-4: the outcome reason holds the invoice (firm_missing, Blocked); it decides no access either.
             // Task 095c-5: on an invoice, the firm hold and the firm hold it from approval and export; neither decides access.
             var isInvoice = string.Equals(trimmed, Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity, StringComparison.OrdinalIgnoreCase);
-            var decides = !isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn, StringComparison.OrdinalIgnoreCase)
+            // 095d-1a: the sequence and the previous sequence are the allocator's too, and decide no access.
+            var decides = !isInvoice && (string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SequenceColumn, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.PreviousSequenceColumn, StringComparison.OrdinalIgnoreCase))
                 ? "it decides no access; only the tracking number allocator writes it"
                 : !isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode, StringComparison.OrdinalIgnoreCase)
                     ? "it decides no access, but it holds the invoice from approval and export; only the submission pipeline writes it"

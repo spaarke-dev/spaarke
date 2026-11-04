@@ -98,12 +98,18 @@ public enum RenumberOutcome
 
     /// <summary>
     /// The submission, read before anything was sent, was already moved into <c>firmId</c>'s scope and holds a number there (review F4): a
-    /// repeat at the version the committing renumber left, after its reply was lost or a step after it failed. <see cref="RenumberResult.TrackingNumber"/>
+    /// repeat at the version the committing renumber left, after its reply was lost or a step after it failed. "Moved" means the row carries
+    /// <c>sprk_previoussequence</c>, which only a renumber writes; a native row of that firm (created in its scope) is refused as
+    /// <see cref="TrackingNumberReasons.NotUnnumbered"/> instead. <see cref="RenumberResult.TrackingNumber"/>
     /// and <see cref="RenumberResult.Sequence"/> are the held number; <b>nothing was sent</b>, so the caller's builder was not called and none of
     /// its requests ran in this call (the commit that moved the submission applied the caller's requests of that call, in the same transaction).
     /// It is a separate outcome from <see cref="Renumbered"/>, as <see cref="TrackingNumberOutcome.AlreadyCreated"/> is from
     /// <see cref="TrackingNumberOutcome.Created"/>, so a caller that must not treat "I applied it now" like "it was applied" has to choose: the
     /// caller (095d-1b) finishes the steps after the apply for both and never repeats the apply.
+    /// <para><b>It does not say which decision renumbered the row (review K3).</b> The same firm can reach the row through a different request
+    /// (another decision, another reason, another set of requests) than the one that committed. 1b must compare the row's STORED decision, not its
+    /// own request, before it finishes the record, the close, the link or a re-run, and treat a different stored decision as a conflict, never as
+    /// its own.</para>
     /// </summary>
     AlreadyRenumbered,
 

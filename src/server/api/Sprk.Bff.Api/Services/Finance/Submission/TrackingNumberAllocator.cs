@@ -54,9 +54,17 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <see cref="PreviousSequenceColumn"/> in the same update. The <c>none</c> scope's next-number read is the highest of two bounded reads, in this
 /// order: the sequences of the rows still in the <c>none</c> scope, then the previous sequences of the rows with this firm invoice number (a
 /// renumber only ever leaves <c>none</c>, so they all refer to it). The order matters: a row that moves between the two reads was seen by the
-/// first, and one that moved before the first is seen by the second. The scope key still decides every race; the read only raises the floor.
+/// first, and one that moved before the first is seen by the second. That order covers a renumber that lands between the two reads of one create;
+/// it does not make a create atomic with its reads (known limit K2 below). The scope key decides a race only while the row that holds the number is
+/// still in the scope; the read only raises the floor.
 /// While the column does not exist the renumber is refused (<see cref="TrackingNumberReasons.SchemaMissing"/>, nothing sent), so no row can have
 /// left <c>none</c> yet and the create falls back to the scope-only read, logging a warning once.</para>
+/// <para><b>Known limit (K2, task 095d-1a re-check; the bound, not a guarantee).</b> Two creates C0 and C1 of the same no-firm number can both read
+/// the highest as n-1. C0 commits <c>.n</c>. Before C1's write lands, C0's row completes intake, a firm is assigned and the renumber commits
+/// (the row leaves the <c>none</c> scope, recording n in <see cref="PreviousSequenceColumn"/>). C1 then commits <c>.n</c> again: the scope key no
+/// longer holds C0's number in <c>none</c>, and C1 read the previous sequences before the renumber wrote n. The window is the write latency of one
+/// create, against a full intake plus a human step (assigning a firm) that the renumber needs, so it is not a path in practice; it is not closed
+/// in code, and nothing here claims the interleaving is impossible.</para>
 /// <para><b>Known limit (K4 residue).</b> The previous-sequence read finds rows by their firm invoice number. The undo of a commit
 /// (<c>SubmissionCommitGate</c>) clears that number, so a renumbered row whose commit were undone afterwards would hide its previous sequence.
 /// The undo runs only inside the intake's commit, before assign-firm can renumber the row, so this is not a path today.</para>
@@ -478,10 +486,12 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
     /// since the caller read it; the caller re-reads).</item>
     /// <item>A firm invoice number that is not the row's: <see cref="ArgumentException"/> (the caller's read was of another row's number, a bug;
     /// compared after trimming, exactly: the number is the row's own, read with its version).</item>
-    /// <item>The row is already in <paramref name="firmId"/>'s scope, with that firm, and holds a sequence: <see cref="RenumberOutcome.AlreadyRenumbered"/>
-    /// with the held number. This is a repeat after a commit whose reply was lost, at the version the commit left.</item>
+    /// <item>The row is already in <paramref name="firmId"/>'s scope, with that firm, holds a sequence, and carries <see cref="PreviousSequenceColumn"/>
+    /// (only a renumber writes it, so it is what tells a renumbered row from one created in that firm's scope):
+    /// <see cref="RenumberOutcome.AlreadyRenumbered"/> with the held number. This is a repeat after a commit whose reply was lost, at the version
+    /// the commit left. A native row of that firm (a sequence, no previous sequence) falls through to the next outcome.</item>
     /// <item>Anything but a no-firm row in the <c>none</c> scope (another firm's row, this firm's row in some other scope, a row in another
-    /// firm's scope): <see cref="RenumberOutcome.Refused"/> with <see cref="TrackingNumberReasons.NotUnnumbered"/>. A renumber moves a
+    /// firm's scope, a native row of this firm that was never renumbered): <see cref="RenumberOutcome.Refused"/> with <see cref="TrackingNumberReasons.NotUnnumbered"/>. A renumber moves a
     /// no-firm submission into a firm's scope and nothing else: it never moves a firm's submission to another firm.</item>
     /// </list>
     /// Before all of these, a read that faults because <see cref="PreviousSequenceColumn"/> does not exist is
@@ -529,7 +539,8 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
         var firm = existing.GetAttributeValue<EntityReference>(FirmColumn)?.Id;
         var scope = existing.GetAttributeValue<string>(ScopeColumn);
         if (firm == firmId && string.Equals(scope, ScopeOf(firmId), StringComparison.OrdinalIgnoreCase)
-            && existing.GetAttributeValue<int?>(SequenceColumn) is { } heldSequence)
+            && existing.GetAttributeValue<int?>(SequenceColumn) is { } heldSequence
+            && existing.GetAttributeValue<int?>(PreviousSequenceColumn) is not null)
         {
             var heldNumber = existing.GetAttributeValue<string>(TrackingNumberColumn) ?? Format(firmInvoiceNumber, heldSequence);
             _logger.LogInformation(

@@ -118,10 +118,12 @@ public class AccessTableAppOnlyWriterTests
         // UAC review F4 (on e371dce6bf): + its invoice and tracking number, which D-176's Duplicate withholding reads.
         // ebilling-r1 task 095c: + its tracking scope (typed writer: the allocator), which pairs with the number in the scope key.
         // ebilling-r1 task 095c-4 (uac-r2): + its outcome reason (typed writers: the pipeline), which stores the firm_missing and Blocked holds.
+        // ebilling-r1 task 095d-1a: + its sequence and previous sequence (typed writer: the allocator), the numbers a tracking number is built from.
         ["sprk_invoicesubmission"] =
         [
             "sprk_vendororg", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment",
             "sprk_invoice", "sprk_trackingnumber", "sprk_trackingscope", "sprk_outcomereasoncode",
+            "sprk_submissionsequence", "sprk_previoussequence",
         ],
 
         // ebilling-r1 095c-4 review fix + task 095c-5 (uac-r2 2026-11-04): an invoice's firm and its own field-secured firm hold. Neither decides
@@ -635,6 +637,10 @@ public class AccessTableAppOnlyWriterTests
             (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
                 Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn),
             (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SequenceColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.PreviousSequenceColumn),
+            (Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity,
                 Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn),
             (Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable, Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn),
@@ -775,6 +781,82 @@ public class AccessTableAppOnlyWriterTests
         Code("sprk_invoice", "sprk_trackingscope").Should().BeNull("only the submission carries the scope");
         Code(submission, "sprk_trackingscopes").Should().BeNull("a neighbouring name");
         CallerCode(submission, "sprk_trackingscope").Should().BeNull("the caller's own privileges decide");
+    }
+
+    [Theory(DisplayName = "095d-1a: an app-only write of the submission's sequence or previous sequence is refused by the output mapping and the Update Record node; the allocator's own write still goes through")]
+    [InlineData("sprk_submissionsequence", " SPRK_SubmissionSequence ")]
+    [InlineData("sprk_previoussequence", "sprk_PREVIOUSSEQUENCE")]
+    public async Task AnAppOnlyWriteOfAnAllocatorOwnedSequenceColumn_IsRefused_ButTheAllocatorsOwnRenumberWriteGoesThrough(string column, string otherForm)
+    {
+        // ebilling-r1 task 095d-1a (uac-r2, replaces the "passed to uac-r2" note): the sequence and the none-scope sequence a renumber gives up are
+        // what a tracking number is built from and what the none scope's next-number read counts. A generic write that lowers or clears either
+        // lets a number be issued twice. The allocator writes them on its own client, in the one renumber transaction; no generic writer does.
+        const string submission = Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity;
+        foreach (var key in new[] { column, otherForm })
+        {
+            Code(submission, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                submission, Row, new Dictionary<string, object?> { [key] = 1 },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    submission, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "1" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        // The refusal says what the column is: it decides no access and the allocator writes it.
+        InheritedAccessPermission.RefuseAppOnlyWrite(submission, [column])!.Reason
+            .Should().Contain("decides no access").And.Contain("only the tracking number allocator writes it").And.NotContain("who may see");
+
+        // Must not fire: the same column name on another table, a neighbouring name, and the caller's own write.
+        Code("sprk_invoice", column).Should().BeNull("only the submission carries it");
+        Code(submission, column + "s").Should().BeNull("a neighbouring name");
+        CallerCode(submission, column).Should().BeNull("the caller's own privileges decide");
+
+        // Must not fire (the allocator's own write): the real allocator renumbers a no-firm row with 3 in the none scope, on its own client,
+        // and the one submission update it sends carries the column. Nothing in that path asks InheritedAccessPermission.
+        var firm = Guid.Parse("22530000-0000-0000-0000-00000000f001");
+        var held = new Microsoft.Xrm.Sdk.Entity(submission, Row)
+        {
+            ["versionnumber"] = 1L,
+            ["sprk_trackingscope"] = "none",
+            ["sprk_firminvoicenumber"] = "INV-7",
+            ["sprk_submissionsequence"] = 3,
+            ["sprk_trackingnumber"] = "INV-7.3",
+        };
+        var sent = new List<Microsoft.Xrm.Sdk.OrganizationRequest>();
+        var entities = new Mock<Spaarke.Dataverse.IGenericEntityService>();
+        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) =>
+                new Microsoft.Xrm.Sdk.EntityCollection(q.ColumnSet.Columns.Contains("versionnumber") ? [held] : []));
+        entities.Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<Microsoft.Xrm.Sdk.OrganizationRequest>>(), It.IsAny<CancellationToken>()))
+            .Callback((IReadOnlyList<Microsoft.Xrm.Sdk.OrganizationRequest> r, CancellationToken _) => sent.AddRange(r))
+            .Returns(Task.CompletedTask);
+        var allocator = new Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator(
+            entities.Object,
+            _ => Task.FromResult<Sprk.Bff.Api.Services.Finance.Submission.TrackingScopePhase?>(
+                Sprk.Bff.Api.Services.Finance.Submission.TrackingScopePhase.P2ScopeKeyActive),
+            new Sprk.Bff.Api.Services.Finance.Submission.TrackingScopePhaseCache(TimeProvider.System),
+            NullLogger<Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator>.Instance);
+
+        var result = await allocator.RenumberSubmissionAsync(
+            Row, "1", firm, "INV-7",
+            _ => new Sprk.Bff.Api.Services.Finance.Submission.RenumberApply(null, []));
+
+        result.Outcome.Should().Be(Sprk.Bff.Api.Services.Finance.Submission.RenumberOutcome.Renumbered);
+        var update = sent.Should().ContainSingle().Which.Should().BeOfType<Microsoft.Xrm.Sdk.Messages.UpdateRequest>().Subject.Target;
+        update.Contains(column).Should().BeTrue($"the allocator's own renumber writes {column}");
+        update.GetAttributeValue<int?>(column).Should().Be(column == "sprk_previoussequence" ? 3 : 1, "the gave-up none sequence, or the firm scope's first number");
     }
 
     [Fact]

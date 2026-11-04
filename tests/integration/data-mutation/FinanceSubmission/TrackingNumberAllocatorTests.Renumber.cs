@@ -452,6 +452,7 @@ public sealed partial class TrackingNumberAllocatorTests
     [InlineData("this firm, filed in the none scope")]
     [InlineData("no firm, another firm's scope")]
     [InlineData("this firm and scope, no sequence held")]
+    [InlineData("this firm and scope, sequence held, never renumbered")]
     public async Task Renumber_ASubmissionThatIsNotUnnumbered_IsRefused(string state)
     {
         InPhase(TrackingScopePhase.P2ScopeKeyActive);
@@ -460,6 +461,9 @@ public sealed partial class TrackingNumberAllocatorTests
             "another firm's row" => _store.AddScoped(FirmB, Number, 1),
             "this firm, filed in the none scope" => _store.AddWithScope(FirmA, "none", Number, 1),
             "no firm, another firm's scope" => _store.AddWithScope(null, FirmB.ToString("D"), Number, 1),
+            // Review re-check F4: a native firm-F row (it was created in F's scope) holds a sequence but carries no sprk_previoussequence, so
+            // it was never moved out of the none scope: it is not "already renumbered".
+            "this firm and scope, sequence held, never renumbered" => _store.AddScoped(FirmA, Number, 1),
             _ => _store.WithoutColumn(_store.AddScoped(FirmA, Number, 1), "sprk_submissionsequence"),
         };
         var before = _store.Row(submission);
