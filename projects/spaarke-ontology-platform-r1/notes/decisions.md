@@ -506,3 +506,22 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - the pseudo-code still selects "the Active Procedure Version" (it should be Active or Superseded, per (3));
     - the gap definition still says "between Active versions";
     - "whether an Override may release it is open" is stale (§15(iii) answered it).
+
+## D-204 — Signals and Decision Records are created only by their ontology writers; generic creates of them are refused (ontology position, 2026-11-04)
+
+- **Context:** field-mapping-server-write-path-r1 task 042c (approved by uac-r2) relayed two follow-ups for ontology:
+  - Rows created through `RecordCreationService` (chat `dataverse.create_record`, generic creates) get the core pair but not the typed `sprk_matter`.
+  - Such a create can write a Decision Record's `sprk_steps` (`resolvedSignalIds`, `reviewId`), which `DecisionCommitService` and the reconciler trust.
+- **Facts (master `7c7d24a3b7`):**
+  - Only `SignalWriter` and `DecisionRecordWriter` create these rows.
+  - No other BFF code creates `sprk_signal` or `sprk_decisionrecord` through `RecordCreationService`. `RecordTableRules` lists them only to exclude field mapping.
+  - Live Create on both tables is held only by System Administrator, System Customizer, Service Writer and Spaarke Ontology Service (`security-roles.md` §17, D-62/D-147). So an ordinary user's caller-checked create is already refused. The exposure is defence in depth (an admin, or a future system-principal caller), not a live defect.
+- **Position:** a generic create of `sprk_signal` or `sprk_decisionrecord` is **refused as a whole table**, before anything is written, on both the caller and the system principal. The pattern is ebilling's `ServerWrittenInvoiceFamilyTables`. A field rule on `sprk_steps` alone would leave every other column of an append-only evidence row forgeable (fact snapshot, action code, record class, subject, core), so ontology does not want one.
+  - One server-side owner per invariant (CLAUDE.md §17).
+  - The rows are append-only evidence (D-2).
+  - `sprk_budgetrevision` is in the same registry block. It is created only by the decision path (`DecisionActionExecutors`), so it gets the same refusal unless field-mapping finds a legitimate generic creator.
+- **Q1 answer, which follows from the position:**
+  - Ontology readers list by the core pair (context) and the `sprk_regarding*` stamp (filing), never by typed `sprk_matter` (task 145, `notes/task-145-matter-readers.md`).
+  - Typed `sprk_matter` (and on a Decision Record `sprk_project` / `sprk_workassignment`) is still a lineage owner parent. It keeps a record about a secure core in that family after a re-file (D-123, K1). It is read by the suppression lineage columns, the `SignalReevaluationJob` lineage row, `TodoAssigneeOwnerReconciliationJob` and uac-r2's reconciler and share synchroniser.
+  - With the refusal, no row reaches that state. If a legitimate generic creator is ever added, it must write the typed column the way the writers do (`LineageColumnByCoreEntity`).
+- **Owner of the change:** field-mapping. `RecordCreationService` and the chat handler are theirs, and ontology reviews it. Keep the detail out of public issues.
