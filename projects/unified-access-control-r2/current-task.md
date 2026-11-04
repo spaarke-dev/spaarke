@@ -22,7 +22,8 @@
 - The first export (20:43Z) failed with 503: the owner's account 1d02f31c is in the ROOT business unit, so the CSV Stored File's hard-deny owner was refused (`AnswerIsRootBusinessUnit`). Failed batch f6788e95 is kept, owned by the root default team, with no file (owner: leave it).
 - **Demo export succeeded:** batch **14680609-b198-48e2-8391-3ada84fda689** (21:55:05Z, Completed, 2 invoices, $20,517.83, owned by the BU1 team). **Blocker:** `sprk_billingexport` is in no app on dev; the source has it in the Matter Management AppModule.xml:49 and sitemap `subarea_eb_export`. The ribbon is deployed (13:35Z). Asked ebilling to prepare the app-module and sitemap import; the owner's go comes in this session. The owner has a direct form link to try.
 - **Hand-made batch gap (owner screenshot shows + New on the Billing Exports grid):** ebilling is fixing it in scope. The ribbon hides New and Delete (entity-scoped import; owner go in my session). Mark Sent refuses a batch with no files or no invoices (409). I asked for one more case: status and formats typed by hand but no Stored File gives 409 `file_not_available` on email and download, never a 5xx. The owner added the billing tables in the app designer at 22:13Z (confirmed).
-- **Owner asked:** move invoices@ and ap@ (USER accounts) to BU1; the owner's rule is that mailbox accounts go in BU1. I asked for an explicit go.
+- **Done (owner go in this session):** moved invoices@ (6d013768) and ap@ (33a198ff) systemusers to BU1 (PATCH 204 for both; read back: BU1, no roles, member of BU1's team only). Owner rule: mailbox accounts go in BU1. Next census should clear the verdict. Follow-up: a provisioning step to keep new users out of the root business unit and keep roles off its default team.
+- **Email to AP button not visible** on batch 14680609's form for the owner. The published ribbon has all 4 buttons; the enable rule and the batch status match; 2 Stored Files exist. Sent the facts to ebilling to investigate (location or group in UCI?). Asked the owner for a hard refresh, a look under the overflow menu, and a screenshot of the command bar.
 - **Owner decision (done):** demo@demo.spaarke.com runs `-ExportOnly` (export only, no approvals). The owner then opens the batch as themselves, checks the AP emails grid has no New button, and clicks Email to AP. ebilling sends me the time and batch id.
 - ebilling's fix for the 2 findings (a 409 `ebilling.export.owner_unit_not_allowed`, and an owner pre-check before any write), diff 82786ce7f3..fad65a79ad, merged to work/ebilling-r1 at a6ff149cd9: **four-point check PASSED**, sent ~21:40Z. `sprk_billingexport` is not an ownership parent, so the pre-check never reads the batch that doesn't exist yet. `no_default_team` and `acting_user_unresolved` stay 503. Note: live proof for a BU1 caller comes with the first BU1 export after the deploy (record it in 153's notes). The fix reaches dev only through a master PR and a deploy that I orchestrate.
 
@@ -66,7 +67,6 @@
 - **TASK-INDEX is stale** (196/197 missing; many statuses old): reconcile it at wrap-up 090.
 
 ## Owner items outstanding
-- **NEW (private, details in session only):** what to do with the invoices@ and ap@ Dataverse users (root business unit, no direct roles): move them to BU1, disable them, or other. Until then the census keeps reporting its verdict.
 - Owner decisions:
   - no-firm invoices: hide them externally until a firm is set? (Today they are visible, by option A.)
   - 095a: may a reader see the lookup name of a Restricted .eml?
