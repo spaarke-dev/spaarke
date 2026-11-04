@@ -60,7 +60,8 @@
    - Then TASK-INDEX 042b ✅ and the POML marked completed.
 2. After uac-r2 deploys #2551: read-only route checks (5xx on POST /api/v1/child-records/*), then ask the owner HERE for an OK on Matter/Project test rows.
 3. After a real dev upload: re-run the 041 read-only checks and send them to uac-r2.
-4. Next: W3, starting with 021 (fix item #2, ReferenceLookupColumns / PostMappingDefaults, before cutover). |
+4. Then the DI-019 / #2561 follow-up task. UAC-r2 ruled it F 2026-11-04: in step 7, read the catalog and put the core first in the owner question, plus a caller AppendTo check on the core record, which is missing today. Create it with task-create after 042b merges.
+5. Next: W3, starting with 021 (fix item #2, ReferenceLookupColumns / PostMappingDefaults, before cutover). |
 | **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
