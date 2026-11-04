@@ -698,15 +698,17 @@ public class ExistingRowOwnershipParityTests
     /// record the resolver cannot read (it is not there).</summary>
     private static readonly string[] OwnerKinds = ["secure team", "ordinary team", "user-owned", "unreadable or missing"];
 
-    /// <summary>Every combination of owner kinds for the subject (a To Do), its matter stamp and its project stamp, both tables.</summary>
-    public static TheoryData<string, string, string, string> TwoStampOwnerKinds()
+    /// <summary>Every combination of owner kinds for the core record (a matter; fix round 3), the subject (a To Do), its matter
+    /// stamp and its project stamp, both tables: 512 cases.</summary>
+    public static TheoryData<string, string, string, string, string> TwoStampOwnerKinds()
     {
-        var data = new TheoryData<string, string, string, string>();
+        var data = new TheoryData<string, string, string, string, string>();
         foreach (var table in new[] { "sprk_signal", "sprk_decisionrecord" })
-            foreach (var subject in OwnerKinds)
-                foreach (var matter in OwnerKinds)
-                    foreach (var project in OwnerKinds)
-                        data.Add(table, subject, matter, project);
+            foreach (var core in OwnerKinds)
+                foreach (var subject in OwnerKinds)
+                    foreach (var matter in OwnerKinds)
+                        foreach (var project in OwnerKinds)
+                            data.Add(table, core, subject, matter, project);
         return data;
     }
 
@@ -727,13 +729,13 @@ public class ExistingRowOwnershipParityTests
         }
     }
 
-    [Theory(DisplayName = "042c fix round 2 (UAC-r2 K2 condition): with the core record and TWO stamps, ForRow(core) and ForExistingRowAsync give the same primary, the same parent set and the same owner (or the same refusal code) for every owner kind of the subject, the matter stamp and the project stamp (Secure team, ordinary team, user-owned, unreadable or missing); their order after the subject differs (CoreRecordEntities order vs lineage order)")]
+    [Theory(DisplayName = "042c fix rounds 2-3 (UAC-r2 K2 condition, design 15.4 row 14): with the core record and TWO stamps, ForRow(core) and ForExistingRowAsync give the same primary, the same parent set and the same owner (or the same refusal code) for every owner kind of the core record, the subject, the matter stamp and the project stamp (Secure team, ordinary team, user-owned, unreadable or missing); their order after the subject differs (CoreRecordEntities order vs lineage order)")]
     [MemberData(nameof(TwoStampOwnerKinds))]
     public async Task ForRow_WithTheCoreRecord_AndTwoStamps_HasTheReconcilersPrimaryParentsAndOwner(
-        string table, string subjectKind, string matterKind, string projectKind)
+        string table, string coreKind, string subjectKind, string matterKind, string projectKind)
     {
         var (coreMatter, todo, matterX, project) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
-        _world.OrdinaryRoot("sprk_matter", coreMatter);
+        RootOwned("sprk_matter", coreMatter, coreKind);
         RootOwned("sprk_matter", matterX, matterKind);
         RootOwned("sprk_project", project, projectKind);
         (string, string, Guid)[] todoLookups = [("sprk_regardingmatter", "sprk_matter", matterX), ("sprk_regardingproject", "sprk_project", project)];

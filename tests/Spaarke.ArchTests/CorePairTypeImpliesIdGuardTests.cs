@@ -22,7 +22,10 @@ namespace Spaarke.ArchTests;
 /// <c>WithCorePair</c> (<c>RecordCreationService</c>), and that member must write the id's key.</item>
 /// </list>
 /// <para>Not seen: a key built at run time outside a body rewrite, a dictionary collection initializer (<c>{ { KEY, v } }</c>, which
-/// reads like a set initializer), an anonymous object or a hand-written JSON string. The behaviour tests pin the paths:
+/// reads like a set initializer), an anonymous object, a hand-written JSON string, a conditional write in one method (a type write
+/// with an id write nearby that does not always run with it: rule 1 checks that the two are near, not that both always run), a DTO
+/// property mapped to the column by <c>[JsonPropertyName]</c> and written through the serializer, and
+/// <c>Entity.SetAttributeValue(KEY, …)</c>. The behaviour tests pin the paths:
 /// <c>SecureChildOwnershipAiToolTests.HalfCorePair</c> (chat and service) and <c>WriterBuilderOwnershipParityTests</c> (the system
 /// principal). Enforced by: this guard (ArchTests in CI and the Stop hook). No baseline: there are no violations today.</para>
 /// <para><b>Controls.</b> <see cref="Control_ATypeWrittenWithoutItsId_IsFound"/> (must fire) and
