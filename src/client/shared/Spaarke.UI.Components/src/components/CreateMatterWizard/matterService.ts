@@ -3,7 +3,9 @@
  * Matter creation flow orchestrator for the Create New Matter wizard.
  *
  * Responsibilities:
- *   1. Create sprk_matter Dataverse record via IDataService
+ *   1. Create the sprk_matter record through the BFF child-records route
+ *      (`POST /api/v1/child-records/sprk_matter`); the server owns field mapping, the owner,
+ *      the search-index default, the I-1 stamp and the matter number
  *   2. Upload files to SPE via BFF SpeFileStore endpoint
  *   3. Execute selected follow-on actions (assign counsel, draft summary, send email)
  *
@@ -32,7 +34,7 @@ import type {
   IUserBuCascadeDefaults,
 } from '../../services/EntityCreationService';
 import type { AuthenticatedFetchFn as ThrowingFetchFn } from '../../utils/fetchTypes';
-import { applyFieldMappings } from '../../services/FieldMappingService';
+import { createRecordViaBffWithWarnings } from '../../utils/adapters/bffChildWriteAdapter';
 import { cleanGuid, discoverNavProps, toNavPropMap } from '../../services/PolymorphicResolverService';
 import { syncAssignedAccess } from '../../services/assignedAccessSync';
 
@@ -119,7 +121,7 @@ export class MatterService {
   private readonly _dataService: IDataService;
   private readonly _entityService: EntityCreationService;
   private readonly _tenantId: string;
-  /** Retained (alongside `_bffBaseUrl`) to drive the Field Mapping Framework engine call in `createMatter`. */
+  /** Drives the BFF create (`createRecordViaBffWithWarnings`) and the post-create access sync in `createMatter`. */
   private readonly _authenticatedFetch: AuthenticatedFetchFn;
   private readonly _bffBaseUrl: string;
 
@@ -165,40 +167,32 @@ export class MatterService {
 
   /**
    * Full matter creation flow:
-   *   1. Create sprk_matter record (with BU cascade applied if defaults provided)
+   *   1. Create the sprk_matter record through the BFF child-records route (user-entered values only)
    *   2. Upload files to SPE via BFF (using EntityCreationService)
    *   3. Create sprk_document records linking files to the matter
    *   4. Execute selected follow-on actions
    *
    * Returns ICreateMatterResult -- never throws.
    *
-   * BU cascade (FR-WIZ-01): when `cascadeDefaults` is provided, applies
-   * `sprk_containerid` AND `sprk_searchindexname` from the user's owning Business
-   * Unit via {@link EntityCreationService.applyUserBuDefaults}. INV-5 enforced
-   * per-field — explicit values pre-existing on the payload are preserved.
-   *
-   * Aligned with the proven CreateProjectWizard pattern: the caller (typically
-   * `CreateMatterWizard.tsx` via `resolveUserBuDefaults` prop) resolves defaults
-   * using the host's `Xrm.Utility.getGlobalContext().userSettings.userId`. This
-   * replaces a prior broken inline implementation that called the non-existent
-   * `Xrm.Utility.getUserId()` API and silently skipped the cascade in the
-   * Code Page iframe runtime.
+   * Field-mapping write path (project field-mapping-server-write-path-r1, task 021, FR-16): the
+   * payload holds ONLY what the user entered or picked. This method does not map fields, generate a
+   * matter number, resolve an owner or default a search index -- the server does each of them in the
+   * one create (fill-only mapping FR-02, owner FR-09, search index FR-38/FR-40, number I-11: the
+   * platform autonumber). A mapped value the caller may not write is dropped by the server with a
+   * warning, which arrives in `warnings`.
    *
    * @param form Form state captured by the wizard.
    * @param uploadedFiles Files to upload to SPE after the matter is created.
    * @param followOnActions Optional follow-on workflow steps (assign counsel, etc.).
-   * @param cascadeDefaults Optional BU-derived defaults (containerId, searchIndexName).
-   *   When omitted/undefined the cascade step is a no-op (legacy behavior preserved
-   *   for tests that omit it). Wizard call sites pass the resolved value.
+   * @param cascadeDefaults Optional BU-derived defaults. Used ONLY to name the search index that the
+   *   uploaded files are indexed into (`indexUploadedFiles`); it is never written onto the matter
+   *   (the index columns are the server's, FR-38).
    * @param onUploadProgress Optional callback fired during SPE file uploads.
-   * @param association Optional parent record selected via the wizard's
-   *   AssociateToStep (Project/Account today; same-entity Matter parents —
-   *   matter→matter — are not precluded: no source===target guard, per
-   *   ADR-024/design.md §10 decision 9). When supplied, drives the Field
-   *   Mapping Framework engine (spec FR-12): `sourceEntity`/`sourceId` =
-   *   `association.entityType`/`recordId`, passed through unchanged. When
-   *   omitted, the engine call is skipped — a graceful no-op identical to
-   *   today's behavior.
+   * @param association Optional parent record selected via the wizard's AssociateToStep
+   *   (Project/Account today; same-entity Matter parents are not precluded, ADR-024). It is sent to
+   *   the route as the explicit `mappingSource` (`?mappingSourceEntity=&mappingSourceId=`), because
+   *   the matter payload carries no filing key the server could infer the source from. The body
+   *   never carries it. When omitted, no source is named and the server maps nothing.
    */
   async createMatter(
     form: ICreateMatterFormState,
@@ -241,39 +235,14 @@ export class MatterService {
     // for a non-secure matter is the SAME value this used to write. For a secure record the column
     // is stamped SERVER-side by provisioning, which is the only authority that should write it.
 
-    // FR-WIZ-01 (spaarke-multi-container-multi-index-r1): cascade `sprk_containerid`
-    // AND `sprk_searchindexname` from the current user's owning Business Unit.
-    // INV-5 enforced per-field by applyUserBuDefaults — the host-injected
-    // this._containerId set above is preserved if already present on the payload.
-    //
-    // Defaults are resolved upstream by the wizard component (using the host's
-    // Xrm.Utility.getGlobalContext().userSettings.userId) and passed in via the
-    // `cascadeDefaults` parameter. Same dependency-injection pattern as
-    // CreateProjectWizard.tsx (verified working).
-    if (cascadeDefaults) {
-      const applied = EntityCreationService.applyUserBuDefaults(entity, cascadeDefaults);
-      console.info('[MatterService] BU cascade applied:', applied, '(BU:', cascadeDefaults.businessUnitId, ')');
-    }
-
-    // Generate matter number: {matterTypeCode}-{random 6 digits}
-    if (form.matterTypeId) {
-      try {
-        const matterTypeRecord = await this._dataService.retrieveRecord(
-          'sprk_mattertype_ref',
-          form.matterTypeId,
-          '?$select=sprk_mattertypecode'
-        );
-        const typeCode = (matterTypeRecord?.sprk_mattertypecode as string) ?? '';
-        if (typeCode) {
-          const random6 = String(Math.floor(100000 + Math.random() * 900000));
-          entity['sprk_matternumber'] = `${typeCode}-${random6}`;
-          console.info('[MatterService] Generated matter number:', entity['sprk_matternumber']);
-        }
-      } catch (err) {
-        console.warn('[MatterService] Could not look up matter type code for numbering:', err);
-        // Non-fatal -- continue without matter number
-      }
-    }
+    // Task 021 (FR-16): the payload is the user's own values -- nothing else.
+    //   - The BU cascade (`sprk_searchindexname`, the `sprk_ai_search_index` bind) is NOT written: both columns are the
+    //     server's on a matter (FR-38; `RecordTableRule.SearchIndexed`), and since task 041 (FR-40) the index follows the
+    //     content type. The server drops either from a caller's payload, so sending them could only be noise.
+    //   - `sprk_matternumber` is NOT generated (was the matter type code plus six random digits): the platform autonumber issues it (I-11,
+    //     owner decision 2026-10-02, task 076), and the route refuses a caller-supplied number.
+    //   - `sprk_containerid` stays unwritten (task 076 W1); the server derives the container from the record.
+    //   - No owner, owning team or impersonation value (FR-09): the BFF decides ownership from the caller.
 
     // Add lookup bindings using discovered nav-prop names
     const lookups: Array<{ col: string; entitySet: string; guid: string }> = [];
@@ -292,17 +261,6 @@ export class MatterService {
         guid: form.assignedOutsideCounselId,
       });
 
-    // Phase G (spaarke-multi-container-multi-index-r1): cascade BU's `sprk_ai_search_index`
-    // lookup onto the new Matter. Nav-prop discovered as `sprk_AI_Search_Index` (PascalCase).
-    // INV-5 moot — Matter create form has no field for the user to override this.
-    if (cascadeDefaults?.searchIndexId) {
-      lookups.push({
-        col: 'sprk_ai_search_index',
-        entitySet: 'sprk_aisearchindexes',
-        guid: cascadeDefaults.searchIndexId,
-      });
-    }
-
     for (const lk of lookups) {
       const navProp = navPropMap[lk.col] ?? lk.col;
       // cleanGuid: some sources (Xrm picker/lookupObjects, created-record ids) return
@@ -311,31 +269,24 @@ export class MatterService {
       entity[`${navProp}@odata.bind`] = `/${lk.entitySet}(${cleanGuid(lk.guid)})`;
     }
 
-    // Field Mapping Framework (spec FR-12, task 020): apply the configured
-    // {parent -> sprk_matter} mapping profile (if any) onto the create
-    // payload. Runs AFTER the lookup-binding block above and BEFORE
-    // createRecord, on the SAME payload object. The engine never throws and
-    // is a graceful no-op when there's no association or no profile -- no
-    // behavior change in either case. No source===target guard -- a Matter
-    // parent (matter→matter) is passed through unchanged, same as any other
-    // parent entity type (ADR-024/design.md §10 decision 9).
-    if (association?.recordId && association.entityType) {
-      const mappingResult = await applyFieldMappings({
-        sourceEntity: association.entityType,
-        sourceId: association.recordId,
-        targetEntity: 'sprk_matter',
-        payload: entity,
-        dataService: this._dataService,
-        authenticatedFetch: this._authenticatedFetch,
-        bffBaseUrl: this._bffBaseUrl,
-      });
-      warnings.push(...mappingResult.warnings);
-    }
-
     try {
       console.info('[MatterService] createRecord payload:', JSON.stringify(entity, null, 2));
-      // IDataService.createRecord returns Promise<string> (just the id)
-      matterId = await this._dataService.createRecord('sprk_matter', entity);
+      // Task 021 (FR-16): the create goes to the BFF child-records route, never to Xrm.WebApi. The server maps the
+      // fields fill-only (the user's own value wins), owns the record by the caller's business-unit team, and the
+      // platform autonumber issues the matter number. The AssociateToStep selection is the explicit mapping source; it
+      // travels in the query string, so the body stays the user's own values. A server warning (a source that could not
+      // be read, a mapped value that was not written) is shown like any other.
+      const created = await createRecordViaBffWithWarnings(
+        this._authenticatedFetch,
+        this._bffBaseUrl,
+        'sprk_matter',
+        entity,
+        association?.recordId && association.entityType
+          ? { mappingSource: { entity: association.entityType, id: association.recordId } }
+          : undefined
+      );
+      matterId = created.id;
+      warnings.push(...created.warnings);
       console.info('[MatterService] createRecord success, matterId:', matterId);
     } catch (err) {
       console.error('[MatterService] createRecord error:', err);
@@ -350,9 +301,11 @@ export class MatterService {
     }
 
     // -- Step 1b (task 142, owner Q5 + R3): the matter's "Assigned *" people get their access NOW --
-    // A client create runs no BFF writer, so this one call is its L1 trigger: the server reads the matter's own
-    // Assigned columns and grants Collaborate (or shares to a linked internal user). Never throws, never fails the
-    // wizard — a failed call is logged and the reconciliation job grants within minutes.
+    // Task 021: the route's create already runs the I-12 L1 materialiser for a root (RecordCreationService), so this call
+    // is now an idempotent repeat (the work-assignment wizard dropped its call in task 046); left in place here, listed in
+    // the task 021 notes for a follow-up. The server reads the matter's own Assigned columns and grants Collaborate (or
+    // shares to a linked internal user). Never throws, never fails the wizard — a failed call is logged and the
+    // reconciliation job grants within minutes.
     await syncAssignedAccess(this._authenticatedFetch, this._bffBaseUrl, 'matter', matterId);
 
     // -- Step 2: Upload files to SPE via BFF + create document records --

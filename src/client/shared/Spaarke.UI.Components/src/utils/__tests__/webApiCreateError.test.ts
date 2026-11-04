@@ -3,8 +3,9 @@
  * unfilled. A privilege or access refusal now becomes one plain sentence naming no ids, users, tables or privilege
  * names, chosen from the privilege the raw message names (Create / AppendTo or Append / none); a BFF child-record
  * refusal (`child_record.denied`) gets the neutral sentence; any other error keeps a clean message. Covers the helper,
- * the two Xrm.WebApi create wizards end to end (Project, Matter), and the five BFF-routed create wizards end to end
- * (Event, Invoice, Report Card, To Do, Work Assignment) through the BFF's 403.
+ * the Xrm.WebApi create wizard end to end (Project), and the six BFF-routed create wizards end to end
+ * (Event, Invoice, Report Card, To Do, Work Assignment, Matter) through the BFF's 403. The Matter wizard moved to the
+ * BFF child-records route in field-mapping-server-write-path-r1 task 021.
  */
 
 import { describeWebApiCreateError } from '../webApiCreateError';
@@ -282,24 +283,7 @@ describe('create wizards show the sentence for a privilege refusal and log the f
 
     expect(result.errorMessage).toBe(sentence);
   });
-
-  it('Matter: the sentence, no template, and the full error object in console.error', async () => {
-    const authFetch = jest
-      .fn()
-      .mockResolvedValue({ ok: true, status: 200, json: async () => ({}), text: async () => '' });
-    const service = new MatterService(
-      rejectingDataService(PRIVILEGE_ERROR),
-      authFetch as unknown as typeof fetch,
-      'https://example.test',
-      'container'
-    );
-
-    const result = await service.createMatter(MATTER_FORM, [], {});
-
-    expect(result.status).toBe('error');
-    expect(result.errorMessage).toBe(NEUTRAL_SENTENCE('matter'));
-    expect(errorSpy).toHaveBeenCalledWith('[MatterService] createRecord error:', PRIVILEGE_ERROR);
-  });
+  // Matter: moved to the BFF child-records route (task 021) -- covered with the BFF-routed wizards below.
 });
 
 // ---------------------------------------------------------------------------
@@ -386,6 +370,7 @@ describe('the BFF-routed create wizards show the neutral sentence for the BFF re
       'to do',
       f => new TodoService(readOnlyDataService(), f, BFF).createTodo({ ...EMPTY_TODO_FORM, title: 'Call' }),
     ],
+    ['Matter', 'matter', f => new MatterService(readOnlyDataService(), f, BFF).createMatter(MATTER_FORM, [], {})],
     [
       'Work Assignment',
       'work assignment',

@@ -72,9 +72,7 @@ describe('syncAssignedAccess', () => {
     // authenticatedFetch THROWS ApiError for a non-2xx; it never resolves { ok: false }.
     const fetchMock = jest
       .fn()
-      .mockRejectedValue(
-        apiErrorFor(403, { title: 'Forbidden', reasonCode: 'sdap.access.delegation.write_required' })
-      );
+      .mockRejectedValue(apiErrorFor(403, { title: 'Forbidden', reasonCode: 'sdap.access.delegation.write_required' }));
 
     const result = await syncAssignedAccess(fetchMock, BFF, 'project', CREATED);
 
@@ -115,8 +113,13 @@ describe('the client writers call the sync route after their create (criterion 1
     summary: '',
   };
 
+  // Task 021: the matter is created through the BFF child-records route, which answers with the new id.
+  const MATTER_ROUTE = `${BFF}/api/v1/child-records/sprk_matter`;
+  const matterFetch = (): jest.Mock =>
+    jest.fn(async (url: string) => (url === MATTER_ROUTE ? ok({ id: CREATED }) : ok()));
+
   it('Create Matter: syncs the created matter', async () => {
-    const fetchMock = jest.fn().mockResolvedValue(ok());
+    const fetchMock = matterFetch();
 
     const result = await new MatterService(dataService(), fetchMock, BFF).createMatter(matterForm, [], {});
 
@@ -126,7 +129,11 @@ describe('the client writers call the sync route after their create (criterion 1
 
   it('Create Matter: a failed sync is logged and does NOT fail the wizard', async () => {
     const fetchMock = jest.fn(async (url: string) =>
-      url === SYNC_URL ? Promise.reject(new TypeError('Failed to fetch')) : ok()
+      url === SYNC_URL
+        ? Promise.reject(new TypeError('Failed to fetch'))
+        : url === MATTER_ROUTE
+          ? ok({ id: CREATED })
+          : ok()
     );
 
     const result = await new MatterService(dataService(), fetchMock, BFF).createMatter(matterForm, [], {});
