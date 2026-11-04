@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
@@ -28,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.FinanceSubmission;
 /// (<c>0x80040200</c>). The phase the allocator reads is the test's (<see cref="_phase"/>); every test that does not set it runs in P0, today's
 /// behaviour.</para>
 /// </remarks>
-public sealed class TrackingNumberAllocatorTests
+public sealed partial class TrackingNumberAllocatorTests
 {
     private static readonly Guid FirmA = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
     private static readonly Guid FirmB = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
@@ -427,6 +428,8 @@ public sealed class TrackingNumberAllocatorTests
     [InlineData("sprk_firminvoicenumber")]
     [InlineData("sprk_vendororg")]
     [InlineData("sprk_trackingscope")]
+    [InlineData("sprk_previoussequence")]
+    [InlineData("SPRK_PreviousSequence")]
     [InlineData("sprk_invoicesubmissionid")]
     [InlineData("SPRK_TrackingNumber")]
     public async Task AColumnTheAllocatorOwns_CannotBeSuppliedByTheCaller(string column)
@@ -851,6 +854,7 @@ public sealed class TrackingNumberAllocatorTests
         private readonly Dictionary<Guid, Entity> _rows = [];
         private int _createCalls;
         private int _sequenceReads;
+        private int _idReads;
 
         public SubmissionStore()
         {
@@ -858,6 +862,24 @@ public sealed class TrackingNumberAllocatorTests
                 .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns(async (QueryExpression query, CancellationToken _) =>
                 {
+                    // Task 095d-1a (K4): the none scope's previous-sequence read is counted; an environment whose schema script has not run
+                    // refuses any query that names the column, as Dataverse does.
+                    var previousRead = query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_previoussequence");
+                    if (previousRead)
+                    {
+                        Interlocked.Increment(ref _previousSequenceReads);
+                    }
+
+                    if (!PreviousSequenceColumnExists && NamesThePreviousSequence(query))
+                    {
+                        throw MissingPreviousSequenceFault();
+                    }
+
+                    if (previousRead && PreviousSequenceReadFault is { } readFault)
+                    {
+                        throw readFault;
+                    }
+
                     // A lookup by the submission id is the idempotency read; one on the sequence is the highest-sequence read; one on
                     // the tracking number is the held-number check (task 094).
                     var byId = !query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_submissionsequence");
@@ -876,6 +898,11 @@ public sealed class TrackingNumberAllocatorTests
                         if (!byId)
                         {
                             _sequenceReads++;
+                        }
+
+                        if (query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_invoicesubmissionid"))
+                        {
+                            _idReads++;
                         }
 
                         answer = Run(query);
@@ -949,6 +976,141 @@ public sealed class TrackingNumberAllocatorTests
                         return id;
                     }
                 });
+
+            Entities
+                .Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<OrganizationRequest>>(), It.IsAny<CancellationToken>()))
+                .Returns(async (IReadOnlyList<OrganizationRequest> requests, CancellationToken _) =>
+                {
+                    await Task.Yield();
+                    lock (_gate)
+                    {
+                        Transact(requests);
+                    }
+                });
+        }
+
+        /// <summary>
+        /// Task 095d-1a: one Dataverse transaction, all or nothing. A submission update is checked as Dataverse checks it on update: its row
+        /// version under <c>IfRowVersionMatches</c>, then the scope key and the firm key over every OTHER row. Any other request is a caller
+        /// request; <see cref="CallerRequestFault"/> faults the first of them. A fault is raised the way the SDK client raises it: an
+        /// <c>ExecuteTransactionFault</c> naming the request, the request's own code as its inner fault, mapped by the real
+        /// <see cref="DataverseServiceClientImpl.MapTransactionFailure"/>. Nothing is applied unless every request passes.
+        /// </summary>
+        private void Transact(IReadOnlyList<OrganizationRequest> requests)
+        {
+            var call = ++_transactionCalls;
+            Transactions.Add(requests.ToList());
+            BeforeTransaction?.Invoke(call, requests);
+
+            var updates = new List<(Guid Id, Entity Target)>();
+            for (var index = 0; index < requests.Count; index++)
+            {
+                if (requests[index] is UpdateRequest { Target.LogicalName: "sprk_invoicesubmission" } update)
+                {
+                    var target = update.Target;
+                    if (!_rows.TryGetValue(target.Id, out var existing))
+                    {
+                        throw TransactionFault(requests, index, unchecked((int)0x80040217), "sprk_invoicesubmission With Id Does Not Exist");
+                    }
+
+                    if (update.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches && target.RowVersion != existing.RowVersion)
+                    {
+                        throw TransactionFault(requests, index, DataverseServiceClientImpl.ConcurrencyVersionMismatch,
+                            "The version of the existing record doesn't match the RowVersion property provided.");
+                    }
+
+                    if (!PreviousSequenceColumnExists && target.Contains("sprk_previoussequence"))
+                    {
+                        throw TransactionFault(requests, index, unchecked((int)0x80041103), MissingPreviousSequenceMessage);
+                    }
+
+                    var after = Clone(existing, existing.Id);
+                    foreach (var attribute in target.Attributes)
+                    {
+                        after[attribute.Key] = attribute.Value;
+                    }
+
+                    var tracking = after.GetAttributeValue<string>("sprk_trackingnumber");
+                    var scope = after.GetAttributeValue<string>("sprk_trackingscope");
+                    var firm = after.GetAttributeValue<EntityReference>("sprk_vendororg")?.Id;
+                    var others = _rows.Values.Where(other => other.Id != target.Id
+                        && string.Equals(other.GetAttributeValue<string>("sprk_trackingnumber"), tracking, StringComparison.OrdinalIgnoreCase)).ToList();
+                    var scopeClash = ScopeKeyActive && !string.IsNullOrEmpty(scope) && others.Any(other =>
+                        string.Equals(other.GetAttributeValue<string>("sprk_trackingscope"), scope, StringComparison.OrdinalIgnoreCase));
+                    var firmClash = FirmKeyActive && firm is not null && others.Any(other =>
+                        other.GetAttributeValue<EntityReference>("sprk_vendororg")?.Id == firm);
+                    if (scopeClash || firmClash)
+                    {
+                        throw TransactionFault(requests, index, unchecked((int)0x80060892),
+                            "A record that has the attribute values Tracking Number, Tracking Scope already exists.");
+                    }
+
+                    updates.Add((existing.Id, after));
+                    continue;
+                }
+
+                if (CallerRequestFault is { } code)
+                {
+                    throw TransactionFault(requests, index, code, "The caller's request faulted.");
+                }
+            }
+
+            foreach (var (id, after) in updates)
+            {
+                after.RowVersion = (int.Parse(_rows[id].RowVersion, System.Globalization.CultureInfo.InvariantCulture) + 1)
+                    .ToString(System.Globalization.CultureInfo.InvariantCulture);
+                _rows[id] = after;
+            }
+
+            Applied.AddRange(requests.Where(r => r is not UpdateRequest { Target.LogicalName: "sprk_invoicesubmission" }));
+        }
+
+        /// <summary>
+        /// The failure the SDK client raises for a transaction: with an <paramref name="index"/>, an <c>ExecuteTransactionFault</c> naming that
+        /// request with the request's own code as its inner fault; with none, a plain fault carrying the code and no faulted request (what
+        /// Dataverse sends when it does not say which request faulted, GitHub #971), mapped by the real <c>MapTransactionFailure</c>.
+        /// </summary>
+        public static DataverseTransactionException TransactionFault(IReadOnlyList<OrganizationRequest> requests, int? index, int code, string message) =>
+            DataverseServiceClientImpl.MapTransactionFailure(
+                requests,
+                index is { } faulted
+                    ? new FaultException<OrganizationServiceFault>(
+                        new ExecuteTransactionFault
+                        {
+                            FaultedRequestIndex = faulted,
+                            Message = "The transaction failed.",
+                            InnerFault = new OrganizationServiceFault { ErrorCode = code, Message = message },
+                        },
+                        new FaultReason("The transaction failed."))
+                    : new FaultException<OrganizationServiceFault>(
+                        new OrganizationServiceFault { ErrorCode = code, Message = message },
+                        new FaultReason("The transaction failed.")));
+
+        private int _transactionCalls;
+
+        /// <summary>Task 095d-1a: every transaction sent, committed or not, in order.</summary>
+        public List<List<OrganizationRequest>> Transactions { get; } = [];
+
+        /// <summary>Task 095d-1a: the caller requests of the transactions that committed.</summary>
+        public List<OrganizationRequest> Applied { get; } = [];
+
+        /// <summary>Task 095d-1a: runs with the table locked as a transaction arrives, before any check (another request committing first).</summary>
+        public Action<int, IReadOnlyList<OrganizationRequest>>? BeforeTransaction { get; set; }
+
+        /// <summary>Task 095d-1a: when set, the first caller request of every transaction faults with this code.</summary>
+        public int? CallerRequestFault { get; set; }
+
+        public int TransactionCalls => Volatile.Read(ref _transactionCalls);
+
+        /// <summary>Task 095d-1a: a concurrent edit of the row: its version moves on, nothing else changes.</summary>
+        public void Touch(Guid id)
+        {
+            lock (_gate)
+            {
+                var row = _rows[id];
+                row.RowVersion = (int.Parse(row.RowVersion, System.Globalization.CultureInfo.InvariantCulture) + 1)
+                    .ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
         }
 
         public Mock<IGenericEntityService> Entities { get; } = new(MockBehavior.Strict);
@@ -978,6 +1140,35 @@ public sealed class TrackingNumberAllocatorTests
 
         public int SequenceReads => Volatile.Read(ref _sequenceReads);
 
+        private int _previousSequenceReads;
+
+        /// <summary>Task 095d-1a (K4): the reads that name <c>sprk_previoussequence</c> in a condition (the none scope's previous-sequence read).</summary>
+        public int PreviousSequenceReads => Volatile.Read(ref _previousSequenceReads);
+
+        /// <summary>Task 095d-1a (K4): false models an environment whose schema script has not run: a query or a write that names
+        /// <c>sprk_previoussequence</c> faults as Dataverse faults on a column that is not there (<c>0x80041103</c>).</summary>
+        public bool PreviousSequenceColumnExists { get; set; } = true;
+
+        /// <summary>Task 095d-1a (K4): when set, every previous-sequence read raises it (a fault that is not a missing column).</summary>
+        public Exception? PreviousSequenceReadFault { get; set; }
+
+        public const string MissingPreviousSequenceMessage =
+            "'sprk_invoicesubmission' entity doesn't contain attribute with Name = 'sprk_previoussequence' and NameMapping = 'Logical' " +
+            "(look up attribute by name is case-sensitive).orgIndex: 142, logicalName: sprk_invoicesubmission";
+
+        /// <summary>The fault the SDK client raises for a query that names a column the environment does not have.</summary>
+        public static FaultException<OrganizationServiceFault> MissingPreviousSequenceFault() => new(
+            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80041103), Message = MissingPreviousSequenceMessage },
+            new FaultReason(MissingPreviousSequenceMessage));
+
+        private static bool NamesThePreviousSequence(QueryExpression query) =>
+            query.ColumnSet.Columns.Contains("sprk_previoussequence")
+            || query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_previoussequence")
+            || query.Orders.Any(o => o.AttributeName == "sprk_previoussequence");
+
+        /// <summary>Task 095d-1a (review F4): the reads of a row by its id (the idempotency read of a create, the precondition read of a renumber).</summary>
+        public int IdReads => Volatile.Read(ref _idReads);
+
         public int RowCount
         {
             get
@@ -1006,6 +1197,22 @@ public sealed class TrackingNumberAllocatorTests
         public Guid AddScoped(Guid? firmId, string firmInvoiceNumber, int sequence, Guid? id = null) =>
             Add(firmId, firmId?.ToString("D") ?? "none", firmInvoiceNumber, sequence, 0, id);
 
+        /// <summary>Task 095d-1a (K4): a submission as a renumber leaves it: in <paramref name="firmId"/>'s scope holding <paramref name="sequence"/>
+        /// there, with the <c>none</c>-scope sequence it gave up in <c>sprk_previoussequence</c>.</summary>
+        public Guid AddRenumbered(Guid firmId, string firmInvoiceNumber, int sequence, int previousSequence) =>
+            WithPreviousSequence(AddScoped(firmId, firmInvoiceNumber, sequence), previousSequence);
+
+        /// <summary>Task 095d-1a (K4): sets <c>sprk_previoussequence</c> on the row <paramref name="id"/>; returns the id.</summary>
+        public Guid WithPreviousSequence(Guid id, int previousSequence)
+        {
+            lock (_gate)
+            {
+                _rows[id]["sprk_previoussequence"] = previousSequence;
+            }
+
+            return id;
+        }
+
         /// <summary>Task 095c: a numbered submission with an explicit scope, whatever its firm (e.g. a firm filed in the <c>none</c> scope).</summary>
         public Guid AddWithScope(Guid? firmId, string scope, string firmInvoiceNumber, int sequence) =>
             Add(firmId, scope, firmInvoiceNumber, sequence, 0, null);
@@ -1016,6 +1223,7 @@ public sealed class TrackingNumberAllocatorTests
             {
                 var row = new Entity("sprk_invoicesubmission", id ?? Guid.NewGuid())
                 {
+                    RowVersion = "1",
                     ["statecode"] = new OptionSetValue(stateCode),
                     ["sprk_firminvoicenumber"] = firmInvoiceNumber,
                     ["sprk_submissionsequence"] = sequence,
@@ -1049,6 +1257,29 @@ public sealed class TrackingNumberAllocatorTests
             return id;
         }
 
+        /// <summary>Task 095d-1a: <see cref="AddUndone"/> as the schema script leaves it after the backfill, in its firm's scope.</summary>
+        public Guid AddScopedUndone(Guid firmId, string firmInvoiceNumber, int sequence)
+        {
+            var id = AddScoped(firmId, firmInvoiceNumber, sequence);
+            lock (_gate)
+            {
+                _rows[id].Attributes.Remove("sprk_firminvoicenumber");
+            }
+
+            return id;
+        }
+
+        /// <summary>Task 095d-1a (review F4): the row <paramref name="id"/> as it is with <paramref name="column"/> not set; returns the id.</summary>
+        public Guid WithoutColumn(Guid id, string column)
+        {
+            lock (_gate)
+            {
+                _rows[id].Attributes.Remove(column);
+            }
+
+            return id;
+        }
+
         /// <summary>A submission that exists with a firm and a tracking number but was never numbered by the allocator (no sequence).</summary>
         public Guid AddUnnumbered(Guid firmId)
         {
@@ -1074,7 +1305,7 @@ public sealed class TrackingNumberAllocatorTests
 
         private static Entity Clone(Entity source, Guid id)
         {
-            var copy = new Entity(source.LogicalName, id);
+            var copy = new Entity(source.LogicalName, id) { RowVersion = source.RowVersion };
             foreach (var attribute in source.Attributes)
             {
                 copy[attribute.Key] = attribute.Value;

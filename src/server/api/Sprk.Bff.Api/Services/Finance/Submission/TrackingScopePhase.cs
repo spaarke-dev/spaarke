@@ -126,8 +126,16 @@ internal sealed class TrackingScopePhaseCache
     private int _phase = (int)TrackingScopePhase.P0NoScopeColumn;
     private long _readAtUtcTicks; // 0: never read
     private long _readsStarted;
+    private int _previousSequenceMissingNoted;
 
     internal TrackingScopePhaseCache(TimeProvider clock) => _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+
+    /// <summary>
+    /// Task 095d-1a (K4): true the first time it is called on this cache, false after. The allocator logs "<c>sprk_previoussequence</c> does not
+    /// exist yet" when it first meets that, once per process (this cache is the allocator's one piece of process-wide state; a test's own cache
+    /// is its own process).
+    /// </summary>
+    internal bool TryMarkPreviousSequenceMissing() => Interlocked.Exchange(ref _previousSequenceMissingNoted, 1) == 0;
 
     /// <summary>
     /// How many reads have been started. A caller that the platform refused takes this at the refusal and passes it as
@@ -155,7 +163,7 @@ internal sealed class TrackingScopePhaseCache
                 return Current;
             }
 
-            if (force &&refusedAtRead is { } at && Volatile.Read(ref _readsStarted) > at)
+            if (force && refusedAtRead is { } at && Volatile.Read(ref _readsStarted) > at)
             {
                 // Reads are serial (this gate), so none is in flight: a read that started after this caller's refusal has completed.
                 return Current;
