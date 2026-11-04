@@ -492,9 +492,10 @@ public sealed class SignalSuppressionService
         return found;
     }
 
-    /// <summary>What <see cref="ReadSubjectRowsAsync"/> reads of a subject row: its lineage lookups and its owner (what the walk reads).</summary>
+    /// <summary>What <see cref="ReadSubjectRowsAsync"/> reads of a subject row: its lineage columns (its lookups and, on a table that
+    /// holds one, its core record pair: <see cref="SecureChildLineage.Table.LineageColumns"/>) and its owner (what the walk reads).</summary>
     private static ColumnSet SubjectColumns(SecureChildLineage.Table table) =>
-        new(table.Lookups.Keys.Append("owningteam").Append("owninguser").ToArray());
+        new(table.LineageColumns.Append("owningteam").Append("owninguser").ToArray());
 
     /// <summary>
     /// #1661 R1: the partition each hit's NEW episode will belong to, from the same truth as the rows (the hit's Signal as the writer

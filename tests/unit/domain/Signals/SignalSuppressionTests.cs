@@ -315,14 +315,13 @@ public partial class SignalSuppressionTests
         var s = new Store();
         (Guid Type, Guid Id)[] cores =
         [
-            (WorkAssignmentType, WorkAssignmentId), (ServiceRequestType, ServiceRequestId), (MatterType, MatterId), (FifthCoreType, FifthCoreId),
+            (WorkAssignmentType, WorkAssignmentId), (ServiceRequestType, ServiceRequestId), (MatterType, MatterId), (ProjectType, ProjectId),
         ];
-        // A fifth core type exists only as a catalog row (a type ref id) and an id: nothing in the service names it.
         for (var n = 0; n < 3; n++)
         {
             s.Dismiss(WorkAssignmentId, Guid.NewGuid(), daysAgo: n + 1, coreType: WorkAssignmentType);
             s.Dismiss(ServiceRequestId, Guid.NewGuid(), daysAgo: n + 1, coreType: ServiceRequestType);
-            s.Dismiss(FifthCoreId, Guid.NewGuid(), daysAgo: n + 1, coreType: FifthCoreType);
+            s.Dismiss(ProjectId, Guid.NewGuid(), daysAgo: n + 1, coreType: ProjectType);
         }
 
         s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1); // the matter has only one
@@ -333,10 +332,34 @@ public partial class SignalSuppressionTests
             results.Add((await s.Service.ApplyAsync(PolicyId, Code, SuppressionGrain.ForCore(type, id), default)).SuppressedUntil);
         }
 
-        // The four core types are counted independently and the service names none of them (D-36). The fifth type is the core
-        // record pair lineage's data error (K1): the core tables are a closed set, so a type the catalog maps to no core table
-        // holds its Signals (undetermined), and the undetermined bucket is fail closed: never stamped, never muting.
-        results.Select(r => r is not null).Should().Equal(true, true, false, false);
+        // The four core types are counted independently, and the service names none of them (D-36): each is a catalog type id
+        // and a core id. A type the catalog maps to no core table is held instead (ACorePairOfAnUnknownType_IsHeld_NeverStamped_D204).
+        results.Select(r => r is not null).Should().Equal(true, true, false, true);
+    }
+
+    [Fact]
+    public async Task ACorePairOfAnUnknownType_IsHeld_NeverStamped_D204()
+    {
+        // The core tables are a closed set, so a core record pair whose type the catalog maps to no core table is a data error: its
+        // Signals are held (undetermined), as the ownership question holds such a row. The undetermined bucket is fail closed: its
+        // dismissals are not counted for the pairing, and nothing is stamped.
+        var s = new Store();
+        var dismissed = Enumerable.Range(0, 3)
+            .Select(n => s.Dismiss(FifthCoreId, Guid.NewGuid(), daysAgo: n + 1, coreType: FifthCoreType))
+            .ToList();
+        var open = s.Open(FifthCoreId, Guid.NewGuid());
+        s.Signals.Single(x => x.Id == open)["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", FifthCoreType);
+        s.Signals.Single(x => x.Id == open).Attributes.Remove("sprk_matter");
+
+        (await s.Service.PartitionsOfSignalsAsync([.. dismissed, open], default))
+            .Should().OnlyContain(p => p == SuppressionPartition.Undetermined, "a type that names no core table holds the Signal");
+
+        var status = await s.Service.ApplyAsync(PolicyId, Code, SuppressionGrain.ForCore(FifthCoreType, FifthCoreId), default);
+
+        status.DismissalsCounted.Should().Be(0, "a held dismissal counts toward nothing");
+        status.SuppressedUntil.Should().BeNull();
+        s.StampedIds.Should().BeEmpty("the undetermined bucket is never stamped");
+        s.Signals.Should().OnlyContain(x => x.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == null);
     }
 
     [Fact]
