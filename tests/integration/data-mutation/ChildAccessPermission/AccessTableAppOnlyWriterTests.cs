@@ -124,6 +124,10 @@ public class AccessTableAppOnlyWriterTests
             "sprk_invoice", "sprk_trackingnumber", "sprk_trackingscope", "sprk_outcomereasoncode",
         ],
 
+        // ebilling-r1 095c-4 review fix + task 095c-5 (uac-r2 2026-11-04): an invoice's firm and its own field-secured firm hold. Neither decides
+        // access; both decide whether the invoice can be approved and exported, and both have typed writers only (the persister; 095d's assign-firm).
+        ["sprk_invoice"] = ["sprk_firmhold", "sprk_vendororg"],
+
         // UAC review F4 / DEF-043: a Signal's frozen core record and its invoice and invoice-line subjects.
         // uac-r2 re-check F1: + its regarding pair, which names the subject a Duplicate is judged by.
         ["sprk_signal"] =
@@ -810,6 +814,52 @@ public class AccessTableAppOnlyWriterTests
         CallerCode(submission, "sprk_outcomereasoncode").Should().BeNull("the caller's own privileges decide");
     }
 
+    [Fact]
+    public async Task AnAppOnlyWriteOfTheInvoicesFirmOrFirmHold_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
+    {
+        // ebilling-r1 095c-4 review fix and task 095c-5 (uac-r2 2026-11-04): the invoice's own firm hold (field-secured) and its firm decide whether it
+        // can be approved and exported (InvoiceFirmHold). A generic write that clears the hold, or sets a firm no pipeline resolved, is refused per
+        // column; only the persister (and 095d's assign-firm) write them.
+        const string invoice = Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity;
+        foreach (var key in new[]
+                 {
+                     Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn, " SPRK_FirmHold ",
+                     Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceVendorOrg, "sprk_VendorOrg@odata.bind", "_sprk_vendororg_value",
+                 })
+        {
+            Code(invoice, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                invoice, Row, new Dictionary<string, object?> { [key] = null },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    invoice, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        InheritedAccessPermission.RefuseAppOnlyWrite(invoice, ["sprk_firmhold"])!.Reason
+            .Should().Contain("decides whether the invoice can be approved and exported").And.NotContain("who may see");
+        InheritedAccessPermission.RefuseAppOnlyWrite(invoice, ["sprk_vendororg"])!.Reason.Should().NotContain("who may see");
+
+        // Must not fire: an ordinary invoice column, the same names on other tables, a neighbouring name, and the caller's own write.
+        Code(invoice, "sprk_description").Should().BeNull("an ordinary column");
+        Code("sprk_billingevent", "sprk_vendororg").Should().BeNull("a line's firm is not the invoice's hold");
+        Code(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity, "sprk_firmhold").Should().BeNull("only the invoice carries the column");
+        Code(invoice, "sprk_firmholds").Should().BeNull("a neighbouring name");
+        CallerCode(invoice, "sprk_firmhold").Should().BeNull("the caller's own privileges (and field security) decide");
+        CallerCode(invoice, "sprk_vendororg").Should().BeNull("the caller's own privileges decide");
+    }
+
     [Theory]
     [InlineData("contact", "firstname")]
     [InlineData("contact", "emailaddress1")]
@@ -864,8 +914,10 @@ public class AccessTableAppOnlyWriterTests
     [InlineData("sprk_invoicesubmission", "sprk_processingstatus")]
     [InlineData("sprk_invoicesubmission", "sprk_submitter")]
     [InlineData("sprk_invoicesubmission", "sprk_adminattention")]
-    // Since #2294 (0bba46c1ba) no vendor org decides a Duplicate: a number-only finding is always withheld, so the invoice's sprk_vendororg decides no access.
-    [InlineData("sprk_invoice", "sprk_vendororg")]
+    // Since #2294 (0bba46c1ba) no vendor org decides a Duplicate. The invoice's sprk_vendororg is refused since the 095c-4 review fix (it holds the
+    // invoice, not access: AnAppOnlyWriteOfTheInvoicesFirmOrFirmHold_IsRefused); its lines' firm is not.
+    [InlineData("sprk_billingevent", "sprk_vendororg")]
+    [InlineData("sprk_invoice", "sprk_name")]
     [InlineData("sprk_invoiceapproval", "sprk_regardingmatter")]
     [InlineData("sprk_externalidentifier", "sprk_regardingproject")]
     public void AnOrdinaryColumn_OrAnAccessColumnOnAnotherTable_IsNotRefused(string table, string key) =>

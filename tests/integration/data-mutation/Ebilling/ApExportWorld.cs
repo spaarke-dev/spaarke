@@ -495,8 +495,10 @@ internal sealed class ExportDataverse
 
     private static bool Matches(Entity row, ConditionExpression condition)
     {
-        var has = row.Contains(condition.AttributeName) && row[condition.AttributeName] is not null;
-        var value = has ? Comparable(row[condition.AttributeName]) : null;
+        // A row's primary key ({table}id) is its id, as Dataverse filters it (task 095c-5: the invoice-side firm hold is read by sprk_invoiceid In ...).
+        var isKey = condition.AttributeName == row.LogicalName + "id";
+        var has = isKey || (row.Contains(condition.AttributeName) && row[condition.AttributeName] is not null);
+        var value = isKey ? row.Id : has ? Comparable(row[condition.AttributeName]) : null;
         if (!has && condition.AttributeName == "statecode")
         {
             // Every Dataverse row has a statecode; a row put here without one is Active.

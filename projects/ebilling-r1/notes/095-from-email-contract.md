@@ -307,27 +307,39 @@ Added 2026-10-28 (094): after `Failed` with `ebilling.submission.source_check_fa
 - **K2, timing.** The no-match answers cost different work: no `.eml` is one query and no rights call; an `.eml` the caller cannot read adds one rights read per `.eml` and no attempt query; unreadable attempts add the attempt query and one rights read per attempt. The body, status and headers are identical (apart from the correlation id), but a caller who times the answers could tell "nothing exists" from "something exists that I cannot read". The route does not equalise the work (the authorization gates of task 064 do, because they answer for a record id; here the key is a Message-ID). Accepted: the caller must hold the table-level Read on submissions and must supply a valid RFC Message-ID, which is not guessable (high entropy chosen by the sender's mail system), the signal is one bit about an email the caller already holds the ID of, and it fails closed (nothing about the record is returned).
 - **K2, cap.** More than 50 `.eml` Documents for one Message-ID, or more than 50 attempts of which none is readable, is the 503, not the 404. That is a count oracle of one bit ("at least 51 candidates exist") for a caller who can read none of them. Accepted: 51 savers of one message, or 51 attempts of one email, is outside normal use, the answer is the safe one (it never says "not submitted"), and the cap exists so one request cannot trigger an unbounded number of per-record rights reads. The two caps are constants (`MaxEmlCandidates`, `MaxAttemptCandidates`), each pinned by a contract test at 50 (decided) and 51 (503).
 
-## 12. An invoice that needs a firm (095c-4)
+## 12. An invoice that needs a firm (095c-4; 095c-5)
 
-Added 2026-11-03 (095c-4). An invoice **needs a firm** while it has no firm (`sprk_invoice.sprk_vendororg` empty) **or** a submission of it stores the
-`firm_missing` hold (`InvoiceFirmHold`): the outcome reason `ebilling.submission.firm_missing`, a pipeline finding with that reason, or a line finding
-`rules.not_checked` with `cause: "ebilling.submission.firm_missing"` (an unreadable findings document counts as held). The stored hold decides: a firm
-set on the invoice or the submission by a direct write does **not** lift it (uac-r2, 2026-11-03). It is lifted only by the submission pipeline
-(095d's assign-firm). A `rules.not_checked` line of a firm invoice (a rule that could not run, EB-D-175) carries no `cause` and does not hold.
+Added 2026-11-03 (095c-4); updated 2026-11-04 (095c-5 and the 095c-4 review fixes). An invoice **needs a firm** for one of two reasons
+(`InvoiceFirmNeed`):
 
-These are reviewer-side (internal) routes; none is called by the add-in. Every refusal writes nothing.
+- **No firm** (`NoFirm`): `sprk_invoice.sprk_vendororg` is empty.
+- **Held** (`Held`): the invoice shows a firm, but it is held for one. Either its own hold `sprk_invoice.sprk_firmhold` is set (095c-5: field-secured,
+  read app-only, written by the persister with the held outcome), or a submission of it stores the `firm_missing` hold (`InvoiceFirmHold`): the
+  outcome reason `ebilling.submission.firm_missing`, a pipeline finding with that reason, or a line finding `rules.not_checked` with
+  `cause: "ebilling.submission.firm_missing"`. An unreadable findings document counts as held.
 
-| Route | Answer | reasonCode | Sentence a reviewer reads |
-|---|---|---|---|
-| Approve (`POST .../invoices/{id}/approve`) | 409 | `ebilling.approve.firm_missing` | This invoice has no firm. A reviewer must add the firm before it can be approved. |
-| Approval state (`GET .../invoices/{id}/approval`) | 200 | `canApprove: false`, `firmNeeded: true` (additive) | (none; the reviewer pane shows the approve refusal's sentence) |
-| Return to Firm | 409 | `ebilling.invoice.firm_missing` | This invoice has no firm to return it to. Add the firm first, or reject the invoice. |
-| Reject | allowed | | (Reject needs no firm) |
-| AP export, selection | 400 `SelectionRefused`, per invoice `invoice_firm_missing` | `ebilling.export.selection_refused` (as before) | Only Approved invoices that are not yet in an export batch can be exported. Nothing was exported. |
-| AP export, the re-check before Sent to AP | 409 | `ebilling.export.firm_missing` | An invoice in the selection has no firm, or is waiting for one. Nothing was exported. A reviewer must add the firm first. |
-| Correct a line or header value | 409 | `ebilling.correction.firm_missing` | This invoice has no firm. Add the firm before correcting its values; nothing was changed. |
-| Correct a value, the firm cleared after the check | 409 | `ebilling.correction.firm_missing` | This invoice has no firm, so the correction was saved but its rules were not re-run. Add the firm, then repeat the correction. |
-| Adjustment rule options, or an adjustment citing a rule | 409 | `ebilling.adjustment.firm_missing` | This invoice has no firm, so no billing rule can be cited. Add the firm first, or add the adjustment without a rule. |
-| Adjustment without a rule | allowed | | |
+The stored hold decides. A firm set on the invoice or the submission by a direct write does **not** lift it (uac-r2, 2026-11-03), and neither does
+unlinking, repointing or deleting the submission (095c-5, uac-r2 2026-11-04). It is lifted only by the submission pipeline (095d's assign-firm, which
+clears `sprk_firmhold` through its typed writer). A `rules.not_checked` line of a firm invoice (a rule that could not run, EB-D-175) carries no `cause`
+and does not hold.
 
-A read fault while deciding "needs a firm" is the route's existing 503 (fail closed), never an approval or an export.
+These are reviewer-side (internal) routes; none is called by the add-in. Every refusal writes nothing, with one exception: "Correct a value, the
+firm cleared after the check" saves the corrected value and does not re-run its rules (the row says so).
+
+| Route | Answer | reasonCode | Sentence a reviewer reads: no firm | Sentence: held (a firm is shown) |
+|---|---|---|---|---|
+| Approve (`POST .../invoices/{id}/approve`) | 409 | `ebilling.approve.firm_missing` | This invoice has no firm. A reviewer must add the firm before it can be approved. | This invoice is waiting for its firm to be assigned. It can be approved once the firm is assigned. |
+| Approval state (`GET .../invoices/{id}/approval`) | 200 | `canApprove: false`, `firmNeeded: true` (additive) | (none; the reviewer pane shows the approve refusal's sentence) | (same) |
+| Return to Firm | 409 | `ebilling.invoice.firm_missing` | This invoice has no firm to return it to. Add the firm first, or reject the invoice. | This invoice is waiting for its firm to be assigned, so it cannot be returned to a firm yet. Reject it, or return it once the firm is assigned. |
+| Reject | allowed | | (Reject needs no firm) | |
+| AP export, candidates (`GET .../export-batches/candidates`) | 200 | | An invoice that needs a firm is not listed. | (same) |
+| AP export, selection | 400 `SelectionRefused`, per invoice `invoice_firm_missing` (both reasons) | `ebilling.export.selection_refused` (as before) | Every invoice refused for its firm: "An invoice in the selection has no firm, or is waiting for one: a reviewer must add the firm first. Nothing was exported." Mixed with other reasons: "Only Approved invoices that have a firm and are not yet in an export batch can be exported. Nothing was exported." No firm reason: the sentence as before. The AP Export page shows "No firm, or waiting for one: a reviewer must add the firm first." per invoice. | (same) |
+| AP export, the re-check before Sent to AP | 409 | `ebilling.export.firm_missing` | An invoice in the selection has no firm. Nothing was exported. A reviewer must add the firm first. | An invoice in the selection is waiting for its firm to be assigned. Nothing was exported. A reviewer must add the firm first. |
+| Correct a line or header value | 409 | `ebilling.correction.firm_missing` | This invoice has no firm. Add the firm before correcting its values; nothing was changed. | This invoice is waiting for its firm to be assigned. Its values can be corrected once the firm is assigned; nothing was changed. |
+| Correct a value, the firm cleared after the check | 409 | `ebilling.correction.firm_missing` | This invoice has no firm, so the correction was saved but its rules were not re-run. Add the firm, then repeat the correction. The value **is** saved; the correction stays unapplied, so approval stays held (CorrectionsPending). | (not reached: only a cleared firm gets here) |
+| Adjustment rule options, or an adjustment citing a rule | 409 | `ebilling.adjustment.firm_missing` | This invoice has no firm, so no billing rule can be cited. Add the firm first, or add the adjustment without a rule. | (no firm only; see 095c-4 section 14.6) |
+| Adjustment without a rule | allowed | | | |
+
+A read fault while deciding "needs a firm", including an environment where `sprk_firmhold` does not exist yet (its script has not run), is the
+route's existing 503 (fail closed), never an approval or an export. The reasonCodes are unchanged; only the sentences are chosen by the reason
+(additive for word-add-in-r1, which calls none of these routes).

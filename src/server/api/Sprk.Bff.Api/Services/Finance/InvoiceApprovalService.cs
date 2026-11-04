@@ -68,8 +68,15 @@ public static class InvoiceApprovalCodes
     /// natively does not lift it; the firm is assigned through the pipeline (095d). Checked before I-2, so an invoice with no lines is refused too.</summary>
     public const string FirmMissing = "ebilling.approve.firm_missing";
 
-    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/>.</summary>
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/> when the invoice names no firm (<see cref="InvoiceFirmNeed.NoFirm"/>).</summary>
     public const string FirmMissingDetail = "This invoice has no firm. A reviewer must add the firm before it can be approved.";
+
+    /// <summary>095c-4 review K1: the sentence with <see cref="FirmMissing"/> when the invoice shows a firm but is held for one
+    /// (<see cref="InvoiceFirmNeed.Held"/>: a firm set outside the pipeline does not count).</summary>
+    public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned. It can be approved once the firm is assigned.";
+
+    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
+    public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
     public const string NotInReview = LineDecisionCodes.NotInReview;
     public const string PortionMissing = "ebilling.approval.missing";
     public const string PortionAmbiguous = "ebilling.approval.ambiguous";
@@ -527,7 +534,7 @@ public sealed class InvoiceApprovalService
             if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
             {
                 _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice needs a firm ({Need}); nothing changed.", invoiceId, need);
-                return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.FirmMissing, InvoiceApprovalCodes.FirmMissingDetail);
+                return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.FirmMissing, InvoiceApprovalCodes.FirmDetailFor(need));
             }
 
             lineRows = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);

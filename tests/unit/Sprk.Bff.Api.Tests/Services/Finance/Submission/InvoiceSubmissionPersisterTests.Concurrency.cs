@@ -119,4 +119,27 @@ public partial class InvoiceSubmissionPersisterTests
         await firmStore.Build().PersistAsync(await TwoLineHarness().RunAsync(), null);
         InvoiceFirmHold.IsHeld(SubmissionUpdateOf(firmStore.Transactions.Single()).Target).Should().BeFalse();
     }
+
+    [Fact(DisplayName = "095c-5: the held outcome sets the invoice's own firm hold in the same transaction; a firm invoice's create never names the column")]
+    public async Task HeldOutcome_SetsTheInvoiceHold_InTheSameTransaction()
+    {
+        var store = NoFirmStore();
+
+        var result = await store.Build().PersistAsync(await NoFirmTwoLines().RunAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Committed);
+        var transaction = store.Transactions.Single();
+        var invoice = transaction.OfType<CreateRequest>().Single(c => c.Target.LogicalName == "sprk_invoice").Target;
+        invoice.GetAttributeValue<string>(InvoiceFirmHold.InvoiceHoldColumn).Should().Be(InvoiceFirmHold.InvoiceHoldValue,
+            "the invoice carries its own hold, written with the held outcome (uac-r2 2026-11-04)");
+        InvoiceFirmHold.IsInvoiceHeld(invoice).Should().BeTrue();
+        transaction.Should().Contain(r => r is UpdateRequest && ((UpdateRequest)r).Target.LogicalName == "sprk_invoicesubmission",
+            "the hold and the held outcome are one transaction");
+
+        // Must not fire: a firm invoice's create does not name the column (an environment without it still persists firm submissions).
+        var firmStore = new Store();
+        await firmStore.Build().PersistAsync(await TwoLineHarness().RunAsync(), null);
+        firmStore.Transactions.Single().OfType<CreateRequest>().Single(c => c.Target.LogicalName == "sprk_invoice").Target
+            .Contains(InvoiceFirmHold.InvoiceHoldColumn).Should().BeFalse();
+    }
 }
