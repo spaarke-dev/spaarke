@@ -569,20 +569,28 @@ public sealed class ApExportDeliveryService
     {
         try
         {
-            Entity batch;
-            try
-            {
-                batch = await _entities.RetrieveAsync(ApExportService.BatchEntity, batchId, ["sprk_exportstatus"], ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (StoredFileNotFound.Is(ex))
+            // The batch read the download and Email to AP use: the status, the servable export files and the invoices. Only Export to AP writes
+            // files and claims invoices; a batch made by hand can carry a Completed status (the column is editable on the form) but never these.
+            var batch = await _batches.GetBatchAsync(batchId, ct).ConfigureAwait(false);
+            if (batch is null)
             {
                 return new ApExportDeliveryResult(ApExportDeliveryOutcome.NotFound);
             }
 
-            if (batch.GetAttributeValue<OptionSetValue>("sprk_exportstatus")?.Value != ApExportService.StatusCompleted)
+            if (batch.Status != "Completed")
             {
                 return ApExportDeliveryResult.Refused(ApExportDeliveryOutcome.BatchNotCompleted, ApExportCodes.BatchNotCompleted,
                     "Only a Completed batch can be marked as sent to AP.");
+            }
+
+            if (batch.Files.Count == 0)
+            {
+                return FileNotAvailable("This batch has no export files, so it was not produced by Export to AP and cannot be marked as sent to AP.");
+            }
+
+            if (batch.InvoiceIds.Count == 0)
+            {
+                return FileNotAvailable("This batch holds no invoices, so it was not produced by Export to AP and cannot be marked as sent to AP.");
             }
 
             var (date, set) = await SetSentToApDateIfEmptyAsync(batchId, ct).ConfigureAwait(false);

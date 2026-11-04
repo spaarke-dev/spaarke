@@ -163,7 +163,8 @@ public static class ApExportEndpoints
             .WithSummary("Mark an AP export batch as sent to AP")
             .WithDescription(
                 "Sets the batch's Sent to AP Date to now when it is empty; otherwise leaves it (idempotent). Both answer 200 { sentToApDate, alreadySet }. " +
-                "Needs Read and Write on the batch (uniform 404 otherwise). 409 ebilling.export.batch_not_completed when the batch is not Completed.")
+                "Needs Read and Write on the batch (uniform 404 otherwise). 409 ebilling.export.batch_not_completed when the batch is not Completed; " +
+                "409 ebilling.export.file_not_available when it has no export files or no invoices (a batch made by hand, not by Export to AP).")
             .Produces<ApExportMarkSentResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound)

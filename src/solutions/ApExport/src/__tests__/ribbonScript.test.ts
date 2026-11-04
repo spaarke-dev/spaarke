@@ -440,6 +440,52 @@ const MARKSENT_COMMAND = 'sprk.ApExport.BillingExport.Form.MarkSentToAp.Command'
 const DOWNLOAD_CSV_COMMAND = 'sprk.ApExport.BillingExport.Form.DownloadCsv.Command';
 const BATCH_WRITE = 'sprk.ApExport.BatchWritePrivilege.DisplayRule';
 
+/**
+ * A batch is created only by Export to AP (POST /api/finance/export-batches). The platform New and Delete commands are hidden on the table's
+ * home grid, form and sub-grids. Every Location below is a control id read from the PUBLISHED ribbon of sprk_billingexport on dev
+ * (RetrieveEntityRibbon, read-only). Create stays granted to Core User (the BFF's OBO create needs it): this is the UI half; the server refuses
+ * a hand-made batch on its own (ApExportDeliveryService).
+ */
+describe('Billing Export: platform New and Delete are hidden (RibbonDiff)', () => {
+  const HIDDEN = [
+    'Mscrm.HomepageGrid.sprk_billingexport.NewRecord',
+    'Mscrm.HomepageGrid.sprk_billingexport.DeleteMenu',
+    'Mscrm.Form.sprk_billingexport.NewRecord',
+    'Mscrm.Form.sprk_billingexport.Delete',
+    'Mscrm.SubGrid.sprk_billingexport.AddNewStandard',
+    'Mscrm.SubGrid.sprk_billingexport.NewRecord',
+  ];
+
+  it('each platform command is hidden once, under the sprk.<Location>.Hide id', () => {
+    const hides = Array.from(BATCH_RIBBON.matchAll(/<HideCustomAction HideActionId="([^"]+)" Location="([^"]+)" \/>/g), m => [m[1], m[2]]);
+    expect(hides.map(h => h[1]).sort()).toEqual([...HIDDEN].sort());
+    for (const [id, location] of hides) {
+      expect(id).toBe(`sprk.${location}.Hide`);
+    }
+  });
+
+  it('the four Billing Export form buttons are still there and are not hidden', () => {
+    for (const id of ['DownloadCsv', 'DownloadJson', 'EmailToAp', 'MarkSentToAp']) {
+      expect(BATCH_RIBBON).toContain(`<CustomAction Id="sprk.ApExport.BillingExport.Form.${id}.CustomAction"`);
+      expect(BATCH_RIBBON).not.toMatch(new RegExp(`<HideCustomAction[^>]*${id}`));
+    }
+  });
+});
+
+describe('Billing Export main form: the legacy CSV / JSON Document lookups are off the form', () => {
+  const formDir = path.join(__dirname, '..', '..', '..', '..', 'dataverse', 'solutions', 'SpaarkeMaster', 'Entities', 'sprk_billingexport', 'FormXml', 'main');
+  const forms = ['{bd0020ec-1912-4f2d-b3e6-a6315f8b9e48}.xml', '{bd0020ec-1912-4f2d-b3e6-a6315f8b9e48}_managed.xml'];
+
+  it.each(forms)('%s has neither lookup, and keeps the Sent to AP Date and the Owner', file => {
+    const xml = fs.readFileSync(path.join(formDir, file), 'utf8');
+    expect(xml).not.toContain('sprk_csvdocument');
+    expect(xml).not.toContain('sprk_jsondocument');
+    expect(xml).toContain('datafieldname="sprk_senttoapdate"');
+    expect(xml).toContain('datafieldname="ownerid"');
+    expect(xml).toContain('id="subgrid_apemails"');
+  });
+});
+
 describe('Billing Export form: Email to AP and Mark Sent to AP (RibbonDiff wiring)', () => {
   it('both buttons exist on the form, with their labels', () => {
     for (const id of ['EmailToAp', 'MarkSentToAp']) {

@@ -145,7 +145,7 @@ $Spec = [ordered]@{
     }
     sprk_billingexport     = @{
         Form = 'Replace'; FormName = 'Information'
-        Sections = @(@{ Name = 'general'; Label = 'Export batch'; Cols = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'sprk_formats', 'sprk_failurereason', 'sprk_senttoapdate', 'sprk_csvdocument', 'sprk_jsondocument', 'ownerid'
+        Sections = @(@{ Name = 'general'; Label = 'Export batch'; Cols = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'sprk_formats', 'sprk_failurereason', 'sprk_senttoapdate', 'ownerid'
                 # Task 151c-1a: the BFF is the one writer of the Sent to AP Date (set once, never overwritten): disabled on the form.
                 ReadOnly = 'sprk_senttoapdate' }
             @{ Name = 'mapping'; Label = 'Mapping snapshot'; Cols = 'sprk_mappingsnapshot' })
