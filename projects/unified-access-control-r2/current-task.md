@@ -51,6 +51,7 @@
   - 095a PR: my 4 conditions plus the attribute and relationship in source;
   - 095c: schema notice; the tracking-scope column is refused in ParentLineage with a typed writer only, and is never a visibility filter; I need the key columns, the backfill and the race behaviour;
   - 095d: full review. Conditions: Write on the invoice plus AppendTo on the firm; the core record derived from the invoice; Unreadable is 503; assign only, In Review only; ParentLineage names the typed writer;
+  - 095c-4 (a4f5884e66): the firm_missing hold is found through the submission-to-invoice link. Two direct-write paths remain: unlink (`sprk_invoicesubmission.sprk_invoice` is not secured) and delete. I asked for a field-secured hold on the invoice itself (preferred), or for the link to be secured plus no Delete; otherwise the owner decides with the consequence stated. Findings JSON is already secured;
   - 089d (Billing Rule Readers team, 012d5dfa68): shape OK; review the diff; the dev Billing rule is already in BU1. It comes after 095c-4 and 089c;
   - 089b/089c: full review. Gate: step 0, record Write/AppendTo, Read on the Procedure, `Admin()`; change rule adds `CreateRuleSet()` plus the policy Create privileges;
   - the NFR-05 census after the next deploy;
