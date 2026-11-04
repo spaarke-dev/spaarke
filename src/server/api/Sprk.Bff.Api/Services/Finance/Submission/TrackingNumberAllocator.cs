@@ -258,6 +258,10 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
         }
     }
 
+    /// <inheritdoc />
+    public async Task<bool> NumbersSubmissionsWithoutFirmAsync(CancellationToken ct = default) =>
+        await _phases.GetAsync(_readPhase, force: false, ct).ConfigureAwait(false) == TrackingScopePhase.P2ScopeKeyActive;
+
     /// <summary>
     /// ebilling-r1 task 094 (EB-D-167): true when the firm's (from P2: the scope's) row holding <paramref name="trackingNumber"/> has no firm
     /// invoice number, so the sequence read cannot see it: an attempt whose commit was undone. A row that still has its number (a concurrent

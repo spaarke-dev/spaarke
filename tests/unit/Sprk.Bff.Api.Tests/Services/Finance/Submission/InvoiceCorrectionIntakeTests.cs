@@ -53,6 +53,13 @@ internal static class CorrectionSeed
         return row;
     }
 
+    /// <summary>Task 095c-2: <paramref name="row"/> (an invoice or a submission) with no firm, as a from-email submission taken without one.</summary>
+    public static Entity WithoutFirm(Entity row)
+    {
+        row.Attributes.Remove(InvoiceSubmissionPersister.InvoiceVendorOrg); // the same column name on both tables (sprk_vendororg)
+        return row;
+    }
+
     /// <summary>A correctable old invoice (In Review) with its submission, in <paramref name="h"/>.</summary>
     public static Entity Seed(Harness h, Entity? invoice = null, Entity? submission = null)
     {
@@ -123,6 +130,47 @@ public sealed class InvoiceCorrectionIntakeTests
         var invoice = CorrectionSeed.Seed(h, submission: CorrectionSeed.Submission(firm: Guid.NewGuid()));
 
         RefusedWith((await Check(h, invoice)).Refusal, "different_firm");
+    }
+
+    // ── task 095c-2: a correction keeps the replaced invoice's firm, including no firm ──────────────────────────────────
+
+    [Fact(DisplayName = "095c-2: a no-firm invoice (and its no-firm submission) corrected without a firm is allowed; the target is its own submission")]
+    public async Task NoFirmInvoice_CorrectedWithoutAFirm_IsAllowed()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h, CorrectionSeed.WithoutFirm(CorrectionSeed.Invoice()), CorrectionSeed.WithoutFirm(CorrectionSeed.Submission()));
+
+        var (refusal, target) = await h.Build().CheckCorrectionAsync(Matter, null, CorrectionSeed.Number, invoice, CancellationToken.None);
+
+        refusal.Should().BeNull("the correction keeps the original's firm, and the original has none");
+        target.Should().Be(CorrectionSeed.OldSubmissionId);
+        h.Writes.Should().Be(0);
+    }
+
+    public static TheoryData<bool, bool, bool> FirmOnOneSideOnly => new()
+    {
+        // (the invoice has a firm, its submission has a firm, the request sends a firm): exactly one side differs from the request
+        { false, false, true },  // a no-firm original corrected WITH a firm (the from-document route, or a from-email request that sends one)
+        { true, true, false },   // a firm original corrected without a firm
+        { false, true, false },  // the invoice has no firm, but its submission has one: the submission check refuses
+    };
+
+    [Theory(DisplayName = "095c-2 (must fire): a firm on one side only is 409 different_firm; a null firm never matches a firm")]
+    [MemberData(nameof(FirmOnOneSideOnly))]
+    public async Task AFirmOnOneSideOnly_Is409DifferentFirm(bool invoiceHasFirm, bool submissionHasFirm, bool requestSendsFirm)
+    {
+        var h = new Harness();
+        var invoiceRow = CorrectionSeed.Invoice();
+        var submissionRow = CorrectionSeed.Submission();
+        var invoice = CorrectionSeed.Seed(h,
+            invoiceHasFirm ? invoiceRow : CorrectionSeed.WithoutFirm(invoiceRow),
+            submissionHasFirm ? submissionRow : CorrectionSeed.WithoutFirm(submissionRow));
+
+        var (refusal, target) = await h.Build().CheckCorrectionAsync(
+            Matter, requestSendsFirm ? FirmId : null, CorrectionSeed.Number, invoice, CancellationToken.None);
+
+        RefusedWith(refusal, "different_firm");
+        target.Should().BeNull();
     }
 
     public static TheoryData<string, string, bool> OtherCores => new()

@@ -559,6 +559,19 @@ public sealed class TrackingNumberAllocatorTests
         _store.RowCount.Should().Be(0);
     }
 
+    [Theory(DisplayName = "095c-2: NumbersSubmissionsWithoutFirmAsync (the intake's early check) is true only in P2, and reads and writes no row")]
+    [InlineData(TrackingScopePhase.P0NoScopeColumn, false)]
+    [InlineData(TrackingScopePhase.P1ScopeColumn, false)]
+    [InlineData(TrackingScopePhase.P2ScopeKeyActive, true)]
+    public async Task NumbersSubmissionsWithoutFirm_IsTrueOnlyInP2(TrackingScopePhase phase, bool expected)
+    {
+        InPhase(phase);
+
+        (await CreateService().NumbersSubmissionsWithoutFirmAsync()).Should().Be(expected);
+        _store.SequenceReads.Should().Be(0);
+        _store.CreateCalls.Should().Be(0);
+    }
+
     [Fact]
     public async Task P1_AFirmSubmission_WritesItsFirmAsTheScope_AndStillCountsPerFirm()
     {

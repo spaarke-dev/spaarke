@@ -168,7 +168,7 @@ internal sealed class FromEmailSubmissionService
             correctedInvoice = correction.Invoice;
         }
 
-        // ── 4. The firm: active (400 / 503), then linked to the record (D-106: 403 / 503) ──
+        // ── 4. The firm: active (400 / 503), then linked to the record (D-106: 403 / 503). No firm (095c-2): only in phase P2, else 400 ──
         if (await CheckFirmAsync(input, ct) is { } firmRefusal)
         {
             return firmRefusal;
@@ -332,14 +332,31 @@ internal sealed class FromEmailSubmissionService
     // The firm
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// The firm: active (400 / 503), then linked to the record (D-106: 403 / 503). Task 095c-2 (owner 2026-11-03): no firm (null or absent) is
+    /// accepted only once this environment's tracking-scope key is Active (phase P2, notes/095c section 8.2); in P0 and P1 it is the 400
+    /// <c>firm_invalid</c> "A firm is required." that the empty id gets, before anything is saved or filed. A no-firm request has no firm to
+    /// check; a Correction's firm is compared with the replaced invoice's later (<see cref="InvoiceSubmissionService.CorrectionKeepsFirm"/>).
+    /// </summary>
     private async Task<FromEmailSubmissionOutcome?> CheckFirmAsync(FromEmailSubmissionInput input, CancellationToken ct)
     {
-        if (input.FirmId == Guid.Empty)
+        if (input.FirmId is not { } firmId)
+        {
+            if (await _submissions.CanSubmitWithoutFirmAsync(ct))
+            {
+                return null;
+            }
+
+            _logger.LogInformation("From-email submission with no firm refused before any write: the tracking-scope key is not Active yet (400)");
+            return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.");
+        }
+
+        if (firmId == Guid.Empty)
         {
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.");
         }
 
-        switch (await _submissions.IsActiveFirmForFromEmailAsync(input.FirmId, ct))
+        switch (await _submissions.IsActiveFirmForFromEmailAsync(firmId, ct))
         {
             case null:
                 return FirmUnverifiable();
@@ -348,7 +365,7 @@ internal sealed class FromEmailSubmissionService
                     "The firm was not found or is not active.");
         }
 
-        return await _submissions.CheckFirmLinkAsync(input.CoreRecord, input.FirmId, ct) switch
+        return await _submissions.CheckFirmLinkAsync(input.CoreRecord, firmId, ct) switch
         {
             InvoiceFirmLink.Linked => null,
             InvoiceFirmLink.NotLinked => FromEmailSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,

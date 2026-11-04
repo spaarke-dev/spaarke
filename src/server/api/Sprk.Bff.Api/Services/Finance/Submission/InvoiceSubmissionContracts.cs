@@ -103,8 +103,12 @@ public sealed record InvoiceSubmissionRequest
     /// The firm the invoice is from (NFR-10): the external caller's own organization, or the firm an internal caller chose. The route decides
     /// who may name it; <see cref="InvoiceSubmissionService.SubmitAsync"/> then checks it is active and LINKED to <see cref="CoreRecord"/>
     /// (D-106 / D-110), whichever channel the request came through.
+    /// <para>Task 095c-2: null means "no firm", and only the internal from-email route (mode New, or a Correction of a no-firm invoice) may
+    /// send it, through <see cref="InvoiceSubmissionService.DecideForFromEmailAsync"/>. Every other entry (the SPA upload, the internal
+    /// upload, the from-document route and the reviewer confirm) refuses null as 400 <see cref="InvoiceSubmissionErrors.FirmInvalid"/>
+    /// "A firm is required.", as it refuses the empty id; their routes always set a firm.</para>
     /// </summary>
-    public required Guid FirmId { get; init; }
+    public required Guid? FirmId { get; init; }
 
     /// <summary>The core record the invoice is filed against.</summary>
     public required InvoiceCoreRecord CoreRecord { get; init; }
