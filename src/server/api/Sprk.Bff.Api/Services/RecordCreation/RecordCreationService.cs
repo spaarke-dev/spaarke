@@ -677,7 +677,17 @@ internal sealed partial class RecordCreationService
         }
 
         // Task 042c fix round 1: a core id that is a record id is written as the writers store it (whatever the principal).
-        item = WithCoreIdAsTheWritersStoreIt(table, item);
+        // Fix round 3: a type bound under a key the pair writer does not recognise is the existing 503, as at step 6¾.
+        try
+        {
+            item = WithCoreIdAsTheWritersStoreIt(table, item);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "[RECORD-CREATE] the core record pair of a new {Table} could not be written (fault); nothing " +
+                                 "was created", table);
+            return Decision.Refuse(StampUnavailable(noun));
+        }
 
         // ── Step 5½: the table's pre-write rules, on the row as it will be written (ebilling-r1 recipe) ────────────────
         if (rule.PreWriteRules.Count > 0)
@@ -1602,8 +1612,10 @@ internal sealed partial class RecordCreationService
     /// (the table's navigation property); a type equal to the one bound is written exactly as sent.
     /// </summary>
     /// <exception cref="ArgumentException">One of <paramref name="type"/> and <paramref name="id"/> without the other.</exception>
-    /// <exception cref="InvalidOperationException">A type is written but the body binds none to keep the key of (a fault: the
-    /// create refuses, nothing written).</exception>
+    /// <exception cref="InvalidOperationException">The item binds a core type (or a type is written) but the body does not bind
+    /// it exactly once under a key this helper recognises — whether the pair is written OR cleared, so a clear can never leave an
+    /// unrecognised type bind in the body (fix round 3). A fault: the caller refuses with
+    /// <see cref="RecordCreationRefusal.StampUnavailableCode"/> (503), nothing written.</exception>
     private static DataverseWriteItemMapper.MappedItem WithCorePair(
         DataverseWriteItemMapper.MappedItem item, DataverseWriteItemMapper.MappedLookup? type, string? id)
     {
@@ -1615,7 +1627,7 @@ internal sealed partial class RecordCreationService
             .Where(p => p.Name.Trim().EndsWith(CoreRecordTypeBindSuffix, StringComparison.OrdinalIgnoreCase) && IsCoreTypeKey(p.Name))
             .Select(p => p.Name)
             .ToList();
-        if (type is not null && typeKey.Count != 1)
+        if ((type is not null || CoreTypeOf(item) is not null) && typeKey.Count != 1)
             throw new InvalidOperationException("The core record type is not bound exactly once in the create body, so its pair cannot be written.");
 
         var sentType = CoreTypeOf(item);
@@ -1693,7 +1705,7 @@ internal sealed partial class RecordCreationService
         try
         {
             foreach (var rootTable in roots.Select(r => r.EntityLogicalName).Distinct(StringComparer.OrdinalIgnoreCase))
-                typeOfTable[rootTable] = await CoreAncestorResolver.RecordTypeOfCoreTableAsync(_entities, rootTable, ct).ConfigureAwait(false);
+                typeOfTable[rootTable] = await CoreAncestorResolver.RecordTypeOfCoreTableAsync(_entities, rootTable, _logger, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -1709,21 +1721,32 @@ internal sealed partial class RecordCreationService
 
         var ofTheSentType = roots.Where(r => typeOfTable[r.EntityLogicalName] == sent.RecordId).ToList();
         (DataverseWriteItemMapper.MappedItem, RecordOwnershipParent?, RecordCreationWarning?, RecordCreationRefusal?) completed;
-        if (ofTheSentType.Count == 1)
+        try
         {
-            var root = ofTheSentType[0];
-            completed = (WithCorePair(item, sent, StoredCoreId(root.RecordId)), CoreRecordOf(root),
-                new RecordCreationWarning(RecordCreationWarning.CoreRecordFilledCode, CoreRecordIdColumn, CoreRecordFilled(noun)), null);
+            if (ofTheSentType.Count == 1)
+            {
+                var root = ofTheSentType[0];
+                completed = (WithCorePair(item, sent, StoredCoreId(root.RecordId)), CoreRecordOf(root),
+                    new RecordCreationWarning(RecordCreationWarning.CoreRecordFilledCode, CoreRecordIdColumn, CoreRecordFilled(noun)), null);
+            }
+            else if (ofTheSentType.Count == 0 && roots.Count == 1 && typeOfTable[roots[0].EntityLogicalName] is { } rootType)
+            {
+                completed = (WithCorePair(item, sent with { RecordId = rootType }, StoredCoreId(roots[0].RecordId)), CoreRecordOf(roots[0]),
+                    new RecordCreationWarning(RecordCreationWarning.CoreRecordReplacedCode, CoreRecordTypeColumn, CoreRecordReplaced(noun)), null);
+            }
+            else
+            {
+                completed = (WithCorePair(item, null, null), null,
+                    new RecordCreationWarning(RecordCreationWarning.CoreRecordClearedCode, CoreRecordTypeColumn, CoreRecordCleared(noun)), null);
+            }
         }
-        else if (ofTheSentType.Count == 0 && roots.Count == 1 && typeOfTable[roots[0].EntityLogicalName] is { } rootType)
+        catch (InvalidOperationException ex)
         {
-            completed = (WithCorePair(item, sent with { RecordId = rootType }, StoredCoreId(roots[0].RecordId)), CoreRecordOf(roots[0]),
-                new RecordCreationWarning(RecordCreationWarning.CoreRecordReplacedCode, CoreRecordTypeColumn, CoreRecordReplaced(noun)), null);
-        }
-        else
-        {
-            completed = (WithCorePair(item, null, null), null,
-                new RecordCreationWarning(RecordCreationWarning.CoreRecordClearedCode, CoreRecordTypeColumn, CoreRecordCleared(noun)), null);
+            // Fix round 3 (K3): the type is bound under a key WithCorePair does not recognise, so the pair can be neither written
+            // nor cleared. A fault, never a half pair: the existing 503, nothing written. The table only.
+            _logger.LogError(ex, "[RECORD-CREATE] the core record pair of a new {Table} could not be completed (fault); nothing " +
+                                 "was created", table);
+            return (item, null, null, StampUnavailable(noun));
         }
 
         // No record id at Information (UAC-r2): the table and what was done only.

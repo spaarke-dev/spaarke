@@ -419,4 +419,113 @@ public sealed partial class SecureChildOwnershipAiToolTests
             Owner(fields).Should().Be(pair == "no pair" ? Directory.ChildTeam : Directory.CustomerChildTeam, "today's owner");
         }
     }
+
+    // ── Fix round 3 (K3): a core type bound under a key the pair writer does not recognise ────────────────────────────────
+
+    /// <summary>The same item through the service as <see cref="ServiceCreate"/>, but with the core type's bind renamed to a key
+    /// <c>WithCorePair</c> does not recognise (a navigation property other than the column's schema name); its lookup is kept.</summary>
+    private async Task<RecordCreationOutcome> ServiceCreateWithAnUnrecognisedTypeKey(string table, params (string Column, JsonElement Value)[] item)
+    {
+        var mapped = await DataverseWriteItemMapper.MapAsync(
+            _user, table, JsonSerializer.SerializeToElement(item.ToDictionary(i => i.Column, i => i.Value)), CancellationToken.None);
+        mapped.Item.Should().NotBeNull(mapped.ValidationError);
+        const string sentKey = "sprk_CoreRecordType@odata.bind";
+        mapped.Item!.JsonBody.Should().Contain(sentKey, "the harness binds the type under its schema name");
+        var renamed = mapped.Item with { JsonBody = mapped.Item.JsonBody.Replace(sentKey, "sprk_CoreRecordTypeRef@odata.bind", StringComparison.Ordinal) };
+        renamed.Lookups.Should().Contain(l => l.Column == "sprk_corerecordtype", "the type lookup is still bound");
+        return await RouteRecordCreation.Over(_world.Resolver(), _appOnly.Object, _serviceRestamper ?? Restamper(), Shares(),
+                SecureRootFilingGateFixtures.NothingSecure(), entities: _serviceEntities?.Object, logger: _halfPairLog)
+            .CreateAsync(new RecordCreationRequest(table, new RecordCreationPayload.Mapped(renamed)),
+                RecordCreationPrincipal.ForCaller(_user, CallerOid), CancellationToken.None);
+    }
+
+    [Theory(DisplayName = "042c fix round 3 (K3): a core type bound under a key the pair writer does not recognise is never cleared or filled around (no half pair, no stray type bind): the existing 503 stamp_unavailable, never check_failed; nothing written; for a clear (no root), a fill, a replace and a full pair whose id is rewritten")]
+    [InlineData("sprk_signal", "clear")]
+    [InlineData("sprk_signal", "fill")]
+    [InlineData("sprk_signal", "replace")]
+    [InlineData("sprk_signal", "full pair")]
+    [InlineData("sprk_decisionrecord", "clear")]
+    [InlineData("sprk_decisionrecord", "fill")]
+    [InlineData("sprk_decisionrecord", "replace")]
+    [InlineData("sprk_decisionrecord", "full pair")]
+    public async Task ACoreTypeBoundUnderAnUnrecognisedKey_IsTheExisting503_NothingWritten(string table, string shape)
+    {
+        HalfPairWorld();
+        (string, JsonElement)[] item = shape switch
+        {
+            "clear" => [CoreType(MatterRecordType)],
+            "fill" => [Lookup("sprk_matter", "sprk_matter", OrdinaryMatter), CoreType(MatterRecordType)],
+            "replace" => [Lookup("sprk_matter", "sprk_matter", OrdinaryMatter), CoreType(ProjectRecordType)],
+            _ => [Lookup("sprk_matter", "sprk_matter", OrdinaryMatter), CoreType(MatterRecordType),
+                ("sprk_corerecordid", JsonSerializer.SerializeToElement(CoreMatterInY.ToString("D").ToUpperInvariant()))],
+        };
+
+        var viaService = await ServiceCreateWithAnUnrecognisedTypeKey(table, item);
+
+        viaService.Refusal.Should().NotBeNull("a type the pair writer cannot find is a fault, never a half pair or a stray bind");
+        viaService.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Unavailable);
+        viaService.Refusal.Code.Should().Be(RecordCreationRefusal.StampUnavailableCode, "the existing 503, not check_failed");
+        viaService.Refusal.Detail.Should().Be(
+            $"The core record the {RecordCreationService.NounOf(table)} belongs to could not be determined right now, so it was not created.");
+        RecordCreationProblemMap.StatusOf(viaService.Refusal).Should().Be(503);
+        viaService.MappingWarnings.Should().BeEmpty("nothing was filled, replaced or cleared");
+        _appCreates.Should().BeEmpty("nothing is written");
+    }
+
+    // ── Fix round 3 (F2-minor): CoreAncestorResolver.RecordTypeOfCoreTableAsync's two edges ────────────────────────────────
+
+    [Theory(DisplayName = "042c fix round 3: two or more ACTIVE catalog rows for one core table are logged at Warning naming the table only (no record id, no catalog row id), then the pair is cleared as today (core_record_cleared); service")]
+    [MemberData(nameof(CorePairTables))]
+    public async Task TwoActiveCatalogRowsForOneCoreTable_AreLoggedAtWarning_TheTableOnly_ThenCleared(string table)
+    {
+        HalfPairWorld();
+        _catalogByTable["sprk_matter"] = [MatterRecordType, SecondMatterRecordType];
+
+        var viaService = await ServiceCreate(table, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter), CoreType(MatterRecordType));
+
+        viaService.Succeeded.Should().BeTrue(viaService.Refusal?.Detail);
+        viaService.MappingWarnings.Should().ContainSingle(w => w.Code == RecordCreationWarning.CoreRecordClearedCode, "cleared as today");
+        var warning = _halfPairLog.Entries.Should().ContainSingle(e =>
+                e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("record-type catalog", StringComparison.Ordinal))
+            .Subject.Message;
+        warning.Should().Contain("sprk_matter", "the table is named");
+        foreach (var id in new[] { OrdinaryMatter, MatterRecordType, SecondMatterRecordType })
+        {
+            foreach (var form in new[] { "D", "N", "B", "P" })
+                warning.Should().NotContainEquivalentOf(id.ToString(form), "the table only: no record or catalog row id");
+        }
+    }
+
+    [Theory(DisplayName = "042c fix round 3: one active catalog row logs no catalog Warning (must not fire); the pair is filled")]
+    [MemberData(nameof(CorePairTables))]
+    public async Task OneActiveCatalogRow_LogsNoCatalogWarning(string table)
+    {
+        HalfPairWorld();
+
+        var viaService = await ServiceCreate(table, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter), CoreType(MatterRecordType));
+
+        viaService.Succeeded.Should().BeTrue(viaService.Refusal?.Detail);
+        viaService.MappingWarnings.Should().ContainSingle(w => w.Code == RecordCreationWarning.CoreRecordFilledCode);
+        _halfPairLog.Entries.Should().NotContain(e =>
+            e.Level == Microsoft.Extensions.Logging.LogLevel.Warning && e.Message.Contains("record-type catalog", StringComparison.Ordinal));
+    }
+
+    [Theory(DisplayName = "042c fix round 3: a catalog read that returns NO collection is a fault, never 'no catalog row': the existing 503 stamp_unavailable, never a clear; nothing written; service")]
+    [MemberData(nameof(CorePairTables))]
+    public async Task ACatalogReadReturningNoCollection_IsTheExisting503_NeverAClear(string table)
+    {
+        HalfPairWorld();
+        _serviceEntities!
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((EntityCollection)null!);
+
+        var viaService = await ServiceCreate(table, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter), CoreType(MatterRecordType));
+
+        viaService.Refusal.Should().NotBeNull("a read with nothing to count is a fault, not an empty catalog");
+        viaService.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Unavailable);
+        viaService.Refusal.Code.Should().Be(RecordCreationRefusal.StampUnavailableCode);
+        RecordCreationProblemMap.StatusOf(viaService.Refusal).Should().Be(503);
+        viaService.MappingWarnings.Should().BeEmpty("nothing was cleared");
+        _appCreates.Should().BeEmpty("nothing is written");
+    }
 }
