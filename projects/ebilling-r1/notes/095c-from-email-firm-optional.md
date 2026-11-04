@@ -1110,3 +1110,18 @@ Task file: `tasks/095d1-set-firm-apply.poml`. It is scoped to 095d-1. It takes i
 - **095d-1c:** the completion step. The record, then the close (per decision 1), the link, 503 incomplete with failedStep and the repeat, and the `-Verify` INFO/FAIL window. A seeded failure at each step, then a repeat. Then the code-review and adr-check gates over 1a-1c, and the publish-size measurement.
 
 rework: none task 095d-1
+
+### 16.7 ontology-r1 decisions for 095d-1b/1c (2026-11-04, their notes/decisions.md d9305192d4; binding)
+
+- **The shared firm_missing Signal: option (b).** 095d-1 does not close it.
+  - The assign-firm record's `ResolvedSignalIds` is EMPTY. Its facts carry the group's Signal id and state that this decision cleared the firm_missing reason.
+  - The 095d-2 re-run re-maps the group. If any reason remains, the same Signal stays open and its title is recomputed (the coding hold's title comes back, §14.8 item 2). If none remains, it is closed as `ConditionCleared`, with the assign-firm record id in the close facts. It is NOT closed as `Acted`.
+  - This replaces D-201's "closed as Acted and linked to the record" for this shared Signal.
+  - Condition 4 holds: nothing closes before the record.
+  - 095d-1 never reaches master without 095d-2.
+- **Stored-file renames go INSIDE the apply transaction.** They are updates to the `sprk_storedfile.sprk_name` column; `StoredFileBlobName.Build` uses ids only (StoredFileContracts.cs:298-305).
+  - The "files" failedStep and its census row are dropped.
+  - The `InvoicePdfWriterGuardTests.ApprovedWriters` entry is name-only, with a must-not-fire test proving it writes no other column.
+- **Ceiling and reporting:**
+  - the ceiling is a refusal before the apply, using `MaxRequestsPerTransaction` = 1000;
+  - "applied, no record yet" rows are reported by `Set-EbillingInvoiceFirmHoldColumn.ps1 -Verify`.
