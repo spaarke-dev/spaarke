@@ -1166,11 +1166,10 @@ A refusal raised by a single condition keeps its code, status and words. Only th
     - the written row's ownership parents are exactly the item lookups plus the bound stamp. The creator-person and index lookups are not ownership parents.
     - 042b pins this with a parity test.
   - **Known difference beyond the stamp (to be confirmed by that test):** the reconciler and Repair add a message's record-thread filing (`SecureChildReconciler.cs:3040-3051`, `RecordCreationService.cs:1183-1187`), and the create does not (Q3).
-- **Step 8 index:**
-  - `sprk_event` is search-indexed (`RecordTableRules.cs:256-259`);
-  - an event made Secure at create gets an empty index plus `search_index_unset_for_owner_bu`, as FR-38 says for the Secure Record BU (§13.3);
-  - today it gets the ordinary BU's index, and the reconciler's re-own leaves the index in place;
-  - #2502 retires per-BU routing later.
+- **Step 8 index (updated by task 042b, 2026-11-03):**
+  - task 041 (FR-40, #2502) merged first: step 8 is NoOp. The create writes neither search-index column for any owner, so an event made Secure at create gets no index value from step 8, as an ordinary one does;
+  - there is therefore no step-8 index assertion in 042b's must-fire tests (AC13);
+  - the text this bullet held before 041 (an empty index plus `search_index_unset_for_owner_bu` for the Secure Record BU) no longer describes the code.
 
 ### 15.6 Test plan (ADR-038; KEEP paths; the characterization lands first, alone)
 
