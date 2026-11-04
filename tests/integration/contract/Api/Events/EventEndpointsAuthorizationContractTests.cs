@@ -698,7 +698,6 @@ public class EventEndpointsAuthorizationContractTests
         creates.Should().BeEmpty("task 031: the service wrote nothing - not the row, not an owner");
         host.AppOnlyCreates.Should().BeEmpty();
         host.Publisher.Published.Should().BeEmpty("no membership event for a row that was never created");
-        host.Events.Verify(e => e.CreateEventAsync(It.IsAny<CreateEventRequest>(), It.IsAny<CancellationToken>()), Times.Never);
         host.Events.Verify(e => e.CreateEventLogAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 

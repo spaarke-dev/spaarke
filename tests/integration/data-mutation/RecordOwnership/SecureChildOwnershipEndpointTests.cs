@@ -98,7 +98,6 @@ public class SecureChildOwnershipEndpointTests
             new { regardingRecordType = 0, regardingRecordId = OrdinaryProject, statusCode = 4 }));
 
         response.StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
-        host.Events.Creates.Should().BeEmpty();
         host.AppOnlyCreates.Should().BeEmpty("task 031: the service's one create is the create now");
         host.Events.StatusUpdates.Should().BeEmpty();
         host.Events.LogOwners.Should().BeEmpty();
@@ -156,7 +155,6 @@ public class SecureChildOwnershipEndpointTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await ReasonCode(response)).Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
-        host.Events.Creates.Should().BeEmpty();
         host.AppOnlyCreates.Should().BeEmpty("task 031: nothing is created, by the service or anything else");
         host.Events.LogOwners.Should().BeEmpty("no audit row for an event that was never created");
     }
@@ -211,7 +209,6 @@ public class SecureChildOwnershipEndpointTests
     internal sealed class RecordingEventService : IEventDataverseService
     {
         public EventEntity? Existing { get; set; }
-        public List<Spaarke.Dataverse.CreateEventRequest> Creates { get; } = new();
         public List<(Guid Id, int StatusCode)> StatusUpdates { get; } = new();
         public List<Guid?> LogOwners { get; } = new();
 
@@ -220,12 +217,6 @@ public class SecureChildOwnershipEndpointTests
 
         public Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default) =>
             Task.FromResult(Existing is { } e && e.Id == id ? e : null);
-
-        public Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(Spaarke.Dataverse.CreateEventRequest request, CancellationToken ct = default)
-        {
-            Creates.Add(request);
-            return Task.FromResult((Guid.NewGuid(), DateTime.UtcNow));
-        }
 
         public Task<Guid> CreateEventLogAsync(
             Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null,
