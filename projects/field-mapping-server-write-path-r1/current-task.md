@@ -8,7 +8,15 @@
 
 | Field | Value |
 |---|---|
-| **Active** | **020 ✅** PR #2551 merged aef86b89f7 (2026-11-03T23:21Z); a lint-ratchet fix was added in the PR (94ce92d3c3). It is not on dev yet: the live Matter/Project route check needs a uac-r2 deploy and the owner's OK for test rows. **Task 042b: Opus implementer `fm-042b` on `task/fm-042b`**, from cfebe65f9b, stops after POML step 5. The main session then runs two adversarial passes and the UAC-r2 full pass. Session 5c is the only field-mapping session (the pre-crash pid 53128 was stopped 2026-11-03).
+| **Active** | **020 ✅** PR #2551 merged aef86b89f7 (2026-11-03T23:21Z); a lint-ratchet fix was added in the PR (94ce92d3c3). It is not on dev yet: the live Matter/Project route check needs a uac-r2 deploy and the owner's OK for test rows. **Task 042b:** the implementer `fm-042b` finished steps 0–5. `task/fm-042b` tip 20bdd9f7e5 (base cfebe65f9b), not pushed; worktree `C:\code_files\spaarke\.claude\worktreesgent-ac26f071a1fb351e7`.
+- Its numbers:
+  - AC1–AC14 met except the AC3 pair half;
+  - verify-suites 6659/0/7; ArchTests 1911; publish delta +811 B; no CVE.
+- **Running now:** two Opus adversarial passes, `rev-042b-sec` (security and ownership) and `rev-042b-cor` (correctness and tests).
+- **Then:** fix F-findings through SendMessage to fm-042b → send the diff to UAC-r2 for its full pass (AC15) → merge to the work branch → PR.
+- **Open questions:**
+  - Q1: the AC3 pair half cannot hold, because `TodoRegardingBuilder.RegardingLookupByEntity` lacks `sprk_reportcard` while the client writes it. Proposed DI-P1, for an owner decision.
+  - Q2: Signal and Decision Record are now refused 409 NoOwnerSource under a team-owned intermediate of a Secure root. UAC-r2 to confirm; ontology impact to be checked; §15.4 needs a row. Session 5c is the only field-mapping session (the pre-crash pid 53128 was stopped 2026-11-03).
 - **020 so far:**
   - the route creates sprk_matter and sprk_project;
   - the optional mapping source is passed as query params;
