@@ -18,6 +18,7 @@
 ## Private items (tracked privately only, owner choice; never in issues/PRs/commits)
 - Core pair fixed after create, plus the lineage follow-up: both on the branch above.
 - fm 042c: my approval was WITHDRAWN (F), and the item is in rework. The owner chose **option 1 (ontology D-204)** in fm's session: the generic create refuses sprk_signal / sprk_decisionrecord / sprk_budgetrevision as whole tables, for the caller and the system principal alike. fm fix round 4 is running; ontology and I get the diff before any merge.
+- **Update-path follow-up (mine, F, found by fm 2026-11-04; details by message only):** goes on the core-pair branch after the 2nd pass. Generic update paths (UpdateRecordActionCore, DataverseUpdateHandler, chat update) use the existing-only update (`If-Match: *`) and refuse an unknown id. Audit every `UpdateRecordFieldsAsync` caller for upsert reliance; tests on every path. fm 042c r4 (4b45ba3cc5) APPROVED by me; ontology's review pending.
 - Withdrawn or closed today: the finance-filter "veto" item (matches the record routes, N2 / round 77), evaluator cost (already uniform; 403 0x80048306 = unknown), #2563 (closed).
 
 ## Dev BFF deploy (owner confirmed 2026-11-03; R3 rollout record §17, PR #2554)
