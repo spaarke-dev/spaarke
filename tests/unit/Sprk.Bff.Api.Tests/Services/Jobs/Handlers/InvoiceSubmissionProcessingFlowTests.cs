@@ -635,6 +635,27 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.StatusHistory.Should().Equal([(int)InvoiceSubmissionStatus.Processing, (int)InvoiceSubmissionStatus.Failed]);
     }
 
+    [Fact(DisplayName = "082c-1 interim, end to end: an invoice with a Procedure gap retries, then ends Failed on the final delivery; never Accepted, no invoice")]
+    public async Task AProcedureGap_RetriesThenFailed_NeverAccepted_NoInvoice()
+    {
+        var kit = new ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 3, 10));
+        kit.Rule("Ended", "ENDED-INCREMENT", RuleType.TimeIncrement);
+        var flow = new Flow(new ProcessorHarness { Procedures = kit.Build() });
+
+        var first = await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
+        var second = await flow.BuildHandler().ProcessAsync(Job(attempt: 2), CancellationToken.None);
+        var final = await flow.BuildHandler().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        first.Status.Should().Be(JobStatus.Failed);
+        second.Status.Should().Be(JobStatus.Failed);
+        final.Status.Should().Be(JobStatus.Poisoned);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Failed);
+        flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(SubmissionReasonCodes.ProcessingFailed);
+        flow.Created.Should().BeEmpty();
+        flow.StatusHistory.Should().NotContain((int)InvoiceSubmissionStatus.Accepted);
+        flow.StatusHistory.Should().Equal([(int)InvoiceSubmissionStatus.Processing, (int)InvoiceSubmissionStatus.Failed]);
+    }
+
     [Fact(DisplayName = "049 E criterion (reason codes): Ebilling:Enabled false is Failed ebilling.disabled and Poisoned; nothing is read")]
     public async Task FlagOff_IsFailed_EbillingDisabled()
     {

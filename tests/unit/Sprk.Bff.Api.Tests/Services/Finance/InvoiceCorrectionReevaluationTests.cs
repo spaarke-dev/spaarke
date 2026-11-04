@@ -345,6 +345,50 @@ public sealed class InvoiceCorrectionReevaluationTests
         StatusOf(world.Line()).Should().Be((int)InvoiceLineStatus.Clean);
     }
 
+    // =========================================================================================
+    // 082c C12 (interim): a Procedure gap the correction brings in is never patched as a pass
+    // =========================================================================================
+
+    /// <summary>A Procedure whose only version ends on 15 September 2026: the received date (late October, the date of every undated subject) is
+    /// already in its gap; a line dated after 15 September moves into it.</summary>
+    private static InvoiceCorrectionService ServiceWithEndedProcedure(CorrectionWorld world)
+    {
+        var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 9, 15));
+        kit.Rule("Ended", "ENDED-CAP", RuleType.DailyHoursCap);
+        var loaded = Kit.Loaded() with { Procedures = kit.Build() };
+        var reevaluation = new InvoiceCorrectionReevaluation(
+            world.Entities.Object, (_, _) => Task.FromResult(loaded), Kit.Evaluator().Evaluate, world.WriteSignalAsync, world.CloseSignalAsync,
+            NullLogger<InvoiceCorrectionReevaluation>.Instance);
+        world.Seam = reevaluation.ApplyAsync;
+        return world.Service();
+    }
+
+    [Fact(DisplayName = "082c C12 interim: a correction that moves a line into a Procedure gap is Incomplete at the findings step; the stored findings are not patched")]
+    public async Task ACorrectionIntoAProcedureGap_IsIncomplete_AndTheFindingsAreNotPatched_C12()
+    {
+        var world = new CorrectionWorld();
+        Store(world);
+        var stored = world.Submission!.GetAttributeValue<string>("sprk_findingsjson");
+
+        var result = await ServiceWithEndedProcedure(world).CorrectAsync(Line("Date", "2026-09-20", W.ExpenseLineId), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.Incomplete);
+        result.FailedStep.Should().Be(CorrectionCodes.FindingsStep);
+        world.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(stored);
+        world.ValueWrites.Should().NotContain(w => w.Entity == "sprk_invoicesubmission" && w.Fields.ContainsKey("sprk_findingsjson"));
+    }
+
+    [Fact(DisplayName = "082c C12 control: a correction that keeps the line inside the version's window (the gaps on both sides are the same) is applied")]
+    public async Task ACorrectionThatBringsInNoNewGap_IsApplied_C12Control()
+    {
+        var world = new CorrectionWorld();
+        Store(world);
+
+        var result = await ServiceWithEndedProcedure(world).CorrectAsync(Line("Date", "2026-09-13", W.ExpenseLineId), CancellationToken.None);
+
+        result.IsApplied.Should().BeTrue();
+    }
+
     [Fact]
     public async Task AFailedStatusStep_IsIncompleteWithFailedStepStatus_AndTheRepeatConvergesWithoutASecondPatch()
     {

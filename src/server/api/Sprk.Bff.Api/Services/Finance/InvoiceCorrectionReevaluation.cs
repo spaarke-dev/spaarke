@@ -510,6 +510,15 @@ public sealed class InvoiceCorrectionReevaluation
         var beforeResult = _evaluate(before, loaded);
         var afterResult = _evaluate(after, loaded);
 
+        // 082c C12 (interim; a new gap hold through a correction is 082d / 101). A resolution fault on either side has already thrown (the load,
+        // or RulesOn for a date only one side has). A Procedure gap the corrected value brings in (a date moved into a gap) means some of the
+        // corrected invoice's rules judged nothing: the patch is refused, so the correction stays unapplied, which already holds approval.
+        var gapsBefore = beforeResult.Gaps.Select(g => (g.Gap.ProcedureId, g.Gap.WorkDate, g.Gap.Kind)).ToHashSet();
+        if (afterResult.Gaps.Any(g => !gapsBefore.Contains((g.Gap.ProcedureId, g.Gap.WorkDate, g.Gap.Kind))))
+        {
+            throw new InvalidOperationException("The corrected invoice has a Procedure gap its stored findings do not; the findings are not patched.");
+        }
+
         var original = root.ToJsonString();
         var touched = new HashSet<int>();
         if (correctedIndex is { } corrected)
