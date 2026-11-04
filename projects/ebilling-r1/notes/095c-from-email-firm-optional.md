@@ -521,3 +521,14 @@ Gate:
 - current-task.md, TASK-INDEX.md and the POML status are not updated here; the main session owns them.
 
 rework: none task 095c
+
+## 13. Owner decision: no-firm invoices stay visible externally (2026-11-03)
+
+uac-r2 asked for this decision before 095c-2 goes into a deploy request.
+
+- **Question.** An invoice with no firm is visible in the external portal to every outside participant with rights on its matter or project. Through option A and the `ExternalInvoiceVisibility` source rule, that includes people from other firms. Should it be hidden from external users until a firm is set?
+- **Owner's answer (typed in session ebilling-r1-7b): leave it visible.** Today's rule stays: matter or project rights decide visibility, with no firm dimension. 095d does not need to change external visibility.
+- **What the 095c-2 review confirmed:** no external route treats "no firm" as "matches any firm".
+  - The submissions list filters on `sprk_vendororg In callerFirmIds`, so a null firm never matches.
+  - The submission read-one (`ExternalInvoiceSubmissionAuthorizationFilter`) and the replacement gate both require `FirmId: { }` and a firm in scope.
+  - A no-firm **submission** is therefore never shown to a firm. A no-firm **invoice**, created from 095c-3 on, is visible through the matter or project rule only (`ExternalAccessModule.cs` ~510-518, invoice documents through `RightsThroughParents`). That is the same reach any firm's invoice has.
