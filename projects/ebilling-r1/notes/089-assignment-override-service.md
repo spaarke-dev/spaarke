@@ -335,3 +335,143 @@ Each change was restored afterwards, and the file content was compared to confir
   - The 6 policies owned in the root "Spaarke" are ontology product rules (POL-TASK-OVERDUE, POL-TASK-DUESOON, POL-WA-RESPONSE, POL-TODO-OVERDUE, POL-MATTER-NOBUDGET, POL-COMMIT-BUDGET), not Billing rules, and Exclude refuses them. No re-owning is needed for Billing rules on dev.
 - **Until the team exists,** a child-unit admin's 403 is correct.
 - **Task:** `tasks/089d-billing-rule-readers-team.poml`.
+
+## 089d - Billing Rule Readers team (code done 2026-11-04; -Apply pending the owner's go)
+
+Branch `task/ebilling-089d`, from `work/ebilling-r1` at `012d5dfa68`. Not pushed, not merged. **Nothing was written to Dataverse**: the dev reads below and the `-WhatIf` run are read-only. `-Apply` is the main session's, after the owner's go and the uac-r2 notices.
+
+### What landed
+
+- **`config/billing-rule-readers-role.json`** (new): team `Billing Rule Readers`, role `Billing Rule Reader`, `businessUnit: customer`, Read at **Deep** on `sprk_policy` only, `membership: members`, `memberPrivilege: prvWritesprk_ruleset` (the billing-admin marker, `BillingAdminAuthorization.WriteRuleSetPrivilege`).
+- **`scripts/Set-CustomerOwnerTeams.ps1`** (extended, no parallel script): the file joins `$DeclaredRoleFiles`.
+  - A config with no `membership` (or `none`) is a memberless owner team at Basic, as before. `members` is a member team at Deep. Every other combination is refused before any read, and so is Global.
+  - Members are allowed on a member team. `-Apply` never adds or removes one. Each member must hold `memberPrivilege` (read with `RetrieveUserPrivileges`); a member without it is drift (`MEMBER PRIVILEGE`) and an owner decision.
+  - Each member must be homed in the customer's top unit or below it. A member homed in another customer's unit (dev has four customer top units), the root or Secure Record is drift (`MEMBER UNIT`) and an owner decision: such a member would read this customer's rules through the team.
+  - New drift for **every** declared team: `TEAM PLACE`, a team of the name in the root, in Secure Record or below it. It is an owner decision (`-Apply` never moves or deletes a team). On dev no declared team is in either place, so the two uac-r2 teams are unchanged.
+  - Depth is the config's (`PRIVILEGE DEPTH ... expected Deep`). `-Apply` adds at that depth.
+  - The output now prints each team's unit by name, its member count, and each privilege its role holds with the depth.
+  - The duplicate-table refusal applies to owner configs only. `sprk_policy` is in the restricted-content file too, and a member team reads; it never owns.
+- **`RestrictedContentOwnerRoleGuardTests`** (ArchTests): a third `DeclaredRole` with `Depth` and `MemberPrivilege`. `Findings` checks the depth, the membership and the member privilege per role. 18 must-fire documents, a named-break control, the member-privilege pin, a script must-fire (the entry commented out), and the negative-case reach test (below). The owner-table check is now owner roles only.
+- **`tests/scripts/Set-CustomerOwnerTeams.Tests.ps1`** (Pester): a second Describe over a mocked Dataverse (every write fails the test), run with `-ConfigPaths` for this file alone.
+- **Docs:** `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.11 (the step), §12.2 Phase 7a (item 3 and the by-hand member step), the change log. `UAC-ACCESS-MODEL-GUIDE.md`, one paragraph after "Hard-deny tables".
+
+### Does Exclude read `sprk_policyversion`? No, not as the caller
+
+- The caller checks on the Exclude routes are the second filter, `ProcedureAssignmentEndpoints.ExcludeTargets`: `ReadOn(PolicyEntitySet = "sprk_policies", body.policyId)` plus `BillingAdminAuthorization.Admin()`.
+  - The Read check is `FinanceCheckPath.Record`, which runs `FinanceAuthorizationFilter.CallerHoldsRightsAsync` → `AuthorizationService.GetCallerRecordAccessAsync` on that one policy record.
+  - `Admin()` is a caller **privilege** check (`prvWritesprk_ruleset`), not a record read.
+- The service reads `sprk_policyversion` once, in `ProcedureAssignmentService.IsSystemRuleAsync` (the current version's `sprk_policy` and `sprk_ruletype`). It reads through `IGenericEntityService`, the application identity; `LoadRuleAsync`'s summary says "Read as the application; the route has already checked the caller's Read on the policy".
+- So the role holds **no** `sprk_policyversion` Read. A future caller-checked route that reads versions (for example 084's read models) must bring its own evidence before the file gains a table; the guard fails the build until both change.
+
+### Dev check (read-only, 2026-11-04)
+
+- Business units: root `Spaarke` (06fbf21c...); direct children `Secure Record` (d9ec0b6f...), `Spaarke Business Unit 1` (cb15f587..., the customer top unit), `Spaarke Demo`, `Spaarke Dev 1`, `Spaarke Test 1`. **`Spaarke Business Unit 1` has no child unit**, so dev has no child-unit billing admin yet: after `-Apply` the team has 0 members.
+- Billing rules (`sprk_domain` 100000000): one, `BILL-SYSTEM-SUBMISSION`, owned by `Spaarke Restricted Content Owners` in `Spaarke Business Unit 1`. The six root-owned policies (POL-TASK-OVERDUE, POL-TASK-DUESOON, POL-WA-RESPONSE, POL-TODO-OVERDUE, POL-MATTER-NOBUDGET, POL-COMMIT-BUDGET) have an empty domain (Ontology). **No Billing rule is owned in the root**: no finding, nothing to re-own.
+- No team named `Billing Rule Readers` and no role named `Billing Rule Reader` exist.
+- `RetrieveRolePrivilegesRole` spells the depth `Deep`, and `RetrieveUserPrivileges` returns `PrivilegeName` per row (checked on the operator's own user), which the member check relies on.
+
+### `-WhatIf` on dev (2026-11-04, read-only, exit 0)
+
+`scripts/Set-CustomerOwnerTeams.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -CustomerBusinessUnitName 'Spaarke Business Unit 1' -WhatIf`:
+
+```
+Environment : https://spaarkedev1.crm.dynamics.com (org 'spaarkedev1')
+Config      : ...\config\restricted-content-owner-role.json ('Spaarke Restricted Content Owners', 5 tables)
+Config      : ...\config\customer-configuration-owner-role.json ('Spaarke Customer Configuration Owners', 3 tables)
+Config      : ...\config\billing-rule-readers-role.json ('Billing Rule Readers', 1 tables)
+Mode        : DRY RUN (no writes)
+Root BU     : Spaarke (06fbf21c-1872-f011-b4cb-7c1e52671ad0)
+Secure BU   : Secure Record (d9ec0b6f-80a0-f111-aaac-000d3a99d1d7)
+Customer BU : Spaarke Business Unit 1 (cb15f587-baa0-f111-aaac-000d3a99d1d7)
+
+== Spaarke Restricted Content Owners (restricted-content-owner-role.json)
+Declared    : Read at Basic on sprk_policy, sprk_policyversion, sprk_storedfile, sprk_ruleset, sprk_procedureassignment; memberless
+Team        : Spaarke Restricted Content Owners (16685363-43d3-f111-84e8-00224820fd20) teamtype=0 isdefault=False bu=Spaarke Business Unit 1 (cb15f587-baa0-f111-aaac-000d3a99d1d7) members=0 roles=1
+Role        : Restricted Content Owner (ba9bf15f-43d3-f111-84e8-7ced8dda31f8) customer-unit copy=0d4e0675-fce9-4e39-baf5-310b0ead22f3 copies=6 assignments=1 privileges=5
+Privilege   : prvReadsprk_Policy at Basic
+Privilege   : prvReadsprk_PolicyVersion at Basic
+Privilege   : prvReadsprk_procedureassignment at Basic
+Privilege   : prvReadsprk_ruleset at Basic
+Privilege   : prvReadsprk_StoredFile at Basic
+INFO        : customer top unit 'Spaarke Demo' (9271b764-952f-f111-88b5-7c1e520aa4df) has no 'Spaarke Restricted Content Owners' team (not this run's unit; not a failure).
+INFO        : customer top unit 'Spaarke Dev 1' (7bdb15ee-e39e-f011-bbd3-7c1e5215b8b5) has no 'Spaarke Restricted Content Owners' team (not this run's unit; not a failure).
+INFO        : customer top unit 'Spaarke Test 1' (1a75377a-e29e-f011-bbd3-7c1e5217cd7c) has no 'Spaarke Restricted Content Owners' team (not this run's unit; not a failure).
+Drift       : none
+
+== Spaarke Customer Configuration Owners (customer-configuration-owner-role.json)
+Declared    : Read at Basic on sprk_aisearchindex, sprk_fieldmappingprofile, sprk_fieldmappingrule; memberless
+Team        : Spaarke Customer Configuration Owners (2dae7e6e-43d3-f111-84e8-00224820fd20) teamtype=0 isdefault=False bu=Spaarke Business Unit 1 (cb15f587-baa0-f111-aaac-000d3a99d1d7) members=0 roles=1
+Role        : Customer Configuration Owner (31ae7e6e-43d3-f111-84e8-00224820fd20) customer-unit copy=fca8fb47-24f2-43d9-bc27-8f21de147a22 copies=6 assignments=1 privileges=3
+Privilege   : prvReadsprk_AISearchIndex at Basic
+Privilege   : prvReadsprk_FieldMappingProfile at Basic
+Privilege   : prvReadsprk_FieldMappingRule at Basic
+INFO        : (the same three customer top units, no team; not a failure)
+Drift       : none
+
+== Billing Rule Readers (billing-rule-readers-role.json)
+Declared    : Read at Deep on sprk_policy; members allowed, each holding prvWritesprk_ruleset
+Team        : (none named 'Billing Rule Readers' in Spaarke Business Unit 1)
+Role        : (none named 'Billing Rule Reader' in the root business unit)
+INFO        : (the same three customer top units, no team; not a failure)
+DRIFT       : TEAM MISSING: no team named 'Billing Rule Readers' in Spaarke Business Unit 1.
+DRIFT       : ROLE MISSING: no role named 'Billing Rule Reader' in the root business unit.
+
+PLAN (dry run, nothing written):
+  1. create the Owner team 'Billing Rule Readers' in Spaarke Business Unit 1 (cb15f587-baa0-f111-aaac-000d3a99d1d7) (teamtype 0), with no members
+  2. create the role 'Billing Rule Reader' in the root business unit (Dataverse copies it into every child unit; the root copy is assigned to nobody)
+  3. add Read at Deep to 'Billing Rule Reader': prvReadsprk_Policy
+  4. take off every privilege of 'Billing Rule Reader' outside billing-rule-readers-role.json, including any the platform injects (setup guide 5.4)
+  5. assign the Spaarke Business Unit 1 copy of 'Billing Rule Reader' to 'Billing Rule Readers'
+  6. read 'Billing Rule Readers' back and check it as -Verify does
+  7. (not this script) an operator adds each of Spaarke Business Unit 1's child-unit billing admins (holding prvWritesprk_ruleset) to 'Billing Rule Readers', then re-runs -Verify
+
+DRY RUN: no writes. Re-run with -Apply (owner go), then -Verify.
+exit=0
+```
+
+Against the first acceptance criterion: the team goes in Spaarke Business Unit 1; the role gets Read at Deep on `sprk_policy` only; nothing changes in the root or Secure Record. The only write in the root is the role definition itself (Dataverse requires a role to be created there and copies it down). Its root copy is assigned to nobody, and `-Verify` reports any assignment outside a customer top unit's team of that name (`ROLE ASSIGNED ELSEWHERE`). The two uac-r2 teams show no drift and their plan is empty.
+
+### Negative case (documented reasoning plus a test; the live probe needs a write)
+
+- **Claim:** a member reads a rule owned in a child unit of the customer unit, and cannot read a rule owned by the Secure Record Owners team.
+- **Why it holds:** a privilege a role grants to an owner team is evaluated against the team's business unit, not the member's. Deep (Parent: Child Business Units) covers that unit and every unit below it. The team sits in the customer's top unit, a direct child of the root. Secure Record is another direct child of the root, so it is a sibling, never a descendant, and Deep from the customer unit never covers it. The census (`SecureBuRoleDepthAssertion.Reaches`) uses the same model: its remarks say a team-held grant is anchored at the team's business unit.
+- **Test:** `RestrictedContentOwnerRoleGuardTests.TheBillingRuleReadersTeam_DeepFromTheCustomerTopUnit_ReachesItsChildUnits_AndNeverSecureRecord` reads the live file's depth and checks it with `Reaches` over a tree of root, Secure Record, the customer unit with a child and a grandchild, and a second customer unit:
+  - Deep from the customer unit reaches the customer unit, its child and its grandchild.
+  - It does not reach Secure Record, the root or the other customer.
+  - Deep from the child unit does not reach the customer unit (the original 403).
+  - Deep from the root, and Global, do reach Secure Record. These are the two shapes ruled out.
+- **Belt:** if the team were ever put in the root, the 15-minute Secure census (clause 1) would report it as a team-held grant reaching Secure Record, and `-Verify` reports `TEAM PLACE`.
+- **Live probe (not run; it needs writes):** dev has no child unit under Spaarke Business Unit 1. A real probe needs a child unit, a billing admin homed in it and added as a member, then an Exclude on `BILL-SYSTEM-SUBMISSION` that gets 409 `assignment.system_rule` instead of 403. A Secure-owned rule must stay 403. Each of those steps is a live write and the owner's call. The escalation trigger did not fire: nothing read so far contradicts the reach model.
+
+### Decisions
+
+1. **Members are added by hand, not by the script.** Membership is a per-person, ongoing decision (who is a billing admin, in which unit); a script that takes a list would need its own source of truth. The guide says how, and `-Verify` checks every member.
+2. **Every member must hold the billing-admin marker and be homed in this customer's units.** Membership gives direct Dataverse Read on every rule in the customer, which D-185 keeps from end users. An operator who adds the wrong person, or another customer's admin, is the realistic failure, and the checks cost one read per member.
+3. **`TEAM PLACE` applies to all declared teams.** It fails closed and changes nothing on dev; a team of a declared name in the root or Secure Record is wrong for the owner teams too.
+4. **Membership lives in the config, not in the script,** so the guard pins it per file and a memberless file cannot silently gain members (must-fire control).
+
+### Seeding proofs
+
+| Change | Result |
+|---|---|
+| Guard: the per-role depth check disabled (`if (false && Text(file, "depth") != role.Depth)`) | 7 of 74 `RestrictedContentOwnerRoleGuard` tests fail: the billing must-fire for Global, Local and Basic; the restricted and configuration raised-depth must-fire; both named-break controls. Restored; file hash equal to the backup; rebuilt and 74/74 again |
+| Script: the `TEAM PLACE` drift disabled (`$false -and` in its filter) | 2 of 12 Pester tests fail: the team in the root and the team in Secure Record. Restored; file hash equal to the backup |
+
+The Pester must-fire cases (Global, an extra privilege, a member without the marker, a member homed in another customer's unit, a team in the root, a team in Secure Record, a bad config depth) each fail closed against the shipped script; the must-not-fire case (two billing-admin members, one homed in a child unit) passes `-Verify` with exit 0.
+
+### Gates
+
+| Run | Result |
+|---|---|
+| ArchTests `FullyQualifiedName~RestrictedContentOwnerRoleGuard` | 74/74 (23 new: 18 must-fire documents, 1 script must-fire, the live-file must-not-fire, the named-break control, the member-privilege pin, the reach test) |
+| ArchTests (full) | 1974/1974 |
+| Pester 5.7.1 `tests/scripts/Set-CustomerOwnerTeams.Tests.ps1` | 12/12 (4 existing, 8 new) |
+| Pester 6.2.0 (local) | does not load any container on this machine (`Export-ModuleMember can only be called from inside a module`, also for the untouched `Set-ProductConfigurationReadDepth.Tests.ps1`): the known 6.x problem `ci-standalone-checks.yml` names; CI's job `owner-teams-script-tests` pins 5.7.1, the version run here |
+| `-WhatIf` on dev | exit 0, plan above (re-run after the member-unit check: identical output) |
+| BFF code | not touched (no publish-size or CVE delta to report) |
+
+### Known limits
+
+- **K: the member check is point in time.** A member who later loses Billing Administrator keeps Read on the rules until someone runs `-Verify` (or H13 re-checks, once provisioning's H7c ships). The owner teams' membership checks work the same way. Not changed here.
+- **K: `RetrieveUserPrivileges` counts the marker at any depth and through any team.** A user who holds `prvWritesprk_ruleset` some other way passes the member check. The BFF's own billing-admin check (`CallerHoldsPrivilegeAsync`) answers the same way, so the two agree.
+- **K: the root copy of the role exists** (Dataverse creates roles in the root). It is assigned to nobody and `-Verify` reports any assignment of it.

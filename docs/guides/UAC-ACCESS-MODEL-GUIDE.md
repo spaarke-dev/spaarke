@@ -438,6 +438,17 @@ least as strict as the matter.
   team is found: every ordinary hard-deny write is refused (`OwnerTeamNotFound`, fail closed). The reconciler's ordinary
   pass leaves an author-owned row, or one owned by a non-default team, where it is and reports it, without refusing it; a
   hard-deny row owned by a non-default team other than the restricted-content team is always reported, by id.
+- **Reading billing rules across the customer (`Billing Rule Readers`; ebilling-r1 task 089d, owner 2026-11-03).** A billing
+  rule (`sprk_policy`) sits in the customer's top business unit, and Billing Administrator reads rules at Deep from the
+  admin's own unit, so an admin homed in a child unit cannot read it, and the rule-exclude route refuses that admin (403;
+  it checks the caller's own Read on the rule and infers nothing from Procedure rights). Each customer's top unit therefore
+  holds a `Billing Rule Readers` team whose role reads `sprk_policy` at Deep and nothing else; child-unit billing admins are
+  its members. A team's Deep is evaluated from the team's own unit, so members read every rule owned in the customer's unit
+  and below it, and never a rule owned by Secure Record Owners (Secure Record is a sibling of the customer unit). Global
+  Read, or Deep held in the root, would reach Secure Record and is not allowed. The one definition is
+  `config/billing-rule-readers-role.json`; `scripts/Set-CustomerOwnerTeams.ps1` sets the team up and its `-Verify` fails on a
+  team in the root or Secure Record, any other privilege or depth, or a member who lacks the billing-admin privilege or is
+  homed outside the customer's units.
 - **A Decision Record** is also filed under the subject of every Signal it resolved (the ids its `sprk_steps` lists). A
   Secure pass reaches it through those Signals even when it lies outside the record's own family, so it moves into
   isolation, or out, with them.
