@@ -146,6 +146,49 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     }
 
     [Fact]
+    public async Task EventRoute_WhenTheTablesMetadataCannotBindTheDerivedStamp_KeepsTheRoutes500RegardingStampFailed()
+    {
+        // Task 031 fix round 1 (F1-low): the same real refusal as above, rendered by POST /api/v1/events' adapter. Before task
+        // 031 that route answered every stamp it could not make with 500 events.regarding_stamp_failed (NFR-07): the service's
+        // generic Undecided must not lose that code. Told apart by the step that refused it, never by the code alone.
+        WithParentEventUnderTheOrdinaryMatter();
+        _user.RespondTo = path => IsTheStampBindsMetadataRead(path)
+            ? DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { ManyToOneRelationships = Array.Empty<object>() }))
+            : null;
+        var outcome = await Service().CreateAsync(EventUnderTheParentEvent(), AsCaller(), CancellationToken.None);
+        var http = new DefaultHttpContext { TraceIdentifier = "trace-stamp" };
+
+        var result = Sprk.Bff.Api.Api.Events.EventEndpoints.RefusalResult(outcome.Refusal!, outcome.Steps, http);
+
+        var problem = result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions.Should().ContainKey("errorCode")
+            .WhoseValue.Should().Be(Sprk.Bff.Api.Api.Events.EventEndpoints.RegardingStampFailedErrorCode);
+        problem.ProblemDetails.Detail.Should().Be(
+            "The event's regarding record could not be resolved for access inheritance, so nothing was written.");
+        _createAttempts.Should().BeEmpty("nothing is written");
+    }
+
+    [Theory]
+    [InlineData(nameof(RecordCreationStep.CallerChecks))]
+    [InlineData(nameof(RecordCreationStep.Owner))]
+    public void EventRoute_TheGenericNoDecisionRefusalAtAnyOtherStep_StaysTheRoutesGeneric500WithoutAnErrorCode(string stepName)
+    {
+        var step = Enum.Parse<RecordCreationStep>(stepName);
+        // Must not fire: the same code from any other step is not a stamp failure, so it keeps the route's generic 500.
+        var refusal = new RecordCreationRefusal(RecordCreationRefusalKind.Undecided, RecordCreationRefusal.NoDecisionCode, "The event was not created.");
+
+        var result = Sprk.Bff.Api.Api.Events.EventEndpoints.RefusalResult(
+            refusal, [new RecordCreationStepRecord(step, RecordCreationStepState.Refused, RecordCreationRefusal.NoDecisionCode)],
+            new DefaultHttpContext());
+
+        var problem = result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Detail.Should().Be("An error occurred while creating the event");
+        problem.ProblemDetails.Extensions.Should().NotContainKey("errorCode");
+    }
+
+    [Fact]
     public async Task CreateAsync_WhenDataverseDoesNotAnswerTheStampBindsMetadataRead_StaysThe503StampUnavailable()
     {
         // The other branch, unchanged: the metadata read itself failed at Dataverse, which a retry may clear.

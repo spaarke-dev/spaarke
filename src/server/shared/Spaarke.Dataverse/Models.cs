@@ -1062,8 +1062,8 @@ public class CreateEventRequest
     /// <summary>
     /// The team that will own the new <c>sprk_event</c> (unified-access-control-r2 task 146, write-path invariants
     /// I-2/I-6): resolved by the BFF's <c>IRecordOwnershipResolver</c> from the regarding record — the named Secure team
-    /// when that record is secure. REQUIRED by <c>DataverseWebApiService.CreateEventAsync</c>, which refuses a create
-    /// without it: the write is app-only, so an unset owner would make the BFF application user own the event in the
+    /// when that record is secure. REQUIRED by <c>DataverseWebApiService.BuildCreateEventPayload</c>, which refuses a
+    /// payload without it (its <c>CreateEventAsync</c> was deleted in field-mapping-server-write-path-r1 task 031): the write is app-only, so an unset owner would make the BFF application user own the event in the
     /// root business unit, where any root-BU user with ordinary depth reads it. Same shape as
     /// <see cref="CreateDocumentRequest.OwningTeamId"/>, and for the same reason never bound from a request body.
     /// </summary>
