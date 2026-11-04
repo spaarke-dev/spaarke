@@ -45,6 +45,7 @@ import {
   type IAttachmentsWebApi,
 } from '../../logic/attachments';
 import { AttachmentList } from '../AttachmentList';
+import { isPdfFileName } from '../SubmitInvoice/invoiceAttachments';
 import type { IEmailReadingAttachmentsProps } from './EmailReadingHeader.types';
 
 const useStyles = makeStyles({
@@ -169,7 +170,8 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
           <Badge appearance="tint" color="success" size="small" data-testid="attachment-invoice-badge">
             Invoice
           </Badge>
-          {onSubmitAsInvoice && (
+          {/* The Invoice mark is PDF only: a flagged non-PDF keeps the badge but offers no action that cannot work. */}
+          {onSubmitAsInvoice && isPdfFileName(item.name || item.documentName) && (
             <Button
               size="small"
               appearance="subtle"

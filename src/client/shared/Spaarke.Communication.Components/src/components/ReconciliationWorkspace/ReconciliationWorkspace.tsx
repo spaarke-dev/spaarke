@@ -60,7 +60,11 @@ import type {
 } from '../EmailAssociationsAndTracking/EmailAssociationsAndTracking.types';
 import type { AuthenticatedFetchFn, ReconciliationAttachmentContent } from '../EmailBody/EmailBodyView.types';
 import { projectAttachmentRecord, filterFileAttachments, type IAttachmentRecord } from '../../logic/attachments';
-import { createEmailInvoiceSubmission, type IEmailInvoiceDataService } from '../../logic/invoice';
+import {
+  createEmailInvoiceSubmission,
+  type EmailInvoiceSubmission,
+  type IEmailInvoiceDataService,
+} from '../../logic/invoice';
 import type { MarkableAttachment } from '../InvoiceAttachmentMarking';
 import type { EmailCitation } from '../../logic/citations';
 
@@ -350,6 +354,22 @@ export interface ReconciliationWorkspaceProps {
   resolveEmlSource?: (record: Record<string, unknown>) => EmlSource | undefined;
 }
 
+/**
+ * The Invoice tab's transport: the one transport, except that the attachment read for `communicationId` answers from the
+ * list the tab-presence probe already read (when it has), so opening the tab does not read the same email twice.
+ */
+function withCachedAttachments(
+  submission: EmailInvoiceSubmission,
+  communicationId: string,
+  cached: MarkableAttachment[] | undefined
+): EmailInvoiceSubmission {
+  if (!cached) return submission;
+  return {
+    ...submission,
+    loadAttachments: id => (id === communicationId ? Promise.resolve(cached) : submission.loadAttachments(id)),
+  };
+}
+
 /** Read a string field off an untyped grid row. */
 function str(record: Record<string, unknown>, field: string): string | null {
   const v = record[field];
@@ -443,6 +463,8 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   // The openable emails' attachments, by communication id, read once per email on open (the same single-query read the
   // flow itself uses). Decides whether the Invoice tab is offered; best-effort: a failed read offers no tab.
   const [invoiceAttachmentsById, setInvoiceAttachmentsById] = React.useState<Record<string, MarkableAttachment[]>>({});
+  // Ids whose attachment read is in flight, so a re-render (or a second open) of the same email never starts a second read.
+  const invoiceReadsInFlight = React.useRef<Set<string>>(new Set());
 
   // UAT Fix #5 — view-switcher. When `views` is supplied, the active view's id is the
   // grid's effective configId; selecting a view swaps the grid query. Default = the
@@ -518,11 +540,13 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       // Reader detail (attachments + `.eml` archive + re-extracted attachment text) — resolved once per
       // record and cached (owner UAT round-3 item 2; B2.1 text overlay). Best-effort: a miss just leaves
       // the reader body-only. Uses the host fetch when supplied, else the @spaarke/auth default.
-      if (!invoiceAttachmentsById[id]) {
+      if (!invoiceAttachmentsById[id] && !invoiceReadsInFlight.current.has(id)) {
+        invoiceReadsInFlight.current.add(id);
         void invoiceSubmission
           .loadAttachments(id)
           .then(list => setInvoiceAttachmentsById(prev => ({ ...prev, [id]: list })))
-          .catch(() => {});
+          .catch(() => {})
+          .finally(() => invoiceReadsInFlight.current.delete(id));
       }
       if (!detailById[id]) {
         void resolveBrowseDetail(dataverseClient, id, authenticatedFetch ?? defaultAuthenticatedFetch)
@@ -719,8 +743,19 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
             {effectiveTab === 'invoice' && (
               <InvoiceSubmitTab
                 communicationId={browseRecord.id}
-                submission={invoiceSubmission}
+                // The tab-presence probe already read this email's attachments: the flow starts from that list
+                // instead of reading them again.
+                submission={withCachedAttachments(
+                  invoiceSubmission,
+                  browseRecord.id,
+                  invoiceAttachmentsById[browseRecord.id]
+                )}
                 regarding={regarding}
+                // Accepting files the email under the chosen record: re-read the row and let the host refresh its view.
+                onAccepted={() => {
+                  enrichRow(browseRecord.id);
+                  review?.onAssociationsChanged?.();
+                }}
               />
             )}
           </div>
@@ -731,6 +766,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       rows,
       invoiceSubmission,
       invoiceAttachmentsById,
+      enrichRow,
       resolveRegarding,
       resolveReview,
       wrapReview,

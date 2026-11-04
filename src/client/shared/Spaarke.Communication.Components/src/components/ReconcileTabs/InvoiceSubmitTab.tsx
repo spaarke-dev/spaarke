@@ -27,6 +27,8 @@ export interface InvoiceSubmitTabProps {
   submission: EmailInvoiceSubmission;
   /** The email's confirmed Related-to record, when there is one: a Matter, Project or Work Assignment starts as the chosen record. */
   regarding?: ReconcileRegarding | null;
+  /** Called once when the server accepts the submission (the email is then filed): the host refreshes the email's row. */
+  onAccepted?: () => void;
   /** Milliseconds between status reads while the submission is processed. Default 2000. */
   pollIntervalMs?: number;
 }
@@ -35,6 +37,7 @@ export const InvoiceSubmitTab: React.FC<InvoiceSubmitTabProps> = ({
   communicationId,
   submission,
   regarding,
+  onAccepted,
   pollIntervalMs,
 }) => {
   const s = useStyles();
@@ -57,6 +60,7 @@ export const InvoiceSubmitTab: React.FC<InvoiceSubmitTabProps> = ({
         communicationId={communicationId}
         submission={submission}
         initialRecord={initialRecord}
+        onAccepted={onAccepted}
         pollIntervalMs={pollIntervalMs}
       />
     </div>

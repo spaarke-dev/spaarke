@@ -13,6 +13,7 @@ import {
   toMarkableAttachments,
   toSubmissionError,
   NO_DOCUMENT_REASON,
+  SUBMIT_NOT_FOUND_TEXT,
   type SubmitInvoiceFromDocumentInput,
 } from '../emailInvoiceSubmission';
 import type { IAttachmentItem } from '../../attachments';
@@ -162,6 +163,57 @@ describe('createEmailInvoiceSubmission.submit', () => {
       expect(err.detail).toBe('server says');
     }
   );
+
+  describe('the uniform 404 (reasonCode record_unavailable, no errorCode)', () => {
+    const uniform404 = {
+      title: 'Not Found',
+      detail: 'The requested record was not found.',
+      reasonCode: 'sdap.access.deny.record_unavailable',
+    };
+
+    it('a returned 404 says this route\'s wording (attachment or record), not the generic "record was not found"', async () => {
+      const fetchMock = jest.fn().mockResolvedValue(jsonResponse(404, uniform404));
+      const err = await createEmailInvoiceSubmission({ authenticatedFetch: fetchMock, dataService })
+        .submit(input())
+        .catch(e => e);
+      expect(err).toBeInstanceOf(InvoiceSubmissionError);
+      expect(err.statusCode).toBe(404);
+      expect(err.errorCode).toBeUndefined();
+      expect(err.detail).toBe(SUBMIT_NOT_FOUND_TEXT);
+      expect(err.detail).toContain('marked attachments');
+    });
+
+    it('a thrown ApiError 404 (what @spaarke/auth does) gets the same wording', async () => {
+      const apiError = Object.assign(new Error('x'), { name: 'ApiError', status: 404, problemDetails: uniform404 });
+      const fetchMock = jest.fn().mockRejectedValue(apiError);
+      const err = await createEmailInvoiceSubmission({ authenticatedFetch: fetchMock, dataService })
+        .submit(input())
+        .catch(e => e);
+      expect(err.statusCode).toBe(404);
+      expect(err.detail).toBe(SUBMIT_NOT_FOUND_TEXT);
+    });
+
+    it('negative: a 404 that carries an errorCode, or another reasonCode, keeps the server detail', async () => {
+      for (const body of [
+        { ...uniform404, errorCode: 'ebilling.submission.document_not_found', detail: 'Document gone.' },
+        { ...uniform404, reasonCode: 'something.else', detail: 'Other 404.' },
+      ]) {
+        const fetchMock = jest.fn().mockResolvedValue(jsonResponse(404, body));
+        const err = await createEmailInvoiceSubmission({ authenticatedFetch: fetchMock, dataService })
+          .submit(input())
+          .catch(e => e);
+        expect(err.detail).toBe(body.detail);
+      }
+    });
+
+    it('negative: the same reasonCode on a status other than 404 is not remapped', async () => {
+      const fetchMock = jest.fn().mockResolvedValue(jsonResponse(403, uniform404));
+      const err = await createEmailInvoiceSubmission({ authenticatedFetch: fetchMock, dataService })
+        .submit(input())
+        .catch(e => e);
+      expect(err.detail).toBe('The requested record was not found.');
+    });
+  });
 
   it('a returned failure whose body is not JSON keeps the status', async () => {
     const fetchMock = jest.fn().mockResolvedValue(jsonResponse(503, undefined, '<html>'));

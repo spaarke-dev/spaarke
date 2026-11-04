@@ -143,10 +143,27 @@ function hasName(err: unknown, name: string): boolean {
   return typeof err === 'object' && err !== null && (err as { name?: unknown }).name === name;
 }
 
-/** Problem members as the screen's error type: the server's `detail` and `errorCode` win over any wording of ours. */
+/** The `reasonCode` of the server's uniform 404 (absent, or not readable by the caller: one answer for both). */
+export const RECORD_UNAVAILABLE_REASON_CODE = 'sdap.access.deny.record_unavailable';
+
+/**
+ * What the submit route's uniform 404 says in this screen. The route answers it for the chosen record AND for a marked
+ * document the caller cannot read, so the server's generic "The requested record was not found." would blame the record
+ * alone. The server cannot say which one without confirming that it exists, so the wording names both and the way out.
+ */
+export const SUBMIT_NOT_FOUND_TEXT =
+  "One of the marked attachments, or the record, could not be found or you can't open it. Mark attachments you can't open as Don't save, or choose another record.";
+
+/**
+ * Problem members as the screen's error type: the server's `detail` and `errorCode` win over any wording of ours,
+ * except for the uniform 404 (a `reasonCode` and no `errorCode`), whose generic detail is replaced by this route's wording.
+ */
 function fromProblem(status: number | undefined, problem: Record<string, unknown> | null): InvoiceSubmissionError {
-  const detail = typeof problem?.detail === 'string' && problem.detail.trim() ? problem.detail : undefined;
   const errorCode = typeof problem?.errorCode === 'string' && problem.errorCode ? problem.errorCode : undefined;
+  if (status === 404 && !errorCode && problem?.reasonCode === RECORD_UNAVAILABLE_REASON_CODE) {
+    return new InvoiceSubmissionError({ statusCode: status, detail: SUBMIT_NOT_FOUND_TEXT });
+  }
+  const detail = typeof problem?.detail === 'string' && problem.detail.trim() ? problem.detail : undefined;
   return new InvoiceSubmissionError({ statusCode: status, errorCode, detail });
 }
 
