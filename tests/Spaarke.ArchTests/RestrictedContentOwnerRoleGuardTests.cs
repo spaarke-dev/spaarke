@@ -28,7 +28,8 @@ namespace Spaarke.ArchTests;
 /// </list>
 /// <para>ebilling-r1 task 089d (option R, owner 2026-11-04 "use direct role approach") adds a third declared role that is NOT an
 /// owner role and that NO team holds: <c>config/billing-rule-readers-role.json</c>, the <c>Billing Rule Reader</c> role, Read at
-/// Deep on <c>sprk_policy</c> only, assigned directly to each child-unit billing admin from the customer top unit's copy. Deep is
+/// Deep on <c>sprk_policy</c>, <c>sprk_ruleset</c> and <c>sprk_procedure</c> only (the last two: task 089e fix round 2), assigned
+/// directly to each child-unit billing admin from the customer top unit's copy. Deep is
 /// measured from the unit of the copy a principal holds, so the holder reaches the top unit and its children and never Secure
 /// Record (a sibling); Global, or Deep from the root's copy, would reach Secure Record (D-123). Its file must say <c>Deep</c>,
 /// <c>customer</c>, <c>assignment: users</c>, <c>isinherited: 0</c>, the billing-admin marker as <c>holderPrivilege</c> and the
@@ -104,15 +105,17 @@ public class RestrictedContentOwnerRoleGuardTests
         CustomerConfigurationRoleName);
 
     /// <summary>
-    /// 089d: Read at Deep on <c>sprk_policy</c> only (the Exclude route's caller check; <c>sprk_policyversion</c> is read there as
-    /// the application, so it is not listed). No team; every holder must hold the billing-admin marker the BFF checks.
+    /// 089d: Read at Deep on <c>sprk_policy</c> (the Exclude route's caller check; <c>sprk_policyversion</c> is read there as the
+    /// application, so it is not listed). 089e fix round 2 (owner 2026-11-04, "Approve role + dev apply"): and on <c>sprk_ruleset</c>
+    /// (the rule-set by-id routes and list ask the caller's Read on the set) and <c>sprk_procedure</c> (Procedure override removal and
+    /// preview ask the caller's Read on the Procedure). No team; every holder must hold the billing-admin marker the BFF checks.
     /// </summary>
     internal static readonly DeclaredRole BillingRuleReaders = new(
         "billing-rule-readers-role.json",
         null,
         "no team (the role is assigned to users directly)",
-        ["sprk_policy"],
-        "the rule table the Exclude route checks as the caller (sprk_policy)",
+        ["sprk_policy", "sprk_ruleset", "sprk_procedure"],
+        "a table the billing routes check as the caller (sprk_policy, sprk_ruleset, sprk_procedure)",
         _ => null,
         BillingRuleReaderRoleName,
         Depth: "Deep",
@@ -269,7 +272,7 @@ public class RestrictedContentOwnerRoleGuardTests
     }
 
     [Fact]
-    public void TheLiveBillingRuleReaderFile_HoldsReadAtDeep_OnSprkPolicyOnly_AssignedToBillingAdminsWithNoTeam()
+    public void TheLiveBillingRuleReaderFile_HoldsReadAtDeep_OnTheRuleRuleSetAndProcedureTablesOnly_AssignedToBillingAdminsWithNoTeam()
     {
         Assert.Empty(Findings(LiveJson(BillingRuleReaders), BillingRuleReaders));
     }
@@ -683,10 +686,17 @@ public class RestrictedContentOwnerRoleGuardTests
         { "isinherited as text", Mutated(BillingRuleReaders, f => f["isinherited"] = "0") },
         { "an extra privilege (Read on sprk_policyversion)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_policyversion", "prvReadsprk_PolicyVersion"))) },
         { "an extra privilege (Write on sprk_policy)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_policy", "prvWritesprk_Policy"))) },
-        { "an extra table (sprk_ruleset)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_ruleset", "prvReadsprk_ruleset"))) },
+        { "an extra table (sprk_procedureassignment)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_procedureassignment", "prvReadsprk_procedureassignment"))) },
+        { "an extra table (sprk_procedureversion)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_procedureversion", "prvReadsprk_procedureversion"))) },
+        { "an extra privilege (Write on sprk_ruleset)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_ruleset", "prvWritesprk_ruleset"))) },
+        { "sprk_ruleset missing (089e)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_ruleset"))) },
+        { "sprk_procedure missing (089e)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_procedure"))) },
+        { "a depth on the sprk_ruleset entry", Mutated(BillingRuleReaders, f => EntryFor(f, "sprk_ruleset")["depth"] = "Global") },
+        { "sprk_procedure's entry naming another table's Read", Mutated(BillingRuleReaders, f => EntryFor(f, "sprk_procedure")["privilegeName"] = "prvReadsprk_procedureversion") },
         { "another access type", Mutated(BillingRuleReaders, f => f["access"] = "Write") },
         { "sprk_policy's entry naming another table's Read", Mutated(BillingRuleReaders, f => EntryFor(f, "sprk_policy")["privilegeName"] = "prvReadsprk_PolicyVersion") },
-        { "sprk_policy missing", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Clear()) },
+        { "sprk_policy missing", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_policy"))) },
+        { "every table missing", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Clear()) },
         { "holderPrivilege missing (any user could hold it)", Mutated(BillingRuleReaders, f => f.Remove("holderPrivilege")) },
         { "holderPrivilege other than the billing-admin marker", Mutated(BillingRuleReaders, f => f["holderPrivilege"] = "prvReadsprk_Policy") },
         { "the org setting missing", Mutated(BillingRuleReaders, f => f.Remove("requiresOrgSetting")) },
@@ -734,7 +744,11 @@ public class RestrictedContentOwnerRoleGuardTests
         Assert.Contains(Of(f => f["depth"] = "Global"), f => f == "depth is 'Global', not Deep");
         Assert.Contains(Of(f => f["isinherited"] = 1), f => f == "isinherited is '1', not 0 (Team privileges only)");
         Assert.Contains(Of(f => f["tables"]!.AsArray().Add(Entry("sprk_policyversion", "prvReadsprk_PolicyVersion"))),
-            f => f.StartsWith("sprk_policyversion: not the rule table", StringComparison.Ordinal));
+            f => f.StartsWith("sprk_policyversion: not a table the billing routes check as the caller", StringComparison.Ordinal));
+        Assert.Contains(Of(f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_ruleset"))),
+            f => f.StartsWith("sprk_ruleset: a table the billing routes check as the caller", StringComparison.Ordinal));
+        Assert.Contains(Of(f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_procedure"))),
+            f => f.StartsWith("sprk_procedure: a table the billing routes check as the caller", StringComparison.Ordinal));
         Assert.Contains(Of(f => f["tables"]!.AsArray().Add(Entry("sprk_policy", "prvWritesprk_Policy"))),
             f => f == "sprk_policy: prvWritesprk_Policy is not this table's Read privilege");
         Assert.Contains(Of(f => f["assignment"] = "team"), f => f == "assignment is 'team', not users (no team holds this role)");
@@ -1002,5 +1016,100 @@ public class RestrictedContentOwnerRoleGuardTests
         Assert.NotEmpty(ClauseOne(CopyIn(Root), PrivilegeDepth.Deep));       // ruled out: the root's copy
         Assert.NotEmpty(ClauseOne(CopyIn(Customer), PrivilegeDepth.Global)); // ruled out: Global
         Assert.Empty(ClauseOne(CopyIn(Child), PrivilegeDepth.Deep));         // the admin-UI copy reaches nothing it should not (nor the top unit)
+    }
+
+    /// <summary>
+    /// 089e fix round 2, uac-r2's condition (binding): the EXTENDED role (every privilege the live file lists, at the file's depth) passes
+    /// <see cref="SecureBuRoleDepthAssertion"/> for every unit copy holders are assigned from (each customer top unit's), and its reach
+    /// covers no row owned in Secure Record. A privilege the census grades (<see cref="SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames"/>)
+    /// is proven through <see cref="SecureBuRoleDepthAssertion.Evaluate"/> (clause 1, no finding); one it does not grade (on 2026-11-04,
+    /// <c>prvReadsprk_procedure</c>: not on the NFR-05 lists) through the census's own depth model,
+    /// <see cref="SecureBuRoleDepthAssertion.Reaches(PrivilegeDepth, Guid, Guid, IReadOnlyList{BusinessUnitNode})"/>. Must-fire: the same
+    /// privileges from the root's copy, or at Global, are clause-1 findings for every graded one, and reach Secure Record for every one.
+    /// The tree is the D-123 shape the setup script refuses to run without: Secure Record a direct child of the root, outside every
+    /// customer subtree.
+    /// </summary>
+    [Fact]
+    public void TheExtendedBillingRuleReader_PassesTheSecureCensus_FromEveryCustomerTopUnitsCopy_AndNeverReachesSecureRecord()
+    {
+        var file = JsonNode.Parse(LiveJson(BillingRuleReaders))!.AsObject();
+        var depth = Enum.Parse<PrivilegeDepth>(Text(file, "depth")!);
+        var privileges = file["tables"]!.AsArray().Select(e => Text(e!.AsObject(), "privilegeName")!).ToArray();
+        Assert.Equal(new[] { "prvReadsprk_Policy", "prvReadsprk_ruleset", "prvReadsprk_procedure" }, privileges);
+
+        // D-123 shape: Secure Record sits directly under the root and inside no customer subtree.
+        Assert.Equal(Root, Tree.Single(u => u.Id == Secure).ParentId);
+        foreach (var top in new[] { Customer, OtherCustomer })
+        {
+            Assert.Equal(Root, Tree.Single(u => u.Id == top).ParentId);
+            Assert.False(SecureBuRoleDepthAssertion.Reaches(PrivilegeDepth.Deep, top, Secure, Tree));
+        }
+
+        var graded = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var censused = privileges.Where(graded.Contains).ToArray();
+        var modelOnly = privileges.Where(p => !graded.Contains(p)).ToArray();
+        Assert.Contains("prvReadsprk_ruleset", censused);   // non-vacuity: the census grades the new rule-set Read
+        Assert.Contains("prvReadsprk_Policy", censused);
+
+        var rootRole = Guid.NewGuid();
+        var adminRole = Guid.NewGuid();
+        Guid CopyIn(Guid unit) => unit == Root ? rootRole : new Guid(unit.ToByteArray().Select(b => (byte)(b ^ 0x3C)).ToArray());
+        var copies = new[] { Root, Secure, Customer, Child, Grandchild, OtherCustomer }
+            .Select(unit => new CensusRole(CopyIn(unit), BillingRuleReaderRoleName, unit, rootRole))
+            .Append(new CensusRole(adminRole, "System Administrator", Root, adminRole))
+            .ToArray();
+
+        IReadOnlyList<SecureBuFinding> ClauseOne(Guid heldCopy, Guid home, PrivilegeDepth d)
+        {
+            var depths = new Dictionary<(Guid, string), PrivilegeDepth> { [(adminRole, "prvReadsprk_Project")] = PrivilegeDepth.Global };
+            foreach (var privilege in privileges)
+            {
+                depths[(rootRole, privilege)] = d;
+            }
+
+            var census = SecureBuRoleDepthCensusBuilder.Build(
+                "Secure Record",
+                "Secure Record Owners",
+                Tree,
+                depths,
+                copies,
+                [
+                    new CensusUser(Guid.NewGuid(), IsHuman: true, home, [heldCopy]),
+                    new CensusUser(Guid.NewGuid(), IsHuman: false, Root, [adminRole]),
+                ],
+                [],
+                SecureRecordOwnerRoleSet.Embedded,
+                SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded));
+            return SecureBuRoleDepthAssertion.Evaluate(census).Findings
+                .Where(f => f.Verdict == SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit)
+                .ToArray();
+        }
+
+        // Every unit copy holders are assigned from: each customer top unit's, held by a user homed below it.
+        foreach (var (top, home) in new[] { (Customer, Child), (Customer, Grandchild), (OtherCustomer, OtherCustomer) })
+        {
+            Assert.Empty(ClauseOne(CopyIn(top), home, depth));
+            foreach (var privilege in privileges)
+            {
+                Assert.False(SecureBuRoleDepthAssertion.Reaches(depth, top, Secure, Tree), $"{privilege} from {top} reaches Secure Record");
+            }
+        }
+
+        // Must-fire: the ruled-out shapes are findings for every graded privilege, and reach Secure Record for every privilege.
+        var fromRoot = ClauseOne(CopyIn(Root), Child, depth);
+        var global = ClauseOne(CopyIn(Customer), Child, PrivilegeDepth.Global);
+        var tableOf = file["tables"]!.AsArray().ToDictionary(e => Text(e!.AsObject(), "privilegeName")!, e => Text(e!.AsObject(), "logicalName")!);
+        foreach (var privilege in censused)
+        {
+            // A clause-1 child-table finding names the tables it covers.
+            Assert.Contains(fromRoot, f => f.Message.Contains(tableOf[privilege], StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(global, f => f.Message.Contains(tableOf[privilege], StringComparison.OrdinalIgnoreCase));
+        }
+
+        foreach (var privilege in modelOnly)
+        {
+            Assert.True(SecureBuRoleDepthAssertion.Reaches(depth, Root, Secure, Tree), $"{privilege}: Deep from the root's copy reaches Secure Record");
+            Assert.True(SecureBuRoleDepthAssertion.Reaches(PrivilegeDepth.Global, Customer, Secure, Tree), $"{privilege}: Global reaches Secure Record");
+        }
     }
 }
