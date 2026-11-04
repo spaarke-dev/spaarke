@@ -12,7 +12,11 @@
 - Its numbers:
   - AC1–AC14 met except the AC3 pair half;
   - verify-suites 6659/0/7; ArchTests 1911; publish delta +811 B; no CVE.
-- **Running now:** two Opus adversarial passes, `rev-042b-sec` (security and ownership) and `rev-042b-cor` (correctness and tests).
+- **Both adversarial passes are done** and found the same **F1**: a caller-sent stamp that disagrees with the intermediate's root keeps the #2483 window open (step 7 asks only over missing stamps; the step-12 restamp then writes S).
+  - Fix options were sent to UAC-r2 and the owner: **A (recommended)** add the disagreeing derived root to step 7; this needs `CoreAncestorRestamper.PlanMissingStampAsync` to return the full plan (+1 file) and an AC12 amendment. B: refuse with 400. C: accept as a known limit.
+  - **Waiting on:** the owner and UAC-r2 to choose the path.
+  - The fix round to fm-042b follows that choice. It also covers: an F1 must-fire test; a user-principal parity case; the AC8 fault test asserting Mapping Skipped; §15.4 rows for Signal/DR (409 NoOwnerSource, K1) and addenda B/C.
+- Filed from the reviews: #2556 / DI-017 (report-card regarding; AC3 second half) and #2557 / DI-018 (thread-only communication).
 - **Then:** fix F-findings through SendMessage to fm-042b → send the diff to UAC-r2 for its full pass (AC15) → merge to the work branch → PR.
 - **Open questions:**
   - Q1: the AC3 pair half cannot hold, because `TodoRegardingBuilder.RegardingLookupByEntity` lacks `sprk_reportcard` while the client writes it. Proposed DI-P1, for an owner decision.
