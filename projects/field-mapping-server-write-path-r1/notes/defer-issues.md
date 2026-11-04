@@ -190,6 +190,6 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 |---|---|
 | **Found** | 2026-11-04, task 042b fix round 1 (review item 3), by inspection, in passing |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2561 |
-| **Class** | Out of scope, pre-existing: the fix needs a record-type catalog read in step 7, outside `OwnerQuestionOf` / `ForRow`; 042b did not change it |
-| **Owner task** | Unassigned; UAC-r2 review, ontology-r1 if the fix refuses chat creates |
+| **Class** | **F (UAC-r2, 2026-11-04)**: a real path (chat). Pre-existing; 042b did not change it and is not held |
+| **Owner task** | A follow-up task straight after 042b. The fix is option 1: in step 7, read the catalog and put the core first in the owner question. It adds the caller's AppendTo on the core record (the same refusal shape, an unresolvable type fails closed). No create path checks that today: only lookups and the regarding pair (`OwnedChildWrite.PairOf`). Tests: Signal and DR, each with a secure core, no AppendTo on the core, and an agreeing core |
 | **Failure** | Chat `dataverse.create_record` of a Signal or DR naming a core pair: the create asks lookups only (`ForRow`), the reconciler asks the core record first (`ForExistingRowAsync`), so the owner can differ until the reconciler re-owns it; under a Secure core with an ordinary subject the row is ordinary-team owned for that window. The ontology writers are not affected |
