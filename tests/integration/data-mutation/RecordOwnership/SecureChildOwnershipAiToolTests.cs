@@ -723,6 +723,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["team"] = "teams", ["businessunit"] = "businessunits",
             // #2084 round 2: a Signal and the rule it cites.
             ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
+            // Field mapping task 042c (#2561): a Decision Record created with a core pair.
+            ["sprk_decisionrecord"] = "sprk_decisionrecords",
             // #2110: a communication's thread.
             ["sprk_communicationthread"] = "sprk_communicationthreads",
             // Field mapping task 017 (item 8): an invoice-family table filed by the regarding trio.
@@ -938,6 +940,20 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_policy", "sprk_policy", "sprk_Policy"),
+                // Field mapping task 042c (#2561): the core pair's type (a lookup to the ADR-024 catalog), the invoice subject
+                // and the matter stamp (CoreAncestorResolver.StampSourceColumns), for the core-pair cases.
+                ("sprk_corerecordtype", "sprk_recordtype_ref", "sprk_CoreRecordType"),
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+            },
+            // Field mapping task 042c (#2561): the Decision Record's core matter, the core pair's type, the invoice subject and
+            // the matter stamp.
+            ["sprk_decisionrecord"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_Matter"),
+                ("sprk_corerecordtype", "sprk_recordtype_ref", "sprk_CoreRecordType"),
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
             },
             // Task 147 r1 E2 (the secure-record ribbon's "New Budget"): sprk_Matter_Budget_1n, live 2026-10-04.
             ["sprk_budget"] = new[]
