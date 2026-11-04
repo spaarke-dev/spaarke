@@ -1,5 +1,7 @@
 # Task 042c notes: a Signal or Decision Record asks its core record (#2561, DI-019)
 
+**Fix round 4 (owner decision D-204, 2026-11-04):** Signal, Decision Record and Budget Revision rows are created only by their writers, and the general create refuses those tables. The create-path work in the sections up to "Fix round 3" is removed; see "Fix round 4" for what is in place now.
+
 Rigor FULL (tags security, bff-api, ownership, testing). Branch `task/fm-042c`, cut from `5f443eaae0` (work-branch tip; contains 042b's merge `49ba684343`). POML steps 0-4 here; step 5 (two adversarial passes, UAC-r2's diff review) and step 6 (close DI-019 / #2561, TASK-INDEX) are the main session's.
 
 ## AC2 amendment (coordinator + UAC-r2, 2026-11-04)
@@ -206,7 +208,74 @@ By review item:
 
 **Failing first.** The 14 new service cases (items 2 and 4) against the merge commit's `RecordCreationService.cs` and `CoreAncestorResolver.cs` (`e094fec5ab`): **12 failed, 2 passed** (the 2 are the must-not-fire). The clear cases reached the create with the stray bind (the harness's create refused the unknown property `sprk_CoreRecordTypeRef@odata.bind`); the fill, replace and full-pair cases were `check_failed`; the null collection was cleared and created; two catalog rows logged no Warning. After: 14 / 14. Item 1 is a widened theory over unchanged code (512 / 512).
 
+## Fix round 4 (owner decision D-204)
+
+**Decision (owner, 2026-11-04; decisions.md, ontology D-204):** Signal, Decision Record and Budget Revision rows are created only by their writers. The general create (`RecordCreationService` and the chat `dataverse.create_record` tool) refuses `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision` as whole tables, for the caller and for the system principal, before anything is written. This replaces fix rounds 1-3 (step 5's core check, step 6¾ and the stored-id rewrite) for these tables.
+
+**The refusal.**
+- Registry: `RecordTableRule.CreatedOnlyByItsWriter` (new `bool` property, default `false`), set on the three entries in `RecordTableRules.All`.
+- Service: `RecordCreationService.CreateAsync` refuses a flagged table at the same point and with the same refusal as a table it does not create: kind `Invalid` (400), code `record_creation.table_unsupported`, detail `'<table>' records are not created here.`. No new code. It runs before WhoAmI, mapping, every check, the owner decision and the create, for both principals; the trace holds no step (as for an unregistered table).
+- Chat: `DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter` (reads the registry flag, so the two cannot drift) is checked right after the `ServerWrittenInvoiceFamilyTables` check in both `ValidateChat` and `ExecuteChatAsync`; `ToolErrorCodes.ValidationFailed` with `CreatedOnlyByItsWriterCreateBlockedMessage(table)`, before any Dataverse call. The invoice-family block and its words are unchanged.
+
+**Component justification (CLAUDE.md §11).**
+- `CreatedOnlyByItsWriter`. Existing: the registry's table entries and the service's `table_unsupported` refusal; the chat's `ServerWrittenInvoiceFamilyTables`. Extension: one property on the existing entry; the refusal reuses the existing one. Unregistering the tables instead was rejected: the entries also carry their mapping exclusion (`OntologyContentIsNotMapped`), which the registry tests pin. Cost of doing nothing: the general create keeps creating these rows.
+- `IsCreatedOnlyByItsWriter` and its message. Existing: the invoice-family set and message beside them. Extension: a sibling check reading the registry flag, rather than a second hand-kept list. Cost of doing nothing: the chat create asks the user to confirm a create that can never run.
+- Placement (§10): inside the existing create service and chat handler; no endpoint, DI registration, package or background work.
+
+**Create paths found (step 1.3).** Every `RecordCreationService.CreateAsync` caller, with the table it creates:
+- `ChildRecordEndpoints.CreateAsync` (the browser create route): `CreateTables` only; none of the three. `DecisionRouteCores.CreateChildAsync` (Add To Do, Create Event, Assign Work, Assign Task, Create Budget) goes through it.
+- `EventEndpoints` (`sprk_event`), `AnalysisEndpoints` (`sprk_analysis`), `EmailDraftToolHandler` (`sprk_communication`), `OfficeService` quick-create (`QuickCreateFieldRequirements.GetLogicalName`: matter, project, invoice, account, contact), `BudgetInquiryExecutor` (`sprk_servicerequest`).
+- `DataverseCreateRecordHandler` (chat): any table; now refuses the three before the service is asked.
+- Not a create path: `RecordCreationService.RepairAsync` (an existing row), the playbook node executors (Create Task: `task`; Create Notification: `appnotification`), the chat delete tool.
+- The writers: `SignalWriter`, `DecisionRecordWriter`, `ReviseBudgetExecutor` (the writer identity, `OntologyWriterDataverseClient`) never reach the general create (new ArchTest below).
+- No first-party flow creates the three tables through the general create.
+
+**Removed (042c code whose only route was a general create of these tables).** `RecordCreationService.cs`, `CallerWriteAuthorization.cs`, `CoreAncestorResolver.cs` and `RecordOwnershipResolver.cs` are back to master's text, then the refusal is added:
+- step 5's `CallerMayFileUnderCoreAsync`, `CorePairOf`, the `CorePairWrite` struct, the core-pair refusal words (`CoreIdNotARecordId`, `CoreIdWithNoType`) and the trace note;
+- step 6¾ (`CompleteHalfCorePairAsync`, `CoreRootsAsTheRowEnds`), its three warning codes and words, and the `WithCorePair` pair writer;
+- the stored-id rewrite (`WithCoreIdAsTheWritersStoreIt`, `StoredCoreId`);
+- step 7's core-record parameters (`DecideOwnerAsync`, `ResolveOwnerOverAsync`, `OwnerQuestionOf`) and the system principal's `CoreRecordOfSystemCreateAsync`;
+- `CoreAncestorResolver.RecordTypeOfCoreTableAsync`;
+- `RecordOwnershipContext.ForRow`'s `coreRecord` parameter (the R3b-2 pin in `ChildRowOwnershipBuilderGuardTests` is master's text again);
+- `CallerWriteAuthorization.PairTargetAsync`'s `idColumn` / `typeColumn` parameters (no other caller).
+- Kept (another path uses them, unchanged by 042c): `RecordCreationService.Repair.cs`, the reconciler, `ForExistingRowAsync`, `PairTargetAsync` as master has it.
+
+**Tests: deleted or changed, with the reason.**
+- Deleted `SecureChildOwnershipAiToolTests.CoreRecordPair.cs` (every case: step 5's core check, its words, the stored id, the core's owner) and `SecureChildOwnershipAiToolTests.HalfCorePair.cs` (step 6¾): the behaviour is removed.
+- `ExistingRowOwnershipParityTests.cs`, `WriterBuilderOwnershipParityTests.cs` (042c's half-pair theory and the `CreateParityWorld` additions), `SecureChildOwnershipAiToolTests.cs` (042c harness additions) and `OwnershipDirectory.cs` (`RowReads`) are back to master's text: the `ForRow(coreRecord)` tests (including the K2 two-stamp theory) and the harness existed only for the removed code.
+- `CorePairTypeImpliesIdGuardTests` (kept; it guards the server writers, and task 044 relies on it): rule 2 no longer exempts `WithCorePair` (gone): no member may rewrite a body that carries the type. Its `RecordCreationService.WithCorePair` non-vacuity pin is removed; the writers' pins stay. Controls: a `WithCorePair` that writes the id now fires too; the must-not-fire pair-writer case is replaced by a body rewrite that never names the type.
+- Deleted `SecureChildOwnershipAiToolTests.SignalCitation.cs` (`CreateRecord_ASignalCitingARuleHeldSecure_...`, unified-access-control-r2 #2084) and `RecordCreationServiceMappingSeamTests.CreateAsync_ACitationLookupMarkedServerSet_...`: both created a Signal through the general create, which is now refused before either question is asked. The citation rule stays pinned by the reconciler's own tests.
+- Changed `RecordCreationServicePipelineSeamTests.CreateAsync_ANonReparentableRecordUnderASecureMatter_Is409NoOwnerSource_AndCreatesNothing`: the table is now a `task` under the Secure matter (was `sprk_signal`). The arm and its assertions are unchanged.
+- Changed `RecordCreationServiceMappingSeamTests.PostMappingDefault_OnATableFieldMappingDoesNotApplyTo_IsAnArgumentError`: the table is now `task` (`ChatPlatformTableIsNotMapped`; was `sprk_signal`).
+- Changed `WriterBuilderOwnershipParityTests`: `StampedRegistryTables` drops `sprk_signal` and `sprk_decisionrecord`; the coverage fact counts the stamped tables the service creates (`!CreatedOnlyByItsWriter`); the Secure-world theory's Signal/Decision Record branch is gone (no case reaches it).
+- Harness addition: `SecureChildOwnershipAiToolTests.ScriptedUserClient` knows `transactioncurrency` (entity set, `sprk_budget.transactioncurrencyid`, organization-owned, AppendTo held), for the Create Budget commit below.
+
+**New tests (KEEP paths).**
+
+| What | Test |
+|---|---|
+| Must fire, service: 3 tables x (caller Web API body, caller mapped item, system principal); 400 `table_unsupported`, the words, nothing written, nothing read (the journal is empty: no WhoAmI, no caller question, no owner, no create, no re-stamp, no mirror, no event), no step | `RecordCreationServicePipelineSeamTests.WriterOnlyTables.CreateAsync_ATableOnlyItsWriterCreates_IsRefused_BeforeAnyReadOrWrite` (9) |
+| The refusal equals an unregistered table's (kind, code, words, steps) | `..._IsRefusedAsAnUnregisteredTableIs` (3) |
+| Must not fire, service: an event is still created | `CreateAsync_AnEvent_IsStillCreated_TheRefusalDoesNotFire` |
+| Must fire, chat execute and validate (no Dataverse call, no create) | `ChatServerWrittenTableBlockTests.CreateRecord_ATableOnlyItsWriterCreates_IsRefused_WithNoCreateCall` (3), `ValidateChat_ATableOnlyItsWriterCreates_IsRefusedBeforeTheConfirmation` (4, one upper-case) |
+| Must not fire, chat: the invoice family keeps its own words; ordinary tables are not flagged | `CreateRecord_AServerWrittenInvoiceFamilyTable_KeepsItsOwnRefusal` (4); the existing invoice-family and `sprk_todo` tests unchanged |
+| Must not fire, decision commits (real executors, real `DecisionRouteCores`, real `ChildRecordEndpoints.CreateAsync`, real `RecordCreationService` over this harness) | `SecureChildOwnershipAiToolTests.DecisionCreateBudget_StillCreatesTheBudget_ThroughTheGeneralCreate`, `DecisionAssignTask_StillCreatesTheTaskEvent_ThroughTheGeneralCreate`, `DecisionReviseBudget_StillRecordsTheRevision_ThroughTheWriter_NotTheGeneralCreate` (the general create in the request's services, the revision created by the writer identity, nothing asked of the general create). End to end at the executor seam: the commit route itself is not driven here |
+| Registry | `RecordTableRulesTests.CreatedOnlyByItsWriter_OntologyWriterTables_AreFlagged` (3), `CreatedOnlyByItsWriter_IsTheThreeOntologyWriterTablesOnly`; ArchTest `RecordTableRulesRegistryGuardTests.NoCreateTable_IsOneOnlyItsWriterCreates` with must-fire and must-not-fire controls |
+| Writers untouched (ArchTest) | `WriterOnlyTablesWritersGuardTests`: `SignalWriter`, `DecisionRecordWriter`, `ReviseBudgetExecutor`, `OntologyWriterDataverseClient` never depend on the general create (`RecordCreationService`, `RecordCreationRequest`, `ChildRecordEndpoints`, `DecisionRouteCores`, `DataverseCreateRecordHandler`): IL (NetArchTest, each type and its nested state machines) and source (the files; the executor file's `ReviseBudgetExecutor` span only). Controls: a seeded fixture whose async method calls `RecordCreationService.CreateAsync` is found (must fire); a clean async fixture and a comment are not (must not fire) |
+
+**Failing first.** The new behaviour tests (31 cases: `DisplayName~042c fix round 4` and the registry flag tests) were run against the source with the refusal made inert (the flag declared but set on no entry, the service and chat checks removed, the helper members kept so the tests compile): **23 failed, 8 passed**. The 23 are every must-fire case (service 9 + 3, chat 3 + 4, registry 4); the 8 are the must-not-fire cases (the event, the invoice family x4, the three decision commits). ArchTest `RecordTableRulesRegistryGuardTests`: the flag guard and its must-fire control failed (no table flagged); the writer guard passed (it pins today's structure). After the change: all pass.
+
+**Seeding proof (writer guard on real code).** A private method in `ReviseBudgetExecutor` that resolves `RecordCreationService` and calls `CreateAsync`: both writer-guard facts failed (IL: `ReviseBudgetExecutor`; source: `DecisionActionExecutors.cs` line 392). Reverted; they pass.
+
+**Found in passing (pre-existing, not changed).** `RecordCreationService`'s server-set filing-lookup guard exempts a citation lookup (`RecordOwnershipResolver.IsCitation`); the only citation is `sprk_signal.sprk_policy`, so with the refusal that exemption is not reached through the service. Left as is (not 042c code); the reconciler still applies the citation rule.
+
 ## Verification
+
+Fix round 4, at `5a2fc5281a` (src and tests; the docs commit follows):
+- `verify-suites.sh`: solution build 0 warnings, 0 errors. Filtered suites **6729 passed, 0 failed, 7 skipped** (7365 at fix round 3: the deleted core-pair, half-pair and K2 cases, plus the new cases). ArchTests **1926 / 1926** after the B3 fix in `5a2fc5281a` (the script run at `c68090c2db` had 1925 / 1926: ADR-038 B3 flagged a DI-resolution assertion in the Revise Budget commit test, now removed).
+- Not in the script's filter, run alone: `AnalysisEndpointsAuthorizationContractTests` + `EventEndpointsAuthorizationContractTests` 151 / 151. Decision-commit tests (`SecureChildOwnershipAiToolTests.Decision*`) 9 / 9.
+- Publish delta (`publish-delta.ps1`, master `7c7d24a3b7`, branch `5a2fc5281a`): **+389 bytes** (zip 41,214,619 to 41,215,008; 192 files each side; total 39.31 MB). Under every §10 threshold.
+- CVE (`dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`): no vulnerable packages.
 
 Fix round 3, at `028deaf0d5` (src; the docs commit follows):
 - `verify-suites.sh`: solution build 0 warnings, 0 errors. ArchTests **1919 / 1919**. Filtered suites **7365 passed, 0 failed, 7 skipped** (one run; no timeout-only failures, so no re-run).
