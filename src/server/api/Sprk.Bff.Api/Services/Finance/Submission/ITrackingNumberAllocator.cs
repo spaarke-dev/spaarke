@@ -1,3 +1,5 @@
+using Microsoft.Xrm.Sdk;
+
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
 /// <summary>What a create call did.</summary>
@@ -31,6 +33,19 @@ public static class TrackingNumberReasons
     /// schema script has run (notes/095c-from-email-firm-optional.md, "Notice for uac-r2").
     /// </summary>
     public const string FirmRequired = "ebilling.tracking.firm_required";
+
+    /// <summary>
+    /// Task 095d-1a: a renumber was asked for before this environment's scope key is Active (tracking-scope phase P0 or P1). A submission with
+    /// no firm exists only from P2, and before P2 nothing guards the target scope's number on update, so nothing was written. Retryable as a 503.
+    /// </summary>
+    public const string ScopeKeyInactive = "ebilling.tracking.scope_key_inactive";
+
+    /// <summary>
+    /// Task 095d-1a: the caller's apply requests and the submission update together exceed one Dataverse transaction
+    /// (<c>InvoiceSubmissionPersister.MaxRequestsPerTransaction</c>); nothing was sent. Not retryable: the caller refuses before the apply
+    /// (<see cref="TrackingNumberAllocator.FitsRenumberTransaction"/>), so reaching this is a caller bug caught fail-closed.
+    /// </summary>
+    public const string TooManyRequests = "ebilling.tracking.too_many_requests";
 }
 
 /// <summary>The result of <see cref="ITrackingNumberAllocator.CreateSubmissionAsync"/>.</summary>
@@ -55,6 +70,58 @@ public sealed record TrackingNumberResult(
 
     internal static TrackingNumberResult Refused(string reason) =>
         new(TrackingNumberOutcome.Refused, null, null, reason);
+}
+
+/// <summary>What a renumber call did (task 095d-1a).</summary>
+public enum RenumberOutcome
+{
+    /// <summary>The one transaction committed: the submission holds the firm, its scope and the firm's next number, and every caller request
+    /// in <see cref="RenumberApply.Requests"/> was applied with it.</summary>
+    Renumbered,
+
+    /// <summary>
+    /// A row-version condition in the transaction failed (the submission's, or a caller request's on its own row): the row changed since the
+    /// caller read it, so nothing was written. Never retried as a race; the caller re-reads and decides ("already applied for this firm", or 409).
+    /// </summary>
+    Conflict,
+
+    /// <summary>Nothing was written; <see cref="RenumberResult.Reason"/> is a stable code from <see cref="TrackingNumberReasons"/>.</summary>
+    Refused,
+}
+
+/// <summary>The number a renumber attempt is about to write, handed to the caller's builder so its own requests can name it.</summary>
+/// <param name="TrackingNumber">The candidate <c>{firm invoice number}.{n}</c> in the target firm's scope.</param>
+/// <param name="Sequence">The candidate n.</param>
+public sealed record RenumberCandidate(string TrackingNumber, int Sequence);
+
+/// <summary>
+/// The caller's part of the renumber transaction for one <see cref="RenumberCandidate"/> (task 095d-1a). Built again on every attempt, so every
+/// value that names the number (the findings <c>trackingNumber</c>, the line and approval names, the stored decision) names the number that
+/// attempt writes.
+/// </summary>
+/// <param name="SubmissionFields">
+/// The submission's other columns, written in the allocator's own update of the submission (one row is not updated twice in one transaction
+/// under its row version): the findings JSON with the stored decision, for one. Null for none. It must not name a column this service owns.
+/// </param>
+/// <param name="Requests">
+/// The rest of the apply, sent in this order after the submission update: the invoice, the lines, the approval and the file renames, each
+/// conditioned on its own row version where the caller needs it. None may target <c>sprk_invoicesubmission</c>. At most
+/// <see cref="TrackingNumberAllocator.MaxRenumberCallerRequests"/>.
+/// </param>
+public sealed record RenumberApply(IReadOnlyDictionary<string, object>? SubmissionFields, IReadOnlyList<OrganizationRequest> Requests);
+
+/// <summary>The result of <see cref="ITrackingNumberAllocator.RenumberSubmissionAsync"/>.</summary>
+/// <param name="Outcome">What happened.</param>
+/// <param name="TrackingNumber">The number the submission now holds; set only for <see cref="RenumberOutcome.Renumbered"/>.</param>
+/// <param name="Sequence">Its n; set only for <see cref="RenumberOutcome.Renumbered"/>.</param>
+/// <param name="Reason">Set only for <see cref="RenumberOutcome.Refused"/>; one of <see cref="TrackingNumberReasons"/>.</param>
+public sealed record RenumberResult(RenumberOutcome Outcome, string? TrackingNumber, int? Sequence, string? Reason)
+{
+    internal static RenumberResult Renumbered(string trackingNumber, int sequence) => new(RenumberOutcome.Renumbered, trackingNumber, sequence, null);
+
+    internal static RenumberResult Conflict() => new(RenumberOutcome.Conflict, null, null, null);
+
+    internal static RenumberResult Refused(string reason) => new(RenumberOutcome.Refused, null, null, reason);
 }
 
 /// <summary>
@@ -112,4 +179,42 @@ public interface ITrackingNumberAllocator
     /// "no"). The create still refuses on its own (<see cref="TrackingNumberReasons.FirmRequired"/>), so this answer is never what guards a number.
     /// </summary>
     Task<bool> NumbersSubmissionsWithoutFirmAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Task 095d-1a (D-37): moves the existing submission <paramref name="submissionId"/>, numbered with no firm, into <paramref name="firmId"/>'s
+    /// scope with that firm's next <c>{firm invoice number}.{n}</c>, in ONE transaction that also carries the caller's apply
+    /// (<paramref name="buildApply"/>). The submission update is the transaction's first request, conditioned on <paramref name="rowVersion"/>
+    /// (<c>IfRowVersionMatches</c>); it writes the firm, the scope, the sequence and the tracking number, and leaves the firm invoice number as it is.
+    /// </summary>
+    /// <param name="submissionId">The submission to renumber.</param>
+    /// <param name="rowVersion">The submission's row version from the caller's read: the version its refusals were checked against.</param>
+    /// <param name="firmId">The firm whose scope the submission moves into; never empty.</param>
+    /// <param name="firmInvoiceNumber">The submission's firm invoice number from the same read (trimmed here, as at create).</param>
+    /// <param name="buildApply">
+    /// Called once per attempt with the number that attempt writes; returns the caller's part of the transaction. A lost race calls it again
+    /// with the next number, so it builds from its inputs and the candidate only, with no side effect.
+    /// </param>
+    /// <remarks>
+    /// <para><b>Race.</b> n is the highest sequence held in the firm's scope for the firm invoice number, plus one. The scope key on
+    /// (<c>sprk_trackingnumber</c>, <c>sprk_trackingscope</c>), enforced by Dataverse on update, decides who wins. A lost race faults the whole
+    /// transaction, so none of it lands; the allocator re-reads the next n, rebuilds the apply and retries, within
+    /// <see cref="TrackingNumberAllocator.MaxAttempts"/>, then answers <see cref="RenumberOutcome.Refused"/> with
+    /// <see cref="TrackingNumberReasons.Unavailable"/>. A number held by an undone attempt (no firm invoice number, so the sequence read cannot
+    /// see it) is skipped, as at create, within <see cref="TrackingNumberAllocator.MaxHiddenSkips"/>.</para>
+    /// <para><b>Row version.</b> A row-version mismatch anywhere in the transaction is <see cref="RenumberOutcome.Conflict"/>, never a retry: the
+    /// caller re-reads. A repeat with the same, now stale, version therefore never allocates a second number.</para>
+    /// <para><b>Phase and ceiling.</b> Only at <see cref="TrackingScopePhase.P2ScopeKeyActive"/>, else
+    /// <see cref="TrackingNumberReasons.ScopeKeyInactive"/>. More caller requests than
+    /// <see cref="TrackingNumberAllocator.MaxRenumberCallerRequests"/> is <see cref="TrackingNumberReasons.TooManyRequests"/>. Both write nothing.
+    /// Any other fault, an unknown outcome (a timeout) included, propagates on the first attempt: the caller's re-read decides.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">An id is empty, the row version or the firm invoice number is blank, or the apply names a column this
+    /// service owns or targets a submission. Nothing was written.</exception>
+    Task<RenumberResult> RenumberSubmissionAsync(
+        Guid submissionId,
+        string rowVersion,
+        Guid firmId,
+        string firmInvoiceNumber,
+        Func<RenumberCandidate, RenumberApply> buildApply,
+        CancellationToken ct = default);
 }

@@ -256,6 +256,11 @@ internal static class ResubmissionOfWriteControlFixtures
         }
 
         public Task<bool> NumbersSubmissionsWithoutFirmAsync(CancellationToken ct = default) => Task.FromResult(false);
+
+        public Task<RenumberResult> RenumberSubmissionAsync(
+            Guid submissionId, string rowVersion, Guid firmId, string firmInvoiceNumber, Func<RenumberCandidate, RenumberApply> buildApply,
+            CancellationToken ct = default) =>
+            Task.FromResult(new RenumberResult(RenumberOutcome.Refused, null, null, "control"));
     }
 
     /// <summary>A table and no client: the shape of <c>SecureChildLineage</c>. Also names the column (C1's must-fire).</summary>
