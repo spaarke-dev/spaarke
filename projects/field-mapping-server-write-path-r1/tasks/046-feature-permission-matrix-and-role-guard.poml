@@ -106,7 +106,10 @@
   <notes>Placement (CLAUDE.md §10): no BFF change; docs, notes and one ArchTest. No publish delta.
 §11: one new test file (justification above); no src/ surface.
 The declared per-feature table lives in the guard; the doc matrix cites it, so the two stay one list.
-Added 2026-11-04 from owner decision 1 (after the 031 review) and UAC-r2's conditions.</notes>
+Added 2026-11-04 from owner decision 1 (after the 031 review) and UAC-r2's conditions.
+Additional inputs to the matrix (2026-11-04):
+- Event type: Spaarke Basic User also holds no AppendTo on sprk_eventtype_ref (Read Deep only). The event route keeps the caller AppendTo; 031 pins this as K1.
+- ebilling-r1, owner-approved: Spaarke Billing Administrator gains prvReadsprk_procedure at Deep. Removing or previewing a Procedure override needs Read on sprk_procedure. Role source: src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Billing Administrator.xml; deploy script: scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1; branch task/ebilling-089e 01924f383d. Record it as a feature row (billing: Procedure override remove/preview → Read sprk_procedure) with ebilling-r1 as the owner of the change. Ask ebilling-r1 for any other billing-role requirements when the matrix is built.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
