@@ -17,15 +17,14 @@
 - **041 ✅** (#2541), live on dev since d763dc120e. FR-40 is unproven live: there has been no activity.
 - 042b worktree `agent-ac26f071a1fb351e7` can be removed later, through Remove-WorktreeSafe.
 - **Open questions:** Q1 / #2556 (the report-card regarding) needs an owner decision. |
-| **Next Action** | 1. With the owner's OK: run 042c through task-execute. Use an Opus implementer, brief line 1 `git switch -c task/fm-042c <work tip>`. Two adversarial passes (security), then UAC-r2.
+| **Next Action** | 1. **Running (owner OK 2026-11-04):** 042c (Opus, task/fm-042c), 031 (Sonnet, task/fm-031), 021 code part only (Sonnet, task/fm-021; no live p95/deploy). All cut from 5f443eaae0. On each report: review, adversarial pass(es) (042c: two, then diff to UAC-r2), merge --no-ff, verify-suites + ArchTests. 021 live part needs #2551 on dev + owner OK for ~40 test matter creates and the code-page deploy.
 2. Tell uac-r2 that #2562 is on master, for the deploy batch. After the deploy: read-only checks on the route and the new owner behaviour, sent to uac-r2. Then ask the owner HERE for an OK on Matter/Project test rows.
 3. After a real dev upload: re-run the 041 read-only checks and send them to uac-r2.
 4. Then W3, starting with 021 (fix item #2, ReferenceLookupColumns / PostMappingDefaults, before cutover). |
 | **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
-| **Waiting on** | - The owner: an OK for 042c.
-- Owner: the Family 1.0.56 look (the four #2513 items on dev) and the 076 narrower-user pass. **Done 2026-11-03:** 005 `-Apply` on dev (36 migrated, VERIFY PASS, idempotent); pid 53128 (the pre-crash session) stopped on the owner's "kill it".
+| **Waiting on** | - Owner: the Family 1.0.56 look (the four #2513 items on dev) and the 076 narrower-user pass. **Done 2026-11-03:** 005 `-Apply` on dev (36 migrated, VERIFY PASS, idempotent); pid 53128 (the pre-crash session) stopped on the owner's "kill it".
 - 041 live proof: dev BFF d763dc120e (carries #2541) is live since 2026-11-03T22:26:31Z. The post-deploy check passed on what existed (0 5xx; no index or child-records traffic; no rows since the deploy). The startup logger exception is pre-existing (#2549, DI-016). After the next real upload or create on dev, re-run the read-only checks (document `sprk_searchindexname` = spaarke-files-index; no `sprk_ai_search_index` on new rows). Send the results to **uac-r2** (it now runs dev deploys), and copy R3 (`spa-external-access-platform-f2`) only for its rollout record §17.
 - Rows to delete later: see `notes/task-019-notes.md` (the check-C event is the owner's and stays).
 - #2518 (ontology writer identity not provisioned): ontology's to own. |
