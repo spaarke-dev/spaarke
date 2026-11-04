@@ -211,4 +211,30 @@ The fail-closed refusal itself is correct and unchanged: a hard-deny row is neve
 - Other deterministic refusals of the plain (non-restricted) owner question, such as `record_owner_no_default_team` and `record_owner_acting_user_unresolved`, are still the retryable 503 here. A retry cannot fix those either. They are left out because the brief scopes the 409 to the restricted-content refusals; widening it is one more arm in `IsOwnerUnitRefusal`.
 - The API answer names no unit id by design. An operator finds which status applied in the resolver's Error log line (`OrdinaryExitAsync`), which carries the status and the business unit ids.
 
+## A batch is created only by Export to AP (uac-r2 finding on dev, 2026-11-03)
+
+The Active Billing Exports view showed **+ New** and Delete. A batch made by hand has no invoices, no files and no claim. Core User keeps Create at Deep (the BFF's OBO create needs it), so the privilege stays; the fix is in the UI and on the server.
+
+**Ribbon (source only).** `Entities/sprk_billingexport/RibbonDiff.xml` gained six `HideCustomAction`s, ids `sprk.<Location>.Hide`. Each Location is a control id read from the PUBLISHED ribbon of `sprk_billingexport` on spaarkedev1 (`RetrieveEntityRibbon`, read-only, 2026-11-03): `Mscrm.HomepageGrid.sprk_billingexport.NewRecord`, `...HomepageGrid...DeleteMenu` (the split button that holds Delete and Bulk Delete), `Mscrm.Form.sprk_billingexport.NewRecord`, `Mscrm.Form.sprk_billingexport.Delete`, `Mscrm.SubGrid.sprk_billingexport.AddNewStandard` and `...SubGrid...NewRecord`. The four existing CustomActions are unchanged. Not hidden (not asked): `Mscrm.Form.sprk_billingexport.SaveAndNew` (opens a blank form), `...NewRecordForBPFEntity` (shown only for process-flow entities), the sub-grid Delete. Hiding is display only; the server check below is the guard.
+
+**Quick create.** Off. `IsQuickCreateEnabled` is false on dev (`EntityDefinitions`) and in `Entity.xml`; dev has no quick-create form (the `quick` form in source is a quick view). Nothing to change.
+
+**Server.** Who can set `sprk_exportstatus` on create: the user. The column is Create/Update-valid, not field-secured, on the main form, and no server code owns it on create (no plugin, ADR-002); `sprk_formats` is the same. So a hand-made batch can read Completed with formats typed in, but it has no Stored File row (the columns that make one servable are field-secured to the BFF writer profile, 088) and no invoice claim.
+
+| Path | Hand-made Completed batch | Result |
+|---|---|---|
+| Mark Sent to AP | read the status only (before) | now reads the batch like Email does: 409 `file_not_available` when it has no servable export file or no invoice; a real batch is unchanged |
+| Email to AP | Completed and formats present, no Stored File row | already 409 `file_not_available` (the per-format file lookup), nothing read from storage, nothing sent; test added |
+| Download | same | already 404 `file_not_available` (documented), no blob opened; test added |
+| Batch read | lists files only from Stored File rows | a hand-made batch shows no files; safe |
+| EligibleApprover, export census | do not read the batch table | not reachable (grep); safe |
+
+The status and formats columns were not made read-only on the form: a form lock is not a guard, the server check is. Field security is out of scope.
+
+**Legacy form fields.** `sprk_csvdocument` / `sprk_jsondocument` removed from the main form (both copies, and the column list in `Deploy-EbillingFormsViews.ps1`, so a re-run does not bring them back). The columns and their relationships stay; retiring the schema is separate. An empty "CSV Document" read as "no file".
+
+**AP emails sub-grid "Add Existing Communication": known limit, not changed.** The 1:N button `Mscrm.SubGrid.sprk_communication.AddExistingStandard` runs the platform command `Mscrm.AddExistingRecordFromSubGridStandard` that every table's sub-grid uses. Scoping it to this form would mean overriding that command in `Entities/sprk_communication/RibbonDiff.xml` with a `FormEntityContextRule` (inverted) display rule. That is not done: it changes the command for every communication sub-grid in every app, whether a form-entity rule is evaluated for a sub-grid's host form cannot be proven without a live write, and the import replaces the table's whole RibbonDiffXml, which `SpaarkeSecureChildRibbons` already customises on dev (`sprk.SecureChild.sprk_communication.*`). Instead the server never treats an associated communication as an AP send: the Sent to AP Date is written only by Email to AP (after the BFF's own send) and Mark Sent to AP; nothing in `src` reads `sprk_communication.sprk_billingexport` (the BFF only writes it, `ServerSendOptions.BillingExportId`); a test attaches one by hand and proves Mark Sent is still 409 and reads no communication.
+
+**Deploy (owner approves; nothing was imported).** `scripts/ebilling/Deploy-EbillingBillingExportRibbon.ps1` (dry run by default; `-Apply`; `-Verify`) packs the ribbon-only solution `BillingExportRibbons` (shell in `infrastructure/dataverse/ribbon/BillingExportRibbons`, the one RibbonDiff.xml copied from SpaarkeMaster at pack time) and imports it with a scoped publish of `sprk_billingexport` only (`Import-SolutionScoped` machinery, never PublishAllXml). The form change deploys with `scripts/ebilling/Deploy-EbillingFormsViews.ps1`. Order: BFF first (Mark Sent guard), then the ribbon, then the form.
+
 rework: none task 150
