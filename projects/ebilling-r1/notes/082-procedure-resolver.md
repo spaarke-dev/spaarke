@@ -167,3 +167,96 @@ Read-only on dev, 2026-11-04, through the Dataverse MCP `read_query`, the same r
 | ArchTests `~CoreRecordChain` | 9/9 (3 new must-fire controls) |
 | Guard seeding proof: `nameof(SecureRootInheritance.OwnerLookupsThroughIntermediatesAsync)` planted in `CoreRecordChain.cs` | 1 failed ("... is not in the allow-list"); restored, `cmp` identical, 9/9 again. The old deny-list did not name this member, so it would have passed. |
 | U2 seeding proof: `NamePairParentAsync` answers `None` for a pair id that is not a record id | 7 of 9 matched tests failed (all 7 new U2 cases); restored, 1864/1864 |
+
+## Slice 082b: ProcedureResolver and the Replace / Additive / Split classification (2026-11-04)
+
+Branch `task/ebilling-082b`, from `origin/work/ebilling-r1` at `0735a566e5`. Nothing was written to Dataverse; no live call was needed.
+
+### What landed
+
+- **`BillingRuleCatalogue.PrecedenceOf(RuleType)`** and the enum **`BillingRulePrecedence`** (Replace, Additive, Split). An exhaustive switch over the 14 billing types, taken from the reviewed table in `rule-set-scope-design.md` 3.3. A non-billing type throws. ExpenseRule is the only Split type. AddedFee is Replace, keyed by `PrecedenceKey` (D-39). The evaluator applies the classification in 082c; nothing reads it yet.
+- **`ProcedureResolver`** (`Services/Signals/Billing/ProcedureResolver.cs`). A public static class with no DI registration, like `CoreRecordChain`.
+  - `ReadAsync(entities, logger, core?, firmId, ct)` reads every row once and returns a `ProcedureResolution`.
+  - `ProcedureResolution.RulesOn(workDate)` is pure. It returns `ProcedureRulesOnDate`: the Procedures applied (version, rank, sources, deciding rows), the rules in force (the policy version content plus the Procedure whose slot each rule takes), the rules excluded, the Procedures excluded, and the gaps.
+  - `ForReaders()` is the reader-facing projection (U3).
+- **Reads, each once per invoice** (ids chunked at 500, every query paged, every row re-checked after its query):
+  1. the chain (`CoreRecordChain`);
+  2. the active `sprk_procedureassignment` rows on the chain;
+  3. the Active Billing Procedures that apply to all records, apply to the invoice's firm, or are assigned (Follow or Pin) on the chain;
+  4. their versions;
+  5. their rule sets;
+  6. the chain's record-scoped sets (Record, or Firm record of the invoice's firm, with exactly one core lookup naming a chain record);
+  7. those sets' enabled, active Billing policies;
+  8. those policies' Published versions.
+
+  `sprk_currentversion` is never read (7.2), and `BILL-SYSTEM-SUBMISSION` is skipped (D-125).
+
+### Semantics as implemented (for the ontology-r1 owner review)
+
+1. **Sources and the firm condition (6.1, O-20).** A Procedure has three possible sources: All records, Firm (Applies to = Firm, naming the invoice's firm), and Manual (a Follow or Pin row on the chain).
+   - The firm condition (the Procedure's Firm is empty or is the invoice's firm) is checked before any source counts, so it applies to all three.
+   - "Assigned records only" with no assignment on the chain has no source: not applicable, no gap.
+   - Retired Procedures are filtered in the query and re-checked (089b K1).
+2. **Procedure-level rows (6.5, D-177 (3)).**
+   - The rows at the nearest distance decide, whatever their mode. An Exclude among them wins, so a d1 Exclude is lifted only by a d0 row.
+   - Level: Manual d0 or Manual d1 when a deciding row exists, else Firm, else All records.
+   - Rank: `(Level, -Distance, FirmSpecific)`, where Distance is the deciding row's distance (0 for a computed source) and FirmSpecific means the Procedure names a firm.
+3. **Version per date (7.1, 7.2).**
+   - Each deciding row makes a choice: a Pin names its version; a Follow, or a computed source alone, takes the version in force on the date.
+   - "In force" means Active or Superseded with an effective-from, inside the half-open [from, to) window (model 3.1).
+   - Two versions in force on the date throw `ProcedureResolutionFaultException` (I-P1).
+   - Before the first in-force version's from: not applicable. A Draft-only Procedure, or one whose only versions are Retired, is also not applicable.
+   - Otherwise a date in no window is a gap: `HoleBetweenVersions` when a later version exists, else `AfterLastVersion`.
+   - A pin to a Retired version is `PinnedVersionRetired`. A pin to a Draft version, or to a version that is missing or belongs to another Procedure, is `PinnedVersionNotInForce`.
+   - Deciding rows that make different choices for the date raise `ConflictingParents`.
+4. **Rules (7.2; 089c K1 confirmed by ontology-r1).** For each enabled policy of the Procedure's set, only the Published policy versions linked to the chosen Procedure Version count. The latest one with effective-from on or before the date applies, so corrections apply from their own date. A rule that a later version dropped is still enabled, but it has no version under the later Procedure Version, so it applies only in the earlier window, or on a record pinned to the earlier version.
+5. **Rule-level overrides (6.3, 6.5).**
+   - Rows for this firm (row Firm empty or equal to the invoice's firm) and the record rules based on the rule are grouped as overrides of their base rule. The overrides at the nearest distance decide.
+   - A plain Exclude among them removes the rule. Otherwise the rows are changes: each record rule whose own version is in force on the date runs in the base rule's slot, with the base rule's Procedure and rank, and the base rule is listed as excluded (`ReplacedByRecordRule`).
+   - A record rule is paired with its change's Exclude row by the same chain record and the same firm as its set. A record rule whose Exclude row is missing still counts as a change.
+6. **Record rule slot (089c K3, confirmed).** A record rule is considered only through its base rule, so only when the base rule was resolved for that date, before exclusion. That covers a dropped rule, a retired Procedure, and a deleted base (`sprk_basedonversion` names a version that is not among the rows read).
+7. **Owner decision (record-rule date window).** A record rule runs only on dates on or after its own effective-from (the latest Published version with from on or before the date). On earlier dates the change is not in effect, so the base version in force on that date runs and is not excluded.
+8. **U3 (`ForReaders`).** An allow-list DTO built field by field. It carries Procedure names, Procedure Version numbers, rule codes, level and distance, the pin flag and the record-rule flag. It carries no record id, record name, override reason, row id or Procedure id. The internal basis (`ProcedureOverrideRow.ChainRecord`, `Reason`) is for the 7.4 snapshot only.
+
+### Decisions and deviations (each one line; owner or reviewer to confirm)
+
+1. **A Follow and a Pin at the same distance that choose different versions are a gap (`ConflictingParents`).** D-177 (3) names only two different pins. A version disagreement between two d1 parents is read as the same conflict, failing closed with a hold. **Open for ontology-r1.**
+2. **A pinned version's rules apply before its own window.** For work dated before the pinned version's first policy version, the earliest Published policy version under it is taken ("whatever the date", 7.2). **Open for ontology-r1.**
+3. **An Exclude row with a record rule paired is a change.** Before the record rule's effective-from, that Exclude does not remove the base rule (the owner's decision, applied to the pair). A plain Exclude removes the rule on every date.
+4. **Among rule-level overrides at one distance, a plain Exclude wins over a change.** This is D-177 (3) applied to rule-level rows, which 6.5 says "follow the same rules". A nearer change that is not yet in effect keeps the base in force even when a farther plain Exclude exists, because the nearer row wins.
+5. **In force means Active or Superseded** (model 3.1, `ProcedureService.IsInForce`), although the 7.1 pseudo code says "Active". A Superseded version stays in force for its own window.
+6. **The rule set's `statuscode` is not required.** The Procedure Version's status and the policy version's `sprk_publishstate` decide. The set's statecode must be Active.
+7. **Inactive assignment rows (statecode not 0) are ignored.** The BFF only deletes rows, so an inactive row exists only if someone deactivated it outside the BFF.
+8. **Fail closed on rows the BFF never writes.** An unknown override mode, a mode other than Excluded on a rule-level row, or an unknown or empty Applies to on an Active Procedure throws `ProcedureResolutionFaultException`. An override row whose core lookups name no chain record, and a record-scoped set without exactly one core lookup or of another firm, contribute nothing.
+9. **Not in 082b:** the rate card per Procedure Version (7.4 / 085). The output names the Procedure Version id; 085 or 082d maps it to the card. The rank-based displacement (Replace types) is the evaluator's (082c), because it depends on gate and handler acceptance.
+10. **POML proof (a) re-targeted**, per the 082a notes, to the resolver test "a Procedure assigned on M applies on P (d1) and does not apply on W1 under P".
+11. **For 082c:** legacy ClientDefault and Firm sets (no `sprk_procedure`) are not read by the resolver. 082c decides whether the loader keeps loading them beside the resolver until 075's copy-forward, or drops them.
+
+### U3 inventory: existing outputs that already name the core or parent record (read-only, for the owner's open 095a question)
+
+| Surface | Names the core record? | Names a parent? |
+|---|---|---|
+| `sprk_findingsjson` (`InvoiceSubmissionPersister.cs:2016-2051`) | No (`invoiceName` is the firm, invoice number and date, `:239`) | No |
+| Finding facts and templates (`BillingRuleCatalogue.cs:221`; `BillingCoreRecordFacts`, `BillingFactSet.cs:211`) | No: CoreRecordWindow cites the open and close dates only | No |
+| Billing Signals (`BillingFindingSignalMapper.cs`; subjects are the invoice and its lines, `InvoiceSubmissionPersister.cs:247`) | Not found (`SignalWriter` not read in full) | Not found |
+| Internal review read model (`InvoiceReviewReadService.cs:48`, `:59`, `:658-675`, `ReviewCoreRecordDto(Type, Id, Name)`) | **Yes: id and name** of the invoice's own core record | No |
+| Firm-facing `GET /invoice-submissions/firm-records` (`ExternalInvoiceSubmissionEndpoints.cs:351`) | **Yes: ids** of the caller's own readable core records, no names | No |
+| Add-in replay | No findings-replay surface found in the BFF (only idempotency replay) | n/a |
+| Record-rule codes (`BRR-` plus a derived id, `ProcedureAssignmentService.cs:1444`) | No. The derived id is a hash of (core table, record, firm, base rule), so someone who knows a record id could confirm that a code belongs to it (a K-class oracle). | Same |
+
+No surface names a parent core record today. 082d must keep `ChainRecord` and `Reason` out of any reader-facing member of `sprk_findingsjson`. Model 7.4 lists "chain record" in the submission snapshot while U3 lists findings JSON as reader-facing. **082d must resolve that tension**: for example, an internal-only member that the review read model never projects, or the distance only.
+
+### 082b gates and seeding proofs
+
+| Run | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 warnings, 0 errors |
+| Unit `~ProcedureResolverTests\|~BillingRulePrecedenceTests\|~CoreRecordChain\|~BillingFactLoader\|~InvoiceComplianceEvaluator\|~BillingRuleCatalogue` | 572/572 (49 resolver cases and 20 precedence cases are new) |
+| ArchTests `~CoreRecordChain\|~RecordOwnerAssignmentCensus\|~WaivedRuleFamily\|~BillingRuleDefinitionCaller\|~Billing\|~Procedure` | 169/169 |
+| `dotnet list package --vulnerable --include-transitive` (BFF) | No vulnerable packages; no package or project file changed |
+| Publish size, `linux-x64`, framework-dependent, base `0735a566e5` vs HEAD | 137,296,440 → 137,431,980 bytes (+135,540, about 0.13 MB); `Sprk.Bff.Api.dll` +115,712 |
+| Proof (a), re-targeted: `CoreRecordChain` adds a project parent's own parents (a second hop) | 2 of 46 failed: "a Procedure assigned on M applies on P (d1) and does not apply on W1 under P" and "a Pin keeps its version for work dated in a later version's window". Restored, `cmp` identical. |
+| Proof (b): the firm condition is skipped when manual rows exist | 1 of 46 failed: "a manually assigned Procedure naming firm F does not apply to G's invoice on that record". Restored. |
+| Extra mutation (c): `decisive.Any(Excluded)` → `.All(...)` | Both O1 "Exclude wins" cases failed (run with (d)-(g); `All` over no rows also excludes every unassigned Procedure, so that run's 22 failures were confounded) |
+| Extra mutations (d)-(g), rerun without (c): record rule judged at `DateOnly.MaxValue`; rules not filtered by the chosen Procedure Version; rule-exclude firm filter dropped; chain record ids appended to the reader-view Procedure name | 7 of 49 failed, each a targeted test: the owner date window, record rule per firm, K1/K3 dropped base, versions per window, Pin in a later window, rule excluded for firm F, U3. Restored. |
+| Fail-closed fix (`b7d3589bed`): unknown or empty Applies to throws; an unnamed Procedure reads "(unnamed Procedure)" | The 3 new cases failed before the fix and pass after |
