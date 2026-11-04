@@ -32,6 +32,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Access;
 
@@ -223,7 +224,8 @@ public sealed record SecureRootsAbove(
 /// <remarks>
 /// <para><b>Which rows.</b> Rows owned by the Secure Record Owners team (task 144) of the child tables in
 /// <see cref="SecureChildLineage"/> — the rows task 146 makes secure. A row's secure roots are the Secure-team-owned
-/// project / matter / work-assignment rows reachable upward through its lookups: through Secure-team-owned children, and
+/// project / matter / work-assignment rows reachable upward through its lookups and, on a Signal or Decision Record, the core
+/// record its core record pair names (<see cref="SecureChildLineage.CorePairParent"/>): through Secure-team-owned children, and
 /// through children owned by a USER (a run-as-user, client-created or pre-146 row — looked through, as the ownership
 /// resolver does); never through a child owned by an ordinary team (its owner already decided it is not secure). Children
 /// of non-secure roots are never touched. Roots are never mirrored: a root's own shares are provisioning's and the share
@@ -735,8 +737,9 @@ public sealed class SecureChildShareSynchronizer
     /// the same one the mirror uses (<c>LineageOfAsync</c>): through Secure-team-owned and user-owned rows, never through an
     /// ordinary team's, at most <see cref="MaxLineageDepth"/> levels. That is the ownership resolver's own rule, so a row is
     /// placed under a root here exactly when the resolver would give it the Secure team. The rows' own owners do not matter.
-    /// Each row is passed as read, carrying its lineage lookups (<see cref="SecureChildLineage.Table.Lookups"/>) and owner
-    /// columns. A lookup the caller did not read counts as absent, so it can only leave a record out.
+    /// Each row is passed as read, carrying its lineage columns (<see cref="SecureChildLineage.Table.LineageColumns"/>: its
+    /// lookups and, on a Signal or Decision Record, its core record pair) and owner columns. A column the caller did not read
+    /// counts as absent, so it can only leave a record out.
     /// </summary>
     /// <remarks>
     /// The secure-child reconciliation job's recent-changes pass calls this (task 147). That pass is the L4 net for children
@@ -1377,7 +1380,15 @@ public sealed class SecureChildShareSynchronizer
     }
 
     /// <summary>What one row says about its ownership and filing.</summary>
-    private sealed record Row(RowRef Ref, Guid? OwningTeam, bool UserOwned, IReadOnlyList<RowRef> Parents);
+    private sealed record Row(RowRef Ref, Guid? OwningTeam, bool UserOwned, IReadOnlyList<RowRef> Parents)
+    {
+        /// <summary>The core record pair (record type, core id) a Signal or Decision Record holds, when whole
+        /// (<see cref="SecureChildLineage.HoldsCorePair"/>); resolved during the walk, as its type needs a catalog read.</summary>
+        public (Guid Type, Guid Core)? CorePair { get; init; }
+
+        /// <summary>The row holds a malformed core record pair: its roots are undetermined.</summary>
+        public bool CorePairMalformed { get; init; }
+    }
 
     /// <summary>A root's ownership and flag.</summary>
     private sealed record RootFacts(Guid? OwningTeam, bool FlaggedSecure)
@@ -1402,6 +1413,10 @@ public sealed class SecureChildShareSynchronizer
         private readonly Dictionary<RowRef, IReadOnlyDictionary<DataversePrincipalRef, int>?> _rootMirrors = new();
         private readonly Dictionary<(RowRef Root, Guid User), SecureShareWallOutcome> _walls = new();
 
+        // The core table each record type a pair names maps to (null: not a core table), read once per run. A fault is not
+        // kept: it propagates as any parent read fault does, and the next run reads again.
+        private readonly Dictionary<Guid, string?> _coreTables = new();
+
         private int _granted, _changed, _revoked;
 
         public Run(SecureChildShareSynchronizer owner, Guid secureTeamId, CancellationToken ct)
@@ -1422,7 +1437,7 @@ public sealed class SecureChildShareSynchronizer
             {
                 var query = new QueryExpression(table.LogicalName)
                 {
-                    ColumnSet = new ColumnSet(table.Lookups.Keys.Append(OwningTeamColumn).ToArray()),
+                    ColumnSet = new ColumnSet(table.LineageColumns.Append(OwningTeamColumn).ToArray()),
                     NoLock = true,
                 };
                 query.Criteria.AddCondition(OwningTeamColumn, ConditionOperator.Equal, _secureTeamId);
@@ -1443,7 +1458,7 @@ public sealed class SecureChildShareSynchronizer
         {
             var query = new QueryExpression(table.LogicalName)
             {
-                ColumnSet = new ColumnSet(table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray()),
+                ColumnSet = new ColumnSet(WalkColumns(table)),
                 NoLock = true,
             };
             query.Criteria.AddCondition(table.IdColumn, ConditionOperator.Equal, id);
@@ -1480,22 +1495,24 @@ public sealed class SecureChildShareSynchronizer
 
                 foreach (var table in SecureChildLineage.Children.Values)
                 {
-                    // Every (lookup column, parent id) pair of this table that points into the previous level.
+                    // Every (lookup column, parent id) pair of this table that points into the previous level — and, on a
+                    // Signal or Decision Record, its core record pair naming a root of it (SecureChildLineage.CorePairMatches).
                     var pairs = table.Lookups
                         .Where(l => idsByTable.ContainsKey(l.Value))
-                        .SelectMany(l => idsByTable[l.Value].Select(id => (Column: l.Key, Id: id)))
+                        .SelectMany(l => idsByTable[l.Value].Select(id => (Column: l.Key, Value: (object)id)))
+                        .Concat(SecureChildLineage.CorePairMatches(table.LogicalName, frontier.Select(r => (r.Table, r.Id))))
                         .ToArray();
 
                     foreach (var chunk in pairs.Chunk(DescendantConditionsPerQuery))
                     {
                         var query = new QueryExpression(table.LogicalName)
                         {
-                            ColumnSet = new ColumnSet(table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray()),
+                            ColumnSet = new ColumnSet(WalkColumns(table)),
                             NoLock = true,
                         };
                         var anyParent = new FilterExpression(LogicalOperator.Or);
                         foreach (var column in chunk.GroupBy(p => p.Column, StringComparer.OrdinalIgnoreCase))
-                            anyParent.AddCondition(column.Key, ConditionOperator.In, column.Select(p => (object)p.Id).ToArray());
+                            anyParent.AddCondition(column.Key, ConditionOperator.In, column.Select(p => p.Value).ToArray());
                         query.Criteria.AddFilter(anyParent);
 
                         foreach (var entity in await ReadAllPagesAsync(table, query).ConfigureAwait(false))
@@ -1606,6 +1623,14 @@ public sealed class SecureChildShareSynchronizer
         {
             foreach (var group in references.GroupBy(r => r.Table, StringComparer.Ordinal))
             {
+                // A core record pair's type the walk could not answer from the cache (one catalog read per type).
+                if (string.Equals(group.Key, SecureChildLineage.RecordTypeCatalogTable, StringComparison.Ordinal))
+                {
+                    foreach (var type in group)
+                        await CoreTableAsync(type.Id).ConfigureAwait(false);
+                    continue;
+                }
+
                 var table = SecureChildLineage.IsRoot(group.Key) ? null : SecureChildLineage.Children[group.Key];
                 foreach (var chunk in group.Chunk(DescendantConditionsPerQuery))
                 {
@@ -1670,9 +1695,9 @@ public sealed class SecureChildShareSynchronizer
             return row;
         }
 
-        /// <summary>The columns the walk reads of a child row: its lineage lookups and its owner.</summary>
+        /// <summary>The columns the walk reads of a child row: its lineage columns (lookups, and a core record pair) and its owner.</summary>
         private static string[] WalkColumns(SecureChildLineage.Table table) =>
-            table.Lookups.Keys.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray();
+            table.LineageColumns.Append(OwningTeamColumn).Append(OwningUserColumn).ToArray();
 
         private static Row ToRow(SecureChildLineage.Table table, Entity entity)
         {
@@ -1683,13 +1708,62 @@ public sealed class SecureChildShareSynchronizer
                     parents.Add(new RowRef(target, reference.Id));
             }
 
+            // A Signal's or Decision Record's core record pair, read by the ownership question's own rule; its type is resolved
+            // during the walk (a catalog read).
+            var pair = table.HoldsCorePair ? RecordOwnershipContext.CorePairOf(entity) : default;
             var owningTeam = entity.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id;
             var owningUser = entity.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id;
             return new Row(
                 new RowRef(table.LogicalName, entity.Id),
                 owningTeam is { } t && t != Guid.Empty ? t : null,
                 UserOwned: owningUser is { } u && u != Guid.Empty,
-                parents.Distinct().ToArray());
+                parents.Distinct().ToArray())
+            {
+                CorePair = pair.IsWhole ? (pair.TypeRef!.Value, pair.CoreId!.Value) : null,
+                CorePairMalformed = pair.Malformed,
+            };
+        }
+
+        /// <summary>
+        /// The core table a pair's record type names (<see cref="CoreAncestorResolver.CoreTableOfRecordTypeAsync"/>: <c>null</c>
+        /// when it is not a core table), once per type per run. A fault, a missing catalog row included, propagates.
+        /// </summary>
+        private async Task<string?> CoreTableAsync(Guid type)
+        {
+            if (_coreTables.TryGetValue(type, out var known))
+                return known;
+
+            var table = await CoreAncestorResolver.CoreTableOfRecordTypeAsync(_owner._dataverse, type, _ct).ConfigureAwait(false);
+            _coreTables[type] = table;
+            return table;
+        }
+
+        /// <summary>
+        /// A row's parents for the walk: its lookups, and the root its core record pair names (<see cref="SecureChildLineage.CorePairParent"/>,
+        /// de-duplicated against the lookups). A malformed pair sets <paramref name="undetermined"/>; a service-request core,
+        /// or a type the catalog maps to no core table, adds nothing. <paramref name="misses"/>: a type not in the run's cache
+        /// is added (as a catalog reference) and the pair is not followed.
+        /// </summary>
+        private async Task<IReadOnlyList<RowRef>> ParentsOfAsync(Row row, HashSet<RowRef>? misses, Action<string> undetermined)
+        {
+            if (row.CorePairMalformed)
+            {
+                undetermined(SecureChildLineage.MalformedCorePair);
+                return row.Parents;
+            }
+
+            if (row.CorePair is not { } pair)
+                return row.Parents;
+
+            if (misses is not null && !_coreTables.ContainsKey(pair.Type))
+            {
+                misses.Add(new RowRef(SecureChildLineage.RecordTypeCatalogTable, pair.Type));
+                return row.Parents;
+            }
+
+            return SecureChildLineage.CorePairParent(await CoreTableAsync(pair.Type).ConfigureAwait(false), pair.Core) is { } core
+                ? row.Parents.Append(new RowRef(core.Table, core.Id)).Distinct().ToArray()
+                : row.Parents;
         }
 
         // ── Lineage ────────────────────────────────────────────────────────────────────────────────────────────
@@ -1716,7 +1790,9 @@ public sealed class SecureChildShareSynchronizer
 
             async Task WalkAsync(Row current, int depth, HashSet<RowRef> path)
             {
-                foreach (var parent in current.Parents)
+                // Its lookups and the core record its pair names; a catalog fault propagates (the caller's read-fault path).
+                var parents = await ParentsOfAsync(current, misses, why => undetermined ??= why).ConfigureAwait(false);
+                foreach (var parent in parents)
                 {
                     if (path.Contains(parent))
                         continue; // a cycle (a document's current version points back at the document)

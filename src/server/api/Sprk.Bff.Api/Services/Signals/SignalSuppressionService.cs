@@ -278,8 +278,9 @@ public sealed class SignalSuppressionService
     /// <summary>uac-r2's lineage of <c>sprk_signal</c> (the matter, the Decision Record and the subject's regarding lookups).</summary>
     private static readonly SecureChildLineage.Table SignalLineage = SecureChildLineage.Children["sprk_signal"];
 
-    /// <summary>The <c>sprk_signal</c> lookup columns the walk follows: every read that partitions a Signal selects them.</summary>
-    internal static IReadOnlyCollection<string> SignalLineageColumns => SignalLineage.Lookups.Keys.ToArray();
+    /// <summary>The <c>sprk_signal</c> columns the walk follows (its lookups and its core record pair,
+    /// <see cref="SecureChildLineage.Table.LineageColumns"/>): every read that partitions a Signal selects them.</summary>
+    internal static IReadOnlyCollection<string> SignalLineageColumns => SignalLineage.LineageColumns.ToArray();
 
     /// <summary>True when <paramref name="owner"/> is the Secure Record owner team (and that team exists: <paramref name="secureTeamId"/>).</summary>
     private static bool IsSecureOwned(EntityReference? owner, Guid? secureTeamId) =>
@@ -314,9 +315,10 @@ public sealed class SignalSuppressionService
         var row = new Entity("sprk_signal", signal.Id);
         if (signal.LineageRow is { } read)
         {
-            foreach (var column in SignalLineage.Lookups.Keys)
+            // Its lookups and its core record pair (a catalog lookup and a string), every column the walk reads.
+            foreach (var column in SignalLineage.LineageColumns)
             {
-                if (read.GetAttributeValue<EntityReference>(column) is { } parent) row[column] = parent;
+                if (read.Attributes.TryGetValue(column, out var value) && value is not null) row[column] = value;
             }
         }
 
@@ -446,10 +448,18 @@ public sealed class SignalSuppressionService
             ? above
             : throw new InvalidOperationException($"The secure roots above the Signals could not be determined ({above.Status}: {above.Detail}).");
 
+    /// <summary>Rows with the same lineage columns (lookups and core record pair) sit under the same roots; the key is those values.</summary>
     private static string LineageKey(IReadOnlyList<Entity> rows) =>
         string.Join("|", rows.Select(r => r.LogicalName + ":" + string.Join(",",
-            SecureChildLineage.Children[r.LogicalName].Lookups.Keys.Order(StringComparer.Ordinal)
-                .Select(k => r.GetAttributeValue<EntityReference>(k)?.Id.ToString("D", CultureInfo.InvariantCulture) ?? string.Empty))));
+            SecureChildLineage.Children[r.LogicalName].LineageColumns.Order(StringComparer.Ordinal)
+                .Select(k => r.Attributes.TryGetValue(k, out var value)
+                    ? value switch
+                    {
+                        EntityReference reference => reference.Id.ToString("D", CultureInfo.InvariantCulture),
+                        string text => text.Trim().ToLowerInvariant(),
+                        _ => string.Empty,
+                    }
+                    : string.Empty))));
 
     /// <summary>The subjects that are lineage children (a To Do, a communication, a document, an event, an invoice), read with their
     /// lineage lookups and owner columns, so the walk can start from them. A root-table subject is reached through the Signal's own
@@ -866,7 +876,8 @@ public sealed class SignalSuppressionService
         Guid signalId, IDataverseUserClient caller, CancellationToken ct, Guid? callerContactId = null)
     {
         var signal = await _entities.RetrieveAsync("sprk_signal", signalId,
-            ["sprk_policy", "sprk_corerecordtype", "sprk_corerecordid", "sprk_dedupekey", "ownerid", "sprk_lane", .. SignalLineageColumns], ct).ConfigureAwait(false);
+            [.. new[] { "sprk_policy", "sprk_corerecordtype", "sprk_corerecordid", "sprk_dedupekey", "ownerid", "sprk_lane" }
+                .Concat(SignalLineageColumns).Distinct(StringComparer.Ordinal)], ct).ConfigureAwait(false);
 
         if (signal.GetAttributeValue<EntityReference>("sprk_policy") is not { Id: var policyId } || policyId == Guid.Empty)
         {

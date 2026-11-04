@@ -262,6 +262,56 @@ public class SecureChildLineageTests
         }).Parents.Should().Equal(new RecordOwnershipParent("sprk_policy", rule));
     }
 
+    // ── The core record pair (a Signal's and Decision Record's core record) ─────────────────────────────────────────────
+
+    /// <summary>The pair is read by every lineage walk on the two tables that hold one, and is never an entry of the lookup map
+    /// (ownership order, filing edges and the form library read the map as an edge registry).</summary>
+    [Fact]
+    public void LineageColumns_AreTheLookupsPlusTheCorePair_OnlyOnSignalsAndDecisionRecords()
+    {
+        foreach (var table in SecureChildLineage.Children.Values)
+        {
+            table.Lookups.Keys.Should().NotContain(new[] { "sprk_corerecordtype", "sprk_corerecordid" }, $"{table.LogicalName}'s pair is not a lookup");
+            var expected = table.LogicalName is "sprk_signal" or "sprk_decisionrecord"
+                ? table.Lookups.Keys.Concat(["sprk_corerecordtype", "sprk_corerecordid"])
+                : table.Lookups.Keys;
+            table.LineageColumns.Should().Equal(expected, table.LogicalName);
+            table.HoldsCorePair.Should().Be(RecordOwnershipContext.CorePairTables.Contains(table.LogicalName));
+        }
+    }
+
+    [Theory]
+    [InlineData("sprk_project", true)]
+    [InlineData("sprk_matter", true)]
+    [InlineData("sprk_workassignment", true)]
+    [InlineData("SPRK_PROJECT", true)]
+    [InlineData("sprk_servicerequest", false)] // D-36: not a root, so the pair adds nothing
+    [InlineData(null, false)]                  // the catalog names no core table
+    public void CorePairParent_IsTheCoreRecord_OnlyWhenItIsARoot(string? coreTable, bool isParent)
+    {
+        var core = Guid.NewGuid();
+
+        var parent = SecureChildLineage.CorePairParent(coreTable, core);
+
+        if (isParent)
+            parent.Should().Be((coreTable!.ToLowerInvariant(), core));
+        else
+            parent.Should().BeNull();
+    }
+
+    [Fact]
+    public void CorePairMatches_NameTheFrontiersRootsByTheirStoredId_OnlyOnTablesWithAPair()
+    {
+        var (project, matter) = (Guid.NewGuid(), Guid.NewGuid());
+        (string, Guid)[] frontier = [("sprk_project", project), ("sprk_event", Guid.NewGuid()), ("sprk_matter", matter)];
+
+        SecureChildLineage.CorePairMatches("sprk_signal", frontier).Should().Equal(
+            ("sprk_corerecordid", project.ToString("D").ToLowerInvariant()), ("sprk_corerecordid", matter.ToString("D").ToLowerInvariant()));
+        SecureChildLineage.CorePairMatches("SPRK_DECISIONRECORD", frontier).Should().HaveCount(2);
+        SecureChildLineage.CorePairMatches("sprk_event", frontier).Should().BeEmpty("an event has no pair");
+        SecureChildLineage.CorePairMatches("sprk_signal", [("sprk_event", Guid.NewGuid())]).Should().BeEmpty("a child is never a core record");
+    }
+
     // ── What a child receives (Dataverse AccessRights values as literals) ────────────────────────────────────────────
 
     // Owner round 91 (2026-10-10, task 179): Share is carried where the root share holds it; never Assign or Create.
