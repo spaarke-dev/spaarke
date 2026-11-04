@@ -60,9 +60,10 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(input.Header);
         ArgumentNullException.ThrowIfNull(input.Lines);
+        // The empty id is never "no firm" (task 095c-3: null is, and reads no roster or rate card).
         if (input.FirmId == Guid.Empty)
         {
-            throw new ArgumentException("The submission context has no firm, so no roster or rate card can be chosen.", nameof(input));
+            throw new ArgumentException("The submission context names the empty firm id; no roster or rate card can be chosen.", nameof(input));
         }
 
         var settings = await _settings.GetAsync(ct);
@@ -82,15 +83,29 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
                 .Select(x => new TimekeeperMatchRequest(x.Line.TimekeeperAsBilled.Value, x.Line.Date.Value))
                 .ToList();
 
-            var needsRoster = requests.Any(r => !string.IsNullOrWhiteSpace(r.BilledName) && r.LineDate.HasValue);
-            var roster = needsRoster ? await ReadRosterAsync(input.FirmId, ct) : [];
-            rosterRows = roster.Count;
-
-            var matches = await _matcher.MatchAsync(
-                input.FirmId, roster, input.TimekeeperSummaryNames, requests, settings.ReliabilityThreshold, ct);
-            for (var i = 0; i < feeLines.Count; i++)
+            if (input.FirmId is { } firmId)
             {
-                timekeepers[feeLines[i].Index] = matches[i];
+                var needsRoster = requests.Any(r => !string.IsNullOrWhiteSpace(r.BilledName) && r.LineDate.HasValue);
+                var roster = needsRoster ? await ReadRosterAsync(firmId, ct) : [];
+                rosterRows = roster.Count;
+
+                var matches = await _matcher.MatchAsync(
+                    firmId, roster, input.TimekeeperSummaryNames, requests, settings.ReliabilityThreshold, ct);
+                for (var i = 0; i < feeLines.Count; i++)
+                {
+                    timekeepers[feeLines[i].Index] = matches[i];
+                }
+            }
+            else
+            {
+                // Task 095c-3: no firm, so no roster to match against (and no AI-assisted match): the match is not established.
+                foreach (var (_, index) in feeLines)
+                {
+                    timekeepers[index] = new TimekeeperResolution
+                    {
+                        Stage = TimekeeperMatchStage.None, MatchConfidence = 0m, Reason = TimekeeperUnmatchedReason.None,
+                    };
+                }
             }
         }
 
@@ -99,8 +114,8 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
             .Where(x => timekeepers[x.Index].IsMatched && x.Line.Date.Value.HasValue)
             .Select(x => x.Line.Date.Value!.Value)
             .ToList();
-        IReadOnlyList<RateRow> rates = dated.Count > 0
-            ? await ReadRatesAsync(input.FirmId, input.CoreRecord, dated.Min(), dated.Max(), ct)
+        IReadOnlyList<RateRow> rates = dated.Count > 0 && input.FirmId is { } rateFirm
+            ? await ReadRatesAsync(rateFirm, input.CoreRecord, dated.Min(), dated.Max(), ct)
             : [];
 
         // ── Assemble: per line, per field. ──────────────────────────────────────────────────────────────────
@@ -115,7 +130,9 @@ public sealed class InvoiceResolutionService : IInvoiceResolutionService
             if (line.LineType == InvoiceLineType.Fee)
             {
                 timekeeper = timekeepers[i];
-                rate = RateCardResolver.Resolve(rates, input.FirmId, input.CoreRecord, timekeeper, line.Date.Value);
+                rate = input.FirmId is { } lineFirm
+                    ? RateCardResolver.Resolve(rates, lineFirm, input.CoreRecord, timekeeper, line.Date.Value)
+                    : new RateResolution { Status = RateResolutionStatus.NotFound, Reason = RateNotFoundReason.TimekeeperUnmatched };
                 if (!timekeeper.IsMatched)
                 {
                     findingInputs.Add(new ApprovedTimekeeperFindingInput(

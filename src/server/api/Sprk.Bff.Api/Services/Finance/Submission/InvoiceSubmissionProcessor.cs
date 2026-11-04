@@ -128,6 +128,17 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
                 new Dictionary<string, string?> { ["typed"] = numberCheck.Typed, ["read"] = numberCheck.Read })]
             : [];
 
+        // Task 095c-3 (owner 2026-11-03): an Internal submission taken without a firm is held "firm needed" (a pipeline finding, as D-91's),
+        // never rejected. It SKIPS every firm-scoped step rather than half-running it: resolution reads no roster and no rates (its lines are
+        // unresolved), coding skips the firm-code step (the record's code set still applies), and steps 4 and 5 do not run at all, so no
+        // client-default rule set, no Duplicate prior read and no partial evaluation marks a rule as checked (the persister flags every line
+        // rules.not_checked). Task 095d's assign-firm runs the full pipeline once the firm is set.
+        var noFirm = snapshot.HasNoFirm;
+        if (noFirm)
+        {
+            pipelineFindings = [.. pipelineFindings, new SubmissionPipelineFinding(SubmissionReasonCodes.FirmMissing, new Dictionary<string, string?>())];
+        }
+
         InvoiceResolutionResult resolution;
         try
         {
@@ -161,6 +172,24 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
                 ? SubmissionReasonCodes.CodingNoCodeSetHold
                 : SubmissionReasonCodes.CodingUnavailableHold;
             pipelineFindings = [.. pipelineFindings, CodingHoldFinding(codingHold, ex.ReasonCode)];
+        }
+
+        if (noFirm)
+        {
+            // Steps 4 and 5 skipped (above). Accepted (coded) or AcceptedUncoded (D-126), both with the firm hold as the reason: it is the hold
+            // that decides approval; a coding hold stays a pipeline finding beside it.
+            return Log(new SubmissionEvaluationOutcome
+            {
+                Kind = coding is null ? SubmissionEvaluationKind.AcceptedUncoded : SubmissionEvaluationKind.Accepted,
+                SubmissionId = snapshot.SubmissionId,
+                ReasonCode = SubmissionReasonCodes.FirmMissing,
+                Submission = snapshot,
+                Read = read,
+                InvoiceNumber = numberCheck,
+                PipelineFindings = pipelineFindings,
+                Resolution = resolution,
+                Coding = coding,
+            });
         }
 
         // Step 4: evaluate (072), on the core record and received date of this same submission read.
@@ -277,6 +306,9 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
     internal static LineCodingRequest BuildCodingRequest(SubmissionSnapshot snapshot, ExtractedInvoice read) => new()
     {
         CoreRecord = new CodingCoreRecord(snapshot.CoreRecord.EntityLogicalName, snapshot.CoreRecord.RecordId),
+
+        // Task 095c-3: with no firm, the firm-code step (FR-22 step 1) is skipped; the record's code set (steps 2 to 5) still applies.
+        IncludeFirmCodes = !snapshot.HasNoFirm,
         Lines = read.Lines.Select((line, index) => new InvoiceLineToCode
         {
             LineKey = LineKey(index),
@@ -327,6 +359,12 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
     internal static BillingEvaluationRequest BuildEvaluationRequest(
         SubmissionSnapshot snapshot, ExtractedInvoice read, InvoiceResolutionResult resolution, InvoiceCodingResult? coding)
     {
+        // Task 095c-3: the rules are never judged without a firm (EvaluateAsync skips steps 4 and 5); a null here is a caller defect.
+        if (snapshot.FirmId is not { } firmId)
+        {
+            throw new InvalidOperationException("A submission with no firm is not evaluated against billing rules.");
+        }
+
         var resolvedByIndex = resolution.Lines.ToDictionary(l => l.LineIndex);
         var codedByKey = coding?.Lines.ToDictionary(l => l.LineKey, StringComparer.Ordinal);
         var header = read.Header;
@@ -373,7 +411,7 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         return new BillingEvaluationRequest
         {
             SubmissionId = snapshot.SubmissionId,
-            FirmId = snapshot.FirmId,
+            FirmId = firmId,
             CoreRecord = ToResolutionCore(snapshot.CoreRecord),
             TrackingNumber = snapshot.TrackingNumber,
             FirmInvoiceNumber = header.FirmInvoiceNumber.Value,

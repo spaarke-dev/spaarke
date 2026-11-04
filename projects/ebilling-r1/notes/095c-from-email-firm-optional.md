@@ -438,4 +438,86 @@ Fail-before proofs: for each mutation, the source was mutated and built, the fil
 - The final contract text.
 - The publish-size measurement.
 
+## 12. Part 095c-3: the pipeline runs a no-firm submission (2026-11-03)
+
+### 12.1 What changed
+
+- **Read.** `SubmissionSnapshot.FirmId` is `Guid?` (`HasNoFirm`).
+  - `Read` accepts a null firm only on the Internal channel (the from-email intake is the only entry that sends one, 095c-2).
+  - The empty id on any channel, and a null firm on an SPA submission, still end Failed `firm_missing` before anything else is read.
+- **The job (`InvoiceSubmissionProcessor`).** For a no-firm submission:
+  - It adds the pipeline finding `firm_missing`.
+  - Resolution reads no roster and no rates. Every fee line is unmatched (`Stage None`, reason `None`, which the approved-timekeeper default reads as unmatched), and every rate is `NotFound`. The arithmetic is still checked.
+  - Coding skips the firm-code step (`LineCodingRequest.IncludeFirmCodes = false`, passed to a new `CodeSetResolver.ResolveAsync` overload). The record's code set still applies, and billed codes are kept.
+  - Rule evaluation is skipped entirely, including the Duplicate priors and the replaced-invoice read.
+  - The outcome is `Accepted` (or `AcceptedUncoded`) with reason `firm_missing`, and has no evaluation or decision. No new outcome kind was added.
+- **Persist (`InvoiceSubmissionPersister`).**
+  - `RulesNotChecked(outcome)` flags every line `rules.not_checked` with "The billing rules were not checked on this line because the invoice has no firm." (EB-D-175). No line of a no-firm invoice is Clean.
+  - There is no firm lookup on the invoice or its lines when the firm is null.
+  - `TerminalFor` keeps the reason code of an Accepted outcome only when it is `firm_missing`.
+  - `Validate` refuses, before any write, a no-firm outcome that is not exactly a held acceptance (an evaluation or decision, a rejection kind, a missing hold finding or reason).
+  - The commit-time correction re-check uses `InvoiceSubmissionService.CorrectionKeepsFirm`.
+  - The commit-time re-read also re-evaluates when the firm changed since the evaluation (see 12.3).
+- **Supersedes lookup (`FindSupersededInvoiceAsync`), decided.** A no-firm submission is never linked to a Returned to Firm invoice, and the lookup does not run. The tracking scope `none` is a numbering scope, not an identity: two no-firm invoices with one number are not the same firm's invoice. A null firm never matches another null. 095d (assign firm) must re-run the pipeline, and with it this lookup, once the firm is known. A Correction of a no-firm invoice still supersedes by its explicit target (`CorrectionKeepsFirm`, null to null).
+- **After-commit (`InvoiceSubmissionAfterSteps`).** `firm_missing` is a system finding. It is written as the SubmissionIntegrity Signal on the invoice under BILL-SYSTEM-SUBMISSION, headline "Firm needed", template "This invoice was submitted without a firm, so its billing rules were not checked. A reviewer must add the firm before it can be approved." It is flag-only. No Decision Record is written, and the terminal status is Accepted `ebilling.submission.firm_missing`.
+- **Signals/Billing (for ontology-r1 review).**
+  - New: `BillingReasonCodes.SubmissionFirmMissing` (`submission.firm_missing`), `BillingSystemFindings.FirmMissing`, the template and headline, and flag-only membership.
+  - Changed: the mapper's primary-reason order on a shared (policy, subject) group. `NotePrecedence` puts the firm hold first, then the invoice-number mismatch (the D-125 rule, unchanged), then the code order. Before, only the mismatch was lifted.
+- **Contract.** Section 9 has the Accepted `ebilling.submission.firm_missing` row.
+
+### 12.2 Component justification (CLAUDE.md section 11)
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `submission.firm_missing` reason, finding, template, headline | The SubmissionIntegrity system findings (invoice-number mismatch, coding notes) | Added to that catalogue, not a new policy | The hold has no Signal; a reviewer sees In Review with no reason and no "add the firm" instruction |
+| `LineCodingRequest.IncludeFirmCodes` and the `CodeSetResolver.ResolveAsync` overload | Step 1 of `CodeSetResolver` (the firm's codes) | A flag on the existing request; the old signature delegates with `true` | Step 1 would choose a code set from codes no firm stands behind |
+| `NotePrecedence` in the mapper | The invoice-number-only `ThenBy` it replaces | Replaces it in place | `coding.no_code_set` sorts before `submission.firm_missing`, so the Signal would be titled by the coding note and hide the hold |
+| `RulesNotCheckedNoFirmMessage` and the `RulesNotChecked(outcome)` overload | `RulesNotChecked(evaluation, lineCount)` | Wraps it; that overload is unchanged | A null evaluation reads as "nothing refused" and every line is Clean |
+| `SubmissionSnapshot.HasNoFirm`, `SubmissionEvaluationOutcome.RulesSkippedForNoFirm` | None (one-line properties) | Read-only properties on the existing records | Each caller would repeat the null test |
+
+Placement: this extends the existing Finance Submission, Resolution, Coding and Signals/Billing services in `Sprk.Bff.Api`. There is no new service, endpoint, DI registration, package or background work. Publish size was not measured (source only, about 400 lines); the 095c-4 gate measures it.
+
+### 12.3 Deviation: the firm change re-evaluates at commit
+
+This was not in the hand-off. `sprk_vendororg` is no longer SystemRequired after the schema script, so the firm can be set or cleared between the evaluation and the commit. The commit-time re-read compared only the core record. It now also compares the firm and answers `ReEvaluate`, as for a changed record. Without this, an evaluation made with a firm could be committed on a submission that no longer has one, or the reverse.
+
+### 12.4 Tests and seed proof
+
+Each new test has a must-not-fire control.
+
+- Processor:
+  - No firm is Accepted `firm_missing`: no roster or rate read, no firm-code step, and no rule judged (a blocking rule does not block). Control: the same rule blocks with a firm.
+  - No firm and no code set is AcceptedUncoded with the firm hold as reason.
+  - The empty id, or no firm on an SPA submission, still fails closed (theory).
+- Resolution: a null firm reads no roster or rate, leaves every fee line unmatched, and still checks the arithmetic. Control: the same input with a firm matches.
+- Coding seam: without the firm-code step, the record's code set applies and billed codes are kept.
+- Persister (`InvoiceSubmissionPersisterTests.NoFirm.cs`):
+  - **SEEDED.** A no-firm invoice is committed In Review with no firm lookup, every line Flagged `rules.not_checked`, and Accepted `firm_missing`. Control: a firm invoice's lines are Clean.
+  - `TerminalFor` keeps an Accepted reason only for `firm_missing`.
+  - A malformed no-firm outcome (four cases) is refused before any write.
+  - A firm set or cleared since the evaluation re-evaluates and persists nothing (two cases).
+  - A no-firm Correction of a no-firm invoice commits and supersedes it.
+  - A firm on one side only at commit is `different_firm` (two cases).
+  - No firm is never linked to a predecessor, and nothing is queried.
+- After-steps:
+  - The "Firm needed" Signal is written on the invoice, with no record and terminal Accepted `firm_missing`.
+  - With no code set as well, the firm hold titles the one invoice Signal.
+- Signals/Billing (`BillingSystemPolicyTests`): `firm_missing` joins the per-reason theories (unique template, flag-only, decided name). The firm hold titles a group shared with the mismatch and a coding note.
+
+Seed proof (one, for the fail-closed "no Clean line" guard). The `RulesSkippedForNoFirm` branch of `RulesNotChecked(outcome)` was disabled (`if (false && ...)`), built and run on the filtered gate. Exactly the SEEDED test failed (1 failed, 10779 passed). The file was restored byte for byte (SHA-256 `4199214e…a84e` before and after), rebuilt, and the persister tests passed (212).
+
+Gate:
+
+- All five test projects build with 0 errors and 0 warnings.
+- The filtered `Sprk.Bff.Api.Tests` run: 10780 passed, 0 failed, 7 skipped. The 6756 in section 11 was before the 086/089a merges. `Step0Refusal_IsTheUniform404` now passes.
+- Full `Spaarke.ArchTests`: 1951 passed.
+
+### 12.5 Known limits and hand-off
+
+- **K1 (095c-4, before P2 is turned on anywhere).** Approval does not yet refuse a no-firm invoice. Today the lines are Flagged, so I-2 refuses approval until a reviewer decides each line. A reviewer who accepts every line could then approve an invoice with no firm. The `held` check does not cover it, because the submission is Accepted, not Blocked. Nothing reaches this path before P2, which needs the schema script. 095c-4 owns the approval and AP-export refusals and the other readers, including `EligibleApproverResolver` and `InvoiceCorrectionReevaluation`.
+- **K2 (095d).** Assigning the firm must re-run the pipeline: resolution, the firm-code step, rule evaluation with Duplicate priors, and the supersedes lookup. It must also renumber into the firm's scope (section 9). The `firm_missing` Signal is then resolved by the re-run.
+- `firm_missing` has two meanings by outcome: Failed (empty id, SPA with no firm) and Accepted (the hold). `TerminalFor` and contract section 9 keep them apart.
+- **ontology-r1 review.** The new reason, template and headline, and the `NotePrecedence` change in `BillingFindingSignalMapper`. The firm hold now outranks the invoice-number mismatch as the title.
+- current-task.md, TASK-INDEX.md and the POML status are not updated here; the main session owns them.
+
 rework: none task 095c

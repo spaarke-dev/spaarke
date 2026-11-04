@@ -38,6 +38,7 @@ public class BillingSystemPolicyTests
         BillingReasonCodes.CodingCodeSetNeedsReview,
         BillingReasonCodes.CodingNoCodeSet,
         BillingReasonCodes.CodingUnavailable,
+        BillingReasonCodes.SubmissionFirmMissing,
     ];
 
     private static PolicyVersionValidator Validator() =>
@@ -178,6 +179,7 @@ public class BillingSystemPolicyTests
         BillingReasonCodes.CodingCodeSetNeedsReview.Should().Be("coding.code_set_needs_review");
         BillingReasonCodes.CodingNoCodeSet.Should().Be("coding.no_code_set", "D-126");
         BillingReasonCodes.CodingUnavailable.Should().Be("coding.unavailable", "D-126");
+        BillingReasonCodes.SubmissionFirmMissing.Should().Be("submission.firm_missing", "ebilling-r1 095c-3, ontology-r1 D-201");
     }
 
     [Fact]
@@ -235,6 +237,7 @@ public class BillingSystemPolicyTests
         BillingReasonCodes.CodingCodeSetNeedsReview => BillingSystemFindings.CodeSetNeedsReview(System, "UTBMS Litigation"),
         BillingReasonCodes.CodingNoCodeSet => BillingSystemFindings.NoCodeSet(System),
         BillingReasonCodes.CodingUnavailable => BillingSystemFindings.CodingUnavailable(System),
+        BillingReasonCodes.SubmissionFirmMissing => BillingSystemFindings.FirmMissing(System),
         _ => throw new ArgumentOutOfRangeException(nameof(reason)),
     };
 
@@ -339,6 +342,27 @@ public class BillingSystemPolicyTests
         mapping.ReasonCodes.Should().Equal(BillingReasonCodes.CodingCodeSetNeedsReview, BillingReasonCodes.SubmissionInvoiceNumberMismatch);
         mapping.Request.EvidenceRefs!.Should().Contain(e => e.Kind == BillingFindingSignalMapper.ReasonEvidenceKind
             && e.Ref == BillingReasonCodes.CodingCodeSetNeedsReview, "the other note is still a merged reason");
+    }
+
+    [Fact(DisplayName = "095c-3 (D-201): the firm hold titles a Signal it shares with the invoice-number mismatch and a coding note, whatever the code order")]
+    public void MapAll_FirmMissingWithOtherInvoiceNotes_TheFirmHoldIsThePrimaryReason()
+    {
+        var findings = new[]
+        {
+            BillingSystemFindings.NoCodeSet(System),
+            BillingSystemFindings.InvoiceNumberMismatch(System, "INV-100", "INV-1OO", 0.91m),
+            BillingSystemFindings.FirmMissing(System),
+        };
+
+        var mapping = BillingFindingSignalMapper.MapAll(findings, new Dictionary<Guid, BillingRuleCandidate> { [VersionId] = SystemRule() }, Subjects())
+            .Should().ContainSingle("one Signal per (policy, subject)").Subject;
+
+        mapping.Request.SubjectEntityLogicalName.Should().Be("sprk_invoice");
+        mapping.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.FirmMissingHeadline, "approval is refused until a firm is added");
+        mapping.Request.MessageTemplate.Should().Be(BillingRuleCatalogue.FirmMissingTemplate);
+        mapping.ReasonCodes.Should().BeEquivalentTo(
+            [BillingReasonCodes.CodingNoCodeSet, BillingReasonCodes.SubmissionInvoiceNumberMismatch, BillingReasonCodes.SubmissionFirmMissing],
+            "the other notes are still merged reasons");
     }
 
     [Fact(DisplayName = "D-125 review (a), must-not-fire: two coding notes keep the code order")]

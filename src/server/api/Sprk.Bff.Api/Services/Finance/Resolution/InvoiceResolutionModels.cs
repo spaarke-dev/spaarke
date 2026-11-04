@@ -87,8 +87,13 @@ public sealed record InvoiceResolutionLine
 /// <summary>Everything resolution needs: the submission context (firm, core record) and what was read.</summary>
 public sealed record InvoiceResolutionInput
 {
-    /// <summary>The firm (<c>sprk_organization</c>) from the submission context. A timekeeper or rate card of any other firm is never used.</summary>
-    public required Guid FirmId { get; init; }
+    /// <summary>
+    /// The firm (<c>sprk_organization</c>) from the submission context. A timekeeper or rate card of any other firm is never used. Null when
+    /// the submission has no firm (ebilling-r1 task 095c-3): no roster and no rates are read, so every fee line is unmatched
+    /// (<see cref="TimekeeperUnmatchedReason.None"/>, "not established") and its rate not found; the arithmetic and the field confidences
+    /// are still computed. <see cref="Guid.Empty"/> is refused.
+    /// </summary>
+    public required Guid? FirmId { get; init; }
 
     /// <summary>The core record of the submission; <c>null</c> = none, so only firm-wide rate cards apply.</summary>
     public CoreRecordReference? CoreRecord { get; init; }
