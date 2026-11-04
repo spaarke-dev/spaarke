@@ -525,3 +525,9 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - Typed `sprk_matter` (and on a Decision Record `sprk_project` / `sprk_workassignment`) is still a lineage owner parent. It keeps a record about a secure core in that family after a re-file (D-123, K1). It is read by the suppression lineage columns, the `SignalReevaluationJob` lineage row, `TodoAssigneeOwnerReconciliationJob` and uac-r2's reconciler and share synchroniser.
   - With the refusal, no row reaches that state. If a legitimate generic creator is ever added, it must write the typed column the way the writers do (`LineageColumnByCoreEntity`).
 - **Owner of the change:** field-mapping. `RecordCreationService` and the chat handler are theirs, and ontology reviews it. Keep the detail out of public issues.
+- **Census on dev, 2026-11-04 (asked by uac-r2):**
+  - **Decision Records:** every row whose core is a matter, project or work assignment has its typed column. 4 rows have a service-request core, which has no typed column by design (D-36; excluded from lineage).
+  - **Signals:** no matter-core row lacks `sprk_matter`. 32 rows have a project or work-assignment core and no typed core column, because `sprk_signal` has only the typed `sprk_matter`, so the writer cannot set one.
+    - 25 are work-assignment cores whose subject is the work assignment itself, so the stamp equals the core.
+    - 7 are project cores whose subject is an event (4) or a To Do (3). For these the core reaches the lineage only through the subject's stamp, which is the K1 case and pre-dates 042c.
+  - uac-r2 owns the fix: the core pair in `SecureChildLineage` for `sprk_signal`, or a typed project/work-assignment lookup on `sprk_signal`. The lookup is a schema change and needs the owner.
