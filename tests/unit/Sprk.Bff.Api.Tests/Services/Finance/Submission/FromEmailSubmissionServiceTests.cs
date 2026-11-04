@@ -401,6 +401,26 @@ public class FromEmailSubmissionServiceTests
         world.Intake.Allocator.Verify(a => a.NumbersSubmissionsWithoutFirmAsync(It.IsAny<CancellationToken>()), Times.Once());
     }
 
+    [Fact(DisplayName = "095c-2 review F1 (seed-proof, the replay precedes the phase gate): a retry of a no-firm submission that a P2 instance accepted, landing on an instance not in P2, gets the replayed 202 and makes no save or submit")]
+    public async Task NoFirm_RetryOfAnAcceptedSubmission_OnANonP2Instance_IsReplayedNotRefused()
+    {
+        var world = new W();
+        world.ScopeKeyActive(false);
+        var input = W.Input() with { FirmId = null };
+        var k = W.K(input);
+        var earlierEml = Guid.NewGuid();
+        var row = world.AddAttempt(k, 1, InvoiceSubmissionStatus.Received, eml: earlierEml, tracking: "1001.4");
+        row[TrackingNumberAllocator.FirmColumn] = null;
+
+        var outcome = await Run(world, input);
+
+        outcome.Receipt.Should().Be(new FromEmailReceipt(row.Id, FromEmailSubmissionKey.JobIdFor(k, 1), "1001.4", earlierEml));
+        world.Save.Requests.Should().BeEmpty("a replay saves nothing again");
+        world.Operation.Submits.Should().BeEmpty("a replay creates no attempt");
+        world.Intake.Allocator.Verify(a => a.NumbersSubmissionsWithoutFirmAsync(It.IsAny<CancellationToken>()), Times.Never(),
+            "the phase gate comes after the replay, so a stale cache cannot refuse an accepted submission");
+    }
+
     [Fact(DisplayName = "095c-2: mode New with no firm, once the scope key is Active, is submitted with no firm; no firm is read or linked")]
     public async Task NoFirm_New_InP2_IsSubmittedWithNoFirm()
     {

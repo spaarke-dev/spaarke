@@ -438,6 +438,17 @@ Fail-before proofs: for each mutation, the source was mutated and built, the fil
 - The final contract text.
 - The publish-size measurement.
 
+### 11.6 Review fixes (095c-2)
+
+**F1: a retry of an accepted no-firm submission could get 400 `firm_invalid`.**
+
+- **Cause.** `CheckFirmAsync` ran the no-firm phase check at step 4, before the replay of K (step 6). It read only this instance's phase cache. Instance A (P2) accepts a no-firm New with 202; the retry lands on instance B (still P1, cache refreshes every 5 minutes) and gets 400 "A firm is required." although the submission exists. A resubmit with a firm then gets 409 `document_already_submitted`. This breaks the allocator's contract (`TrackingNumberAllocator`: a redelivery on a stale P1 instance must return the row, not refuse it).
+- **Fix (chosen: move the check, not a forced re-read).** `FromEmailSubmissionService`: `CheckFirmAsync` passes a null firm (nothing to check); the phase gate is the new `CheckNoFirmPhaseAsync`, called as step 6b after the replay of K and the generation cap, before step 7 (communication read, correction checks, save, submit). A replay is answered before the gate is consulted. A refusal still happens before any save, filing or submit. Why not `force: true`: a forced re-read costs a metadata call on every no-firm request in P0/P1, still races a not-yet-refreshed instance, and leaves the check ahead of the replay, whose answer needs no phase at all.
+- **Cost.** In P0/P1 a no-firm request now does the marks check, the Correction's Write check, the operation-availability and caller reads, and the attempt reads of K before it is refused. All are read-only.
+- **Test.** `FromEmailSubmissionServiceTests.NoFirm_RetryOfAnAcceptedSubmission_OnANonP2Instance_IsReplayedNotRefused`: a no-firm Received row exists for K and the phase is not P2. The retry gets the replayed 202 (same submission id, job id, tracking number and .eml), saves nothing, submits nothing, and never consults the phase.
+- **Seed proof.** The fix was reverted (the file restored from `HEAD`), the service test class run: 1 failed (the new test, `Receipt` null), 82 passed. The fixed file was then restored byte for byte (SHA-256 `b7024850…3734` before and after), and the class run again: 83 passed. `NoFirm_BeforeTheScopeKeyIsActive_Is400FirmInvalid_BeforeAnyWrite` (New and Correction) passes under the fix and was in the 82.
+- **Gate.** All five test projects (`Sprk.Bff.Api.Tests`, `Spaarke.Core.Tests`, `Spaarke.Scheduling.Tests`, `Spaarke.ArchTests`, `Sprk.Bff.Api.IntegrationTests`) build with 0 errors and 0 warnings. Filtered `Sprk.Bff.Api.Tests` (`Submission|Finance|Office`): 6609 passed, 0 failed, 10 skipped. `Spaarke.ArchTests` filtered to `Submission|TrackingScope`: 42 passed, 0 failed.
+
 ## 12. Part 095c-3: the pipeline runs a no-firm submission (2026-11-03)
 
 ### 12.1 What changed
