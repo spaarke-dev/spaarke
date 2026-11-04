@@ -46,6 +46,36 @@ public static class BillingRuleCatalogue
     /// </summary>
     public static bool IsSystemType(RuleType ruleType) => ruleType == RuleType.SubmissionIntegrity;
 
+    /// <summary>
+    /// How rules of one billing type from several Procedures combine (ebilling-r1 task 082b; procedure model 7.3; ontology D-172 Q7
+    /// "limits replace, checklists add"; the per-type table in <c>notes/rule-set-scope-design.md</c> 3.3). <see cref="BillingRulePrecedence.Replace"/>:
+    /// a numeric limit, the highest-ranked accepted version replaces the others of its <see cref="BillingRuleDefinition.PrecedenceKey"/>.
+    /// <see cref="BillingRulePrecedence.Additive"/>: a checklist, every in-force version applies. <see cref="BillingRulePrecedence.Split"/>:
+    /// ExpenseRule only, its per-category caps replace and its non-reimbursable codes add (ontology F3-c). Closed: an exhaustive switch,
+    /// reviewed as code (D-27); a non-billing type throws. The evaluator applies it (task 082c).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
+    public static BillingRulePrecedence PrecedenceOf(RuleType ruleType) => ruleType switch
+    {
+        RuleType.ApprovedTimekeeper => BillingRulePrecedence.Additive,
+        RuleType.ApprovedRate => BillingRulePrecedence.Replace,
+        RuleType.TimeIncrement => BillingRulePrecedence.Replace,
+        RuleType.DailyHoursCap => BillingRulePrecedence.Replace,
+        RuleType.NonBillableActivity => BillingRulePrecedence.Additive,
+        RuleType.ExpenseRule => BillingRulePrecedence.Split,
+        RuleType.InvoiceAge => BillingRulePrecedence.Replace,
+        RuleType.CoreRecordWindow => BillingRulePrecedence.Replace,
+        RuleType.Duplicate => BillingRulePrecedence.Replace,
+        RuleType.RequiredData => BillingRulePrecedence.Additive,
+        RuleType.AiObservation => BillingRulePrecedence.Additive,
+        // Keyed by PrecedenceKey: the rule type plus the fee kind, and for 'other' the exact fee-code set (owner 2026-10-21, D-39).
+        RuleType.AddedFee => BillingRulePrecedence.Replace,
+        RuleType.Discount => BillingRulePrecedence.Replace,
+        // The system type (D-125): one seeded policy outside the Procedure model, never displaced and never displacing.
+        RuleType.SubmissionIntegrity => BillingRulePrecedence.Additive,
+        _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
+    };
+
     /// <summary>The system policy's code (D-125): one policy, seeded by <c>scripts/ebilling/Seed-BillingSystemPolicy.ps1</c>.</summary>
     public const string SystemPolicyCode = "BILL-SYSTEM-SUBMISSION";
 
@@ -708,4 +738,17 @@ public static class BillingRuleCatalogue
 
     private static string List(JsonElement root, string name) =>
         string.Join(", ", root.GetProperty(name).EnumerateArray().Select(e => e.GetString()));
+}
+
+/// <summary>How rules of one billing type from several Procedures combine (<see cref="BillingRuleCatalogue.PrecedenceOf"/>, model 7.3).</summary>
+public enum BillingRulePrecedence
+{
+    /// <summary>A limit: the highest-ranked accepted version of a precedence key replaces the others. A broken one never removes the general one.</summary>
+    Replace,
+
+    /// <summary>A checklist: every in-force version applies; nothing is displaced.</summary>
+    Additive,
+
+    /// <summary>ExpenseRule: its per-category caps replace in rank order, its non-reimbursable codes add across sources.</summary>
+    Split,
 }
