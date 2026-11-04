@@ -125,6 +125,10 @@ public static class RecordCreatorPerson
         // children now (a record-scoped rule set and an assignment are filed under their core record), so they left
         // StampedOutsideCodifiedChildren; sprk_procedure and sprk_procedureversion stay outside.
         "sprk_ruleset", "sprk_procedureassignment",
+        // ebilling-r1 task 086 (procedure model 5.2, K6): StoredFileService creates every Stored File app-only and records the person who
+        // asked (none for a contact uploader or a job). 088 created the column UNSECURED in SpaarkeMaster; the script empty-checks,
+        // secures and verifies it, never creates it.
+        "sprk_storedfile",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

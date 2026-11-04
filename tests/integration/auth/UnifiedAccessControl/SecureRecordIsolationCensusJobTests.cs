@@ -102,7 +102,7 @@ public class SecureRecordIsolationCensusJobTests
         }
 
         // ebilling-r1 (NFR-05 depth list): the environment also has the hard-deny tables' Reads the codified set does not list
-        // yet (sprk_storedfile) — iterated FROM the list, held by no role here.
+        // (none since task 086 codified sprk_storedfile) — iterated FROM the list, held by no role here.
         foreach (var (logicalName, privilegeName) in SecureBuRoleDepthAssertion.RestrictedContentPrivileges
                      .Where(e => SecureRecordOwnerRoleSet.Embedded.Tables.All(t => !string.Equals(t.PrivilegeName, e.PrivilegeName, StringComparison.OrdinalIgnoreCase))))
         {
@@ -313,14 +313,17 @@ public class SecureRecordIsolationCensusJobTests
     }
 
     /// <summary>
-    /// ebilling-r1 (089a review F3): an NFR-05 depth-list privilege the environment lacks (<c>sprk_storedfile</c>, which the
-    /// codified set does not list) leaves that table ungraded. It is ONE Error line naming it, never Critical (it is not an
-    /// exposure), and the run reports <c>findings</c>, not <c>isolated</c>.
+    /// ebilling-r1 (089a review F3): an NFR-05 depth-list privilege the environment lacks (<c>sprk_storedfile</c>) leaves that
+    /// table ungraded. Since task 086 every depth-list entry is codified, so the verdict reaches the job only where clause 5
+    /// cannot grade (089a review K6): a second owner role here. It is ONE Error line naming it beside clause 5's role-count
+    /// Error, never Critical (neither is an exposure), and the run reports <c>findings</c>, not <c>isolated</c>.
     /// </summary>
     [Fact]
     public async Task Run_WhenADepthListPrivilegeDoesNotExistInTheEnvironment_LogsOneErrorNamingIt_NotCritical()
     {
         _directory.RemovePrivilege(_codifiedChildPrivileges["sprk_storedfile"]);
+        var secondOwnerRole = Guid.Parse("00000000-0000-0000-0000-0000000003c2");
+        _directory.Role(secondOwnerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, secondOwnerRole);
 
         var result = await RunAsync();
 
@@ -328,7 +331,10 @@ public class SecureRecordIsolationCensusJobTests
         _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error
                                                  && e.Message.Contains(nameof(SecureBuVerdict.RestrictedContentPrivilegeNotResolved))
                                                  && e.Message.Contains("prvReadsprk_StoredFile"));
-        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error);
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error
+                                                 && e.Message.Contains(nameof(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege))
+                                                 && e.Message.Contains("2 role(s)"));
+        _log.Entries.Where(e => e.Level == LogLevel.Error).Should().HaveCount(2);
         _log.Entries.Should().NotContain(e => e.Level == LogLevel.Critical, "an ungraded table is not an exposure");
         _log.Entries.Should().ContainSingle(e => e.Message.Contains("heartbeat status=findings"));
     }

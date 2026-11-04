@@ -86,6 +86,10 @@ public class RecordFamilyEdgesGuardTests
             "an ownership parent (secure child, 089a) that no family row names: never family (owner, 2026-10-27)",
         [Only("OwnershipParentEntities", "sprk_ruleset")] =
             "an ownership parent (a record rule's set, 089a) that no family row names: family membership pending UAC-r2",
+        // ebilling-r1 task 086 (model 5.2): an invoice Stored File's secure-child registration adds ownership lineage only, as 089a's
+        // above; whether a Stored File joins the displayed family is UAC-r2's call (raised in the 086 notes).
+        [Only("SecureChildLineage", "sprk_storedfile.sprk_invoice -> sprk_invoice")] =
+            "ownership lineage of an invoice Stored File (secure child, a leaf, 086); family membership pending UAC-r2",
 
         // CoreAncestorResolver's stamp sources are the intermediates a stamp is COPIED from, not every filing lookup.
         [Extra("CoreAncestorResolver.StampSourceColumns", "sprk_analysis.sprk_documentid -> sprk_document")] =

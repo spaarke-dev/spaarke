@@ -2312,7 +2312,8 @@ public partial class InvoiceSubmissionPersisterTests
     {
         var store = new Store
         {
-            // The source stays filed under M (the filing check passes); the copy's roots (its invoice's, until 086) no longer include M.
+            // The source stays filed under M (the filing check passes); the copy's roots (walked up from its file row through its
+            // invoice, task 086) no longer include M.
             AfterCommit = s => s.Isolation
                 .OrdinaryRoot("sprk_matter", OtherMatter)
                 .OrdinaryChild("sprk_invoice", SourceInvoice, ("sprk_matter", "sprk_matter", OtherMatter)),
@@ -3551,6 +3552,28 @@ public partial class InvoiceSubmissionPersisterTests
                     case InvoiceSubmissionPersister.ApprovalEntity:
                         CreatedRows.Add((InvoiceSubmissionPersister.ApprovalEntity, create.Target.Id));
                         break;
+                }
+            }
+
+            // Task 086: sprk_storedfile is a lineage child of sprk_invoice, so the commit gate walks the copy's roots up from its file rows
+            // (SubmissionCommitGate.FileRootsAsync). Each file goes into the isolation world filed under its invoice, owned as the
+            // transaction owns it: the Secure team under a Secure matter, else an ordinary team.
+            foreach (var create in requests.OfType<CreateRequest>().Where(c => c.Target.LogicalName == StoredFileSchema.Entity))
+            {
+                if (create.Target.GetAttributeValue<EntityReference>("sprk_invoice") is not { } invoice
+                    || !CreatedInvoices.TryGetValue(invoice.Id, out var created)
+                    || created.GetAttributeValue<EntityReference>("sprk_matter") is not { } fileMatter)
+                {
+                    continue;
+                }
+
+                if (Isolation.ValueOf<bool>("sprk_matter", fileMatter.Id, "sprk_issecure"))
+                {
+                    Isolation.SecureChild(StoredFileSchema.Entity, create.Target.Id, ("sprk_invoice", "sprk_invoice", invoice.Id));
+                }
+                else
+                {
+                    Isolation.OrdinaryChild(StoredFileSchema.Entity, create.Target.Id, ("sprk_invoice", "sprk_invoice", invoice.Id));
                 }
             }
 
