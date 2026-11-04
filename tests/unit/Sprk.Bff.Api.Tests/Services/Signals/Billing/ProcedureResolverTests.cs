@@ -1245,6 +1245,52 @@ public sealed class ProcedureResolverTests
         gap.ToString().Should().Contain("ConflictingParents");
     }
 
+    [Fact(DisplayName = "082c C17: ToString of ExcludedProcedure, ExcludedRule, ResolvedRule, ResolvedPolicyVersion and CoreRecordLink prints no id, rule body or reason")]
+    public void ToString_OfTheRecordsThe082cEvaluatorCarries_PrintsNoIdBodyOrReason()
+    {
+        Guid[] ids = [.. Enumerable.Range(0, 10).Select(_ => Guid.NewGuid())];
+        const string reason = "Agreed with " + MatterName;
+        const string body = """{"type":"TimeIncrement","incrementHours":0.1,"note":"SECRET-BODY"}""";
+        const string template = "SECRET-TEMPLATE";
+        var parent = new CoreRecordLink(Matter, ids[0], 1);
+        var row = new ProcedureOverrideRow(ids[1], ProcedureOverrideMode.Excluded, parent, null, null, ids[2], ids[3], reason);
+        IReadOnlyList<ProcedureOverrideRow> rows = [row];
+        var version = new ResolvedPolicyVersion
+        {
+            PolicyId = ids[2], PolicyCode = "INC-1", PolicyVersionId = ids[4], RuleSetId = ids[5], VersionNumber = 3,
+            RuleType = "100000005", RuleBody = body, MessageTemplate = template, ShortHeadline = template, ClauseReference = template,
+            ClauseLocation = template, InForceFrom = Feb1, ProcedureVersionId = ids[6], BasedOnVersionId = ids[7],
+        };
+        var applied = new AppliedProcedure(
+            ids[8], "Billing guidelines", ids[6], 2, new ProcedureRank(ProcedureLevel.ManualParent, 1, false), ProcedureSources.Manual, false, rows);
+        var slot = new RecordRuleSlot(ids[9], "BASE-1", ids[7], parent, row);
+        var texts = new Dictionary<string, string>
+        {
+            ["link"] = parent.ToString(),
+            ["version"] = version.ToString(),
+            ["rule"] = new ResolvedRule(version, applied, slot).ToString(),
+            ["excludedRule"] = new ExcludedRule(version, applied, rows, 1, ReplacedByRecordRule: true).ToString(),
+            ["excludedProcedure"] = new ExcludedProcedure(ids[8], "Billing guidelines", rows).ToString(),
+        };
+
+        foreach (var (name, text) in texts)
+        {
+            text.Should().NotBeNullOrEmpty(name);
+            foreach (var id in ids)
+            {
+                text.Should().NotContainEquivalentOf(id.ToString("D"), name).And.NotContainEquivalentOf(id.ToString("N"), name);
+            }
+
+            text.Should().NotContain("SECRET", name).And.NotContain(reason, name).And.NotContain(MatterName, name).And.NotContain("incrementHours", name);
+        }
+
+        texts["link"].Should().Contain(Matter).And.Contain("Distance = 1");
+        texts["version"].Should().Contain("INC-1").And.Contain("VersionNumber = 3").And.Contain("100000005");
+        texts["rule"].Should().Contain("INC-1").And.Contain("Billing guidelines").And.Contain("ManualParent").And.Contain("RecordRule = True");
+        texts["excludedRule"].Should().Contain("INC-1").And.Contain("Billing guidelines").And.Contain("ReplacedByRecordRule = True").And.Contain("Overrides = 1");
+        texts["excludedProcedure"].Should().Contain("Billing guidelines").And.Contain("Overrides = 1");
+    }
+
     [Fact(DisplayName = "082b K2: ToString of the records a resolution returns, built over a Secure matter's override with a reason, prints no id or reason")]
     public async Task ToString_OfResolvedRecords_PrintsNoId()
     {
