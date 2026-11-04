@@ -612,6 +612,77 @@ public sealed class ProcedureResolverTests
         resolution.RulesOn(Jun1).Rules.Single().Version.VersionNumber.Should().Be(3);
     }
 
+    [Fact(DisplayName = "082b record rules (D-203 (8b), same second): a version written in the Exclude row's own transaction counts when the two createdon stamps are equal; one a second before it does not")]
+    public async Task RecordRule_VersionWithTheSameCreatedOnAsItsExcludeRow_Counts_OneSecondEarlierDoesNot()
+    {
+        var general = Simple("GENERAL");
+        var stamp = new DateTime(2026, 1, 1, 9, 30, 15, DateTimeKind.Utc);
+        ExcludeRule(Matter, M, general.Rule, created: stamp);
+        var recordRule = AddRecordRule(Matter, M, null, general.Rule, "BRR-TIE");
+        AddRuleVersion(recordRule, null, Jan15, number: 1, basedOn: general.RuleVersion, created: stamp.AddSeconds(-1)); // an older change, a second before
+        AddRuleVersion(recordRule, null, Mar1, number: 2, basedOn: general.RuleVersion, created: stamp); // the row's own transaction: the same stamp
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var beforeV2 = resolution.RulesOn(Feb1);
+        var fromV2 = resolution.RulesOn(Mar15);
+
+        beforeV2.Rules.Single().Should().Match<ResolvedRule>(r => r.Version.PolicyVersionId == general.RuleVersion && r.RecordRule == null,
+            "the version a second older than the row is a removed change's: the base runs until the tied version's from-date");
+        fromV2.Rules.Single().Should().Match<ResolvedRule>(r => r.Version.PolicyCode == "BRR-TIE" && r.Version.VersionNumber == 2 && r.RecordRule != null);
+    }
+
+    [Theory(DisplayName = "082b record rules (re-check K2): an enabled record rule none of whose versions is in the current episode (all older than its Exclude row, or with no createdon) faults; the base never runs in its place")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RecordRule_WithNoVersionInTheCurrentEpisode_Faults(bool olderThanTheRow)
+    {
+        var general = Simple("GENERAL");
+        var rowAt = Tick();
+        ExcludeRule(Matter, M, general.Rule, created: rowAt);
+        var recordRule = AddRecordRule(Matter, M, null, general.Rule, "BRR-STALE");
+        AddRuleVersion(recordRule, null, Jan15, basedOn: general.RuleVersion, created: olderThanTheRow ? rowAt.AddMinutes(-5) : null);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var resolve = () => resolution.RulesOn(Feb1);
+
+        resolve.Should().Throw<ProcedureResolutionFaultException>().WithMessage("*none was created on or after*");
+    }
+
+    [Fact(DisplayName = "082b record rules (re-check K2, must-not-fire): a date before the current episode's first effective-from is not a fault: the episode has a version, and the base runs")]
+    public async Task RecordRule_BeforeTheEpisodesFirstEffectiveFrom_IsNotAFault()
+    {
+        var general = Simple("GENERAL");
+        var recordRule = ChangeRule(Matter, M, general.Rule, general.RuleVersion, Mar1, code: "BRR-LATER");
+        AddRuleVersion(recordRule, null, Jun1, number: 2, basedOn: general.RuleVersion, created: Tick());
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var before = resolution.RulesOn(Feb1);
+
+        before.Rules.Single().Should().Match<ResolvedRule>(r => r.Version.PolicyVersionId == general.RuleVersion && r.RecordRule == null);
+        resolution.RulesOn(Apr15).Rules.Single().Version.PolicyCode.Should().Be("BRR-LATER");
+    }
+
+    [Theory(DisplayName = "082b record rules (re-check K3): an enabled record rule found by its derived id with no Exclude row of its own faults; it is not read as a change with every version in force")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RecordRule_WithNoPairedExcludeRow_Faults(bool plainExcludeForAnotherFirmContext)
+    {
+        var general = Simple("GENERAL");
+        var firm = plainExcludeForAnotherFirmContext ? F : (Guid?)null;
+        if (plainExcludeForAnotherFirmContext)
+        {
+            ExcludeRule(Matter, M, general.Rule); // a plain Exclude for every firm: not the Firm-record change's row (its firm is F)
+        }
+
+        var recordRule = AddRecordRule(Matter, M, firm, general.Rule, "BRR-NOROW");
+        AddRuleVersion(recordRule, null, Jan15, basedOn: general.RuleVersion, created: Tick());
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var resolve = () => resolution.RulesOn(Feb1);
+
+        resolve.Should().Throw<ProcedureResolutionFaultException>().WithMessage("*no Exclude row*");
+    }
+
     [Theory(DisplayName = "082b record rules (K1): a record rule is paired by its derived id; a cleared based-on link, or one naming another rule's version, faults and is never read as a plain Exclude")]
     [InlineData(false)]
     [InlineData(true)]
@@ -721,7 +792,8 @@ public sealed class ProcedureResolverTests
     {
         var procedure = AddProcedure("Holey", ProcedureAppliesTo.AllRecords);
         AddVersion(procedure, 1, Jan1, Feb1, ProcedureEntity.VersionStatusSuperseded);
-        AddVersion(procedure, 2, Feb1, Mar1, ProcedureEntity.VersionStatusRetired);
+        var withdrawn = AddVersion(procedure, 2, Feb1, Mar1, ProcedureEntity.VersionStatusRetired);
+        AddRuleVersion(AddProcedureRule(procedure, "HOLEY-V2"), withdrawn, Feb1); // it was in force: a Published rule sits under it (D-203 (9))
         AddVersion(procedure, 3, Mar1, null);
 
         var onDate = (await Resolve(CoreRecordKind.Matter, M, F)).RulesOn(Feb15);
@@ -815,7 +887,8 @@ public sealed class ProcedureResolverTests
     public async Task RetiringTheFirstVersion_LeavesItsWindowAGap()
     {
         var procedure = AddProcedure("First retired", ProcedureAppliesTo.AllRecords);
-        AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired); // superseded on Mar 1, then retired
+        var v1 = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired); // superseded on Mar 1, then retired
+        AddRuleVersion(AddProcedureRule(procedure, "V1-RULE"), v1, Jan1); // it was in force: a Published rule sits under it (D-203 (9))
         var v2 = AddVersion(procedure, 2, Mar1, null);
         AddRuleVersion(AddProcedureRule(procedure, "V2-RULE"), v2, Mar1);
         var resolution = await Resolve(CoreRecordKind.Matter, M, F);
@@ -837,7 +910,8 @@ public sealed class ProcedureResolverTests
     public async Task TheOnlyVersionRetired_IsAGapFromItsFromDate()
     {
         var procedure = AddProcedure("Only retired", ProcedureAppliesTo.AllRecords);
-        AddVersion(procedure, 1, Feb1, null, ProcedureEntity.VersionStatusRetired);
+        var only = AddVersion(procedure, 1, Feb1, null, ProcedureEntity.VersionStatusRetired);
+        AddRuleVersion(AddProcedureRule(procedure, "ONLY-RULE"), only, Feb1); // it was in force: a Published rule sits under it (D-203 (9))
         var resolution = await Resolve(CoreRecordKind.Matter, M, F);
 
         foreach (var date in new[] { Feb1, Mar15, Jul1 })
@@ -855,9 +929,91 @@ public sealed class ProcedureResolverTests
     public async Task TheOnlyVersionRetired_WithAnEnd_IsAGapAfterTheEnd()
     {
         var procedure = AddProcedure("Only retired, ended", ProcedureAppliesTo.AllRecords);
-        AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired);
+        var only = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired);
+        AddRuleVersion(AddProcedureRule(procedure, "ENDED-RULE"), only, Jan1); // it was in force: a Published rule sits under it (D-203 (9))
 
         (await Resolve(CoreRecordKind.Matter, M, F)).RulesOn(Apr15).Gaps.Should().ContainSingle().Which.Kind.Should().Be(ProcedureGapKind.AfterLastVersion);
+    }
+
+    // ── A Retired version opens a window only if it was in force (round 2, D-203 (5a), (9)) ─────────────────
+
+    [Fact(DisplayName = "082b gaps (round 2, D-203 (9), must-fire): retiring an Active version that had Published policy versions leaves its window a gap")]
+    public async Task RetiringAnActiveVersionThatHadPublishedRules_IsAGap()
+    {
+        var procedure = AddProcedure("Retired after use", ProcedureAppliesTo.AllRecords);
+        var version = AddVersion(procedure, 1, Feb1, null, ProcedureEntity.VersionStatusRetired); // was Active, then retired
+        AddRuleVersion(AddProcedureRule(procedure, "WAS-IN-FORCE"), version, Feb1);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var inWindow = resolution.RulesOn(Mar15);
+
+        inWindow.Gaps.Should().ContainSingle().Which.Should().Match<ProcedureGap>(g =>
+            g.ProcedureId == procedure && g.Kind == ProcedureGapKind.HoleBetweenVersions);
+        inWindow.Rules.Should().BeEmpty();
+        resolution.RulesOn(Jan15).Gaps.Should().BeEmpty("work dated before the version opened is not applicable");
+    }
+
+    [Fact(DisplayName = "082b gaps (round 2, D-203 (9), must-not-fire): a dated Draft that was retired without ever being published opens no window: not applicable, no gap")]
+    public async Task RetiringANeverPublishedDatedDraft_IsNotApplicable_NoGap()
+    {
+        var procedure = AddProcedure("Discarded draft", ProcedureAppliesTo.AllRecords);
+        var discarded = AddVersion(procedure, 1, Feb1, null, ProcedureEntity.VersionStatusRetired); // a Draft with an effective-from, retired to discard it
+        AddRuleVersion(AddProcedureRule(procedure, "NEVER-PUBLISHED"), discarded, Feb1, published: false); // its rules stayed Draft
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        foreach (var date in new[] { Jan15, Feb1, Mar15, Jul1 })
+        {
+            var onDate = resolution.RulesOn(date);
+            onDate.Gaps.Should().BeEmpty($"a Draft that never governed anything holds nothing ({date})");
+            onDate.Rules.Should().BeEmpty();
+            onDate.Procedures.Should().BeEmpty();
+        }
+    }
+
+    [Theory(DisplayName = "082b gaps (round 2, D-203 (9)): a Draft v2 dated before Active v1, refused at publish and then retired, raises no gap; the same version with a Published rule (control) does")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ADraftDatedBeforeTheActiveVersion_RefusedAtPublishThenRetired_RaisesNoGap(bool hadPublishedRule)
+    {
+        var procedure = AddProcedure("Refused draft", ProcedureAppliesTo.AllRecords);
+        var v1 = AddVersion(procedure, 1, Mar1, null); // Active from Mar 1
+        AddRuleVersion(AddProcedureRule(procedure, "V1-RULE"), v1, Mar1);
+        var v2 = AddVersion(procedure, 2, Jan1, null, ProcedureEntity.VersionStatusRetired); // dated Jan 1: publish refused (overlap), so it was retired
+        AddRuleVersion(AddProcedureRule(procedure, "V2-RULE"), v2, Jan1, published: hadPublishedRule);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var early = resolution.RulesOn(Jan15);
+        var current = resolution.RulesOn(Apr15);
+
+        current.Gaps.Should().BeEmpty();
+        current.Rules.Select(r => r.Version.PolicyCode).Should().Equal("V1-RULE");
+        if (hadPublishedRule)
+        {
+            early.Gaps.Should().ContainSingle(because: "control: a version that was in force and was withdrawn leaves its window a gap").Which.Kind
+                .Should().Be(ProcedureGapKind.HoleBetweenVersions);
+        }
+        else
+        {
+            early.Gaps.Should().BeEmpty("work dated before Active v1 opened is not applicable; the discarded Draft opened nothing");
+            early.Rules.Should().BeEmpty();
+            early.Procedures.Should().BeEmpty();
+        }
+    }
+
+    [Theory(DisplayName = "082b gaps (round 2, D-203 (9)): the gap kind counts a Retired version's window only when it was in force (hole) and reads a discarded Draft's window as past the last end")]
+    [InlineData(true, ProcedureGapKind.HoleBetweenVersions)]
+    [InlineData(false, ProcedureGapKind.AfterLastVersion)]
+    public async Task GapKind_CountsARetiredWindow_OnlyWhenTheVersionWasInForce(bool hadPublishedRule, ProcedureGapKind expected)
+    {
+        var procedure = AddProcedure("Window kinds", ProcedureAppliesTo.AllRecords);
+        var v1 = AddVersion(procedure, 1, Jan1, Feb1, ProcedureEntity.VersionStatusSuperseded);
+        AddRuleVersion(AddProcedureRule(procedure, "V1-RULE"), v1, Jan1);
+        var v2 = AddVersion(procedure, 2, Feb1, Mar1, ProcedureEntity.VersionStatusRetired);
+        AddRuleVersion(AddProcedureRule(procedure, "V2-RULE"), v2, Feb1, published: hadPublishedRule);
+
+        var onDate = (await Resolve(CoreRecordKind.Matter, M, F)).RulesOn(Feb15);
+
+        onDate.Gaps.Should().ContainSingle().Which.Kind.Should().Be(expected);
     }
 
     [Theory(DisplayName = "082b gaps (F1, ontology-r1 D-203): retiring the whole Procedure is a normal end of life: no gap, no rules, assigned or not")]
@@ -886,10 +1042,11 @@ public sealed class ProcedureResolverTests
     {
         var procedure = AddProcedure("Mixed", ProcedureAppliesTo.AllRecords);
         var v1 = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusSuperseded);
-        AddVersion(procedure, 2, Mar1, May1, ProcedureEntity.VersionStatusRetired);
+        var v2 = AddVersion(procedure, 2, Mar1, May1, ProcedureEntity.VersionStatusRetired);
         var v3 = AddVersion(procedure, 3, May1, null);
         var rule = AddProcedureRule(procedure, "MIXED");
         var r1 = AddRuleVersion(rule, v1, Jan1);
+        AddRuleVersion(rule, v2, Mar1, number: 2); // the retired version was in force: a Published rule sits under it (D-203 (9))
         var r3 = AddRuleVersion(rule, v3, May1, number: 3);
         var resolution = await Resolve(CoreRecordKind.Matter, M, F);
 
