@@ -444,6 +444,14 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 
   Ontology prefers option 1 over option 2. Option 2 can leave an append-only record, and possibly an Acted Signal, for a firm assignment that was never applied, plus a scope that does not match the firm.
   uac-r2 (2026-11-04) accepts option 1's window, in which the firm sees the submission before the record exists. They add a fifth condition: the census or schema check reports "applied, no record yet" rows with their age, INFO inside a set window and FAIL after it. **The owner chose option 1** (2026-11-04, in uac-r2's session, relayed by uac-r2 `-20`). The owner also wants an ontology K-3 review of the 095d diff before merge. AI re-run rule (owner): re-run the AI only where a rule's outcome can change with it.
+- **Amended 2026-11-04 (095d-1 facts, ebilling §16.5 at `0a37980d9d`).**
+  - **The Signal is shared.** `BillingFindingSignalMapper.MapGroup` writes one SubmissionIntegrity Signal per (policy, invoice) group, so firm_missing shares it with the invoice-number mismatch and the coding notes. The hold also lifts only after the 095d-2 re-run clears all three markers.
+  - **So the assign-firm decision closes no Signal.** Its `ResolvedSignalIds` is empty. Its facts name the group's Signal id and say that the firm_missing reason was cleared by the decision. An append-only record must not claim to resolve a Signal that may stay open for other notes.
+  - **The 095d-2 re-run re-maps the group.**
+    - If reasons remain, the same Signal stays open with its title recomputed.
+    - If none remain, the Signal closes as `ConditionCleared`, with the record's id in the close facts for audit.
+  - **The earlier "closed as Acted and linked to the record" no longer applies to the shared Signal.** Condition 4 holds: nothing closes before the record.
+  - **Stored-file renames go inside the apply transaction.** `sprk_storedfile.sprk_name` is a Dataverse column, and `StoredFileBlobName.Build` uses ids only (`StoredFileContracts.cs:298-305`). This replaces ontology's earlier "rename after the record" addition, and the `files` failedStep and its census row are not needed.
 
 ## D-202 — Record-rule policy code: `BRR-{recordRulePolicyId:N}` (ontology position, 2026-11-03)
 
