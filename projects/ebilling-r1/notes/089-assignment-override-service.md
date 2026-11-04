@@ -459,6 +459,49 @@ Against the first acceptance criterion: the team goes in Spaarke Business Unit 1
 
 The Pester must-fire cases (Global, an extra privilege, a member without the marker, a member homed in another customer's unit, a team in the root, a team in Secure Record, a bad config depth) each fail closed against the shipped script; the must-not-fire case (two billing-admin members, one homed in a child unit) passes `-Verify` with exit 0.
 
+### Gates
+
+| Run | Result |
+|---|---|
+| ArchTests `FullyQualifiedName~RestrictedContentOwnerRoleGuard` | 74/74 (23 new: 18 must-fire documents, 1 script must-fire, the live-file must-not-fire, the named-break control, the member-privilege pin, the reach test) |
+| ArchTests (full) | 1974/1974 |
+| Pester 5.7.1 `tests/scripts/Set-CustomerOwnerTeams.Tests.ps1` | 12/12 (4 existing, 8 new) |
+| Pester 6.2.0 (local) | does not load any container on this machine (`Export-ModuleMember can only be called from inside a module`, also for the untouched `Set-ProductConfigurationReadDepth.Tests.ps1`): the known 6.x problem `ci-standalone-checks.yml` names; CI's job `owner-teams-script-tests` pins 5.7.1, the version run here |
+| `-WhatIf` on dev | exit 0, plan above (re-run after the member-unit check: identical output) |
+| BFF code | not touched (no publish-size or CVE delta to report) |
+
+### Known limits
+
+- **K: the member check is point in time.** A member who later loses Billing Administrator keeps Read on the rules until someone runs `-Verify` (or H13 re-checks, once provisioning's H7c ships). The owner teams' membership checks work the same way. Not changed here.
+- **K: `RetrieveUserPrivileges` counts the marker at any depth and through any team.** A user who holds `prvWritesprk_ruleset` some other way passes the member check. The BFF's own billing-admin check (`CallerHoldsPrivilegeAsync`) answers the same way, so the two agree.
+- **K: the root copy of the role exists** (Dataverse creates roles in the root). It is assigned to nobody and `-Verify` reports any assignment of it.
+
+### 089d: uac-r2 review (2026-11-04)
+
+uac-r2 approved 089d (43a5b37051) with two binding notes. Both are to be done in the 089d fix round.
+
+1. **Pin the role's member-privilege inheritance.** Set "Member's privilege inheritance" to Team privileges only (`isinherited` = 0).
+   - `-Apply` creates or sets the role with `isinherited` = 0.
+   - `-Verify` fails if it is 1.
+   - Add a guard test or a Pester case for each of these.
+   - Why: the isolation argument depends on the team's Deep being evaluated from the team's business unit.
+2. **A live proof is required before the first customer with a child unit relies on this.** A member homed in a child unit must be able to read a top-unit Billing rule, and must NOT be able to read a rule owned by Secure Record Owners.
+   - Add this to Phase 7a of the deployment guide and to the provisioning notice.
+   - For a proof on dev earlier, a test child unit under BU1 is needed, which is a live change and needs the owner's go.
+
+**Who adds members:** this is an owner question. The proposed default is that an operator adds each child-unit billing admin following guide Phase 7a, and `-Verify` catches mistakes.
+
+### 089d: owner answers and an alternative (2026-11-04)
+
+- **Members (owner):** Billing Admin is a security role explicitly assigned to a limited set of users. An operator adds billing admins by hand; the default stands.
+- **Owner's question:** why use a team rather than the role assignment? On dev, `OrgDBOrgSettings.EnableOwnershipAcrossBusinessUnits` is true, so a role can be assigned to a user in another business unit's context.
+- **Option R (no team):** assign "Billing Rule Reader" (Read at Deep on `sprk_policy`, `isinherited`=0) directly to each child-unit billing admin, in the customer top unit's context.
+  - The isolation argument is the same as for the team.
+  - R depends on two things the team does not: the org setting must be on in every customer environment, and the uac-r2 census must model role assignments made in another unit's context.
+  - Do not add the Read to the existing Billing Admin role. Re-homing that role's assignment would move all its other privileges as well.
+- **Status:** sent to uac-r2. The 089d fix round (adversarial pass 1: the `isinherited` pin, the live-proof gate in the guide, removing the operator straight after the team is created, the file-pattern wording) is held until uac-r2 chooses between the team and R.
+- **If R is chosen (provisioning-09 asked):** should provisioning only CHECK `EnableOwnershipAcrossBusinessUnits` (an H0/H13 gate that fails when it is off), or SET it during stamp setup? Setting it is an org-wide Dataverse write on every stamp, so the owner must approve that design. It is not yet known whether the setting is on in ACME.
+
 ## 089c - change rule and remove with preview (2026-11-04)
 
 Branch `task/ebilling-089c`, from `work/ebilling-r1` at `1848d67bdb`. Not merged, not pushed. No Dataverse write, no live call, no deploy.
@@ -569,12 +612,16 @@ Each change was restored afterwards, and `cmp` confirmed the file was identical.
 
 | Run | Result |
 |---|---|
-| ArchTests `FullyQualifiedName~RestrictedContentOwnerRoleGuard` | 74/74 (23 new: 18 must-fire documents, 1 script must-fire, the live-file must-not-fire, the named-break control, the member-privilege pin, the reach test) |
-| ArchTests (full) | 1974/1974 |
-| Pester 5.7.1 `tests/scripts/Set-CustomerOwnerTeams.Tests.ps1` | 12/12 (4 existing, 8 new) |
-| Pester 6.2.0 (local) | does not load any container on this machine (`Export-ModuleMember can only be called from inside a module`, also for the untouched `Set-ProductConfigurationReadDepth.Tests.ps1`): the known 6.x problem `ci-standalone-checks.yml` names; CI's job `owner-teams-script-tests` pins 5.7.1, the version run here |
-| `-WhatIf` on dev | exit 0, plan above (re-run after the member-unit check: identical output) |
-| BFF code | not touched (no publish-size or CVE delta to report) |
+| Build: BFF and Sprk.Bff.Api.Tests | 0 warnings, 0 errors |
+| Unit filter `ProcedureAssignment\|OperationAccessPolicy\|RuleSet\|Procedure` | 1008 passed, 0 failed |
+| ArchTests filter `RouteAuthorizationGuard\|RecordOwnerAssignmentCensus\|FinanceStepZero\|ProcedureRolePrivilege\|ProcedureRetireSelection` | 172 passed |
+| Spaarke.ArchTests (full) | 1953/1953 |
+| `dotnet list package --vulnerable --include-transitive` (BFF) | none |
+| Publish size (`-c Release`, uncompressed, 192 files each) | See below |
+
+Publish size, no package added:
+- **Against a fresh master** (`aef86b89f7`, 136,945,460 B): this branch is 137,238,892 B, **+293,432 B**. Most of that is ebilling-r1 work not yet merged to master.
+- **This task alone**, against the base `1848d67bdb` (137,147,136 B): **+91,756 B** (dll +72,704, pdb +18,420).
 
 ### 089c pass-1 review (2026-11-04)
 
@@ -591,49 +638,6 @@ Branch `task/ebilling-089c-fix1`, from `work/ebilling-r1` at `0b3abd3e38`. No Da
 
 - **K3 (082 must).** `sprk_excludedpolicy` is Cascade (`scripts/ebilling/Deploy-EbillingProcedureSchema.ps1:589`). Deleting the base rule deletes the Exclude row, which strands an enabled record rule that no API can switch off. Retiring a Procedure also leaves the record rules made from its rules enabled. 082's resolver and the retire count must handle both.
 - **K4 (082 must).** The record set's "visible to firms" flag is taken from the first rule changed (`ProcedureAssignmentService.cs:544`, `:1173`). Nothing reads it today, because `LoadRuleSetAsync` hides record-scoped sets. Any later firm-facing reader must not skip that hide.
-
-### Known limits
-
-- **K: the member check is point in time.** A member who later loses Billing Administrator keeps Read on the rules until someone runs `-Verify` (or H13 re-checks, once provisioning's H7c ships). The owner teams' membership checks work the same way. Not changed here.
-- **K: `RetrieveUserPrivileges` counts the marker at any depth and through any team.** A user who holds `prvWritesprk_ruleset` some other way passes the member check. The BFF's own billing-admin check (`CallerHoldsPrivilegeAsync`) answers the same way, so the two agree.
-- **K: the root copy of the role exists** (Dataverse creates roles in the root). It is assigned to nobody and `-Verify` reports any assignment of it.
-
-### 089d: uac-r2 review (2026-11-04)
-
-uac-r2 approved 089d (43a5b37051) with two binding notes. Both are to be done in the 089d fix round.
-
-1. **Pin the role's member-privilege inheritance.** Set "Member's privilege inheritance" to Team privileges only (`isinherited` = 0).
-   - `-Apply` creates or sets the role with `isinherited` = 0.
-   - `-Verify` fails if it is 1.
-   - Add a guard test or a Pester case for each of these.
-   - Why: the isolation argument depends on the team's Deep being evaluated from the team's business unit.
-2. **A live proof is required before the first customer with a child unit relies on this.** A member homed in a child unit must be able to read a top-unit Billing rule, and must NOT be able to read a rule owned by Secure Record Owners.
-   - Add this to Phase 7a of the deployment guide and to the provisioning notice.
-   - For a proof on dev earlier, a test child unit under BU1 is needed, which is a live change and needs the owner's go.
-
-**Who adds members:** this is an owner question. The proposed default is that an operator adds each child-unit billing admin following guide Phase 7a, and `-Verify` catches mistakes.
-
-### 089d: owner answers and an alternative (2026-11-04)
-
-- **Members (owner):** Billing Admin is a security role explicitly assigned to a limited set of users. An operator adds billing admins by hand; the default stands.
-- **Owner's question:** why use a team rather than the role assignment? On dev, `OrgDBOrgSettings.EnableOwnershipAcrossBusinessUnits` is true, so a role can be assigned to a user in another business unit's context.
-- **Option R (no team):** assign "Billing Rule Reader" (Read at Deep on `sprk_policy`, `isinherited`=0) directly to each child-unit billing admin, in the customer top unit's context.
-  - The isolation argument is the same as for the team.
-  - R depends on two things the team does not: the org setting must be on in every customer environment, and the uac-r2 census must model role assignments made in another unit's context.
-  - Do not add the Read to the existing Billing Admin role. Re-homing that role's assignment would move all its other privileges as well.
-- **Status:** sent to uac-r2. The 089d fix round (adversarial pass 1: the `isinherited` pin, the live-proof gate in the guide, removing the operator straight after the team is created, the file-pattern wording) is held until uac-r2 chooses between the team and R.
-- **If R is chosen (provisioning-09 asked):** should provisioning only CHECK `EnableOwnershipAcrossBusinessUnits` (an H0/H13 gate that fails when it is off), or SET it during stamp setup? Setting it is an org-wide Dataverse write on every stamp, so the owner must approve that design. It is not yet known whether the setting is on in ACME.
-
-| Build: BFF and Sprk.Bff.Api.Tests | 0 warnings, 0 errors |
-| Unit filter `ProcedureAssignment\|OperationAccessPolicy\|RuleSet\|Procedure` | 1008 passed, 0 failed |
-| ArchTests filter `RouteAuthorizationGuard\|RecordOwnerAssignmentCensus\|FinanceStepZero\|ProcedureRolePrivilege\|ProcedureRetireSelection` | 172 passed |
-| Spaarke.ArchTests (full) | 1953/1953 |
-| `dotnet list package --vulnerable --include-transitive` (BFF) | none |
-| Publish size (`-c Release`, uncompressed, 192 files each) | See below |
-
-Publish size, no package added:
-- **Against a fresh master** (`aef86b89f7`, 136,945,460 B): this branch is 137,238,892 B, **+293,432 B**. Most of that is ebilling-r1 work not yet merged to master.
-- **This task alone**, against the base `1848d67bdb` (137,147,136 B): **+91,756 B** (dll +72,704, pdb +18,420).
 
 ### Decisions and deviations
 
@@ -679,3 +683,34 @@ The stop fires, as expected. No evaluation closes the open Signals that the base
 
 - The STOP above: choose (a) or (b).
 - Confirm deviation 1 (404, not 409) and deviation 2 (Write on policy for change).
+
+### 089c pass-2 review (2026-11-04)
+
+Branch `task/ebilling-089c-fix2`, from `work/ebilling-r1` at `916e2f80ba`. No Dataverse write.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | **Partly retired Procedure (fixed).** The change's in-force check never read the base set's `sprk_procedure` or that Procedure's status. `ProcedureService.RetireAsync` writes in chunks (`ProcedureService.cs:938-950`), so a failed later chunk leaves the Procedure retired while some of its rules stay `sprk_enabled=true`. | `LoadRuleAsync` (`ProcedureAssignmentService.cs`) takes `readProcedure`, which only the change passes. It reads the set's `sprk_procedure` and that Procedure's `sprk_status`, against `ProcedureEntity.StatusRetired`, the constant `AssignProcedureAsync` refuses a retired Procedure with. `BaseRule.ProcedureRetired` ends the in-force check, whatever the rule's flags say: 409 `assignment.rule_not_in_force`. A fault reading the Procedure throws `ReadFailedException` and is the existing 503 `assignment.read_failed`. A set with no Procedure reads none and behaves as before. Assign and Exclude are unchanged (`Exclude_StillAcceptsARuleOfARetiredProcedure`). |
+| 2 | **Removal routes read the row twice (fixed).** `RequireReadOnTheOverridesSubject` passed the request on when its subject lookup found no row, and `PreviewRemovalAsync` / `RemoveAsync` read the row again and acted on whatever was there. | The filter answers a null subject itself with `Map(ProcedureAssignmentService.OverrideNotFound<object>(), http)`, the answer an unreadable subject already gets, so the bytes are identical. The request never reaches the service. Override ids are derived from the subject, so a row created later at that id has the subject that would have been checked. The ledger citations for the filter (`RouteAuthorizationGuardTests.Ledger.cs`) moved to `:364`, `:375`, `:376`. |
+| 3 | **The notes record was wrong (fixed).** Merge `85c835dad0` mixed 089d's text into 089c's section. | Reorganised: each item is back under its own task. 089d's gate rows, known limits, uac-r2 review and owner answers follow 089d's Seeding proofs. 089c's gate table has its header, and its Decisions, Known limits, STOP, answers and questions follow it. No text was lost (checked against the merge's two parents) and none was added. |
+| 4 | **K1: a rule dropped by a newer Procedure Version (082 must-item and owner question; not changed here).** Such a rule stays enabled and keeps its old current version (`RuleSetService.cs` about `:2195-2196`), so the change still accepts it (`ProcedureAssignmentService.cs` about `:505`). For a record pinned to the old version the rule is still in force. Whether to refuse the change for records that are not pinned depends on 082's pin resolution. | Left for 082. Owner question: should a change of a rule that the Procedure's latest version no longer carries be refused for a record that is not pinned to an older version? |
+| 5 | **K2: the Location header of a create route (follow-up).** The change route answers `Location: .../rule-overrides/change/{id}` (`ProcedureAssignmentEndpoints.cs` about `:119`, from `Created`); the resource is `.../overrides/{id}`. 089b's exclude route does the same. | Not changed here. One later change should fix every create route together (assign, exclude and change, three cores each) and pin it with a test. |
+
+**Seeding and pre-fix proofs (each restored; `cmp` confirmed the file identical)**
+
+| Change | Result |
+|---|---|
+| Item 1: `ProcedureRetired: false` removed from the in-force check | `Change_ARuleOfARetiredProcedure_Is409_WhateverTheRuleFlagsSay`: the retired case failed (status 0, Done instead of 409); the active-Procedure case still passed |
+| Item 2: the filter's null subject passes on again (`return await next(context)`), the old behaviour | `Removal_OfAnUnknownRow_IsTheFilters404_AndTheServiceNeverRuns`: 6 of 6 cases failed. The byte-identical test (`Removal_OfAnUnreadableSubject_IsIdenticalToAMissingRow`) passed |
+
+**Tests added or changed**
+
+- `ProcedureAssignmentServiceTests`: a theory (retired Procedure and enabled rule: 409 and no writes; active Procedure: changed); a set with no Procedure is changed and no `sprk_procedure` row is read; a Procedure read fault is 503 with no write; Exclude still accepts a rule of a retired Procedure. The existing `Change_WhenAReadFaults_Is503` now names the record-set read only, because the base rule's set read also selects `sprk_procedure` now.
+- `ProcedureAssignmentEndpointsTests`: `Removal_OfAnUnknownRow_IsTheServices404` became `Removal_OfAnUnknownRow_IsTheFilters404_AndTheServiceNeverRuns` (404 `assignment.override_not_found`, and neither `RemoveAsync` nor `PreviewRemovalAsync` is called).
+
+### 089c fix rounds
+
+| Round | Build | Unit (`ProcedureAssignment\|RuleSetService`) | ArchTests (`RecordOwnerAssignmentCensus\|RouteAuthorizationGuard\|ProcedureRolePrivilege\|FinanceStepZero`) | Publish size |
+|---|---|---|---|---|
+| Fix round 1 (pass-1 review, `task/ebilling-089c-fix1`) | 0 errors | 578/578 | 168/168 | Not measured: no package or registration changed |
+| Fix round 2 (pass-2 review, `task/ebilling-089c-fix2`) | 0 warnings, 0 errors | 583/583 (5 new cases) | 168/168 | Not measured: no package or registration changed (`LoadRuleAsync` gained one optional parameter and a Procedure read) |

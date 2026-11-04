@@ -315,7 +315,7 @@ public static class ProcedureAssignmentEndpoints
     /// right of Dataverse as the caller through <see cref="CallerReadCheck"/> (the same Record-path question the assign and exclude routes
     /// declare). Refused is the SAME 404 <c>assignment.override_not_found</c> a missing row gets (override ids are derived, so a different
     /// answer would show whether an override exists for a subject the caller cannot Read); a fault reading the row, or no answer, is 403
-    /// <c>system_failure</c>. A row that is not this record's passes on, and the service answers its 404 (the record check has already run).
+    /// <c>system_failure</c>. No row, or a row that is not this record's, is answered by the filter with the same 404 and the request never reaches the service (the record check has already run).
     /// Added after the route's two <c>AddFinanceAuthorizationFilter</c> declarations (step 0, the record, the billing-admin privileges) and
     /// after <c>RequireEbillingEnabled</c>, so a switched-off eBilling answers 503 before this filter reads Dataverse.
     /// </summary>
@@ -353,7 +353,10 @@ public static class ProcedureAssignmentEndpoints
 
             if (subject is null)
             {
-                return await next(context);
+                // No row (or not this record's): the filter answers, so the service never reads the row a second time and acts on whatever is
+                // there by then. Override ids are derived from the subject, so a row created later at this id has the subject that would have
+                // been checked here (089c pass 2).
+                return Map(ProcedureAssignmentService.OverrideNotFound<object>(), http);
             }
 
             var caller = new InvoiceContextService.InvoiceCaller(
