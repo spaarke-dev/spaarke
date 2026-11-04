@@ -42,15 +42,21 @@ public sealed class ProcedureResolverTests
 
     private static readonly DateOnly Jan1 = new(2026, 1, 1);
     private static readonly DateOnly Jan15 = new(2026, 1, 15);
+    private static readonly DateOnly Jan20 = new(2026, 1, 20);
     private static readonly DateOnly Feb1 = new(2026, 2, 1);
     private static readonly DateOnly Feb15 = new(2026, 2, 15);
     private static readonly DateOnly Mar1 = new(2026, 3, 1);
     private static readonly DateOnly Mar15 = new(2026, 3, 15);
+    private static readonly DateOnly Apr1 = new(2026, 4, 1);
     private static readonly DateOnly Apr15 = new(2026, 4, 15);
+    private static readonly DateOnly May1 = new(2026, 5, 1);
+    private static readonly DateOnly Jun1 = new(2026, 6, 1);
+    private static readonly DateOnly Jul1 = new(2026, 7, 1);
 
     private readonly SecureChildShareWorld _world = SecureChildShareWorld.Standard();
     private readonly Mock<IGenericEntityService> _entities;
     private readonly Dictionary<Guid, Guid> _setOf = new();
+    private DateTime _created = new(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc);
 
     public ProcedureResolverTests()
     {
@@ -108,20 +114,23 @@ public sealed class ProcedureResolverTests
         return id;
     }
 
-    private Guid AddRule(Guid set, string code, bool enabled = true)
+    /// <summary>The next <c>createdon</c>: each call is a minute later, so a later write is always the newer one.</summary>
+    private DateTime Tick() => _created = _created.AddMinutes(1);
+
+    private Guid AddRule(Guid set, string code, bool enabled = true, Guid? id = null)
     {
-        var id = Guid.NewGuid();
-        _world.Add(Policy, id,
+        id ??= Guid.NewGuid();
+        _world.Add(Policy, id.Value,
             ("sprk_policycode", code), ("sprk_ruleset", Ref(RuleSet, set)), ("sprk_enabled", enabled), ("statecode", Option(0)),
             (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)));
-        return id;
+        return id.Value;
     }
 
     private Guid AddProcedureRule(Guid procedure, string code, bool enabled = true) => AddRule(_setOf[procedure], code, enabled);
 
     private Guid AddRuleVersion(
         Guid policy, Guid? procedureVersion, DateOnly from, int number = 1, bool published = true, Guid? basedOn = null,
-        RuleType type = RuleType.ApprovedRate)
+        RuleType type = RuleType.ApprovedRate, DateTime? created = null)
     {
         var id = Guid.NewGuid();
         var columns = new List<(string, object)>
@@ -134,6 +143,7 @@ public sealed class ProcedureResolverTests
         };
         if (procedureVersion is { } pv) columns.Add((RuleSetService.ProcedureVersionColumn, Ref(ProcedureEntity.VersionEntity, pv)));
         if (basedOn is { } b) columns.Add((ProcedureAssignmentService.BasedOnVersionColumn, Ref(PolicyVersion, b)));
+        if (created is { } c) columns.Add(("createdon", c));
         _world.Add(PolicyVersion, id, columns.ToArray());
         return id;
     }
@@ -160,7 +170,7 @@ public sealed class ProcedureResolverTests
         return AddRow(table, record, columns.ToArray());
     }
 
-    private Guid ExcludeRule(string? table, Guid record, Guid policy, Guid? firm = null)
+    private Guid ExcludeRule(string? table, Guid record, Guid policy, Guid? firm = null, DateTime? created = null)
     {
         var columns = new List<(string, object)>
         {
@@ -168,12 +178,14 @@ public sealed class ProcedureResolverTests
             (ProcedureAssignmentEntity.ModeColumn, Option(ProcedureAssignmentEntity.ModeExcluded)),
         };
         if (firm is { } f) columns.Add((ProcedureAssignmentEntity.FirmColumn, Ref("sprk_organization", f)));
+        if (created is { } c) columns.Add(("createdon", c));
         return AddRow(table, record, columns.ToArray());
     }
 
+    /// <summary>The record's record-scoped set under the id the BFF derives for it (one per core table, record and firm or none).</summary>
     private Guid AddRecordSet(string? table, Guid record, Guid? firm, int? scope = null)
     {
-        var id = Guid.NewGuid();
+        var id = table is null ? Guid.NewGuid() : ProcedureAssignmentService.RecordRuleSetIdFor(table, record, firm);
         var columns = new List<(string, object)>
         {
             ("sprk_scope", Option(scope ?? (firm is null ? RecordRuleSet.ScopeRecord : RecordRuleSet.ScopeFirmRecord))),
@@ -186,13 +198,24 @@ public sealed class ProcedureResolverTests
         return id;
     }
 
-    /// <summary>A changed rule (089c): the Exclude row of the base rule plus a record rule based on <paramref name="baseVersion"/>.</summary>
-    private Guid ChangeRule(string table, Guid record, Guid basePolicy, Guid baseVersion, DateOnly from, Guid? firm = null, string code = "BRR-1")
+    /// <summary>The record rule of <paramref name="basePolicy"/> in the record's set, under the id the BFF derives for it (089c, D-202).</summary>
+    private Guid AddRecordRule(string table, Guid record, Guid? firm, Guid basePolicy, string code)
     {
-        ExcludeRule(table, record, basePolicy, firm);
         var set = AddRecordSet(table, record, firm);
-        var recordRule = AddRule(set, code);
-        AddRuleVersion(recordRule, null, from, basedOn: baseVersion);
+        return AddRule(set, code, id: ProcedureAssignmentService.RecordRulePolicyIdFor(set, basePolicy));
+    }
+
+    /// <summary>
+    /// A changed rule (089c): the Exclude row of the base rule plus the record rule's first version based on <paramref name="baseVersion"/>
+    /// (null: the link is cleared), written at <paramref name="created"/> (default: the next minute) in one transaction as the BFF writes it.
+    /// </summary>
+    private Guid ChangeRule(
+        string table, Guid record, Guid basePolicy, Guid? baseVersion, DateOnly from, Guid? firm = null, string code = "BRR-1", DateTime? created = null)
+    {
+        var at = created ?? Tick();
+        ExcludeRule(table, record, basePolicy, firm, at);
+        var recordRule = AddRecordRule(table, record, firm, basePolicy, code);
+        AddRuleVersion(recordRule, null, from, basedOn: baseVersion, created: at);
         return recordRule;
     }
 
@@ -244,6 +267,32 @@ public sealed class ProcedureResolverTests
 
         (await CodesOn(CoreRecordKind.Matter, M, G, Feb1)).Should().BeEmpty("the Procedure names firm F");
         (await CodesOn(CoreRecordKind.Matter, M, F, Feb1)).Should().Equal("ASSIGNED-F");
+    }
+
+    [Fact(DisplayName = "082b sources (F3, O-20): an All-records Procedure naming firm F applies to F's invoices and not to G's, on a matter and with no core record")]
+    public async Task AllRecordsProcedure_NamingAFirm_AppliesOnlyToThatFirmsInvoices()
+    {
+        Simple("ALL-F", ProcedureAppliesTo.AllRecords, F);
+        var noCoreF = await ProcedureResolver.ReadAsync(_entities.Object, NullLogger.Instance, null, F, CancellationToken.None);
+        var noCoreG = await ProcedureResolver.ReadAsync(_entities.Object, NullLogger.Instance, null, G, CancellationToken.None);
+
+        (await CodesOn(CoreRecordKind.Matter, M, F, Feb1)).Should().Equal("ALL-F");
+        (await CodesOn(CoreRecordKind.Matter, M, G, Feb1)).Should().BeEmpty("the Procedure names firm F");
+        noCoreF.RulesOn(Feb1).Rules.Select(r => r.Version.PolicyCode).Should().Equal("ALL-F");
+        noCoreG.RulesOn(Feb1).Rules.Should().BeEmpty();
+        noCoreG.RulesOn(Feb1).Procedures.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "082b sources (F3, O-20): an All-records Procedure naming firm F that is also assigned on the record still does not apply to G's invoice")]
+    public async Task AllRecordsProcedure_NamingAFirm_AlsoAssigned_StillAppliesOnlyToThatFirmsInvoices()
+    {
+        var (procedure, _, _, _) = Simple("ALL-F", ProcedureAppliesTo.AllRecords, F);
+        Assign(Matter, M, procedure);
+
+        (await CodesOn(CoreRecordKind.Matter, M, G, Feb1)).Should().BeEmpty("the Procedure names firm F, whichever source brings it");
+        var onF = (await Resolve(CoreRecordKind.Matter, M, F)).RulesOn(Feb1);
+        onF.Rules.Select(r => r.Version.PolicyCode).Should().Equal("ALL-F");
+        onF.Procedures.Single().Sources.Should().Be(ProcedureSources.AllRecords | ProcedureSources.Manual);
     }
 
     [Fact(DisplayName = "082b sources: a Procedure assigned on M applies on P (d1) and does not apply on W1 under P (no second hop)")]
@@ -493,16 +542,94 @@ public sealed class ProcedureResolverTests
         var rv = AddVersion(retired, 1, Jan1, null);
         var retiredRule = AddProcedureRule(retired, "RETIRED");
         ChangeRule(Matter, M, retiredRule, AddRuleVersion(retiredRule, rv, Jan1), Jan1, code: "BRR-RETIRED");
-        var set = AddRecordSet(Matter, M, G);
-        AddRuleVersion(AddRule(set, "BRR-DELETED-BASE"), null, Jan1, basedOn: Guid.NewGuid());
+        AddRuleVersion(AddRecordRule(Matter, M, G, Guid.NewGuid(), "BRR-DELETED-BASE"), null, Jan1, basedOn: Guid.NewGuid(), created: Tick());
 
         (await CodesOn(CoreRecordKind.Matter, M, F, Feb1)).Should().BeEmpty();
         (await CodesOn(CoreRecordKind.Matter, M, G, Feb1)).Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "082b record rules (D-203 must-fire / must-not-fire): on an earlier date a change's Exclude keeps its base, while a plain Exclude of another rule still removes its base")]
+    public async Task OnAnEarlierDate_TheChangeKeepsItsBase_AndAPlainExcludeStillRemovesIt()
+    {
+        var changed = Simple("CHANGED");
+        var plain = Simple("PLAIN");
+        ChangeRule(Matter, M, changed.Rule, changed.RuleVersion, Mar1, code: "BRR-C");
+        ExcludeRule(Matter, M, plain.Rule);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var early = resolution.RulesOn(Feb15);
+        early.Rules.Select(r => r.Version.PolicyCode).Should().Equal("CHANGED");
+        early.ExcludedRules.Should().ContainSingle().Which.Should().Match<ExcludedRule>(e => e.Version.PolicyCode == "PLAIN" && !e.ReplacedByRecordRule);
+
+        var later = resolution.RulesOn(Mar15);
+        later.Rules.Select(r => r.Version.PolicyCode).Should().Equal("BRR-C");
+        later.ExcludedRules.Select(e => e.Version.PolicyCode).Should().BeEquivalentTo("CHANGED", "PLAIN");
+    }
+
+    [Fact(DisplayName = "082b record rules (F1, D-203 (5)-(7)): a change removed and made again: the removed change's version never comes back; the base runs until the new version's from-date")]
+    public async Task RecordRule_RemovedAndMadeAgain_NeverRevivesTheRemovedVersion()
+    {
+        var general = Simple("GENERAL");
+        // Episode 1: the change is made (v1 from Jan 15, 10%) and removed on Mar 1: the Exclude row is deleted and the record rule switched Off.
+        var first = Tick();
+        var firstRow = ExcludeRule(Matter, M, general.Rule, created: first);
+        var recordRule = AddRecordRule(Matter, M, null, general.Rule, "BRR-M");
+        AddRuleVersion(recordRule, null, Jan15, number: 1, basedOn: general.RuleVersion, created: first);
+        _world.Remove(ProcedureAssignmentEntity.Entity, firstRow);
+
+        // Episode 2: the same rule is changed again on Jun 1 (v2, 5%): a new Exclude row, the same record rule switched On, a new version.
+        var second = Tick();
+        ExcludeRule(Matter, M, general.Rule, created: second);
+        AddRuleVersion(recordRule, null, Jun1, number: 2, basedOn: general.RuleVersion, created: second);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        foreach (var date in new[] { Jan20, Apr1 })
+        {
+            var onDate = resolution.RulesOn(date);
+            onDate.Rules.Should().ContainSingle(because: $"{date}").Which.Should().Match<ResolvedRule>(r =>
+                r.Version.PolicyVersionId == general.RuleVersion && r.RecordRule == null, "v1 is never used once v2 exists: the base runs");
+            onDate.ExcludedRules.Should().BeEmpty();
+        }
+
+        var after = resolution.RulesOn(Jul1);
+        after.Rules.Single().Version.VersionNumber.Should().Be(2);
+        after.Rules.Single().RecordRule.Should().NotBeNull();
+        after.ExcludedRules.Single().ReplacedByRecordRule.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "082b record rules (F1, D-203 (5)-(7)): an edit inside one episode is not a removal: v2 applies between its from-date and v3's, v3 from its own")]
+    public async Task RecordRule_EditedWithinOneEpisode_AppliesEachVersionFromItsDate()
+    {
+        var general = Simple("GENERAL");
+        var recordRule = ChangeRule(Matter, M, general.Rule, general.RuleVersion, Jan15, code: "BRR-M"); // v1, the episode's first
+        AddRuleVersion(recordRule, null, Mar1, number: 2, basedOn: general.RuleVersion, created: Tick());
+        AddRuleVersion(recordRule, null, May1, number: 3, basedOn: general.RuleVersion, created: Tick());
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        resolution.RulesOn(Jan1).Rules.Single().RecordRule.Should().BeNull("before the episode's first from-date the base runs");
+        resolution.RulesOn(Feb1).Rules.Single().Version.VersionNumber.Should().Be(1);
+        resolution.RulesOn(Mar15).Rules.Single().Version.VersionNumber.Should().Be(2);
+        resolution.RulesOn(Jun1).Rules.Single().Version.VersionNumber.Should().Be(3);
+    }
+
+    [Theory(DisplayName = "082b record rules (K1): a record rule is paired by its derived id; a cleared based-on link, or one naming another rule's version, faults and is never read as a plain Exclude")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RecordRule_WithABrokenBasedOnLink_Faults(bool namesAnotherRule)
+    {
+        var general = Simple("GENERAL");
+        var other = Simple("OTHER");
+        ChangeRule(Matter, M, general.Rule, namesAnotherRule ? other.RuleVersion : null, Jan15, code: "BRR-BROKEN");
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var resolve = () => resolution.RulesOn(Feb1);
+
+        resolve.Should().Throw<ProcedureResolutionFaultException>().WithMessage("*does not name a version of its base rule*");
+    }
+
     // ── Versions (7.2) ───────────────────────────────────────────────────────────────────────────────────────
 
-    [Fact(DisplayName = "082b versions: v1's window uses v1's Published rules, v2's window v2's; a rule dropped by v2 applies only in v1's window, whatever sprk_enabled says")]
+    [Fact(DisplayName = "082b versions: v1's window uses v1's Published rules, v2's window v2's; a rule dropped by v2 applies only in v1's window (enabled is required but not sufficient)")]
     public async Task Versions_EachWindowUsesItsOwnRules()
     {
         var procedure = AddProcedure("Guideline", ProcedureAppliesTo.AllRecords);
@@ -632,13 +759,214 @@ public sealed class ProcedureResolverTests
         onDate.Rules.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "082b versions: a pinned version's rules apply before its effective-from (whatever the date), taking its first rule version")]
-    public async Task Pin_AppliesBeforeItsOwnWindow()
+    [Fact(DisplayName = "082b versions (D-203 Q2): a pin dated before the pinned version's window takes the pinned version's EARLIEST policy version")]
+    public async Task Pin_BeforeItsOwnWindow_TakesTheEarliestPolicyVersionUnderIt()
     {
-        var (procedure, version, _, ruleVersion) = Simple("LATE", from: Mar1);
-        Assign(Matter, M, procedure, ProcedureAssignmentEntity.ModePinned, version);
+        var procedure = AddProcedure("Pinned early", ProcedureAppliesTo.AllRecords);
+        var v1 = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusSuperseded);
+        var v2 = AddVersion(procedure, 2, Mar1, null);
+        var rule = AddProcedureRule(procedure, "EARLY");
+        AddRuleVersion(rule, v1, Jan1);
+        var first = AddRuleVersion(rule, v2, Mar1, number: 2);
+        AddRuleVersion(rule, v2, Apr15, number: 3); // a correction inside v2
+        Assign(Matter, M, procedure, ProcedureAssignmentEntity.ModePinned, v2);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
 
-        (await Resolve(CoreRecordKind.Matter, M, F)).RulesOn(Jan15).Rules.Single().Version.PolicyVersionId.Should().Be(ruleVersion);
+        var onDate = resolution.RulesOn(Feb1);
+
+        onDate.Rules.Single().Version.PolicyVersionId.Should().Be(first, "work dated before v2's first policy version takes that first one");
+        onDate.Procedures.Single().Should().Match<AppliedProcedure>(p => p.ProcedureVersionId == v2 && p.Pinned);
+        resolution.RulesOn(Mar15).Rules.Single().Version.PolicyVersionId.Should().Be(first);
+        resolution.RulesOn(May1).Rules.Single().Version.VersionNumber.Should().Be(3, "inside its window the pinned version's correction applies from its date");
+    }
+
+    [Theory(DisplayName = "082b versions (D-203 Q2): a pin dated before the Procedure's first version opened is not applicable, whatever it names (the F2-d test runs first); after it the pin decides")]
+    [InlineData(ProcedureEntity.VersionStatusActive, null)]
+    [InlineData(ProcedureEntity.VersionStatusRetired, ProcedureGapKind.PinnedVersionRetired)]
+    [InlineData(ProcedureEntity.VersionStatusDraft, ProcedureGapKind.PinnedVersionNotInForce)]
+    public async Task Pin_BeforeTheProceduresFirstVersion_IsNotApplicable(int pinnedStatus, ProcedureGapKind? gapAfter)
+    {
+        var procedure = AddProcedure("Pinned too early", ProcedureAppliesTo.AllRecords);
+        var first = AddVersion(procedure, 1, Mar1, null);
+        AddRuleVersion(AddProcedureRule(procedure, "TOO-EARLY"), first, Mar1);
+        var pinned = pinnedStatus == ProcedureEntity.VersionStatusActive ? first : AddVersion(procedure, 2, Mar15, null, pinnedStatus);
+        Assign(Matter, M, procedure, ProcedureAssignmentEntity.ModePinned, pinned);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var before = resolution.RulesOn(Jan15);
+        var after = resolution.RulesOn(Apr15);
+
+        before.Rules.Should().BeEmpty();
+        before.Gaps.Should().BeEmpty("not applicable before the Procedure's first version, pinned or not");
+        before.Procedures.Should().BeEmpty();
+        if (gapAfter is { } kind)
+        {
+            after.Gaps.Should().ContainSingle().Which.Kind.Should().Be(kind, "control: after that date the pin's own outcome decides");
+        }
+        else
+        {
+            after.Rules.Select(r => r.Version.PolicyCode).Should().Equal("TOO-EARLY");
+        }
+    }
+
+    // ── Retired versions are gaps, not 'not applicable' (F1, model 3.1 I-P5, D-203) ──────────────────────────
+
+    [Fact(DisplayName = "082b gaps (F1): retiring the first version leaves its window a gap, not 'not applicable'; before it opened is still not applicable")]
+    public async Task RetiringTheFirstVersion_LeavesItsWindowAGap()
+    {
+        var procedure = AddProcedure("First retired", ProcedureAppliesTo.AllRecords);
+        AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired); // superseded on Mar 1, then retired
+        var v2 = AddVersion(procedure, 2, Mar1, null);
+        AddRuleVersion(AddProcedureRule(procedure, "V2-RULE"), v2, Mar1);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var inWindow = resolution.RulesOn(Feb1);
+
+        inWindow.Gaps.Should().ContainSingle().Which.Should().Match<ProcedureGap>(g =>
+            g.ProcedureId == procedure && g.WorkDate == Feb1 && g.Kind == ProcedureGapKind.HoleBetweenVersions);
+        inWindow.Rules.Should().BeEmpty();
+        var current = resolution.RulesOn(Mar15);
+        current.Gaps.Should().BeEmpty();
+        current.Rules.Select(r => r.Version.PolicyCode).Should().Equal("V2-RULE");
+        var before = resolution.RulesOn(new DateOnly(2025, 12, 31));
+        before.Gaps.Should().BeEmpty("work dated before the first version opened is not applicable");
+        before.Procedures.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "082b gaps (F1): when the only version is Retired, every date at or after its from-date is a gap; a date before it is not applicable")]
+    public async Task TheOnlyVersionRetired_IsAGapFromItsFromDate()
+    {
+        var procedure = AddProcedure("Only retired", ProcedureAppliesTo.AllRecords);
+        AddVersion(procedure, 1, Feb1, null, ProcedureEntity.VersionStatusRetired);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        foreach (var date in new[] { Feb1, Mar15, Jul1 })
+        {
+            resolution.RulesOn(date).Gaps.Should().ContainSingle(because: $"{date}").Which.Should().Match<ProcedureGap>(g =>
+                g.ProcedureId == procedure && g.Kind == ProcedureGapKind.HoleBetweenVersions);
+        }
+
+        var before = resolution.RulesOn(Jan15);
+        before.Gaps.Should().BeEmpty();
+        before.Procedures.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "082b gaps (F1): when the only version is Retired and had an end, work after the end is a gap too (nothing follows it)")]
+    public async Task TheOnlyVersionRetired_WithAnEnd_IsAGapAfterTheEnd()
+    {
+        var procedure = AddProcedure("Only retired, ended", ProcedureAppliesTo.AllRecords);
+        AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired);
+
+        (await Resolve(CoreRecordKind.Matter, M, F)).RulesOn(Apr15).Gaps.Should().ContainSingle().Which.Kind.Should().Be(ProcedureGapKind.AfterLastVersion);
+    }
+
+    [Theory(DisplayName = "082b gaps (F1, ontology-r1 D-203): retiring the whole Procedure is a normal end of life: no gap, no rules, assigned or not")]
+    [InlineData(ProcedureEntity.VersionStatusActive)]
+    [InlineData(ProcedureEntity.VersionStatusSuperseded)]
+    [InlineData(ProcedureEntity.VersionStatusRetired)]
+    public async Task RetiringTheProcedure_RaisesNoGap(int versionStatus)
+    {
+        var procedure = AddProcedure("Ended", ProcedureAppliesTo.AllRecords, status: ProcedureEntity.StatusRetired);
+        var version = AddVersion(procedure, 1, Jan1, versionStatus == ProcedureEntity.VersionStatusActive ? null : Mar1, versionStatus);
+        AddRuleVersion(AddProcedureRule(procedure, "ENDED", enabled: false), version, Jan1); // retiring a Procedure switches its rules Off
+        Assign(Matter, M, procedure);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        foreach (var date in new[] { Feb15, Apr15 })
+        {
+            var onDate = resolution.RulesOn(date);
+            onDate.Gaps.Should().BeEmpty();
+            onDate.Rules.Should().BeEmpty();
+            onDate.Procedures.Should().BeEmpty();
+        }
+    }
+
+    [Fact(DisplayName = "082b versions (D-203): a Superseded version is in force for its own window; a Retired version's window is a gap")]
+    public async Task Superseded_IsInForceForItsWindow_RetiredIsAGap()
+    {
+        var procedure = AddProcedure("Mixed", ProcedureAppliesTo.AllRecords);
+        var v1 = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusSuperseded);
+        AddVersion(procedure, 2, Mar1, May1, ProcedureEntity.VersionStatusRetired);
+        var v3 = AddVersion(procedure, 3, May1, null);
+        var rule = AddProcedureRule(procedure, "MIXED");
+        var r1 = AddRuleVersion(rule, v1, Jan1);
+        var r3 = AddRuleVersion(rule, v3, May1, number: 3);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        var superseded = resolution.RulesOn(Feb1);
+        superseded.Gaps.Should().BeEmpty();
+        superseded.Procedures.Single().ProcedureVersionId.Should().Be(v1);
+        superseded.Rules.Single().Version.PolicyVersionId.Should().Be(r1);
+        var retired = resolution.RulesOn(Mar15);
+        retired.Rules.Should().BeEmpty();
+        retired.Gaps.Should().ContainSingle().Which.Kind.Should().Be(ProcedureGapKind.HoleBetweenVersions);
+        resolution.RulesOn(Jun1).Rules.Single().Version.PolicyVersionId.Should().Be(r3);
+    }
+
+    // ── Follow beside Pin (D-177 (3), ontology-r1 D-203 Q1) ──────────────────────────────────────────────────
+
+    /// <summary>A work assignment W filed under both M and P, and an assigned-only Procedure: v1 [Jan 1, v1Ends) (Superseded), then v2 from Mar 1.</summary>
+    private (Guid Procedure, Guid V1, Guid V2, Guid R1, Guid R2) FollowAndPinWorld(DateOnly v1Ends)
+    {
+        _world.Add(WorkAssignment, W, ("sprk_regardingmatter", Ref(Matter, M)), ("sprk_regardingproject", Ref(Project, P)));
+        var procedure = AddProcedure("Follow and Pin", ProcedureAppliesTo.AssignedRecordsOnly);
+        var v1 = AddVersion(procedure, 1, Jan1, v1Ends, ProcedureEntity.VersionStatusSuperseded);
+        var v2 = AddVersion(procedure, 2, Mar1, null);
+        var rule = AddProcedureRule(procedure, "FP-1");
+        var r1 = AddRuleVersion(rule, v1, Jan1);
+        var r2 = AddRuleVersion(rule, v2, Mar1, number: 2);
+        return (procedure, v1, v2, r1, r2);
+    }
+
+    private void FollowAndPin(Guid procedure, Guid pinned, bool pinOnMatter)
+    {
+        Assign(pinOnMatter ? Matter : Project, pinOnMatter ? M : P, procedure, ProcedureAssignmentEntity.ModePinned, pinned);
+        Assign(pinOnMatter ? Project : Matter, pinOnMatter ? P : M, procedure);
+    }
+
+    [Theory(DisplayName = "082b overrides (D-203 Q1): a Follow and a Pin of another version, at one distance, raise one ConflictingParents gap, whichever parent holds which")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FollowBesideAPinOfAnotherVersion_IsAConflict_InEitherOrder(bool pinOnMatter)
+    {
+        var (procedure, v1, _, _, _) = FollowAndPinWorld(Mar1);
+        FollowAndPin(procedure, v1, pinOnMatter); // on Mar 15 the Follow takes v2, the Pin v1
+
+        var onDate = (await Resolve(CoreRecordKind.WorkAssignment, W, F)).RulesOn(Mar15);
+
+        onDate.Rules.Should().BeEmpty();
+        onDate.Gaps.Should().ContainSingle().Which.Should().Match<ProcedureGap>(g =>
+            g.ProcedureId == procedure && g.Kind == ProcedureGapKind.ConflictingParents);
+    }
+
+    [Theory(DisplayName = "082b overrides (D-203 Q1): a version beside none (the Follow falls in a hole, the Pin names a version) is a ConflictingParents gap, in either order")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AVersionBesideNone_IsAConflict_InEitherOrder(bool pinOnMatter)
+    {
+        var (procedure, v1, _, _, _) = FollowAndPinWorld(Feb1); // v1 ends Feb 1, v2 starts Mar 1: Feb 15 is a hole for a Follow
+        FollowAndPin(procedure, v1, pinOnMatter);
+
+        var onDate = (await Resolve(CoreRecordKind.WorkAssignment, W, F)).RulesOn(Feb15);
+
+        onDate.Rules.Should().BeEmpty();
+        onDate.Gaps.Should().ContainSingle().Which.Kind.Should().Be(ProcedureGapKind.ConflictingParents);
+    }
+
+    [Theory(DisplayName = "082b overrides (D-203 Q1): a Follow and a Pin that choose the same version raise no gap, whichever parent holds which")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FollowBesideAPinOfTheSameVersion_IsNoGap_InEitherOrder(bool pinOnMatter)
+    {
+        var (procedure, _, v2, _, r2) = FollowAndPinWorld(Mar1);
+        FollowAndPin(procedure, v2, pinOnMatter); // on Mar 15 both choose v2
+
+        var onDate = (await Resolve(CoreRecordKind.WorkAssignment, W, F)).RulesOn(Mar15);
+
+        onDate.Gaps.Should().BeEmpty();
+        onDate.Rules.Single().Version.PolicyVersionId.Should().Be(r2);
+        onDate.Procedures.Single().Should().Match<AppliedProcedure>(p => p.ProcedureVersionId == v2 && p.Pinned,
+            "pinned if any deciding row pins, whatever order the rows are read in");
     }
 
     // ── Fail closed (7.1) ────────────────────────────────────────────────────────────────────────────────────
@@ -703,6 +1031,95 @@ public sealed class ProcedureResolverTests
         {
             json.Should().NotContainEquivalentOf(form);
         }
+    }
+
+    [Fact(DisplayName = "082b fail closed (K6): an override row that names neither a Procedure nor a rule faults the resolution")]
+    public async Task AnOverrideRowNamingNothing_Faults()
+    {
+        Simple("ALL-1");
+        AddRow(Matter, M, (ProcedureAssignmentEntity.ModeColumn, Option(ProcedureAssignmentEntity.ModeExcluded)));
+
+        var read = () => Resolve(CoreRecordKind.Matter, M, F);
+
+        await read.Should().ThrowAsync<ProcedureResolutionFaultException>().WithMessage("*neither a Procedure nor a rule*");
+    }
+
+    [Fact(DisplayName = "082b fail closed (K6): an override row that names both a Procedure and a rule faults the resolution")]
+    public async Task AnOverrideRowNamingAProcedureAndARule_Faults()
+    {
+        var general = Simple("ALL-1");
+        AddRow(Matter, M,
+            (ProcedureAssignmentEntity.ProcedureColumn, Ref(ProcedureEntity.Entity, general.Procedure)),
+            (ProcedureAssignmentEntity.ExcludedPolicyColumn, Ref(Policy, general.Rule)),
+            (ProcedureAssignmentEntity.ModeColumn, Option(ProcedureAssignmentEntity.ModeExcluded)));
+
+        var read = () => Resolve(CoreRecordKind.Matter, M, F);
+
+        await read.Should().ThrowAsync<ProcedureResolutionFaultException>().WithMessage("*both a Procedure and a rule*");
+    }
+
+    [Fact(DisplayName = "082b K2: ToString of an override row, applied Procedure, record-rule slot and gap prints no record id, row id, Procedure id or reason")]
+    public void ToString_OfTheInternalRecords_PrintsNoId()
+    {
+        Guid[] ids = [Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()];
+        const string reason = "Agreed with " + MatterName;
+        var parent = new CoreRecordLink(Matter, ids[0], 1);
+        var row = new ProcedureOverrideRow(ids[1], ProcedureOverrideMode.Pinned, parent, ids[2], ids[3], null, ids[4], reason);
+        IReadOnlyList<ProcedureOverrideRow> rows = [row];
+        var applied = new AppliedProcedure(
+            ids[2], "Rate card", ids[3], 2, new ProcedureRank(ProcedureLevel.ManualParent, 1, false), ProcedureSources.Manual, true, rows);
+        var slot = new RecordRuleSlot(ids[5], "RATE-1", ids[6], parent, row);
+        var gap = new ProcedureGap(ids[2], "Rate card", Feb1, ProcedureGapKind.ConflictingParents, rows);
+
+        foreach (var text in new[] { row.ToString(), applied.ToString(), slot.ToString(), gap.ToString() })
+        {
+            text.Should().NotBeNullOrEmpty();
+            foreach (var id in ids)
+            {
+                text.Should().NotContainEquivalentOf(id.ToString("D")).And.NotContainEquivalentOf(id.ToString("N"));
+            }
+
+            text.Should().NotContain(reason).And.NotContain(MatterName);
+        }
+
+        row.ToString().Should().Contain("Pinned").And.Contain("Distance = 1");
+        applied.ToString().Should().Contain("Rate card").And.Contain("ManualParent");
+        slot.ToString().Should().Contain("RATE-1");
+        gap.ToString().Should().Contain("ConflictingParents");
+    }
+
+    [Fact(DisplayName = "082b K2: ToString of the records a resolution returns, built over a Secure matter's override with a reason, prints no id or reason")]
+    public async Task ToString_OfResolvedRecords_PrintsNoId()
+    {
+        _world.SecureRoot(Matter, M);
+        var assigned = Simple("MATTER-PROC", ProcedureAppliesTo.AssignedRecordsOnly);
+        Assign(Matter, M, assigned.Procedure, reason: "Agreed with " + MatterName);
+        var changed = Simple("CHANGED");
+        ChangeRule(Matter, M, changed.Rule, changed.RuleVersion, Jan15);
+        var gapped = AddProcedure("Gapped", ProcedureAppliesTo.AssignedRecordsOnly);
+        AddVersion(gapped, 1, Jan1, Feb1, ProcedureEntity.VersionStatusSuperseded);
+        Assign(Matter, M, gapped, reason: "Agreed with " + MatterName);
+
+        var onDate = (await Resolve(CoreRecordKind.Project, P, F)).RulesOn(Mar15);
+        var texts = new List<string>
+        {
+            onDate.Procedures.First(p => p.ProcedureName == "Procedure MATTER-PROC").ToString(),
+            onDate.Procedures.First(p => p.ProcedureName == "Procedure MATTER-PROC").Overrides.Single().ToString(),
+            onDate.Rules.Single(r => r.RecordRule is not null).RecordRule!.ToString(),
+            onDate.Rules.Single(r => r.RecordRule is not null).RecordRule!.Exclude!.ToString(),
+            onDate.Gaps.Single().ToString(),
+            onDate.Gaps.Single().Overrides.Single().ToString(),
+        };
+
+        foreach (var text in texts)
+        {
+            foreach (var form in new[] { M.ToString("D"), M.ToString("N"), P.ToString("D"), assigned.Procedure.ToString("D"), assigned.Procedure.ToString("N"), gapped.ToString("D"), MatterName })
+            {
+                text.Should().NotContainEquivalentOf(form);
+            }
+        }
+
+        texts.Should().OnlyContain(t => t.Length > 0);
     }
 
     // ── Cost bound (8.2) ─────────────────────────────────────────────────────────────────────────────────────

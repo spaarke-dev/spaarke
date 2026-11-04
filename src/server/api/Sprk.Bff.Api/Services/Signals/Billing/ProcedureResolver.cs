@@ -75,12 +75,20 @@ public enum ProcedureOverrideMode
 /// (<see cref="PolicyId"/>). <see cref="ChainRecord"/> is the chain record it sits on.
 /// </summary>
 /// <remarks><b>Internal basis (uac-r2 U3).</b> <see cref="ChainRecord"/> and <see cref="Reason"/> may name or describe a Secure parent. They
-/// belong in the evaluation's internal snapshot (7.4) only; a reader-facing output uses <see cref="ProcedureRulesOnDate.ForReaders"/>.</remarks>
+/// belong in the evaluation's internal snapshot (7.4) only; a reader-facing output uses <see cref="ProcedureRulesOnDate.ForReaders"/>.
+/// <see cref="object.ToString"/> prints the mode and distance only (K2): no record id, row id, Procedure id or reason.
+/// <see cref="CreatedOn"/> is the row's <c>createdon</c>: the start of a change's current episode (see the record rules, 6.3).</remarks>
 public sealed record ProcedureOverrideRow(
     Guid RowId, ProcedureOverrideMode Mode, CoreRecordLink ChainRecord, Guid? ProcedureId, Guid? PinnedVersionId, Guid? PolicyId, Guid? FirmId,
-    string? Reason)
+    string? Reason, DateTime? CreatedOn = null)
 {
     public int Distance => ChainRecord.Distance;
+
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Mode = ").Append(Mode).Append(", Distance = ").Append(Distance).Append(", Subject = ").Append(ProcedureId is not null ? "Procedure" : "Rule");
+        return true;
+    }
 }
 
 /// <summary>One Published policy version as read: what the gate, the handlers and the Signal mapping need (082c maps it to a candidate).</summary>
@@ -123,16 +131,42 @@ public sealed record ResolvedPolicyVersion
 
     /// <summary><c>sprk_basedonversion</c>: on a record rule's version, the base rule's version it was copied from.</summary>
     public Guid? BasedOnVersionId { get; init; }
+
+    /// <summary><c>createdon</c> (UTC): which episode of a change a record rule's version belongs to. Internal: it is not part of the snapshot.</summary>
+    internal DateTime? CreatedOn { get; init; }
 }
 
-/// <summary>A Procedure in force for one work date: the version chosen, its rank and sources, and the rows that decided it.</summary>
+/// <summary>
+/// A Procedure in force for one work date: the version chosen, its rank and sources, and the rows that decided it.
+/// <see cref="object.ToString"/> prints names, numbers and the rank only (K2): no Procedure id, version id or deciding row.
+/// </summary>
 public sealed record AppliedProcedure(
     Guid ProcedureId, string ProcedureName, Guid ProcedureVersionId, int ProcedureVersionNumber, ProcedureRank Rank, ProcedureSources Sources,
-    bool Pinned, IReadOnlyList<ProcedureOverrideRow> Overrides);
+    bool Pinned, IReadOnlyList<ProcedureOverrideRow> Overrides)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("ProcedureName = ").Append(ProcedureName).Append(", ProcedureVersionNumber = ").Append(ProcedureVersionNumber)
+            .Append(", Rank = ").Append(Rank).Append(", Sources = ").Append(Sources).Append(", Pinned = ").Append(Pinned)
+            .Append(", Overrides = ").Append(Overrides.Count);
+        return true;
+    }
+}
 
-/// <summary>A record rule in its base rule's slot (model 6.3): the base it replaces, the change's Exclude row, the record it sits on.</summary>
+/// <summary>
+/// A record rule in its base rule's slot (model 6.3): the base it replaces, the change's Exclude row, the record it sits on.
+/// <see cref="object.ToString"/> prints the base rule's code and the distance only (K2): no record id, policy id or Exclude row.
+/// </summary>
 public sealed record RecordRuleSlot(
-    Guid BasePolicyId, string BasePolicyCode, Guid BasePolicyVersionId, CoreRecordLink ChainRecord, ProcedureOverrideRow? Exclude);
+    Guid BasePolicyId, string BasePolicyCode, Guid BasePolicyVersionId, CoreRecordLink ChainRecord, ProcedureOverrideRow? Exclude)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("BasePolicyCode = ").Append(BasePolicyCode).Append(", Distance = ").Append(ChainRecord.Distance)
+            .Append(", HasExclude = ").Append(Exclude is not null);
+        return true;
+    }
+}
 
 /// <summary>
 /// A rule in force for one work date. <see cref="Procedure"/> is the Procedure whose slot it takes (a record rule's is its base rule's), so
@@ -169,9 +203,20 @@ public enum ProcedureGapKind
     ConflictingParents,
 }
 
-/// <summary>An applicable Procedure with no version for a work date. 082c raises the one blocking BILL-SYSTEM-SUBMISSION finding from it.</summary>
+/// <summary>
+/// An applicable Procedure with no version for a work date. 082c raises the one blocking BILL-SYSTEM-SUBMISSION finding from it.
+/// <see cref="object.ToString"/> prints the name, date, kind and row count only (K2): no Procedure id and no deciding row.
+/// </summary>
 public sealed record ProcedureGap(
-    Guid ProcedureId, string ProcedureName, DateOnly WorkDate, ProcedureGapKind Kind, IReadOnlyList<ProcedureOverrideRow> Overrides);
+    Guid ProcedureId, string ProcedureName, DateOnly WorkDate, ProcedureGapKind Kind, IReadOnlyList<ProcedureOverrideRow> Overrides)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("ProcedureName = ").Append(ProcedureName).Append(", WorkDate = ").Append(WorkDate).Append(", Kind = ").Append(Kind)
+            .Append(", Overrides = ").Append(Overrides.Count);
+        return true;
+    }
+}
 
 /// <summary>What judges one work date. Every list is in a stable order: rules by (policy code, policy id), the rest by Procedure.</summary>
 public sealed record ProcedureRulesOnDate(
@@ -187,6 +232,8 @@ public sealed record ProcedureRulesOnDate(
     /// rule codes, levels and distances only. No record id, record name, override reason or row id: the chain may include a Secure parent
     /// that the reader of the invoice cannot read, and an override reason is free text typed on that parent.
     /// </summary>
+    // uac-r2 K1 (082b review): Level and Distance reveal that an assignment exists at that level. Acceptable only while Procedures are catalogue-level;
+    // if Procedures are ever created per record, or named from the record, this becomes an F finding and the fields must go.
     public ProcedureResolutionReaderView ForReaders() => new(
         WorkDate,
         Rules.Select(r => new ProcedureReaderRule(
@@ -216,9 +263,16 @@ public sealed record ProcedureReaderExcludedProcedure(string ProcedureName, int 
 public sealed record ProcedureReaderGap(string ProcedureName, DateOnly WorkDate, string Kind);
 
 /// <summary>
-/// The Procedure model's rows could not be resolved: a row the BFF never writes (an unknown mode), or two versions in force on one date
-/// (I-P1). The evaluation faults and the job retries; nothing is judged on a partial set.
+/// The Procedure model's rows could not be resolved: a row the BFF never writes (an unknown mode, a row naming both or neither of a
+/// Procedure and a rule, a record rule that does not name a version of its base rule), or two versions in force on one date (I-P1). The
+/// evaluation faults and the job retries; nothing is judged on a partial set.
 /// </summary>
+/// <remarks>
+/// <b>For operators only (K2).</b> The message names row, Procedure and rule ids so an operator can find the row. <c>ex.Message</c> must
+/// NEVER be shown to a reader, and the SPA warning at submit time (owner decision 2026-11-04) in particular: it names ids of records the
+/// reader may not be able to read. A reader-facing text is built from a reason code and
+/// <see cref="ProcedureRulesOnDate.ForReaders"/>.
+/// </remarks>
 public sealed class ProcedureResolutionFaultException(string message) : InvalidOperationException(message);
 
 /// <summary>
@@ -249,7 +303,8 @@ public sealed class ProcedureResolution
     public IReadOnlyList<CoreRecordLink> Chain => _rows.Chain;
 
     /// <summary>The Procedures, rules, exclusions and gaps for <paramref name="workDate"/>. Pure; reads nothing.</summary>
-    /// <exception cref="ProcedureResolutionFaultException">Two versions of one Procedure are in force on the date (I-P1).</exception>
+    /// <exception cref="ProcedureResolutionFaultException">Two versions of one Procedure are in force on the date (I-P1), or a record rule
+    /// does not name a version of its base rule. The message is for operators: never show <c>ex.Message</c> to a reader.</exception>
     public ProcedureRulesOnDate RulesOn(DateOnly workDate)
     {
         var applied = new List<AppliedProcedure>();
@@ -386,25 +441,45 @@ public sealed class ProcedureResolution
     {
         var versions = _versionsByProcedure[candidate.Procedure.Id].ToList();
 
+        // Owner F2-d, run FIRST for every choice, pinned or not (ontology-r1 D-203 Q2): work dated before the Procedure's first version
+        // opened is not applicable, and no pin outcome (a Retired or missing pinned version included) turns that into a gap.
+        if (NotApplicableOn(versions, date))
+        {
+            return new VersionChoice.NotApplicable();
+        }
+
         // Each decisive row's choice: a Pin names its version, a Follow takes the version in force on the date. A computed source alone
-        // follows the date.
+        // follows the date. Each is a version or a gap.
         var choices = candidate.Decisive.Count == 0
             ? [ByDate(candidate.Procedure, versions, date)]
             : candidate.Decisive.Select(row => row.Mode == ProcedureOverrideMode.Pinned
                 ? Pinned(row.PinnedVersionId, versions)
                 : ByDate(candidate.Procedure, versions, date)).ToList();
 
-        if (choices.OfType<VersionChoice.Gap>().FirstOrDefault() is { } gap)
+        // Rows at the same distance that choose different outcomes for the date conflict (D-177 (3), D-203 Q1): two different pins, a Follow
+        // beside a Pin of another version, or a version beside none (a gap) raise one blocking gap. Rows that all end in a gap keep the
+        // first gap; rows that agree on a version choose it, pinned if any of them pins.
+        var gaps = choices.OfType<VersionChoice.Gap>().ToList();
+        if (gaps.Count > 0)
         {
-            return gap;
+            return gaps.Count == choices.Count ? gaps[0] : new VersionChoice.Gap(ProcedureGapKind.ConflictingParents);
         }
 
-        // Two rows at the same distance that choose different versions for the date conflict: two different pins raise a blocking gap
-        // (D-177 (3)). A Follow beside a Pin of another version is read the same way (fail closed; recorded for ontology-r1 in the notes).
-        var distinct = choices.Select(Key).Distinct().Count();
-        return distinct > 1 ? new VersionChoice.Gap(ProcedureGapKind.ConflictingParents) : choices[0];
+        var chosen = choices.OfType<VersionChoice.Chosen>().ToList();
+        return chosen.Select(c => c.Version.Id).Distinct().Count() > 1
+            ? new VersionChoice.Gap(ProcedureGapKind.ConflictingParents)
+            : new VersionChoice.Chosen(chosen[0].Version, chosen.Any(c => c.Pinned));
+    }
 
-        static Guid Key(VersionChoice choice) => choice is VersionChoice.Chosen c ? c.Version.Id : Guid.Empty;
+    /// <summary>
+    /// Owner F2-d / D-203: before the date the Procedure's first version opened (the earliest effective-from of an Active, Superseded or
+    /// Retired version: a version withdrawn later still opened its window, 3.1 I-P5), the Procedure is not applicable. So is a Procedure
+    /// with no such version (Draft-only). It is not a gap.
+    /// </summary>
+    private static bool NotApplicableOn(IReadOnlyList<ProcedureVersionRow> versions, DateOnly date)
+    {
+        var opened = versions.Where(v => v.OpenedAWindow).Select(v => v.From!.Value).ToList();
+        return opened.Count == 0 || date < opened.Min();
     }
 
     private static VersionChoice Pinned(Guid? pinnedVersionId, IReadOnlyList<ProcedureVersionRow> versions)
@@ -420,13 +495,9 @@ public sealed class ProcedureResolution
 
     private static VersionChoice ByDate(ProcedureRow procedure, IReadOnlyList<ProcedureVersionRow> versions, DateOnly date)
     {
-        // In force for its window: Active, and Superseded (model 3.1: a Superseded version stays in force for its own window).
+        // In force for its window: Active, and Superseded (model 3.1: a Superseded version stays in force for its own window). A Retired
+        // version is never in force (I-P5): work inside its window is a gap, below.
         var inForce = versions.Where(v => v.IsInForce).ToList();
-        if (inForce.Count == 0)
-        {
-            return new VersionChoice.NotApplicable(); // Draft-only (or only withdrawn versions): the Procedure is not Active
-        }
-
         var containing = inForce.Where(v => v.Contains(date)).ToList();
         if (containing.Count > 1)
         {
@@ -439,13 +510,9 @@ public sealed class ProcedureResolution
             return new VersionChoice.Chosen(containing[0], Pinned: false);
         }
 
-        // Owner F2-d: before the first version's effective-from the Procedure is not applicable; after it, a date in no window is a gap.
-        if (date < inForce.Min(v => v.From!.Value))
-        {
-            return new VersionChoice.NotApplicable();
-        }
-
-        return new VersionChoice.Gap(inForce.Any(v => v.From!.Value > date)
+        // The caller has run the F2-d test (the date is not before the first version opened), so a date in no window of a version in
+        // force is a gap: a hole before a later version, a Retired version's own window (a withdrawn version, D-203), or past the last end.
+        return new VersionChoice.Gap(inForce.Any(v => v.From!.Value > date) || versions.Any(v => v.Status == ProcedureEntity.VersionStatusRetired && v.Contains(date))
             ? ProcedureGapKind.HoleBetweenVersions
             : ProcedureGapKind.AfterLastVersion);
     }
@@ -458,10 +525,12 @@ public sealed class ProcedureResolution
         {
             foreach (var policy in _policiesBySet[set.Id])
             {
-                // A rule applies on a date only with a Published version under the Procedure Version chosen for that date, whatever its
-                // sprk_enabled says (089c K1, ontology-r1 D-177 (1)(2)(14)): a rule a later version dropped stays enabled with no version
-                // under it. Within that Procedure Version the latest version with effective-from <= the date applies (corrections). A
-                // pinned version applies whatever the date: work dated before its first policy version takes that first one.
+                // A rule applies on a date only with a Published version under the Procedure Version chosen for that date: enabled is
+                // required but not sufficient (089c K1, ontology-r1 D-177 (1)(2)(14), D-203). sprk_enabled is Off only for a removed record
+                // rule or a rule of a retired Procedure; it never picks a version, and "dropped" is never inferred from Off (a rule a later
+                // version dropped stays enabled with no version under it). Within that Procedure Version the latest version with
+                // effective-from <= the date applies (corrections). A pinned version applies whatever the date, once the Procedure is
+                // applicable: work dated before its first policy version takes that first one.
                 var under = _versionsByPolicy[policy.Id]
                     .Where(v => v.ProcedureVersionId == procedureVersionId && v.InForceFrom is not null)
                     .ToList();
@@ -523,11 +592,33 @@ public sealed class ProcedureResolution
         // Owner decision (2026-11-04): a record rule applies only to work dates on or after its own effective-from. Earlier dates are judged
         // by the base version in force on that date, without the record's change, so the change's Exclude does not remove the base either.
         var running = decisive
-            .Select(o => (o, Version: Latest(_versionsByPolicy[o.RecordRule!.Id], date)))
+            .Select(o => (o, Version: RecordRuleVersionOn(o.RecordRule!, o.Exclude, date)))
             .Where(x => x.Version is not null)
             .Select(x => new RecordRuleRun(x.Version!, x.o.ChainRecord, x.o.Exclude))
             .ToList();
         return running.Count == 0 ? new RuleDecision.Kept() : new RuleDecision.Changed(rows, nearest, running);
+    }
+
+    /// <summary>
+    /// The version of a record rule in effect on <paramref name="date"/>, or null while the change is not (the base rule then runs).
+    /// <para><b>Episodes (ontology-r1 D-203 (5)-(7); 089b I-A1, 089c D-202).</b> A record rule's policy is reused across a removal and a new
+    /// change of the same rule, so its older versions belong to a removed change and must never come back. Only the versions of the CURRENT
+    /// EPISODE count: those created on or after the change's Exclude row. The Exclude row and the first version of an episode are written
+    /// in one transaction, the row first, so a version of that episode is never created before its row; a removal deletes the row, so a
+    /// later change has a newer one. Inside an episode the latest version whose effective-from is on or before the date applies (an edit
+    /// adds a version in force from then on: the change was never removed). Before the episode's first effective-from the base rule runs.</para>
+    /// <para>A change whose Exclude row is missing, or has no <c>createdon</c>, has no known boundary: every version counts (the previous
+    /// behaviour). A version with no <c>createdon</c> beside a known boundary does not count.</para>
+    /// </summary>
+    private ResolvedPolicyVersion? RecordRuleVersionOn(PolicyRow recordRule, ProcedureOverrideRow? exclude, DateOnly date)
+    {
+        IEnumerable<ResolvedPolicyVersion> versions = _versionsByPolicy[recordRule.Id];
+        if (exclude?.CreatedOn is { } episodeStart)
+        {
+            versions = versions.Where(v => v.CreatedOn is { } created && created >= episodeStart);
+        }
+
+        return Latest(versions, date);
     }
 
     private List<RuleOverride> RuleOverridesOf(Guid basePolicyId)
@@ -537,19 +628,23 @@ public sealed class ProcedureResolution
             .Where(o => o.PolicyId == basePolicyId && (o.FirmId is null || o.FirmId == _rows.FirmId))
             .ToList();
 
-        // The record rules based on this rule: in a record-scoped set on the chain (already narrowed to this firm at read), whose version
-        // names a version of the base rule. A record rule whose base version is not among the rows read has no slot.
-        var recordRules = _rows.Sets
-            .Where(s => s.Record is not null)
-            .SelectMany(s => _policiesBySet[s.Id].Select(p => (Set: s, Policy: p)))
-            .Where(x => _versionsByPolicy[x.Policy.Id].Any(v =>
-                v.BasedOnVersionId is { } baseVersion && _versionsById.TryGetValue(baseVersion, out var based) && based.PolicyId == basePolicyId))
-            .ToList();
-
+        // The record rule of this rule in each record-scoped set on the chain (already narrowed to this firm at read). It is found by its
+        // DERIVED id, the one the change wrote (K1): the id is a hash of (core table, record, firm, base rule), so a cleared or wrong
+        // sprk_basedonversion can never hide it and let its Exclude act as a plain Exclude. A record rule whose base rule is not resolved
+        // for the date (deleted, dropped by a later version, or of a retired Procedure) is never looked up: it has no slot.
         var result = new List<RuleOverride>();
         var paired = new HashSet<Guid>();
-        foreach (var (set, policy) in recordRules)
+        foreach (var set in _rows.Sets.Where(s => s.Record is not null))
         {
+            var recordRuleId = ProcedureAssignmentService.RecordRulePolicyIdFor(
+                ProcedureAssignmentService.RecordRuleSetIdFor(set.Record!.Table, set.Record.Id, set.FirmId), basePolicyId);
+            if (_policiesBySet[set.Id].FirstOrDefault(p => p.Id == recordRuleId) is not { } policy)
+            {
+                continue;
+            }
+
+            RequireBasedOn(policy, basePolicyId);
+
             // The change's Exclude row sits on the same record, for the same firm as the set (Firm record: its firm; Record: no firm).
             var exclude = excludes.FirstOrDefault(e => e.ChainRecord == set.Record && e.FirmId == set.FirmId);
             if (exclude is not null)
@@ -557,11 +652,30 @@ public sealed class ProcedureResolution
                 paired.Add(exclude.RowId);
             }
 
-            result.Add(new RuleOverride(set.Record!, exclude, policy));
+            result.Add(new RuleOverride(set.Record, exclude, policy));
         }
 
         result.AddRange(excludes.Where(e => !paired.Contains(e.RowId)).Select(e => new RuleOverride(e.ChainRecord, e, null)));
         return result;
+    }
+
+    /// <summary>
+    /// A record rule found by its derived id must name, in every Published version, a version of its base rule (the check
+    /// <c>ProcedureAssignmentService.EnsureRecordRuleAsync</c> makes before it writes one). A link that is missing or names another rule's
+    /// version is a row the BFF never writes: the change cannot be read, and it is never read as a plain Exclude (K1). The message names
+    /// ids for operators; it is never shown to a reader.
+    /// </summary>
+    private void RequireBasedOn(PolicyRow recordRule, Guid basePolicyId)
+    {
+        foreach (var version in _versionsByPolicy[recordRule.Id])
+        {
+            if (version.BasedOnVersionId is not { } baseVersion || !_versionsById.TryGetValue(baseVersion, out var based) || based.PolicyId != basePolicyId)
+            {
+                throw new ProcedureResolutionFaultException(
+                    $"Record rule {recordRule.Id} has a version {version.PolicyVersionId} that does not name a version of its base rule {basePolicyId}; "
+                    + "the change cannot be told from a plain Exclude.");
+            }
+        }
     }
 }
 
@@ -577,7 +691,9 @@ public sealed class ProcedureResolution
 /// Firm record of the invoice's firm); those sets' enabled Billing policies; and those policies' Published versions. Every row is
 /// re-checked after its query. <c>sprk_currentversion</c> is never read: it means "latest published", for display only (7.2).</item>
 /// <item><b>Fails closed:</b> any read fault propagates, the chain's <see cref="CoreRecordChainUnreadableException"/> included, and an
-/// override row with a mode the BFF never writes throws <see cref="ProcedureResolutionFaultException"/>. Nothing is judged on a partial set.</item>
+/// override row with a mode the BFF never writes, a row naming both or neither of a Procedure and a rule, and a record rule that does not
+/// name a version of its base rule throw <see cref="ProcedureResolutionFaultException"/> (operator text: never show its message to a
+/// reader). Nothing is judged on a partial set.</item>
 /// <item><b>Not here</b> (082c, 082d): the loader and evaluator re-key, the precedence between rules by
 /// <see cref="BillingRuleCatalogue.PrecedenceOf"/> and rank, the gap finding and hold, the snapshot, the rate card.
 /// <c>BILL-SYSTEM-SUBMISSION</c> is exempt (D-125): it is never returned here; the loader keeps loading it.</item>
@@ -592,6 +708,7 @@ public static class ProcedureResolver
     private const string RuleSetColumn = "sprk_ruleset";
     private const string ScopeColumn = "sprk_scope";
     private const string FirmColumn = "sprk_firm";
+    private const string CreatedOnColumn = "createdon";
 
     /// <summary>The core tables whose lookups place a row on the chain (assignment rows and record-scoped sets carry the same three).</summary>
     private static readonly string[] CoreTables = [SecureRootInheritance.Matter, SecureRootInheritance.Project, SecureRootInheritance.WorkAssignment];
@@ -635,7 +752,7 @@ public static class ProcedureResolver
             {
                 ProcedureAssignmentEntity.ProcedureColumn, ProcedureAssignmentEntity.ModeColumn, ProcedureAssignmentEntity.PinnedVersionColumn,
                 ProcedureAssignmentEntity.ExcludedPolicyColumn, ProcedureAssignmentEntity.FirmColumn, ProcedureAssignmentEntity.ReasonColumn,
-                "statecode",
+                "statecode", CreatedOnColumn,
             }).ToArray()),
             NoLock = true,
         };
@@ -652,11 +769,14 @@ public static class ProcedureResolver
                 continue;
             }
 
+            // A row overrides exactly one subject: a Procedure or a rule. A row naming both, or neither, is one the BFF never writes (K6):
+            // it is not guessed at, whichever lookup would win.
             var procedureId = row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ProcedureColumn)?.Id;
-            var policyId = procedureId is null ? row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ExcludedPolicyColumn)?.Id : null;
-            if (procedureId is null && policyId is null)
+            var policyId = row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ExcludedPolicyColumn)?.Id;
+            if (procedureId is null == policyId is null)
             {
-                continue; // names nothing it overrides
+                throw new ProcedureResolutionFaultException(
+                    $"Override row {row.Id} names {(procedureId is null ? "neither a Procedure nor a rule" : "both a Procedure and a rule")}, which the BFF never writes; the Procedures that judge the invoice cannot be told.");
             }
 
             var mode = row.GetAttributeValue<OptionSetValue>(ProcedureAssignmentEntity.ModeColumn)?.Value switch
@@ -679,7 +799,8 @@ public static class ProcedureResolver
                 row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.PinnedVersionColumn)?.Id,
                 policyId,
                 row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.FirmColumn)?.Id,
-                row.GetAttributeValue<string>(ProcedureAssignmentEntity.ReasonColumn)));
+                row.GetAttributeValue<string>(ProcedureAssignmentEntity.ReasonColumn),
+                row.GetAttributeValue<DateTime?>(CreatedOnColumn)));
         }
 
         return rows.OrderBy(r => r.RowId).ToList();
@@ -906,7 +1027,7 @@ public static class ProcedureResolver
                 ColumnSet = new ColumnSet(
                     "sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
                     "sprk_consequence", "sprk_clausereference", "sprk_clauselocation", "sprk_inforcefrom", RuleSetService.ProcedureVersionColumn,
-                    RuleSetService.PublishStateColumn, ProcedureAssignmentService.BasedOnVersionColumn),
+                    RuleSetService.PublishStateColumn, ProcedureAssignmentService.BasedOnVersionColumn, CreatedOnColumn),
                 NoLock = true,
             };
             query.Criteria.AddCondition("sprk_policy", ConditionOperator.In, chunk.Cast<object>().ToArray());
@@ -940,6 +1061,7 @@ public static class ProcedureResolver
                     Consequence = row.GetAttributeValue<OptionSetValue>("sprk_consequence")?.Value,
                     ProcedureVersionId = row.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id,
                     BasedOnVersionId = row.GetAttributeValue<EntityReference>(ProcedureAssignmentService.BasedOnVersionColumn)?.Id,
+                    CreatedOn = row.GetAttributeValue<DateTime?>(CreatedOnColumn),
                 });
             }
         }
@@ -1012,6 +1134,13 @@ internal sealed record ProcedureVersionRow(Guid Id, Guid ProcedureId, int Number
 {
     /// <summary>Active or Superseded with an effective-from: in force for its own window (model 3.1).</summary>
     public bool IsInForce => Status is ProcedureEntity.VersionStatusActive or ProcedureEntity.VersionStatusSuperseded && From is not null;
+
+    /// <summary>
+    /// The version opened a window at its effective-from: Active, Superseded or Retired with an effective-from (D-203). A Retired version is
+    /// never in force, but its window is not "before the first version" either: work in it is a gap. A Draft never opened one.
+    /// </summary>
+    public bool OpenedAWindow =>
+        Status is ProcedureEntity.VersionStatusActive or ProcedureEntity.VersionStatusSuperseded or ProcedureEntity.VersionStatusRetired && From is not null;
 
     /// <summary>Half-open [from, to); a null <c>to</c> is open-ended.</summary>
     public bool Contains(DateOnly date) => From is { } from && from <= date && (To is not { } to || date < to);
