@@ -510,15 +510,15 @@ Branch `task/ebilling-089c`, from `work/ebilling-r1` at `1848d67bdb`. Not merged
     1. step 0, on the group;
     2. the record filter `ebilling.record.override` (uniform 404);
     3. the privilege filter (403);
-    4. on the two removal routes only, `RequireReadOnTheOverridesSubject` (403);
-    5. `RequireEbillingEnabled`.
+    4. `RequireEbillingEnabled`;
+    5. on the two removal routes only, `RequireReadOnTheOverridesSubject` (after the kill switch since the pass-1 review, K2).
   - Privilege filter for change:
     - Read on the body's rule (`sprk_policies`), asked as the caller; rule rights are never inferred from Procedure rights;
     - `CreateRuleSet() ∪ DraftRules() ∪ EditRule()`;
     - Write on `sprk_policy`.
   - Privilege filter for preview: `Admin()`. For delete: `Admin()` plus Write on `sprk_policy`.
   - `RequireReadOnTheOverridesSubject` reads the row app-only through `SubjectOfOverrideAsync`, then runs `CallerReadCheck.CheckAsync` as the caller:
-    - Refused: 403 `insufficient_rights`.
+    - Refused: 404 `assignment.override_not_found`, the answer of a missing row (pass-1 review K1; it was 403 `insufficient_rights`).
     - A read fault, an unparseable id or no answer: 403 `system_failure`.
     - A row that is not this record's passes through to the service, which answers 404.
   - A caller whose oid is not a GUID gets 401 on every route.
@@ -534,7 +534,7 @@ Branch `task/ebilling-089c`, from `work/ebilling-r1` at `1848d67bdb`. Not merged
 - **Route ledger**: a credited form for `RequireReadOnTheOverridesSubject`. The `GovernedFile` reason covers the new routes. `ExpectedEndpointFileCount` stays 151.
 - **Columns**:
   - Every new `ColumnSet` and write was checked against `Entities/sprk_Policy`, `sprk_PolicyVersion`, `sprk_ruleset` and the 080 schema script.
-  - `sprk_basedonversion` and `sprk_publishstate` are not in the solution XML yet. They come from `Deploy-EbillingProcedureSchema.ps1` (P6) and are live on dev, per `080-dev-run-2026-10-21.md`.
+  - `sprk_basedonversion` and `sprk_publishstate` are not in `sprk_ruleset/Entity.xml` yet; neither are `sprk_matter`, `sprk_project` and `sprk_workassignment` on `sprk_ruleset`. They come from `Deploy-EbillingProcedureSchema.ps1` (P5/P6, task 080) and are live on dev, per `080-dev-run-2026-10-21.md`. The core lookups come from 080 P5, so every rule-set read now needs P5 deployed (089c review K5).
   - The firm check still selects `sprk_organizationid` only.
 
 ### Section 11
@@ -575,6 +575,22 @@ Each change was restored afterwards, and `cmp` confirmed the file was identical.
 | Pester 6.2.0 (local) | does not load any container on this machine (`Export-ModuleMember can only be called from inside a module`, also for the untouched `Set-ProductConfigurationReadDepth.Tests.ps1`): the known 6.x problem `ci-standalone-checks.yml` names; CI's job `owner-teams-script-tests` pins 5.7.1, the version run here |
 | `-WhatIf` on dev | exit 0, plan above (re-run after the member-unit check: identical output) |
 | BFF code | not touched (no publish-size or CVE delta to report) |
+
+### 089c pass-1 review (2026-11-04)
+
+Branch `task/ebilling-089c-fix1`, from `work/ebilling-r1` at `0b3abd3e38`. No Dataverse write.
+
+**Fixed**
+
+- **F1: a change of a retired or unpublished rule.** `ChangeRuleCoreAsync` (`ProcedureAssignmentService.cs:503-512`) treated a rule as in force when its current version belonged to it. Retiring a Procedure sets each rule's `sprk_enabled=false` (`ProcedureService.cs:937`) but keeps `statecode` and the version, so a change answered 201 and created an enabled record rule copied from a retired rule. `LoadRuleAsync` (`:942-985`) now also reads `sprk_enabled` and the set's `statuscode` (against `RuleSetService.RuleSetPublished`); the change answers 409 `assignment.rule_not_in_force` unless the rule is enabled, its set is Published and its version is in force. Assign and Exclude accept what they accepted before (pinned by `Exclude_StillAcceptsARuleThatIsNotInForce`).
+- **K1: an existence oracle on the removal routes.** Override ids are derived (`AssignmentIdFor`), so 403 for an unreadable subject against 404 for a missing row showed whether an override exists. `RequireReadOnTheOverridesSubject` (`ProcedureAssignmentEndpoints.cs:370-373`) now answers a refused Read with the service's own `OverrideNotFound` through `Map`: the same status, `errorCode` and body shape. A fault or an unanswered question stays 403 `system_failure`.
+- **K2: filter order.** On the six removal routes `RequireEbillingEnabled` now runs before `RequireReadOnTheOverridesSubject`, so a switched-off eBilling answers 503 before the row is read. The record and privilege filters keep their order.
+- **K5:** the columns bullet above now lists the three core lookups on `sprk_ruleset`.
+
+**Left for 082 (defect and location only; not changed here)**
+
+- **K3 (082 must).** `sprk_excludedpolicy` is Cascade (`scripts/ebilling/Deploy-EbillingProcedureSchema.ps1:589`). Deleting the base rule deletes the Exclude row, which strands an enabled record rule that no API can switch off. Retiring a Procedure also leaves the record rules made from its rules enabled. 082's resolver and the retire count must handle both.
+- **K4 (082 must).** The record set's "visible to firms" flag is taken from the first rule changed (`ProcedureAssignmentService.cs:544`, `:1173`). Nothing reads it today, because `LoadRuleSetAsync` hides record-scoped sets. Any later firm-facing reader must not skip that hide.
 
 ### Known limits
 
