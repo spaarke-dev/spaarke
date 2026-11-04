@@ -64,7 +64,6 @@ public interface IEventDataverseService
         CancellationToken ct = default);
 
     Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default);
-    Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default);
     Task UpdateEventStatusAsync(Guid id, int statusCode, DateOnly? completedDate = null, CancellationToken ct = default);
     /// <param name="owningTeamId">
     /// The owner team the caller resolved from the event (unified-access-control-r2 task 146: a log row is content of
