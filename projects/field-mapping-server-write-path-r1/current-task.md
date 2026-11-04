@@ -8,7 +8,7 @@
 
 | Field | Value |
 |---|---|
-| **Active** | **020 ✅** PR #2551 merged aef86b89f7 (2026-11-03T23:21Z); a lint-ratchet fix was added in the PR (94ce92d3c3). It is not on dev yet: the live Matter/Project route check needs a uac-r2 deploy and the owner's OK for test rows. **Task 042b:** the implementer `fm-042b` finished steps 0–5. `task/fm-042b` tip 20bdd9f7e5 (base cfebe65f9b), not pushed; worktree `C:\code_files\spaarke\.claude\worktreesgent-ac26f071a1fb351e7`.
+| **Active** | **020 ✅** PR #2551 merged aef86b89f7 (2026-11-03T23:21Z); a lint-ratchet fix was added in the PR (94ce92d3c3). It is not on dev yet: the live Matter/Project route check needs a uac-r2 deploy and the owner's OK for test rows. **Task 042b:** the implementer `fm-042b` finished steps 0–5. `task/fm-042b` tip 20bdd9f7e5 (base cfebe65f9b), not pushed; worktree `C:\code_files\spaarke\.claude\worktrees\agent-ac26f071a1fb351e7`.
 - Its numbers:
   - AC1–AC14 met except the AC3 pair half;
   - verify-suites 6659/0/7; ArchTests 1911; publish delta +811 B; no CVE.
