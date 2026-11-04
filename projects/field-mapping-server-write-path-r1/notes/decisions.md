@@ -779,3 +779,12 @@ Also agreed with UAC-r2: Signal / Decision Record under a team-owned intermediat
 - **Rejected alternatives:**
   - giving Signal and Decision Record a Secure owner at create, which would change the 042b rule;
   - refusing all chat creates of these tables, which needs ontology-r1's agreement.
+
+## 2026-11-04 — Owner decisions after the 031 review and on half-written pairs (owner, this session)
+
+1. **031, playbook and event-type AppendTo:** exempt them in code. The route filter already authorises the lookup for this caller, so step 5 does not ask the caller for AppendTo on it. The scope is narrow (a request option; a filing or ownership-parent lookup is refused as an argument error), and UAC-r2 reviews it. Also: security roles must be aligned with the permissions each feature requires. This becomes task 046.
+2. **Document as a mapping source:** if the user can read the document and may create or update the analysis, the document's values map. This becomes task 043.
+3. **042c, a core type with no id: no refusal**, because a refused chat create is a dead end for the user. The server fills the id from the derived root, or clears the stray type, with a visible warning. A half core pair must never be written on any path. Task 044 covers the paths outside the server: field security plus a repair-pass backstop.
+4. **Regarding pair:** where a regarding is set, every related row that should carry the regarding value gets it. Make the opposite impossible. This becomes task 045: an inventory first, then the design for the owner.
+
+Numbering note (2026-11-04): the "task 043" planned on 2026-11-02 for the `sprk_Project_Matter_nn` link (#2524) was never written. 043 is now the Document mapping-source task. #2524 gets the next free number (047) when its POML is written.
