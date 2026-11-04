@@ -99,7 +99,7 @@ public sealed class InvoiceFirmHoldColumnTests
         AssertNothingWritten(w);
     }
 
-    [Fact(DisplayName = "095c-5: the invoice's own hold alone (no submission at all) holds approve, Return and correction state")]
+    [Fact(DisplayName = "095c-5: the invoice's own hold alone (no submission at all) holds approve and Return to Firm (correction: InvoiceCorrectionServiceTests, K5)")]
     public async Task TheInvoiceHoldAlone_IsHeld()
     {
         var w = new ApprovalWorld();
@@ -154,7 +154,7 @@ public sealed class InvoiceFirmHoldColumnTests
         (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
     }
 
-    [Fact(DisplayName = "095c-5 uac-r2 (binding): a read on the caller's token returns the hold as null, the app-only read returns it set - the answer is held (409)")]
+    [Fact(DisplayName = "095c-5 uac-r2 (binding): a read on the caller's token returns the hold as null, the app-only read returns it set - InvoiceFirmHold.CheckAsync answers Held (the route half is TheInvoiceHoldAlone_IsHeld)")]
     public async Task TheCallersRowSaysNoHold_TheAppOnlyReadSaysHeld_IsHeld()
     {
         var invoiceId = Guid.NewGuid();
@@ -173,12 +173,6 @@ public sealed class InvoiceFirmHoldColumnTests
         InvoiceFirmHold.IsInvoiceHeld(callersRow).Should().BeFalse("the caller's row, read on the user's token, shows no hold");
         (await InvoiceFirmHold.CheckAsync(entities.Object, callersRow, CancellationToken.None)).Should().Be(InvoiceFirmNeed.Held,
             "the hold is re-read app-only, never taken from the row a caller hands in");
-
-        // The same at the route: the approval reads the hold app-only, so the answer is still 409.
-        var w = new ApprovalWorld();
-        w.HoldInvoiceForFirm();
-        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
-        (await w.ApproveAs(AliceUser)).Code.Should().Be(InvoiceApprovalCodes.FirmMissing);
     }
 
     [Fact(DisplayName = "095c-5: the pure invoice reader - a reason code or any other non-blank value holds; null, empty and absent do not")]

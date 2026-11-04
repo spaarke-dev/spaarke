@@ -1227,12 +1227,29 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             return (Result(SubmissionPersistStatus.Retry, submissionId, SupersedesReadFailedCode), null);
         }
 
+        // Task 095c-5 review K1: a held invoice is treated as one with no firm, so a submission that names a firm never replaces it (the
+        // intake's check, repeated here because the firm column is writable). Read app-only; a fault is a Retry, never "not held".
+        var firmHeld = false;
+        if (outcome.Submission!.FirmId is not null)
+        {
+            try
+            {
+                firmHeld = await InvoiceFirmHold.IsHeldAsync(_entities, old.Id, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the firm hold of the invoice its correction replaces could not be read ({Fault}); retry",
+                    submissionId, ex.GetType().Name);
+                return (Result(SubmissionPersistStatus.Retry, submissionId, SupersedesReadFailedCode), null);
+            }
+        }
+
         string? refusal = null;
         var state = old.GetAttributeValue<OptionSetValue>("statecode")?.Value;
         var status = StatusOfInvoice(old);
         // Task 095c-3: the intake's own comparison (a no-firm invoice is corrected only by a no-firm submission; a firm on one side only, or
         // the empty id, never matches).
-        if (!InvoiceSubmissionService.CorrectionKeepsFirm(old.GetAttributeValue<EntityReference>(InvoiceVendorOrg)?.Id, outcome.Submission!.FirmId))
+        if (!InvoiceSubmissionService.CorrectionKeepsFirm(old.GetAttributeValue<EntityReference>(InvoiceVendorOrg)?.Id, outcome.Submission!.FirmId) || firmHeld)
         {
             refusal = SubmissionReasonCodes.CorrectionDifferentFirm;
         }

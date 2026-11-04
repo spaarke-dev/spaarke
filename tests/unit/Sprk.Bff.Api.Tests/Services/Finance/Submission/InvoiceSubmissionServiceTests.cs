@@ -126,6 +126,9 @@ public sealed class InvoiceSubmissionServiceTests
         /// <summary>Task 097e: non-null, the query for the submissions that name an earlier one (<c>sprk_resubmissionof</c>) throws this.</summary>
         public Exception? ResubmissionReadFailure;
 
+        /// <summary>Task 095c-5 review K1: non-null, the app-only read of the invoice's own firm hold throws this.</summary>
+        public Exception? HoldReadFailure;
+
         /// <summary>Task 097f: non-null, the status routes' page read of which invoices are Superseded (<c>sprk_invoice</c> by key) throws this.</summary>
         public Exception? SupersededInvoiceReadFailure;
 
@@ -303,6 +306,19 @@ public sealed class InvoiceSubmissionServiceTests
                                 && byEarlier.Values.Contains(earlierId))
                             .Select(s => OnlyColumns(s, q.ColumnSet.Columns.ToArray()))
                             .ToList());
+                    }
+
+                    // Task 095c-5 review K1: the app-only read of the invoice's own firm hold (sprk_firmhold), among Invoices.
+                    if (q.EntityName == "sprk_invoice" && q.ColumnSet.Columns.Contains(InvoiceFirmHold.InvoiceHoldColumn)
+                        && q.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_invoiceid") is { } byHoldKey)
+                    {
+                        if (HoldReadFailure is { } holdFailure)
+                        {
+                            throw holdFailure;
+                        }
+
+                        return new EntityCollection(Invoices.Values.Where(i => byHoldKey.Values.Contains(i.Id))
+                            .Select(i => OnlyColumns(i, q.ColumnSet.Columns.ToArray())).ToList());
                     }
 
                     // Task 097f: the status routes page read of which of the asked invoices are Superseded, among Invoices.

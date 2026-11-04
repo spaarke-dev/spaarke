@@ -173,6 +173,71 @@ public sealed class InvoiceCorrectionIntakeTests
         target.Should().BeNull();
     }
 
+    // ── task 095c-5 review K1: a held invoice is corrected like a no-firm one, whatever its firm column says ───────────────
+
+    [Theory(DisplayName = "095c-5 K1 (must fire): an invoice held for a firm (its own sprk_firmhold, or its submission's marker), firm columns set, corrected naming that firm is 409 different_firm")]
+    [InlineData("invoice")]
+    [InlineData("submission")]
+    public async Task HeldInvoice_WithItsFirmSet_CorrectionNamingThatFirm_Is409DifferentFirm(string hold)
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h);
+        if (hold == "invoice")
+        {
+            invoice[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;
+        }
+        else
+        {
+            h.PriorSubmissions.Single()["sprk_outcomereasoncode"] = SubmissionReasonCodes.FirmMissing;
+        }
+
+        invoice.Contains("sprk_vendororg").Should().BeTrue("the firm column is set");
+
+        var (refusal, target) = await Check(h, invoice);
+
+        RefusedWith(refusal, "different_firm");
+        target.Should().BeNull();
+        h.Writes.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "095c-5 K1 must not fire: an ordinary firm invoice (hold column present and empty) corrected keeping its firm is allowed")]
+    public async Task OrdinaryFirmInvoice_HoldColumnEmpty_CorrectionKeepingTheFirm_IsAllowed()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h);
+        invoice[InvoiceFirmHold.InvoiceHoldColumn] = null;
+
+        var (refusal, target) = await Check(h, invoice);
+
+        refusal.Should().BeNull();
+        target.Should().Be(CorrectionSeed.OldSubmissionId);
+    }
+
+    [Fact(DisplayName = "095c-5 K1: the hold cannot be read - 503 record_unavailable, never allowed as 'not held'")]
+    public async Task HeldInvoice_HoldReadFault_Is503()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h);
+        h.HoldReadFailure = new TimeoutException();
+
+        var (refusal, target) = await Check(h, invoice);
+
+        (refusal!.StatusCode, refusal.ErrorCode).Should().Be((503, "ebilling.submission.record_unavailable"));
+        target.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "095c-5 K1 must not fire: a held no-firm invoice corrected without a firm is still allowed (it stays held)")]
+    public async Task HeldNoFirmInvoice_CorrectedWithoutAFirm_IsAllowed()
+    {
+        var h = new Harness();
+        var invoice = CorrectionSeed.Seed(h, CorrectionSeed.WithoutFirm(CorrectionSeed.Invoice()), CorrectionSeed.WithoutFirm(CorrectionSeed.Submission()));
+        invoice[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;
+
+        var (refusal, _) = await h.Build().CheckCorrectionAsync(Matter, null, CorrectionSeed.Number, invoice, CancellationToken.None);
+
+        refusal.Should().BeNull("the request names no firm, as the original");
+    }
+
     public static TheoryData<string, string, bool> OtherCores => new()
     {
         // (the invoice's core column, its table, same id as the request's matter)

@@ -1335,4 +1335,56 @@ public sealed class InvoiceAdjustmentServiceTests
         w.Row(result.Adjustment!.LineId).Contains("sprk_vendororg").Should().BeFalse("no firm lookup, never the empty id");
         w.Stored("sprk_approvedtotal").Should().Be(850m);
     }
+
+    // ── 095c-5 review K2: a held invoice that shows a firm is refused as one with no firm (the hold is read app-only) ──
+
+    [Fact(DisplayName = "095c-5 K2 (must fire): the rule options of an invoice held for a firm, firm column set, are 409 firm_missing with the held sentence; no firm is asked")]
+    public async Task HeldWithAFirm_ListRules_Is409FirmMissing()
+    {
+        var w = new World();
+        w.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldValue;
+        w.Invoice.Contains("sprk_vendororg").Should().BeTrue("the firm column is set");
+        w.Candidates.Add(Rule());
+
+        var result = await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        result.Detail.Should().Be(AdjustmentCodes.FirmHeldDetail).And.NotContain("has no firm");
+        result.Rules.Should().BeNull();
+        w.FirmsAsked.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095c-5 K2 (must fire): an adjustment citing a rule on an invoice held for a firm, firm column set, is 409 firm_missing and writes nothing")]
+    public async Task HeldWithAFirm_CitedAdjustment_Is409_WritesNothing()
+    {
+        var w = new World();
+        w.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldValue;
+        var rule = Rule();
+        w.Candidates.Add(rule);
+
+        var result = await w.Service().AddAsync(Add(w, "percent", 10m, rule: rule.PolicyVersionId), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        result.Detail.Should().Be(AdjustmentCodes.FirmHeldDetail);
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+        w.FirmsAsked.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095c-5 K2 must not fire: an ordinary firm invoice (hold column present and empty) lists its rules and takes a cited adjustment")]
+    public async Task OrdinaryFirmInvoice_HoldColumnEmpty_ListsRules_AndTakesACitedAdjustment()
+    {
+        var w = new World();
+        w.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = null;
+        var rule = Rule();
+        w.Candidates.Add(rule);
+
+        (await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None)).Status.Should().Be(AdjustmentStatus.Applied);
+        var result = await w.Service().AddAsync(Add(w, "percent", 10m, rule: rule.PolicyVersionId), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied);
+        w.CreateCount.Should().Be(1);
+    }
 }
