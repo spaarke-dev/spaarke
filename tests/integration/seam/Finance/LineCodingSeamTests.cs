@@ -232,6 +232,23 @@ public sealed class LineCodingSeamTests
             "the firm's code is context for the model, not an instruction");
     }
 
+    [Fact(DisplayName = "095c-3: with IncludeFirmCodes false (an invoice with no firm) the firm-code step is skipped and the record's code set applies")]
+    public async Task WithoutTheFirmCodeStep_TheRecordsCodeSetApplies_AndTheBilledCodesAreStillKept()
+    {
+        var h = new Harness();
+        var core = h.CoreRecordMappedTo(h.Utbms.Counseling);
+
+        var result = await h.Sut.CodeLinesAsync(Request(
+            core,
+            Fee("F1", "Gathered facts", billedTask: "L110"),
+            Fee("F2", "Strategy call", billedTask: "L120")) with { IncludeFirmCodes = false });
+
+        // The same lines as FirmCodes_SelectTheSet_... (where Litigation wins by the firm's codes): here the matter type's set is used.
+        result.CodeSet.Source.Should().Be(CodeSetSource.MatterType);
+        result.Lines.Should().OnlyContain(l => l.CodeSetSource == CodeSetSource.MatterType && l.CodeSetId == h.Utbms.Counseling);
+        result.Lines.Select(l => l.Task.FirmCode).Should().Equal("L110", "L120");
+    }
+
     [Fact]
     public async Task EveryLine_RecordsHowItsSetWasChosen_IncludingAnAiSuggestedSetThatNeedsReview()
     {

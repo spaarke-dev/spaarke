@@ -802,6 +802,36 @@ public sealed class InvoiceResolutionServiceTests
         _calls.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "095c-3: an input with NO firm (null) reads no roster and no rates, matches no one (not even by AI), and still resolves the arithmetic")]
+    public async Task AnInputWithNullFirm_ReadsNoRosterOrRate_LeavesEveryFeeLineUnmatched_AndStillChecksTheArithmetic()
+    {
+        GivenRoster(Person("Jane Doe"));
+        GivenRates(Rate(500m, classification: Partner));
+        var input = Invoice(
+            [Fee("Jane Doe", Day, 2m, 500m, 1000m), Expense(1m, 10m, 10m)], fees: 1000m, expenses: 10m, adjustments: 0m, totalDue: 1010m)
+            with { FirmId = null };
+
+        var result = await CreateService().ResolveAsync(input);
+
+        _calls.Should().BeEmpty("no firm: no roster and no rate card can be chosen, so none is read");
+        _embedded.Should().BeEmpty("no AI-assisted match without a roster");
+        var fee = result.Lines[0];
+        fee.Timekeeper!.IsMatched.Should().BeFalse();
+        fee.Timekeeper.Reason.Should().Be(TimekeeperUnmatchedReason.None, "the match was not established (not 'not on the roster')");
+        fee.Rate.Status.Should().Be(RateResolutionStatus.NotFound);
+        fee.Rate.Reason.Should().Be(RateNotFoundReason.TimekeeperUnmatched);
+        fee.Fields[ResolutionFieldNames.TimekeeperAsBilled].Reference.Should().Be(ReferenceOutcome.Missing);
+        result.Lines[1].Rate.Status.Should().Be(RateResolutionStatus.NotApplicable, "an expense line is unchanged");
+        result.ArithmeticChecks.Should().NotBeEmpty().And.OnlyContain(c => c.Passed, "the arithmetic does not depend on the firm");
+
+        // Must-not-fire control: the same invoice with the firm matches and finds the rate.
+        _calls.Clear();
+        var withFirm = await CreateService().ResolveAsync(input with { FirmId = Firm });
+        withFirm.Lines[0].Timekeeper!.IsMatched.Should().BeTrue();
+        withFirm.Lines[0].Rate.Status.Should().Be(RateResolutionStatus.Found);
+        _calls.Select(c => c.Entity).Should().Equal("sprk_timekeeper", "sprk_ratecardrate");
+    }
+
     [Fact]
     public async Task TheLog_CarriesCountsOnly_NeverNamesOrAmounts()
     {

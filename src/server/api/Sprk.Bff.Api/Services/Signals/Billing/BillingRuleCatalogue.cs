@@ -289,6 +289,7 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewTemplate,
         BillingReasonCodes.CodingNoCodeSet => NoCodeSetTemplate,
         BillingReasonCodes.CodingUnavailable => CodingUnavailableTemplate,
+        BillingReasonCodes.SubmissionFirmMissing => FirmMissingTemplate,
         BillingEvaluationReasons.CurrencyMissing => RatesNotCheckedPrefix + "missing.",
         BillingEvaluationReasons.CurrencyUnreliable => RatesNotCheckedPrefix + "unclear.",
         BillingEvaluationReasons.CurrencyNotUsd => RatesNotCheckedPrefix + "not USD.",
@@ -367,6 +368,11 @@ public static class BillingRuleCatalogue
     public const string CodingUnavailableTemplate =
         "Code suggestion was not available when this invoice was processed, so no codes were suggested for the invoice lines.";
 
+    /// <summary>The message of <see cref="BillingReasonCodes.SubmissionFirmMissing"/> (ebilling-r1 task 095c-3, D-201): the invoice has no firm,
+    /// so its billing rules were not checked and it cannot be approved until a reviewer adds the firm.</summary>
+    public const string FirmMissingTemplate =
+        "This invoice was submitted without a firm, so its billing rules were not checked. A reviewer must add the firm before it can be approved.";
+
     /// <summary>The title of <see cref="BillingReasonCodes.SubmissionInvoiceNumberMismatch"/>'s Signal.</summary>
     public const string InvoiceNumberMismatchHeadline = "Invoice number differs from the submission";
 
@@ -396,6 +402,9 @@ public static class BillingRuleCatalogue
 
     /// <summary>The title of <see cref="BillingReasonCodes.CodingUnavailable"/>'s Signal.</summary>
     public const string CodingUnavailableHeadline = "Lines not coded";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.SubmissionFirmMissing"/>'s Signal.</summary>
+    public const string FirmMissingHeadline = "Firm needed";
 
     /// <summary>The title (<c>sprk_name</c>) of D-115's "money not judged" Signal.</summary>
     public const string RatesNotCheckedHeadline = "Rates and expense caps not checked";
@@ -429,6 +438,7 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewHeadline,
         BillingReasonCodes.CodingNoCodeSet => NoCodeSetHeadline,
         BillingReasonCodes.CodingUnavailable => CodingUnavailableHeadline,
+        BillingReasonCodes.SubmissionFirmMissing => FirmMissingHeadline,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd
             => RatesNotCheckedHeadline,
         BillingReasonCodes.DiscountNotCheckedNoRackRate => DiscountNotCheckedHeadline,
@@ -452,7 +462,7 @@ public static class BillingRuleCatalogue
             or BillingReasonCodes.CodingRefusedCodeNotShown or BillingReasonCodes.CodingCodeKindNotForLine
             or BillingReasonCodes.CodingFirmCodeMismatch or BillingReasonCodes.CodingCodeSetNeedsReview
             or BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown or BillingReasonCodes.CodingFirmCodeMismatchNotShown
-            or BillingReasonCodes.CodingNoCodeSet or BillingReasonCodes.CodingUnavailable => true,
+            or BillingReasonCodes.CodingNoCodeSet or BillingReasonCodes.CodingUnavailable or BillingReasonCodes.SubmissionFirmMissing => true,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd => true,
         // Task 115: "not checked" is a fact about the invoice's data, not a breach (as D-115).
         BillingReasonCodes.DiscountNotCheckedNoRackRate or BillingReasonCodes.AddedFeeNotChecked => true,

@@ -160,6 +160,13 @@ public static class BillingSystemFindings
     public static BillingFinding CodingUnavailable(BillingSystemPolicyVersion policy) =>
         Build(policy, BillingSubject.ForInvoice(), BillingReasonCodes.CodingUnavailable, [], new Dictionary<string, string>(StringComparer.Ordinal));
 
+    /// <summary>
+    /// ebilling-r1 task 095c-3 (ontology-r1 D-201): the invoice was submitted without a firm, so no firm-scoped step and no billing rule ran;
+    /// it is held until a reviewer adds the firm (and approval refuses it until then). Invoice level; it cites no value.
+    /// </summary>
+    public static BillingFinding FirmMissing(BillingSystemPolicyVersion policy) =>
+        Build(policy, BillingSubject.ForInvoice(), BillingReasonCodes.SubmissionFirmMissing, [], new Dictionary<string, string>(StringComparer.Ordinal));
+
     private static BillingFinding Build(
         BillingSystemPolicyVersion policy, BillingSubject subject, string reasonCode, IReadOnlyList<BillingValueRead> values,
         IReadOnlyDictionary<string, string> facts)

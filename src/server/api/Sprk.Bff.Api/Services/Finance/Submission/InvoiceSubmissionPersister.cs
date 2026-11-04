@@ -302,11 +302,15 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         }
 
         // 072 part L: never persist findings judged under a different core record.
-        var stored = InvoiceSubmissionService.ToView(current).CoreRecord;
-        if (stored != outcome.CoreRecord)
+        // Task 095c-3: the firm too. Since sprk_vendororg is no longer required it can be set or cleared between the evaluation and the commit,
+        // and a firm decides which steps ran (a no-firm evaluation ran no rule; a firm evaluation judged that firm's data): never persist an
+        // invoice whose firm is not the one it was evaluated with.
+        var view = InvoiceSubmissionService.ToView(current);
+        var stored = view.CoreRecord;
+        if (stored != outcome.CoreRecord || view.FirmId != outcome.Submission?.FirmId)
         {
             _logger.LogWarning(
-                "Invoice submission {SubmissionId}: the core record changed since the evaluation; nothing persisted, re-evaluate", submissionId);
+                "Invoice submission {SubmissionId}: the core record or the firm changed since the evaluation; nothing persisted, re-evaluate", submissionId);
             return new SubmissionPersistResult
             {
                 Status = SubmissionPersistStatus.ReEvaluate,
@@ -1100,8 +1104,12 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal async Task<Guid?> FindSupersededInvoiceAsync(
         Guid submissionId, Guid invoiceId, SubmissionSnapshot submission, InvoiceCoreRecord core, CancellationToken ct)
     {
+        // Task 095c-3: a submission with no firm links to no predecessor. The link asserts "the same firm's invoice"; with no firm there is
+        // none to match, and a null firm never matches anything (not even another null: the `none` tracking scope is a numbering scope only,
+        // never an identity). Task 095d's assign-firm runs the pipeline again once the firm is set. A firm submission never finds a no-firm
+        // invoice either: the Equal condition below excludes a null sprk_vendororg.
         var number = submission.FirmInvoiceNumber?.Trim();
-        if (string.IsNullOrEmpty(number) || submission.FirmId == Guid.Empty)
+        if (string.IsNullOrEmpty(number) || submission.FirmId is not { } firmId || firmId == Guid.Empty)
         {
             return null;
         }
@@ -1112,7 +1120,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             Criteria = new FilterExpression(LogicalOperator.And),
             NoLock = true,
         };
-        query.Criteria.AddCondition(InvoiceVendorOrg, ConditionOperator.Equal, submission.FirmId);
+        query.Criteria.AddCondition(InvoiceVendorOrg, ConditionOperator.Equal, firmId);
         query.Criteria.AddCondition(InvoiceReviewService.InvInvoiceNumber, ConditionOperator.Equal, number);
         query.AddOrder("createdon", OrderType.Descending);
         query.AddOrder(InvoiceReviewService.InvoiceEntity + "id", OrderType.Descending);
@@ -1202,7 +1210,9 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         string? refusal = null;
         var state = old.GetAttributeValue<OptionSetValue>("statecode")?.Value;
         var status = StatusOfInvoice(old);
-        if (old.GetAttributeValue<EntityReference>(InvoiceVendorOrg)?.Id is not { } firm || firm != outcome.Submission!.FirmId)
+        // Task 095c-3: the intake's own comparison (a no-firm invoice is corrected only by a no-firm submission; a firm on one side only, or
+        // the empty id, never matches).
+        if (!InvoiceSubmissionService.CorrectionKeepsFirm(old.GetAttributeValue<EntityReference>(InvoiceVendorOrg)?.Id, outcome.Submission!.FirmId))
         {
             refusal = SubmissionReasonCodes.CorrectionDifferentFirm;
         }
@@ -1341,7 +1351,12 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         invoice[InvoiceReviewService.InvName] = InvoiceNameFor(outcome);
         invoice[InvoiceReviewService.InvInvoiceNumber] = snapshot.FirmInvoiceNumber;
         invoice[InvoiceReviewService.InvTrackingNumber] = snapshot.TrackingNumber;
-        invoice[InvoiceVendorOrg] = new EntityReference("sprk_organization", snapshot.FirmId);
+
+        // Task 095c-3: no firm, no lookup (never the empty id, never a placeholder): the invoice is created with no firm and held FirmMissing.
+        if (snapshot.FirmId is { } firmId)
+        {
+            invoice[InvoiceVendorOrg] = new EntityReference("sprk_organization", firmId);
+        }
 
         // Task 094: the invoice never names a document (sprk_document): its PDF is the invoice's Stored File on every channel (an upload, a
         // Submit Invoice copy), and the source stays where it is filed (the copy rule; owner K keeps the copy out of indexing).
@@ -1391,8 +1406,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             .ToHashSet();
 
         // F2: a rule version the gate or its handler refused produced no finding, but its check did not run on the lines it applies to: those lines are
-        // Flagged (the same principle as EB-D-175: a check that did not run is not Clean).
-        var notChecked = RulesNotChecked(outcome.Evaluation, read.Lines.Count);
+        // Flagged (the same principle as EB-D-175: a check that did not run is not Clean). Task 095c-3: with no firm no rule ran, so every line.
+        var notChecked = RulesNotChecked(outcome);
 
         var rows = new List<Entity>(read.Lines.Count);
         for (var index = 0; index < read.Lines.Count; index++)
@@ -1416,8 +1431,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 [LineName] = LineNameFor(snapshot.TrackingNumber, index),
                 [LineSequence] = index + 1,
                 [InvoiceTotalsService.LineCostType] = new OptionSetValue(line.LineType == InvoiceLineType.Fee ? CostTypeFee : CostTypeExpense),
-                [LineVendorOrg] = new EntityReference("sprk_organization", snapshot.FirmId),
             };
+
+            // Task 095c-3: as the invoice, no firm lookup for a submission with no firm.
+            if (snapshot.FirmId is { } lineFirm)
+            {
+                row[LineVendorOrg] = new EntityReference("sprk_organization", lineFirm);
+            }
+
             foreach (var (column, value) in resolverFields)
             {
                 row[column] = value;
@@ -1522,6 +1543,25 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// A refusal is tied to its lines through <see cref="BillingEvaluationResult.RefusalScopes"/>: the lines the version was selected for, or every line when
     /// the invoice subject selected it. A refusal with no scope (it cannot be tied to particular lines) flags every line.
     /// </summary>
+    internal static IReadOnlyDictionary<int, string> RulesNotChecked(SubmissionEvaluationOutcome outcome)
+    {
+        ArgumentNullException.ThrowIfNull(outcome);
+        var lineCount = outcome.Read?.Lines.Count ?? 0;
+
+        // Task 095c-3 (ontology-r1, 2026-11-03; EB-D-175): a submission with no firm skipped the evaluation entirely, so no rule was checked on
+        // any line. Every line is flagged explicitly; a null evaluation alone would read as "nothing refused" and leave the lines Clean.
+        if (outcome.RulesSkippedForNoFirm)
+        {
+            return Enumerable.Range(0, lineCount).ToDictionary(i => i, _ => RulesNotCheckedNoFirmMessage);
+        }
+
+        return RulesNotChecked(outcome.Evaluation, lineCount);
+    }
+
+    /// <summary>The <see cref="LineFindingRulesNotChecked"/> message of every line of an invoice submitted without a firm (task 095c-3).</summary>
+    internal const string RulesNotCheckedNoFirmMessage = "The billing rules were not checked on this line because the invoice has no firm.";
+
+    /// <inheritdoc cref="RulesNotChecked(SubmissionEvaluationOutcome)"/>
     internal static IReadOnlyDictionary<int, string> RulesNotChecked(BillingEvaluationResult? evaluation, int lineCount)
     {
         var result = new Dictionary<int, string>();
@@ -1654,6 +1694,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     {
         SubmissionEvaluationKind.AutoRejected or SubmissionEvaluationKind.Blocked => (InvoiceSubmissionStatus.Rejected, reasonCode),
         SubmissionEvaluationKind.AcceptedUncoded => (InvoiceSubmissionStatus.Accepted, reasonCode),
+
+        // Task 095c-3: an Accepted invoice with no firm is held, and the submission says so (contract section 9). Only that code passes: any
+        // other Accepted outcome keeps no reason code, as before.
+        SubmissionEvaluationKind.Accepted when reasonCode == SubmissionReasonCodes.FirmMissing => (InvoiceSubmissionStatus.Accepted, reasonCode),
         _ => (InvoiceSubmissionStatus.Accepted, null),
     };
 
@@ -1835,7 +1879,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         // EB-D-175 / EB-D-176: the lines left Flagged for lacking a check or a description, each with a stable code. Additive (schema 1 readers
         // ignore it); no Signal, no value: the reviewer decides the line from its Flagged status.
         var codedByKey = outcome.Coding?.Lines.ToDictionary(l => l.LineKey, StringComparer.Ordinal);
-        var notChecked = RulesNotChecked(outcome.Evaluation, outcome.Read!.Lines.Count);
+        var notChecked = RulesNotChecked(outcome);
         var lineFindings = new JsonArray();
         for (var index = 0; index < outcome.Read!.Lines.Count; index++)
         {
@@ -2060,6 +2104,24 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             or SubmissionEvaluationKind.Blocked or SubmissionEvaluationKind.AcceptedUncoded))
         {
             throw new ArgumentException($"A {outcome.Kind} outcome creates no invoice (D-101); only a read submission is persisted.", nameof(outcome));
+        }
+
+        // Task 095c-3: a submission with no firm ran no rule, so it carries no evaluation and no decision, and it can only be accepted and
+        // held: Accepted (coded) or AcceptedUncoded, its reason the firm hold, and the firm hold among its pipeline findings. Anything else
+        // (a rule result without a firm, a rejection, a missing hold) is a builder defect and is never persisted.
+        if (outcome.Submission is { HasNoFirm: true })
+        {
+            if (outcome.Kind is not (SubmissionEvaluationKind.Accepted or SubmissionEvaluationKind.AcceptedUncoded)
+                || outcome.ReasonCode != SubmissionReasonCodes.FirmMissing
+                || !outcome.PipelineFindings.Any(p => p.ReasonCode == SubmissionReasonCodes.FirmMissing)
+                || outcome.Read is null || outcome.Resolution is null
+                || outcome.EvaluationRequest is not null || outcome.Evaluation is not null || outcome.Decision is not null
+                || (outcome.Kind == SubmissionEvaluationKind.Accepted && outcome.Coding is null))
+            {
+                throw new ArgumentException($"A {outcome.Kind} outcome with no firm must be accepted and held for the firm, with no rule result.", nameof(outcome));
+            }
+
+            return;
         }
 
         // D-130 (1): the rules run on uncoded submissions too, so every persistable kind carries its evaluation and decision. Only Accepted

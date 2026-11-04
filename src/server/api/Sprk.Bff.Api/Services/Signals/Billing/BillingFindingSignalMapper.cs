@@ -314,8 +314,7 @@ public static class BillingFindingSignalMapper
             ? deciding[0]
             : members.Where(m => m.Consequence == consequence)
                 .OrderBy(m => BillingRuleCatalogue.IsFlagOnlyReason(m.Finding.ReasonCode) ? 1 : 0)
-                .ThenBy(m => m.Finding.ReasonCode is BillingReasonCodes.SubmissionInvoiceNumberMismatch
-                    or BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown ? 0 : 1)
+                .ThenBy(m => NotePrecedence(m.Finding.ReasonCode))
                 .First();
         var groupDecision = !decided ? BillingGroupDecision.NotDecided
             : deciding.Count > 0 ? BillingGroupDecision.Rejects
@@ -417,6 +416,18 @@ public static class BillingFindingSignalMapper
         && rule.Consequence is { } value && Enum.IsDefined(typeof(BillingConsequence), value)
             ? (BillingConsequence)value
             : BillingConsequence.Flag;
+
+    /// <summary>
+    /// Which flag-only note titles a group when no real breach does (lower first): ebilling-r1 task 095c-3's firm missing (approval is
+    /// refused until a firm is added, so the reviewer must see it first, and a non-primary reason survives only as an evidence line the read
+    /// path strips), then the D-91 invoice-number mismatch (D-125 review (a)), then every other note in code order.
+    /// </summary>
+    private static int NotePrecedence(string reasonCode) => reasonCode switch
+    {
+        BillingReasonCodes.SubmissionFirmMissing => 0,
+        BillingReasonCodes.SubmissionInvoiceNumberMismatch or BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown => 1,
+        _ => 2,
+    };
 
     private static int Strength(BillingConsequence consequence) => consequence switch
     {

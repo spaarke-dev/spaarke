@@ -66,8 +66,15 @@ public sealed record SubmissionSnapshot
 
     public required Guid SubmissionId { get; init; }
 
-    /// <summary><c>sprk_vendororg</c>.</summary>
-    public required Guid FirmId { get; init; }
+    /// <summary>
+    /// <c>sprk_vendororg</c>; null when the submission has no firm (task 095c-3: only an Internal submission, which the from-email route takes
+    /// without one). A no-firm submission runs no firm-scoped step (<see cref="InvoiceSubmissionProcessor"/>) and is held
+    /// <see cref="SubmissionReasonCodes.FirmMissing"/>. Never <see cref="Guid.Empty"/>: <see cref="Read"/> fails that.
+    /// </summary>
+    public required Guid? FirmId { get; init; }
+
+    /// <summary>True when the submission has no firm (task 095c-3).</summary>
+    public bool HasNoFirm => FirmId is null;
 
     /// <summary>The one <c>sprk_regarding{core}</c> lookup (FR-05).</summary>
     public required InvoiceCoreRecord CoreRecord { get; init; }
@@ -112,8 +119,9 @@ public sealed record SubmissionSnapshot
     public DateOnly ReceivedOn => DateOnly.FromDateTime(CreatedOnUtc);
 
     /// <summary>
-    /// Reads a submission row. Fails closed: a missing tracking number, <c>createdon</c>, firm, core record (or more than one), typed
-    /// firm invoice number or supported channel gives a <see cref="SubmissionEvaluationKind.Failed"/> reason code, never a default.
+    /// Reads a submission row. Fails closed: a missing tracking number, <c>createdon</c>, core record (or more than one), typed firm invoice
+    /// number or supported channel gives a <see cref="SubmissionEvaluationKind.Failed"/> reason code, never a default. A missing firm is a
+    /// failure too, except on an Internal submission (task 095c-3), whose snapshot then has <see cref="FirmId"/> null.
     /// </summary>
     /// <remarks>ebilling-r1 task 092: no document is an upload (its PDF is in the file store). Task 094 (a deliberate change of 092's rule,
     /// recorded in notes/094-submit-invoice.md): an INTERNAL submission that names a document is a Submit Invoice source submission,
@@ -138,7 +146,25 @@ public sealed record SubmissionSnapshot
             return (null, SubmissionReasonCodes.ReceivedOnMissing);
         }
 
-        if (view.FirmId is not { } firmId || firmId == Guid.Empty)
+        // Task 095c-3 (owner 2026-11-03): an Internal submission may have no firm (the from-email route takes one without it); it is processed
+        // and held FirmMissing, never matched to a firm. The empty id is never "no firm", and an SPA submission always carries the caller's
+        // firm, so either is still a failure (fail closed).
+        var channel = row.GetAttributeValue<OptionSetValue>("sprk_channel")?.Value;
+        Guid? firmId;
+        if (view.FirmId is { } firm)
+        {
+            if (firm == Guid.Empty)
+            {
+                return (null, SubmissionReasonCodes.FirmMissing);
+            }
+
+            firmId = firm;
+        }
+        else if (channel == (int)InvoiceSubmissionChannel.Internal)
+        {
+            firmId = null;
+        }
+        else
         {
             return (null, SubmissionReasonCodes.FirmMissing);
         }
@@ -153,7 +179,6 @@ public sealed record SubmissionSnapshot
             return (null, SubmissionReasonCodes.FirmInvoiceNumberMissing);
         }
 
-        var channel = row.GetAttributeValue<OptionSetValue>("sprk_channel")?.Value;
         if (channel is not ((int)InvoiceSubmissionChannel.Spa or (int)InvoiceSubmissionChannel.Internal))
         {
             return (null, SubmissionReasonCodes.ChannelUnsupported);
@@ -338,7 +363,8 @@ public sealed record SubmissionEvaluationOutcome
     /// (<see cref="SubmissionEvaluationKind.AutoRejected"/>), <see cref="SubmissionReasonCodes.Blocked"/>
     /// (<see cref="SubmissionEvaluationKind.Blocked"/>), the coding code (<see cref="SubmissionEvaluationKind.AcceptedUncoded"/>:
     /// <see cref="SubmissionReasonCodes.CodingNoCodeSetHold"/> or <see cref="SubmissionReasonCodes.CodingUnavailableHold"/>, D-130 b),
-    /// or null (<see cref="SubmissionEvaluationKind.Accepted"/>).
+    /// or null (<see cref="SubmissionEvaluationKind.Accepted"/>). Task 095c-3: a submission with no firm is Accepted or AcceptedUncoded with
+    /// <see cref="SubmissionReasonCodes.FirmMissing"/> (the hold that decides approval wins over a coding code, which stays a pipeline finding).
     /// </summary>
     public string? ReasonCode { get; init; }
 
@@ -368,14 +394,23 @@ public sealed record SubmissionEvaluationOutcome
     /// <see cref="SubmissionEvaluationKind.AcceptedUncoded"/> outcome, or an AutoRejected / Blocked one carrying a coding hold finding.</summary>
     public InvoiceCodingResult? Coding { get; init; }
 
-    /// <summary>Step 4 input: exactly what was judged (for the findings JSON and part C's re-evaluation check).</summary>
+    /// <summary>Step 4 input: exactly what was judged (for the findings JSON and part C's re-evaluation check). Null when the submission has
+    /// no firm (task 095c-3: the billing rules are not run, see <see cref="RulesSkippedForNoFirm"/>).</summary>
     public BillingEvaluationRequest? EvaluationRequest { get; init; }
 
-    /// <summary>Step 4: the billing findings (072).</summary>
+    /// <summary>Step 4: the billing findings (072). Null when the submission has no firm (<see cref="RulesSkippedForNoFirm"/>).</summary>
     public BillingEvaluationResult? Evaluation { get; init; }
 
-    /// <summary>Step 5: the decision (073); <see cref="SubmissionDecision.DecidingFindings"/> are the findings that rejected.</summary>
+    /// <summary>Step 5: the decision (073); <see cref="SubmissionDecision.DecidingFindings"/> are the findings that rejected. Null when the
+    /// submission has no firm (<see cref="RulesSkippedForNoFirm"/>): nothing was judged, so nothing can reject.</summary>
     public SubmissionDecision? Decision { get; init; }
+
+    /// <summary>
+    /// Task 095c-3: true when the submission has no firm, so steps 4 and 5 did not run. No billing rule was checked on any line, and the
+    /// persister flags every line <c>rules.not_checked</c> (EB-D-175: a check that did not run is not Clean); a partial run is never made,
+    /// because it would mark the firm-scoped rules and Duplicate as checked.
+    /// </summary>
+    public bool RulesSkippedForNoFirm => Submission is { HasNoFirm: true };
 
     /// <summary>
     /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 2): the copies the job staged from the submission's source before the commit

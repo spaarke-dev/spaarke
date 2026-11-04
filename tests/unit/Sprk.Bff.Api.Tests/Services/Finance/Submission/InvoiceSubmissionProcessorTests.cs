@@ -658,6 +658,89 @@ public class InvoiceSubmissionProcessorTests
         SubmissionReasonCodes.CodingUnavailableHold.Should().Be("ebilling.submission.coding_unavailable");
     }
 
+    // ── 095c-3: a submission with no firm ──
+
+    /// <summary>An Internal submission whose row names no firm (the from-email route, mode New, owner 2026-11-03).</summary>
+    internal static Harness NoFirm(params BillingRuleCandidate[] rules)
+    {
+        var h = new Harness { Channel = InvoiceSubmissionChannel.Internal, Rules = rules };
+        h.Row.Attributes.Remove("sprk_vendororg");
+        return h;
+    }
+
+    [Fact(DisplayName = "095c-3: an Internal submission with no firm is Accepted, held firm_missing; it reads no roster or rate, skips the firm-code step and runs no rule (a rule that would block does not)")]
+    public async Task NoFirm_IsAcceptedHeldFirmMissing_SkipsEveryFirmScopedStep_AndJudgesNoRule()
+    {
+        var h = NoFirm(InvoiceAgeReject());
+        h.Lines = [FeeLine(date: new DateOnly(2026, 1, 20))];
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.FirmMissing).And.Be("ebilling.submission.firm_missing");
+        outcome.Submission!.FirmId.Should().BeNull();
+        outcome.RulesSkippedForNoFirm.Should().BeTrue();
+        outcome.PipelineFindings.Should().ContainSingle().Which.Should().Match<SubmissionPipelineFinding>(f =>
+            f.ReasonCode == SubmissionReasonCodes.FirmMissing && f.Values.Count == 0);
+        outcome.Read.Should().NotBeNull();
+        outcome.Resolution.Should().NotBeNull();
+        outcome.Coding.Should().NotBeNull("coding by the record's code set still runs");
+        outcome.EvaluationRequest.Should().BeNull();
+        outcome.Evaluation.Should().BeNull();
+        outcome.Decision.Should().BeNull();
+        h.Evaluated.Should().BeNull("steps 4 and 5 do not run: no rule set, no Duplicate prior read, no partial evaluation");
+        h.Resolution.Input!.FirmId.Should().BeNull("no roster and no rate card is chosen without a firm");
+        h.Coding.Request!.IncludeFirmCodes.Should().BeFalse("the firm-code step is skipped");
+
+        // Must-not-fire control: the same submission WITH its firm is judged (and this rule blocks it), with the firm-code step.
+        var withFirm = new Harness { Channel = InvoiceSubmissionChannel.Internal, Rules = [InvoiceAgeReject()] };
+        withFirm.Lines = [FeeLine(date: new DateOnly(2026, 1, 20))];
+        var judged = await withFirm.RunAsync();
+        judged.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        judged.RulesSkippedForNoFirm.Should().BeFalse();
+        judged.PipelineFindings.Should().NotContain(f => f.ReasonCode == SubmissionReasonCodes.FirmMissing);
+        withFirm.Resolution.Input!.FirmId.Should().Be(Firm);
+        withFirm.Coding.Request!.IncludeFirmCodes.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "095c-3: no firm and no code set is AcceptedUncoded with firm_missing as its reason, both holds kept as pipeline findings")]
+    public async Task NoFirm_AndUncoded_IsAcceptedUncoded_WithTheFirmHoldAsTheReason()
+    {
+        var h = NoFirm();
+        h.Coding.Failure = new LineCodingException(LineCodingException.NoCodeSet, "none");
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.FirmMissing, "the hold that decides approval");
+        outcome.PipelineFindings.Select(f => f.ReasonCode).Should().Equal(SubmissionReasonCodes.FirmMissing, SubmissionReasonCodes.CodingNoCodeSetHold);
+        outcome.Evaluation.Should().BeNull();
+        h.Evaluated.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "095c-3 (fail closed): the empty firm id, or no firm on an SPA submission, is still Failed firm_missing before anything is read")]
+    [InlineData(InvoiceSubmissionChannel.Internal, true)]
+    [InlineData(InvoiceSubmissionChannel.Spa, false)]
+    public async Task EmptyFirm_OrNoFirmOnSpa_FailsClosed(InvoiceSubmissionChannel channel, bool emptyId)
+    {
+        var h = new Harness { Channel = channel };
+        if (emptyId)
+        {
+            h.Row["sprk_vendororg"] = new EntityReference("sprk_organization", Guid.Empty);
+        }
+        else
+        {
+            h.Row.Attributes.Remove("sprk_vendororg");
+        }
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Failed);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.FirmMissing);
+        outcome.Submission.Should().BeNull();
+        h.DocumentLoads.Should().Be(0);
+    }
+
     // ── builders ──
 
     internal static BillingRuleCandidate InvoiceAgeReject() => Version("BILL-AGE", RuleType.InvoiceAge) with { Consequence = Reject };

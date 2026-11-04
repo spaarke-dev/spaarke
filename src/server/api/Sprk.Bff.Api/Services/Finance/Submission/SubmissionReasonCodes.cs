@@ -69,7 +69,17 @@ public static class SubmissionReasonCodes
     /// <summary>The submission has no <c>createdon</c>, so the date its rules are judged on (072 <c>ReceivedOn</c>) is unknown. Never defaulted.</summary>
     public const string ReceivedOnMissing = "ebilling.submission.received_on_missing";
 
-    /// <summary>The submission names no firm (<c>sprk_vendororg</c>).</summary>
+    /// <summary>
+    /// The submission names no firm (<c>sprk_vendororg</c>). Two uses (task 095c-3):
+    /// <list type="bullet">
+    /// <item>A <b>failure</b> (Failed, no invoice) for a firm that is the empty id, or for a submission without a firm on a channel that always
+    /// sends one (SPA).</item>
+    /// <item>A <b>pipeline finding and hold</b> for an Internal submission taken without a firm (the from-email route, mode New, owner
+    /// 2026-11-03): the invoice is created In Review with no firm, the firm-scoped steps are skipped, every line is
+    /// <c>rules.not_checked</c>, and the submission is Accepted with this code as its reason. Part D writes it as the SubmissionIntegrity
+    /// reason <c>submission.firm_missing</c>. It holds for review and never rejects.</item>
+    /// </list>
+    /// </summary>
     public const string FirmMissing = "ebilling.submission.firm_missing";
 
     /// <summary>FR-05: the submission names no core record, or more than one.</summary>

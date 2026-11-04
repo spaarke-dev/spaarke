@@ -1281,7 +1281,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     // ── System Signals (D-123, D-125) ──
 
     /// <summary>
-    /// The system findings (D-91 mismatch, refused codes, firm-code mismatches, code set needs review, no code set, coding unavailable) as
+    /// The system findings (D-91 mismatch, refused codes, firm-code mismatches, code set needs review, no code set, coding unavailable, and
+    /// task 095c-3's firm missing) as
     /// Signal requests under <c>BILL-SYSTEM-SUBMISSION</c>: read app-only, once per run, and only when there is a system finding. Missing,
     /// ambiguous, disabled, of another rule type, or with no Active version in force on the received date: no system Signal, one Warning
     /// (the policy code only), and the findings stay in the findings JSON. Disabled is the administrator's choice (D-125) and stays a
@@ -1571,7 +1572,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         /// <summary>True when any stored finding maps to a SubmissionIntegrity Signal.</summary>
         public bool HasSystemFindings =>
             PipelineFindings.OfType<JsonObject>().Any(p => Text(p, "reasonCode") is SubmissionReasonCodes.InvoiceNumberMismatch
-                or SubmissionReasonCodes.CodingNoCodeSetHold or SubmissionReasonCodes.CodingUnavailableHold)
+                or SubmissionReasonCodes.CodingNoCodeSetHold or SubmissionReasonCodes.CodingUnavailableHold or SubmissionReasonCodes.FirmMissing)
             || CodingFindings.Count > 0
             || CodeSet?["needsReview"]?.GetValue<bool>() == true;
 
@@ -1594,6 +1595,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                         break;
                     case SubmissionReasonCodes.CodingUnavailableHold:
                         findings.Add(BillingSystemFindings.CodingUnavailable(policy));
+                        break;
+                    case SubmissionReasonCodes.FirmMissing:
+                        // Task 095c-3 (ontology-r1 D-201): the invoice was submitted without a firm; held until a reviewer adds one.
+                        findings.Add(BillingSystemFindings.FirmMissing(policy));
                         break;
                 }
             }
