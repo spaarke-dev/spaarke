@@ -641,8 +641,8 @@ public class AnalysisEndpointsAuthorizationContractTests
         bodies[0].Should().Contain("content-type: application/problem+json", "the comparison covers the route's headers, not an empty set");
     }
 
-    [Fact(DisplayName = "031 fix round 1 (a): a body carrying routeAuthorizedLookupColumns is ignored - the document's AppendTo is still asked and refuses")]
-    public async Task Create_BodyNamingRouteAuthorizedLookupColumns_IsIgnored()
+    [Fact(DisplayName = "031 fix round 1 (a): a body carrying routeAuthorizedLookups (any spelling) is ignored - the document's AppendTo is still asked and refuses")]
+    public async Task Create_BodyNamingRouteAuthorizedLookups_IsIgnored()
     {
         await using var host = await AnalysisAuthHost.StartAsync();
         var documentId = Guid.NewGuid();
@@ -660,6 +660,8 @@ public class AnalysisEndpointsAuthorizationContractTests
             ["toolIds"] = Array.Empty<Guid>(),
             ["routeAuthorizedLookupColumns"] = new[] { "sprk_documentid", "sprk_playbook" },
             ["RouteAuthorizedLookupColumns"] = new[] { "sprk_documentid" },
+            ["routeAuthorizedLookups"] = new Dictionary<string, Guid> { ["sprk_documentid"] = documentId, ["sprk_playbook"] = playbookId },
+            ["RouteAuthorizedLookups"] = new Dictionary<string, Guid> { ["sprk_documentid"] = documentId },
         }));
 
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, "the route's existing generic failure for a service refusal");

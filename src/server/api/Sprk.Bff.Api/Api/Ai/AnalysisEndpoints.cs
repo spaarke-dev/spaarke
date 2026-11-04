@@ -202,12 +202,13 @@ public static class AnalysisEndpoints
                     // FR-19 / FR-03: the mapping profile of the document the analysis is filed under, if one exists; read as
                     // the caller first (FR-04). No profile: a silent no-op. Fill-only: every value of the request wins.
                     Mapping = Sprk.Bff.Api.Api.Events.EventEndpoints.CallerMappingOf(httpContext, logger),
-                    // Task 031 fix round 1 (F1, owner 2026-11-04): the route filter's playbook-use decision (public, or the
-                    // caller's Read on the row) authorised THIS playbook, so the service asks no AppendTo on it (only Spaarke AI
-                    // Analysis Admin holds it). Set only when the filter recorded that decision for this request's id.
-                    RouteAuthorizedLookupColumns =
-                        Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.IsPlaybookUseAuthorized(httpContext, request.PlaybookId)
-                            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { PlaybookColumn }
+                    // Task 031 fix round 1 (F1, owner 2026-11-04; UAC-r2 2026-11-04): the route filter's playbook-use decision
+                    // (public, or the caller's Read on the row) authorised ONE playbook id, so the service asks no AppendTo on
+                    // that record (only Spaarke AI Analysis Admin holds it). The id is the filter's, not the body's: the service
+                    // exempts the payload's playbook only when it is that record. Set only when the filter recorded a decision.
+                    RouteAuthorizedLookups =
+                        Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizedPlaybookId(httpContext) is { } authorisedPlaybook
+                            ? new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase) { [PlaybookColumn] = authorisedPlaybook }
                             : null,
                 },
                 RecordCreationPrincipal.ForCaller(

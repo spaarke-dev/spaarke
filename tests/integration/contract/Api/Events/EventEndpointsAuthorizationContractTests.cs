@@ -427,6 +427,45 @@ public class EventEndpointsAuthorizationContractTests
         payload.Keys.Should().NotContain("sprk_RegardingRecordType@odata.bind", "this environment double has no record-type row for analysis");
     }
 
+    [Fact]
+    public async Task Create_ABodyNamingAContact_IsIgnored_TheRowNamesTheCallersLinkedContact()
+    {
+        // Task 031 (UAC-r2, 2026-11-04): sprk_assignedto is the server-set lookup that costs no AppendTo, so it must come from
+        // the caller's identity on the server and never from the body. The create body has no contact field; every spelling
+        // a client might try is dropped at binding, and the row names the caller's LINKED contact.
+        var linkedContact = Guid.Parse("c0c0c0c0-0031-4031-8031-000000000031");
+        var bodyContact = Guid.Parse("c0c0c0c0-0031-4031-8031-0000000000bb");
+        await using var host = await EventsAuthHost.StartAsync();
+        host.Identity.Setup(i => i.ResolveAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(CallerSystemUserId, ContactId: linkedContact));
+        var analysis = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant(AnalysesSet, analysis, AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync(AnalysesSet);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync(MattersSet);
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync((Entity?)null);
+        host.Entities.Setup(e => e.RetrieveAsync("sprk_analysis", analysis, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_analysis", analysis) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter) });
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new Dictionary<string, object>
+        {
+            ["subject"] = "Review",
+            ["regardingRecordType"] = 3,
+            ["regardingRecordId"] = analysis,
+            ["assigneeContactId"] = bodyContact,
+            ["assignedToContactId"] = bodyContact,
+            ["sprk_assignedto"] = bodyContact,
+            ["sprk_AssignedTo@odata.bind"] = $"/contacts({bodyContact:D})",
+        }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var payload = creates.Should().ContainSingle().Subject.Payload;
+        payload["sprk_AssignedTo@odata.bind"].Should().Be($"/contacts({linkedContact:D})", "the caller's linked contact, resolved on the server");
+        System.Text.Json.JsonSerializer.Serialize(payload).Should().NotContain(bodyContact.ToString("D"), "nothing the body names reaches the row");
+    }
+
     /// <summary>
     /// Task 173 (owner round 81): an event filed under an analysis of a RESTRICTED matter is created showing Restricted —
     /// the value comes from <c>DeriveForHostAsync</c> and rides the same create body as the stamps.

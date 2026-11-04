@@ -183,7 +183,7 @@ internal sealed partial class RecordCreationService
         }
 
         ValidateReferenceLookupColumns(table, rule, request);
-        ValidateRouteAuthorizedLookupColumns(table, request, principal);
+        ValidateRouteAuthorizedLookups(table, request, principal);
         var defaults = PostMappingDefaultValues(table, rule, request);
 
         Decision decision;
@@ -1966,20 +1966,21 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
             .Select(c => c.Trim().ToLowerInvariant())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-    private readonly IReadOnlySet<string>? _routeAuthorizedLookupColumns;
+    private readonly IReadOnlyDictionary<string, Guid>? _routeAuthorizedLookups;
 
     /// <summary>
-    /// Task 031 fix round 1 (F1, owner 2026-11-04): lookups of the CALLER's payload whose target the ROUTE has already
-    /// authorised for this caller and this record id (the analysis create's playbook-use decision). Step 5 asks their Read as
-    /// the caller (existence: the uniform not-found) but not their AppendTo; every other check is the caller's value's. Set
-    /// by route code only, never bound from a request; a CLOSED list (<see cref="RecordCreationService.RouteAuthorizedLookups"/>)
-    /// — any other column, a filing lookup or an ownership-parent target is an argument error. Normalised as
-    /// <see cref="ServerSetLookupColumns"/> is. <c>null</c> (the default): every lookup's AppendTo is asked.
+    /// Task 031 fix round 1 (F1, owner 2026-11-04; UAC-r2 2026-11-04): lookups of the CALLER's payload whose target the ROUTE
+    /// has already authorised for this caller, each as (column, the record id the route decided). Step 5 asks the caller's
+    /// Read on such a lookup (existence: the uniform not-found) but not its AppendTo, and only when the payload names exactly
+    /// that record; any other record in the column keeps its AppendTo. Every other check is the caller's value's. Set by route
+    /// code only, never bound from a request; a CLOSED list (<see cref="RecordCreationService.RouteAuthorizableLookups"/>):
+    /// any other column, a filing lookup, an ownership-parent target or an empty id is an argument error. Columns are
+    /// normalised as <see cref="ServerSetLookupColumns"/> are. <c>null</c> (the default): every lookup's AppendTo is asked.
     /// </summary>
-    public IReadOnlySet<string>? RouteAuthorizedLookupColumns
+    public IReadOnlyDictionary<string, Guid>? RouteAuthorizedLookups
     {
-        get => _routeAuthorizedLookupColumns;
-        init => _routeAuthorizedLookupColumns = NormaliseColumns(value);
+        get => _routeAuthorizedLookups;
+        init => _routeAuthorizedLookups = RecordCreationService.NormaliseRouteAuthorizedLookups(value);
     }
 
     /// <summary>The request's trace id (the ProblemDetails <c>correlationId</c>); a fresh one when absent.</summary>

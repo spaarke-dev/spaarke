@@ -145,8 +145,9 @@ playbook-use decision (public, or Read on the row); the old route never asked Ap
 
 Fix (owner decision 2026-11-04, "exempt in code"):
 
-- `RecordCreationRequest.RouteAuthorizedLookupColumns` (`IReadOnlySet<string>?`, default null; normalised like
-  `ServerSetLookupColumns`). Step 5 (`RecordCreationService.cs`, the lookup check only) asks each such lookup's Read as the
+- `RecordCreationRequest.RouteAuthorizedLookups` (column to the decided record id, `IReadOnlyDictionary<string, Guid>?`, default
+  null; columns normalised like `ServerSetLookupColumns`; first shipped as `RouteAuthorizedLookupColumns`, a set of columns:
+  see "UAC-r2 approval change" below). Step 5 (`RecordCreationService.cs`, the lookup check only) asks each such lookup's Read as the
   caller (RetrievePrincipalAccess: missing, unreadable or unanswered is the uniform not-found an AppendTo failure gives) and
   hands the AppendTo checks a skip set of the server-set columns plus exactly those columns. Only a lookup whose column AND
   target table are on the list, and whose record in the merged row is the caller's own (fill-only), is skipped.
@@ -169,7 +170,7 @@ Fix (owner decision 2026-11-04, "exempt in code"):
   `TypedEventRoute_ABasicUser_WithoutAppendToOnTheEventType_IsRefused_KnownLimitK1`; the fix belongs to the owner's
   roles-alignment task.
 
-Component justification (CLAUDE.md section 11) for `RouteAuthorizedLookupColumns`:
+Component justification (CLAUDE.md section 11) for `RouteAuthorizedLookups`:
 1. Existing: `ServerSetLookupColumns` (skips AppendTo for lookups that name the caller), `ReferenceLookupColumns` (drops an
    unusable optional reference), and the filter's playbook-use decision.
 2. Extension: neither option can be extended. Server-set means "names the caller", is never mapped and is guarded as never
@@ -182,8 +183,8 @@ Component justification (CLAUDE.md section 11) for `RouteAuthorizedLookupColumns
 
 | Condition | How it is met | Evidence (tests) |
 |---|---|---|
-| (a) Route code sets it; never bound from body, query or headers | Property only on the internal `RecordCreationRequest`; no DTO carries it; the handler sets it from the filter's record | `Create_BodyNamingRouteAuthorizedLookupColumns_IsIgnored` (contract: a body with both spellings; the document's AppendTo is still asked; 500, nothing created); `RouteAuthorizedLookupColumnsCallSiteTests.NoBoundTypeCarriesTheOption` |
-| (b) Closed allow-list of (route, table, column) in code; ArchTest ratcheted at the call sites | Service list `RecordCreationService.RouteAuthorizedLookups`; IL scan of the init accessor | `RouteAuthorizedLookupColumnsCallSiteTests.OnlyTheClosedListSetsRouteAuthorizedLookupColumns` (only `AnalysisEndpoints.CreateAnalysis`; a stale entry fails too), `TheServicesClosedListIsTheAnalysisPlaybookOnly`, `Detector_MustFireAndMustNotFire` |
+| (a) Route code sets it; never bound from body, query or headers | Property only on the internal `RecordCreationRequest`; no DTO carries it; the handler sets it from the filter's record | `Create_BodyNamingRouteAuthorizedLookups_IsIgnored` (contract: a body with the old and new names, both casings; the document's AppendTo is still asked; 500, nothing created); `RouteAuthorizedLookupsCallSiteTests.NoBoundTypeCarriesTheOption` |
+| (b) Closed allow-list of (route, table, column) in code; ArchTest ratcheted at the call sites | Service list `RecordCreationService.RouteAuthorizableLookups`; IL scan of the init accessor | `RouteAuthorizedLookupsCallSiteTests.OnlyTheClosedListSetsRouteAuthorizedLookups` (only `AnalysisEndpoints.CreateAnalysis`; a stale entry fails too), `TheServicesClosedListIsTheAnalysisPlaybookOnly`, `Detector_MustFireAndMustNotFire` |
 | (c) For THIS caller and THIS record id; the filter refusal is uniform; nothing distinguishes "exists" from "not authorised" | The filter records the id it authorised, only after every check passed; only the create filter may record it (IL scan). This route's uniform filter refusal is its existing 403 `insufficient_rights` "Access denied" (kept under NFR-07, not turned into a 404); a missing and a not-shared playbook give byte-identical bodies. A Read failure in the service is the uniform not-found, rendered as the route's generic 500 for missing and unreadable alike | `OnlyTheCreateFilterRecordsThePlaybookUseDecision`, `TypedAnalysisRoute_TheFilterAuthorisedAnotherPlaybook_ThisOnesAppendToIsAsked_AndIsRefused`, `Create_PrivateUnsharedAndNonexistentPlaybook_AreTheSameRefusal_ServiceNotReached`, `Create_PrivatePlaybookSharedWithTheCaller_Is201`, `TypedAnalysisRoute_AnAuthorisedPlaybookTheCallerCannotRead_IsTheSameRefusal_NothingCreated` (missing, unreadable) |
 | (d) Skip only AppendTo; keep existence and Read | Read asked as the caller (RetrievePrincipalAccess) before the skip; bind spelling, table check and mapping unchanged | `TypedAnalysisRoute_AnOrdinaryUser_ReadButNoAppendToOnThePlaybook_..._201` (asserts the Read question), `..._CallerCannotRead_...` |
 | (e) A filing lookup or an ownership-parent table throws ArgumentException, a test per table class | Validation before anything is read | `RouteAuthorisedLookups_AnythingButTheListedPlaybook_IsAnArgumentError` (lineage `sprk_todo.sprk_regardingmatter`; ownership-parent filing `sprk_event.sprk_regardingevent`; root filing `sprk_workassignment.sprk_regardingmatter`; off-list `sprk_event.sprk_eventtype_ref`, `sprk_analysis.sprk_actionid`), `RouteAuthorisedLookups_AListedLookupToAnOwnershipParentTable_IsAnArgumentError`, `RouteAuthorisedLookups_TheListedPlaybook_IsAccepted_ButNeverForASystemPrincipal_NorAlsoServerSet`, `RouteAuthorisedLookups_TheServiceThrowsBeforeAskingAnything` |
@@ -263,3 +264,73 @@ Chunk 2 (`Office|SearchIndex|...`) took 33 m 35 s this time, against about 7 min
 - **Uniform 403 (UAC-r2 accepted it, 2026-11-04):** `Create_PrivateUnsharedAndNonexistentPlaybook_AreTheSameRefusal_ServiceNotReached` now compares the status, every header the route controls (all but Date and correlation/trace ids; it asserts `content-type: application/problem+json` is among them) and the normalised body.
 - **Inactive playbook: not treated as unusable by the filter (reported, filter not changed).** `PlaybookAuthorizationFilter.BuildPlaybookUseCheckAsync` decides on `IsPublic` from `PlaybookService.GetPlaybookAsync`, whose `$select` has no `statecode`; `PlaybookResponse` carries no state. So an inactive public playbook passes the filter, and an inactive private one goes to the caller's Read on its row, as an active one does. A deleted playbook is a 404 from that read (`null`), which is the existing "nonexistent" case. The filter's unusable states are therefore exactly "not public and no Read" and "not found", and the test covers both. No inactive case was added.
 - `BuildCreateEventPayload` moves to task 063 (dead code).
+
+### UAC-r2 approval change (2026-11-04): (column, id), not the column alone
+
+UAC-r2 approved 031 on one condition: the option carries the record id the route decided, and the service exempts only that
+record.
+
+- `RecordCreationRequest.RouteAuthorizedLookupColumns` (a set of columns) became `RouteAuthorizedLookups`, an
+  `IReadOnlyDictionary<string, Guid>?` of column to the decided record id. Columns are normalised as before. One column named
+  with two different ids is an `ArgumentException` (`RecordCreationService.NormaliseRouteAuthorizedLookups`), and so is an
+  empty id (`ValidateRouteAuthorizedLookups`). The service's closed list was renamed `RouteAuthorizableLookups` to keep the
+  two names apart; its content is unchanged.
+- Step 5 (`RecordCreationService.RouteAuthorized.cs:140`) exempts a caller lookup only when its record equals the decided id,
+  in addition to every earlier condition: the closed list, the target table, the same record in the merged row, and the
+  caller's Read. Any other record in that column keeps its AppendTo question.
+- `AnalysisAuthorizationFilter.IsPlaybookUseAuthorized(ctx, id)` became `AuthorizedPlaybookId(ctx)`, which returns the id the
+  filter recorded. `AnalysisEndpoints.CreateAnalysis` (`AnalysisEndpoints.cs:210`) passes `{ sprk_playbook: <that id> }`, the
+  filter's id and not the body's, so the id comparison happens in the service.
+- The ArchTest class was renamed `RouteAuthorizedLookupsCallSiteTests` and now ratchets `set_RouteAuthorizedLookups`. The
+  allow-list is unchanged (`AnalysisEndpoints.CreateAnalysis` only).
+- Must-not-fire: `TypedAnalysisRoute_TheFilterAuthorisedAnotherPlaybook_ThisOnesAppendToIsAsked_AndIsRefused`. The option
+  carries A, the payload carries B, and B is readable. B's rights are asked, nothing is asked of A, and the create is refused
+  (500, nothing created). Failing first: with the service's id comparison removed (`ContainsKey` only), this test is the one
+  failure (1 failed / 18 passed, `/c/tmp/fm031/fix1/ab-seeded.log`); restored.
+- `TypedRouteCreateInvariantsTests`' validation test also covers an empty id ("no record") and two ids for one column ("two
+  different records").
+- `Create_BodyNamingRouteAuthorizedLookups_IsIgnored` (renamed) now sends the old and the new property names, in both
+  casings, including a map that names the document and the playbook. The document's AppendTo is still asked and refused.
+- UAC-r2 conditions (a) to (g) above hold under the new names: read `RouteAuthorizedLookupColumns` as `RouteAuthorizedLookups`
+  and `RouteAuthorizedLookupColumnsCallSiteTests` as `RouteAuthorizedLookupsCallSiteTests`. The failing-first and
+  verification rows above are historical and keep the old names.
+
+### Event route: the linked contact is the caller's, resolved on the server (UAC-r2 question, 2026-11-04)
+
+Confirmed: the event create's server-set contact comes from the caller's identity, never from the body.
+
+- **The column:** `sprk_assignedto` (`EventEndpoints.AssignedToColumn`, `EventEndpoints.cs:899`). It is the only contact
+  lookup the create writes, and the only server-set lookup on the route.
+- **Where its value comes from:**
+  - `EventEndpoints.cs:744` calls `ResolveActingUserContactAsync(callerResolver, identity, httpContext, ...)`, defined at
+    `EventEndpoints.cs:1025`.
+  - That resolves the caller from `httpContext.User` (`:1034`).
+  - It then reads `identity.ResolveAsync(systemUserId).ContactId` (`:1039`): the caller's LINKED contact, never an email match.
+  - If the caller has no link, the column is left blank.
+- **Where it is written:** `BuildCreatePayload` writes it at `EventEndpoints.cs:936`, and only from that argument.
+  `ServerSetLookupColumns` names the column only when that value exists (`EventEndpoints.cs:760`).
+- **What the body can carry:** the bound DTO, `Dtos/CreateEventRequest.cs:20-31`, has no contact field: subject, description,
+  event type, regarding id/name/type, the dates and priority. Unknown JSON properties are dropped at binding.
+- **Test:** `EventEndpointsAuthorizationContractTests.Create_ABodyNamingAContact_IsIgnored_TheRowNamesTheCallersLinkedContact`
+  (new). The body carries `assigneeContactId`, `assignedToContactId`, `sprk_assignedto` and `sprk_AssignedTo@odata.bind` naming
+  contact X. The row's `sprk_AssignedTo@odata.bind` is the caller's linked contact, and X appears nowhere in the create body.
+  `TypedEventRoute_CreatesThroughTheService_...` already pins the linked contact.
+
+**A contact supplied in the body is still asked for AppendTo.**
+
+- On create, a body cannot supply a contact at all (above).
+- If field mapping fills `sprk_assignedto` (a caller with no linked contact, so no server-set column), that value goes through
+  step 5's merged-payload AppendTo check like any mapped lookup.
+- When the caller does have a linked contact, the column is already filled and mapping is fill-only. A mapped copy of the
+  server-set value into another column becomes server-set too (`RecordCreationService.cs:524-533`), because it names the same
+  caller contact.
+- The one route where a body names a contact is `PATCH /api/v1/events/{id}/due-assignee`. There `AssigneeContactId` is bound
+  (`EventDueAssigneeWrite.cs:107`) and the PATCH runs AS THE CALLER (`user.PatchAsync`, `EventDueAssigneeWrite.cs:162`), so
+  Dataverse asks the caller's AppendTo on that contact itself. Nothing is skipped, and task 031 does not touch that route.
+
+Verification (UAC-r2 change):
+
+- Build: BFF, Sprk.Bff.Api.Tests and ArchTests, each with 0 warnings and 0 errors.
+- Classes: the Analysis and Events contract and filter classes, `TypedRouteCreateInvariantsTests` (the typed-route, route-authorised and secure-child classes) and the pipeline seam tests: 984 passed, 0 failed.
+- `RouteAuthorizedLookupsCallSiteTests`: 5/5.
+- ArchTests (full): 1916/1916.

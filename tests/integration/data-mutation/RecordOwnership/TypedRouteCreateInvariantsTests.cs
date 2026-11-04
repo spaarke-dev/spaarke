@@ -329,11 +329,21 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public async Task TypedAnalysisRoute_TheFilterAuthorisedAnotherPlaybook_ThisOnesAppendToIsAsked_AndIsRefused()
     {
-        // UAC-r2 (c): the filter's decision is for THIS record id only.
-        var (result, _) = await RunTypedAnalysisRoute(playbook: TypedRoutePlaybook, filterAuthorisedPlaybook: Guid.NewGuid());
+        // UAC-r2 (c), and the (column, id) change of 2026-11-04, must not fire: the option carries playbook A (the filter's
+        // decision, which the handler passes as it is) and the payload carries B. Only A would be exempt, so B's AppendTo is
+        // asked as for any caller lookup - and an ordinary user (Read, no AppendTo) is refused. B's Read is granted, so the
+        // refusal is the AppendTo question, not existence.
+        var decided = Guid.Parse("a2460000-0000-4000-8000-0000000031aa");
+        var paths = RecordCallerReads();
+
+        var (result, analyses) = await RunTypedAnalysisRoute(playbook: TypedRoutePlaybook, filterAuthorisedPlaybook: decided);
 
         Status(result).Should().Be(StatusCodes.Status500InternalServerError);
+        (result as ProblemHttpResult)!.ProblemDetails.Detail.Should().Be("Failed to create analysis record.");
         _appCreates.Should().BeEmpty();
+        analyses.Invocations.Should().BeEmpty();
+        AsksRightsOn(paths, "sprk_analysisplaybooks", TypedRoutePlaybook).Should().BeTrue("B's AppendTo is the caller's question");
+        AsksRightsOn(paths, "sprk_analysisplaybooks", decided).Should().BeFalse("A is not in the payload: nothing is asked of it");
     }
 
     [Fact]
@@ -399,9 +409,12 @@ public sealed partial class SecureChildOwnershipAiToolTests
     // ── UAC-r2 (b), (e): a closed list; a filing lookup or an ownership-parent target is the adapter's defect ──────────────
 
     private static RecordCreationRequest RouteAuthorised(string table, params string[] columns) =>
+        RouteAuthorisedFor(table, columns.ToDictionary(c => c, _ => TypedRoutePlaybook));
+
+    private static RecordCreationRequest RouteAuthorisedFor(string table, IReadOnlyDictionary<string, Guid> lookups) =>
         new(table, new RecordCreationPayload.WebApi(JsonSerializer.SerializeToElement(new { })))
         {
-            RouteAuthorizedLookupColumns = new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase),
+            RouteAuthorizedLookups = lookups,
         };
 
     private RecordCreationPrincipal TheCaller() => RecordCreationPrincipal.ForCaller(_user, null);
@@ -414,7 +427,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [InlineData("sprk_analysis", "sprk_actionid", "closed list")]            // another analysis configuration lookup
     public void RouteAuthorisedLookups_AnythingButTheListedPlaybook_IsAnArgumentError(string table, string column, string why)
     {
-        var act = () => RecordCreationService.ValidateRouteAuthorizedLookupColumns(table, RouteAuthorised(table, column), TheCaller());
+        var act = () => RecordCreationService.ValidateRouteAuthorizedLookups(table, RouteAuthorised(table, column), TheCaller());
 
         act.Should().Throw<ArgumentException>().WithMessage($"*{why}*");
     }
@@ -424,7 +437,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     {
         // The ownership-parent class: even an entry on the list, on a column no filing list names (the reviewer lookup), may not
         // name an ownership-parent table (a matter here).
-        var act = () => RecordCreationService.ValidateRouteAuthorizedLookupColumns(
+        var act = () => RecordCreationService.ValidateRouteAuthorizedLookups(
             "sprk_analysis", RouteAuthorised("sprk_analysis", "sprk_reviewerby"), TheCaller(),
             [("sprk_analysis", "sprk_reviewerby", "sprk_matter")]);
 
@@ -435,15 +448,24 @@ public sealed partial class SecureChildOwnershipAiToolTests
     public void RouteAuthorisedLookups_TheListedPlaybook_IsAccepted_ButNeverForASystemPrincipal_NorAlsoServerSet()
     {
         var request = RouteAuthorised("sprk_analysis", "SPRK_Playbook ");
-        RecordCreationService.ValidateRouteAuthorizedLookupColumns("sprk_analysis", request, TheCaller());
-        request.RouteAuthorizedLookupColumns.Should().BeEquivalentTo(["sprk_playbook"], "normalised as the server-set set is");
+        RecordCreationService.ValidateRouteAuthorizedLookups("sprk_analysis", request, TheCaller());
+        request.RouteAuthorizedLookups.Should().BeEquivalentTo(
+            new Dictionary<string, Guid> { ["sprk_playbook"] = TypedRoutePlaybook }, "the column normalised as the server-set set is; the id kept");
 
-        var system = () => RecordCreationService.ValidateRouteAuthorizedLookupColumns("sprk_analysis", request, RecordCreationPrincipal.ForSystem());
+        var system = () => RecordCreationService.ValidateRouteAuthorizedLookups("sprk_analysis", request, RecordCreationPrincipal.ForSystem());
         system.Should().Throw<ArgumentException>().WithMessage("*caller's create only*");
 
-        var both = () => RecordCreationService.ValidateRouteAuthorizedLookupColumns(
+        var both = () => RecordCreationService.ValidateRouteAuthorizedLookups(
             "sprk_analysis", request with { ServerSetLookupColumns = new HashSet<string> { "sprk_playbook" } }, TheCaller());
         both.Should().Throw<ArgumentException>().WithMessage("*only one*");
+
+        // UAC-r2 (2026-11-04): the route names the record it decided; an empty id, or two ids for one column, is a defect.
+        var noRecord = () => RecordCreationService.ValidateRouteAuthorizedLookups(
+            "sprk_analysis", RouteAuthorisedFor("sprk_analysis", new Dictionary<string, Guid> { ["sprk_playbook"] = Guid.Empty }), TheCaller());
+        noRecord.Should().Throw<ArgumentException>().WithMessage("*no record*");
+        var twoRecords = () => RouteAuthorisedFor("sprk_analysis",
+            new Dictionary<string, Guid> { ["sprk_playbook"] = TypedRoutePlaybook, ["SPRK_PLAYBOOK"] = Guid.NewGuid() });
+        twoRecords.Should().Throw<ArgumentException>().WithMessage("*two different records*");
     }
 
     [Fact]

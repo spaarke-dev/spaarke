@@ -8,28 +8,29 @@ namespace Spaarke.ArchTests;
 
 /// <summary>
 /// Field-mapping-server-write-path-r1 task 031 fix round 1 (F1; UAC-r2 binding conditions (a) to (c), 2026-11-04):
-/// <see cref="RecordCreationRequest.RouteAuthorizedLookupColumns"/> skips the caller's AppendTo on a lookup whose target the
-/// ROUTE already authorised. Only route code may set it, at a CLOSED list of call sites, ratcheted at their names:
+/// <see cref="RecordCreationRequest.RouteAuthorizedLookups"/> skips the caller's AppendTo on a lookup whose target the
+/// ROUTE already authorised, for the one record id the route decided (UAC-r2 2026-11-04: (column, id), not the column alone).
+/// Only route code may set it, at a CLOSED list of call sites, ratcheted at their names:
 /// <list type="bullet">
 /// <item><c>AnalysisEndpoints.CreateAnalysis</c> — POST /api/ai/analysis/create, the playbook the create filter authorised.</item>
 /// </list>
 /// The event create is NOT on the list: its route makes no route-level decision on the event type (review K1; a roles task).
 /// The filter's decision is recorded by <c>AnalysisAuthorizationFilter.RecordPlaybookUseAuthorized</c>, itself a closed list of
 /// one caller: <c>AnalysisAuthorizationFilter.AuthorizeCreateAsync</c> (the create filter, after every check passed). Which
-/// (table, column) the service accepts is the service's own closed list (<see cref="RecordCreationService.RouteAuthorizedLookups"/>,
+/// (table, column) the service accepts is the service's own closed list (<see cref="RecordCreationService.RouteAuthorizableLookups"/>,
 /// pinned here too).
 /// </summary>
 /// <remarks>
 /// <para><b>Why IL.</b> <see cref="IlCallScan"/> reads compiled method references, so an initializer inside an async state
 /// machine or a lambda counts, and a comment, string or <c>nameof</c> does not. Setting the property is a call of its
-/// <c>init</c> accessor (<c>set_RouteAuthorizedLookupColumns</c>).</para>
+/// <c>init</c> accessor (<c>set_RouteAuthorizedLookups</c>).</para>
 /// <para><b>Controls.</b> <see cref="Detector_MustFireAndMustNotFire"/> runs the same detector over the
 /// <c>RouteAuthorizedControl*</c> fixtures: a direct set and a set inside a lambda are found; a request that sets only
 /// <see cref="RecordCreationRequest.ServerSetLookupColumns"/>, and one that only names the property, are not.</para>
 /// </remarks>
-public class RouteAuthorizedLookupColumnsCallSiteTests
+public class RouteAuthorizedLookupsCallSiteTests
 {
-    private const string Setter = "set_" + nameof(RecordCreationRequest.RouteAuthorizedLookupColumns);
+    private const string Setter = "set_" + nameof(RecordCreationRequest.RouteAuthorizedLookups);
 
     /// <summary>The closed list of call sites that may set the option, each with its route decision.</summary>
     private static readonly IReadOnlyList<(Type Type, string Method, string Reason)> SetterAllowList = new[]
@@ -40,8 +41,8 @@ public class RouteAuthorizedLookupColumnsCallSiteTests
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
 
-    [Fact(DisplayName = "031 fix round 1 (b): only AnalysisEndpoints.CreateAnalysis sets RecordCreationRequest.RouteAuthorizedLookupColumns")]
-    public void OnlyTheClosedListSetsRouteAuthorizedLookupColumns()
+    [Fact(DisplayName = "031 fix round 1 (b): only AnalysisEndpoints.CreateAnalysis sets RecordCreationRequest.RouteAuthorizedLookups")]
+    public void OnlyTheClosedListSetsRouteAuthorizedLookups()
     {
         var setters = Callers(BffTypes.Value, typeof(RecordCreationRequest), Setter);
 
@@ -52,7 +53,7 @@ public class RouteAuthorizedLookupColumnsCallSiteTests
             .Order(StringComparer.Ordinal)
             .ToArray();
         Assert.True(outside.Length == 0,
-            "RecordCreationRequest.RouteAuthorizedLookupColumns skips the caller's AppendTo; only a route whose filter authorised " +
+            "RecordCreationRequest.RouteAuthorizedLookups skips the caller's AppendTo; only a route whose filter authorised " +
             "that record for this caller may set it (UAC-r2 conditions (a)-(c), owner decision 2026-11-04). Not on the list:\n" +
             string.Join("\n", outside));
 
@@ -83,7 +84,7 @@ public class RouteAuthorizedLookupColumnsCallSiteTests
     {
         Assert.Equal(
             new[] { ("sprk_analysis", "sprk_playbook", "sprk_analysisplaybook") },
-            RecordCreationService.RouteAuthorizedLookups.ToArray());
+            RecordCreationService.RouteAuthorizableLookups.ToArray());
     }
 
     [Fact(DisplayName = "031 fix round 1 (a): the option is on no type a request body binds - only on the internal RecordCreationRequest")]
@@ -91,11 +92,11 @@ public class RouteAuthorizedLookupColumnsCallSiteTests
     {
         var carriers = BffTypes.Value
             .Where(t => t != typeof(RecordCreationRequest))
-            .Where(t => t.GetProperty(nameof(RecordCreationRequest.RouteAuthorizedLookupColumns),
+            .Where(t => t.GetProperty(nameof(RecordCreationRequest.RouteAuthorizedLookups),
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.IgnoreCase) is not null)
             .Select(t => t.FullName)
             .ToArray();
-        Assert.True(carriers.Length == 0, "Only RecordCreationRequest carries RouteAuthorizedLookupColumns:\n" + string.Join("\n", carriers));
+        Assert.True(carriers.Length == 0, "Only RecordCreationRequest carries RouteAuthorizedLookups:\n" + string.Join("\n", carriers));
         Assert.False(typeof(RecordCreationRequest).IsPublic, "RecordCreationRequest is internal: no endpoint can bind it from a body");
     }
 
@@ -128,14 +129,14 @@ public class RouteAuthorizedLookupColumnsCallSiteTests
             .ToArray();
 }
 
-// Compiled control fixtures for RouteAuthorizedLookupColumnsCallSiteTests.Detector_MustFireAndMustNotFire. Never run; only
+// Compiled control fixtures for RouteAuthorizedLookupsCallSiteTests.Detector_MustFireAndMustNotFire. Never run; only
 // their IL is read.
 
 /// <summary>MUST FIRE: sets the option directly.</summary>
 internal static class RouteAuthorizedControlDirectSetter
 {
     internal static RecordCreationRequest Build(RecordCreationPayload payload) =>
-        new("sprk_analysis", payload) { RouteAuthorizedLookupColumns = new HashSet<string> { "sprk_playbook" } };
+        new("sprk_analysis", payload) { RouteAuthorizedLookups = new Dictionary<string, Guid> { ["sprk_playbook"] = Guid.NewGuid() } };
 }
 
 /// <summary>MUST FIRE: sets the option inside a lambda — in a method named like the allowed one.</summary>
@@ -144,7 +145,7 @@ internal static class RouteAuthorizedControlLambdaSetter
     internal static RecordCreationRequest CreateAnalysis(RecordCreationPayload payload)
     {
         Func<RecordCreationRequest> build = () =>
-            new("sprk_analysis", payload) { RouteAuthorizedLookupColumns = new HashSet<string> { "sprk_playbook" } };
+            new("sprk_analysis", payload) { RouteAuthorizedLookups = new Dictionary<string, Guid> { ["sprk_playbook"] = Guid.NewGuid() } };
         return build();
     }
 }
@@ -156,8 +157,8 @@ internal static class RouteAuthorizedControlServerSetOnly
         new("sprk_event", payload) { ServerSetLookupColumns = new HashSet<string> { "sprk_assignedto" } };
 }
 
-/// <summary>MUST NOT FIRE: only names the option (this comment sets RouteAuthorizedLookupColumns; the code does not).</summary>
+/// <summary>MUST NOT FIRE: only names the option (this comment sets RouteAuthorizedLookups; the code does not).</summary>
 internal static class RouteAuthorizedControlNameOnly
 {
-    internal static string Name() => nameof(RecordCreationRequest.RouteAuthorizedLookupColumns);
+    internal static string Name() => nameof(RecordCreationRequest.RouteAuthorizedLookups);
 }
