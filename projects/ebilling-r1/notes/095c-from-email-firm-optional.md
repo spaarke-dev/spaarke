@@ -331,4 +331,111 @@ Gate: all five test projects build with 0 errors; full `Spaarke.ArchTests` 1931 
 
 Found, not fixed (not this change): `Step0Refusal_IsTheUniform404` asserts `_queries.Should().BeEmpty()` after `NoMatchBodyAsync()` has already run the handler and recorded its queries (`tests/integration/contract/Api/Finance/InvoiceSubmissionByEmailContractTests.cs:664-672`). Owner: 095a. The fix is to clear `_queries` after the no-match call.
 
+## 11. Part 095c-2: the intake takes an optional firm (2026-11-03)
+
+### 11.1 What changed
+
+- `InvoiceSubmissionRequest.FirmId`, `FromEmailSubmissionInput.FirmId` and `FromEmailSubmitInput.FirmId` are `Guid?`. Null means no firm. The empty id never means "no firm"; it is 400 `firm_invalid`.
+- From-email HTTP: a null or absent `firmId` is no longer a body-shape error. A null firm adds no AppendTo check on the firm, because there is no firm record.
+- **Phase gate (section 8.2), before anything is saved or filed.**
+  - `FromEmailSubmissionService.CheckFirmAsync` asks `InvoiceSubmissionService.CanSubmitWithoutFirmAsync`. That asks `ITrackingNumberAllocator.NumbersSubmissionsWithoutFirmAsync`, which reads the shared, forward-only phase cache and is true only in P2.
+  - In P0 and P1, a no-firm request (New or Correction) is 400 `ebilling.submission.firm_invalid` "A firm is required.".
+  - The allocator still refuses on create (`firm_required`). `SubmitInvoiceFromEmailOperation` maps that refusal to the same 400. This covers a phase that changed between the two reads.
+- **Which entries take a null firm.**
+  - `DecideForFromEmailAsync` is the only entry that accepts one. It skips the active-firm and firm-link checks.
+  - `ValidateFields` refuses a null firm on every other entry (SPA, internal upload, from-document, confirm) with 400 `firm_invalid`.
+  - `DecideAsync` throws if a null firm reaches it from any other caller.
+- **Correction rule.** `InvoiceSubmissionService.CorrectionKeepsFirm(original, requested)` does both firm comparisons (intake and prefill).
+  - A null firm equals a null firm only.
+  - A firm on one side only is 409 `correction_not_allowed` / `different_firm`.
+  - The empty id never matches.
+- **Idempotency.** `FromEmailSubmissionKey.CacheBinding` binds a null firm as an empty value, so a null firm and an absent one are the same request. K is unchanged. `SameFirmDetails` compares the nullable firm.
+- **Correction prefill (contract section 10).**
+  - An invoice with no firm is 200 with `"firm": null`; `CorrectionPrefillResponse.Firm` is nullable.
+  - A firm whose name cannot be read is still 503.
+  - The section 8 firms route is unchanged.
+- External, wizard and SPA routes are unchanged; they always set a firm.
+
+### 11.2 Component justification (CLAUDE.md section 11)
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `ITrackingNumberAllocator.NumbersSubmissionsWithoutFirmAsync` | `TrackingScopePhaseCache` (095c-1), read inside `CreateSubmissionAsync` | This is the extension: one read of the same cache, added to the existing interface | The intake cannot refuse a no-firm request in P0/P1 before it saves and files the email; the job would refuse it after the writes |
+| `InvoiceSubmissionService.CanSubmitWithoutFirmAsync` | The allocator member above | A one-line virtual seam on the existing service, which the from-email service already holds. It keeps the allocator out of `FromEmailSubmissionService`'s constructor | The from-email service would need a new dependency and a DI change for one call |
+| `InvoiceSubmissionService.CorrectionKeepsFirm` | The two inline `!=` firm checks it replaces | It replaces them in place | With `Guid?`, the inline checks treat a null original as either "any firm" or "never matches". A no-firm invoice could then be corrected with a firm, or never corrected at all |
+
+Placement: this extends the existing Finance Submission services in `Sprk.Bff.Api`. It adds no service, endpoint, DI registration, package or background work.
+
+Publish size: no package or asset was added, only about 120 lines of BFF source, so the expected delta is a few KB. It was not measured against a fresh master publish in this part; the 095c-4 full gate measures it.
+
+### 11.3 Tests and seed proofs
+
+All new and changed tests pass:
+
+- Unit, `FromEmailSubmissionServiceTests`:
+  - No firm before the scope key is Active is 400 before any write (New and Correction).
+  - No firm in P2 is submitted with no firm.
+  - A firm that is sent in P2 is still checked.
+  - A correction of a no-firm invoice keeps the null firm; sending a firm instead is 409 `different_firm`.
+- Unit, `InvoiceCorrectionIntakeTests`: a no-firm invoice corrected without a firm is allowed; a firm on one side only is 409 (3 rows).
+- Unit, `InvoiceSubmissionServiceTests`: a null firm on the SPA, internal and existing-document entries is 400.
+- Unit, `SubmitInvoiceFromEmailOperationTests`: a no-firm submission reaches the allocator with no firm; the allocator's `firm_required` refusal is 400.
+- Contract, `InvoiceSubmissionFromEmailContractTests`:
+  - A null or absent firm is 400 in P0/P1 and 202 in P2, with no firm access check.
+  - A null firm and an absent one are one cached request.
+  - The same header with a firm reaches the handler.
+  - A Correction of a no-firm invoice is 202, and 409 when it sends a firm.
+- Contract: `InvoiceCorrectionPrefillContractTests.NoFirmInvoice_Is200_WithFirmNull`.
+- Data-mutation: `TrackingNumberAllocatorTests.NumbersSubmissionsWithoutFirm_IsTrueOnlyInP2`.
+
+The `firmId` body-shape row was removed, because the behaviour it pinned is gone.
+
+Seed proofs, one each:
+
+- The P0/P1 refusal (`NoFirm_BeforeTheScopeKeyIsActive_Is400FirmInvalid_BeforeAnyWrite` and the contract P0/P1 cases) fails under M1.
+- The prefill null-firm path (`NoFirmInvoice_Is200_WithFirmNull`) fails under M2.
+
+Fail-before proofs: for each mutation, the source was mutated and built, the filtered tests were run, and the file was restored byte for byte (SHA-256 checked).
+
+| Mutation | Tests failed |
+|---|---|
+| M1: the phase gate is bypassed (no firm is always accepted) | 4 (service ×2, contract ×2) |
+| M2: the prefill answers 503 for a null firm | 1 (prefill) |
+| M3a: a null firm never matches | 4 (unit, contract, prefill) |
+| M3b: a null original matches any firm | 2 |
+| M4: the cache binding ignores the firm | 2 (the same-header test and the existing `Key_DoesNotChangeWithTheFirmOrTheNumber_ButTheCacheBindingDoes`) |
+| M5: other entries accept a null firm | 3 |
+| M6: the body shape requires `firmId` again | 7 (contract) |
+| M7: `firm_required` is not mapped to 400 | 1 (operation) |
+
+### 11.4 Deviations and known limits
+
+- current-task.md and the POML status are not updated here; the main session owns them.
+- The P0/P1 check reuses the allocator's phase cache through a new interface member instead of a separate probe, so the intake and the create read the same phase.
+- A Correction may also send no firm, but only when the replaced invoice has none (the correction rule). In P0/P1 it is refused the same way as New.
+- A Correction sent without a firm in P0/P1 now gets 400 `firm_invalid` "A firm is required.". Before, it got the body-shape ValidationProblem 400 for `firmId`.
+- **K1 (safe until 095c-3).**
+  - In P2, a no-firm submission is accepted and queued.
+  - `SubmissionSnapshot.Read` still requires a firm and returns `FirmMissing`, so the job ends the submission Failed. No invoice is created and no rule runs.
+  - A stamp from the current SpaarkeMaster source reaches P2 without the schema script, so this fail-closed job is the guard there.
+  - Approval and AP export cannot see a no-firm invoice until 095c-3 creates one.
+
+### 11.5 Hand-off
+
+095c-3 (pipeline):
+
+- Make `SubmissionSnapshot.FirmId` `Guid?`, and stop `Read` failing a no-firm submission as `FirmMissing`.
+- Make the job skip the firm-scoped steps and record the `firm_missing` finding.
+- Add the contract section 9 outcome row.
+- Change the commit-time correction re-check in `InvoiceSubmissionPersister` (`InvoiceSubmissionPersister.cs:1205`, now `old firm is not {} firm || firm != Submission.FirmId`) to use `CorrectionKeepsFirm`. Otherwise a correction of a no-firm invoice is refused at commit.
+- Make the persister's writes of `snapshot.FirmId` (`:1344`, `:1419`) write no firm lookup for null.
+- Decide the persister's invoice lookup by firm and number (`:1104`, `:1115`) for a no-firm submission. Today it skips the lookup for the empty firm.
+
+095c-4 (readers and contract):
+
+- The approval and AP-export refusals for a no-firm invoice.
+- The remaining readers of `sprk_vendororg` (section 6 inventory).
+- The final contract text.
+- The publish-size measurement.
+
 rework: none task 095c
