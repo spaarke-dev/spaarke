@@ -25,7 +25,7 @@
   - **Deploy order after master + BFF:** ribbon -Apply/-Verify, then Deploy-EbillingFormsViews.ps1. The owner's go is in uac-r2's session.
 
 ## Filed this session
-#2559 (UAC share mirror grants Write/Delete/Share on hard-deny rows; uac-r2 owns), DEF-051 #2547 (GA day-for-month dates), DEF-052 #2553 (job copy and .eml parts skip the size limit), #2548 (email-communication duplicate .eml), #2555 (Email Review OData passed to a FetchXML client).
+#2560 (UAC share mirror passes more than Read on hard-deny rows; uac-r2 owns; replaces deleted #2559), DEF-051 #2547 (GA day-for-month dates), DEF-052 #2553 (job copy and .eml parts skip the size limit), #2548 (email-communication duplicate .eml), #2555 (Email Review OData passed to a FetchXML client).
 
 ## Owner decisions 2026-11-03
 - No-firm invoices stay VISIBLE to external participants on the matter/project (095c notes §13); uac-r2 told.
@@ -42,8 +42,8 @@
 4. Firm-name check at intake (INV-2025-05166 prints Garrison and Ellison but sits under Morrison Foerster).
 5. 161 live run S1 ~$26 or S2 ~$22.
 6. A leftover "lint-staged automatic backup" stash entry 1e84ffafed (holds committed changes only); dropping it needs the owner's confirmation.
-7. 089b: should Billing Administrator get Read on sprk_policy at Global, so child-unit admins can Exclude top-unit rules? Until then the 403 is correct (uac-r2: a role change, not a filter).
-8. #2559 contains an access-escalation scenario in a public repo; uac-r2 has taken to the owner how it is tracked. Do not edit it until the owner decides.
+7. 089b: the owner said YES (2026-11-03) to Billing Administrator Read on rules organisation-wide. BLOCKED on uac-r2: Global Read on sprk_policy would also expose rules of Secure matters, which are re-owned to the Secure team (config/secure-record-owner-role.json:289-293, D-123). Waiting for uac-r2's design. Until then the 403 stays.
+8. The owner asked whether to make the GitHub repo private. Answered: it is their call; Claude Code keeps working through authenticated gh and git.
 
 ## Peer state
 - uac-r2 (38): runs ALL dev BFF deploys now (R3 stopped); the procedure is docs/procedures/dev-bff-deploy-coordination.md. Deploy requests carry the master SHA, the PRs and the pre-checks; the next deploy also carries #2550. It waits for the Email to AP UTC time, the master PR, and the NFR-05 census after deploy.

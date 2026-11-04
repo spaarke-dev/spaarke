@@ -43,3 +43,15 @@
   - Tests: `tests/scripts/Add-BillingExportToMatterManagementApp.Tests.ps1` (Pester 5, 70 tests, offline: the functions are read out of the script and the whole script runs against a fake Dataverse).
   - Dev, read only: `-Verify` passed 4 of 4 at 22:52Z and again at 23:00Z (ValidateApp: success, 0 errors, 0 Billing Export issues, 106 warnings that were already there); `-WhatIf` planned nothing.
 - **Lint:** the comment at `Deploy-EbillingSubmissionTrackingScopeSchema.ps1:125` (095c-1) named the tenant-wide publish by its action name, which the repo's publish lint bans. It now says "the tenant-wide publish"; `Publish-SolutionComponents.Tests.ps1` is 77/77.
+## Billing export ribbon applied on dev (2026-11-04)
+
+- **Owner go:** typed in session ebilling-r1-7b. uac-r2 was notified before and after.
+- **Apply:** `scripts/ebilling/Deploy-EbillingBillingExportRibbon.ps1 -Apply`, started 04:36Z.
+  - The dedicated solution `BillingExportRibbons` (sprk_billingexport only, behavior 2) went through the scoped import.
+  - PublishXml was scoped to 1 entity. The application ribbon was not published.
+  - The pre-check compared the stored definitions by content: 12 diff rows, 4 commands, 3 rules, 0 differing.
+  - 7 controls were present and are now hidden: grid New and Delete, form New, Delete and Save & New, subgrid Add New and New.
+- **-Verify** at 2026-11-04T04:37:54Z: PASS.
+- **Rollback copy:** `%TEMP%\BillingExportRibbons-rollback-20261103233623` (the effective ribbon XML and the stored rows).
+- **Email to AP is in the FORM ribbon.** The effective ribbon before the apply already had the 4 form buttons (Email to AP, Download CSV, Download JSON, Mark Sent to AP) in `Mscrm.Form.sprk_billingexport.MainTab.Actions`. The owner's screenshots were of the "Active Billing Exports" grid view, where these buttons are not placed by design. To see Email to AP, open the batch record.
+- **Still to do:** `Deploy-EbillingFormsViews.ps1` (the legacy CSV/JSON Document fields off the form) needs its own go, after the master PR.
