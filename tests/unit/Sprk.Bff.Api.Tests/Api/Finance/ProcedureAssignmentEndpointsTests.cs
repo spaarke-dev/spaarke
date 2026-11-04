@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
@@ -50,9 +51,9 @@ public sealed class ProcedureAssignmentEndpointsTests
         { "workassignments", "sprk_workassignments", "sprk_workassignment" },
     };
 
-    private static readonly string[] Suffixes = { "/procedure-assignments", "/rule-overrides/exclude" };
+    private static readonly string[] Suffixes = { "/procedure-assignments", "/rule-overrides/exclude", "/rule-overrides/change" };
 
-    /// <summary>All six routes: (url, the record's entity set).</summary>
+    /// <summary>All nine create routes: (url, the record's entity set).</summary>
     public static TheoryData<string, string> AllRoutes
     {
         get
@@ -73,8 +74,13 @@ public sealed class ProcedureAssignmentEndpointsTests
     private sealed class Host : IAsyncDisposable
     {
         public StatedCaller StepZero { get; private set; } = null!;
+        // Task 089c: the constructor takes the rule-set service, the shared close and the counter; the routes never reach them (the service is substituted).
         public readonly Mock<ProcedureAssignmentService> Service = new(
-            MockBehavior.Strict, Mock.Of<IGenericEntityService>(), Mock.Of<IRecordOwnershipResolver>(), NullLogger<ProcedureAssignmentService>.Instance);
+            MockBehavior.Strict, Mock.Of<IGenericEntityService>(), Mock.Of<IRecordOwnershipResolver>(),
+            (RuleSetService)RuntimeHelpers.GetUninitializedObject(typeof(RuleSetService)),
+            (Sprk.Bff.Api.Services.Signals.SignalClosureService)RuntimeHelpers.GetUninitializedObject(typeof(Sprk.Bff.Api.Services.Signals.SignalClosureService)),
+            (AffectedInvoiceCounter)RuntimeHelpers.GetUninitializedObject(typeof(AffectedInvoiceCounter)),
+            NullLogger<ProcedureAssignmentService>.Instance);
 
         public readonly FinAuth.RecordingAccessDataSource Access = new();
         public readonly FinAuth.RecordingPrivilegeProbe Probe = new();
@@ -133,10 +139,17 @@ public sealed class ProcedureAssignmentEndpointsTests
             return host;
         }
 
-        /// <summary>A billing admin with Write and AppendTo on every core record and Read on the Procedure and the rule.</summary>
+        /// <summary>
+        /// A billing admin with Write and AppendTo on every core record, Read on the Procedure and the rule, and the privileges a change and a
+        /// removal add (task 089c).
+        /// </summary>
         public void GrantAdmin()
         {
             Probe.Hold(BillingAdminAuthorization.WriteRuleSetPrivilege);
+            foreach (var privilege in ChangePrivileges.Append(BillingAdminAuthorization.WritePolicyPrivilege))
+            {
+                Probe.Hold(privilege);
+            }
             foreach (var row in Cores)
             {
                 Access.Grant((string)row[1], RecordId, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo);
@@ -150,6 +163,9 @@ public sealed class ProcedureAssignmentEndpointsTests
         {
             Service.Verify(s => s.AssignProcedureAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ProcedureAssignmentRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
             Service.Verify(s => s.ExcludeRuleAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<RuleExcludeRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+            Service.Verify(s => s.ChangeRuleAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<RuleChangeRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+            Service.Verify(s => s.RemoveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            Service.Verify(s => s.PreviewRemovalAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
         public async ValueTask DisposeAsync()
@@ -167,7 +183,17 @@ public sealed class ProcedureAssignmentEndpointsTests
     private static HttpContent BodyFor(string url) =>
         url.EndsWith("/procedure-assignments", StringComparison.Ordinal)
             ? JsonContent.Create(new { procedureId = ProcedureId })
-            : JsonContent.Create(new { policyId = PolicyId, reason = "x" });
+            : url.EndsWith("/change", StringComparison.Ordinal)
+                ? JsonContent.Create(new { policyId = PolicyId, reason = "x", shortHeadline = "Cap" })
+                : JsonContent.Create(new { policyId = PolicyId, reason = "x" });
+
+    /// <summary>The privileges a change needs besides the billing-admin marker (Create and Write on rule set, Create and Write on policy, Create and Write on version).</summary>
+    private static readonly string[] ChangePrivileges =
+    {
+        BillingAdminAuthorization.CreateRuleSetPrivilege, BillingAdminAuthorization.CreatePolicyPrivilege,
+        BillingAdminAuthorization.CreatePolicyVersionPrivilege, BillingAdminAuthorization.WritePolicyVersionPrivilege,
+        BillingAdminAuthorization.WritePolicyPrivilege,
+    };
 
     private static async Task<JsonObject> Json(HttpResponseMessage r) => JsonNode.Parse(await r.Content.ReadAsStringAsync())!.AsObject();
 
@@ -451,6 +477,7 @@ public sealed class ProcedureAssignmentEndpointsTests
     [InlineData("/procedure-assignments", """{"mode":"Excluded"}""")]
     [InlineData("/procedure-assignments", """{"procedureId":"00000000-0000-0000-0000-000000000000"}""")]
     [InlineData("/rule-overrides/exclude", """{"reason":"x"}""")]
+    [InlineData("/rule-overrides/change", """{"reason":"x","shortHeadline":"Cap"}""")]
     public async Task AMissingBodyId_Is400_BeforeAnySubjectCheckOrServiceCall(string suffix, string json)
     {
         await using var host = await Host.StartAsync();
@@ -460,6 +487,307 @@ public sealed class ProcedureAssignmentEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         host.Access.Calls.Should().NotContain(c => c.Set == ProcedureSet || c.Set == PolicySet);
+        host.NoWrites();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Task 089c: change rule
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public static TheoryData<string> ChangePrivilegeNames => new()
+    {
+        BillingAdminAuthorization.CreateRuleSetPrivilege, BillingAdminAuthorization.CreatePolicyPrivilege,
+        BillingAdminAuthorization.CreatePolicyVersionPrivilege, BillingAdminAuthorization.WritePolicyVersionPrivilege,
+        BillingAdminAuthorization.WritePolicyPrivilege,
+    };
+
+    [Theory(DisplayName = "089c must-fire: a change without any one of the privileges of what it creates is 403 and writes nothing")]
+    [MemberData(nameof(ChangePrivilegeNames))]
+    public async Task Change_WithoutOneCreatePrivilege_Returns403(string privilege)
+    {
+        await using var host = await Host.StartAsync();
+        host.Probe.Release(privilege);
+
+        var response = await host.Client.SendAsync(Post($"/api/finance/matters/{RecordId}/rule-overrides/change"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Probe.Calls.Should().Contain(c => c.Privilege == privilege && c.HasToken);
+        host.NoWrites();
+    }
+
+    [Theory(DisplayName = "089c must-fire: a billing admin with Write on the record but no Read on the rule cannot change it (403, nothing written)")]
+    [InlineData("matters")]
+    [InlineData("projects")]
+    [InlineData("workassignments")]
+    public async Task Change_WithoutReadOnTheRule_Returns403(string segment)
+    {
+        await using var host = await Host.StartAsync();
+        host.Access.Grant(PolicySet, PolicyId, AccessRights.None);
+
+        var response = await host.Client.SendAsync(Post($"/api/finance/{segment}/{RecordId}/rule-overrides/change"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Access.Calls.Should().Contain(c => c.Set == PolicySet && c.Id == PolicyId && c.HasToken, "the caller's own Read on the rule");
+        host.NoWrites();
+    }
+
+    [Theory]
+    [MemberData(nameof(Cores))]
+    public async Task Change_Returns201_AndHandsTheServiceTheRoutesTableTheBodyAndTheCaller(string segment, string _, string table)
+    {
+        await using var host = await Host.StartAsync();
+        RuleChangeRequest? seen = null;
+        string? seenTable = null;
+        var view = new RuleChangedView(
+            new OverrideView(Guid.NewGuid(), "RuleChanged", "Excluded", null, null, PolicyId, null, "x"),
+            new RecordRuleView(Guid.NewGuid(), Guid.NewGuid(), "BRR-x", Guid.NewGuid(), 1, Guid.NewGuid(), "Record", null));
+        host.Service.Setup(s => s.ChangeRuleAsync(It.IsAny<string>(), RecordId, It.IsAny<RuleChangeRequest>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback((string t, Guid _, RuleChangeRequest r, Guid? _, CancellationToken _) => (seenTable, seen) = (t, r))
+            .ReturnsAsync(RuleSetOutcome<RuleChangedView>.Done(view));
+        var url = $"/api/finance/{segment}/{RecordId}/rule-overrides/change";
+
+        var response = await host.Client.SendAsync(Post(url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        response.Headers.Location!.ToString().Should().EndWith($"{url}/{view.Override.Id}");
+        (await Json(response))["recordRule"]!["code"]!.GetValue<string>().Should().Be("BRR-x");
+        seenTable.Should().Be(table);
+        seen.Should().Be(new RuleChangeRequest(PolicyId, "x", null, null, null, "Cap", null));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Task 089c: removal and its preview
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid OverrideId = Guid.NewGuid();
+
+    /// <summary>The six removal routes: (method, url, the record's entity set).</summary>
+    public static TheoryData<string, string, string> RemovalRoutes
+    {
+        get
+        {
+            var data = new TheoryData<string, string, string>();
+            foreach (var row in Cores)
+            {
+                var url = $"/api/finance/{row[0]}/{RecordId}/overrides/{OverrideId}";
+                data.Add("GET", url + "/removal-preview", (string)row[1]);
+                data.Add("DELETE", url, (string)row[1]);
+            }
+
+            return data;
+        }
+    }
+
+    /// <summary>The core table of a core entity set (<c>sprk_matters</c> is <c>sprk_matter</c>).</summary>
+    private static string TableOf(string entitySet) => entitySet[..^1];
+
+    private static HttpRequestMessage Send(string method, string url, bool authenticated = true) =>
+        RateCardImportEndpointsTests.Req(method, url, authenticated);
+
+    /// <summary>The stored row's subject, as the service reads it for the filter, and a removal or preview that succeeds.</summary>
+    private static void StoredRowOverrides(Host host, OverrideSubject? subject)
+    {
+        host.Service.Setup(s => s.SubjectOfOverrideAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<CancellationToken>())).ReturnsAsync(subject);
+        host.Service.Setup(s => s.PreviewRemovalAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<OverrideRemovalPreview>.Done(new OverrideRemovalPreview(OverrideId, "RuleExcluded", false, null, null, null)));
+        host.Service.Setup(s => s.RemoveAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<OverrideRemoved>.Done(new OverrideRemoved(OverrideId, "RuleExcluded", false, true, null, null, null)));
+    }
+
+    [Theory]
+    [MemberData(nameof(RemovalRoutes))]
+    public async Task Removal_Unauthenticated_Returns401(string method, string url, string _)
+    {
+        await using var host = await Host.StartAsync();
+
+        var response = await host.Client.SendAsync(Send(method, url, authenticated: false));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    public static IEnumerable<object[]> RemovalRoutesRefused => StatedCaller.Cross(RemovalRoutes, StatedCaller.RefusedKinds);
+
+    [Theory(DisplayName = "089c must-fire: every removal route refuses a flagged-external, row-less or flag-fault caller at step 0, before any check or read")]
+    [MemberData(nameof(RemovalRoutesRefused))]
+    public async Task Removal_StepZero_RefusesBeforeAnyCheckOrRead(string method, string url, string _, StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync();
+        host.StepZero.Kind = kind;
+
+        var response = await host.Client.SendAsync(Send(method, url));
+
+        await host.StepZero.AssertRefusedAsync(response, kind, uniformNotFound: true);
+        host.Probe.Calls.Should().BeEmpty();
+        host.Access.Calls.Should().BeEmpty();
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Theory(DisplayName = "089c must-fire: without Write AND AppendTo on the record, a removal or its preview is the uniform 404, byte-identical to an unknown record, and never reads the row")]
+    [MemberData(nameof(RemovalRoutes))]
+    public async Task Removal_WithoutWriteAndAppendToOnTheRecord_IsTheUniform404(string method, string url, string set)
+    {
+        await using var host = await Host.StartAsync();
+        host.Access.Grant(set, RecordId, AccessRights.Read | AccessRights.Write);
+        var response = await host.Client.SendAsync(Send(method, url));
+
+        await using var unknown = await Host.StartAsync();
+        var unknownResponse = await unknown.Client.SendAsync(Send(method, url.Replace(RecordId.ToString(), Guid.NewGuid().ToString(), StringComparison.Ordinal)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await ShapeOf(response)).Should().Be(await ShapeOf(unknownResponse), "no existence oracle");
+        host.Access.Calls.Should().Contain(c => c.Set == set && c.Id == RecordId && c.HasToken);
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Theory(DisplayName = "089c must-fire: without the billing-admin privilege a removal or its preview is 403 and never reads the row")]
+    [MemberData(nameof(RemovalRoutes))]
+    public async Task Removal_WithoutTheBillingAdminMarker_Returns403(string method, string url, string _)
+    {
+        await using var host = await Host.StartAsync();
+        host.Probe.Release(BillingAdminAuthorization.WriteRuleSetPrivilege);
+
+        var response = await host.Client.SendAsync(Send(method, url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Theory(DisplayName = "089c must-fire: a removal without Write on sprk_policy is 403 (a changed rule's removal switches its record rule Off); its preview does not need it")]
+    [InlineData("matters")]
+    [InlineData("projects")]
+    [InlineData("workassignments")]
+    public async Task Remove_WithoutWriteOnPolicy_Returns403_ThePreviewDoesNot(string segment)
+    {
+        await using var host = await Host.StartAsync();
+        host.Probe.Release(BillingAdminAuthorization.WritePolicyPrivilege);
+        StoredRowOverrides(host, new OverrideSubject(PolicySet, PolicyId));
+        var url = $"/api/finance/{segment}/{RecordId}/overrides/{OverrideId}";
+
+        var removed = await host.Client.SendAsync(Send("DELETE", url));
+        var previewed = await host.Client.SendAsync(Send("GET", url + "/removal-preview"));
+
+        removed.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        previewed.StatusCode.Should().Be(HttpStatusCode.OK, "must not fire: the preview writes nothing");
+        host.Service.Verify(s => s.RemoveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    public static TheoryData<string, string, string, string, string> RemovalRoutesBySubject
+    {
+        get
+        {
+            var data = new TheoryData<string, string, string, string, string>();
+            foreach (var route in RemovalRoutes)
+            {
+                data.Add((string)route[0], (string)route[1], (string)route[2], ProcedureSet, ProcedureId.ToString());
+                data.Add((string)route[0], (string)route[1], (string)route[2], PolicySet, PolicyId.ToString());
+            }
+
+            return data;
+        }
+    }
+
+    [Theory(DisplayName = "089c must-fire: before a removal or its preview, the caller's own Read on what the stored row overrides; without it 403 insufficient_rights and nothing is removed")]
+    [MemberData(nameof(RemovalRoutesBySubject))]
+    public async Task Removal_WithoutReadOnTheStoredSubject_Returns403(string method, string url, string set, string subjectSet, string subjectId)
+    {
+        await using var host = await Host.StartAsync();
+        var subject = new OverrideSubject(subjectSet, Guid.Parse(subjectId));
+        StoredRowOverrides(host, subject);
+        host.Access.Grant(subjectSet, subject.Id, AccessRights.None);
+
+        var response = await host.Client.SendAsync(Send(method, url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        host.Access.Calls.Should().Contain(c => c.Set == subjectSet && c.Id == subject.Id && c.HasToken, "asked as the caller, about the stored subject");
+        host.Service.Verify(s => s.SubjectOfOverrideAsync(TableOf(set), RecordId, OverrideId, It.IsAny<CancellationToken>()), Times.Once, "the row is read for THIS route's record");
+        host.NoWrites();
+    }
+
+    [Theory(DisplayName = "089c must-not-fire: with Read on the stored subject, the removal and its preview reach the service with the route's table")]
+    [MemberData(nameof(RemovalRoutesBySubject))]
+    public async Task Removal_WithReadOnTheStoredSubject_ReachesTheService(string method, string url, string set, string subjectSet, string subjectId)
+    {
+        await using var host = await Host.StartAsync();
+        StoredRowOverrides(host, new OverrideSubject(subjectSet, Guid.Parse(subjectId)));
+
+        var response = await host.Client.SendAsync(Send(method, url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        if (method == "DELETE")
+        {
+            host.Service.Verify(s => s.RemoveAsync(TableOf(set), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+        else
+        {
+            host.Service.Verify(s => s.PreviewRemovalAsync(TableOf(set), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+    }
+
+    [Theory(DisplayName = "089c must-fire: when the stored row cannot be read, or Dataverse gives no answer on the subject, the removal fails closed (403 system_failure)")]
+    [MemberData(nameof(RemovalRoutes))]
+    public async Task Removal_WhenTheSubjectCannotBeChecked_FailsClosed(string method, string url, string _)
+    {
+        await using var faulted = await Host.StartAsync();
+        faulted.Service.Setup(s => s.SubjectOfOverrideAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("simulated Dataverse fault"));
+        await using var unanswered = await Host.StartAsync();
+        StoredRowOverrides(unanswered, new OverrideSubject(PolicySet, PolicyId));
+        unanswered.Access.Grant(PolicySet, PolicyId, AccessRights.None);
+        unanswered.Access.Fault(PolicySet, PolicyId); // no right AND no answer: an unknown, never a denial
+
+        foreach (var host in new[] { faulted, unanswered })
+        {
+            var response = await host.Client.SendAsync(Send(method, url));
+
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            (await Json(response))["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+            host.NoWrites();
+        }
+    }
+
+    [Theory(DisplayName = "089c: a row that is not this record's passes the subject filter and the service answers its 404")]
+    [MemberData(nameof(RemovalRoutes))]
+    public async Task Removal_OfAnUnknownRow_IsTheServices404(string method, string url, string _)
+    {
+        await using var host = await Host.StartAsync();
+        StoredRowOverrides(host, null);
+        var notFound = RuleSetOutcome<OverrideRemoved>.Refused(404, "assignment.override_not_found", "The override was not found on this record.");
+        host.Service.Setup(s => s.RemoveAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(notFound);
+        host.Service.Setup(s => s.PreviewRemovalAsync(It.IsAny<string>(), RecordId, OverrideId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<OverrideRemovalPreview>.Refused(404, "assignment.override_not_found", "The override was not found on this record."));
+
+        var response = await host.Client.SendAsync(Send(method, url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("assignment.override_not_found");
+    }
+
+    [Theory]
+    [MemberData(nameof(RemovalRoutes))]
+    public async Task Removal_WhenEbillingIsOff_Returns503_AndNeverReachesTheService(string method, string url, string _)
+    {
+        await using var host = await Host.StartAsync(ebillingEnabled: false);
+        StoredRowOverrides(host, new OverrideSubject(PolicySet, PolicyId));
+
+        var response = await host.Client.SendAsync(Send(method, url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ebilling.disabled");
+        host.NoWrites();
+    }
+
+    [Theory(DisplayName = "089c must-fire: a caller whose oid is not a GUID is 401 on a removal or its preview, and the service never runs")]
+    [MemberData(nameof(RemovalRoutes))]
+    public async Task Removal_ACallerWhoseOidIsNotAGuid_Is401(string method, string url, string _)
+    {
+        await using var host = await Host.StartAsync(callerOid: "not-a-guid");
+        StoredRowOverrides(host, new OverrideSubject(PolicySet, PolicyId));
+
+        var response = await host.Client.SendAsync(Send(method, url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         host.NoWrites();
     }
 }

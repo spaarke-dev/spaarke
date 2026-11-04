@@ -353,11 +353,13 @@ public class RuleSetService
         RowVersionColumn, RejectionReasonColumn, ProcedureVersionColumn, PublishStateColumn,
     };
 
-    private static readonly string[] RuleSetColumns =
+    // Task 089c (089a K1): the core-record lookups are read too, so every read here can refuse a record-scoped set
+    // (RecordRuleSet.IsRecordScoped: a record scope OR a core lookup).
+    private static readonly string[] RuleSetColumns = new[]
     {
         "sprk_name", "sprk_scope", "sprk_firm", "sprk_visibletofirms", "sprk_effectivefrom", "sprk_effectiveto", "sprk_sourcedocument",
         "sprk_notconverted", "statuscode", RuleDomains.PolicyDomainColumn, ProcedureColumn,
-    };
+    }.Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray();
 
     private readonly IGenericEntityService _entities;
     private readonly IDocumentDataverseService _documents;
@@ -504,6 +506,7 @@ public class RuleSetService
                 row["sprk_firm"] = new EntityReference(FirmEntity, firmId);
             }
 
+            RecordRuleSet.RequireOneHome(row); // task 089c (089a K1): a legacy set has no record and no Procedure
             ruleSetOwner.ApplyTo(row);
             var ruleSetId = await _entities.CreateAsync(row, ct);
             created.Add((RuleSetEntity, ruleSetId));
@@ -571,7 +574,8 @@ public class RuleSetService
                 StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, "There are more rule sets than can be listed in one pass.");
         }
 
-        var rows = sets.Entities.Where(RuleDomains.IsBillingRow).ToList();
+        // Task 089c: a record-scoped set is its record's secure child, changed only through the record's override routes; never listed here.
+        var rows = sets.Entities.Where(r => RuleDomains.IsBillingRow(r) && !RecordRuleSet.IsRecordScoped(r)).ToList();
         var counts = new Dictionary<Guid, int>();
         foreach (var batch in rows.Select(r => (object)r.Id).Chunk(MaxInValues))
         {
@@ -2129,6 +2133,7 @@ public class RuleSetService
             if (value is not DBNull) row[column] = value;
         }
 
+        RecordRuleSet.RequireOneHome(row); // task 089c (089a K1): a Procedure's set never carries a core-record lookup or a record scope
         return row;
     }
 
@@ -2499,6 +2504,12 @@ public class RuleSetService
     internal virtual async Task<Guid?> ProcedureOfRuleSetAsync(Guid ruleSetId, CancellationToken ct) =>
         (await LoadRuleSetAsync(ruleSetId, ct))?.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id;
 
+    /// <summary>
+    /// The one read of a rule set by id, under every route and plan here. Task 089c (089a K1): a record-scoped set reads as no set. It is
+    /// its record's secure child, changed only through the record's override routes (<c>ProcedureAssignmentService</c>), so every mutation
+    /// and read here answers it as the uniform not found. It is not a 409: the set's id is derived from the record, and a distinct answer
+    /// would tell a caller with no right on the record that the record has a changed rule.
+    /// </summary>
     private async Task<Entity?> LoadRuleSetAsync(Guid ruleSetId, CancellationToken ct)
     {
         if (ruleSetId == Guid.Empty)
@@ -2514,7 +2525,7 @@ public class RuleSetService
         };
         RuleDomains.AddBillingFilter(query);
         var rows = await _entities.RetrieveMultipleAsync(query, ct);
-        return rows.Entities.FirstOrDefault(r => r.Id == ruleSetId && RuleDomains.IsBillingRow(r));
+        return rows.Entities.FirstOrDefault(r => r.Id == ruleSetId && RuleDomains.IsBillingRow(r) && !RecordRuleSet.IsRecordScoped(r));
     }
 
     private static QueryExpression PolicyQuery(string column, ConditionOperator op, object[] values)
@@ -2741,7 +2752,8 @@ public class RuleSetService
     /// columns (consequence, headline, template). Task 073 (FR-26, I-5, D-89): the validator also gets the consequence, so a rule whose
     /// type may not carry it (Reject on an AiObservation rule, say) is refused on every one of these paths, publish included.
     /// </summary>
-    private List<RuleSetError> ValidateRule(PolicyRow policy, string? ruleTypeRaw, VersionRow version)
+    /// <remarks>Internal for task 089c: a record rule (<c>ProcedureAssignmentService.ChangeRuleAsync</c>) is validated by this same method.</remarks>
+    internal List<RuleSetError> ValidateRule(PolicyRow policy, string? ruleTypeRaw, VersionRow version)
     {
         var errors = new List<RuleSetError>();
         void Add(string field, string message, string? reason = null) =>

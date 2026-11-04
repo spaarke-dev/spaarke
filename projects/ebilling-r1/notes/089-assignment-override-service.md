@@ -459,6 +459,112 @@ Against the first acceptance criterion: the team goes in Spaarke Business Unit 1
 
 The Pester must-fire cases (Global, an extra privilege, a member without the marker, a member homed in another customer's unit, a team in the root, a team in Secure Record, a bad config depth) each fail closed against the shipped script; the must-not-fire case (two billing-admin members, one homed in a child unit) passes `-Verify` with exit 0.
 
+## 089c - change rule and remove with preview (2026-11-04)
+
+Branch `task/ebilling-089c`, from `work/ebilling-r1` at `1848d67bdb`. Not merged, not pushed. No Dataverse write, no live call, no deploy.
+
+### What landed
+
+- **`ProcedureAssignmentService`** gets four new `public virtual` methods. In each, a read fault before the write is 503 `assignment.read_failed`.
+  - **`ChangeRuleAsync(core, record, RuleChangeRequest, callerOid)`**
+    - Requires a policy id, a reason and at least one edit (`ruleBody`, `messageTemplate`, `shortHeadline`, `consequence`).
+    - Loads the base rule the way Exclude does: an active Billing rule that is not record-scoped and not the system rule.
+    - The base is the rule's `sprk_currentversion`. If that is missing, or belongs to another policy, the call is 409 `assignment.rule_not_in_force`.
+    - Merges the edits over the base and validates the result with `RuleSetService.ValidateRule` (now `internal`), so errors come back as `errors[]`.
+    - Writes in three stages:
+      1. The record's record-scoped set. Its id comes from `RecordRuleSetIdFor`: a v5 id per core, record, and firm or all firms.
+      2. The record rule, created Off. Its code is `BRR-{id:N}` and its id is `IdOf("ebilling-record-rule-{set:D}-{base:D}")`.
+      3. One transaction with three writes:
+         - the Exclude row, `AssignmentIdFor(..., ExcludedPolicyColumn, policyId)`, so an Exclude and a change of the same rule collide on the key;
+         - the rule's next version: `sprk_basedonversion` = the base version, Accepted, Published, in force now;
+         - the switch-on: `sprk_enabled` and `sprk_currentversion`, as a conditional update.
+    - An existing set or rule is reused only if it is provably this record's. For the set, `IsTheRecordSet` must hold. For the rule: the same set, a `BRR-` code, active, and every version based on a version of the same base policy. Otherwise the call is 409 `assignment.record_rule_conflict`.
+  - **`SubjectOfOverrideAsync`** returns the stored row's Procedure (`sprk_procedures`) or rule (`sprk_policies`), and only for this route's record.
+  - **`PreviewRemovalAsync`**
+    - A row that is not this record's is 404 `assignment.override_not_found`.
+    - For a changed rule it returns:
+      - the warning;
+      - the number of invoices the caller can see that have an open Signal of the record rule (`SignalClosureService.SelectOpenSignalsOfPolicyAsync` + `AffectedInvoiceCounter`, as the caller);
+      - `ProcedureService.AffectedText`.
+    - A rights fault gives no count.
+  - **`RemoveAsync`**
+    - One transaction: a `DeleteRequest` on the row (never a deactivation, per the 089b limit). For a changed rule it also switches the record rule Off, as a conditional update.
+    - After the commit, the record rule's open Signals are closed through `ClosePolicySignalsRetiredAsync`.
+    - If that close fails, the answer is still 200, with `closeComplete=false` and a message. The rule is Off, so the nightly run closes the rest.
+- **`RecordRuleSet`** (public static, in the service file):
+  - `ScopeRecord` and `ScopeFirmRecord` moved here (089a K4).
+  - `IsRecordScoped`, shared with `RuleSetService`.
+  - `RequireOneHome`, the 089a K1 write validator. It refuses:
+    - a Procedure and a core lookup together;
+    - two core lookups;
+    - a record scope without a core lookup, or a core lookup without a record scope;
+    - a firm without Firm-record scope, or Firm-record scope without a firm.
+- **`RuleSetService`** (089a K1):
+  - It now reads the core lookups.
+  - `ListAsync` hides record-scoped sets.
+  - `LoadRuleSetAsync` treats a record-scoped set as not found, so every mutation and every read by id is 404.
+  - `RequireOneHome` runs on both of its set creates.
+- **Routes**: one literal chain per core, 15 routes in the file.
+  - POST `.../{recordId}/rule-overrides/change` (201), GET `.../overrides/{overrideId}/removal-preview` (200) and DELETE `.../overrides/{overrideId}` (200).
+  - Order on each route:
+    1. step 0, on the group;
+    2. the record filter `ebilling.record.override` (uniform 404);
+    3. the privilege filter (403);
+    4. on the two removal routes only, `RequireReadOnTheOverridesSubject` (403);
+    5. `RequireEbillingEnabled`.
+  - Privilege filter for change:
+    - Read on the body's rule (`sprk_policies`), asked as the caller; rule rights are never inferred from Procedure rights;
+    - `CreateRuleSet() ∪ DraftRules() ∪ EditRule()`;
+    - Write on `sprk_policy`.
+  - Privilege filter for preview: `Admin()`. For delete: `Admin()` plus Write on `sprk_policy`.
+  - `RequireReadOnTheOverridesSubject` reads the row app-only through `SubjectOfOverrideAsync`, then runs `CallerReadCheck.CheckAsync` as the caller:
+    - Refused: 403 `insufficient_rights`.
+    - A read fault, an unparseable id or no answer: 403 `system_failure`.
+    - A row that is not this record's passes through to the service, which answers 404.
+  - A caller whose oid is not a GUID gets 401 on every route.
+- **Census**:
+  - `ProcedureAssignmentService.cs` is listed Routed for `sprk_ruleset`, `sprk_policy` and `sprk_policyversion`, one create each.
+  - `PersonBearingWriter`s:
+    - `AssignmentCreateAsync` (renamed from `CreateRowAsync`);
+    - `RecordRuleSetCreateAsync`;
+    - `RecordRuleCreateAsync`;
+    - `RecordRuleVersionCreateAsync`.
+  - Every builder asks `ForChild(row)` with `CallerObjectId` and `RequestedBy`, and applies the answer in the same member. A refusal writes nothing.
+  - New record-scope marker `RecordRuleSet.Scope(Record|FirmRecord)`, with two must-fire cases and one must-not-fire case (`RequireOneHome`, `IsRecordScoped`).
+- **Route ledger**: a credited form for `RequireReadOnTheOverridesSubject`. The `GovernedFile` reason covers the new routes. `ExpectedEndpointFileCount` stays 151.
+- **Columns**:
+  - Every new `ColumnSet` and write was checked against `Entities/sprk_Policy`, `sprk_PolicyVersion`, `sprk_ruleset` and the 080 schema script.
+  - `sprk_basedonversion` and `sprk_publishstate` are not in the solution XML yet. They come from `Deploy-EbillingProcedureSchema.ps1` (P6) and are live on dev, per `080-dev-run-2026-10-21.md`.
+  - The firm check still selects `sprk_organizationid` only.
+
+### Section 11
+
+- **Existing:**
+  - `RuleSetService` writes rule sets, rules and versions.
+  - `SignalClosureService` and `AffectedInvoiceCounter` close and count Signals.
+  - The 089b service writes the Exclude row.
+- **Extension:** the change and removal reuse all of these: the validator, the closure, the counter, `AssignmentIdFor` and `SendAsync`. The record-scoped writes cannot live in `RuleSetService`, for two reasons:
+  - its census waiver covers Procedure sets only (089a K4);
+  - a record's rows are secure children, routed through the resolver.
+- **Cost of doing nothing:** no record could change a rule (O-4) or undo an override, and 082 would have no record rules to resolve.
+- **New surface:**
+  - 9 routes, 3 per core;
+  - one custom filter, needed because the request does not name the subject;
+  - `RecordRuleSet`: the shared constants and the write validator.
+  - No package, no background work and no DI registration change; the three new dependencies were already registered.
+
+### Seeding proofs
+
+Each change was restored afterwards, and `cmp` confirmed the file was identical. Suite: `~ProcedureAssignmentEndpoints`, 243 tests.
+
+| Change | Result |
+|---|---|
+| S1: record filter dropped on the matter change route | 10 failed: the step-0 and uniform-404 must-fires |
+| S2: Read on the rule dropped from `ChangeTargets` | 3 failed: "no Read on the rule cannot change it" (3 cores) |
+| S3: `Admin()` dropped from `RemoveTargets` | 3 failed: "without the billing-admin privilege a removal is 403" (DELETE, 3 cores) |
+| S4: `RequireReadOnTheOverridesSubject` dropped from the matter DELETE | 3 failed: "without Read on what the row overrides, 403 insufficient_rights" (Procedure and rule subjects), plus the fail-closed case |
+| S5: step 0 dropped from the group | 60 failed: the step-0 must-fire theory |
+
 ### Gates
 
 | Run | Result |
@@ -501,3 +607,59 @@ uac-r2 approved 089d (43a5b37051) with two binding notes. Both are to be done in
   - Do not add the Read to the existing Billing Admin role. Re-homing that role's assignment would move all its other privileges as well.
 - **Status:** sent to uac-r2. The 089d fix round (adversarial pass 1: the `isinherited` pin, the live-proof gate in the guide, removing the operator straight after the team is created, the file-pattern wording) is held until uac-r2 chooses between the team and R.
 - **If R is chosen (provisioning-09 asked):** should provisioning only CHECK `EnableOwnershipAcrossBusinessUnits` (an H0/H13 gate that fails when it is off), or SET it during stamp setup? Setting it is an org-wide Dataverse write on every stamp, so the owner must approve that design. It is not yet known whether the setting is on in ACME.
+
+| Build: BFF and Sprk.Bff.Api.Tests | 0 warnings, 0 errors |
+| Unit filter `ProcedureAssignment\|OperationAccessPolicy\|RuleSet\|Procedure` | 1008 passed, 0 failed |
+| ArchTests filter `RouteAuthorizationGuard\|RecordOwnerAssignmentCensus\|FinanceStepZero\|ProcedureRolePrivilege\|ProcedureRetireSelection` | 172 passed |
+| Spaarke.ArchTests (full) | 1953/1953 |
+| `dotnet list package --vulnerable --include-transitive` (BFF) | none |
+| Publish size (`-c Release`, uncompressed, 192 files each) | See below |
+
+Publish size, no package added:
+- **Against a fresh master** (`aef86b89f7`, 136,945,460 B): this branch is 137,238,892 B, **+293,432 B**. Most of that is ebilling-r1 work not yet merged to master.
+- **This task alone**, against the base `1848d67bdb` (137,147,136 B): **+91,756 B** (dll +72,704, pdb +18,420).
+
+### Decisions and deviations
+
+1. **A record-scoped set is 404 in `RuleSetService`, not the 409 the 089a list named.** A 409 would tell a caller that a set id exists; the uniform not-found leaks nothing.
+2. **Change also requires Write on `sprk_policy`.** The 089b list named it for removal only, but the change switches the record rule on, just as removal switches it off. This is stricter.
+3. **The change filter always requires Create on rule set**, because the filter cannot know whether the record's set already exists.
+4. **The base is the policy's `sprk_currentversion`, even for a record pinned to an earlier Procedure Version.** 082 resolves pins; the record rule copies the rule in force now.
+5. **A failure after stage 1 or 2 can leave an empty set, or a rule that is Off and has no version.** Nothing applies either one, and the next change reuses it. Stage 3 is all or nothing.
+6. **An inactive (statecode 1) record-rule policy is 409, not reactivated.** A removal only switches the rule Off, so this case arises only after a manual deactivation.
+7. **Record rules have no firm clause text.** A plain removal's preview has no warning and no count.
+
+### Known limits
+
+- **K1: an assignment to a retired Procedure** (089b review 2, unchanged). 082 must ignore it.
+- **K2: a change that names the wrong firm is 400 `firmId`.** This applies when the base rule names one firm and the change names another firm or none. 089b's Exclude still lacks this check.
+- **K3: the preview count is a snapshot.** Signals raised between the preview and the delete are closed too.
+- **K4: the close after a removal is best effort**, and the response body says whether it completed. The nightly run finishes it, because the rule is Off.
+
+### STOP: stale base-code Signals (POML)
+
+The stop fires, as expected. No evaluation closes the open Signals that the base rule raised on the record's invoices:
+- `SignalReevaluationJob` evaluates Ontology policies only.
+- Billing Signals are written only at submission and by the corrections re-evaluation.
+
+**No close path was added.**
+- **Count:** 0 on every record today, because nothing is deployed and no client calls the change route yet. In general it is the number of open base-rule Signals on the record's In Review invoices at the time of the change. The service does not count them.
+- **Stricter or looser:** neither in general. It depends on each edit: a body that matches more lines is stricter, and a softer consequence or template is looser. The service does not compare them.
+- **Owner choice:**
+  - (a) leave them for the reviewer, with a "rule changed" note in the UI; or
+  - (b) close them at publish as Superseded, through the existing SignalWriter close, naming the record rule's first Policy Version.
+
+### Answers to spaarke-prototype questions h-j (`notes/084-prototype-questions.md`)
+
+- **h (removal preview):** `GET /api/finance/{matters|projects|workassignments}/{recordId}/overrides/{overrideId}/removal-preview` returns `{ overrideId, kind, closesRule, warning, affectedText, visibleOpenInvoices }`. The count covers only invoices the caller can see, and is `null` when it could not be counted.
+- **i (parameter schema per rule type):** there is no schema route. The editor starts from the base rule's current version (its body, template, headline and consequence) and sends only what it changes. The server validates the merged version with the rule-type validator. An invalid version is 400 with `errors[]` (field and message).
+- **j (request shapes):**
+  - assign or pin: `POST .../procedure-assignments` `{ procedureId, mode: "FollowLatest"|"Pinned"|"Excluded", pinnedVersionId?, reason? }`;
+  - exclude: `POST .../rule-overrides/exclude` `{ policyId, reason, firmId? }`;
+  - change: `POST .../rule-overrides/change` `{ policyId, reason, firmId?, ruleBody?, messageTemplate?, shortHeadline?, consequence? }`, answered 201 `{ override, recordRule }`;
+  - remove: `DELETE .../overrides/{overrideId}`, answered 200 `{ overrideId, kind, ruleSwitchedOff, closeComplete, affectedText, visibleOpenInvoices, message }`.
+
+### Questions for the owner or uac-r2
+
+- The STOP above: choose (a) or (b).
+- Confirm deviation 1 (404, not 409) and deviation 2 (Write on policy for change).
