@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.FieldMappings;
@@ -39,6 +40,27 @@ public class CoreRecordPairUpdateWriterTests
     private static readonly string Value = Guid.Parse("c0e00000-0000-4000-8000-0000000001ff").ToString("D");
 
     private readonly Mock<IFieldMappingDataverseService> _writes = new();
+
+    /// <summary>
+    /// The doubles answer for <see cref="Row"/> as an existing row and for <see cref="MissingRow"/> as the real service answers
+    /// for a row that does not exist: a read comes back with no columns (<c>DataverseWebApiService.RetrieveRecordFieldsAsync</c>
+    /// on a 404) and an update-only write throws <see cref="KeyNotFoundException"/>; <see cref="World"/> holds <see cref="Row"/>
+    /// only, and its read of any other id faults as Dataverse's does. So "the same refusal for any record id" can fail.
+    /// </summary>
+    public CoreRecordPairUpdateWriterTests()
+    {
+        _writes.Setup(w => w.RetrieveRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid id, string[] columns, CancellationToken _) => id == MissingRow
+                ? new Dictionary<string, object?>()
+                : columns.ToDictionary(c => c, _ => (object?)"Existing"));
+        _writes.Setup(w => w.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), MissingRow, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new KeyNotFoundException());
+        _writes.Setup(w => w.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), MissingRow, It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new KeyNotFoundException());
+    }
 
     /// <summary>Every core-pair payload shape: one column, the other, both, mixed case, the bind form, and the pair with an ordinary column.</summary>
     public static readonly string[][] CorePairPayloads =
@@ -97,13 +119,14 @@ public class CoreRecordPairUpdateWriterTests
     [MemberData(nameof(EveryPayload))]
     public async Task UpdateRecordNode_TheCorePairOfASignal_IsRefused_AndNothingIsWritten(int payload)
     {
-        // A Signal's pair is an access column on this path, refused under that code first (precedence, see the remarks).
+        // On a Signal the existing app-only access-column refusal answers first on this path (its order is pinned by
+        // AccessTableAppOnlyWriterTests.AnAppOnlyWriteOfASignalsCoreRecordRegardingPairOrInvoiceSubject_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode).
         var node = () => Core().UpdateAsync(
             new UpdateRecordActionInput("sprk_signal", Row, FieldMappings: null, LegacyFields(payload), Lookups: null),
             CancellationToken.None);
 
         (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
-            .Should().BeOneOf(FixedAfterCreateCode, InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+            .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
         _writes.Invocations.Should().BeEmpty();
     }
 
@@ -138,6 +161,10 @@ public class CoreRecordPairUpdateWriterTests
         }
 
         (await RefusalFor(MissingRow)).Should().Be(await RefusalFor(Row));
+
+        // Control: the double tells the two ids apart, so a refusal that depended on the row would differ.
+        (await _writes.Object.RetrieveRecordFieldsAsync(table, Row, ["sprk_name"])).Should().NotBeEmpty();
+        (await _writes.Object.RetrieveRecordFieldsAsync(table, MissingRow, ["sprk_name"])).Should().BeEmpty();
     }
 
     [Theory]
@@ -192,11 +219,13 @@ public class CoreRecordPairUpdateWriterTests
     [MemberData(nameof(EveryPayload))]
     public async Task OutputMapping_TheCorePairOfASignal_IsRefused_AndNothingIsWritten(int payload)
     {
+        // On a Signal the existing app-only access-column refusal answers first on this path (its order is pinned by
+        // AccessTableAppOnlyWriterTests.AnAppOnlyWriteOfASignalsCoreRecordRegardingPairOrInvoiceSubject_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode).
         var mapping = () => Handler().UpdateAsync(
             "sprk_signal", Row, Fields(payload), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
         (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
-            .Should().BeOneOf(FixedAfterCreateCode, InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
+            .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode);
         _writes.Invocations.Should().BeEmpty();
     }
 
@@ -212,6 +241,12 @@ public class CoreRecordPairUpdateWriterTests
         }
 
         (await RefusalFor(MissingRow)).Should().Be(await RefusalFor(Row));
+
+        // Control: the world tells the two ids apart, so a refusal that depended on the row would differ.
+        var world = World();
+        (await world.Service.RetrieveAsync("sprk_decisionrecord", Row, ["sprk_name"], CancellationToken.None)).Id.Should().Be(Row);
+        await world.Service.Invoking(s => s.RetrieveAsync("sprk_decisionrecord", MissingRow, ["sprk_name"], CancellationToken.None))
+            .Should().ThrowAsync<System.ServiceModel.FaultException<OrganizationServiceFault>>();
     }
 
     [Theory]
@@ -270,7 +305,7 @@ public class CoreRecordPairUpdateWriterTests
         string table, params FieldMappingRuleDto[] rules) =>
         FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
             _writes.Object,
-            new StampWorld().Restamper,
+            World().Restamper,
             rules,
             new Dictionary<string, object?> { ["sprk_name"] = "Matter" },
             table,
@@ -285,9 +320,13 @@ public class CoreRecordPairUpdateWriterTests
             .GetRequiredService<IServiceScopeFactory>(),
         NullLogger.Instance);
 
+    /// <summary>A world holding <see cref="Row"/> on every table these tests write; <see cref="MissingRow"/> is not in it.</summary>
+    private static StampWorld World() =>
+        new StampWorld().Row("sprk_signal", Row).Row("sprk_decisionrecord", Row).Row("sprk_todo", Row);
+
     private DataverseUpdateHandler Handler()
     {
-        var world = new StampWorld();
+        var world = World();
         return new DataverseUpdateHandler(
             _writes.Object, world.Service, world.Restamper, new RecordOwnershipResolverDouble(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,

@@ -685,6 +685,18 @@ public class RecordTableRulesTests
     }
 
     [Theory]
+    [InlineData("sprk_signal", "sprk_corerecordtype @odata.bind")]
+    [InlineData("sprk_decisionrecord", "Sprk_CoreRecordType  @odata.bind")]
+    public void RefuseFixedAfterCreateColumns_ABindKeyWithASpaceBeforeTheAt_NamesItsColumn(string table, string key)
+    {
+        var refusal = RecordTableRules.RefuseFixedAfterCreateColumns(table, [key]);
+
+        refusal.Should().NotBeNull();
+        refusal!.RefusalCode.Should().Be(RecordTableRules.FixedAfterCreateReasonCode);
+        refusal.Reason.Should().StartWith("sprk_corerecordtype of a ");
+    }
+
+    [Theory]
     [InlineData("sprk_signal", "sprk_name")]
     [InlineData("sprk_decisionrecord", "sprk_regardingrecordid")]
     [InlineData("sprk_todo", "sprk_corerecordid")]

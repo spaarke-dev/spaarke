@@ -469,7 +469,9 @@ internal static partial class RecordTableRules
         if (Find(table) is not { FixedAfterCreateColumns.Count: > 0 } rule)
             return null;
 
-        var named = keys.Select(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn)
+        // Trimmed after the normalization too, so a space before the '@' of a bind key ("sprk_corerecordtype @odata.bind")
+        // still names its column.
+        var named = keys.Select(k => Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k).Trim())
             .FirstOrDefault(rule.FixedAfterCreateColumns.Contains);
         return named is null
             ? null
