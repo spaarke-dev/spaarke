@@ -842,3 +842,14 @@ Seed proofs (each mutation applied, built, the named tests run, the file restore
 - The deviation in 15.3.
 - Adjustments still check "no firm" only (14.6); approval and export refuse a held invoice.
 - current-task.md, TASK-INDEX.md and the POML status are not updated here; the main session owns them.
+
+### 15.9 Deploy order (uac-r2, 2026-11-04, binding)
+
+uac-r2 accepted the deviation in 15.3. When the column is missing, approval and export answer 503. That fails closed, and the read is not gated on the phase.
+
+Before deploying any BFF build that carries 095c-5, uac-r2 reads the attribute metadata on dev. All three must hold:
+- `sprk_invoice.sprk_firmhold` exists;
+- it is field-secured;
+- it carries the Writers grant (read, create, update) and the Readers grant (read).
+
+If any of these is missing, uac-r2 does not deploy. The column is created by `Set-EbillingInvoiceFirmHoldColumn.ps1 -Apply` (or, on a new environment, by the SpaarkeMaster import). It runs in the ebilling main session, after the owner's go, with notices sent before and after.
