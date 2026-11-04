@@ -285,3 +285,34 @@ Each change was restored afterwards, and the file content was compared to confir
 - **K5: unrelated rules and firms are accepted as no-op rows.** An Exclude of a rule that no Procedure in force on the record carries, or for a firm the rule does not apply to, is written and never matched by the resolver (082).
 - **K6: the 201 `Location` points at a GET that does not exist until 084.**
 - **K7: step 0 runs twice per request** (a cost, not a defect; not changed).
+
+### 089b review 2 fixes (2026-11-03, branch `fix/ebilling-089b-review2`)
+
+**F1 + F3 (fixed): every exclude that named a firm returned 500.**
+- **Cause:** `ExcludeRuleAsync` checked the firm with a `$select` of `sprk_name` on `sprk_organization`. That column does not exist; the primary name is `sprk_organizationname` (`RegardingNameFields.cs:29`; `AssignedAccessStore.cs:876`). The test harness answered any column set on `sprk_organization`, so the tests passed against a query production cannot run.
+- **Fix:** the check selects `sprk_organizationid` only (const `FirmIdColumn`), as `RuleSetService.ExistsAsync` does.
+- **Other columns:** every `ColumnSet` and `$select` in `ProcedureAssignmentService` was checked against `Entities/sprk_Policy`, `sprk_PolicyVersion`, `sprk_ruleset`, `sprk_Organization` and `notes/080-procedure-schema.md` (2.2, 2.3). **No other wrong name.** Checked: policy `sprk_name`, `sprk_policycode`, `sprk_ruleset`, `sprk_currentversion`, `sprk_domain`; policy version `sprk_policy`, `sprk_ruletype`; rule set `sprk_scope`, `sprk_domain` and the three core lookups; Procedure and version columns (`ProcedureEntity`); the assignment's own subject and core lookups.
+- **Tests (`ProcedureAssignmentServiceTests`):**
+  - `World` now sets `H.AfterQuery` so the fake refuses a column `sprk_organization` does not have (`sprk_organizationid`, `sprk_organizationname`). It is local to this class; `RuleSetServiceTests.Harness` is unchanged.
+  - New `ExcludeRule_TheFirmCheck_SelectsOnlyTheKey_NeverSprkName`: the exclude succeeds and the firm query's columns are exactly `sprk_organizationid`.
+- **Seed proof:** with `sprk_name` restored in the firm check, 4 fail: the new test, plus 3 existing tests that had been passing against the bad query (`ExcludeRule_WritesOneRow...ForOneFirm...`, `ExcludeRule_NeedsAReason_AndAFirmThatExists`, `...SecondExcludeOfTheSameRule...`). Restored; `cmp` identical.
+
+**K2 (fixed): a Dataverse read fault before the write was a generic 500.**
+- All pre-write reads (Procedure, version, firm, rule, rule set, system-rule version, duplicate) go through `ReadAsync`. A fault (other than the caller's own cancellation) becomes a private `ReadFailedException`; `AssignProcedureAsync` and `ExcludeRuleAsync` catch it and return `Refused(503, "assignment.read_failed")` (ADR-019), logged, nothing written. `SendAsync` (the transaction write) is not wrapped and keeps its own mapping.
+- **Test:** `APreWriteRead_ThatFaults_Is503ReadFailed_AndWritesNothing` (assign and exclude).
+- **Seed proof:** with the service at the parent commit, both cases fail (the exception escapes). Restored; `cmp` identical.
+
+**K3 (fixed): a caller whose `oid` is not a GUID ran the service with no requester.**
+- `ProcedureAssignmentEndpoints.Created` now takes the caller first and returns 401 (the shape `FinanceAuthorizationFilter` uses) when `CallerOid` does not parse; the service is never called. The six routes pass `oid => service...`.
+- In production step 0 already refuses such a caller (it resolves GUID oids only), so this is defence in depth; the test host reaches the route through `StatedCaller.Register(normaliseOid: true)`.
+- **Test:** `EveryRoute_ACallerWhoseOidIsNotAGuid_Is401_AndNeverReachesTheService` (six routes).
+- **Seed proof:** with the endpoints file at the parent commit, all 6 fail. Restored; `cmp` identical.
+
+**K1 (recorded, not changed): the retired-Procedure check is time-of-check vs time-of-use.**
+- `AssignProcedureAsync` reads the Procedure's status, then creates the row in a separate transaction. A Procedure retired in between still gets an assignment.
+- The window is small and the row is harmless. **Task 082's resolver must ignore assignments to retired Procedures**, so a row that slips through has no effect.
+
+**Gate:**
+- All 5 test projects build with 0 warnings, 0 errors (Sprk.Bff.Api.Tests, Spaarke.ArchTests, Sprk.Bff.Api.IntegrationTests, Spe.Integration.Tests, Sprk.Provisioning.ControlPlane.LoadTests).
+- Unit filter `ProcedureAssignment|OperationAccessPolicy|RuleSet`: 633 passed, 0 failed, 0 skipped (`~ProcedureAssignment` alone: 127).
+- ArchTests filter `RouteAuthorizationGuard|RecordOwnerAssignmentCensus|FinanceStepZero|ProcedureRolePrivilege`: 166 passed, 0 failed.

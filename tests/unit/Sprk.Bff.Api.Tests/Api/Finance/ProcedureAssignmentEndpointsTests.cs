@@ -81,7 +81,7 @@ public sealed class ProcedureAssignmentEndpointsTests
         private WebApplication _app = null!;
         public HttpClient Client = null!;
 
-        public static async Task<Host> StartAsync(bool ebillingEnabled = true, bool admin = true)
+        public static async Task<Host> StartAsync(bool ebillingEnabled = true, bool admin = true, string? callerOid = null)
         {
             var host = new Host();
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
@@ -94,7 +94,8 @@ public sealed class ProcedureAssignmentEndpointsTests
                 })
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
-            host.StepZero = StatedCaller.Register(builder.Services);
+            // Step 0 only resolves a GUID oid, so a host whose token oid is not one asks the real resolver under the normalised oid (as the document fixtures do).
+            host.StepZero = StatedCaller.Register(builder.Services, normaliseOid: callerOid is not null);
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
             builder.Services.AddSingleton<IAccessDataSource>(host.Access);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
@@ -110,6 +111,21 @@ public sealed class ProcedureAssignmentEndpointsTests
             host._app = builder.Build();
             host._app.UseRouting();
             host._app.UseAuthentication();
+            if (callerOid is not null)
+            {
+                // The authenticated principal carries this oid instead of the handler's GUID (a token whose oid claim is not a GUID).
+                host._app.Use(async (http, next) =>
+                {
+                    if (http.User.Identity?.IsAuthenticated == true)
+                    {
+                        http.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                            new[] { new System.Security.Claims.Claim("oid", callerOid) }, FinanceAuthzTestAuthHandler.SchemeName));
+                    }
+
+                    await next();
+                });
+            }
+
             host._app.UseAuthorization();
             host._app.MapProcedureAssignmentEndpoints();
             await host._app.StartAsync();
@@ -381,6 +397,18 @@ public sealed class ProcedureAssignmentEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         seenTable.Should().Be(table);
         seen.Should().Be(new RuleExcludeRequest(PolicyId, "agreed", firm));
+    }
+
+    [Theory(DisplayName = "089b review 2 K3 must-fire: a caller whose oid is not a GUID is 401 and the service never runs with no requester")]
+    [MemberData(nameof(AllRoutes))]
+    public async Task EveryRoute_ACallerWhoseOidIsNotAGuid_Is401_AndNeverReachesTheService(string url, string _)
+    {
+        await using var host = await Host.StartAsync(callerOid: "not-a-guid");
+
+        var response = await host.Client.SendAsync(Post(url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        host.NoWrites();
     }
 
     [Theory(DisplayName = "089b: the duplicate rule's 409 reaches the caller with its stable code")]
