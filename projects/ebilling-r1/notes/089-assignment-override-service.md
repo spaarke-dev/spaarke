@@ -258,3 +258,30 @@ Each change was restored afterwards, and the file content was compared to confir
 - **Exclude route:** keep the caller's Read check on `sprk_policies` and its fail-closed 403. Do **not** add a custom filter that infers rule rights from Procedure rights; that would be a second, softer authorization path to the same rows.
 - **Child-unit admins:** a billing admin in a child business unit may get 403 for a rule held in the top unit. If the owner wants such admins to be able to exclude top-unit rules, the fix is in the role: Billing Administrator gets Read on `sprk_policy` at Global (rules are org-wide configuration), set in the role config and checked by the census. This is an open owner question. Until the owner answers, the 403 is correct.
 - **UI constraint (084 and any UI that offers Exclude):** offer Exclude only on rules the caller can Read. Otherwise the 403 looks like a bug. On 2026-11-03 no client code calls these routes.
+
+### 089b review fixes (2026-11-03, branch `fix/ebilling-089b-review`)
+
+**F1 (fixed): the system rule got 404 `assignment.rule_not_found` instead of 409 `assignment.system_rule`.**
+- **Cause:** `LoadRuleAsync` required a rule set before it looked at the rule's type. The system policy `BILL-SYSTEM-SUBMISSION` belongs to no rule set (`scripts/ebilling/Seed-BillingSystemPolicy.ps1`: "the system policy belongs to none"), so the 409 branch could not be reached on real data. The old test seeded the system rule inside a published set, a shape production never has.
+- **Fix:** `ProcedureAssignmentService.IsSystemRuleAsync` runs right after the Billing policy is found and before the rule set is required. It matches `sprk_policycode == BillingRuleCatalogue.SystemPolicyCode` (trimmed, ordinal, as `InvoiceSubmissionAfterSteps` finds it) or a version in force of type `SubmissionIntegrity` (the check that was already here, as `RuleSetService` ~2635 applies it). No rule was duplicated. The route's Read check on the rule still runs first, and the order of the other checks is unchanged.
+- **Tests (`ProcedureAssignmentServiceTests`):**
+  - `ExcludeRule_RefusesTheSystemRule_AndWritesNothing` re-seeded with the system rule holding no `sprk_ruleset` (`World.RuleWithoutSet`): 409 `assignment.system_rule`, nothing written.
+  - New: a `SubmissionIntegrity` rule inside a set stays 409.
+  - New: an ordinary rule with no rule set stays 404 `assignment.rule_not_found`.
+- **Seed proof:** with `ProcedureAssignmentService.cs` reverted to the parent commit, the re-seeded test fails ("Expected outcome.StatusCode to be 409, but found 404"; 1 failed, 9 passed of the `ExcludeRule` cases). The fixed file was restored and compared byte for byte (`cmp`: identical).
+- **Gate:**
+  - All 5 test projects build with 0 warnings, 0 errors (Sprk.Bff.Api.Tests, Spaarke.ArchTests, Sprk.Bff.Api.IntegrationTests, Spe.Integration.Tests, Sprk.Provisioning.ControlPlane.LoadTests).
+  - Unit filter `ProcedureAssignment|OperationAccessPolicy|RuleSet`: 624 passed, 0 failed, 0 skipped.
+  - ArchTests filter `RecordOwnerAssignmentCensus|RouteAuthorizationGuard|ProcedureRolePrivilege`: 154 passed, 0 failed.
+
+**Known limits recorded from the review (not changed):**
+- **K2: Read on `sprk_policies` is Deep.**
+  - uac-r2 decided (2026-11-03) to keep the check, with no Procedure-inferred filter (a second, softer authorization path).
+  - **Owner question:** does Billing Administrator get Global Read on `sprk_policy`? Rules are org-wide configuration, so Global would let a child-unit admin exclude top-unit rules. The change would be in the role config and checked by the census.
+  - **Tension:** EB-D-162 premises "no route depends on the depth" (`notes/decisions-log.md` ~169). This route now does. The owner resolves it: either amend that premise or raise the role's Read depth.
+  - Until then the 403 is correct and fails closed.
+- **K3: the race-duplicate relies on fault code `0x80040237` in `Detail.ErrorCode`.** It has never been verified against live Dataverse. A live probe needs owner OK; none was run.
+- **K4: a missing firm returns 400** ("The firm was not found"), which reveals whether an organization id exists. An **inactive firm is accepted** (the firm lookup does not filter `statecode`).
+- **K5: unrelated rules and firms are accepted as no-op rows.** An Exclude of a rule that no Procedure in force on the record carries, or for a firm the rule does not apply to, is written and never matched by the resolver (082).
+- **K6: the 201 `Location` points at a GET that does not exist until 084.**
+- **K7: step 0 runs twice per request** (a cost, not a defect; not changed).

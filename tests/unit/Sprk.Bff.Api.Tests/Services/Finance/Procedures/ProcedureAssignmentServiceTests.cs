@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Procedures;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
@@ -82,6 +83,15 @@ public sealed class ProcedureAssignmentServiceTests
             return body is null
                 ? H.Rule(set, code, ProposalState.Accepted, current: true, type: type).Policy
                 : H.Rule(set, code, ProposalState.Accepted, current: true, type: type, body: body).Policy;
+        }
+
+        /// <summary>A policy that belongs to NO rule set (<c>sprk_ruleset</c> empty), with its in-force version: the shape the system policy has
+        /// in production (<c>Seed-BillingSystemPolicy.ps1</c>: "the system policy belongs to no rule set").</summary>
+        public Guid RuleWithoutSet(string code, string type)
+        {
+            var policy = H.Rule(H.RuleSet(RuleSetService.RuleSetPublished), code, ProposalState.Accepted, current: true, type: type).Policy;
+            H.Row("sprk_policy", policy).Attributes.Remove("sprk_ruleset");
+            return policy;
         }
 
         public List<Entity> Rows => H.Rows.GetValueOrDefault(Assignment) ?? new List<Entity>();
@@ -354,8 +364,21 @@ public sealed class ProcedureAssignmentServiceTests
         w.H.Transactions.Should().BeEmpty();
     }
 
-    [Fact]
+    [Fact(DisplayName = "089b review F1 must-fire: the system rule, which belongs to NO rule set (as in production), is 409 system_rule, not 404 rule_not_found")]
     public async Task ExcludeRule_RefusesTheSystemRule_AndWritesNothing()
+    {
+        var w = new World();
+        var system = w.RuleWithoutSet(BillingRuleCatalogue.SystemPolicyCode, "SubmissionIntegrity");
+
+        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(system, "why not", null), CallerOid, default);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("assignment.system_rule");
+        w.H.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "089b review F1: a SubmissionIntegrity rule inside a published set is still 409 system_rule (the version-type rule)")]
+    public async Task ExcludeRule_ASubmissionIntegrityRuleInASet_IsStill409SystemRule()
     {
         var w = new World();
         var system = w.Rule("SYS-INTEGRITY", type: "SubmissionIntegrity", body: """{"type":"SubmissionIntegrity"}""");
@@ -364,6 +387,19 @@ public sealed class ProcedureAssignmentServiceTests
 
         outcome.StatusCode.Should().Be(409);
         outcome.ErrorCode.Should().Be("assignment.system_rule");
+        w.H.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "089b review F1 must-not-fire: an ordinary rule with no rule set stays 404 rule_not_found")]
+    public async Task ExcludeRule_AnOrdinaryRuleWithNoRuleSet_Is404RuleNotFound()
+    {
+        var w = new World();
+        var ordinary = w.RuleWithoutSet("BILL-ORPHAN", "DailyHoursCap");
+
+        var outcome = await w.Service().ExcludeRuleAsync(Matter, MatterId, new(ordinary, "x", null), CallerOid, default);
+
+        outcome.StatusCode.Should().Be(404);
+        outcome.ErrorCode.Should().Be("assignment.rule_not_found");
         w.H.Transactions.Should().BeEmpty();
     }
 
