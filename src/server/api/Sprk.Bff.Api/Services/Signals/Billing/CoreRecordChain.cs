@@ -15,6 +15,7 @@
 // registration, no endpoint, no package.
 
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -80,6 +81,8 @@ public static class CoreRecordChain
             select.Add(SecureRootInheritance.PairTypeColumn);
         }
 
+        // NoLock = true, app-only: this read serves PROCEDURE SELECTION only (which Procedures judge the invoice). It is NOT an access
+        // decision and must not be reused to judge access; access goes through SecureRootInheritance and the unified evaluator.
         var query = new QueryExpression(table) { ColumnSet = new ColumnSet(select.ToArray()), TopCount = 1, NoLock = true };
         query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, core.Id);
         var row = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault(r => r.Id == core.Id)
@@ -107,9 +110,17 @@ public static class CoreRecordChain
                 case PairParentAnswer.Parent parent:
                     parents.Add(new CoreRecordLink(parent.Table, parent.Id, 1));
                     break;
+                case PairParentAnswer.None:
+                case PairParentAnswer.NotAFilingParent:
+                    break; // no pair, a repeat, or a readable type that is not a core record: no parent and no fault
                 case PairParentAnswer.Unknown unknown:
                     throw new CoreRecordChainUnreadableException(
                         $"What the invoice's core record {table} {core.Id} is filed under cannot be told: {unknown.Reason}.");
+                default:
+                    // The answer type is a closed set of four (private base constructor); a fifth must be decided here on purpose, never
+                    // dropped as "no parent", which would judge the invoice on a shortened chain.
+                    throw new UnreachableException(
+                        $"Unexpected pair answer {answer.GetType().Name} for core record {table} {core.Id}; CoreRecordChain must handle it explicitly.");
             }
         }
 

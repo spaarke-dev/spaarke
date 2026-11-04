@@ -101,3 +101,68 @@ Scope: the four files of commit `4e98e82a10`. No F-class finding.
 | **082b** | `ProcedureResolver`: the reads (assignment and override rows on the chain, Procedures by All records / Firm / assigned ids, Procedure Versions, rule sets, policies, policy versions with `sprk_procedureversion` and `sprk_publishstate` Published, record-scoped sets on the chain), each once per invoice; the pure resolution per work date (sources, firm condition, Exclude and Pin with distance, versions and gaps, rule excludes, record rules in their base rule's slot); `BillingRuleCatalogue` Replace / Additive / Split with the pinned list. The 089 must-items: ignore an assignment to a retired Procedure (089b review 2 K1); an assignment row with every core lookup null contributes nothing (080 limit); K3 and the K1 decision above; deviation 5 (an empty set, or an Off rule with no version, contributes nothing). | `ProcedureResolver.cs`, `BillingRuleCatalogue.cs`, `ProcedureResolverTests.cs` | Pure plus reads; no loader change yet. Seeding proof (a) and (b) here. |
 | **082c** | Loader and evaluator re-keyed: `LoadRulesAsync` takes the resolver's rules (the `sprk_procedure` null filter and the row re-check removed, the 081 MUST-DO), candidates carry rank, Procedure Version and source; the evaluator's precedence by classification and rank (D-39 `PrecedenceKey` kept); per-line dates from the one resolution; the gap finding (new reason code, `BillingSystemFindings`) and the hold; `BILL-SYSTEM-SUBMISSION` exemption unchanged. Check every `LoadRulesAsync` caller (102's adjustment rule list). | `BillingFactLoader.cs`, `InvoiceComplianceEvaluator.cs`, `BillingSystemFindings.cs`, `InvoiceSubmissionAfterSteps.cs`, `FinanceModule.cs`, loader and evaluator tests | Needs question 1 answered. The ontology-r1 owner review is of this slice. |
 | **082d** | The 7.4 snapshot members in `sprk_findingsjson` (one hunk in `InvoiceSubmissionPersister.cs`), the bounded Decision Record summary, the ratchet ArchTest over `sprk_currentversion` readers, NFR-01 timing on 150 lines, publish-size delta. | `InvoiceSubmissionPersister.cs`, `CurrentVersionReaderRatchetTests.cs` | After 092 and 095d merge, which also edit the persister. |
+
+## 082a review and decisions (2026-11-04)
+
+### Reviews
+
+- **uac-r2 review: OK, no F.** Decisions 1-3 (the `Guid?` pair type, the two optional parameters, the reason on `NotAFilingParent`) are confirmed equivalent to the old code branch by branch. Notes:
+  - **U1** (fixed here): a comment on the `NoLock = true` app-only read in `CoreRecordChain`. It serves procedure selection only, is NOT an access decision, and must not be reused to judge access.
+  - **U2** (fixed here): the "pair id is not a record id" cases are now in uac-r2's own access suite, one per caller, in `SecureRootInheritanceTests`: `AProjectWhosePairIdIsNotARecordId_IsUnverifiable_ThroughTheRecordWalk` (through `ReadSecureParentsAsync`, the public entry to the private `NameParentsAsync`) and `NamePairParentAsync_APairIdThatIsNotARecordId_IsUnknown` (direct, on a project and a work assignment).
+  - **U3** (acceptance criterion for 082b / 082c, below).
+- **ontology-r1 review: OK, no F.** The chain matches D-172 and D-177 (3), (8), (9). Notes:
+  - **O1** (082b criterion, below).
+  - **O2** (082c criterion, below).
+  - **O3:** `NoLock` during a re-file is accepted as K4.
+  - **The K1 proposal (item 2 under "Questions before 082c") is CONFIRMED** by ontology (D-177 (1), (2), (14); D-175; D-202): a rule applies on a date only with a Published version under that date's Procedure Version, regardless of `sprk_enabled`. A record rule runs only where its base rule is resolved for that date, before exclusion. This also closes 089c K3.
+- **Adversarial pass 1: no F.** Four known-limit findings, K1 to K4.
+  - **K1 (fixed here):** the no-multi-hop guard was a deny-list. `CoreRecordChainNoMultiHopGuardTests` is now an allow-list (below).
+  - **K2 (fixed here):** the `PairParentAnswer` switch in `CoreRecordChain` had no `default`. It now handles `None` and `NotAFilingParent` explicitly (no parent, no fault), `Unknown` (throws, as before), and `default:` throws `UnreachableException` naming the answer type. **No unit test:** the base record has a private constructor, so no type outside `PairParentAnswer` can derive from it and a fake future answer cannot be built. The `default` guards a fifth nested record added later.
+  - **K3 and K4:** see the 082b and 082c criteria and the census below.
+
+### Fixes in this round
+
+- **Guard allow-list.** Any `SecureRootInheritance.<member>` reference in `CoreRecordChain.cs` outside {`TypedFilingColumns`, `PairNamesAParentOnItsOwn`, `PairIdColumn`, `PairTypeColumn`, `NamePairParentAsync`, `Matter`, `Project`, `WorkAssignment`} fails (the members the file really uses). A reference to `CoreAncestorResolver` fails. An intermediate literal fails: the lookup columns and tables are read live from `SecureRootInheritance.IntermediateFilingColumns` and `IntermediateParentColumns` (`sprk_regardinginvoice`, `sprk_regardingevent`, `sprk_invoice`, `sprk_event`, and the columns on those that name a matter or project), so the list cannot drift. The by-name deny list stays as a second net. One must-fire control per class (a member outside the allow-list, `CoreAncestorResolver`, an intermediate literal), each planted into a copy of the real text. Must-not-fire: the real file and a synthetic sanctioned shape.
+- **Seeding proof:** planting `OwnerLookupsThroughIntermediatesAsync` in `CoreRecordChain.cs` made the guard fail (see the 082a fix-round gates below).
+
+### OWNER DECISIONS (2026-11-04, typed in session c7)
+
+- **Gap hold on SPA.** Owner: "if this is flagged when the SPA user (a partner user) then the user needs to receive the warning message so they can fix it at that time. whichever is the rights way to ensure the issue is surfaced to the SPA user".
+  - 082c criterion: an SPA submission with a gap is never auto-rejected and never silently held. The partner user gets a descriptive warning at submit time (the submit response and the SPA status view), naming what is missing in terms the partner can act on, with a reason code so it can be tracked. The internal channel holds as Blocked and stays overridable. 082c designs the exact shape (classifier and 073 decider) and shows it to uac-r2 / SPA-r3. This answers Question 1 above.
+- **Record-rule date window.** Owner chose "Only from its own effective-from". A record rule runs only on work dates on or after its own effective-from. Earlier dates are judged by the base version in force on that date, without the record's change. This answers ontology's deviation 4 question (option 1).
+
+### Acceptance criteria carried forward
+
+**082b**
+- **U3, disclosure test:** the chain may include a Secure parent (a project under a Secure matter, or a work assignment under a Secure project). Billing outputs judged with that parent's Procedures must not carry the parent record's id or name to readers: findings JSON, line reasons, Signals, the review page, the add-in replay. Procedure and rule names are OK. Test: a project under a Secure matter, findings rendered, and no matter id or name in the reader-facing output. Inventory any existing output that already names the core or parent record; it belongs with the owner's open 095a question.
+- **O1, order-swap test:** a work assignment with both a matter and a project lookup gives [W0, M1, P1]. The table-then-id sort is for stability only, NOT precedence. D-177(3): Exclude wins, and two different pins raise a blocking gap. A resolver test swaps the order and expects the same result. It needs seeded data; dev has 0 such rows.
+- **K1 / K3 date rule:** a rule applies on a date only with a Published version under that date's Procedure Version, regardless of `sprk_enabled`; a record rule runs only where its base rule is resolved for that date, before exclusion. Plus the owner's limit: a record rule runs only on work dates on or after its own effective-from; earlier dates use the base version in force that day, without the record's change.
+
+**082c**
+- **O2:** when the job runs out of retries after a `CoreRecordChainUnreadableException`, the submission ends held or blocked with a stated reason. It never passes, and is never judged on [W0] alone. Needs a must-fire test.
+- **Review K3 (permanent vs transient):** the reason shown says whether the chain fault is permanent (a core record not found, a pair UAC answers Unknown for) or transient (a read fault), so the operator knows whether a retry can help.
+- **The owner's SPA warning-at-submit requirement** (above): the partner user gets the warning with a reason code at submit time and in the SPA status view; never auto-rejected, never silently held.
+- **Census open item:** none from dev (below); 082c still decides "backfill or fault" for a linked project with an empty pair on another environment.
+
+### Census (review K4): projects linked to a matter with no BFF-managed pair
+
+Read-only on dev, 2026-11-04, through the Dataverse MCP `read_query`, the same route as the step 0 count. The Project to Matter N:N is `sprk_Project_Matter_nn`, intersect `sprk_project_sprk_matter`.
+
+| Query | Result |
+|---|---|
+| `sprk_project` rows | 30 |
+| `sprk_project_sprk_matter` link rows | 7 (7 distinct projects) |
+| of those, projects with an empty `sprk_regardingrecordid` or `sprk_regardingrecordtype` | **0** |
+| of those, projects whose pair id equals the linked matter's id | 7 of 7; the pair type on all 7 is the `sprk_matter` record type |
+
+**Count: 0.** Every project linked through the N:N also has a BFF-managed pair naming the same matter, so on dev no linked project would lose its matter from the chain. Dev is not the whole estate: today a linked project with an empty pair gets [P0] with no fault (`None` is "no parent"), so 082c should decide "backfill or fault" before another environment is judged. Nothing was written to Dataverse.
+
+### 082a fix-round gates
+
+| Run | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 warnings, 0 errors |
+| Unit `~CoreRecordChain\|~SecureRoot\|~SecureChild` | 1864/1864 (7 new: 3 + 4 cases of the two U2 tests) |
+| ArchTests `~CoreRecordChain` | 9/9 (3 new must-fire controls) |
+| Guard seeding proof: `nameof(SecureRootInheritance.OwnerLookupsThroughIntermediatesAsync)` planted in `CoreRecordChain.cs` | 1 failed ("... is not in the allow-list"); restored, `cmp` identical, 9/9 again. The old deny-list did not name this member, so it would have passed. |
+| U2 seeding proof: `NamePairParentAsync` answers `None` for a pair id that is not a record id | 7 of 9 matched tests failed (all 7 new U2 cases); restored, 1864/1864 |
