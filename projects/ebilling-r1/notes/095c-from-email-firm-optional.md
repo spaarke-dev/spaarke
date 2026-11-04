@@ -1081,3 +1081,32 @@ For option 2, the criterion would be reworded to: "A failure leaves a state that
   - 095d-1: renumber, route, atomic apply, record, Signal close, guards, incomplete reporting.
   - 095d-2: the persister's second evaluation and the rule re-run, after 082 and 092 merge.
   - 095d-3: the UI.
+
+### 16.5 095d-1 (2026-11-04): task file written; stopped before code
+
+Task file: `tasks/095d1-set-firm-apply.poml`. It is scoped to 095d-1. It takes in the 16.4 conditions, the uac-r2 additions and ontology-r1's three binding additions (renames, the transaction ceiling, the old-to-new mapping in the stored decision). It states that 095d-1 makes no AI call. The implementer stopped before writing code, for two reasons: two decisions are needed, and the task is too big for one agent. Nothing outside the task file and this section was changed.
+
+**Facts read from the code (for the decisions):**
+
+- **The firm_missing Signal is shared.** `BillingFindingSignalMapper.MapGroup` writes one SubmissionIntegrity Signal per (policy, invoice) group. The firm hold shares that Signal with the invoice-number mismatch and the coding notes; `NotePrecedence` (~:425) only makes it the title. Closing "the firm_missing Signal" after the 095d-1 record therefore also closes those notes. Nothing raises them again until the 095d-2 re-run. This sits uneasily with D-201: "ResolvedSignalIds holds only the firm_missing Signal(s), never other open findings."
+- **Stored-file names live in Dataverse.**
+  - The display name is `sprk_storedfile.sprk_name` (`StoredFileSchema.Name`; written by `StoredFileService.BuildRow` ~:271).
+  - The blob path is built from ids only (`StoredFileBlobName.Build`: tenant, parent table, parent id, file id), and the blob metadata holds no name.
+  - So a rename is a Dataverse column update, and it can join the apply transaction. uac-r2 allows this ("inside the apply transaction where the columns allow it"). In the transaction, "never named with another firm's sequence" holds by construction, and the `files` failedStep and the old-number census row disappear.
+  - It does need a name-only entry in `InvoicePdfWriterGuardTests.ApprovedWriters`. That guard allows only BuildRow and two status-only updates today.
+- **Transaction ceiling.** The intake commit is already bounded at `InvoiceSubmissionPersister.MaxRequestsPerTransaction` = 1000 (~:100, ~:702). It covers the invoice create, the approval, the N lines, the files (`SubmissionCommitGate.MaxFiles` = 50) and the submission. The apply is 1 submission + 1 invoice + 1 approval + N lines (+ F files if renamed in it), so any invoice the intake created fits. Lines are added later only by adjustments, and those are refused while the invoice is held. The ceiling check before the apply is therefore a defensive refusal with tests at the ceiling and one above it, not a split.
+- **Census.** There is no census script. The reporting can go in an existing `-Verify`: `Deploy-EbillingSubmissionTrackingScopeSchema.ps1` (the scope phases) or `Set-EbillingInvoiceFirmHoldColumn.ps1` (the hold). The latter already reads the findings, so it is preferred.
+- **After 095d-1 alone,** the invoice stays held. The three submission markers (14.8 item 1) are cleared only by the 095d-2 re-run. Approval keeps answering 409 (Held sentence) until then. That is safe, but 095d-1 must not merge to master without 095d-2.
+
+**Decisions needed:**
+
+1. **ontology-r1:** close the shared Signal in 095d-1 anyway (095d-2 raises the remaining notes again as new D-13 keys), defer the close to 095d-2 after the re-run, or close it only when firm_missing is its only reason. **Recommendation:** defer the close to 095d-2. The record then names the set, and 095d-2 closes it after the re-run has written the replacement notes. Condition 4 (close only after the record) still holds.
+2. **ontology-r1 (their addition 1 assumed the file store is not Dataverse):** put the file renames in the apply transaction (recommended, for the reason above) or keep them after the record.
+
+**Proposed split** (each part is one agent, run in this order):
+
+- **095d-1a:** `TrackingNumberAllocator.RenumberSubmissionAsync`. It takes the companion requests built per number, sends them in one transaction with IfRowVersionMatches, retries on the alternate key, skips hidden numbers, runs only at P2, and checks the ceiling. Tests: races, ceiling at and above, row-version conflict. It does not touch the persister.
+- **095d-1b:** the service and route. The refusals, the stored decision member and the apply through 1a. The decision code and the exact-set guard, ParentLineage, the hold guard and the stored-file guard entries. A must-fire and a must-not-fire test for each refusal, and seed proofs for the before-apply check and the hold clear.
+- **095d-1c:** the completion step. The record, then the close (per decision 1), the link, 503 incomplete with failedStep and the repeat, and the `-Verify` INFO/FAIL window. A seeded failure at each step, then a repeat. Then the code-review and adr-check gates over 1a-1c, and the publish-size measurement.
+
+rework: none task 095d-1

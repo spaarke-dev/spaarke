@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095d-1" project="ebilling-r1">
+  <metadata>
+    <title>Set the firm on a no-firm invoice, part 1: renumber, route, one apply transaction, then record, close, link</title>
+    <phase>3 Rules (follow-up to 095c; split of 095d, notes/095c-from-email-firm-optional.md 16.4)</phase>
+    <gate>owner decided 2026-11-04 (option 1, apply then record; renumber everything)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New internal write route that changes an invoice's firm and its tracking number (alternate-key value) and records a Decision Record; tags bff-api, auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Race, recovery and visibility consequences of a renumber under the scope key.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>082, 092 and 089e edit InvoiceSubmissionPersister.cs; avoid it, or keep to small hunks.</parallel-reason>
+    <deps>095c (all parts)</deps>
+    <tags>bff-api, auth, ebilling</tags>
+    <estimated-effort>1.5 days (split into 1a / 1b / 1c below)</estimated-effort>
+  </metadata>
+
+  <prompt>Parent: tasks/095d-set-invoice-firm.poml. Binding inputs, read first and not restated here: notes/095c-from-email-firm-optional.md section 16 (16.1-16.3 analysis, 16.4 owner decisions and conditions 1-5), sections 12-15 (14.8 the 095d must-list, 15.1-15.2 sprk_firmhold and its reviewed list, InvoiceFirmHold), projects/ebilling-r1/CLAUDE.md (D-37, D-76, D-100), and projects/spaarke-ontology-platform-r1/notes/decisions.md D-201 (clarified 269cfd8221).</prompt>
+
+  <role>SPAARKE platform developer: the Finance route gate, TrackingNumberAllocator, BillingDecisionRecorder, HumanDecisionSignalClose.</role>
+
+  <goal>An internal reviewer with Write on a held no-firm invoice X sets X's firm to a firm linked to X's core record. Every refusal is given before anything is written. One transaction, conditional on row version, renumbers X's submission into the firm's scope and applies the firm everywhere, clears sprk_firmhold and stores the decision. After the commit, a repeatable completion step writes the Decision Record, closes the firm_missing Signal, and links. It records "rules re-run pending" for 095d-2. No AI call.</goal>
+
+  <scope>
+    <in>The allocator renumber; the route and its refusals; the apply transaction; the stored decision; the completion step (record, close, renames that cannot join the apply, link); 503 incomplete with failedStep and its repeat; the assign-firm decision code, exact-set guard and subject mapping; the ParentLineage text; the InvoiceFirmHoldAppOnlyGuardTests reviewed list; reporting of applied rows that have no record yet; tests.</in>
+    <out>095d-2: the persister's second evaluation and the rules re-run, which clears the three submission markers (14.8 item 1), resets the line decisions (K5) and runs Duplicate and supersedes (K6). Leave one named seam and store rulesRerun = "pending"; never fake it. 095d-3: the UI. NO AI call in 095d-1. The owner's AI re-run rule applies to 095d-2 only.</out>
+  </scope>
+
+  <constraints>
+    <constraint source="Finance route gate (parent)">The route is in the /api/finance group: step 0 (internal callers only), RequireEbillingEnabled, and Write on the invoice as the caller under the new operation key `ebilling.invoice.assign_firm`. It is a new route in an existing endpoints file, not a new file. The decider is the authenticated caller's systemuserid, never request input.</constraint>
+    <constraint source="owner 16.4 condition 1 + uac-r2 (a)(b)(c)">Before the apply, check every permanent refusal as the caller or app-only, as stated:
+      - the uniform 404: unknown invoice, no Write, a step-0 refusal;
+      - AppendTo on the firm organization (`finance.attach_invoice`): 403;
+      - Read on the firm, as for approval;
+      - the core record from EligibleApproverResolver.SingleCoreOf, never from the body;
+      - CheckFirmLinkAsync: Unreadable is 503; NotLinked is a 4xx that names no other firm; an inactive firm is refused;
+      - sprk_vendororg already set on the invoice or its submission: 409;
+      - not Active and In Review: 409;
+      - not held (InvoiceFirmHold app-only): 409;
+      - not phase P2: 503;
+      - HumanDecisionSignalClose.AuthorizeAsync: AppendTo on the core record and Write on each Signal's subject;
+      - CoreAncestorResolver.ResolveStampsAsync;
+      - BillingDecisionRecorder.Preflight;
+      - above the transaction ceiling (ontology 2): refused.
+      Refusals write nothing.</constraint>
+    <constraint source="owner condition 2 + uac-r2 (e) + ontology 2, 3">The apply is ONE ExecuteTransaction, with IfRowVersionMatches on the submission and the invoice, built by the allocator's renumber. It holds:
+      - the submission's firm, scope, sequence, tracking number, and the findings `trackingNumber`;
+      - the stored decision under a new findings member: decision id, firm, note, previous and new number, the firm_missing Signal set and its read time, the decider, the old-to-new name mapping for every renamed row, and rulesRerun "pending";
+      - the invoice firm, tracking-number column, and sprk_firmhold cleared;
+      - each line's LineVendorOrg and name (InvoiceSubmissionPersister.LineNameFor);
+      - the approval name;
+      - every rename whose column allows it.
+      State the request ceiling (Dataverse caps a transaction at 1000 requests; InvoiceSubmissionPersister.MaxRequestsPerTransaction) and refuse above it before the apply. Never apply part silently.</constraint>
+    <constraint source="allocator (D-37, parent)">Add a concurrency-safe renumber to TrackingNumberAllocator, the only writer of the number columns. Copy CreateSubmissionAsync's loop: re-read the highest sequence in the firm's scope; the scope alternate key is enforced on update; an alternate-key duplicate rebuilds the transaction with the next number and retries within MaxAttempts and MaxHiddenSkips. A row-version mismatch is never retried as a race: re-read, then either "already applied for this firm" (finish) or 409. Never 500, never two numbers.</constraint>
+    <constraint source="owner condition 3 + 4; D-122; D-201">After the commit, in this order: the Decision Record, then the Signal close, then the link. The renames that could not join the apply come after the record (ontology 1), unless the notes give a reason for another order.
+      - Decision Record: BillingDecisionRecorder.RecordAsync (WriteBillingDecisionAsync, D-100), rebuilt only from the stored decision, so a repeat produces the same id and hash.
+      - Signal close: the firm_missing Signal only, after the record exists, as Acted by the record in the decider's name (CloseActedByDecisionAsync). A close that fails is 503, never "decided".
+      - A failure after the apply answers 503 `incomplete` with failedStep (record, signals, files, link). The repeat finishes from the stored decision without a second apply. A repeat naming a different firm is refused 409.
+      - Copy the order-and-recovery pattern in the InvoiceApprovalService remarks, "Order and recovery (074 K-3)".</constraint>
+    <constraint source="ontology-r1 D-201 (parent): the decision">Add the billing code `assign-firm` ("Set firm") to DecisionActionCatalog.DeclaredBilling:
+      - class Judgement; subject the invoice;
+      - DeclaredTier Tier3, Reversible false, ExternallyVisible true, RecordOfTruthImpact true;
+      - no schema;
+      - values: a required Lookup `firm` and an optional TextArea `note` (hashed);
+      - id IdOf("ebilling-assign-firm-{submissionId:D}");
+      - facts (not hashed): the previous and new number, the read time, the policy code, and the name mapping;
+      - decider: BillingDecider.Human(callerUserId, role);
+      - update Billing_C2_TheBillingEntrysSubjects_AreTheLineForLineCodes_AndTheInvoiceForEveryOther to map assign-firm to sprk_invoice.</constraint>
+    <constraint source="uac-r2 (d), 14.8 item 6, 15.2">ParentLineage's sprk_invoicesubmission entry names the typed service (the persister and the allocator) as the second writer of sprk_vendororg and sprk_trackingnumber. The generic refusal stays. sprk_firmhold is cleared ONLY by assign-firm, through the typed app-only writer, in the apply transaction; the hold is read app-only. Add the type to InvoiceFirmHoldAppOnlyGuardTests' reviewed list. A sprk_storedfile name update needs an InvoicePdfWriterGuardTests ApprovedWriters entry (name only: never purpose, parent or status).</constraint>
+    <constraint source="uac-r2 additions 2026-11-04">
+      - Every rename runs inside the apply where its column allows, or in the repeatable completion step.
+      - A failed file rename never leaves a file named with another firm's sequence number.
+      - The add-in's 095a read returns the new number after the apply.
+      - The Decision Record keeps the old-to-new mapping.</constraint>
+    <constraint source="owner condition 5 + ontology 1">Report, in an existing script's -Verify (schema or census check), rows that are applied with no record, and rows whose files still carry the old number. INFO inside a window that the notes state; FAIL after it.</constraint>
+    <constraint source="project">No live writes. No persister refactor. Justify the route, the renumber method, the findings member and the guard entries in the notes (CLAUDE.md 11). Measure publish size against a fresh master (10). Describe access defects as defect plus location only.</constraint>
+  </constraints>
+
+  <relevant-files>
+    <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/TrackingNumberAllocator.cs, ITrackingNumberAllocator.cs</file>
+    <file role="create">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceAssignFirmService.cs (the route's service; justify)</file>
+    <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/SubmissionOverrideEndpoints.cs or InvoiceApprovalEndpoints.cs (the existing reviewer-action file)</file>
+    <file role="modify">Services/Signals/Actions/DecisionActionCatalog.cs; Services/Dataverse/ParentLineage.cs (~:987)</file>
+    <file role="reference">InvoiceApprovalService.cs (remarks 156-198), SubmissionOverrideService.cs (stored set, Preflight, CloseActed, FindStoredResolvedSetAsync), HumanDecisionSignalClose.cs, BillingDecisionRecorder.cs, InvoiceFirmHold.cs, InvoiceSubmissionService.CheckFirmLinkAsync (:1979)</file>
+    <file role="modify">tests/Spaarke.ArchTests/InvoiceFirmHoldAppOnlyGuardTests.cs, InvoicePdfWriterGuardTests.cs; tests/unit/Sprk.Bff.Api.Tests/Services/Signals/DecisionRecordWriterTests.Billing.cs</file>
+  </relevant-files>
+
+  <steps mode="directional">
+    <step id="1a">Allocator renumber and its tests: a race that one caller wins, a lost race retried, a row-version conflict, a hidden skip, a phase that is not P2, and the ceiling (one test at it, one just above).</step>
+    <step id="1b">The service and route: the refusals; the stored decision; the apply through 1a. Add a must-fire and a must-not-fire test for each refusal. Seed-prove the before-apply refusal check and the hold clear.</step>
+    <step id="1c">Completion: record, close, files, link. A seeded failure at each step, then a repeat that finishes without a second apply. A repeat naming another firm. The -Verify report.</step>
+    <step>Notes 16.5. Gates: code-review, adr-check.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>A linked firm set on a held no-firm invoice answers 200. The firm is on the invoice, the submission and every line. The number is the firm's next for that firm invoice number. It replaces the old number in the invoice, the line names, the approval name, the file names and the findings `trackingNumber`. sprk_firmhold is cleared. One Decision Record holds the old and new number. The firm_missing Signal is Acted by that record. rulesRerun is "pending", and the invoice stays held by the submission markers until 095d-2.</criterion>
+    <criterion>Each refusal in condition 1 writes nothing, and has a must-fire and a must-not-fire test.</criterion>
+    <criterion>Two reviewers at once: one number, and the loser gets 409 (or the same result for the same firm). A lost scope-key race retries; the loop ends within the bound.</criterion>
+    <criterion>A seeded failure at each post-apply step answers 503 incomplete with that failedStep. The repeat finishes without a second allocation and gives the same record id and hash. A repeat naming another firm gets 409. No file ever carries another firm's sequence number.</criterion>
+    <criterion>The ceiling is stated. At the ceiling the apply runs; one above, it is refused before the apply.</criterion>
+    <criterion>After the apply, a 095a read and a replay return the new number.</criterion>
+    <criterion>-Verify reports an applied row with no record, and a row whose file still carries the old number: INFO inside the stated window, FAIL after it.</criterion>
+    <criterion>The exact-set guard, the hold guard, the stored-file guard and the ParentLineage refusal test pass, with the new entries. The 5 test projects build. ArchTests, the broad filter and the integration suites pass.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The firm_missing Signal is shared. BillingFindingSignalMapper puts it in one SubmissionIntegrity Signal per (policy, invoice) group, alongside the invoice-number mismatch and the coding notes (NotePrecedence). Closing it in 095d-1, before the 095d-2 re-run, closes those notes too. ontology-r1 must choose: close it anyway, defer the close to 095d-2, or close it only when firm_missing is its only reason.</trigger>
+    <trigger>Stored-file display names are sprk_storedfile.sprk_name, a Dataverse column. The blob path is built from ids only (StoredFileBlobName.Build). So the renames can join the apply. ontology-r1 must confirm that order, or keep them after the record.</trigger>
+    <trigger>Renumbering cannot be made atomic and race-safe through the allocator. STOP.</trigger>
+    <trigger>The decision needs schema. STOP.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+</task>
