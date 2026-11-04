@@ -31,6 +31,22 @@ public class InvoiceFirmHoldFieldSecurityAgreementTests
         Agrees(Analyse(script)).Should().BeTrue("the script must secure sprk_invoice.sprk_firmhold for the reused writer and reader profiles");
     }
 
+    // 095c-5 pass-2 review: three behaviours of the script that no host runs in a unit test, pinned as source facts. Each pattern is checked
+    // against the shipped script and against a seeded drift of it.
+    [Theory(DisplayName = "095c-5 pass-2: the script keeps its p0 length check, the InvoiceIdFor derivation, and -Verify's empty-firm INFO")]
+    [InlineData(@"\$MaxLength\s+-lt\s+\$HoldValue\.Length", "-lt $HoldValue.Length", "-gt $HoldValue.Length")]
+    [InlineData(@"ebilling-invoice-\$\(\$SubmissionId\.ToString\('D'\)\)", "ebilling-invoice-$($SubmissionId", "ebilling-line-$($SubmissionId")]
+    [InlineData(@"\[Guid\]::new\(\[byte\[\]\]\$bytes\[0\.\.15\]\)", "$bytes[0..15]", "$bytes[0..14]")]
+    [InlineData(@"if \(\$emptyFirmToSet\.Count -gt 0\) \{ Report 'INFO' ", "Report 'INFO' \"$($emptyFirmToSet.Count) invoice(s) have no firm", "Report 'MISSING' \"$($emptyFirmToSet.Count) invoice(s) have no firm")]
+    public void TheScript_KeepsItsPass2Behaviours(string pattern, string from, string to)
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "ebilling", "Set-EbillingInvoiceFirmHoldColumn.ps1")).ReplaceLineEndings("\n");
+
+        Regex.IsMatch(script, pattern).Should().BeTrue("the shipped script has this behaviour");
+        script.Should().Contain(from);
+        Regex.IsMatch(script.Replace(from, to), pattern).Should().BeFalse("a seeded drift of it must fail the pin");
+    }
+
     [Fact(DisplayName = "095c-5: the solution source has sprk_invoice.sprk_firmhold as a secured text column, only the writer may write it, the reader reads it")]
     public void TheSolution_SecuresTheColumn_OnlyTheWriterWritesIt_AndTheReaderReadsIt()
     {

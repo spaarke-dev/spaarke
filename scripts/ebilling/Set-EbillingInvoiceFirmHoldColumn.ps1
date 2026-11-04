@@ -3,7 +3,7 @@
 .SYNOPSIS
     eBilling R1 (task 095c-5; uac-r2 2026-11-04) - creates sprk_invoice.sprk_firmhold, the invoice's own "firm needed" hold, field-secures it so
     ONLY the server sets it ("Spaarke BFF-Managed Field Writers": read, create, update; "Spaarke BFF-Managed Field Readers": read only), and
-    backfills it on every invoice a linked submission already holds for a firm. -WhatIf is a dry run, -Apply writes, -Verify checks.
+    backfills it on every invoice a submission already holds for a firm (and on every invoice with no firm). -WhatIf is a dry run, -Apply writes, -Verify checks.
 
 .DESCRIPTION
     WHY (095c-5). Task 095c-4 finds the firm_missing hold through the submissions linked to an invoice (sprk_invoicesubmission.sprk_invoice).
@@ -25,8 +25,9 @@
       profile, matched by its fixed id.
 
     PRECONDITIONS (every mode; -Apply refuses unless all pass):
-      (p0) the column exists and can be secured for read, create and update - or, when it does not exist yet, sprk_invoice exists and the
-           column is created by -Apply (step s) before anything else;
+      (p0) the column exists, is a String of at least as many characters as the hold value (ebilling.submission.firm_missing; a shorter
+           column could not store it) and can be secured for read, create and update - or, when it does not exist yet, sprk_invoice exists
+           and the column is created by -Apply (step s) before anything else;
       (p1) the writer profile exists, exactly once, and is in -SolutionUniqueName;
       (p2) its members are exactly the -BffApplicationIds application users (no other user, no team);
       (p3) no business unit's default team holds the writer profile;
@@ -48,19 +49,23 @@
       (b) the permissions are exactly as above;
       (c) any OTHER profile that can create or update the column is FAIL (the System Administrator profile excepted);
       (d) publish sprk_invoice - only when this run wrote metadata;
-      (e) BACKFILL: every invoice that a linked submission holds for a firm (the reason ebilling.submission.firm_missing, the firm_missing
+      (e) BACKFILL: every invoice that a submission holds for a firm (the reason ebilling.submission.firm_missing, the firm_missing
           pipeline finding, a rules.not_checked line finding with that cause, or findings that cannot be parsed - the BFF's
-          InvoiceFirmHold.IsHeld) and whose sprk_firmhold is empty gets sprk_firmhold = ebilling.submission.firm_missing. Task 095c-5
-          review K3: so does every invoice whose sprk_vendororg is empty (a legacy no-firm invoice has no submission hold) and whose
-          sprk_firmhold is blank (null, empty or whitespace), so a firm written to the column directly cannot lift the hold. Only after
-          (b) passed. -WhatIf reports the two counts separately (submission hold, empty firm) and the distinct total; -Verify only counts.
+          InvoiceFirmHold.IsHeld) and whose sprk_firmhold is empty gets sprk_firmhold = ebilling.submission.firm_missing. EVERY submission is
+          read, linked or not (pass-2 review): the invoice is the one its link names AND the one its id derives
+          (InvoiceSubmissionPersister.InvoiceIdFor: SHA-256 of "ebilling-invoice-<id>", first 16 bytes), when that invoice exists, so a
+          submission whose link was cleared or repointed is still found. Task 095c-5 review K3: so does every invoice whose sprk_vendororg
+          is empty (a legacy no-firm invoice has no submission hold) and whose sprk_firmhold is blank (null, empty or whitespace), so a firm
+          written to the column directly cannot lift the hold. Only after (b) passed. -WhatIf reports the counts separately (submission
+          hold, how many only through the derivation, empty firm) and the distinct total; -Verify only counts.
 
     A second -Apply reports every item OK and writes nothing (no publish either).
 
     -VERIFY passes only when the column exists and IS secured, the writer profile holds read=4 create=4 update=4, the reader profile holds
-    read=4 create=0 update=0, NO other profile can create or update it (the System Administrator profile excepted), and no held invoice is
-    left without its hold (e): neither an invoice a linked submission holds, nor an invoice with an empty sprk_vendororg, has a blank
-    sprk_firmhold.
+    read=4 create=0 update=0, NO other profile can create or update it (the System Administrator profile excepted), and no invoice that a
+    submission holds for a firm (e) has a blank sprk_firmhold. An invoice with an empty sprk_vendororg and no hold is reported as INFO
+    ("-Apply sets it"), NOT as a failure (pass-2 review): a user can still write the firm column after deploy, so an ordinary invoice whose
+    firm was cleared later has none, and the BFF already refuses it as no firm. -Apply backfills it (idempotent).
 
     WHAT IT IS NOT. Not an access column: it decides no visibility. It is refused to the BFF's app-only generic writers
     (InheritedAccessPermission.AccessColumns, sprk_invoice) together with sprk_invoice.sprk_vendororg. Rollback: un-secure the column by
@@ -183,6 +188,14 @@ Write-Host "`nPreconditions"
 $tableMeta = try { Invoke-DvGet "EntityDefinitions(LogicalName='$Table')?`$select=MetadataId,EntitySetName" } catch { $null }
 if (-not $tableMeta) { throw "$Table does not exist in this environment." }
 function Get-ColumnMeta { try { Invoke-DvGet "$attrPath`?`$select=MetadataId,AttributeType,IsSecured,CanBeSecuredForCreate,CanBeSecuredForRead,CanBeSecuredForUpdate" } catch { $null } }
+# 095c-5 pass-2 review: a String column that already exists must hold the whole hold value, or the persister's create and this script's
+# backfill would be refused (or truncated) on it. MaxLength is on the String subtype, hence the cast.
+function Get-ColumnMaxLength { try { [int](Invoke-DvGet "$attrPath/Microsoft.Dynamics.CRM.StringAttributeMetadata?`$select=MaxLength").MaxLength } catch { $null } }
+function Get-HoldLengthFault($MaxLength) {
+    if ($null -eq $MaxLength) { return "its MaxLength could not be read" }
+    if ($MaxLength -lt $HoldValue.Length) { return "its MaxLength is $MaxLength, shorter than the hold value '$HoldValue' ($($HoldValue.Length) characters)" }
+    return $null
+}
 $attr = Get-ColumnMeta
 $columnMissing = -not $attr
 if ($columnMissing) {
@@ -193,7 +206,8 @@ elseif ($attr.AttributeType -ne 'String') { Report 'FAIL' "(p0) $Table.$Column e
 elseif (-not ($attr.CanBeSecuredForCreate -and $attr.CanBeSecuredForRead -and $attr.CanBeSecuredForUpdate)) {
     Report 'FAIL' "(p0) $Table.$Column cannot be secured for read, create and update"
 }
-else { Report 'OK' "(p0) $Table.$Column exists (String) and can be secured for read, create and update" }
+elseif ($lengthFault = Get-HoldLengthFault (Get-ColumnMaxLength)) { Report 'FAIL' "(p0) $Table.$Column exists but $lengthFault - the hold could not be stored; widen the column by hand (this script changes no existing column)" }
+else { Report 'OK' "(p0) $Table.$Column exists (String, MaxLength >= $($HoldValue.Length)) and can be secured for read, create and update" }
 
 $writers = @((Invoke-DvGet ("fieldsecurityprofiles?`$select=fieldsecurityprofileid,name&`$filter=name eq '$WriterProfileName'" +
     '&$expand=teamprofiles_association($select=teamid,name,isdefault),systemuserprofiles_association($select=systemuserid,fullname,applicationid)')).value)
@@ -465,29 +479,50 @@ function Test-SubmissionHeld($s) {
     foreach ($l in @($root['lineFindings'])) { if ($l -is [System.Collections.IDictionary] -and $l['code'] -eq 'rules.not_checked' -and $l['cause'] -eq $HoldValue) { return $true } }
     return $false
 }
-$submissions = Get-AllPages "sprk_invoicesubmissions?`$select=sprk_invoicesubmissionid,_sprk_invoice_value,sprk_outcomereasoncode,sprk_findingsjson&`$filter=_sprk_invoice_value ne null"
-$heldInvoices = @($submissions | Where-Object { Test-SubmissionHeld $_ } | ForEach-Object { $_._sprk_invoice_value.ToString().ToLowerInvariant() } | Sort-Object -Unique)
+# 095c-5 pass-2 review: InvoiceSubmissionPersister.InvoiceIdFor in C#: the first 16 bytes of the SHA-256 of the UTF-8 text
+# "ebilling-invoice-<submission id, lower-case D format>", read as a Guid (new Guid(byte[16]), the same mixed-endian layout [Guid]::new
+# takes). It lets the backfill find the invoice a held submission created whatever the submission's link now says. Pinned against the C#
+# by InvoiceSubmissionPersisterTests (test vector) and the agreement test.
+function Get-InvoiceIdFor([Guid]$SubmissionId) {
+    $bytes = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes("ebilling-invoice-$($SubmissionId.ToString('D'))"))
+    return [Guid]::new([byte[]]$bytes[0..15])
+}
+# EVERY submission, linked or not: a removed or repointed link is the very bypass the column closes.
+$submissions = Get-AllPages "sprk_invoicesubmissions?`$select=sprk_invoicesubmissionid,_sprk_invoice_value,sprk_outcomereasoncode,sprk_findingsjson"
+$heldSubmissions = @($submissions | Where-Object { Test-SubmissionHeld $_ })
+$heldByLink = @($heldSubmissions | Where-Object { $_._sprk_invoice_value } | ForEach-Object { $_._sprk_invoice_value.ToString().ToLowerInvariant() } | Sort-Object -Unique)
+$heldByDerivation = @($heldSubmissions | ForEach-Object { (Get-InvoiceIdFor ([Guid]$_.sprk_invoicesubmissionid)).ToString().ToLowerInvariant() } | Sort-Object -Unique)
+# Every invoice (id, firm, hold): a derived id names an invoice only when that invoice exists. A PATCH on an id that does not exist would CREATE a row.
+$invoiceSelect = if ($attr) { "$($Table)id,_sprk_vendororg_value,$Column" } else { "$($Table)id,_sprk_vendororg_value" }
+# (Get-AllPages returns the list as ONE object; the pipeline unrolls it into rows.)
+$invoiceRows = @((Get-AllPages "$($tableMeta.EntitySetName)?`$select=$invoiceSelect") | ForEach-Object { $_ })
+$invoiceIds = @($invoiceRows | ForEach-Object { $_."$($Table)id".ToString().ToLowerInvariant() })
+$heldInvoices = @(@($heldByLink) + @($heldByDerivation) | Where-Object { $_ -in $invoiceIds } | Sort-Object -Unique)
+$derivedOnly = @($heldByDerivation | Where-Object { $_ -in $invoiceIds -and $_ -notin $heldByLink })
 # 095c-5 review K3: a legacy invoice with NO firm (sprk_vendororg empty) has no submission hold and no own hold, yet the BFF refuses it as
 # "no firm" only while the firm column stays empty. Its hold is set too, so a firm written to the column directly cannot lift it.
-$noFirmIds = @((Get-AllPages "$($tableMeta.EntitySetName)?`$select=$($Table)id&`$filter=_sprk_vendororg_value eq null") | ForEach-Object { $_."$($Table)id".ToString().ToLowerInvariant() })
-Report 'INFO' "$($submissions.Count) submission(s) linked to an invoice read; $($heldInvoices.Count) invoice(s) held for a firm by a linked submission; $($noFirmIds.Count) invoice(s) with no firm"
+$noFirmIds = @($invoiceRows | Where-Object { -not $_._sprk_vendororg_value } | ForEach-Object { $_."$($Table)id".ToString().ToLowerInvariant() })
+Report 'INFO' "$($submissions.Count) submission(s) read; $($heldSubmissions.Count) held for a firm; $($heldInvoices.Count) invoice(s) held by a submission ($($derivedOnly.Count) found only through InvoiceIdFor, not through the link); $($noFirmIds.Count) invoice(s) with no firm"
 # A blank hold is what InvoiceFirmHold.IsInvoiceHeld treats as no hold: null, empty or whitespace.
 $withHoldNow = @()
 if ($attr) {
-    $withHoldNow = @((Get-AllPages "$($tableMeta.EntitySetName)?`$select=$($Table)id,$Column&`$filter=$Column ne null") |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_.$Column) } | ForEach-Object { $_."$($Table)id".ToString().ToLowerInvariant() })
+    $withHoldNow = @($invoiceRows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.$Column) } | ForEach-Object { $_."$($Table)id".ToString().ToLowerInvariant() })
 }
 $submissionToSet = @($heldInvoices | Where-Object { $_ -notin $withHoldNow })
 $emptyFirmToSet = @($noFirmIds | Where-Object { $_ -notin $withHoldNow })
 $toSet = @($submissionToSet + $emptyFirmToSet | Sort-Object -Unique)
-Report 'INFO' "BACKFILL COUNT (submission hold): $($submissionToSet.Count) invoice(s) held by a linked submission need $Column = $HoldValue"
+Report 'INFO' "BACKFILL COUNT (submission hold): $($submissionToSet.Count) invoice(s) held by a submission need $Column = $HoldValue"
 Report 'INFO' "BACKFILL COUNT (empty firm): $($emptyFirmToSet.Count) invoice(s) with no firm need $Column = $HoldValue"
 Report 'INFO' "BACKFILL COUNT (distinct, written by -Apply): $($toSet.Count) invoice(s)"
-if ($toSet.Count -eq 0) { Report 'OK' "every invoice held by a linked submission, and every invoice with no firm, carries its own hold" }
-elseif ($Verify) {
-    foreach ($id in $submissionToSet) { Report 'MISSING' "invoice $id is held by a linked submission but $Column is empty" }
-    foreach ($id in $emptyFirmToSet) { Report 'MISSING' "invoice $id has no firm but $Column is empty" }
+if ($Verify) {
+    # The submission-hold gap is a FAILURE: a held submission whose invoice carries no hold of its own is the bypass this column closes.
+    foreach ($id in $submissionToSet) { Report 'MISSING' "invoice $id is held by a submission but $Column is empty" }
+    if ($submissionToSet.Count -eq 0) { Report 'OK' "every invoice a submission holds for a firm carries its own hold" }
+    # An empty firm is NOT a failure: a user can still write sprk_vendororg after deploy, so an ordinary invoice whose firm was cleared later
+    # has none, and the BFF already refuses it as no firm. -Apply backfills it (idempotent); -Verify only reports it.
+    if ($emptyFirmToSet.Count -gt 0) { Report 'INFO' "$($emptyFirmToSet.Count) invoice(s) have no firm and no hold of their own (the BFF refuses them as no firm); -Apply sets it" }
 }
+elseif ($toSet.Count -eq 0) { Report 'OK' "every invoice held by a submission, and every invoice with no firm, carries its own hold" }
 elseif ($IsDryRun) { foreach ($id in $toSet) { Report 'WOULD' "set $Table($id).$Column = $HoldValue" } }
 elseif (-not $permissionsOk -or -not $attr) { Report 'FAIL' "the backfill did not run: the column or its permissions are not in place ((s) to (b))" }
 else {
@@ -507,7 +542,7 @@ if ($IsDryRun) {
     else { Write-Host "`nDRY RUN complete - nothing was written." -ForegroundColor Cyan }
     exit 0
 }
-if ($gaps.Count -eq 0) { Write-Host "`nPASS: $Table.$Column exists and is field-secured, the BFF writer profile holds read/create/update, the reader profile holds read, no other profile (the System Administrator profile excepted) can create or update it, and every held invoice, and every invoice with no firm, carries its hold." -ForegroundColor Green; exit 0 }
+if ($gaps.Count -eq 0) { Write-Host "`nPASS: $Table.$Column exists and is field-secured, the BFF writer profile holds read/create/update, the reader profile holds read, no other profile (the System Administrator profile excepted) can create or update it, and every invoice a submission holds for a firm carries its hold." -ForegroundColor Green; exit 0 }
 Write-Host "`nFAIL ($($gaps.Count)):" -ForegroundColor Red
 $gaps | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
 exit 1

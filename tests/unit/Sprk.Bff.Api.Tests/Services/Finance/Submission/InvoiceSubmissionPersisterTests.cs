@@ -1014,6 +1014,16 @@ public partial class InvoiceSubmissionPersisterTests
             .Should().OnlyHaveUniqueItems();
     }
 
+    // 095c-5 pass-2 review: scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 (Get-InvoiceIdFor) ports InvoiceIdFor to PowerShell to find
+    // a held submission's invoice whatever its link says. The three vectors below were produced by that PowerShell function; this test makes
+    // the C# produce the same Guids, so a change to the derivation here fails until the script is changed with it.
+    [Theory(DisplayName = "095c-5 pass-2: InvoiceIdFor matches the backfill script's port (test vectors)")]
+    [InlineData("11111111-2222-3333-4444-555555555555", "672fd995-e798-c85d-b141-751abf54978a")]
+    [InlineData("00000000-0000-0000-0000-000000000000", "9fe5ecd0-dcce-b5ae-2159-b3600dd97f3e")]
+    [InlineData("f47ac10b-58cc-4372-a567-0e02b2c3d479", "b0e42f51-3d97-0fb9-9f3c-c9d799adcb1e")]
+    public void InvoiceIdFor_MatchesTheBackfillScriptsPort(string submissionId, string expectedInvoiceId) =>
+        InvoiceSubmissionPersister.InvoiceIdFor(Guid.Parse(submissionId)).Should().Be(Guid.Parse(expectedInvoiceId));
+
     [Fact(DisplayName = "049 C (D-112): a withheld finding's group stores no values read")]
     public async Task WithheldFinding_StoresNoValuesRead()
     {

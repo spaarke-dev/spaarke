@@ -759,10 +759,22 @@ BigInt cannot be field-secured. Any non-blank value holds, so an unknown future 
 
 | Type | Use | Identity |
 |---|---|---|
-| `InvoiceFirmHold` | reads it (`HeldInvoicesAsync`, called by `CheckAsync` from approval, Return to Firm, correction, AP export re-check, selection and candidates) | app-only `IGenericEntityService` |
+| `InvoiceFirmHold` | reads it (`HeldInvoicesAsync`, called by `CheckAsync` and `IsHeldAsync` from the callers listed below) | app-only `IGenericEntityService` |
 | `InvoiceSubmissionPersister` | writes it on the held invoice create | app-only transaction |
 | `InheritedAccessPermission` | names it only to refuse it to the generic writers | (registration only) |
 | 095d assign-firm (planned) | clears it | must be typed, app-only; must be added to the guard's reviewed list |
+
+Callers of `InvoiceFirmHold` (read from the code, 095c-5 pass-2 review; every one passes its own app-only `_entities`, never the caller's token):
+
+| Caller | Where | Reads |
+|---|---|---|
+| `InvoiceApprovalService` | ~:326 (approval-state GET), ~:534 (approve) | `CheckAsync` |
+| `InvoiceRejectReturnService` | ~:423 (Return to Firm) | `CheckAsync` |
+| `InvoiceCorrectionService` | ~:407, ~:700 (line and header correction) | `CheckAsync` |
+| `ApExportService` | ~:331, ~:440 (create batch, re-check), ~:575 (candidates) | `HeldInvoicesAsync` |
+| `InvoiceAdjustmentService` | ~:259 (rule options), ~:467 (**every** adjustment add since pass-2 item 5, cited or not) | `CheckAsync` |
+| `InvoiceSubmissionService.JudgeCorrectionAsync` | ~:1687 (intake correction naming a firm), **and the correction prefill** through `JudgeCorrectionPrefillAsync` ~:1790 | `IsHeldAsync` |
+| `InvoiceSubmissionPersister` | ~:1237 (correction commit) | `IsHeldAsync` |
 
 ### 15.3 P0/P1 environments, and a deviation
 
@@ -785,12 +797,21 @@ phase-gated read at P0/P1.
 | AP candidates GET | `ApExportEndpoints.cs` ~:199 (`GetCandidates` catch) from `ApExportService.ListCandidatesAsync` ~:575 | `HeldInvoicesAsync`, only when Approved, unbatched invoices exist | 503 unavailable |
 | Adjustment rule options, and a rule-citing adjustment add (review K2) | `InvoiceAdjustmentService` ~:259 and ~:469 | `CheckAsync` | unavailable |
 | Intake correction naming a firm (review K1) | `InvoiceSubmissionService.JudgeCorrectionAsync` ~:1687; persister commit ~:1237 | `IsHeldAsync` | 503 record_unavailable at the intake; Retry at commit |
+| **Correction prefill GET** (pass-2 review, item 1) | `GET /api/finance/invoices/{invoiceId}/correction-prefill`: `InvoiceSubmissionFromEmailHttp.GetCorrectionPrefillAsync` ~:603-606 calls `InvoiceSubmissionService.JudgeCorrectionPrefillAsync`, which calls `JudgeCorrectionAsync` ~:1682-1694 | `IsHeldAsync`, on **every prefill of an invoice that has a firm** (since pass-1 K1) | 503 (`PrefillUnavailable`); the Outlook add-in's correction prefill fails |
+| **Adjustment add without a rule** (pass-2 review, item 5) | `InvoiceAdjustmentService.ApplyAddAsync` ~:467 | `CheckAsync`, now for every add (before: only a rule-citing add) | `Unavailable` (`ReadFailed`) |
 
 **The POML's P0/P1 expectation ("the column can be absent without blocking ordinary approval") is not met.** Approval, the approval-state read, the
 AP candidates list, and (after review K1 and K2) a firm-naming intake correction and the adjustment rule options all fail closed on an environment
 without the column, at every phase. The mitigation is the binding deploy pre-check in 15.9 (the column exists, is secured, and carries the Writers and
 Readers grants before any BFF build with 095c-5 deploys), plus the SpaarkeMaster import on new environments. **Owner decision pending:** whether this is
 acceptable, or whether a phase-gated read at P0/P1 is wanted instead. Code change for K4: none.
+
+**Pass-2 review (item 1): a third read page, and a fourth route.** The owner's acceptance in 15.11 ("two read pages - yes proceed") named the
+approval-state GET and the AP candidates GET. The correction prefill GET is a **third** read page that answers 503 while the column is missing: since
+pass-1 K1 it reads the hold on every prefill of a firm invoice. (The Outlook add-in's correction prefill is the reader; see the notice in 15.12.) The
+same mitigation covers it, unchanged: the 15.9 pre-check (the column exists, is secured, carries the Writers and Readers grants) before any BFF build
+with 095c-5 deploys, plus the SpaarkeMaster import on new environments. The rule-less adjustment add (last row) is a **fourth** route that now reads the
+hold; it is an add on an In Review invoice, not a read page, and the same mitigation covers it. Neither is a code change.
 
 ### 15.4 Component justification (CLAUDE.md section 11)
 
@@ -871,6 +892,20 @@ Seed proofs (each mutation applied, built, the named tests run, the file restore
   Administrator), cover this.
 - The correction prefill (`JudgeCorrectionPrefillAsync`) asks the intake guard with the invoice's own firm; for an invoice held with a firm set natively
   the guard now refuses, and the prefill reports it as `no_submission`, not as a held invoice. A read fault in the guard is passed on as the prefill's 503.
+- **Script `-Verify` and the empty-firm list (pass-2 review, item 3).** A user can still write `sprk_vendororg` after deploy, so an ordinary invoice
+  whose firm was cleared later has no firm and no hold. The BFF already refuses such an invoice as NoFirm. `-Apply` still backfills it (idempotent), but
+  `-Verify` now reports that list as INFO ("-Apply sets it"), not as a failure. The submission-hold gap (an invoice a submission holds, with no hold of
+  its own) stays a FAILURE.
+- **Script backfill finds held submissions through the derivation as well as the link (pass-2 review, item 4).** I chose to port the derivation. Reason:
+  `InvoiceSubmissionPersister.InvoiceIdFor` is deterministic (the first 16 bytes of SHA-256 of `ebilling-invoice-<submission id, D format>`, read as
+  `new Guid(byte[16])`), so PowerShell reproduces it exactly with `[Guid]::new([byte[]]$bytes[0..15])`; `InvoiceSubmissionPersisterTests.InvoiceIdFor_MatchesTheBackfillScriptsPort`
+  pins three vectors produced by the PowerShell function against the C#, and the agreement test pins the key text. The script now reads every
+  submission (no `_sprk_invoice_value ne null` filter) and holds the invoice its link names **and** the invoice its id derives, only when that invoice
+  exists (a PATCH on an id that does not exist would create a row). Dev: 10 submissions, 0 held, so the derivation found nothing extra there.
+- **Script p0 checks the length (pass-2 review, item 2).** An existing column must be a String with `MaxLength` of at least the hold value's length (32);
+  otherwise p0 FAILs in every mode and `-Apply` is refused. There is no Pester file for this script (the agreement test is the only automated check on
+  it), so the check is pinned by a source-scan case in `InvoiceFirmHoldFieldSecurityAgreementTests` and was run on the helper with lengths 31, 32, 100 and
+  unreadable.
 - current-task.md, TASK-INDEX.md and the POML status are not updated here; the main session owns them.
 
 ### 15.9 Deploy order (uac-r2, 2026-11-04, binding)
@@ -892,7 +927,7 @@ Branch `task/ebilling-095c-5-fix1`. Findings are described as defect and locatio
 |---|---|---|---|
 | K1 | A correction compared the writable firm columns only, so a held invoice whose firm column was set could be superseded by a correction naming that firm, by a new invoice with no hold | `InvoiceSubmissionService.JudgeCorrectionAsync` (~:1673, intake) and `InvoiceSubmissionPersister` (~:1235, commit) | **Fixed.** Both read the hold app-only (`InvoiceFirmHold.IsHeldAsync`) when the request names a firm and treat a held target like a no-firm target: refused `different_firm` (409; `CorrectionDifferentFirm` at commit), the same code and sentence as the existing refusal. A hold read fault is 503 `record_unavailable` at the intake and Retry at commit. A held no-firm invoice corrected without a firm is still allowed (it stays held). Tests: `InvoiceCorrectionIntakeTests` (K1 block), `InvoiceSubmissionPersisterTests.NoFirm` (K1 block). Seed proof: the intake held check removed, 2 of 2 must-fire cases fail; restored, file SHA-256 identical. |
 | K2 | Adjustments checked the firm column only | `InvoiceAdjustmentService` (~:251 rule options, ~:457 cited add) | **Fixed.** Both use `InvoiceFirmHold.CheckAsync` (app-only) and refuse NoFirm or Held with the existing `ebilling.adjustment.firm_missing`; the sentence follows the need (`AdjustmentCodes.FirmDetailFor`), as approve does. A fault is `Unavailable`. Tests: `InvoiceAdjustmentServiceTests` (held with a firm: rule options and cited add refused; ordinary firm: allowed). |
-| K3 | A legacy invoice with no firm has no hold of its own and no linked submission hold | `Set-EbillingInvoiceFirmHoldColumn.ps1` (e) (~:465-472) | **Fixed in the script.** The backfill also sets the hold on every invoice with an empty `sprk_vendororg` and a blank `sprk_firmhold`. `-WhatIf` reports the submission-hold and empty-firm counts separately (15.5: 0 and 8 on dev). `-Verify` fails for either gap. Idempotent: a second `-Apply` finds both lists empty. No script test pins the backfill query (the agreement test pins the hold value and the profiles). |
+| K3 | A legacy invoice with no firm has no hold of its own and no linked submission hold | `Set-EbillingInvoiceFirmHoldColumn.ps1` (e) (~:465-472) | **Fixed in the script.** The backfill also sets the hold on every invoice with an empty `sprk_vendororg` and a blank `sprk_firmhold`. `-WhatIf` reports the submission-hold and empty-firm counts separately (15.5: 0 and 8 on dev). `-Verify` failed for either gap (pass-2 review item 3: now only the submission-hold gap fails; the empty-firm list is INFO). Idempotent: a second `-Apply` finds both lists empty. No script test pins the backfill query (the agreement test pins the hold value and the profiles). |
 | K4 | The deviation's route list was incomplete | notes 15.3 | **Notes only.** The full list is in 15.3, including the approval-state GET and the AP candidates GET. The POML's P0/P1 expectation is not met; mitigation is 15.9 and the SpaarkeMaster import. **Owner decision pending.** |
 | K5 | Tests proved less than their names | `InvoiceFirmHoldColumnTests` (~:102, ~:177-181) | **Fixed.** The "correction state" name was dishonest (the test covers approve and Return to Firm): renamed, and `InvoiceCorrectionServiceTests.HeldByTheInvoiceColumnAlone_Correction_Is409FirmMissing_WritesNothing` covers `CorrectAsync` (line and header) with the invoice hold alone and a firm set. The caller-token test's route half duplicated `TheInvoiceHoldAlone_IsHeld` and was removed; the name now says what it proves (`CheckAsync` answers Held). |
 | K6 | The app-only read depends on the BFF user's profile | notes 15.8 | **Notes only.** Bullet added to 15.8. |
@@ -910,3 +945,81 @@ Publish size: no new package, endpoint or DI registration, so no publish-size de
   - The backfill set the hold on 8 invoices: 0 held through a submission, 8 with no firm.
 - **`-Verify` passed** at 2026-11-04T14:16:03Z with 0 gaps remaining.
 - **uac-r2 was notified** before and after (session 20; the copy sent to session 09 was held by that session).
+
+### 15.12 095c-5 pass-2 review (2026-11-04)
+
+Branch `task/ebilling-095c-5-fix2`. Findings are described as defect and location only; the steps to reach them are not recorded here.
+
+| # | Defect | Location | Disposition |
+|---|---|---|---|
+| 1 | The correction prefill is a third read page that answers 503 without the column; the notes named two | `InvoiceSubmissionService.JudgeCorrectionAsync` ~:1682-1694, reached from `InvoiceSubmissionFromEmailHttp.GetCorrectionPrefillAsync` ~:603-606 | **Notes only.** Row added to the 15.3 route table; the 15.11 acceptance named two pages and the 15.9 pre-check covers this third one; the reader table (15.2) lists the adjustment, intake, prefill and persister callers; notice drafted below. |
+| 2 | Precondition p0 checked the type of an existing column, not its length | `Set-EbillingInvoiceFirmHoldColumn.ps1` p0 (~:192) | **Fixed.** p0 also requires `MaxLength` of at least the hold value's length and fails with a message naming both. No Pester file exists for the script; pinned by a source-scan case in `InvoiceFirmHoldFieldSecurityAgreementTests`. |
+| 3 | `-Verify` failed on an invoice with no firm and no hold, which is an ordinary state after deploy | `Set-EbillingInvoiceFirmHoldColumn.ps1` (e) (~:481-489 before) | **Fixed in the script.** `-Verify` reports the empty-firm list as INFO with the count and "-Apply sets it"; `-Apply` still backfills it; the submission-hold gap stays a FAILURE. Script help and 15.8 updated. |
+| 4 | The backfill found held submissions only through their link | `Set-EbillingInvoiceFirmHoldColumn.ps1` (e) query (~:468 before) | **Fixed in the script** by porting `InvoiceSubmissionPersister.InvoiceIdFor` (15.8 says which choice and why); test vectors in `InvoiceSubmissionPersisterTests`. A simulated run (four submissions: link cleared, linked, derived invoice absent, not held) found the link-cleared one, skipped the absent invoice and wrote nothing for the non-held one. |
+| 5 | A rule-less adjustment copied an unconfirmed firm onto its line when the invoice was held for its firm and its firm column was set directly | `InvoiceAdjustmentService` `BuildRow` (~:638) | **Fixed.** `ApplyAddAsync` reads `InvoiceFirmHold.CheckAsync` once (before: only for a cited rule) and uses the one result for both the cited-rule refusal and the firm copy; the line takes the firm only when the answer is None. A fault on that read is `Unavailable` for every add (see the fourth route in 15.3). Tests: `InvoiceAdjustmentServiceTests` held with a firm, rule-less, line has no firm (must fire; fails on the old code); ordinary invoice, rule-less, line has the firm (must not fire). |
+
+Publish size: no new package, endpoint or DI registration, so no publish-size delta applies.
+
+**`-Verify` against spaarkedev1 (read-only, 2026-11-04, after items 2 to 4): PASS, exit 0.**
+
+```
+Environment : https://spaarkedev1.crm.dynamics.com (org 'spaarkedev1')
+Mode        : VERIFY (read-only)
+
+Preconditions
+  OK       (p0) sprk_invoice.sprk_firmhold exists (String, MaxLength >= 32) and can be secured for read, create and update
+  OK       (p1) profile 'Spaarke BFF-Managed Field Writers' exists (917b64c5-47bf-f111-a05b-3833c5e9614d)
+  OK       (p7) profile 'Spaarke BFF-Managed Field Readers' exists (42e542c8-47bf-f111-aaaf-0022482913fc)
+  OK       (p1) 'Spaarke BFF-Managed Field Writers' is in SpaarkeMaster
+  OK       (p7) 'Spaarke BFF-Managed Field Readers' is in SpaarkeMaster
+  OK       (p2) BFF app user '# mi-bff-api-dev' is a member of Spaarke BFF-Managed Field Writers
+  OK       (p2) BFF app user 'SDAP-BFF-SPE-API' is a member of Spaarke BFF-Managed Field Writers
+  OK       (p3) no business-unit default team holds Spaarke BFF-Managed Field Writers
+  OK       (p4) no field-mapping rule, AI topic-registry row or email update field targets sprk_firmhold
+  OK       (p5) sprk_invoice.sprk_firmhold is in SpaarkeMaster (ViaTable)
+  INFO     (p6) 8 sprk_invoice row(s) carry a firm hold now
+  INFO     (p6) no form or system view binds sprk_firmhold (no existing reader to blank)
+  INFO     (p6) BFF app user '# mi-bff-api-dev' holds System Administrator (full field access; no masked window for it)
+  INFO     (p6) BFF app user 'SDAP-BFF-SPE-API' holds System Administrator (full field access; no masked window for it)
+  OK       (p8) reader profile on default team 'Secure Record' (BU 'Secure Record')
+  OK       (p8) reader profile on default team 'Spaarke Business Unit 1' (BU 'Spaarke Business Unit 1')
+  OK       (p8) reader profile on default team 'Spaarke Demo' (BU 'Spaarke Demo')
+  OK       (p8) reader profile on default team 'Spaarke Dev 1' (BU 'Spaarke Dev 1')
+  OK       (p8) reader profile on default team 'Spaarke Test 1' (BU 'Spaarke Test 1')
+  OK       (p8) reader profile on default team 'Spaarke' (BU 'Spaarke')
+  OK       (p9) the operator (1d02f31c-1872-f011-b4cb-7c1e52671ad0) holds System Administrator: the backfill reads the field-secured submission findings
+
+(s) The column
+  OK       sprk_invoice.sprk_firmhold exists
+(a) Field-level security
+  OK       sprk_invoice.sprk_firmhold is field-secured
+(b) Permissions on sprk_invoice.sprk_firmhold
+  OK       Spaarke BFF-Managed Field Writers (read=4 create=4 update=4)
+  OK       Spaarke BFF-Managed Field Readers (read=4 create=0 update=0)
+(c) Other profiles
+  OK       no profile besides 'Spaarke BFF-Managed Field Writers' and the System Administrator profile (572329c1-a042-4e22-be47-367c6374ea45) can create or update sprk_invoice.sprk_firmhold ('Spaarke BFF-Managed Field Readers' is checked in (b): read only)
+
+(e) Backfill
+  INFO     10 submission(s) read; 0 held for a firm; 0 invoice(s) held by a submission (0 found only through InvoiceIdFor, not through the link); 8 invoice(s) with no firm
+  INFO     BACKFILL COUNT (submission hold): 0 invoice(s) held by a submission need sprk_firmhold = ebilling.submission.firm_missing
+  INFO     BACKFILL COUNT (empty firm): 0 invoice(s) with no firm need sprk_firmhold = ebilling.submission.firm_missing
+  INFO     BACKFILL COUNT (distinct, written by -Apply): 0 invoice(s)
+  OK       every invoice a submission holds for a firm carries its own hold
+
+PASS: sprk_invoice.sprk_firmhold exists and is field-secured, the BFF writer profile holds read/create/update, the reader profile holds read, no other
+profile (the System Administrator profile excepted) can create or update it, and every invoice a submission holds for a firm carries its hold.
+```
+
+(The "Column :" header line is omitted; long lines are unwrapped as printed.) The empty-firm path (an invoice with no firm and no hold, reported as INFO) is not
+reached on dev, where the 8 no-firm invoices already carry their hold; it was exercised in a simulated run (see item 4).
+
+**Notice for word-add-in-r1 (draft; the main session sends it).**
+
+> Subject: ebilling-r1 095c-5 - the correction prefill answers 503 on an environment without `sprk_invoice.sprk_firmhold`
+>
+> `GET /api/finance/invoices/{invoiceId}/correction-prefill` now reads the invoice's firm hold (app-only) for every invoice that has a firm. On an
+> environment where the column `sprk_invoice.sprk_firmhold` does not exist, the read faults and the route answers 503 (the existing "prefill
+> unavailable" answer; nothing is written). Dev has the column since 2026-11-04 14:16Z, so dev answers normally. No contract change: the
+> request, the response shape, and the 503 body are unchanged. Handle the 503 as you already do for the prefill's other read faults (offer a retry; do
+> not treat it as "no submission"). Any other environment gets the column from the deploy pre-check (15.9) or the SpaarkeMaster import before a BFF
+> build with 095c-5 deploys.
