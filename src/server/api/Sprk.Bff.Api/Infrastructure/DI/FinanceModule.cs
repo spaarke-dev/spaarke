@@ -123,6 +123,10 @@ public static class FinanceModule
         // per-request CallerRecordAccessProbe (ExternalAccessModule). Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<AffectedInvoiceCounter>();
         services.AddScoped<ProcedureService>();
+        // Procedure assignments and record overrides (ebilling-r1 task 089b, EB-D-148, model 6.2 / 6.3): assign, pin or exclude a Procedure
+        // and exclude a rule for one core record; 089c adds change rule and remove. Concrete (ADR-010). Scoped: it holds the scoped ownership
+        // resolver. Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<ProcedureAssignmentService>();
 
         // Rule drafting job (ebilling-r1 task 075, FR-27): ADR-004 IJobHandler, the same shape as the other Finance handlers. Reads the rule
         // set's source document, asks IInvoiceAi.DraftRulesAsync (which has its Null peer, so AI-off is a clear Poisoned outcome, not a

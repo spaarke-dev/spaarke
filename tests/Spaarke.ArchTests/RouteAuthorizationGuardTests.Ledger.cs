@@ -359,6 +359,13 @@ public partial class RouteAuthorizationGuardTests
             + "and GET .../retire-preview -- Write on the Procedure AND the billing-admin marker (Write on sprk_ruleset); POST .../versions -- the "
             + "same plus Create on sprk_policyversion; POST .../versions/{versionId}/publish -- the same plus Write on sprk_policyversion and "
             + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. The eBilling kill switch runs after it."),
+        new GovernedFile("Api/Finance/ProcedureAssignmentEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments and .../rule-overrides/exclude (ebilling-r1 "
+            + "task 089b, EB-D-148) -- assign, pin or exclude a Procedure, and exclude a rule, for one core record; the core table is fixed per "
+            + "literal route chain. Step 0 on the group (RequireInternalFinanceCaller). Each route then carries two AddFinanceAuthorizationFilter "
+            + "declarations, as the caller, fail closed: Write and AppendTo on the route record (ebilling.record.override, the uniform 404), then "
+            + "(403) Read on the body's Procedure (assign) or rule's policy (exclude) plus the billing-admin privilege composed from "
+            + "BillingAdminAuthorization.Admin() (Write on sprk_ruleset). The eBilling kill switch runs after them."),
         new GovernedFile("Api/Finance/InvoiceAdjustmentEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId} (ebilling-r1 task 102, "
             + "FR-32) -- the invoice-level adjustments. Every route carries AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail "
@@ -1143,7 +1150,13 @@ public partial class RouteAuthorizationGuardTests
     // GET /api/finance/export-batches/candidates, POST /api/finance/export-batches, GET /api/finance/export-batches/{batchId}. Classified by GovernedFiles
     // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter on each route; the per-invoice decide right is asked inside the service
     // through the one authorization seam); .RequireEbillingEnabled is already in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 150;
+    //
+    // 150 -> 151 (2026-11-03, ebilling-r1 task 089b, EB-D-148). Net +1: Api/Finance/ProcedureAssignmentEndpoints.cs ADDED -- POST
+    // /api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments and .../rule-overrides/exclude. Classified by
+    // GovernedFiles (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter twice per route as the caller: the record's
+    // ebilling.record.override, then Read on the Procedure or rule plus the billing-admin privilege); .RequireEbillingEnabled is already in
+    // NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 151;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision

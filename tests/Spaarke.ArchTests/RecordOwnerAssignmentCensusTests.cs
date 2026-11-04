@@ -295,6 +295,12 @@ public class RecordOwnerAssignmentCensusTests
             + "sprk_storedfile and the lookups BuildRow writes) with the caller as RequestedBy and refuses OwnerUnresolved before any stage or "
             + "write; the Submit Invoice persister passes its one StoredFileOwnerContext resolution (ForRow for sprk_storedfile over the "
             + "invoice's core record), so the file is owned with its invoice (uac-r2 194b R4b-2: an ordinary answer is the restricted-content team)."),
+        // ebilling-r1 task 089b (procedure model 5.1 / 6.2 / 6.3, EB-D-168): a Procedure assignment or rule Exclude is a secure child of its core record.
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_procedureassignment", 1, Disposition.Routed,
+            "ebilling-r1 task 089b: CreateRowAsync is the one sprk_procedureassignment create (assign, pin, exclude a Procedure; exclude a rule). "
+            + "It builds the row, asks the row's own question (RecordOwnershipContext.ForChild: the core record is its one parent, the Procedure, "
+            + "pinned version and excluded rule are citations) with the caller as RequestedBy, refuses before any write when no team is resolved, "
+            + "and writes the answer with ApplyTo (a hard-deny table: an ordinary record's row goes to the restricted-content owner team)."),
         // WorkAssignmentEndpoints.cs's sprk_workassignment create is gone: task 166 deleted the caller-less route (S-76,
         // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
 
@@ -2952,6 +2958,8 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("RuleSetService.cs", "ContentOwnerContext", "the calling admin (oid) of a rule set, policy or policy version create"),
         // ebilling-r1 task 086: every Stored File records the person who asked (none for a job or a contact uploader, model 5.2 K6).
         new PersonBearingWriter("StoredFileService.cs", "StageCreateFlipAsync", "the caller (or the app create's requestedBy) as RequestedBy of the file's owner"),
+        // ebilling-r1 task 089b: an override row records the calling billing admin (the owner question's RequestedBy, which ApplyTo stamps).
+        new PersonBearingWriter("ProcedureAssignmentService.cs", "CreateRowAsync", "the calling billing admin (oid) of an assignment or rule Exclude"),
         new PersonBearingWriter("StoredFileService.cs", "BuildRow", "the person handed in (creatorPersonId), stamped with RecordCreatorPerson"),
     };
 
