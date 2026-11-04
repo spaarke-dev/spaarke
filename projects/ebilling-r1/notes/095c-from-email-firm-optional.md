@@ -1023,3 +1023,43 @@ reached on dev, where the 8 no-firm invoices already carry their hold; it was ex
 > request, the response shape, and the 503 body are unchanged. Handle the 503 as you already do for the prefill's other read faults (offer a retry; do
 > not treat it as "no submission"). Any other environment gets the column from the deploy pre-check (15.9) or the SpaarkeMaster import before a BFF
 > build with 095c-5 deploys.
+
+## 16. Part 095d: design stop (2026-11-04)
+
+Task `tasks/095d-set-invoice-firm.poml`. The implementer stopped before writing code (escalation). Nothing was changed.
+
+### 16.1 The conflict
+
+Renumbering a submission into the firm's sequence is safe under concurrency in exactly one form: a single transaction, conditional on the row version, that writes the submission's firm, scope, sequence and tracking number together with the invoice's firm, `sprk_firmhold` and the lines' firm. Dataverse enforces the scope alternate key on update, so a lost race fails the whole transaction and the allocator retries.
+
+That leaves three rules of the task that cannot all hold:
+
+- **Record first** (ontology D-201, K-3): the number is stored with the decision before the Decision Record, and the record never differs from the applied number.
+- **Nothing changes on failure** (acceptance criterion).
+- **Safe under concurrency:** a number is reserved only once it is written under the scope key, and the Decision Record writer (`WriteBillingDecisionAsync`) cannot join that transaction.
+
+| Option | Order | Breaks |
+|---|---|---|
+| 1. Apply, then record | One apply transaction (with retry), then the record, then close the firm_missing Signal, then re-run the rules | Record first (K-3). If the record write fails, the firm already sees the submission before any record exists. A retry must finish the job. |
+| 2. Reserve, record, apply (**recommended**) | Write only the scope, number and stored decision (the firm stays null, so the submission is not visible yet); then the record and the Signal close; then the firm, hold and lines transaction | "Nothing changes on failure": the number changes at the reservation. The in-between row has a scope that is not its firm, which the strict scope check flags. uac-r2 condition (e) may allow this as a state that the census or a retry can see. |
+| 3. D-201 literally | Pick the number in memory, store it, record, apply | Unsafe: a concurrent intake can take the number. |
+| 4. Keep the number | No renumber | Unsafe: it breaks the strict scope check and lets the allocator reuse the `.n`, or collide with the firm's own number. |
+
+For option 2, the criterion would be reworded to: "A failure leaves a state that a retry finishes and that never shows the submission to the firm."
+
+### 16.2 Size: split proposed
+
+- **The rules re-run needs a second-evaluation path in the persister.** Today a linked submission resumes and writes nothing (`ResumeAsync`). The re-run covers: `rules.not_checked` flags, the line-decision reset (§14.8 item 2), Duplicate and supersedes, new Signals, and the held set.
+- **The number appears in several places:** the invoice tracking-number column, the line names, the approval name, the stored-file names and the findings `trackingNumber`. Owner question: rename all of them, or only the two number columns?
+- **Proposed split:**
+  - **095d-1** (Opus): renumber, route, the atomic write in the chosen order, the decision code, the Signal close, guards, race and seed tests.
+  - **095d-2** (Opus, after 082 and 092 merge): the persister's second evaluation.
+  - **095d-3** (Sonnet): the "Set firm" UI and its tests.
+
+### 16.3 Open questions
+
+- **Owner, ontology-r1 (K-3), uac-r2 (condition (e)):** which order, 1 or 2?
+- **Owner:** which names carry the new number?
+- **Re-run in the request:** confirm the re-run makes no AI call. Only the code-set resolver's firm-code step runs again.
+- **Approval afterwards:** Flagged lines need a line decision before approval. Is that what the criterion intends?
+- **word-add-in-r1:** a 095a read or replay returns the new number. The add-in must not cache the number from intake.
