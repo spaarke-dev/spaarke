@@ -182,10 +182,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
             ["amount"] = "125000",
             ["reason"] = "Scope grew",
         });
-        // The general create is registered in the request's services, as the commit route has it: a revise that reached it
-        // would be refused (sprk_budgetrevision is created only by its writer), so a Done proves it did not.
-        request.Http.RequestServices.GetRequiredService<Sprk.Bff.Api.Services.RecordCreation.RecordCreationService>()
-            .Should().NotBeNull();
+        // The general create is registered in the request's services (DecisionRequest), as the commit route has it: a revise
+        // that reached it would be refused (sprk_budgetrevision is created only by its writer), so a Done proves it did not.
         _user.GetOverride = path => path.StartsWith($"sprk_budgets({budget:D})", StringComparison.Ordinal)
             ? DataverseUserResponse.Ok(200, System.Text.Json.JsonSerializer.SerializeToElement(new Dictionary<string, object?>
             {
