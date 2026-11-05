@@ -313,7 +313,7 @@ public class CoreRecordPairUpdateWriterTests
             null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // ── The field-mapping push (a configured rule per column: a refused rule is skipped, the rest applies) ───────
+    // ── The field-mapping push's child writer (a Signal and a Decision Record are refused whole since task 048) ───────
 
     [Theory]
     [InlineData("sprk_signal", "sprk_corerecordid")]
@@ -322,18 +322,23 @@ public class CoreRecordPairUpdateWriterTests
     [InlineData("sprk_decisionrecord", "sprk_corerecordid")]
     [InlineData("sprk_decisionrecord", "sprk_corerecordtype")]
     [InlineData("sprk_decisionrecord", "Sprk_CoreRecordType")]
-    public async Task Push_ARuleOntoTheCorePair_IsSkipped_AndNeverWritten(string table, string target)
+    public async Task Push_ARuleOntoTheCorePair_OfASignalOrDecisionRecord_IsRefusedWithTheWholeTable_AndNeverWritten(string table, string target)
     {
-        var (updated, failed, _, errors, results) = await Push(
+        // Task 048 fix round 1 (owner decision 2026-11-04, D-204 extended to updates): the child writer refuses a Signal and a
+        // Decision Record whole, as the push's request check does, so the other rule is no longer written (#2568 had it written and
+        // only the core-pair rule skipped). Every child fails, with the plain message; nothing is written.
+        var (updated, failed, _, errors, _) = await Push(
             table, Rule("sprk_name", "sprk_description"), Rule("sprk_name", target));
 
-        (updated, failed).Should().Be((1, 0));
-        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((0, 1));
+        errors.Should().ContainSingle().Which.Should().Be(new PushFieldMappingsError
+        {
+            RecordId = Row,
+            Error = Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterMessage(table),
+        });
         _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
-            table, Row, It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_description")),
-            Caller, It.IsAny<CancellationToken>()), Times.Once);
-        results.Should().ContainSingle(r => r.TargetField == target).Which.Status.Should().Be(FieldMappingStatus.Skipped);
-        results.Single(r => r.TargetField == target).ErrorMessage.Should().Contain("cannot be changed").And.Contain("nothing was written");
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]

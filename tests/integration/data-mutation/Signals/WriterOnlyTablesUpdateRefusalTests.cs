@@ -166,6 +166,44 @@ public class WriterOnlyTablesUpdateRefusalTests
             asPerson ? Person : null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // ── The field-mapping push's child writer (task 048 fix round 1) ─────────────────────────────────────────────
+
+    [Theory(DisplayName = "048 fix 1 (D-204, must fire): the push's child writer fails every child of a table only its writer changes, in a plain sentence, writing nothing")]
+    [MemberData(nameof(WriterOnlyTables))]
+    public async Task PushChildWriter_ATableOnlyItsWriterChanges_FailsEveryChild_AndNothingIsWritten(string table)
+    {
+        var world = World(table);
+
+        var (updated, failed, skipped, errors, _) = await Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            _writes.Object, world.Restamper,
+            [new Sprk.Bff.Api.Models.FieldMapping.FieldMappingRuleDto
+            {
+                SourceField = "sprk_name", TargetField = "sprk_name", SourceFieldType = "String", TargetFieldType = "String", Priority = 1,
+            }],
+            new Dictionary<string, object?> { ["sprk_name"] = "Renamed" },
+            table, [Row, MissingRow], Person, NullLogger.Instance, CancellationToken.None);
+
+        (updated, failed, skipped).Should().Be((0, 2, 0));
+        errors.Select(e => (e.RecordId, e.Error)).Should().Equal(
+            (Row, RecordTableRules.ChangedOnlyByItsWriterMessage(table)), (MissingRow, RecordTableRules.ChangedOnlyByItsWriterMessage(table)));
+        _writes.Invocations.Should().BeEmpty();
+    }
+
+    // ── The wording: a plain sentence on the paths people read; the model's wording only on the chat tool ─────────
+
+    [Theory(DisplayName = "048 fix 1: the refusal people read is a plain sentence with the code; the chat tool's wording is the model's")]
+    [MemberData(nameof(WriterOnlyTables))]
+    public void TheMessage_IsPlainOffChat_AndTheModelsOnChat(string table)
+    {
+        var plain = RecordTableRules.ChangedOnlyByItsWriterMessage(table);
+        var chat = Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler.ChangedOnlyByItsWriterChatMessage(table);
+
+        plain.Should().Be($"'{table}' records are changed only by Spaarke itself and can't be changed by this update; nothing was written. (record_update.changed_only_by_its_writer)");
+        plain.Should().NotContain("Do NOT").And.NotContain("REJECTED");
+        chat.Should().Contain("Do NOT retry this update").And.Contain("(record_update.changed_only_by_its_writer)");
+        RecordTableRules.RefuseWriterOnlyTableUpdate(table)!.RefusalCode.Should().Be("record_update.changed_only_by_its_writer");
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────
 
     private void AcceptUpdates() =>

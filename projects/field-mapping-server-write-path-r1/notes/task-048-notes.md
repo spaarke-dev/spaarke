@@ -21,13 +21,14 @@ b9a5a9cbe0 (contains 042c's merge 79d7360fb9 and #2568 909754869f).
 
 `RecordTableRules.RefuseWriterOnlyTableUpdate(table)` reads `RecordTableRule.CreatedOnlyByItsWriter` (042c's flag) and returns
 `RecordOwnerResolution.Refused("record_update.changed_only_by_its_writer", message)` or null. Table only: it reads nothing, so it
-answers the same for any record, payload, identity and write mode. One message (`ChangedOnlyByItsWriterMessage`), modelled on the
-chat create tool's message for the same tables:
+answers the same for any record, payload, identity and write mode. Two wordings of the one refusal (fix round 1; the code is the same): `ChangedOnlyByItsWriterMessage` is a plain sentence for every
+path a person reads it on, and the chat update tool keeps the model-facing text, as the create side splits them:
 
-> '{table}' records can't be changed by this update — it was REJECTED and nothing was written. They are changed only by Spaarke
-> itself: a signal by its evaluation and its lifecycle, a decision record or a budget revision when a decision is committed. Do
-> NOT retry this update — {table} is blocked on every general update unconditionally and no argument change makes it valid; work
-> from the signal or its decision instead (record_update.changed_only_by_its_writer).
+> '{table}' records are changed only by Spaarke itself and can't be changed by this update; nothing was written.
+> (record_update.changed_only_by_its_writer)
+
+> (chat only, `DataverseUpdateRecordHandler.ChangedOnlyByItsWriterChatMessage`) '{table}' records can't be changed from chat — this
+> update was REJECTED and nothing was written. ... Do NOT retry this update — ... (record_update.changed_only_by_its_writer).
 
 No existing refusal's kind, code or wording changes (NFR-07). Each path asks it after its existing shape-only refusals (the
 access-column and core-record-pair checks keep answering first where they did, so their pinned order is unchanged) and before any
@@ -43,9 +44,9 @@ row is read or written.
 | Playbook output mapping (`DataverseUpdateHandler`, only consumer `OutputOrchestratorService`) | Yes (ontology: included) | `UpdateAsync`, after the shape refusals, before the invoice-family read, the row-version read and the write; app-only and as the run's user | `RecordOwnerUnresolvedException` (as the core-pair refusal) |
 | Field-mapping push (`POST /api/v1/field-mappings/push`) | Yes | `ValidatePushRequest`: before the source is authorized and before any profile, row or child is read | 400 validation problem, `errors.targetEntity` = the message |
 | Work-product persister (`TopicRegistryWorkProductPersister`, a configured column of the session's host record, user-OBO PATCH) | Yes | `PersistAsync`, after the registry mapping, before the host table is resolved or written | `InvalidOperationException` "registry row … targets {table}.{field}, which is not written: {message} Fix the registry row." (as its core-pair refusal) |
-| Browser re-file core (`ChildRecordEndpoints.UpdateAsync`) | Excluded (reasoned) | — | Its routes pass `RefileTables` (todo, memo, invoice, report card, analysis), an event or a communication only; pinned by `WriterOnlyTablesUpdateGuardTests.TheBrowserRefileTables_IncludeNoWriterOnlyTable` |
-| Re-file core (`OwnedChildWrite.RefileAsync`) | Excluded (reasoned) | — | Called by the chat tool after it refuses the three tables, and by `ChildRecordEndpoints.UpdateAsync` (fixed tables) |
-| `FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync` | Excluded (reasoned) | — | Its one caller, `PushFieldMappingsAsync`, refuses the target in `ValidatePushRequest` first |
+| Browser re-file core (`ChildRecordEndpoints.UpdateAsync`; four callers: the child-records, event and communication filing routes and `DecisionRouteCores.UpdateChildAsync`) | Yes (fix round 1) | Itself, after the core-pair check, before the metadata read | 403 problem, reason code `child_record.denied`, detail = the message |
+| Re-file core (`OwnedChildWrite.RefileAsync`) | Yes (fix round 1) | Itself, after the core-pair check, before the invoice-family read | `RefileOutcome.Invalid` = the message |
+| `FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync` (push child writer) | Yes (fix round 1) | Itself, first, before any child is read | Every child counted failed, one `PushFieldMappingsError` per child carrying the message; nothing written |
 | Fixed-table writers (`FinanceRollupService`, `ScorecardCalculatorService`, the ontology admin services, the decision action executors, …) | Not generic | — | Listed in `CoreRecordPairUpdateCheckGuardTests.FixedPayloadWriters` with their fixed table or columns |
 | The general create (`RecordCreationService`, chat create) | 042c | — | Already refuses the three tables |
 
@@ -102,12 +103,19 @@ must-not-fire and one "same for any record" row pass either way), and the update
 
 ## Known limits
 
-- K4: the Update Record core resolves table metadata (column types for a `type:"string"` mapping, a lookup target's entity set)
-  before its shape refusals, as it did for the core-pair refusal; the writer-only refusal follows them, so for such a payload a
-  metadata read can precede it. No row is read or written. Moving it first would change the pinned order of the access-column
-  refusal on a Signal (`AccessTableAppOnlyWriterTests`).
-- K1: `ApplyMappingsToChildRecordsAsync` (internal) relies on its one caller's request check; a second caller added later would
-  not be caught by the guard (the listed reason names the one caller).
+- K4 (ordering, three answers): on a Signal Update Record node the writer-only refusal follows steps that can answer first. A
+  `type:"string"` mapping against a Choice column with an unmatchable value throws `FieldCoercionException`; a lookup whose target
+  entity set cannot be resolved throws `InvalidOperationException`; and the table metadata read for a `type:"string"` mapping can fail
+  (no row is read or written by any of them). Fix round 1 tried to move the check ahead of the coercion and metadata steps and
+  could not: the later shape refusals are asked on the built payload, and on a Signal their order is pinned (the app-only
+  access-column refusal first, then the core record pair: `AccessTableAppOnlyWriterTests`, `CoreRecordPairUpdateWriterTests`), so a
+  table-only check ahead of the payload build would answer first for payloads those tests pin to another code. All three still
+  refuse or fail with nothing written; the writer-only code is the answer only when none of them applies.
+- K1 (guard reach): the guards recognise a generic update path only through `UpdateRecordFieldsAsync`,
+  `UpdateExistingRecordFieldsAsync` and `IDataverseUserClient.PatchAsync` (what `CoreRecordPairUpdateCheckGuardTests` scans, and
+  this guard follows). A future generic path written on `IGenericEntityService.UpdateAsync`/`BulkUpdateAsync` or
+  `DataverseWebApiClient.UpdateAsync` would not be seen by either. Fix round 1 removed the exemption list: the three shared cores
+  now ask the check themselves.
 - K4: on a Signal or Decision Record item that names the core record pair, the chat tool's `ValidateChat` answers with the
   writer-only message while `ExecuteChatAsync` (reached only past validation, or by a direct call) answers with the core-pair code
   first, as #2568 pinned. Both refuse with nothing written.
@@ -117,5 +125,42 @@ must-not-fire and one "same for any record" row pass either way), and the update
   table-generic update that asks the core-pair check, and the guard requires every such path to decide. Remove it if the owner
   scopes it out.
 - Out of scope: a client surface writing these tables through `Xrm.WebApi` is not a BFF path and is not covered here.
+
+
+## Review note for the PR (owner decision)
+
+Three #2568 tests asserted "another column of a Signal or Decision Record is written" (the chat tool, the Update Record core and the
+output mapping). By the owner's decision of 2026-11-04 they now assert the opposite outcome, the task 048 refusal (renamed
+`..._IsNotTheCorePairRefusal`). Their core-pair refusal assertions are unchanged. This goes in the PR description too.
+Fix round 1 inverts a fourth, found by the second filter: `CoreRecordPairUpdateWriterTests.Push_ARuleOntoTheCorePair_IsSkipped_AndNeverWritten`
+drove the push's child writer directly and expected the other rule written with only the core-pair rule skipped. The writer now
+refuses a Signal or Decision Record whole (every child failed with the plain message, nothing written), so it is renamed
+`Push_ARuleOntoTheCorePair_OfASignalOrDecisionRecord_IsRefusedWithTheWholeTable_AndNeverWritten`; the per-rule core-pair skip is
+still in the writer but no registered table that carries the pair can reach it now.
+
+## Fix round 1 (review: no F; K items fixed in scope)
+
+1. **Exemptions relied on callers (K1).** `ChildRecordEndpoints.UpdateAsync`, `OwnedChildWrite.RefileAsync` and
+   `FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync` now call `RecordTableRules.RefuseWriterOnlyTableUpdate` themselves, before
+   any read or write (after the core-pair check, so that order is unchanged), each in its own refusal shape (table above).
+   `WriterOnlyTablesUpdateGuardTests.FixedTableUpdatePaths` and its stale-entry checks are gone, and the three methods are pinned by
+   name with the other update paths. `ChildRecordEndpoints.UpdateAsync` has four callers (the three routes and
+   `DecisionRouteCores.UpdateChildAsync`); the core now decides for all of them. `RefileAsync` was in the same list and is covered
+   the same way, since dropping the list needs it. The test `TheBrowserRefileTables_IncludeNoWriterOnlyTable` is removed: it only
+   existed to excuse the exemption.
+   - Must fire: `ChildRecordUpdateCore_…IsRefused_BeforeAnyReadOrWrite` (3 tables), `DecisionRouteUpdate_…IsRefused…` (3),
+     `RefileCore_…IsRefused…` (3), `PushChildWriter_…FailsEveryChild…` (3).
+   - Must not fire: `DecisionRouteUpdate_ATodo_IsStillWritten`, `ChildRecordUpdateCore_AnOrdinaryTable_IsStillWritten`, and the
+     existing decision `sprk_todo` update tests (`DecisionActionExecutorsTests`).
+2. **Wording.** The model-facing text ("REJECTED ... Do NOT retry ...") now exists only as
+   `DataverseUpdateRecordHandler.ChangedOnlyByItsWriterChatMessage`, used by the chat tool's validate and execute. Every other path
+   answers `RecordTableRules.ChangedOnlyByItsWriterMessage`: "'{table}' records are changed only by Spaarke itself and can't be
+   changed by this update; nothing was written. (record_update.changed_only_by_its_writer)". Code unchanged. The guard test pins the
+   plain text (no "Do NOT") and the chat text (has it); the chat tests assert the chat message, the others the plain one.
+3. **Node ordering.** Not movable without changing pinned Signal orders; the known-limit text now names all three answers (see K4).
+4. **Notes.** K1 guard reach and the #2568 inversion are recorded above.
+5. **Found in passing (filed here, not fixed).** `src/client/pcf/UpdateRelatedButton/UpdateRelatedButtonApp.tsx:174` shows
+   `detail || title`, so every push 400 (`Results.ValidationProblem`, which carries `errors`, no `detail`) shows "One or more
+   validation errors occurred." The 400 for a writer-only target (`errors.targetEntity`) is therefore not readable in that button.
 
 rework: none task 048

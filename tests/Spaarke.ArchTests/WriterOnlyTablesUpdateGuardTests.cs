@@ -14,31 +14,24 @@ namespace Spaarke.ArchTests;
 /// <para><b>Which paths.</b> The generic update paths are the members that ask the core record pair check
 /// (<see cref="RecordTableRules.RefuseFixedAfterCreateColumns"/>): <c>CoreRecordPairUpdateCheckGuardTests</c> already makes every BFF
 /// method that sends a generic update ask it, or be listed there because its table or columns are fixed. So each member that asks
-/// that check must also ask the writer-only check, or be listed below with the reason its table cannot be one of the three. A new
-/// generic update path is therefore caught twice: by that guard, then by this one. The chat tool's <c>ValidateChat</c> and the
-/// field-mapping push's request check ask the writer-only check on their own (they send nothing) and are pinned by name.</para>
+/// that check must also ask the writer-only check. There is no exemption list (fix round 1, K1): the shared cores
+/// (<c>ChildRecordEndpoints.UpdateAsync</c>, <c>OwnedChildWrite.RefileAsync</c>, the push's child writer) ask it themselves, whatever
+/// their callers pass. A new generic update path is therefore caught twice: by that guard, then by this one. The chat tool's
+/// <c>ValidateChat</c> and the field-mapping push's request check ask the writer-only check on their own (they send nothing) and are
+/// pinned by name. <b>Limit (K1):</b> the scan sees only paths that ask the core record pair check, which the other guard finds
+/// through <c>UpdateRecordFieldsAsync</c>, <c>UpdateExistingRecordFieldsAsync</c> and <c>IDataverseUserClient.PatchAsync</c>; a future
+/// generic path on <c>IGenericEntityService.UpdateAsync</c>/<c>BulkUpdateAsync</c> or <c>DataverseWebApiClient.UpdateAsync</c> would not
+/// be seen.</para>
 /// <para><b>One list.</b> <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/> refuses exactly the flagged tables, agrees
 /// with the chat create tool's check, and its compiled body reads the flag (so it cannot become a hand-written list).</para>
 /// <para><b>Per source member</b>, as <c>CoreRecordPairUpdateCheckGuardTests</c> attributes it (<see cref="CoreRecordPairUpdateCheckGuardTests.SourceMember"/>):
-/// a lambda, local function or state machine counts as the member it is written in. <b>Closed list, no baseline</b>: a listed
-/// member that now asks the check, or no longer asks the core record pair check, fails the test. Enforced by: this guard (ArchTests
+/// a lambda, local function or state machine counts as the member it is written in. <b>No list, no baseline</b>: a member that asks
+/// the core record pair check and not the writer-only check fails the test. Enforced by: this guard (ArchTests
 /// in CI and the Stop hook) and the behaviour tests (<c>WriterOnlyTablesUpdateRefusalTests</c>). <b>Controls</b>:
 /// <see cref="Detector_MustFireAndMustNotFire"/> runs the detectors over the <c>WriterOnlyUpdateControl*</c> fixtures below.</para>
 /// </remarks>
 public class WriterOnlyTablesUpdateGuardTests
 {
-    /// <summary>Members that ask the core record pair check but not the writer-only check, each with the reason its table cannot
-    /// be one of the three.</summary>
-    private static readonly IReadOnlyList<(Type Type, string Method, string Reason)> FixedTableUpdatePaths = new[]
-    {
-        (typeof(Sprk.Bff.Api.Api.ChildRecordEndpoints), "UpdateAsync",
-            "The browser re-file core: its routes pass RefileTables, an event or a communication only (pinned below)."),
-        (typeof(Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite), "RefileAsync",
-            "The re-file core: called by the chat update tool after it refuses the three tables, and by ChildRecordEndpoints.UpdateAsync."),
-        (typeof(Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints), "ApplyMappingsToChildRecordsAsync",
-            "Its one caller, PushFieldMappingsAsync, refuses the target table in ValidatePushRequest before anything is read."),
-    };
-
     /// <summary>The update paths that must ask the writer-only check (non-vacuity: the scan sees each one).</summary>
     private static readonly IReadOnlyList<(Type Type, string Method)> UpdateTools = new[]
     {
@@ -48,27 +41,23 @@ public class WriterOnlyTablesUpdateGuardTests
         (typeof(Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler), "UpdateAsync"),
         (typeof(Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints), "ValidatePushRequest"),
         (typeof(Sprk.Bff.Api.Services.Ai.TopicRegistryWorkProductPersister), "PersistAsync"),
+        // Fix round 1 (K1): the shared cores ask it themselves, whatever their callers pass.
+        (typeof(Sprk.Bff.Api.Api.ChildRecordEndpoints), "UpdateAsync"),
+        (typeof(Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite), "RefileAsync"),
+        (typeof(Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints), "ApplyMappingsToChildRecordsAsync"),
     };
 
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
 
-    [Fact(DisplayName = "048 (D-204): every generic update path that asks the core record pair check also refuses the writer-only tables, or is listed")]
+    [Fact(DisplayName = "048 (D-204): every generic update path that asks the core record pair check also refuses the writer-only tables")]
     public void EveryGenericUpdatePath_RefusesTheWriterOnlyTables_OrIsListed()
     {
         var fixedAskers = AskersOf(BffTypes.Value, nameof(RecordTableRules.RefuseFixedAfterCreateColumns));
         var writerOnlyAskers = AskersOf(BffTypes.Value, nameof(RecordTableRules.RefuseWriterOnlyTableUpdate));
 
-        var problems = MissingWriterOnlyCheck(fixedAskers, writerOnlyAskers, FixedTableUpdatePaths.Select(p => (p.Type, p.Method)))
+        var problems = MissingWriterOnlyCheck(fixedAskers, writerOnlyAskers)
             .Select(m => $"{m.Type.FullName}.{m.Method}: asks RecordTableRules.RefuseFixedAfterCreateColumns but not RefuseWriterOnlyTableUpdate")
             .ToList();
-
-        foreach (var (type, method, _) in FixedTableUpdatePaths)
-        {
-            if (writerOnlyAskers.Contains((type, method)))
-                problems.Add($"STALE entry {type.FullName}.{method}: it now asks the writer-only check; remove it from the list.");
-            if (!fixedAskers.Contains((type, method)))
-                problems.Add($"STALE entry {type.FullName}.{method}: it no longer asks the core record pair check; remove it from the list.");
-        }
 
         foreach (var (type, method) in UpdateTools)
         {
@@ -78,16 +67,8 @@ public class WriterOnlyTablesUpdateGuardTests
 
         Assert.True(problems.Count == 0,
             "A Signal, a Decision Record and a Budget Revision are changed only by their writers (owner decision D-204, extended to "
-            + "updates). A generic update path asks RecordTableRules.RefuseWriterOnlyTableUpdate before it reads or writes a row, or is "
-            + "listed in FixedTableUpdatePaths with the reason its table cannot be one of them:\n" + string.Join("\n", problems));
-    }
-
-    [Fact(DisplayName = "048 (D-204): the browser re-file tables include none of the writer-only tables (the listed re-file core's reason)")]
-    public void TheBrowserRefileTables_IncludeNoWriterOnlyTable()
-    {
-        var refileTables = Sprk.Bff.Api.Api.ChildRecordEndpoints.RefileTables.Append("sprk_event").Append("sprk_communication");
-
-        Assert.Empty(refileTables.Where(t => RecordTableRules.RefuseWriterOnlyTableUpdate(t) is not null));
+            + "updates). A generic update path asks RecordTableRules.RefuseWriterOnlyTableUpdate itself, before it reads or writes a "
+            + "row; there is no exemption list:\n" + string.Join("\n", problems));
     }
 
     [Fact(DisplayName = "048 (D-204): the update refusal and the create refusals read one list, the registry flag")]
@@ -106,6 +87,10 @@ public class WriterOnlyTablesUpdateGuardTests
             {
                 Assert.Equal(RecordTableRules.ChangedOnlyByItsWriterReasonCode, refused.RefusalCode);
                 Assert.Equal(RecordTableRules.ChangedOnlyByItsWriterMessage(rule.Table), refused.Reason);
+                // Fix round 1: every path but the chat tool answers in a plain sentence; the model's wording is the chat tool's own.
+                Assert.DoesNotContain("Do NOT", refused.Reason);
+                Assert.Contains("Do NOT retry this update",
+                    Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler.ChangedOnlyByItsWriterChatMessage(rule.Table));
             }
         }
 
@@ -131,13 +116,10 @@ public class WriterOnlyTablesUpdateGuardTests
         var fixedAskers = AskersOf(types, nameof(RecordTableRules.RefuseFixedAfterCreateColumns));
         var writerOnlyAskers = AskersOf(types, nameof(RecordTableRules.RefuseWriterOnlyTableUpdate));
 
-        // Must fire: the core record pair check without the writer-only check.
+        // Must fire: the core record pair check without the writer-only check (the two clean fixtures are not named).
         Assert.Equal(
             new[] { $"{nameof(WriterOnlyUpdateControlFixedCheckOnly)}.Update" },
-            MissingWriterOnlyCheck(fixedAskers, writerOnlyAskers, []).Select(m => $"{m.Type.Name}.{m.Method}").ToArray());
-
-        // Must not fire when listed.
-        Assert.Empty(MissingWriterOnlyCheck(fixedAskers, writerOnlyAskers, [(typeof(WriterOnlyUpdateControlFixedCheckOnly), "Update")]));
+            MissingWriterOnlyCheck(fixedAskers, writerOnlyAskers).Select(m => $"{m.Type.Name}.{m.Method}").ToArray());
 
         // The flag read: a hand-written list is found; the flag read (the production shape) is not.
         Assert.False(ReadsTheWriterOnlyFlag(typeof(WriterOnlyUpdateControlFlagReads).GetMethod(
@@ -146,14 +128,12 @@ public class WriterOnlyTablesUpdateGuardTests
             nameof(WriterOnlyUpdateControlFlagReads.ReadsTheFlag), BindingFlags.Static | BindingFlags.NonPublic)!));
     }
 
-    /// <summary>The detector: each member that asks the core record pair check, is not listed, and does not ask the writer-only check.</summary>
+    /// <summary>The detector: each member that asks the core record pair check and does not ask the writer-only check.</summary>
     internal static IReadOnlyList<(Type Type, string Method)> MissingWriterOnlyCheck(
         IReadOnlySet<(Type Type, string Method)> fixedAskers,
-        IReadOnlySet<(Type Type, string Method)> writerOnlyAskers,
-        IEnumerable<(Type Type, string Method)> listed)
+        IReadOnlySet<(Type Type, string Method)> writerOnlyAskers)
     {
-        var excused = listed.ToHashSet();
-        return fixedAskers.Where(m => !writerOnlyAskers.Contains(m) && !excused.Contains(m))
+        return fixedAskers.Where(m => !writerOnlyAskers.Contains(m))
             .OrderBy(m => $"{m.Type.FullName}.{m.Method}", StringComparer.Ordinal)
             .ToList();
     }

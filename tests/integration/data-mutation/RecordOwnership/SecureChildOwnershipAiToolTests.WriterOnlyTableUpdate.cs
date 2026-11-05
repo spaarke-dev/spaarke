@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
@@ -47,7 +48,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var validation = ChatValidateOf(table, PairRow, ("sprk_name", Text("Renamed")));
 
         validation.IsValid.Should().BeFalse();
-        validation.Errors.Should().ContainSingle().Which.Should().Be(RecordTableRules.ChangedOnlyByItsWriterMessage(table));
+        validation.Errors.Should().ContainSingle().Which.Should().Be(DataverseUpdateRecordHandler.ChangedOnlyByItsWriterChatMessage(table))
+            .And.Contain("Do NOT retry this update", "the chat tool's wording is for the model");
     }
 
     [Theory(DisplayName = "048 (D-204, must fire): a chat update of a table only its writer changes is refused on execute, before any read or write")]
@@ -66,7 +68,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(RecordTableRules.ChangedOnlyByItsWriterReasonCode);
-        result.ErrorMessage.Should().Be(RecordTableRules.ChangedOnlyByItsWriterMessage(table));
+        result.ErrorMessage.Should().Be(DataverseUpdateRecordHandler.ChangedOnlyByItsWriterChatMessage(table));
         result.ErrorMessage.Should().Contain("REJECTED and nothing was written");
         _user.Patches.Should().BeEmpty();
         _user.Posts.Should().BeEmpty();
@@ -97,5 +99,92 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         result.Success.Should().BeTrue(result.ErrorMessage);
         PatchedKeys().Should().BeEquivalentTo("sprk_name");
+    }
+
+    // ── Task 048 fix round 1: the shared cores ask the check themselves, whatever their callers pass ─────────────────
+
+    [Theory(DisplayName = "048 fix 1 (D-204, must fire): the child-records update core refuses a table only its writer changes in a plain sentence, before any read or write")]
+    [MemberData(nameof(WriterOnlyTables))]
+    public async Task ChildRecordUpdateCore_ATableOnlyItsWriterChanges_IsRefused_BeforeAnyReadOrWrite(string table)
+    {
+        var reads = new List<string>();
+        _user.GetOverride = path =>
+        {
+            reads.Add(path);
+            return null;
+        };
+
+        var result = await Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync(
+            table, PairRow, JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["sprk_name"] = "Renamed" }),
+            _user, _world.Resolver(),
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper, Children(),
+            new DefaultHttpContext(), Microsoft.Extensions.Logging.Abstractions.NullLogger<Program>.Instance, CancellationToken.None);
+
+        var problem = result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(Sprk.Bff.Api.Api.ChildRecordEndpoints.DeniedCode);
+        problem.ProblemDetails.Detail.Should().Be(RecordTableRules.ChangedOnlyByItsWriterMessage(table))
+            .And.NotContain("Do NOT retry", "people read this message, not the chat model");
+        _user.Patches.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+        reads.Should().BeEmpty("the refusal is decided on the table alone, before any read");
+    }
+
+    [Theory(DisplayName = "048 fix 1 (D-204, must fire): the decision executors' in-process child update refuses a table only its writer changes")]
+    [MemberData(nameof(WriterOnlyTables))]
+    public async Task DecisionRouteUpdate_ATableOnlyItsWriterChanges_IsRefused_AndNothingIsWritten(string table)
+    {
+        var reply = await DecisionRouteUpdate(table, PairRow, new Dictionary<string, object?> { ["sprk_name"] = "Renamed" });
+
+        reply.Status.Should().Be(StatusCodes.Status403Forbidden, reply.Detail);
+        reply.Detail.Should().Be(RecordTableRules.ChangedOnlyByItsWriterMessage(table));
+        _user.Patches.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "048 fix 1 (D-204, must not fire): the decision executors' in-process child update still updates a to-do")]
+    public async Task DecisionRouteUpdate_ATodo_IsStillWritten()
+    {
+        var reply = await DecisionRouteUpdate("sprk_todo", PairRow, new Dictionary<string, object?> { ["sprk_name"] = "Renamed" });
+
+        reply.Status.Should().Be(StatusCodes.Status204NoContent, reply.Detail);
+        PatchedKeys().Should().BeEquivalentTo("sprk_name");
+    }
+
+    [Fact(DisplayName = "048 fix 1 (D-204, must not fire): the child-records update core still updates an ordinary table")]
+    public async Task ChildRecordUpdateCore_AnOrdinaryTable_IsStillWritten()
+    {
+        var result = await Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync(
+            "sprk_todo", PairRow, JsonSerializer.SerializeToElement(new Dictionary<string, object?> { ["sprk_name"] = "Renamed" }),
+            _user, _world.Resolver(),
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper, Children(),
+            new DefaultHttpContext(), Microsoft.Extensions.Logging.Abstractions.NullLogger<Program>.Instance, CancellationToken.None);
+
+        result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.NoContent>();
+        PatchedKeys().Should().BeEquivalentTo("sprk_name");
+    }
+
+    [Theory(DisplayName = "048 fix 1 (D-204, must fire): the re-file core refuses a table only its writer changes before any read or write")]
+    [MemberData(nameof(WriterOnlyTables))]
+    public async Task RefileCore_ATableOnlyItsWriterChanges_IsRefused_AndNothingIsReadOrWritten(string table)
+    {
+        var reads = new List<string>();
+        _user.GetOverride = path =>
+        {
+            reads.Add(path);
+            return null;
+        };
+
+        var outcome = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.RefileAsync(
+            _user, _world.Resolver(), table, PairRow, table + "s", table + "id",
+            new Sprk.Bff.Api.Services.Dataverse.DataverseWriteItemMapper.MappedItem(
+                JsonSerializer.Serialize(new { sprk_name = "Renamed" }), ["sprk_name"]),
+            callerObjectId: null, CancellationToken.None);
+
+        outcome.Invalid.Should().Be(RecordTableRules.ChangedOnlyByItsWriterMessage(table));
+        (outcome.Written, outcome.NotARefile).Should().Be((false, false));
+        _user.Patches.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+        reads.Should().BeEmpty("the refusal is decided on the table alone, before any read");
     }
 }

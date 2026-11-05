@@ -511,13 +511,13 @@ internal static partial class RecordTableRules
             ? RecordOwnerResolution.Refused(ChangedOnlyByItsWriterReasonCode, ChangedOnlyByItsWriterMessage(rule.Table))
             : null;
 
-    /// <summary>The single refusal message for an update of a <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> table (user-,
-    /// model- and log-facing), modelled on the chat create tool's message for the same tables.</summary>
+    /// <summary>The refusal message for an update of a <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> table on every path a
+    /// person reads it on (the Update Record node, a playbook's output mapping, the work-product persister, the field-mapping push,
+    /// the child-records update): a plain sentence. The chat update tool words the same refusal for the model
+    /// (<c>DataverseUpdateRecordHandler.ChangedOnlyByItsWriterChatMessage</c>), as the chat create tool does for a create.</summary>
     internal static string ChangedOnlyByItsWriterMessage(string table) =>
-        $"'{table}' records can't be changed by this update — it was REJECTED and nothing was written. They are changed only " +
-        "by Spaarke itself: a signal by its evaluation and its lifecycle, a decision record or a budget revision when a decision " +
-        $"is committed. Do NOT retry this update — {table} is blocked on every general update unconditionally and no argument " +
-        $"change makes it valid; work from the signal or its decision instead ({ChangedOnlyByItsWriterReasonCode}).";
+        $"'{table}' records are changed only by Spaarke itself and can't be changed by this update; nothing was written. " +
+        $"({ChangedOnlyByItsWriterReasonCode})";
 
     /// <summary>
     /// Task 037 (FR-36): what <paramref name="rule"/>'s copied defaults (<see cref="ServerDefault.CopiedFrom"/>) come to on

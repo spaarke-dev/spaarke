@@ -1024,6 +1024,15 @@ public static class FieldMappingEndpoints
         var failed = 0;
         var skipped = 0;
 
+        // Task 048 fix round 1 (K1): a Signal, a Decision Record and a Budget Revision are changed only by their writers
+        // (RecordTableRule.CreatedOnlyByItsWriter). The push's request check refuses such a target first; this method asks it too,
+        // on the table alone before any child is read or written, so it holds for any caller. Every child fails, none is written.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate(targetEntity) is { } writerOnly)
+        {
+            return (0, childRecordIds.Length, 0,
+                childRecordIds.Select(id => new PushFieldMappingsError { RecordId = id, Error = writerOnly.Reason! }).ToArray(), []);
+        }
+
         // #2091 round 4: on a reparentable child, a lookup rule writes the column it NAMES or nothing. Its bind is planned by
         // the referenced table's navigation property, which can be another lookup to the same table — a filing move the rule
         // never asked for. Refused per rule, like any other unplannable lookup. Keyed by the rule INSTANCE, as the plan is
