@@ -4,7 +4,7 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-04 late (checkpoint #93: core-pair work merged as PR #2568 / 909754869f; master ready for the next dev deploy, waiting on the owner's go).
+> **Last Updated**: 2026-11-05 ~05:00Z (checkpoint #94: dev BFF = 909754869f, gate PASS, ontology PASS; record `notes/deploy-gate-2026-11-05-909754869f.md`).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -12,8 +12,8 @@
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green: `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys and settings changes need the owner's go IN THIS SESSION. Peers take the owner's go for THEIR live writes in THEIR sessions. |
 | **Active work** | None in flight. **PR #2568 MERGED** (squash **909754869f**): the core pair is fixed after create on BFF update paths; secure-child lineage reads the pair (held unknown/blank type); generic update paths update existing records only (ArchTest `UpdateRecordFieldsCallerGuardTests`). 4 Opus passes plus re-checks, all F fixed; ontology PASSED; integration BFF 199/0, SPE 353/0; all CI green. C:/wtcore removed. Known limits: #2090 (optimistic mode), the unindexed lineage `sprk_corerecordid` walk. |
-| **Dev state** | BFF = **909754869f** since **2026-11-05T04:16:30Z** (read-back OK: PV +909754869f, healthz 200, dataverse 200, anon /api/me 401, 225 settings unchanged). Rollback: `deploy/rollback/wwwroot-20261105T024806Z` in THIS worktree (d763dc120e) or redeploy d763dc120e. Dev SPA = b083d62183. |
-| **Next action** | 1. **30-min gate RUNNING** (background; script `$TEMP/uacmerge/uacg/gate909.sh`, output `$TEMP/uacmerge/uacg/d909/gate909_30m.txt`, window 04:16:30Z-04:46:30Z). Report PASS/FAIL to ontology, word-add-in, R4, fm and ebilling. 2. AFTER read-back (ontology): (a)(b)(c) vs `$TEMP/uacmerge/uacg/d909/readback_before.txt`, after one reconcile; plus Worklist 200, the SuppressionPartitionUndeterminedException count after the next nightly run, and held-pair Warnings. 3. Record the deploy in `docs/procedures/dev-bff-deploy-coordination.md`'s rollout record. 4. Remove C:/wtdep with Remove-WorktreeSafe. Then: ebilling 082c-2 / 095d-1 final review; fm 048 (D-204 updates) review; #2569 (042c) in the next deploy batch. |
+| **Dev state** | BFF = **909754869f** since 2026-11-05T04:16:30Z. Gate **PASS** (04:16:30-04:46:30Z) and ontology PASS; record `notes/deploy-gate-2026-11-05-909754869f.md`. Rollback: `deploy/rollback/wwwroot-20261105T024806Z` in THIS worktree (d763dc120e). Dev SPA = b083d62183. C:/wtdep removed. |
+| **Next action** | 1. **Owed to ontology:** /api/v1/signals 200 from organic/UAT traffic, plus the suppression and SuppressionPartitionUndeterminedException counts after the first nightly SignalReevaluationJob on 909754869f (query App Insights; a non-zero Undetermined count or a Signals 5xx reopens the gate). 2. **Peer live checks (their sessions, owner's go):** word-add-in's Office save smoke and Submit Invoice; fm's creates for 020/031/042b. 3. **Reviews:** ebilling 082c-2 (sprk_reviewdetail conditions, ForReaders option (a) conditions), the 095d-1 final (1a, 1b cleared at d71b2f20f0, 1c in fix round) plus ontology K-3; fm 048 (D-204 updates) and #2569 (042c, next deploy batch). 4. Own backlog. |
 
 ## Private items (tracked privately only, owner choice; never in issues/PRs/commits)
 - Core pair fixed after create, the lineage follow-up and the update-path follow-up: all MERGED in #2568 (909754869f). The post-deploy read-back is still owed.
