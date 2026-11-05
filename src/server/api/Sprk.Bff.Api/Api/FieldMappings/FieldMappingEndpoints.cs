@@ -995,11 +995,20 @@ public static class FieldMappingEndpoints
             .Select(c => new KeyValuePair<string, string>(c, c));
         var first = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.InPrimaryOrder(targetEntity, filing).Select(c => c.Key).FirstOrDefault();
 
-        return first is not null && lineage.LookupOrder.Contains(first, StringComparer.OrdinalIgnoreCase) ? first : null;
+        // Hardening (re-check K4): the one column this rule may answer is the analysed document; any other first column, for
+        // example when the metadata lacks sprk_documentid, keeps the 409.
+        return first is not null
+               && string.Equals(first, DocumentPushParentColumn, StringComparison.OrdinalIgnoreCase)
+               && lineage.LookupOrder.Contains(first, StringComparer.OrdinalIgnoreCase)
+            ? first
+            : null;
     }
 
     /// <summary>The one target a push from a document resolves among several document lookups (task 043): the analysis.</summary>
     internal const string DocumentPushTarget = "sprk_analysis";
+
+    /// <summary>The analysis column a push from a document filters on: the analysed document (task 043).</summary>
+    internal const string DocumentPushParentColumn = "sprk_documentid";
 
     /// <summary>A Dataverse logical name: letters, digits and underscores only (it is interpolated into OData).</summary>
     internal static bool IsLogicalName(string value)

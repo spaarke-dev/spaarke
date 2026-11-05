@@ -232,6 +232,7 @@ public class FieldMappingPushDocumentSourceTests
     /// </summary>
     [Theory]
     [InlineData("sprk_analysis", "sprk_regardingdocument,sprk_outputfileid,sprk_documentid", "sprk_documentid")]
+    [InlineData("sprk_analysis", "sprk_regardingdocument,sprk_outputfileid", null)]
     [InlineData("sprk_document", "sprk_canonicaldocument,sprk_parentdocument", null)]
     [InlineData("sprk_invoicesubmission", "sprk_reportdocument,sprk_document", null)]
     [InlineData("sprk_billingexport", "sprk_csvdocument,sprk_jsondocument", null)]

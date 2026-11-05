@@ -199,3 +199,12 @@ The round-2 rule also resolved two other targets that had always answered the 40
 (`sprk_parentdocument`) and an invoice submission's (`sprk_document`). Neither is in the owner's rule (Document to Analysis),
 so the rule is now limited to `sprk_analysis` (`FieldMappingEndpoints.DocumentPushTarget`); every other target keeps the
 existing 409, unchanged (NFR-07). The theory `DocumentOwnershipParentColumn_IsFixedByTheTargetTable` pins all four targets.
+
+Scoped re-check of round 2: no F. K4 hardened: the rule answers only `sprk_documentid` for the analysis
+(`DocumentPushParentColumn`); if the metadata ever lacks it, the push keeps the 409 instead of choosing another document
+lookup. UAC-r2: round 2 (`de96647095..495639ce81`) cleared from the access side, no F (2026-11-05).
+
+## Publish size and CVE (final)
+
+Publish delta against master `0f53e053bf` at `495639ce81`: **+1,485 B**, 39.21 MB total. `dotnet list package --vulnerable
+--include-transitive`: no vulnerable packages.
