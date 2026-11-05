@@ -1383,6 +1383,46 @@ public sealed class ProcedureResolverTests
         readerView.Should().NotContainEquivalentOf(P.ToString("D"), "no record id at all, not even the invoice's own");
     }
 
+    // ── uac-r2 option (a), 082c-2: a record rule's reader code is its base rule's catalogue code ─────────────────
+
+    [Fact(DisplayName = "082c-2 uac-r2 (a): a record rule's reader rule carries the base rule's code and the record-rule flag, never its BRR- code; the serialized view passes the sentinel scan")]
+    public async Task ReaderView_RecordRule_CarriesTheBaseCode_AndPassesTheSentinelScan()
+    {
+        var (procedure, _, rule, ruleVersion) = Simple("INC-1");
+        Assign(Matter, M, procedure);
+        var recordCode = ProcedureAssignmentService.RecordRuleCodePrefix + Guid.NewGuid().ToString("N");
+        ChangeRule(Matter, M, rule, ruleVersion, Jan15, code: recordCode);
+
+        var onDate = (await Resolve(CoreRecordKind.Matter, M, F)).RulesOn(Feb1);
+        var readerRule = onDate.ForReaders().Rules.Should().ContainSingle().Subject;
+
+        onDate.Rules.Single().Version.PolicyCode.Should().Be(recordCode, "control: the internal rule does carry the BRR- code");
+        readerRule.PolicyCode.Should().Be("INC-1");
+        readerRule.RecordRule.Should().BeTrue();
+        Sprk.Bff.Api.Tests.Services.Finance.Submission.ReaderSentinel.Scan(JsonSerializer.Serialize(onDate.ForReaders())).Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "082c-2 uac-r2 (a), fail closed: a record rule whose base code cannot be resolved has a blank code (flag kept), never the BRR- code")]
+    [InlineData("")]
+    [InlineData("BRR-0123456789abcdef0123456789abcdef")]
+    public void ReaderCode_UnresolvableBase_IsBlank(string baseCode)
+    {
+        var version = new ResolvedPolicyVersion
+        {
+            PolicyId = Guid.NewGuid(), PolicyCode = "BRR-" + Guid.NewGuid().ToString("N"), PolicyVersionId = Guid.NewGuid(), RuleSetId = Guid.NewGuid(),
+        };
+        var applied = new AppliedProcedure(Guid.NewGuid(), "Billing guidelines", Guid.NewGuid(), 1, new ProcedureRank(ProcedureLevel.ManualOwn, 0, false),
+            ProcedureSources.Manual, false, []);
+        var slot = new RecordRuleSlot(Guid.NewGuid(), baseCode, Guid.NewGuid(), new CoreRecordLink("sprk_matter", M, 0), null);
+        var rule = new ResolvedRule(version, applied, slot);
+
+        ProcedureRulesOnDate.ReaderCodeOf(rule, null).Should().BeEmpty();
+        var view = new ProcedureRulesOnDate(Feb1, [applied], [rule], [], [], []).ForReaders();
+        view.Rules.Single().PolicyCode.Should().BeEmpty();
+        view.Rules.Single().RecordRule.Should().BeTrue();
+        Sprk.Bff.Api.Tests.Services.Finance.Submission.ReaderSentinel.Scan(JsonSerializer.Serialize(view)).Should().BeEmpty();
+    }
+
     // ── Rank (6.5) ───────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "082b rank: (Level, -Distance, FirmSpecific): Manual d0 > Manual d1 > Firm > All records, then firm-specific; equal ranks tie")]
