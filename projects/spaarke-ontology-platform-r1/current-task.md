@@ -43,7 +43,7 @@ The last was PR #2463, merged as master `c8bb55d0cd` (2026-10-29): 168 and 173. 
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- **BFF:** `d763dc120e` (R3's last deploy, live 2026-11-03 22:26:31Z; rollback 5796774091). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
+- **BFF:** `909754869f` (uac-r2, live 2026-11-05 04:16:30Z; healthz/dataverse 200, anon /api/me 401, settings 225 unchanged; rollback `d763dc120e`, uac-r2 snapshot). 30-min gate to 04:46:30Z; AFTER read-back (a)(b)(c) + nightly SignalReevaluationJob/suppression count pending from uac-r2. **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
 - **Worktrees:** none for lanes. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
 - **Stash:** two old `lint-staged automatic backup` entries (20 and 30 h old) are not ours. Leave them.
 
