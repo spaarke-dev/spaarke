@@ -1064,6 +1064,21 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         }
     }
 
+    [Theory(DisplayName = "098 (uac-r2): even if the store returned a submission with no firm, the registered seam withholds it from the list, whatever its channel and document")]
+    [InlineData("spa")]
+    [InlineData("internal-with-document")]
+    public async Task External_list_withholds_a_returned_submission_with_no_firm(string kind)
+    {
+        var document = _world.Document(Guid.NewGuid(), permission: StandardPermission);
+        var blank = kind == "spa" ? SubmissionRow("INV-BLANK", Spa) : SubmissionRow("INV-BLANK", Internal, document);
+        WithoutFirm(blank);
+        var control = kind == "spa" ? SubmissionRow("INV-CONTROL", Spa) : SubmissionRow("INV-CONTROL", Internal, document);
+
+        var body = await ListBodyAsync(blank, control); // ListReturns does not filter: the withholding is the seam's
+
+        body.Should().Contain("INV-CONTROL", "the same shape with a firm is listed").And.NotContain("INV-BLANK");
+    }
+
     [Fact(DisplayName = "095c A2 (uac-r2): a caller with no firm is answered an empty list and no submission query is issued")]
     public async Task External_list_of_a_caller_with_no_firm_issues_no_query()
     {

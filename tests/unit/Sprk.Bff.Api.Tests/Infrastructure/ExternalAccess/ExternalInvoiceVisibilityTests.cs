@@ -934,7 +934,8 @@ public sealed class ExternalInvoiceVisibilityTests
 
     /// <summary>The submission row as <c>InvoiceSubmissionService.ToView</c> reads it (channel, document link, invoice link).</summary>
     private static InvoiceSubmissionView SubmissionView(
-        Guid id, int? channel, Guid? document = null, Guid? invoice = null, InvoiceSubmissionStatus status = InvoiceSubmissionStatus.Received) =>
+        Guid id, int? channel, Guid? document = null, Guid? invoice = null, InvoiceSubmissionStatus status = InvoiceSubmissionStatus.Received,
+        bool noFirm = false) =>
         new()
         {
             SubmissionId = id,
@@ -942,6 +943,7 @@ public sealed class ExternalInvoiceVisibilityTests
             ChannelValue = channel,
             DocumentId = document,
             InvoiceId = invoice,
+            FirmId = noFirm ? null : InvoiceWorld.Firm, // the firm the row carries (ebilling-098: a row with none is withheld first)
         };
 
     /// <summary>
@@ -1113,6 +1115,112 @@ public sealed class ExternalInvoiceVisibilityTests
 
         decision.IsVisible(submission).Should().BeFalse();
         decision.HiddenSummary().Should().Be($"{InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.SourceLinkUnreadable)}=1");
+    }
+
+    // ── ebilling-098 (P2 precondition, uac-r2): a submission with NO firm (sprk_vendororg blank, as an internal from-email row may
+    //    become) is withheld from every external caller, whatever its source: decided before the invoice, channel and document ──
+
+    private string NoFirmCode => $"{InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.SourceKindUnknown)}=1";
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task NoFirm_Internal_WithAReadableDocument_IsWithheld_ItWouldOtherwiseDeferToTheDocument(string caller)
+    {
+        var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
+        var withFirm = Guid.NewGuid();
+        var blank = Guid.NewGuid();
+
+        var decision = await DecideSubmissions(caller,
+            SubmissionView(withFirm, InvoiceWorld.InternalChannel, document),
+            SubmissionView(blank, InvoiceWorld.InternalChannel, document, noFirm: true));
+
+        decision.IsVisible(blank).Should().BeFalse("no firm: withheld before the document narrowing is consulted");
+        decision.HiddenSummary().Should().Be(NoFirmCode);
+        // Control (must fire): the same document and channel WITH a firm still defer to the document narrowing, which keeps it.
+        decision.IsVisible(withFirm).Should().BeTrue(decision.HiddenSummary());
+        decision.Faulted.Should().BeFalse();
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task NoFirm_Spa_IsWithheld_AndASpaRowWithAFirmIsVisible(string caller)
+    {
+        var withFirm = Guid.NewGuid();
+        var blank = Guid.NewGuid();
+
+        var decision = await DecideSubmissions(caller,
+            SubmissionView(withFirm, InvoiceWorld.SpaChannel),
+            SubmissionView(blank, InvoiceWorld.SpaChannel, noFirm: true));
+
+        decision.IsVisible(blank).Should().BeFalse();
+        decision.HiddenSummary().Should().Be(NoFirmCode);
+        decision.IsVisible(withFirm).Should().BeTrue(decision.HiddenSummary());
+        _world.Urls.Should().BeEmpty("neither is decided by a read: a Spa row is visible and a firmless row is withheld first");
+    }
+
+    [Theory, MemberData(nameof(ExternalCallers))]
+    public async Task NoFirm_WithAnInvoiceThatIsVisible_IsStillWithheld(string caller)
+    {
+        var invoice = Guid.NewGuid();
+        var submission = Guid.NewGuid();
+        _world.SpaUpload(invoice, submission);
+
+        var withFirm = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.SpaChannel, invoice: invoice));
+        var blank = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.SpaChannel, invoice: invoice, noFirm: true));
+
+        withFirm.IsVisible(submission).Should().BeTrue("control: its invoice is visible", withFirm.HiddenSummary());
+        blank.IsVisible(submission).Should().BeFalse();
+        blank.HiddenSummary().Should().Be(NoFirmCode);
+    }
+
+    [Fact]
+    public async Task NoFirm_ABlankGuidOrAnUnreadableFirmLink_IsWithheldToo()
+    {
+        var empty = Guid.NewGuid();
+        var unreadable = Guid.NewGuid();
+
+        var decision = await DecideSubmissions("contact",
+            SubmissionView(empty, InvoiceWorld.SpaChannel) with { FirmId = Guid.Empty },
+            SubmissionView(unreadable, InvoiceWorld.SpaChannel) with { FirmId = ExternalDocumentNarrowing.UnreadableLink });
+
+        decision.IsVisible(empty).Should().BeFalse();
+        decision.IsVisible(unreadable).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task NoFirm_AnInternalSystemuser_StillSeesIt_AsBefore()
+    {
+        var blank = Guid.NewGuid();
+
+        var decision = await DecideSubmissions("internal-systemuser", SubmissionView(blank, InvoiceWorld.SpaChannel, noFirm: true));
+
+        decision.IsVisible(blank).Should().BeTrue("the rule is for external callers; internal users read the submission as before");
+    }
+
+    [Theory]
+    [InlineData("spa")]
+    [InlineData("internal-readable-document")]
+    [InlineData("internal-empty-link")]
+    public async Task NoFirm_TheAssistantTools_HideASubmissionRowWithNoFirm_AndKeepOneWithAFirm(string source)
+    {
+        (int? Channel, Guid? Document) shape = source switch
+        {
+            "spa" => (InvoiceWorld.SpaChannel, null),
+            "internal-readable-document" =>
+                (InvoiceWorld.InternalChannel, _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter())),
+            "internal-empty-link" => (InvoiceWorld.InternalChannel, null),
+            _ => throw new ArgumentOutOfRangeException(nameof(source)),
+        };
+        var (channel, document) = shape;
+        var blank = _world.PendingSubmission(document, channel, noFirm: true);
+        var withFirm = _world.PendingSubmission(document, channel);
+
+        var hidden = await _world.NewService(_identity.Object)
+            .HideInvoiceFamilyRowsAsync("sprk_invoicesubmission", new[] { blank, withFirm }, _world.RootFlags);
+
+        hidden.Contains(blank).Should().BeTrue("a submission with no firm is hidden whatever its source");
+        // Control: the row with a firm is decided by its source exactly as before (the empty Internal link stays withheld; the others are visible).
+        hidden.Contains(withFirm).Should().Be(source == "internal-empty-link");
+        _world.Reads("sprk_invoicesubmissions").Should().Contain(u => u.Contains("_sprk_vendororg_value", StringComparison.Ordinal),
+            "the tools' read of the rows carries the firm link");
     }
 
     [Theory]
@@ -1600,6 +1708,9 @@ internal sealed class InvoiceWorld : HttpMessageHandler
 
     public const int InvoicePdf = (int)Sprk.Bff.Api.Services.Finance.Files.StoredFilePurpose.InvoicePdf;
     public const int InvoiceSupportingFile = (int)Sprk.Bff.Api.Services.Finance.Files.StoredFilePurpose.InvoiceSupportingFile;
+    /// <summary>The firm every seeded submission carries by default (<c>sprk_vendororg</c>); a row with none is withheld first (ebilling-098).</summary>
+    public static readonly Guid Firm = Guid.Parse("09800000-0000-4000-8000-0000000000f0");
+
     public const int SpaChannel = (int)Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel.Spa;
     public const int InternalChannel = (int)Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel.Internal;
 
@@ -1627,7 +1738,7 @@ internal sealed class InvoiceWorld : HttpMessageHandler
 
     /// <summary>A submission with an explicit raw <paramref name="channel"/> (null and unknown values allowed); returns its id
     /// (<paramref name="id"/> when given: the row a submission decided before its invoice existed gets on the commit).</summary>
-    public Guid Submission(Guid invoice, Guid? document, object? channel, Guid? id = null)
+    public Guid Submission(Guid invoice, Guid? document, object? channel, Guid? id = null, bool noFirm = false)
     {
         var submission = id ?? Guid.NewGuid();
         Seed("sprk_invoicesubmissions", new Dictionary<string, object?>
@@ -1636,6 +1747,7 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             ["_sprk_invoice_value"] = invoice.ToString(),
             ["_sprk_document_value"] = document?.ToString(),
             ["sprk_channel"] = channel,
+            ["_sprk_vendororg_value"] = noFirm ? null : Firm.ToString(),
             ["sprk_name"] = "SUB-0001",
         });
         return submission;
@@ -1802,6 +1914,9 @@ internal sealed class InvoiceWorld : HttpMessageHandler
         var row = new Dictionary<string, object?> { [family.IdColumn] = id.ToString() };
         if (family.InvoiceLink is { } invoiceLink) row[invoiceLink] = invoice?.ToString();
         if (family.LineLink is { } lineLink) row[lineLink] = line?.ToString();
+        // A submission row always carries its firm (ebilling-098: one with none is withheld first).
+        if (table == "sprk_invoicesubmission")
+            row["_sprk_vendororg_value"] = Firm.ToString();
         // A confirm-route submission: Internal, naming a clean document.
         if (table == "sprk_invoicesubmission" && invoice is not null)
         {
@@ -1818,7 +1933,7 @@ internal sealed class InvoiceWorld : HttpMessageHandler
 
     /// <summary>Review round 5: a submission with NO invoice yet (Received, Processing, or a terminal outcome that produced none),
     /// naming <paramref name="document"/> on the raw <paramref name="channel"/>; returns its id.</summary>
-    public Guid PendingSubmission(Guid? document, object? channel)
+    public Guid PendingSubmission(Guid? document, object? channel, bool noFirm = false)
     {
         var submission = Guid.NewGuid();
         Seed("sprk_invoicesubmissions", new Dictionary<string, object?>
@@ -1827,6 +1942,7 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             ["_sprk_invoice_value"] = null,
             ["_sprk_document_value"] = document?.ToString(),
             ["sprk_channel"] = channel,
+            ["_sprk_vendororg_value"] = noFirm ? null : Firm.ToString(),
             ["sprk_name"] = "SUB-0002",
         });
         return submission;
