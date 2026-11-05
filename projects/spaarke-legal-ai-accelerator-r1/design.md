@@ -249,6 +249,12 @@ There is no default playbook, no library setting, and no way to automate the cho
 
 **T-P4 answered (owner, Word desktop, 2026-11-05) `[Tested]`:** **saved** playbooks *are* offered in a new chat. The attorney picks **Review contract** with `/`. Copilot asks "Which playbook do you want to use?" and shows a picker, "Choose a playbook to review this contract". It lists each saved playbook by name with its "Last updated" date, plus **New playbook**, **View all** and **Run review**. **View all** opens "Playbooks: Manage playbooks for contract reviews. Reuse them across future reviews." Our saved `NDA - Mutual (Spaarke baseline)` showed General guidelines plus all of its topics. So, in Word, the playbook is **imported once and then picked from a list**. The list is the user's own: an update means re-importing, and only the name and date reveal a stale copy (L24).
 
+**Non-contract legal skills in Word (owner, 2026-11-05) `[Tested]`.** `/` **Identify regulatory gaps** ran in Word on the open NDA. It asked two question cards:
+- the delivery medium (chat, Word or Excel);
+- the standard: a named law or regulation with a version, an internal compliance policy, or an industry code or standard.
+
+There is no saved list for these standards: they are attached or named on each run. So Microsoft's AI for Legal skill set runs in Word as well as Cowork, and grounding other than playbooks reaches Word only per run. See `notes/playbook-library-and-grounding.md` §7.2–7.2a.
+
 Plain Word Copilot, without the Legal plugin (Word web, T-12), applied our Word playbook and quoted our `nda.*` topic IDs in every comment. Its edits were whole-clause replacements, with no summary and no copies `[Tested]`.
 
 | Surface | How the playbook gets in | Automatic? | What we ship |

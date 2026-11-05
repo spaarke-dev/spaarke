@@ -174,12 +174,39 @@ In every path:
 
 ### 7.2 How users bring grounding in
 
-The same mechanics as playbooks (§3):
+**Observed in Word (owner screenshots, Word desktop, 2026-11-05) `[Tested]`.** The attorney ran `/` **Identify regulatory gaps** on the open NDA. Copilot showed two question cards before doing any work:
+
+1. **"Where would you like the regulatory gap analysis delivered?"**: In chat (recommended), As a Word document, As an Excel workbook, or Something else.
+2. **"Which standard should I test the open Mutual Nondisclosure Agreement against?"**:
+   - **Named law or regulation** (recommended; "provide the exact statute, regulation, regulator guidance, version, or consolidation date");
+   - **Internal compliance policy** ("attach or identify the exact internal policy, rulebook, or delegated-authority matrix");
+   - **Industry code or standard** ("attach or identify the exact code, certification standard, or standard form and version");
+   - Something else.
+
+What this tells us:
+- **Microsoft's non-contract legal skills run in Word too,** with the same question-card flow as the Cowork skill text. The Word variant recommends "In chat"; the Cowork text recommends Excel. So the skills are per-surface variants of one skill.
+- **Normative grounding has no saved list.** A playbook is imported once and then picked (§3). A policy or standard is **attached, named or identified every run**. So for grounding, findability (the naming convention, the library location, a `/` reference) is the only lever, as it was for playbooks before T-P4.
+- **A named law needs a pinned version.** The skill fetches public law itself by web search, but only when the instrument and a version or consolidation date can be pinned; "GDPR" alone is not enough. It never states a requirement from memory. Internal policies and industry codes must be supplied.
+- **Format grounding has an entry point.** The skill's scope questions include "is there an existing reporting template or desired structure?"; in Word that is "Something else".
+- **An approved playbook can also be the standard here** (the skill text lists it). Contract positions stay in playbooks (W6), though, and this is a second, read-only way to use them.
+
+The same mechanics as for playbooks apply:
 - attach it, or `/`-reference it for one task;
 - a Cowork **Project** or **Preferences** line for standing grounding;
 - our skills read the named locations.
 
-Microsoft's skills also read the task's `grounding/` folder.
+Microsoft's skills also read the task's `grounding/` folder, and search M365 only where the user names a location.
+
+### 7.2a Writing normative grounding so these skills use it well
+
+`identify-regulatory-gaps` turns the standard into a **requirement inventory**: one row per discrete obligation, prohibition, condition, threshold or deadline, each with its operative wording and citation. Compound provisions are split. It then traces every requirement into the document. Our normative grounding files should already be in that shape:
+
+1. **Header** (the first lines, so the inventory can pin it): exact title, version or effective date, jurisdiction, in-force status, owner. The file name repeats the title and version: `Acme Contract Signature Authority Policy v3.0`.
+2. **Scope provision.** Who and what the policy applies to, in its own numbered clause. The skill gives a "Not applicable" state only with a quoted scoping basis.
+3. **Numbered, atomic requirements.** One obligation per numbered paragraph, each with a stable ID (e.g., `SIG-4.2`). Keep a threshold and a deadline in separate paragraphs.
+4. **No workflow instructions.** As for playbooks (G1), the text is evidence, not instructions.
+
+**A pack idea from this.** The NDA pack could ship a sample **"NDA approval and signature authority policy"** (normative grounding). An attorney runs Microsoft's `identify-regulatory-gaps` against it on an incoming NDA, which gives policy-conformance triage without a Spaarke skill. We'd test it as part of T-P15.
 
 ### 7.3 Library tree (extends design §5.9)
 
@@ -215,7 +242,7 @@ Legal Knowledge/                 (was "Legal Playbooks"; OD-35)
 | G2 `playbook-scope-block` | Every playbook has the full scope block, and the file name matches the convention and the title |
 | G3 `playbook-topic-integrity` | Each topic ID appears once; `Related:` IDs exist; fallbacks are numbered |
 | G4 `ms-neighbour-overlap` | No trigger phrase in our SKILL.md descriptions matches a Microsoft 1.0.10 description, unless it is allow-listed with a routing reason. The fixture is the extracted texts; refresh on a version change. |
-| G5 `grounding-header` | Every grounding file has the §7.1 header. `licence` and `as_of` are required. |
+| G5 `grounding-header` | Every grounding file has the §7.1 header. `licence` and `as_of` are required. Normative files also need the §7.2a shape: a title with a version, a scope clause, and numbered requirement IDs that are unique. |
 
 ## 9. Proposed owner decisions
 
