@@ -35,7 +35,12 @@
     three above (by value and label). This script never alters an existing column.
 
     -VERIFY (read only; exit 0 = pass, 1 = a gap, each one named): the column exists; is a local choice; has exactly the three options; is not
-    field-secured; and no invoice with a non-blank review detail has a statuscode other than In Review.
+    field-secured; and no invoice with a non-blank review detail has a statuscode other than In Review. It also counts the REVERSE
+    invariant as a WARNING (never a failure, exit code unchanged): In Review invoices with an open Procedure or firm hold and a BLANK review
+    detail. The holds are read as the BFF reads them (InvoiceFirmHold: the invoice's own sprk_firmhold, and the stored submission outcome
+    reason and findings; InvoiceProcedureHold: the same stored state). It is a warning because an invoice held before the column existed
+    reads blank until its next writer (no backfill); after the build that carries 082c-2 is deployed, a count that grows means a writer
+    missed an invoice.
 
     Publish is entity-scoped (PublishXml for sprk_invoice only, never the tenant-wide publish), and only when this run wrote metadata.
 
@@ -91,6 +96,14 @@ $Options = [ordered]@{
     659490001 = 'Billing terms could not be checked'
     659490002 = 'Waiting for the firm to be confirmed'
 }
+# The reverse invariant (-Verify, a warning): the stored state the BFF reads the holds from (InvoiceFirmHold, InvoiceProcedureHold).
+$SubmissionSet = 'sprk_invoicesubmissions'
+$FirmHold = 'sprk_firmhold'
+$FirmMissingReason = 'ebilling.submission.firm_missing'
+$ProcedureReasons = @('ebilling.submission.procedures_unresolved', 'ebilling.submission.procedure_gap')
+$RulesNotChecked = 'rules.not_checked'
+$ReadCap = 20000        # most In Review invoices with a blank detail read for the reverse invariant
+$ChunkSize = 20         # invoice ids per submission read
 
 $State = Initialize-EbillingSchema -EnvironmentUrl $EnvironmentUrl -SolutionUniqueName $SolutionUniqueName -DryRun:$DryRun -Entity $Table
 $script:Created = $State.Created
@@ -154,6 +167,79 @@ function Get-InvariantBreaks {
     return @($rows.value)
 }
 
+# Rows of a read-only query, every page (follows @odata.nextLink), at most $ReadCap rows.
+function Get-Pages([string]$Path) {
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $next = $Path
+    while ($next -and $rows.Count -lt $ReadCap) {
+        $page = Invoke-Dv -Path $next
+        foreach ($row in @($page.value)) { $rows.Add($row) }
+        $next = $page.'@odata.nextLink'
+    }
+    return , $rows
+}
+
+# The hold reasons one stored submission names, as InvoiceProcedureHold.ReasonsOf and InvoiceFirmHold.IsHeld read them: the outcome reason code,
+# and the findings' reasonCode (procedure reasons), pipelineFindings[].reasonCode and the rules.not_checked line findings' cause. Findings that
+# cannot be parsed are held as 'procedures not checked' (fail closed, as the BFF).
+function Get-SubmissionHoldReasons($Submission) {
+    $reasons = [System.Collections.Generic.HashSet[string]]::new()
+    $code = [string]$Submission.sprk_outcomereasoncode
+    if ($code -eq $FirmMissingReason -or $ProcedureReasons -contains $code) { [void]$reasons.Add($code) }
+    $json = [string]$Submission.sprk_findingsjson
+    if ([string]::IsNullOrWhiteSpace($json)) { return $reasons }
+    try {
+        $root = $json | ConvertFrom-Json -ErrorAction Stop
+        if ($root -isnot [pscustomobject]) { throw 'not an object' }
+        if ($ProcedureReasons -contains [string]$root.reasonCode) { [void]$reasons.Add([string]$root.reasonCode) }
+        foreach ($finding in @($root.pipelineFindings)) {
+            if ($null -eq $finding) { continue }
+            $c = [string]$finding.reasonCode
+            if ($c -eq $FirmMissingReason -or $ProcedureReasons -contains $c) { [void]$reasons.Add($c) }
+        }
+        foreach ($line in @($root.lineFindings)) {
+            if ($null -eq $line -or [string]$line.code -ne $RulesNotChecked) { continue }
+            $cause = [string]$line.cause
+            if ($cause -eq $FirmMissingReason -or $ProcedureReasons -contains $cause) { [void]$reasons.Add($cause) }
+        }
+    } catch {
+        [void]$reasons.Add($ProcedureReasons[0])
+    }
+    return $reasons
+}
+
+# The reverse invariant (a warning, never a failure): In Review invoices with an open Procedure or firm hold and a BLANK review detail. Read only
+# (GETs); needs the column. Invoices held before the column existed read blank until their next writer, so a non-zero count is not by itself a defect.
+# Returns @{ Checked; Capped; Breaks } where Breaks is a list of "invoiceId (expected detail)".
+function Get-HeldWithBlankDetail {
+    $invoices = Get-Pages "${EntitySet}?`$select=sprk_invoiceid,$FirmHold&`$filter=statuscode eq $InReviewStatusCode and $Column eq null"
+    $capped = $invoices.Count -ge $ReadCap
+    $reasonsOf = @{}
+    foreach ($invoice in $invoices) {
+        $set = [System.Collections.Generic.HashSet[string]]::new()
+        if (-not [string]::IsNullOrWhiteSpace([string]$invoice.$FirmHold)) { [void]$set.Add($FirmMissingReason) }
+        $reasonsOf[[string]$invoice.sprk_invoiceid] = $set
+    }
+    $ids = @($reasonsOf.Keys)
+    for ($i = 0; $i -lt $ids.Count; $i += $ChunkSize) {
+        $chunk = $ids[$i..([Math]::Min($i + $ChunkSize, $ids.Count) - 1)]
+        $or = ($chunk | ForEach-Object { "_sprk_invoice_value eq $_" }) -join ' or '
+        foreach ($submission in (Get-Pages "${SubmissionSet}?`$select=_sprk_invoice_value,sprk_outcomereasoncode,sprk_findingsjson&`$filter=$or")) {
+            $owner = [string]$submission._sprk_invoice_value
+            if ($reasonsOf.ContainsKey($owner)) { $reasonsOf[$owner].UnionWith((Get-SubmissionHoldReasons $submission)) }
+        }
+    }
+    $breaks = [System.Collections.Generic.List[string]]::new()
+    foreach ($id in $ids) {
+        $reasons = $reasonsOf[$id]
+        if ($reasons.Count -eq 0) { continue }
+        # The expected detail by the fixed priority (ontology D-205): the firm, then could not be checked, then waiting for terms.
+        $expected = if ($reasons.Contains($FirmMissingReason)) { 659490002 } elseif ($reasons.Contains($ProcedureReasons[0])) { 659490001 } else { 659490000 }
+        $breaks.Add("$id (expected $expected)")
+    }
+    return @{ Checked = $invoices.Count; Capped = $capped; Breaks = $breaks }
+}
+
 Write-Host ""
 Write-Host "eBilling 082c-2 - $Table.$Column" -ForegroundColor Cyan
 Write-Host ("Environment: {0}   Solution: {1}   Mode: {2}" -f $EnvironmentUrl, $SolutionUniqueName, $(if ($Verify) { 'VERIFY (read only)' } elseif ($DryRun) { 'WHATIF (no writes)' } else { 'APPLY' }))
@@ -163,16 +249,30 @@ if ($Verify) {
     try {
         if (-not (Get-DvOrNull "EntityDefinitions(LogicalName='$Table')?`$select=LogicalName" -Retries 4)) { throw "$Table does not exist in $EnvironmentUrl." }
         $gaps = Get-ColumnGaps
+        $warnings = [System.Collections.Generic.List[string]]::new()
         if (-not ($gaps | Where-Object { $_ -like '*does not exist' -or $_ -like '*not a choice*' })) {
             $breaks = Get-InvariantBreaks
             if ($breaks.Count -gt 0) {
                 $gaps.Add("$($breaks.Count) invoice(s) (first 50 read) carry a review detail but are not In Review (uac-r2 (b)): $(($breaks | ForEach-Object { "$($_.sprk_invoiceid) statuscode=$($_.statuscode)" }) -join '; ')")
+            }
+
+            # The reverse invariant, a warning only (see the header): a failed read of it is reported, never a pass or a fail by itself.
+            try {
+                $held = Get-HeldWithBlankDetail
+                if ($held.Breaks.Count -gt 0) {
+                    $shown = @($held.Breaks | Select-Object -First 20) -join '; '
+                    $cap = if ($held.Capped) { ' (the read stopped at the cap; there may be more)' } else { '' }
+                    $warnings.Add("$($held.Breaks.Count) of $($held.Checked) In Review invoice(s) with a blank review detail have an open Procedure or firm hold$cap. Expected for invoices held before this column existed (no backfill: they read blank until their next writer); a count that grows after the 082c-2 BFF build is deployed means a writer missed an invoice. First: $shown")
+                }
+            } catch {
+                $warnings.Add("The reverse invariant (In Review invoices with an open hold and a blank review detail) could not be read: $($_.Exception.Message)")
             }
         }
     } catch {
         Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
         exit 1
     }
+    foreach ($w in $warnings) { Write-Host "WARN: $w" -ForegroundColor Yellow }
     if ($gaps.Count -eq 0) {
         Write-Host "PASS: $Table.$Column exists as a local choice with the three pinned options, not field-secured; no non-In-Review invoice carries a review detail." -ForegroundColor Green
         exit 0
