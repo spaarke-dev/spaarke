@@ -707,7 +707,12 @@ public sealed class InvoiceSubmissionProcessingFlowTests
     [InlineData(InvoiceSubmissionChannel.Internal)]
     public async Task AResolverFault_FinalDelivery_IsHeld_EndToEnd(InvoiceSubmissionChannel channel)
     {
-        var flow = new Flow(new ProcessorHarness { EvaluationFault = new CoreRecordChainUnreadableException("chain unreadable"), Channel = channel });
+        // 082c-2 fix round 2 (F3, uac-r2): the fault's message is the operator text the resolver writes, which names ids of rows and a record
+        // rule's BRR- code. It is planted here and must reach no reader surface and no stored column.
+        var plantedId = Guid.NewGuid();
+        var planted = "chain unreadable: Procedure row " + plantedId.ToString("D") + " names "
+            + Sprk.Bff.Api.Services.Finance.Procedures.ProcedureAssignmentService.RecordRuleCode(Guid.NewGuid());
+        var flow = new Flow(new ProcessorHarness { EvaluationFault = new CoreRecordChainUnreadableException(planted), Channel = channel });
         flow.Row["sprk_channel"] = new OptionSetValue((int)channel);
 
         var outcome = await flow.BuildHandler().ProcessAsync(FinalJob(), CancellationToken.None);
@@ -729,7 +734,47 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 && e[InvoiceFirmHold.LineFindingCauseMember]!.GetValue<string>() == SubmissionReasonCodes.ProceduresUnresolved)
             .Should().HaveCount(lines);
         InvoiceProcedureHold.ReasonsOf(flow.Row).Should().BeEquivalentTo([SubmissionReasonCodes.ProceduresUnresolved]);
+
+        // ── The sentinel, end to end through the handler's real persist path (F3) ──
+        var invoice = flow.CreatedOf("sprk_invoice").Single();
+        var view = InvoiceSubmissionService.ToView(flow.Row);
+        // The row's OWN ids (the submission, its invoice, its firm, document and core record) are links the answer is about, not a planted one:
+        // they are taken out of each surface so the scan reads the rest. The planted id and the BRR- code are not among them.
+        var ownIds = new Guid?[] { flow.Row.Id, invoice.Id, view.SubmissionId, view.FirmId, view.DocumentId, view.CoreRecord?.RecordId, Matter }
+            .OfType<Guid>().Distinct().ToList();
+        string WithoutOwnIds(string text) => ownIds.Aggregate(text, (t, id) => t.Replace(id.ToString("D"), string.Empty).Replace(id.ToString("N"), string.Empty));
+
+        var readerSurfaces = new Dictionary<string, string>
+        {
+            ["findings: pipelineFindings"] = root["pipelineFindings"]!.ToJsonString(),
+            ["findings: lineFindings"] = root[InvoiceSubmissionPersister.LineFindingsMember]!.ToJsonString(),
+            ["sprk_adminattention"] = flow.Row.GetAttributeValue<string>("sprk_adminattention") ?? string.Empty,
+            ["the created invoice's text attributes"] = WithoutOwnIds(string.Join("\n", invoice.Attributes.Values.OfType<string>())),
+            ["the status view"] = WithoutOwnIds(JsonSerializer.Serialize(view, new JsonSerializerOptions(JsonSerializerDefaults.Web))),
+        };
+        readerSurfaces["findings: pipelineFindings"].Should().Contain(SubmissionReasonCodes.ProceduresUnresolved, "control: the scan reads the hold's finding");
+        readerSurfaces["the status view"].Should().Contain(channel == InvoiceSubmissionChannel.Spa ? "warning" : SubmissionReasonCodes.Blocked,
+            "control: the scan reads the status view's hold warning (SPA) or its blocked outcome (Internal)");
+        foreach (var (surface, text) in readerSurfaces)
+        {
+            ReaderSentinel.Scan(text).Should().BeEmpty($"{surface} is a reader surface and holds no id and no BRR- code");
+        }
+
+        // The planted text is nowhere in the whole submission row (every column, whatever its type), nor in what the Signals and the invoice hold.
+        static string Flat(Entity e) => string.Join("\n", e.Attributes.Select(a => a.Value switch
+        {
+            EntityReference r => r.LogicalName + " " + r.Id.ToString("D") + " " + r.Name,
+            OptionSetValue o => o.Value.ToString(),
+            null => string.Empty,
+            var other => other.ToString(),
+        }));
+        foreach (var (what, text) in new[] { ("the submission row", Flat(flow.Row)), ("the invoice", Flat(invoice)), ("the Signals", string.Join("\n", flow.Signals.Values.Select(Flat))) })
+        {
+            text.Should().NotContain(plantedId.ToString("D")).And.NotContain(plantedId.ToString("N")).And.NotContain("Procedure row")
+                .And.NotContain("chain unreadable").And.NotContain(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureAssignmentService.RecordRuleCodePrefix, $"{what} holds nothing of the fault's message");
+        }
     }
+
     [Fact(DisplayName = "049 E criterion (reason codes): Ebilling:Enabled false is Failed ebilling.disabled and Poisoned; nothing is read")]
     public async Task FlagOff_IsFailed_EbillingDisabled()
     {
