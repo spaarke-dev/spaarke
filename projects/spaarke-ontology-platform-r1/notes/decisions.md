@@ -564,6 +564,11 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - Ontology's position: refuse all three as UpdateRecord targets, for update and upsert alike, not only upsert-create.
   - First, field-mapping runs a read-only census of configured playbook nodes targeting them.
   - This extends D-204 from create to update, so the owner decides through field-mapping. uac-r2 classifies it.
+  - **Owner accepted the update extension** (2026-11-04, in field-mapping's session, relayed). Field-mapping builds it as task 048.
+    - Scope: chat update_record, the playbook UpdateRecord step and the output-mapping path (`DataverseUpdateHandler`) refuse all three tables, update and upsert alike.
+    - Census on dev (read-only): 0 of the 93 configured `sprk_playbooknode` rows name these tables.
+    - Ontology confirmed output mapping is in scope. No legitimate playbook writes these tables through it. The writers (SignalWriter, DecisionRecordWriter, the Revise Budget writer and SignalEvaluationService's upsert) do not use any generic path.
+    - Ontology asked for must-not-fire tests on the writers' own updates and for a rebase onto uac-r2's `5df0a80e1d`. Ontology reviews the diff before merge.
 - **Consequence for D-36 extensibility (2026-11-04, uac-r2 second review K2).** Grouping through `CoreAncestorResolver` stays data-driven. Secure lineage, however, now holds a core pair whose type maps outside the closed core-table set. So a new core type needs its catalog row and a code change to that set before its Signals reconcile and suppress normally. Until then they are held: visible, never stamped, shares narrow only. This is accepted as fail-closed. The project CLAUDE.md data-and-security line is amended to match. The test rename or split is done on uac-r2's branch.
 - **082c-1 owner review (2026-11-04, `origin/task/ebilling-082c-1` at `a680dacf0d`; source diff read in full): PASS, with one change.**
   - **Must change (Q1):** under Split (ExpenseRule), a higher-ranked valid version displaces a lower version's cap only when it **states a cap** (`MaxAmountPerItem` non-null).
