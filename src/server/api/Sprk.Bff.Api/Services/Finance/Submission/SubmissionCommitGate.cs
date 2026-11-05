@@ -128,6 +128,9 @@ public class SubmissionCommitGate
     private readonly ILogger<SubmissionCommitGate> _logger;
     private readonly JobSubmissionService? _jobs;
 
+    /// <summary>082c-2 fix round 2 (F2): whether <see cref="InvoiceReviewDetail.Column"/> exists (the process-wide probe; a test sets its own, and the lifecycle it is given the same one).</summary>
+    internal ReviewDetailColumnProbe ReviewDetailProbe { get; init; } = ReviewDetailColumnProbe.Shared;
+
     public SubmissionCommitGate(
         IGenericEntityService entities,
         StoredFileService files,
@@ -553,7 +556,12 @@ public class SubmissionCommitGate
             remaining.Add(SubmissionReasonCodes.FirmMissing);
         }
 
-        var built = _lifecycle.BuildSupersedeUndoRequest(oldId, current, version, InvoiceReviewDetail.ReviewDetailOf(remaining));
+        // Fix round 2 (F2): the lifecycle's builder reads only the probe's cached answer, so the column is probed (one read, then cached) before the
+        // request is built; where it does not exist yet the detail is not asked for, and the undo succeeds without naming the column.
+        var detail = await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false)
+            ? InvoiceReviewDetail.ReviewDetailOf(remaining)
+            : null;
+        var built = _lifecycle.BuildSupersedeUndoRequest(oldId, current, version, detail);
         if (!built.Succeeded)
         {
             // Defensive: the builder refuses only a status other than Superseded, which returned above.

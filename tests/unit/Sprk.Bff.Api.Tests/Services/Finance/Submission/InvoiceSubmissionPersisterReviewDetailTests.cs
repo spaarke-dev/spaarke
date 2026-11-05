@@ -137,6 +137,45 @@ public partial class InvoiceSubmissionPersisterTests
         store.OldInvoice.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value.Should().Be(659490000);
     }
 
+    [Fact(DisplayName = "082c-2 fix round 2 (F2): where the column does not exist yet, the undo reopens a held invoice without naming it and is not held - the gate probes before it builds the request")]
+    public async Task SupersedeUndo_ColumnMissing_ReopensWithoutNamingTheColumn()
+    {
+        var store = CorrectionStore(afterCommit: TamperTheStagedBlob);
+        store.ReviewDetailColumnAbsentInDataverse = true;
+        store.ReviewDetailProbe = ReviewDetailColumnProbe.Fixed(present: false); // the commit's own writers already know
+        store.GateReviewDetailProbe = new ReviewDetailColumnProbe(TimeProvider.System); // the undo's probe has not been asked: another delivery or process
+        store.OldInvoiceSubmissions.Add(new Entity("sprk_invoicesubmission", EarlierSubmission)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", OldInvoiceId),
+            ["sprk_outcomereasoncode"] = SubmissionReasonCodes.ProcedureGap,
+        });
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        result.UndoHeld.Should().BeFalse("the reopen did not name a column that does not exist");
+        store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+        store.OldInvoiceWrites.Should().ContainSingle().Which.Target.Attributes.Keys.Should().BeEquivalentTo("statecode", "statuscode");
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 2 (F2): where the column exists, the same undo still carries the derived detail (the probe changes nothing)")]
+    public async Task SupersedeUndo_ColumnPresent_StillCarriesTheDetail_AfterTheGateProbed()
+    {
+        var store = CorrectionStore(afterCommit: TamperTheStagedBlob);
+        store.GateReviewDetailProbe = new ReviewDetailColumnProbe(TimeProvider.System);
+        store.OldInvoiceSubmissions.Add(new Entity("sprk_invoicesubmission", EarlierSubmission)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", OldInvoiceId),
+            ["sprk_outcomereasoncode"] = SubmissionReasonCodes.ProcedureGap,
+        });
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        store.OldInvoiceWrites.Should().ContainSingle().Which.Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value
+            .Should().Be(InvoiceReviewDetail.WaitingForBillingTerms);
+    }
+
     [Fact(DisplayName = "082c-2 fix round 1 (F2): the undo derives the detail from the firm hold too, and leaves it blank when no hold is open")]
     public async Task SupersedeUndo_FirmHoldGivesTheFirmDetail_NoHoldGivesNone()
     {

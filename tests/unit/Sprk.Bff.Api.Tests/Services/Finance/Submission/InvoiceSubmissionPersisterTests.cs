@@ -3186,6 +3186,22 @@ public partial class InvoiceSubmissionPersisterTests
         /// <summary>082c-2: whether the review detail column exists (fixed per test; never the process-wide probe).</summary>
         public ReviewDetailColumnProbe ReviewDetailProbe { get; set; } = ReviewDetailColumnProbe.Fixed(present: true);
 
+        /// <summary>
+        /// 082c-2 fix round 2 (F2): the probe the commit gate (and the lifecycle it builds the supersede undo with) uses. Separate from
+        /// <see cref="ReviewDetailProbe"/> on purpose: the undo can run in another delivery or process than the commit, with a probe that has not
+        /// yet been asked.
+        /// </summary>
+        public ReviewDetailColumnProbe GateReviewDetailProbe { get; set; } = ReviewDetailColumnProbe.Fixed(present: true);
+
+        /// <summary>
+        /// 082c-2 fix round 2 (F2): Dataverse has no <see cref="InvoiceReviewDetail.Column"/>: the probe's read of it faults, and so does any
+        /// write of the old invoice (the supersede undo's reopen) that names it - as Dataverse refuses an unknown attribute.
+        /// </summary>
+        public bool ReviewDetailColumnAbsentInDataverse { get; set; }
+
+        private static Exception ColumnAbsentFault() =>
+            new InvalidOperationException($"'sprk_invoice' entity doesn't contain attribute with Name = '{InvoiceReviewDetail.Column}'");
+
         public Entity Submission { get; } = new("sprk_invoicesubmission", InvoiceSubmissionPersisterTests.Submission)
         {
             ["sprk_trackingnumber"] = "INV-100.2",
@@ -3394,6 +3410,12 @@ public partial class InvoiceSubmissionPersisterTests
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns((QueryExpression q, CancellationToken _) =>
                 {
+                    // 082c-2 fix round 2: an environment without the column - the probe's one-row read of it faults as Dataverse faults.
+                    if (ReviewDetailColumnAbsentInDataverse && q.EntityName == "sprk_invoice" && q.ColumnSet.Columns.Contains(InvoiceReviewDetail.Column))
+                    {
+                        return Task.FromException<EntityCollection>(ColumnAbsentFault());
+                    }
+
                     if (IsEarlierApprovalQuery(q))
                     {
                         return EarlierInvoiceFault is { } approvalFault
@@ -3570,9 +3592,15 @@ public partial class InvoiceSubmissionPersisterTests
                 InvoiceSubmissionServiceTests.IsolationOver(() => Isolation),
                 Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
                     () => Isolation, new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
-                new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance),
+                new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance)
+                {
+                    ReviewDetailProbe = GateReviewDetailProbe,
+                },
                 NullLogger<SubmissionCommitGate>.Instance,
-                Index.Submitter);
+                Index.Submitter)
+            {
+                ReviewDetailProbe = GateReviewDetailProbe,
+            };
 
             return new InvoiceSubmissionPersister(
                 entities.Object,
@@ -3862,6 +3890,11 @@ public partial class InvoiceSubmissionPersisterTests
         {
             BeforeOldInvoiceWrite?.Invoke(this);
             OldInvoiceWrites.Add(update);
+            if (ReviewDetailColumnAbsentInDataverse && update.Target.Contains(InvoiceReviewDetail.Column))
+            {
+                return Task.FromException(ColumnAbsentFault());
+            }
+
             // As Dataverse: only a conditional update is refused at a stale version; an unconditional one overwrites.
             if (update.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches && !OldInvoiceMatches(update))
             {
