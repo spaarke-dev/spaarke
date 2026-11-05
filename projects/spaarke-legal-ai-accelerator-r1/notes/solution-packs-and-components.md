@@ -306,7 +306,7 @@ Source: researcher note `cowork-visual-outputs-2026-11-05.md`, which checked Lea
 | Level | What | Example (NDA pack) | Hosting | Interactive? | Persists and shares? | Status |
 |---|---|---|---|---|---|---|
 | **V1. Visuals inside the deliverables** | Charts and colour in the files we already produce: native Excel charts and conditional formatting, a PowerPoint brief, SVG/PNG charts built by script and embedded | Page-1 summary in the internal redline (have). **Excel audit pack** with a risk chart and coverage heat map. Optional one-slide brief. | None | No | **Yes**: they're files | Documented preview; build `[Proposed]` |
-| **V2. Self-contained HTML dashboard** | One offline `.html` file in the output folder, opened in the preview pane | Results dashboard: risk donut, topic heat map, clause list with filters, and links back to the redline | None | If the preview runs JS (T-P13) | Yes: a file that also opens in any browser | `[Cited]` that HTML renders; JS untested |
+| **V2. Self-contained HTML dashboard** | One offline `.html` file in the output folder, opened in the preview pane | Results dashboard: risk donut, topic heat map, clause list, and links back to the redline | None | **Probably not in the preview.** Microsoft's own `CoworkDashboard` sample says previews may block scripts. Microsoft CAT saw Teams and Outlook previews skip inline scripts over about 2,000 characters. Interactive once downloaded and opened in a browser. | Yes: a file that also opens in any browser | `[Cited]` that HTML renders; scripts likely blocked (observed, 2026-11-05 sweep); T-P13 confirms |
 | **V3. Adaptive Card in chat** | A card drawn by the built-in skill | **Plan preview** before files are built: counts, High items, escalations | None | Buttons unproven (S7) | No: chat only | Demo only; contract unknown |
 | **V4. MCP App** | A React/Fluent widget served by our connector | Interactive review: accept or reject plan items, matter look-ups, saving to Spaarke | BFF (T2) | Yes | Through Spaarke | v2 (§9.1a) |
 | **V5. App built-in** | A Microsoft-hosted app | — | Microsoft | Yes | Yes, inside the org | **Not for R1**: Frontier preview, metered, no template hook |
@@ -318,11 +318,11 @@ Source: researcher note `cowork-visual-outputs-2026-11-05.md`, which checked Lea
 | Where | React? | How |
 |---|---|---|
 | Adaptive Card (V3) | **No** | Cards are JSON drawn by the host in its own style. We supply the data and layout, not components. |
-| HTML dashboard (V2) | **Probably yes, at T0**, if T-P13 shows the preview runs JS | Build a Spaarke dashboard in React + Fluent v9 (and `Spaarke.UI.Components` where it fits) into **one HTML file**, all scripts and styles inline. Ship it in `assets/`. A script (`render_dashboard.py`) injects the run's data as JSON into a placeholder. Offline only: no CDN, no `fetch`. Mind the 5 MB per-file cap. **Fallback if JS doesn't run:** the same script writes a static HTML+SVG version with no JS. |
+| HTML dashboard (V2) | **Not in the preview pane, probably** (2026-11-05 sweep: Microsoft's `CoworkDashboard` and CAT's `rich-html-presentation` both report previews blocking scripts) | **Default:** `render_dashboard.py` writes **static HTML + CSS + SVG** with no script, which renders in the preview. **Optional:** the same file can carry a React + Fluent layer that runs only when the user downloads it and opens it in a browser. That layer is worth building only if T-P13 shows a real benefit. Offline only: no CDN, no `fetch`. |
 | MCP App (V4) | **Yes** | Single-file Fluent v9 build served by the BFF. We already have the `widget-design` skill and `knowledge/mcp-apps/`. |
 | App built-in (V5) | Unknown | Not for R1 |
 
-So one React dashboard can serve two routes: as an offline asset at T0 (V2), and later as an MCP App (V4), with the data source swapped from injected JSON to tool calls.
+So **interactive React belongs to the MCP App (V4)**, in the `spaarkeai-mcp-bff-api-r1` project. At T0 the visual is a static HTML/SVG file, plus visuals inside the Office files we deliver.
 
 ### 5.4 Rules for visuals
 
@@ -338,7 +338,7 @@ So one React dashboard can serve two routes: as an offline asset at T0 (V2), and
 | When | Visual | Level | Built by |
 |---|---|---|---|
 | After the dry run, before files | Plan preview card: changes by priority, High items, escalations, Approve / Change | V3, fallback chat table | `engine.card_data` (new) + `visual.plan-preview` template |
-| After `check_outputs` | Results dashboard (`<name> - Review Dashboard.html`) | V2, fallback static HTML | `engine.render_dashboard` (new) + `visual.dashboard` bundle |
+| After `check_outputs` | Results dashboard (`<name> - Review Dashboard.html`), static HTML + SVG | V2 | `engine.render_dashboard` (new, stdlib) + `visual.dashboard` template |
 | After `check_outputs` | Excel audit pack: change log, risk summary with chart, review checklist, topic coverage | V1 | `engine.audit_pack` (new; stdlib XML, or `openpyxl` if probe finds it) |
 | Always | Page-1 linked summary in the internal redline | V1 | `summary_table` (have) |
 
@@ -353,7 +353,56 @@ So one React dashboard can serve two routes: as an offline asset at T0 (V2), and
 7. A script-built `.xlsx` and `.pptx` with native charts, previewed: check fidelity.
 8. In chat: a Markdown table, a Mermaid block, LaTeX.
 
+9. Binary companions after plugin install. One community packager reports that `.docx` and `.xlsx` arrive empty. Our T-05 counters that for our route: the `sample-nda.docx` asset in the unified plugin worked and the trial review ran on it. Re-check on admin deploy (T-14) and the folder route.
+10. Runtime packages. A community probe (one tenant, 2026-10-05) saw `openpyxl`, `pdfplumber`, `PIL` and `tesseract`, and no Chromium or Playwright. Confirm with our `probe.py` before relying on any of them.
+
 T-P14 (optional, Frontier tenant only): `/app` with clause-risk JSON. Record the stack, where it renders, sharing and `/cost`.
+
+---
+
+## 7. External resources (GitHub and Hugging Face sweep, 2026-11-05)
+
+Source: researcher note `github-hf-delta-sweep-cowork-mcp-2026-11-05.md` (licences checked at source). It adds to the 2026-10-31 legal-content sweep (design §8.5, `references.md`).
+
+**`kesslernity/awesome-copilot-cowork-skills`: Skip.**
+- CC BY-SA 4.0, so none of its wording can go into a proprietary product.
+- It's a marketing funnel for paid kits.
+- It's stale: wrong count of built-ins and old models.
+- Its "tested" claims are self-declared; its legal skill says "Tested in Cowork: not yet".
+
+**Adopt (accelerator):**
+
+| Item | Licence | Use |
+|---|---|---|
+| `microsoft/wiqd` v0.24.0 (2026-11-05) | MIT | CI gate `plugin validate --mode deep`. **0.24.0 changes validation, so re-baseline our gates.** |
+| `microsoft/CoworkDashboard` | MIT | HTML dashboard and verify-gate pattern; the preview caveats behind OD-30 |
+| `microsoft/cat-agent-skills` (`rich-html-presentation`, `chart-builder`) | MIT | Preview constraints; chart script pattern |
+| `NVIDIA/SkillEvaluator` Tier 1 only | Apache-2.0 | Offline skill-quality score as a lint gate. Tiers 2 and 3 send skill text to a hosted model: not used. |
+| `Dmitry-Kov/ooxml-integrity` | MIT (young, 0 stars) | A second, independent CI check for lost comment anchors and tracked changes. Trial beside `check_outputs`. |
+| Hugging Face `crosbylegal/RedlineBench` | CC BY 4.0 data, MIT code | Eval method: real `.docx` files with tracked changes, playbooks, attorney rubrics, "surgicalness" and verbosity metrics. The contracts are MSAs, not NDAs, so adopt the rubric and metrics, not the corpus. |
+
+**Reference:**
+- `houfu/lq-plugin-cowork`: a 27-probe Cowork harness. It has no licence, so run it but don't copy it.
+- `cowork-scenario-plugin-packager`: platform notes.
+- Skill eval tools: `skillprobe`, `skillgrade`, `agent-skills-eval`, `skilllint`.
+- Charts-in-Adaptive-Cards doc and card evals.
+- `alea-institute/alea-redline` and `alea-clause-type` on Hugging Face (CC BY 4.0).
+
+**Watch:** `microsoft/apm` (pack versioning), `docx-redline`, `python-redlines`, adeu.
+
+**Skip:** anything AGPL, non-commercial or unlicensed. That includes `jubarte-redlines`, the `kleister_nda_*` datasets (no licence) and the obaydata benchmark (non-commercial).
+
+**Also found:**
+- Learn pages disagree on upload limits: `cowork-customize` says 100 files / 10 MB compressed / 50 MB uncompressed; `use-cowork` says 20 companions / 10 MB.
+- No NDA-specific redline or negotiation dataset exists with a clean licence.
+
+**For the MCP project:** the same note has a section (B) to hand to the `spaarkeai-mcp-bff-api-r1` window. It covers:
+- the PnP .NET 10 Entra-protected MCP sample;
+- Fluent v9 single-file widget samples (copilot-camp lab11, Power CAT, power-platform-skills `mcp-apps`);
+- the MCP conformance suite (`--spec-version 2026-07-28`);
+- `microsoft/DataFactory.MCP` (.NET MCP Apps).
+
+No public sample yet combines .NET, Entra, a widget and a declarative agent.
 
 ---
 
@@ -379,4 +428,5 @@ T-P14 (optional, Frontier tenant only): `/app` with clause-risk JSON. Record the
 | OD-27 | Move shared user-facing skills (setup, help) into a **Core plugin** | Yes, before a second pack ships; R1 can stay one plugin if it ships only NDA |
 | OD-28 | Component manifest, step includes and bill of materials in the build | Yes, Phase 1 |
 | OD-29 | Visual priority: deliverable visuals (V1) and the HTML dashboard (V2) first; the card (V3) optional with fallback | Yes |
-| OD-30 | Build the dashboard as a single-file React + Fluent asset | Only if T-P13 shows the preview runs JS; otherwise static HTML+SVG from Python |
+| OD-30 | T0 dashboard format | **Static HTML + CSS + SVG from Python** (previews likely block scripts, per the 2026-11-05 sweep). Interactive React only in the MCP App (V4). |
+| OD-31 | Adopt external tools found in the 2026-11-05 sweep (§7) | Yes for the CI gates; RedlineBench's rubric as an eval method |

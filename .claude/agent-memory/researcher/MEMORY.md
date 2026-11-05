@@ -105,24 +105,25 @@
 - [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization must be primary .…
 
 ## AI platform / models / competitors
-- [Opal (Frontier) computer-use agent (2026-11-05)](opal-frontier-computer-use-agent-2026-11-05.md) — browser-only CUA on W365 for Agents Cloud PC; allowlist default now ALLOW-ALL; billing/retention UNKNOWN
-- [MCP server in .NET BFF + Copilot DA widget (2026-11-05)](mcp-server-dotnet-bff-copilot-widget-2026-11-05.md) — C# SDK 2.3.1 + official Extensions.Apps (experimental MCPEXP003); stateless default; Entra SSO setup; no .NET Entra+widget MS sample; Dataverse MCP now 16 tools (invoke_api)
-- [Word vs Cowork plugin kinds + Harvey/Legora + Tuning (2026-11-02)](word-vs-cowork-plugin-kinds-harvey-legora-tuning-2026-11-02.md) — no target field; partner legal = MCP federated connectors (doc'd in Word); Harvey skills = its 5 MCP tools; custom federated connector = Word route; Tuning agents in Copilot app/Teams, paused→Copilot Studio
-- [Word won't run plugin skills (2026-11-02)](word-plugin-skills-not-executed-2026-11-02.md) — no host field; Word lists registry plugins but has no 3P skill loader; PPT org skills via admin Add agent; no Word ETA
-- [Word Copilot pane plugins/playbooks/add-in (2026-10-31)](word-copilot-pane-plugins-playbooks-addin-2026-10-31.md) — Plugins menu in Word documented; Legal = 3 Cowork-named skills; org plugins in Word unknown; Office.js skills Excel-only; model picker GA, EUDB excluded; no Copilot API for add-ins
-- [Cowork built-ins + specialist agents (2026-10-31)](cowork-builtin-skills-and-specialist-agent-patterns-2026-10-31.md) — 15 named built-ins + image-gen/browser; Built-in tab read-only; no agent calls from Cowork (worker_agents = Chat only); script egress blocked by design; R1 = persona panel in one skill, T2 = BFF MCP to Foundry OBO
-- [Copilot as Spaarke surface + Frontier (2026-11-05)](copilot-as-spaarke-surface-and-frontier-2026-11-05.md) — MCP Apps = summary+handoff not workspace (UX guide says no whole-SaaS); OpenUrlDialog preview; 3 MCP registration models; Frontier = tenant opt-in, NOT an ISV program; 9 tenant tests
-- [Cowork visual outputs (2026-11-05)](cowork-visual-outputs-2026-11-05.md) — HTML/SVG/PNG/PDF/Office file previews cited; Adaptive Card contract undocumented; App skill = Managed Runtime (Frontier); 8 tenant tests
-- [Legal skill content sources (2026-10-31)](legal-skill-content-sources-2026-10-31.md) — OpenAgreements Apache = best NDA/employment scaffold + 56-jx noncompete survey; ContractNLI is CC BY 4.0 (not NC); lawve-ai is CC BY-NC-ND; invoice/patent/CRE skills thin → LEDES/UTBMS/FDIC, MPEP/WIPO-CC-BY/USPTO PD data, GSA L100
-- [Word vs Cowork legal boundary + onboarding (2026-10-31)](word-vs-cowork-legal-boundary-and-onboarding-2026-10-31.md) — Word desktop-only/USL vs Cowork credits; no shared playbook object or handoff; Skill Management + Skill Report; 20 KB instructions, private Projects, conversation-scoped memory; claude-for-legal cold-start as prior art
-- [Skill engines precedent + licences (2026-10-31)](skill-engines-precedent-licences-2026-10-31.md) — Anthropic doc skills proprietary (patterns only), validators not generator; Legal for Cowork edit-contract = native tracked changes; Cowork Word built-in undocumented for tracked changes/bookmarks/formulas; OSS licence traps; engine verdicts
-- [Cowork MCP Apps author guide (2026-10-30)](cowork-mcp-apps-author-guide-2026-10-30.md) — SEP-1865; ui:// + resources/read; inline/fullscreen; widget→ only resources/read, tools/call, ui/message; auth never in iframe; 64 KiB, 60/min, 10 s init; validDomains fail-closed
-- [Cowork skill runtime + MVP claims (2026-10-30)](cowork-skill-runtime-and-mvp-claims-2026-10-30.md) — OneDrive copy-install; 50-skill cap (not 20); scripts/ run but runtime undocumented; /skill-name; Automations user-owned; Adaptive Cards built-in only
-- [Cowork SPE/playbooks/automation (2026-10-30)](cowork-spe-playbooks-automation-2026-10-30.md) — no native SPE; no default playbooks; scripts get no token; MCP connector via OAuthPluginVault; no Graph plugin install; site skills not in Cowork
+- [GitHub+HF delta sweep Cowork/MCP (2026-11-05)](github-hf-delta-sweep-cowork-mcp-2026-11-05.md) — kesslernity CC BY-SA funnel (Skip); HTML previews script-hostile; Fluent/singlefile samples
+- [Opal (Frontier) computer-use agent (2026-11-05)](opal-frontier-computer-use-agent-2026-11-05.md) — browser-only CUA on W365 Cloud PC; billing UNKNOWN
+- [MCP server in .NET BFF + Copilot DA widget (2026-11-05)](mcp-server-dotnet-bff-copilot-widget-2026-11-05.md) — C# SDK 2.3.1 + Extensions.Apps (experimental); stateless; Entra SSO setup
+- [Word vs Cowork plugin kinds + Harvey/Legora + Tuning (2026-11-02)](word-vs-cowork-plugin-kinds-harvey-legora-tuning-2026-11-02.md) — no target field; partner legal = MCP federated connectors; Harvey = 5 MCP tools
+- [Word won't run plugin skills (2026-11-02)](word-plugin-skills-not-executed-2026-11-02.md) — Word has no 3P skill loader; no ETA
+- [Word Copilot pane plugins/playbooks/add-in (2026-10-31)](word-copilot-pane-plugins-playbooks-addin-2026-10-31.md) — Plugins menu documented; Legal = 3 Cowork-named skills; no Copilot API for add-ins
+- [Cowork built-ins + specialist agents (2026-10-31)](cowork-builtin-skills-and-specialist-agent-patterns-2026-10-31.md) — 15 built-ins; no agent calls from Cowork; script egress blocked; R1 = persona panel in one skill
+- [Copilot as Spaarke surface + Frontier (2026-11-05)](copilot-as-spaarke-surface-and-frontier-2026-11-05.md) — MCP Apps = summary+handoff not workspace; Frontier = tenant opt-in, not ISV program
+- [Cowork visual outputs (2026-11-05)](cowork-visual-outputs-2026-11-05.md) — file previews cited; Adaptive Card contract undocumented; App skill = Frontier
+- [Legal skill content sources (2026-10-31)](legal-skill-content-sources-2026-10-31.md) — OpenAgreements Apache best NDA/employment scaffold; ContractNLI CC BY; lawve-ai NC-ND
+- [Word vs Cowork legal boundary + onboarding (2026-10-31)](word-vs-cowork-legal-boundary-and-onboarding-2026-10-31.md) — Word desktop/USL vs Cowork credits; no shared playbook object or handoff
+- [Skill engines precedent + licences (2026-10-31)](skill-engines-precedent-licences-2026-10-31.md) — Anthropic doc skills proprietary (patterns only); Legal for Cowork edit-contract = native tracked changes; engine verdicts
+- [Cowork MCP Apps author guide (2026-10-30)](cowork-mcp-apps-author-guide-2026-10-30.md) — SEP-1865; inline/fullscreen; auth never in iframe; 64 KiB, 60/min limits
+- [Cowork skill runtime + MVP claims (2026-10-30)](cowork-skill-runtime-and-mvp-claims-2026-10-30.md) — OneDrive copy-install; 50-skill cap; scripts/ run, runtime undocumented
+- [Cowork SPE/playbooks/automation (2026-10-30)](cowork-spe-playbooks-automation-2026-10-30.md) — no native SPE; scripts get no token; MCP connector via OAuthPluginVault
 - [Copilot UX components + kit package anatomy (2026-10-29)](copilot-ux-components-and-kit-package-anatomy-2026-10-29.md)…
-- [Copilot for Legal mechanics (2026-10-29)](copilot-for-legal-mechanics-walkthrough-2026-10-29.md) — Word: playbook .docx→topics/rules→Run Review→tracked changes; Cowork 20 skills, OneDrive outputs; gaps
-- [Copilot for legal taxonomy + practice-pack dev refs (2026-10-29)](copilot-legal-taxonomy-and-practice-pack-dev-refs-2026-10-29.md) — umbrella = Word legal plugin + "Legal for Cowork"; MCP Apps DO render in Cowork (SPFx do not); per-surface skill limits; sample SHAs
-- [Practice-pack content sources (2026-10-29)](practice-pack-content-sources-2026-10-29.md) — claude-for-legal Apache/no defaults, profile path breaks in MS Cowork; mike-workflows MIT lean checklists (UK lease); Lavern thin; no invoice/patent seeds
+- [Copilot for Legal mechanics (2026-10-29)](copilot-for-legal-mechanics-walkthrough-2026-10-29.md) — Word playbook .docx→Run Review→tracked changes; Cowork 20 skills
+- [Copilot for legal taxonomy + practice-pack dev refs (2026-10-29)](copilot-legal-taxonomy-and-practice-pack-dev-refs-2026-10-29.md) — Word legal plugin + "Legal for Cowork"; MCP Apps render in Cowork (SPFx no)
+- [Practice-pack content sources (2026-10-29)](practice-pack-content-sources-2026-10-29.md) — claude-for-legal Apache/no defaults; mike-workflows MIT checklists
 - [Legal enablement-kit deploy paths (2026-10-29)](copilot-legal-enablement-kit-deployment-paths-2026-10-29.md) — users…
 - [Copilot for Legal + Cowork + plugin registry (2026-10-29)](ms-copilot-for-legal-cowork-registry-2026-10-29.md) — lega…
 - [Foundry + Work IQ delta (2026-10-29)](foundry-work-iq-delta-2026-10-29.md) — Foundry IQ unchanged; GPT-6 GA; Routines…
@@ -136,7 +137,6 @@
 - [MCP ecosystem for publishing (2026-09-01)](mcp-ecosystem-publishing-2026-09-01.md) — spec stateless; Entra no DCR/CIM…
 - [Legal-AI competitive landscape (2026-07)](legal-ai-competitive-landscape-2026-07.md) — assistant/grid/research/agent-…
 - [Azure OpenAI reasoning models (2026-07)](azure-openai-reasoning-models-2026-07.md) — gpt-5 @ medium; westus3 has gpt-…
-- [Work IQ GA refresh (2026-07-14)](work-iq-ga-refresh-2026-07-14.md) — SUPERSEDED by 2026-09-21 entry
 - [Foundry memory now public](foundry-memory-now-public.md) — concept + how-to docs exist; GAP-memory.md superseded
 - [Cosmos Gremlin direction](cosmos-gremlin-direction.md) — soft signals away from Gremlin; no vector support
 - [Insights Engine pre-design (2026-05-19)](insights-engine-pre-design-2026-05.md) — five-topic research; four knowledge…
@@ -152,3 +152,4 @@
 ## Meta
 - [Knowledge base layout](knowledge-base-layout.md) — `knowledge/` tree convention; SOURCE/NOTES/README
 - [Cascade delete privileges/Archive (2026-10-17)](dataverse-cascade-delete-privileges-archive-2026-10-17.md) — child De…
+- [Work IQ GA refresh (2026-07-14)](work-iq-ga-refresh-2026-07-14.md) — SUPERSEDED by 2026-09-21 entry
