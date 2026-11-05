@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-04 ~23:30Z. Session ebilling-r1-c7 (authoritative; d4 is the duplicate). Work head: d5b13b49ed (095d-1b merge; filtered gate on the combined tip RUNNING, background b354j3mhd — push only after it passes). Dev BFF: master d763dc120e; uac-r2 is deploying master 909754869f (owner go; ebilling OK'd it with creator-person -Verify PASS and `StoredFileReconcileEnabled=false`; it waits on field-mapping's OK; expect uac-r2's after-notice with SHA). **None of this project's work is on master or the dev BFF.**
+> **Last Updated**: 2026-11-04 ~23:30Z. Session ebilling-r1-c7 (authoritative; d4 is the duplicate). Work head: d5b13b49ed (095d-1b merge; filtered gate on the combined tip RUNNING, background b354j3mhd — push only after it passes). Dev BFF: **master 909754869f** (deployed by uac-r2, received 2026-11-05T04:16:30Z; healthz 200, settings 225, `StoredFileReconcileEnabled=false`; rollback target d763dc120e; uac-r2's 30-minute gate to 04:46:30Z). **None of this project's work is on master or the dev BFF.**
 
 ## Quick Recovery (READ THIS FIRST)
 
