@@ -1423,6 +1423,20 @@ public sealed class ProcedureResolverTests
         Sprk.Bff.Api.Tests.Services.Finance.Submission.ReaderSentinel.Scan(JsonSerializer.Serialize(view)).Should().BeEmpty();
     }
 
+    [Theory(DisplayName = "082c-2 fix round 2 (uac-r2 option (i)): the reader code of a STORED key - a catalogue code is its own; a record rule's is its base (or blank), never the BRR- key")]
+    [InlineData("BILL-RATE", null, "BILL-RATE", false)]
+    [InlineData("BILL-RATE", "IGNORED-BASE", "BILL-RATE", false)]
+    [InlineData("BRR-0123456789abcdef0123456789abcdef", null, "", true)]
+    [InlineData("BRR-0123456789abcdef0123456789abcdef", "", "", true)]
+    [InlineData("BRR-0123456789abcdef0123456789abcdef", "BILL-BASE", "BILL-BASE", true)]
+    [InlineData("BRR-0123456789abcdef0123456789abcdef", "BRR-fedcba9876543210fedcba9876543210", "", true)]
+    public void ReaderCode_OfAStoredKey(string stored, string? baseCode, string expected, bool recordRule)
+    {
+        ProcedureRulesOnDate.IsRecordRuleCode(stored).Should().Be(recordRule);
+        ProcedureRulesOnDate.ReaderCodeOf(stored, baseCode, null).Should().Be(expected);
+        Sprk.Bff.Api.Tests.Services.Finance.Submission.ReaderSentinel.Scan(ProcedureRulesOnDate.ReaderCodeOf(stored, baseCode, null)).Should().BeEmpty();
+    }
+
     // ── Rank (6.5) ───────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "082b rank: (Level, -Distance, FirmSpecific): Manual d0 > Manual d1 > Firm > All records, then firm-specific; equal ranks tie")]

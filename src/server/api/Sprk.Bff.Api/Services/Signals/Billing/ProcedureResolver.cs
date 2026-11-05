@@ -334,14 +334,28 @@ public sealed record ProcedureRulesOnDate(
 
     /// <summary>uac-r2 option (a): a rule's reader code. A Procedure rule keeps its own catalogue code; a record rule gets its base rule's, or
     /// blank when that is missing or is itself a record-rule code (fail closed: never a <c>BRR-</c> code or any part of an id).</summary>
-    internal static string ReaderCodeOf(ResolvedRule rule, ILogger? logger)
-    {
-        if (rule.RecordRule is not { } slot)
-        {
-            return rule.Version.PolicyCode;
-        }
+    internal static string ReaderCodeOf(ResolvedRule rule, ILogger? logger) =>
+        rule.RecordRule is not { } slot ? rule.Version.PolicyCode : BaseCodeForReaders(slot.BasePolicyCode, logger);
 
-        var baseCode = slot.BasePolicyCode;
+    /// <summary>
+    /// 082c-2 fix round 2 (uac-r2 option (i)): whether a STORED policy code (a join key: <c>findings[].policyCode</c>, <c>signalPlan[]</c>,
+    /// <c>signalPlanRefusals[]</c>, the Signal's <c>sprk_policycode</c>) is a record rule's own <c>BRR-</c> code. The record-rule flag of a reader
+    /// member when only the key is at hand.
+    /// </summary>
+    internal static bool IsRecordRuleCode(string? policyCode) =>
+        policyCode?.StartsWith(ProcedureAssignmentService.RecordRuleCodePrefix, StringComparison.Ordinal) == true;
+
+    /// <summary>
+    /// 082c-2 fix round 2 (uac-r2 option (i)): the reader code of a STORED policy code, for a reader surface built from stored findings (the
+    /// internal join key stays as stored). A Procedure rule's catalogue code is its own; a record rule's (<see cref="IsRecordRuleCode"/>) is
+    /// its base rule's, which a stored key does not carry, so a caller that has none passes null and gets blank (fail closed: never the
+    /// <c>BRR-</c> key, never any part of an id), as <see cref="ReaderCodeOf(ResolvedRule, ILogger?)"/> does for a base it cannot resolve.
+    /// </summary>
+    internal static string ReaderCodeOf(string storedPolicyCode, string? baseCode, ILogger? logger) =>
+        IsRecordRuleCode(storedPolicyCode) ? BaseCodeForReaders(baseCode, logger) : storedPolicyCode;
+
+    private static string BaseCodeForReaders(string? baseCode, ILogger? logger)
+    {
         if (string.IsNullOrWhiteSpace(baseCode)
             || baseCode.StartsWith(ProcedureAssignmentService.RecordRuleCodePrefix, StringComparison.OrdinalIgnoreCase))
         {

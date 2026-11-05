@@ -191,6 +191,36 @@ public sealed class InvoiceSubmissionProcedureHoldTests
         planted.ForReaders().Should().Be(new ProcedureReaderGap("Ended", new DateOnly(2026, 3, 11), nameof(ProcedureGapKind.AfterLastVersion)));
     }
 
+    [Fact(DisplayName = "082c-2 fix round 2 (uac-r2 (a)/(b), condition (c)): a finding judged under a record rule's BRR- key keeps it as the Signal's internal key (policy code, dedupe key) and renders it in no Signal title, sentence, fact or evidence")]
+    public void Sentinel_RecordRuleKey_IsTheSignalKey_ButInNoSignalText()
+    {
+        var key = ProcedureAssignmentServiceCode(Guid.NewGuid());
+        ReaderSentinel.Scan(key).Should().NotBeEmpty("must-fire control: the scan finds the key");
+        var policy = new BillingSystemPolicyVersion(Guid.NewGuid(), key, Guid.NewGuid());
+        var finding = BillingSystemFindings.ProcedureGap(policy, "Ended", new DateOnly(2026, 3, 11), ProcedureGapKind.AfterLastVersion);
+        var rule = SystemRule() with { PolicyId = policy.PolicyId, PolicyCode = key, PolicyVersionId = policy.PolicyVersionId };
+
+        var mapped = BillingFindingSignalMapper.MapAll(
+            [finding], new Dictionary<Guid, BillingRuleCandidate> { [policy.PolicyVersionId] = rule }, new BillingSignalSubjects(InvoiceId, "INV-100", new Dictionary<int, Guid>()));
+
+        var request = mapped.Should().ContainSingle().Subject.Request;
+        request.PolicyCode.Should().Be(key, "the key is the Signal's internal identity (sprk_policycode and the dedupe key), unchanged");
+        SignalWriter.DedupeKeySubjectPrefix(request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId.ToString("D").ToLowerInvariant())
+            .Should().Contain(key, "control: the dedupe key is where the key lives");
+        // Title, sentence, facts and each evidence line's kind, text and clause are reader text. An evidence line's ref and source are record links
+        // by design (the source is "sprk_policyversion:" plus the policy VERSION id, as before this change; noted for uac-r2 in the round-2 notes);
+        // they must not carry the key either, which the BRR- check below covers.
+        var evidence = request.EvidenceRefs ?? [];
+        var readerText = string.Join("\n",
+            request.ShortHeadline,
+            SignalWriter.RenderSentence(request.MessageTemplate, request.FactValues),
+            string.Join("|", request.FactValues.Values.Select(v => v?.ToString())),
+            string.Join("|", evidence.SelectMany(e => new[] { e.Kind, e.Text, e.Clause })));
+        readerText.Should().Contain("Ended", "control: the scan reads the gap's text");
+        ReaderSentinel.Scan(readerText).Should().BeEmpty();
+        JsonSerializer.Serialize(evidence).Should().NotContain("BRR-", "no evidence line carries the key either");
+    }
+
     // ── 3(c) / C18: the status view's warning ──
 
     [Theory(DisplayName = "082c-2 3(c): the status view's warning is derived from the reason code with the owner-approved text; absent for any other reason")]
