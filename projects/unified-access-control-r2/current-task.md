@@ -4,46 +4,25 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-05 ~19:45Z (checkpoint #96: dev deploy of 0f53e053bf being prepared; 046 role rulings; reviews in flight).
+> **Last Updated**: 2026-11-05 ~22:15Z (0f53e053bf deployed to dev, gate PASS; 043 cleared; 049 decisions sent).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; peers take the owner's go for their own live writes in their sessions. |
-| **Active work** | **Dev BFF deploy of master `0f53e053bf`** (#2569 fm 042c + #2570 fm 048; Router green; 909754869f is an ancestor; src/server 13 files +231/−9). The owner said "deploy now, master as it is" but the go must NAME the SHA: ask for it once ebilling OKs. One Opus review agent is running (fm 043 access review). No uncommitted files. |
-| **Dev state** | BFF = **909754869f** since 2026-11-05T04:16:30Z (gate PASS; record `notes/deploy-gate-2026-11-05-909754869f.md`). Rollback snapshot `deploy/rollback/wwwroot-20261105T024806Z` is d763dc120e. Dev SPA = b083d62183. |
-| **Next action** | 1. Wait for ebilling's OK on 0f53e053bf (fm, word-add-in, ontology OK; provisioning standing). 2. Ask the owner for the go naming `0f53e053bf`. 3. Run the checklist below. 4. Answer fm on 043 when the review agent reports. |
-
-## Deploy 0f53e053bf: checklist
-- **Done (read-only):** 225 settings; the four switches (RootOwnerWrites, OrdinaryMovesWrites and Ebilling__Enabled true; StoredFileReconcile false); the 3 `Finance__FileStore__*` names present.
-- **Before the deploy:**
-  - the #2450 ancestor check and no non-comment `sprk_invoicestatus` under `src/server`;
-  - `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`;
-  - a detached worktree at the SHA (C:/wtdep is gone; recreate it);
-  - `Save-BffDevRollbackSnapshot.ps1 -RepoRoot <this worktree>`;
-  - the pre-deploy count of `record_creation.table_unsupported` over the prior 24h;
-  - a before-notice to word-add-in, R4 (`spaarke-wt-spa-external-access-platform-ad`), ontology, fm and ebilling.
-- **Deploy and gate:**
-  - `Deploy-BffApi.ps1 -Environment dev`, then `Test-BffDevDeployReadback.ps1`;
-  - the gate script `$TEMP/uacmerge/uacg/gate909.sh <start> <end>`;
-  - extra gate checks:
-    - 0 from organic traffic for `record_update.changed_only_by_its_writer` and `record_delete.changed_only_by_its_writer`;
-    - `record_creation.table_unsupported` compared with its pre-deploy count, NOT with 0;
-    - no 5xx on `/api/v1/signals*` or `POST /api/v1/signals/{id}/decision`;
-    - 0 5xx on the create, update and chat routes;
-    - 0 OWNERSHIP-REFUSED.
-  - A refusal from a WRITER path reopens the deploy.
-- **After:** an after-notice with the receive time (word-add-in needs it for the owner's Office saves and Submit Invoice read-back); a record in `notes/deploy-gate-2026-11-05-0f53e053bf.md`; Remove-WorktreeSafe.
+| **Active work** | Reviews (below). No deploy in flight. No uncommitted files. |
+| **Dev state** | BFF = **0f53e053bf** since 2026-11-05T21:39:06Z (gate PASS; record `notes/deploy-gate-2026-11-05-0f53e053bf.md`; gate script `$TEMP/uacmerge/uacg/gate0f5.sh`). Rollback snapshot `deploy/rollback/wwwroot-20261105T213757Z` is 909754869f. Dev SPA = b083d62183. |
+| **Next action** | 1. fm 049b: review when fm sends the final head SHA (fix round in progress, with my decisions below). 2. 046b -Apply on dev when fm's script and WhatIf are ready (owner go given for G1, G2, G4-G8). 3. ebilling master PR review when it opens. 4. Owed to ontology: Signals 200 and the nightly counts on 0f53e053bf. |
 
 ## Reviews in flight
 - **ebilling** (`-c7`):
   - 082c-2 is merged into work (ef6eb01910); C19 and P2 blank-firm are cleared; DEF-044 is merged into work (1c581b33ae).
   - Master PR coming. My items on its checklist: the pre-P2 table, the `sprk_trackingscope` re-grep, the runbook lines, prevseq MappingProtectedColumns, C22, the full integration suites.
   - After it: my deploy, P2 migration (owner go in their session), seam test, L6 Defender check, before-notice, then I flip `Ebilling__StoredFileReconcileEnabled` (owner go HERE).
-  - Asked, no answer yet: the deploy OK; whether Core User's Write on `sprk_ebillingoverride` at Global on dev (not in the role file) is intended; the "New Billing Event" ribbon (no role creates lines).
+  - Answered: D-142 override Global Write is intended; the "New Billing Event" ribbon gets hidden. DEF-053 (#2571) filed. 082c-3 (08702087cb) and 114 (c4b8d43e8f) come with the master PR.
 - **field-mapping** (`-69`):
-  - **043** (a document as a mapping source, `de96647095`): the Opus access review agent is running; send the verdict by message.
+  - **043** (`de96647095`): cleared, no F (Ks: push timing, older log lines, analysis-create warnings widened). Re-check only a further delta if fm pushes one.
   - **046/046b:** fm builds the role files and the apply script (-WhatIf/-Apply/-Verify; root role through the Web API; read back every BU copy; KnownGaps removed); fm runs -WhatIf. I run -Apply on dev under the owner's go, given 2026-11-05, for:
     - G1: Create, Append and AppendTo on reportcard (Core);
     - G2;
@@ -53,9 +32,14 @@
     - G7/G8: Office Add In gets AppendTo on account and sprk_budget (Deep).
 
     The standalone add-on gap list goes to the owner before anything from it is applied. The guard pins Ontology Administrator as the only person role with C/W/D on the writer-only tables.
-  - **049:** conditions sent; waiting for the diff.
+  - **049b** (`task/fm-049b`, fix round in progress). My decisions, sent:
+    - the maker-as-assignee pass stays inline, with a test pinning both sides;
+    - only the removal paths take the lease; fm's notes must show the reconcile re-derives Assigned-To grants, or the gap is filed;
+    - in scope: the `ScanAssignedRootsAsync` cap (a uac defect): `$orderby` plus a recent-change window ≥3× the tick;
+    - in scope, PRIVATE wording: the create-time pass is skipped for roots created secure or Restricted; the post-provisioning sync grants;
+    - Ks accepted: no invite when the reconcile grants first; duplicate passes collapse; `record-busy` acceptable only if the user sees a message, not a 500.
   - 044 field-security profile still owed (owner go here).
-- **ontology** (`-38`): owed TO them: Signals 200 from organic traffic, and the nightly suppression and Undetermined counts on 909754869f (and on 0f53e053bf once live).
+- **ontology** (`-38`): owed TO them: Signals 200 from organic traffic, and the nightly suppression and Undetermined counts on 909754869f and on 0f53e053bf (live since 21:39:06Z).
 
 ## Owner items outstanding
 - **NEW (ontology recommendation): column auditing on the writer-only tables' lookups.**
