@@ -130,7 +130,7 @@ public sealed class ProcedureResolverTests
 
     private Guid AddRuleVersion(
         Guid policy, Guid? procedureVersion, DateOnly from, int number = 1, bool published = true, Guid? basedOn = null,
-        RuleType type = RuleType.ApprovedRate, DateTime? created = null)
+        RuleType type = RuleType.ApprovedRate, DateTime? created = null, DateTime? inForceInstant = null)
     {
         var id = Guid.NewGuid();
         var columns = new List<(string, object)>
@@ -138,7 +138,7 @@ public sealed class ProcedureResolverTests
             ("sprk_policy", Ref(Policy, policy)),
             ("sprk_versionnumber", number),
             ("sprk_ruletype", Option((int)type)),
-            ("sprk_inforcefrom", Utc(from)),
+            ("sprk_inforcefrom", inForceInstant ?? Utc(from)),
             (RuleSetService.PublishStateColumn, Option(published ? RuleSetService.PublishStatePublished : RuleSetService.PublishStateDraft)),
         };
         if (procedureVersion is { } pv) columns.Add((RuleSetService.ProcedureVersionColumn, Ref(ProcedureEntity.VersionEntity, pv)));
@@ -518,6 +518,28 @@ public sealed class ProcedureResolverTests
         before.Rules.Single().Version.PolicyVersionId.Should().Be(general.RuleVersion);
         before.ExcludedRules.Should().BeEmpty();
         resolution.RulesOn(Mar15).Rules.Single().Version.PolicyCode.Should().Be("BRR-M");
+    }
+
+    // 082c C19 fix round 1: the change's close of the base rule's findings (ProcedureAssignmentServiceTests, "fix round 1") compares work dates with
+    // the version's in-force day through ProcedureResolution.InForceOn, the expression behind this selection. The same instants run through both,
+    // so the close and the resolver cannot disagree on the day the record rule takes over.
+    [Theory(DisplayName = "082b record rules (C19 fix round 1): the record rule runs from the UTC day of its in-force instant, at any time of that day; the day before the base runs")]
+    [InlineData("2026-03-01T00:00:00Z")]
+    [InlineData("2026-03-01T14:30:00Z")]
+    [InlineData("2026-03-01T23:59:59Z")]
+    public async Task RecordRule_RunsFromTheUtcDayOfItsInForceInstant(string instant)
+    {
+        var general = Simple("GENERAL");
+        var at = DateTime.SpecifyKind(DateTime.Parse(instant, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind), DateTimeKind.Utc);
+        var created = Tick();
+        ExcludeRule(Matter, M, general.Rule, null, created);
+        AddRuleVersion(AddRecordRule(Matter, M, null, general.Rule, "BRR-M"), null, Mar1, basedOn: general.RuleVersion, created: created, inForceInstant: at);
+        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
+
+        resolution.RulesOn(Mar1).Rules.Single().Version.PolicyCode.Should().Be("BRR-M", "on the in-force day itself the record rule runs");
+        resolution.RulesOn(Mar1.AddDays(-1)).Rules.Single().Version.PolicyCode.Should().Be("GENERAL", "the day before, the base rule still runs");
+        ProcedureResolution.InForceOn(ProcedureResolver.UtcDate(at), Mar1).Should().BeTrue();
+        ProcedureResolution.InForceOn(ProcedureResolver.UtcDate(at), Mar1.AddDays(-1)).Should().BeFalse();
     }
 
     [Fact(DisplayName = "082b record rules (089c K1/K3): a record rule runs only where its base rule resolves for the date; a rule a later version dropped strands it")]

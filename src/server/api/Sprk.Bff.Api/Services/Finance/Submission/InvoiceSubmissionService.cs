@@ -2290,7 +2290,11 @@ public class InvoiceSubmissionService
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(firmIds);
-        if (firmIds.Count == 0)
+
+        // A blank firm id names no firm: it never reaches the In condition (hygiene; nothing is known to produce one), so the set
+        // is the caller's real firms only and an empty one reads nothing.
+        var firms = firmIds.Where(id => id != Guid.Empty).Distinct().ToArray();
+        if (firms.Length == 0)
         {
             return Array.Empty<InvoiceSubmissionView>();
         }
@@ -2304,7 +2308,7 @@ public class InvoiceSubmissionService
             foreach (var chunk in ids.Where(id => id != Guid.Empty).Distinct().Chunk(MaxInValues))
             {
                 var query = new QueryExpression(SubmissionEntity) { ColumnSet = new ColumnSet(ViewColumns), TopCount = MaxListSize };
-                query.Criteria.AddCondition(TrackingNumberAllocator.FirmColumn, ConditionOperator.In, firmIds.Cast<object>().ToArray());
+                query.Criteria.AddCondition(TrackingNumberAllocator.FirmColumn, ConditionOperator.In, firms.Cast<object>().ToArray());
                 query.Criteria.AddCondition(column, ConditionOperator.In, chunk.Cast<object>().ToArray());
                 query.AddOrder("createdon", OrderType.Descending);
 

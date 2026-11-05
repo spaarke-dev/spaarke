@@ -334,8 +334,11 @@ internal static partial class RecordTableRules
             Table = "sprk_invoicesubmission",
             Kind = RecordTableKind.Child,
             // 095d-1c F4-1: and the stored findings, whose assignFirm member decides the immutable Decision Record (typed writers only).
+            // 095d (uac-r2): and sprk_previoussequence, which only TrackingNumberAllocator's renumber writes (it is an AccessColumn in ParentLineage).
             MappingProtectedColumns = Columns(
-                [.. InvoiceFamilyCoreLookupsOf("sprk_invoicesubmission"), Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson]),
+                [.. InvoiceFamilyCoreLookupsOf("sprk_invoicesubmission"),
+                    Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson,
+                    Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.PreviousSequenceColumn]),
             PreWriteRules = [InvoiceFamilyRule],
         },
         new RecordTableRule

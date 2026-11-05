@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -11,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Procedures;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -30,6 +32,22 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Procedures;
 /// </remarks>
 public sealed class ProcedureAssignmentServiceTests
 {
+    // C19 (ontology): the close's completion log names the closed Signals in a bounded list.
+    [Theory]
+    [InlineData(0, 0, false)]
+    [InlineData(50, 50, false)]
+    [InlineData(51, 50, true)]
+    [InlineData(300, 50, true)]
+    public void ClosedSignalIdsForLog_IsBounded(int closed, int named, bool counted)
+    {
+        var ids = Enumerable.Range(0, closed).Select(_ => Guid.NewGuid()).ToHashSet();
+
+        var text = ProcedureAssignmentService.ClosedSignalIdsForLog(ids);
+
+        ids.Count(id => text.Contains(id.ToString(), StringComparison.Ordinal)).Should().Be(named);
+        text.Contains($"(+{closed - ProcedureAssignmentService.MaxClosedSignalIdsLogged} more)", StringComparison.Ordinal).Should().Be(counted);
+    }
+
     private static readonly Guid TeamId = Guid.NewGuid();
     private static readonly Guid CallerOid = Guid.NewGuid();
     private static readonly Guid CallerUserId = Guid.NewGuid();
@@ -38,6 +56,24 @@ public sealed class ProcedureAssignmentServiceTests
     private const string Matter = "sprk_matter";
     private const string Assignment = "sprk_procedureassignment";
     private const string Token = "caller-token";
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    /// <summary>Keeps what the service logged: level, the formatted line, and whether an exception object was passed.</summary>
+    private sealed class CapturingLogger : ILogger<ProcedureAssignmentService>
+    {
+        public List<(LogLevel Level, string Message, bool HasException)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception), exception is not null));
+    }
 
     private sealed class World
     {
@@ -63,6 +99,13 @@ public sealed class ProcedureAssignmentServiceTests
 
         // Task 089e pass-1 K4: the change's selection, bounded to the record's invoices and their lines (real, over the fake store).
         public readonly List<(Guid Policy, IReadOnlyCollection<Guid> Invoices, IReadOnlyCollection<Guid> Lines)> SubjectSelections = new();
+
+        // 082c C19 fix round 1 (owner 2026-11-05, "the effective date wins"): the instant a change puts its record rule in force by. Fixed, so a
+        // test can date an invoice's lines before, on and after the in-force day. A test that needs another instant sets Clock.
+        public static readonly DateTimeOffset InForceInstant = new(2026, 11, 5, 14, 30, 0, TimeSpan.Zero);
+        public static readonly DateOnly InForceDay = new(2026, 11, 5);
+        public TimeProvider Clock = new FixedClock(InForceInstant);
+        public readonly CapturingLogger Log = new();
 
         public World()
         {
@@ -159,7 +202,8 @@ public sealed class ProcedureAssignmentServiceTests
         public ProcedureAssignmentService Service(IRecordOwnershipResolver? ownership = null) =>
             new(H.Entities.Object, ownership ?? H.Ownership.Object, H.Service(), Closure.Object,
                 new AffectedInvoiceCounter(H.Entities.Object, Probe.Object, NullLogger<AffectedInvoiceCounter>.Instance),
-                NullLogger<ProcedureAssignmentService>.Instance);
+                Log)
+            { Clock = Clock };
 
         private Task<IReadOnlyList<OpenPolicySignal>> SelectReal(Guid policyId, bool withBillingSubject, CancellationToken ct) =>
             RealClosure().SelectOpenSignalsOfPolicyAsync(policyId, withBillingSubject, ct);
@@ -168,18 +212,34 @@ public sealed class ProcedureAssignmentServiceTests
             new((SignalWriter)RuntimeHelpers.GetUninitializedObject(typeof(SignalWriter)), H.Entities.Object,
                 TimeProvider.System, NullLogger<SignalClosureService>.Instance);
 
-        public Guid Invoice(int statuscode = InvoiceStatusCodes.InReview, Guid? matter = null, Guid? firm = null)
+        /// <summary>An invoice; its date is the in-force day unless told (the close compares work dates with the change's in-force day).</summary>
+        public Guid Invoice(int statuscode = InvoiceStatusCodes.InReview, Guid? matter = null, Guid? firm = null, DateOnly? date = null)
         {
-            var i = new Entity("sprk_invoice", Guid.NewGuid()) { ["statuscode"] = new OptionSetValue(statuscode), ["statecode"] = new OptionSetValue(0) };
+            var i = new Entity("sprk_invoice", Guid.NewGuid())
+            {
+                ["statuscode"] = new OptionSetValue(statuscode), ["statecode"] = new OptionSetValue(0),
+                [InvoiceAdjustmentService.InvoiceDateColumn] = (date ?? InForceDay).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+            };
             if (matter is { } m) i[Matter] = new EntityReference(Matter, m);
             if (firm is { } f) i["sprk_vendororg"] = new EntityReference("sprk_organization", f);
             H.Seed(i);
             return i.Id;
         }
 
-        public Guid Line(Guid invoice)
+        /// <summary>A Fee line of the invoice, worked on the in-force day unless told; <paramref name="date"/> null with <paramref name="dated"/> false
+        /// is a line with no work date (the evaluator then judges it on the invoice date).</summary>
+        public Guid Line(Guid invoice, DateOnly? date = null, bool dated = true, InvoiceLineCostType cost = InvoiceLineCostType.Fee)
         {
-            var l = new Entity("sprk_billingevent", Guid.NewGuid()) { ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice) };
+            var l = new Entity("sprk_billingevent", Guid.NewGuid())
+            {
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice),
+                [InvoiceTotalsService.LineCostType] = new OptionSetValue((int)cost),
+            };
+            if (dated)
+            {
+                l[InvoiceSubmissionPersister.LineEventDate] = (date ?? InForceDay).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            }
+
             H.Seed(l);
             return l.Id;
         }
@@ -1343,7 +1403,7 @@ public sealed class ProcedureAssignmentServiceTests
         outcome.Value.VisibleOpenInvoices.Should().Be(2, "the hidden invoice is not counted");
         outcome.Value.AffectedText.Should().Be("2 open invoices you can see are affected.");
         outcome.Value.Message.Should().Be(ProcedureAssignmentService.ChangeCloseCompleteMessage, "pass-1 F2: the answer says what the close covered");
-        outcome.Value.Message.Should().Contain("filed directly on this record");
+        outcome.Value.Message.Should().Contain("records directly under it", "082c C19: the close now covers the direct children");
     }
 
     [Fact(DisplayName = "089e must-not-fire: another record's invoice, another rule's finding, an invoice not In Review and an inactive invoice keep their findings open")]
@@ -1485,6 +1545,499 @@ public sealed class ProcedureAssignmentServiceTests
         w.SubjectSelections.Should().BeEmpty();
         w.H.Queries.Should().NotContain(q => q.EntityName == "sprk_signal");
         w.StatusOf(elsewhere).Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 082c C19: the change's close selects through the chain (the records DIRECTLY under the record; nearer rows win; fail closed)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private const string Project = "sprk_project";
+    private const string WorkAssignmentTable = "sprk_workassignment";
+
+    /// <summary>A work assignment filed by its typed lookup under <paramref name="parent"/> (a matter or project).</summary>
+    private static Guid WorkAssignmentUnder(World w, string parentTable, Guid parent)
+    {
+        var id = Guid.NewGuid();
+        w.H.Seed(new Entity(WorkAssignmentTable, id)
+        {
+            [parentTable == Matter ? "sprk_regardingmatter" : "sprk_regardingproject"] = new EntityReference(parentTable, parent),
+        });
+        return id;
+    }
+
+    /// <summary>A project filed by its BFF-managed pair under <paramref name="parent"/>.</summary>
+    private static Guid ProjectUnder(World w, string parentTable, Guid parent)
+    {
+        var type = Guid.NewGuid();
+        w.H.Seed(new Entity("sprk_recordtype_ref", type) { ["sprk_recordlogicalname"] = parentTable });
+        var id = Guid.NewGuid();
+        w.H.Seed(new Entity(Project, id)
+        {
+            ["sprk_regardingrecordid"] = parent.ToString(),
+            ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", type),
+        });
+        return id;
+    }
+
+    /// <summary>An invoice filed on exactly one core record, <paramref name="coreTable"/> <paramref name="core"/>.</summary>
+    private static Guid InvoiceOn(World w, string coreTable, Guid core, Guid? firm = null, int status = InvoiceStatusCodes.InReview, DateOnly? date = null)
+    {
+        var column = InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_invoice"].Single(l => l.CoreEntity == coreTable).Column;
+        var i = new Entity("sprk_invoice", Guid.NewGuid())
+        {
+            ["statuscode"] = new OptionSetValue(status), ["statecode"] = new OptionSetValue(0), [column] = new EntityReference(coreTable, core),
+            [InvoiceAdjustmentService.InvoiceDateColumn] = (date ?? World.InForceDay).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+        };
+        if (firm is { } f) i["sprk_vendororg"] = new EntityReference("sprk_organization", f);
+        w.H.Seed(i);
+        return i.Id;
+    }
+
+    /// <summary>A record's own rule-level row (a plain Exclude, or a change's Exclude row) of <paramref name="policy"/>.</summary>
+    private static void OwnRuleRow(World w, string table, Guid record, Guid policy, Guid? firm = null)
+    {
+        var row = new Entity(Assignment, Guid.NewGuid())
+        {
+            [table] = new EntityReference(table, record),
+            ["sprk_excludedpolicy"] = new EntityReference("sprk_policy", policy),
+            ["sprk_mode"] = new OptionSetValue(ProcedureAssignmentEntity.ModeExcluded),
+        };
+        if (firm is { } f) row["sprk_firm"] = new EntityReference("sprk_organization", f);
+        w.H.Seed(row);
+    }
+
+    /// <summary>Makes a query that <paramref name="when"/> matches throw, keeping the world's own check.</summary>
+    private static void FailQueriesWhen(World w, Func<QueryExpression, bool> when)
+    {
+        var before = w.H.AfterQuery;
+        w.H.AfterQuery = q =>
+        {
+            before?.Invoke(q);
+            if (when(q)) throw new InvalidOperationException("simulated Dataverse read fault");
+        };
+    }
+
+    [Fact(DisplayName = "082c C19 must-fire: the change closes the base rule's findings on the record's own invoices (d0) and on the invoices of the records directly under it (d1: a work assignment by its lookup, a project by its pair)")]
+    public async Task Change_ClosesTheBaseRulesFindings_OnTheRecordAndOnTheRecordsDirectlyUnderIt()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var own = w.Signal(policy, w.Invoice(matter: MatterId));
+        var workAssignment = WorkAssignmentUnder(w, Matter, MatterId);
+        var project = ProjectUnder(w, Matter, MatterId);
+        var onWorkAssignment = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, workAssignment));
+        var projectInvoice = InvoiceOn(w, Project, project);
+        var onProjectLine = w.Signal(policy, projectInvoice, line: w.Line(projectInvoice));
+        w.Readable.Add(projectInvoice);
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        foreach (var s in new[] { own, onWorkAssignment, onProjectLine })
+        {
+            w.StatusOf(s).Should().Be(SignalWriter.SignalStatusResolved);
+            ResolutionOf(w, s).Should().Be(SignalWriter.ResolutionSuperseded);
+        }
+
+        w.Superseded.Should().ContainSingle("one close over d0 and d1 together").Which.Signals.Should().BeEquivalentTo(new[] { own, onWorkAssignment, onProjectLine });
+        outcome.Value!.CloseComplete.Should().BeTrue();
+        outcome.Value.VisibleOpenInvoices.Should().Be(1, "only the project's invoice is readable by the caller");
+        outcome.Value.Message.Should().Be(ProcedureAssignmentService.ChangeCloseCompleteMessage);
+    }
+
+    [Fact(DisplayName = "082c C19 must-not-fire: a grandchild's invoice (d2: its chain does not reach the record, D-172) and a sibling's under another record keep their findings open")]
+    public async Task Change_LeavesAGrandchildAndAnotherRecordsChildAlone()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var project = ProjectUnder(w, Matter, MatterId);
+        var onChild = w.Signal(policy, InvoiceOn(w, Project, project));
+        var grandchild = WorkAssignmentUnder(w, Project, project);
+        var onGrandchild = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, grandchild));
+        var otherMatter = Guid.NewGuid();
+        w.H.Seed(new Entity(Matter, otherMatter));
+        var sibling = WorkAssignmentUnder(w, Matter, otherMatter);
+        var onSibling = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, sibling));
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Value!.CloseComplete.Should().BeTrue();
+        w.StatusOf(onChild).Should().Be(SignalWriter.SignalStatusResolved);
+        w.StatusOf(onGrandchild).Should().Be(SignalWriter.SignalStatusOpen, "a record under a child does not take the change (no second hop)");
+        w.StatusOf(onSibling).Should().Be(SignalWriter.SignalStatusOpen, "another matter's work assignment is not under this record");
+    }
+
+    [Fact(DisplayName = "082c C19 nearer wins: a child with its own row of the rule (for every firm, or the invoice's firm) is not closed; a child whose own row is for another firm, or is Procedure-level only, is")]
+    public async Task Change_RespectsANearerRowOnTheChild()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var procedure = w.Procedure();
+        var version = w.ProcedureVersion(procedure, ProcedureEntity.StatusActive);
+        var nearer = WorkAssignmentUnder(w, Matter, MatterId);
+        var nearerForFirm = WorkAssignmentUnder(w, Matter, MatterId);
+        var otherFirmRow = WorkAssignmentUnder(w, Matter, MatterId);
+        var procedureLevel = WorkAssignmentUnder(w, Matter, MatterId);
+        OwnRuleRow(w, WorkAssignmentTable, nearer, policy);
+        OwnRuleRow(w, WorkAssignmentTable, nearerForFirm, policy, firm: FirmId);
+        OwnRuleRow(w, WorkAssignmentTable, otherFirmRow, policy, firm: OtherFirmId);
+        w.H.Seed(new Entity(Assignment, Guid.NewGuid())
+        {
+            [WorkAssignmentTable] = new EntityReference(WorkAssignmentTable, procedureLevel),
+            ["sprk_procedure"] = new EntityReference("sprk_procedure", procedure),
+            ["sprk_pinnedversion"] = new EntityReference("sprk_procedureversion", version),
+            ["sprk_mode"] = new OptionSetValue(ProcedureAssignmentEntity.ModePinned),
+        });
+        var onNearer = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, nearer, firm: FirmId));
+        var onNearerForFirm = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, nearerForFirm, firm: FirmId));
+        var onOtherFirmRow = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, otherFirmRow, firm: FirmId));
+        var onProcedureLevel = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, procedureLevel, firm: FirmId));
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Value!.CloseComplete.Should().BeTrue();
+        w.StatusOf(onNearer).Should().Be(SignalWriter.SignalStatusOpen, "the child's own row decides the rule there (the nearer row wins)");
+        w.StatusOf(onNearerForFirm).Should().Be(SignalWriter.SignalStatusOpen, "the child's own row for the invoice's firm decides it");
+        w.StatusOf(onOtherFirmRow).Should().Be(SignalWriter.SignalStatusResolved, "a row for another firm does not decide this firm's invoice");
+        w.StatusOf(onProcedureLevel).Should().Be(SignalWriter.SignalStatusResolved,
+            "a Procedure-level row does not decide a rule-level override (the resolver groups rule-level rows by base rule)");
+    }
+
+    [Fact(DisplayName = "082c C19: a firm-scoped change closes only that firm's invoices on the children; an invoice on two core records (FR-05) is never closed")]
+    public async Task Change_ForOneFirm_OnTheChildren_AndNotAnAmbiguousInvoice()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var child = WorkAssignmentUnder(w, Matter, MatterId);
+        var thisFirm = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, child, firm: FirmId));
+        var otherFirm = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, child, firm: OtherFirmId));
+        var twoCores = InvoiceOn(w, WorkAssignmentTable, child, firm: FirmId);
+        w.H.Row("sprk_invoice", twoCores)[Project] = new EntityReference(Project, Guid.NewGuid());
+        var ambiguous = w.Signal(policy, twoCores);
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy, firm: FirmId), CallerOid, Token, default);
+
+        outcome.Value!.CloseComplete.Should().BeTrue();
+        w.StatusOf(thisFirm).Should().Be(SignalWriter.SignalStatusResolved);
+        w.StatusOf(otherFirm).Should().Be(SignalWriter.SignalStatusOpen);
+        w.StatusOf(ambiguous).Should().Be(SignalWriter.SignalStatusOpen, "an invoice filed on two core records has no chain to judge it by");
+    }
+
+    [Theory(DisplayName = "082c C19 fix round 1 (ontology 3): a fault reading the records DIRECTLY under the record drops their close only; the record's own findings still close, closeComplete=false, and the message says the records under it stay open")]
+    [InlineData("chain")]
+    [InlineData("rows")]
+    [InlineData("unwritten row")]
+    [InlineData("lines of the children's invoices")]
+    public async Task Change_WhenTheChildrenCannotBeRead_ClosesTheRecordsOwnOnly(string fault)
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var ownInvoice = w.Invoice(matter: MatterId);
+        var own = w.Signal(policy, ownInvoice);
+        var child = WorkAssignmentUnder(w, Matter, MatterId);
+        var childInvoice = InvoiceOn(w, WorkAssignmentTable, child);
+        var onChild = w.Signal(policy, childInvoice);
+        switch (fault)
+        {
+            case "chain":
+                FailQueriesWhen(w, q => q.EntityName == WorkAssignmentTable && q.TopCount == 1);
+                break;
+            case "rows":
+                FailQueriesWhen(w, q => q.EntityName == Assignment
+                    && q.Criteria.Filters.Any(f => f.Conditions.Any(c => c.AttributeName == WorkAssignmentTable)));
+                break;
+            case "lines of the children's invoices":
+                FailQueriesWhen(w, q => q.EntityName == "sprk_billingevent" && q.Criteria.Conditions.Any(c => c.Values.Contains(childInvoice)));
+                break;
+            default: // a row the BFF never writes on the child (a Procedure and a rule): the resolver's own fault
+                w.H.Seed(new Entity(Assignment, Guid.NewGuid())
+                {
+                    [WorkAssignmentTable] = new EntityReference(WorkAssignmentTable, child),
+                    ["sprk_procedure"] = new EntityReference("sprk_procedure", Guid.NewGuid()),
+                    ["sprk_excludedpolicy"] = new EntityReference("sprk_policy", policy),
+                    ["sprk_mode"] = new OptionSetValue(ProcedureAssignmentEntity.ModeExcluded),
+                });
+                break;
+        }
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        outcome.Value!.CloseComplete.Should().BeFalse();
+        outcome.Value.Message.Should().Be(ProcedureAssignmentService.ChangeCloseChildrenOpenMessage);
+        w.Superseded.Should().ContainSingle("the record's own findings close, in one close").Which.Signals.Should().Equal(new[] { own });
+        w.StatusOf(own).Should().Be(SignalWriter.SignalStatusResolved);
+        ResolutionOf(w, own).Should().Be(SignalWriter.ResolutionSuperseded);
+        w.StatusOf(onChild).Should().Be(SignalWriter.SignalStatusOpen, "all or nothing within the children's side");
+        w.H.Row("sprk_policy", outcome.Value.RecordRule.PolicyId).GetAttributeValue<bool>("sprk_enabled").Should().BeTrue("the change is committed");
+        w.Log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("could not be read"));
+        w.Log.Entries.Should().OnlyContain(e => !e.HasException, "a log line carries the exception type name, never the exception");
+        w.Log.Entries.Should().NotContain(e => e.Message.Contains(child.ToString()) || e.Message.Contains(childInvoice.ToString()),
+            "no id of a record under the record is logged");
+    }
+
+    [Theory(DisplayName = "082c C19 fix round 1 (ontology 3, must-not-fire): a fault reading the record's OWN invoices or their lines closes nothing, not even the children's findings")]
+    [InlineData("invoices")]
+    [InlineData("lines")]
+    public async Task Change_WhenTheRecordsOwnInvoicesCannotBeRead_ClosesNothing(string fault)
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var ownInvoice = w.Invoice(matter: MatterId);
+        var own = w.Signal(policy, ownInvoice);
+        var onChild = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, WorkAssignmentUnder(w, Matter, MatterId)));
+        var ownColumn = InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_invoice"].Single(l => l.CoreEntity == Matter).Column;
+        if (fault == "invoices")
+        {
+            FailQueriesWhen(w, q => q.EntityName == "sprk_invoice" && q.Criteria.Conditions.Any(c => c.AttributeName == ownColumn));
+        }
+        else
+        {
+            FailQueriesWhen(w, q => q.EntityName == "sprk_billingevent" && q.Criteria.Conditions.Any(c => c.Values.Contains(ownInvoice)));
+        }
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        outcome.Value!.CloseComplete.Should().BeFalse();
+        outcome.Value.Message.Should().Be(ProcedureAssignmentService.ChangeCloseIncompleteMessage);
+        w.Superseded.Should().BeEmpty("nothing is closed when the record's own side could not be read");
+        w.StatusOf(own).Should().Be(SignalWriter.SignalStatusOpen);
+        w.StatusOf(onChild).Should().Be(SignalWriter.SignalStatusOpen);
+        w.Log.Entries.Should().OnlyContain(e => !e.HasException);
+    }
+
+    [Fact(DisplayName = "082c C19 fix round 1 (ontology 3): more records directly under the record than the bound drops the children's close only; the record's own findings close, and the bound is logged at Warning with the count")]
+    public async Task Change_PastTheChildBound_ClosesTheRecordsOwnOnly()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var own = w.Signal(policy, w.Invoice(matter: MatterId));
+        var children = Enumerable.Range(0, ProcedureAssignmentService.MaxChildRecords + 1).Select(_ => WorkAssignmentUnder(w, Matter, MatterId)).ToList();
+        var onChild = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, children[0]));
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        outcome.Value!.CloseComplete.Should().BeFalse();
+        outcome.Value.Message.Should().Be(ProcedureAssignmentService.ChangeCloseChildrenOpenMessage);
+        w.Superseded.Should().ContainSingle().Which.Signals.Should().Equal(new[] { own });
+        w.StatusOf(own).Should().Be(SignalWriter.SignalStatusResolved);
+        w.StatusOf(onChild).Should().Be(SignalWriter.SignalStatusOpen, "the records under it are not read in part");
+        w.H.Queries.Should().NotContain(q => q.EntityName == WorkAssignmentTable && q.TopCount == 1, "no child's chain is read past the bound");
+        var warning = w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
+        warning.Message.Should().Contain($"more than {ProcedureAssignmentService.MaxChildRecords} core records").And.Contain($"({ProcedureAssignmentService.MaxChildRecords + 1} counted");
+        w.Log.Entries.Should().OnlyContain(e => !e.HasException);
+        w.Log.Entries.Should().NotContain(e => e.Message.Contains(children[0].ToString()), "no id of a record under the record is logged");
+    }
+
+    [Fact(DisplayName = "082c C19 fix round 1 (ontology 2, must-not-fire): a child pinned (Procedure-level) to a version whose rule is a DIFFERENT policy keeps that rule's open findings; only the changed rule's findings close")]
+    public async Task Change_LeavesADifferentRulesFindingsOnAPinnedChildOpen()
+    {
+        var w = new World();
+        var changed = w.Rule();
+        var procedure = w.Procedure();
+        var version = w.ProcedureVersion(procedure, ProcedureEntity.StatusActive);
+        var pinnedRule = w.Rule(code: "BILL-PINNED");
+        w.H.Rows["sprk_policyversion"].Single(v => v.GetAttributeValue<EntityReference>("sprk_policy").Id == pinnedRule)
+            [RuleSetService.ProcedureVersionColumn] = new EntityReference("sprk_procedureversion", version);
+        var pinned = WorkAssignmentUnder(w, Matter, MatterId);
+        w.H.Seed(new Entity(Assignment, Guid.NewGuid())
+        {
+            [WorkAssignmentTable] = new EntityReference(WorkAssignmentTable, pinned),
+            ["sprk_procedure"] = new EntityReference("sprk_procedure", procedure),
+            ["sprk_pinnedversion"] = new EntityReference("sprk_procedureversion", version),
+            ["sprk_mode"] = new OptionSetValue(ProcedureAssignmentEntity.ModePinned),
+        });
+        var invoice = InvoiceOn(w, WorkAssignmentTable, pinned, firm: FirmId);
+        var onChangedRule = w.Signal(changed, invoice);
+        var onPinnedRule = w.Signal(pinnedRule, invoice);
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(changed), CallerOid, Token, default);
+
+        outcome.Value!.CloseComplete.Should().BeTrue();
+        w.StatusOf(onChangedRule).Should().Be(SignalWriter.SignalStatusResolved, "the changed rule's finding closes: a Procedure-level pin does not decide a rule-level override");
+        w.StatusOf(onPinnedRule).Should().Be(SignalWriter.SignalStatusOpen, "a different policy's finding is never the change's to close");
+        w.Superseded.Should().ContainSingle().Which.Signals.Should().Equal(new[] { onChangedRule });
+    }
+
+    // ── 082c C19 fix round 1 (owner 2026-11-05, "the effective date wins"): a base finding closes only on an invoice whose every judged date is
+    //    on or after the change's in-force day. The same table runs at d0 (the record's own invoice) and d1 (a record directly under it). ──
+
+    private static readonly DateOnly Oct30 = new(2026, 10, 30);
+    private static readonly DateOnly Nov4 = new(2026, 11, 4);
+    private static readonly DateOnly Nov5 = new(2026, 11, 5);
+    private static readonly DateOnly Nov6 = new(2026, 11, 6);
+    private static readonly DateOnly Nov9 = new(2026, 11, 9);
+
+    /// <summary>Parses a table cell: a date, or "-" for none.</summary>
+    private static DateOnly? Day(string cell) => cell == "-" ? null : DateOnly.Parse(cell, System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>An In Review invoice of the record (<paramref name="side"/> d0) or of a work assignment directly under it (d1), with a finding on the
+    /// invoice and one on each line. <paramref name="invoiceDate"/> "-" is an invoice with no date at all; a line cell "-" is a line with no work date.</summary>
+    private static (Guid Invoice, List<Guid> Findings) DatedInvoice(World w, Guid policy, string side, string invoiceDate, string[] lines, string[]? adjustmentLines = null)
+    {
+        var invoice = side == "d0"
+            ? w.Invoice(matter: MatterId, date: Day(invoiceDate) ?? Nov6)
+            : InvoiceOn(w, WorkAssignmentTable, WorkAssignmentUnder(w, Matter, MatterId), date: Day(invoiceDate) ?? Nov6);
+        if (Day(invoiceDate) is null)
+        {
+            w.H.Row("sprk_invoice", invoice).Attributes.Remove(InvoiceAdjustmentService.InvoiceDateColumn);
+        }
+
+        var findings = new List<Guid> { w.Signal(policy, invoice) };
+        foreach (var cell in lines)
+        {
+            findings.Add(w.Signal(policy, invoice, line: w.Line(invoice, date: Day(cell), dated: cell != "-")));
+        }
+
+        foreach (var cell in adjustmentLines ?? [])
+        {
+            findings.Add(w.Signal(policy, invoice, line: w.Line(invoice, date: Day(cell), dated: cell != "-", cost: InvoiceLineCostType.Adjustment)));
+        }
+
+        return (invoice, findings);
+    }
+
+    // Closed: every judged date is on or after the in-force day (2026-11-05), the day itself included; a line with no work date is judged on the
+    // invoice date (the evaluator's own rule); an adjustment line is not judged. Open: any earlier date, or no date at all.
+    [Theory(DisplayName = "082c C19 fix round 1 (owner 2026-11-05): a base finding closes only when the resolver runs the record rule, not the base rule, on EVERY date it judges the invoice on (d0 and d1)")]
+    [InlineData("d0", "2026-11-06", "2026-11-05,2026-11-09", true)]    // all lines on or after, the in-force day itself among them
+    [InlineData("d1", "2026-11-06", "2026-11-05,2026-11-09", true)]
+    [InlineData("d0", "2026-11-05", "2026-11-05", true)]               // exactly the in-force day, invoice and line
+    [InlineData("d1", "2026-11-05", "2026-11-05", true)]
+    [InlineData("d0", "2026-11-06", "2026-10-30", false)]              // an October line (the seed trips here)
+    [InlineData("d1", "2026-11-06", "2026-10-30", false)]
+    [InlineData("d0", "2026-11-06", "2026-11-09,2026-10-30", false)]   // a mixed-date invoice: one earlier line keeps ALL its findings open
+    [InlineData("d1", "2026-11-06", "2026-11-09,2026-10-30", false)]
+    [InlineData("d0", "2026-11-06", "2026-11-04", false)]              // the day before the in-force day
+    [InlineData("d1", "2026-11-06", "2026-11-04", false)]
+    [InlineData("d0", "2026-11-04", "2026-11-05", false)]              // the invoice itself is judged on its date
+    [InlineData("d1", "2026-11-04", "2026-11-05", false)]
+    [InlineData("d0", "2026-11-06", "-", true)]                        // no work date: judged on the invoice date, on or after
+    [InlineData("d1", "2026-11-06", "-", true)]
+    [InlineData("d0", "2026-10-30", "-", false)]                       // no work date on an October invoice: judged on October
+    [InlineData("d1", "2026-10-30", "-", false)]
+    [InlineData("d0", "-", "-", false)]                                // no date to judge by at all
+    [InlineData("d1", "-", "-", false)]
+    [InlineData("d0", "-", "2026-11-09", false)]                       // the invoice has no date, so its own date cannot be told
+    [InlineData("d1", "-", "2026-11-09", false)]
+    [InlineData("d0", "2026-11-06", "", true)]                         // no lines: judged on the invoice date alone
+    [InlineData("d1", "2026-11-06", "", true)]
+    [InlineData("d0", "2026-10-30", "", false)]
+    [InlineData("d1", "2026-10-30", "", false)]
+    public async Task Change_ClosesAnInvoiceOnlyWhenEveryJudgedDateIsOnOrAfterTheInForceDay(string side, string invoiceDate, string lineDates, bool closed)
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var (_, findings) = DatedInvoice(w, policy, side, invoiceDate, lineDates.Length == 0 ? [] : lineDates.Split(','));
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        outcome.Value!.CloseComplete.Should().BeTrue("an invoice left open by its dates is not an incomplete close");
+        outcome.Value.Message.Should().Be(ProcedureAssignmentService.ChangeCloseCompleteMessage);
+        foreach (var finding in findings)
+        {
+            w.StatusOf(finding).Should().Be(closed ? SignalWriter.SignalStatusResolved : SignalWriter.SignalStatusOpen,
+                closed ? "every date the resolver judges the invoice on runs the record rule" : "the base rule still runs on a date before the change took effect");
+        }
+    }
+
+    [Fact(DisplayName = "082c C19 fix round 1: an adjustment line is not judged, so its early date keeps nothing open (d0 and d1)")]
+    public async Task Change_DoesNotJudgeAnAdjustmentLinesDate()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var (_, ownFindings) = DatedInvoice(w, policy, "d0", "2026-11-06", ["2026-11-05"], adjustmentLines: ["2026-10-30"]);
+        var (_, childFindings) = DatedInvoice(w, policy, "d1", "2026-11-06", ["2026-11-05"], adjustmentLines: ["2026-10-30"]);
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Value!.CloseComplete.Should().BeTrue();
+        foreach (var finding in ownFindings.Concat(childFindings))
+        {
+            w.StatusOf(finding).Should().Be(SignalWriter.SignalStatusResolved);
+        }
+    }
+
+    [Fact(DisplayName = "082c C19 fix round 1 (uac-r2 b): a mixed-date invoice on a record under the record stays open beside a fully-dated one that closes; the answer counts and says only what the caller can see")]
+    public async Task Change_OnTheChildren_ClosesTheFullyDatedInvoice_AndKeepsTheMixedDateOneOpen()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var (closing, closingFindings) = DatedInvoice(w, policy, "d1", "2026-11-06", ["2026-11-05", "2026-11-09"]);
+        var (mixed, mixedFindings) = DatedInvoice(w, policy, "d1", "2026-11-06", ["2026-11-09", "2026-10-30"]);
+        w.Readable.UnionWith(new[] { closing, mixed });
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Value!.CloseComplete.Should().BeTrue();
+        closingFindings.Should().OnlyContain(f => w.StatusOf(f) == SignalWriter.SignalStatusResolved);
+        mixedFindings.Should().OnlyContain(f => w.StatusOf(f) == SignalWriter.SignalStatusOpen, "one earlier line keeps every finding of the invoice open");
+        w.Superseded.Should().ContainSingle().Which.Signals.Should().BeEquivalentTo(closingFindings, "only findings superseded under the effective-date rule are targeted");
+        outcome.Value.VisibleOpenInvoices.Should().Be(1, "the count is of the invoices the caller can read whose findings closed");
+        outcome.Value.Message.Should().NotContain(closing.ToString()).And.NotContain(mixed.ToString());
+        w.Log.Entries.Should().NotContain(e => e.Message.Contains(closing.ToString()) || e.Message.Contains(mixed.ToString()), "no id of an invoice under the record is logged");
+    }
+
+    // The close agrees with the resolver on the day the version takes effect, whatever time of that UTC day it was written at: the version's
+    // in-force day is the UTC day of the instant (ProcedureResolver.UtcDate), and the comparison is ProcedureResolution.InForceOn, the one
+    // expression RecordRuleVersionOn selects by (ProcedureResolverTests: "082b record rules (C19 fix round 1)" runs the same instants through the resolver).
+    [Theory(DisplayName = "082c C19 fix round 1: a line dated on the in-force UTC day closes at any time of that day, and one dated the day before stays open")]
+    [InlineData("2026-11-05T00:00:00Z")]
+    [InlineData("2026-11-05T14:30:00Z")]
+    [InlineData("2026-11-05T23:59:59Z")]
+    public async Task Change_AgreesWithTheResolverOnTheInForceDay_WhateverTheTimeOfDay(string instant)
+    {
+        var w = new World { Clock = new FixedClock(DateTimeOffset.Parse(instant, System.Globalization.CultureInfo.InvariantCulture)) };
+        var policy = w.Rule();
+        var (_, onTheDay) = DatedInvoice(w, policy, "d0", "2026-11-05", ["2026-11-05"]);
+        var (_, theDayBefore) = DatedInvoice(w, policy, "d0", "2026-11-05", ["2026-11-04"]);
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Value!.CloseComplete.Should().BeTrue();
+        onTheDay.Should().OnlyContain(f => w.StatusOf(f) == SignalWriter.SignalStatusResolved);
+        theDayBefore.Should().OnlyContain(f => w.StatusOf(f) == SignalWriter.SignalStatusOpen);
+        var version = w.H.Row("sprk_policyversion", outcome.Value.RecordRule.VersionId);
+        version.GetAttributeValue<DateTime>("sprk_inforcefrom").Should().Be(DateTimeOffset.Parse(instant, System.Globalization.CultureInfo.InvariantCulture).UtcDateTime,
+            "the close dates by the very instant the version is written with");
+    }
+
+    [Fact(DisplayName = "082c C19: exactly the bound of records under the record is read and closed")]
+    public async Task Change_AtTheChildBound_Closes()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var children = Enumerable.Range(0, ProcedureAssignmentService.MaxChildRecords).Select(_ => WorkAssignmentUnder(w, Matter, MatterId)).ToList();
+        var onLast = w.Signal(policy, InvoiceOn(w, WorkAssignmentTable, children[^1]));
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        outcome.Value!.CloseComplete.Should().BeTrue();
+        w.StatusOf(onLast).Should().Be(SignalWriter.SignalStatusResolved);
+    }
+
+    [Fact(DisplayName = "082c C19 idempotent: a finding already resolved is not targeted, and the repeated change (409 duplicate) closes nothing more")]
+    public async Task Change_Repeated_ClosesNothingMore()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        var child = WorkAssignmentUnder(w, Matter, MatterId);
+        var invoice = InvoiceOn(w, WorkAssignmentTable, child);
+        var open = w.Signal(policy, invoice);
+        var resolved = w.Signal(policy, invoice);
+        w.H.Row("sprk_signal", resolved)["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
+
+        var first = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+        var again = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        first.Kind.Should().Be(RuleSetOutcomeKind.Done, first.Detail);
+        again.ErrorCode.Should().Be("assignment.duplicate");
+        w.Superseded.Should().ContainSingle().Which.Signals.Should().Equal(new[] { open }, "an already resolved finding is not targeted");
+        w.StatusOf(open).Should().Be(SignalWriter.SignalStatusResolved);
+        ResolutionOf(w, resolved).Should().Be(0, "the resolved finding was not written again");
     }
 
     [Fact(DisplayName = "089e K2: a stage-3 transaction that committed but gave no answer is read back: the change is Done and the close runs")]
