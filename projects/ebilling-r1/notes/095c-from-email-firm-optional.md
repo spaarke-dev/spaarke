@@ -1546,4 +1546,18 @@ Scoped to the access boundary around the stored `assignFirm` member, one test ga
 
 The closing `rework:` line is a status marker read by `scripts/ai-cost/spend-report.py`, so it is updated to `fix-round-2`.
 
+### 16.10 P2 precondition: partners never see a firmless submission (2026-11-05)
+
+uac-r2's condition before the owner is asked for P2: every partner and contact reader of `sprk_invoicesubmission` fails closed on a blank firm. Branch `task/ebilling-p2-blankfirm-tests` (`af833bd605`, `5ba48fd7ce`, `e8450e8d22`), merged into work at `ebfb5f39bf`. Two adversarial passes, no F; uac-r2 CLEARED.
+
+- **Routes (already closed, now pinned by tests).** Single read: `ExternalInvoiceSubmissionAuthorizationFilter.cs:~300` (`FirmId: { } firmId` pattern) gives a 404. List: `InvoiceSubmissionService.ListAsync` (an empty firm set reads nothing; `sprk_vendororg In [...]` never matches null; Guid.Empty is now dropped from the set, for hygiene, since no membership read produces it, `ExternalParticipationService.ProjectOrganizationMemberships` `:296-299`). Replacement note: `ExternalInvoiceSubmissionEndpoints.cs:~162`.
+- **Assistant `dataverse.*` tools for flagged systemusers (was open).** `ExternalInvoiceVisibility.DecideSubmissionsAsync` withholds a submission whose firm is null, Guid.Empty or not a GUID, before the invoice and channel decisions, with the internal reason `InvoiceHiddenReason.FirmMissing` (`firm_missing`, logs only). `ReadSubmissionViewsAsync` re-reads `_sprk_vendororg_value` app-only by id. It hides the submission only; the invoice predicate does not read the firm. Internal systemusers are unaffected.
+- **K1 (accepted by uac-r2, ruling (a)).** The tracking number is also copied onto rows that follow the INVOICE (the invoice's `sprk_trackingnumber`, line names, the approval name, the Stored File name, the Decision Record payload), so a flagged systemuser who may see the invoice can read it. It is the invoice's identifier, not submission content, and partners never get it (not in the invoices module `ReadableColumns`). No stripping.
+- **K2.** Set firm can land between the assistant path's user read and its app-only re-read; only firmless to firm, and a set firm cannot be cleared. No action.
+- **K3 (pre-existing).** A wrong firm cannot be corrected, so the old firm keeps sight.
+- **K4 (pre-existing, uac-r2's).** `GET /api/v1/records/{table}/{id}/family` reads as the caller with no external narrowing; uac-r2 takes it to the owner with the flagged-systemuser role question.
+- **Not covered:** the depth of the Dataverse role XML (the round-77 accepted gap). No role ceiling is cited.
+
+**ORDERING: P2 needs a 095c BFF on the environment first.** The dev BFF is master, and master has no `sprk_trackingscope` code (0 hits, 2026-11-05). Step 5 of `Deploy-EbillingSubmissionTrackingScopeSchema.ps1` makes the scope column SystemRequired, after which a BFF that does not write it has every submission create refused by the platform (0x80040200). So the migration on an environment runs only after a BFF with 095c is deployed there. The live seam test (`TrackingNumberAllocatorLiveTests.Renumber`) therefore cannot be a gate before the master PR on dev; it runs after the master merge and the dev deploy, before any release beyond dev (owner decision pending).
+
 rework: fix-round-2 task 095d-1c
