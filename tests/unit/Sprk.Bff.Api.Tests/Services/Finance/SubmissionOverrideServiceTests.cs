@@ -3541,6 +3541,92 @@ public class SubmissionOverrideServiceTests
         w.AssertNothingWritten();
     }
 
+    private static AccessRights ReadOnlyRights(string set, Guid id) => AccessRights.Read;
+
+    [Fact(DisplayName = "114b F1 must-fire: the shared Signal is the only open one and its firm hold remains (the filter empties the set) - the caller's rights are still asked on the invoice AND the core record")]
+    public async Task Release_WhenTheFilterEmptiesTheSet_StillAsksTheCallersRights_OnTheInvoiceAndTheCore()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
+        w.InvoiceOwnHold = FirmMissing;
+        var shared = AddSharedIntegritySignal(w);
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        AssertLeftOpen(w, shared);
+        w.Probe.RightsAsked.Should().BeEquivalentTo(
+            [(World.Token, "sprk_matters", World.Matter), (World.Token, "sprk_invoices", World.InvoiceId)],
+            "the filter leaves nothing to close, but the record is core-bound and the review detail is an invoice write");
+        w.InvoiceDetail.Should().Be(InvoiceReviewDetail.WaitingForFirm);
+    }
+
+    [Fact(DisplayName = "114b F1 must-fire: the same set, a caller without AppendTo on the core and Write on the invoice - 403, no Decision Record, no review-detail write, no close, no stored set")]
+    public async Task Release_WhenTheFilterEmptiesTheSet_ACallerWithoutTheRights_Is403_AndNothingIsWritten()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
+        w.InvoiceOwnHold = FirmMissing;
+        var shared = AddSharedIntegritySignal(w);
+        w.Probe.Rights = ReadOnlyRights;
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(403);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.NotAuthorized);
+        w.RecordCreates.Should().Be(0);
+        w.Recorded.Should().BeEmpty();
+        w.Closes.Should().BeEmpty();
+        w.ClosedBy.Should().NotContainKey(shared);
+        w.InvoiceDetail.Should().BeNull("no review-detail write");
+        w.Transactions.Should().BeEmpty();
+        w.AssertNothingWritten();
+    }
+
+    [Fact(DisplayName = "114b F1 must-fire order (K2): a caller without the rights, where the holds derivation would fault, gets 403 and not 503 - the derivation is not called")]
+    public async Task Release_ACallerWithoutTheRights_Is403_NotUnavailable_AndTheDerivationIsNotCalled()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
+        w.InvoiceOwnHold = FirmMissing;
+        AddSharedIntegritySignal(w);
+        w.HoldReadFault = new TimeoutException("dataverse");
+        w.Probe.Rights = ReadOnlyRights;
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(403);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.NotAuthorized);
+        w.SignalQueries.Should().NotContain(q => q == "sprk_invoice" || q == FinanceBaseValues.SubmissionEntity, "the app-only holds read (the derivation) never ran");
+        w.AssertNothingWritten();
+    }
+
+    [Fact(DisplayName = "114b F1 replay: a stored set left EMPTY by the filter is replayed unchanged, but a retry by a caller without the rights is still 403 (the rights are asked on what is open now)")]
+    public async Task Release_Replay_OfAnEmptyStoredSet_StillAsksTheCallersRights()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
+        w.InvoiceOwnHold = FirmMissing;
+        var shared = AddSharedIntegritySignal(w);
+        w.RecordFault = new TimeoutException("dataverse");
+
+        var first = await w.OverrideAsync();
+
+        first.StatusCode.Should().Be(503);
+        StoredSetIds(w).Should().BeEmpty("the filter left nothing; the empty set is stored");
+        w.RecordFault = null;
+        w.Probe.Rights = ReadOnlyRights;
+
+        var retry = await w.OverrideAsync();
+
+        retry.StatusCode.Should().Be(403);
+        retry.ErrorCode.Should().Be(BlockedSubmissionErrors.NotAuthorized);
+        w.RecordCreates.Should().Be(0);
+        w.ClosedBy.Should().NotContainKey(shared);
+
+        w.Probe.Rights = ScriptedProbe.RealReviewerRights;
+        var again = await w.OverrideAsync();
+
+        again.Kind.Should().Be(BlockedDecisionKind.Decided, "the replay of the stored (empty) set is unchanged for a caller with the rights");
+        AssertLeftOpen(w, shared);
+    }
+
     [Fact(DisplayName = "114b: a Return closes the set as before - the filter is the Override's (a Return releases no hold)")]
     public async Task Return_IsUnchanged_ByTheHoldFilter()
     {

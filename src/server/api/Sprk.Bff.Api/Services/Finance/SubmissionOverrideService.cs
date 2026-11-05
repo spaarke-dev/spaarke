@@ -786,6 +786,10 @@ public sealed class SubmissionOverrideService
 
         InvoiceSubmissionAfterSteps.ResolvedSignalSet signalSet;
         IReadOnlyList<(string Entity, Guid Id)> subjects;
+        // Task 114b F1: the set the caller's rights (FR-51) are asked on. It is the set as determined, BEFORE the hold filter below, because the
+        // Decision Record is core-bound and the review detail is an invoice write even when the filter leaves no Signal to close.
+        InvoiceSubmissionAfterSteps.ResolvedSignalSet authSet;
+        IReadOnlyList<(string Entity, Guid Id)> authSubjects;
         var storeSet = false;
         IReadOnlyList<(InvoiceSubmissionAfterSteps.ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)>? freshOpen = null;
         try
@@ -808,7 +812,7 @@ public sealed class SubmissionOverrideService
             {
                 var read = await InvoiceSubmissionAfterSteps.ReadOpenSignalSetWithSubjectsAsync(_entities, _time, invoiceId, _logger, ct).ConfigureAwait(false);
                 (signalSet, storeSet, freshOpen) = (read.Set, true, read.Open);
-                check =new StoredSignalSetCheck.Result(true, null, read.Subjects);
+                check = new StoredSignalSetCheck.Result(true, null, read.Subjects);
             }
 
             if (!check.Trusted)
@@ -819,6 +823,16 @@ public sealed class SubmissionOverrideService
             }
 
             subjects = check.Subjects;
+            (authSet, authSubjects) = (signalSet, subjects);
+
+            if (!storeSet && verb == Verb.Override && signalSet.Signals.Count == 0)
+            {
+                // Replay of a stored set that is empty (no Signal was open, or the 114b filter left none): the rights are asked on what is open NOW,
+                // unfiltered, so a retry by another caller cannot write the record and the review detail unasked. A read only; the replayed
+                // decision (the stored set, the closes) is not changed. Nothing open now asks nothing, as for a first attempt.
+                var now = await InvoiceSubmissionAfterSteps.ReadOpenSignalSetWithSubjectsAsync(_entities, _time, invoiceId, _logger, ct).ConfigureAwait(false);
+                (authSet, authSubjects) = (now.Set, now.Subjects);
+            }
         }
         catch (Exception ex) when (!IsCallerCancellation(ex, ct))
         {
@@ -826,11 +840,19 @@ public sealed class SubmissionOverrideService
             return Unavailable(submissionId, invoiceId);
         }
 
+        // ── FR-51, before any write and before any other read (114 position; 114b F1): closing Signals (app identity, no impersonation) needs the
+        //    caller's rights, asked as the caller, on the set BEFORE the hold filter. An unauthorised caller gets 403 before the review-detail probe
+        //    or the app-only holds read, so a fault in those cannot answer 503 first. ──
+        if (await AuthorizeCloseAsync(submissionId, invoiceId, invoice!, authSet, authSubjects, token, ct).ConfigureAwait(false) is { } denied)
+        {
+            return denied;
+        }
+
         // ── Task 114 (F4 review round; 114b order change): the holds that REMAIN are derived BEFORE any write (the set store, the Decision Record,
         //    the Signal closes), so a fault reading them leaves nothing behind (503, no record, no closed Signal) while the hold stays in force. The
         //    derivation does not depend on the record: it asks "what remains once this submission reads as released", through a provisional stamp
-        //    (the decision id; the real stamp, with the record id, is written below). 114b: it also runs BEFORE the authorisation, the Decision
-        //    Record's build and the set's store, because the same answer decides which Signals this decision may close (a Signal whose hold still
+        //    (the decision id; the real stamp, with the record id, is written below). 114b: it also runs BEFORE the Decision
+        //    Record's build and the set's store (after the authorisation, which asks on the unfiltered set), because the same answer decides which Signals this decision may close (a Signal whose hold still
         //    stands stays open), so the record's resolved set, the stored set and the close all name the same Signals. ──
         var liftsProcedureHold = verb == Verb.Override && InvoiceProcedureHold.ReasonsOf(row).Count > 0;
         var holdBearingOpen = verb == Verb.Override && freshOpen is { } openNow && openNow.Any(s => IsHoldBearingSignal(s.Signal, s.SubjectEntity, s.SubjectId, invoiceId));
@@ -882,12 +904,6 @@ public sealed class SubmissionOverrideService
             var keptIds = kept.Select(s => s.Signal.Id).ToHashSet();
             signalSet = new InvoiceSubmissionAfterSteps.ResolvedSignalSet(signalSet.SetReadAtUtc, signalSet.Signals.Where(s => keptIds.Contains(s.Id)).ToList());
             subjects = kept.Select(s => (s.SubjectEntity, s.SubjectId)).Distinct().ToList();
-        }
-
-        // ── FR-51, before any write: closing Signals (app identity, no impersonation) needs the caller's rights, asked as the caller. ──
-        if (await AuthorizeCloseAsync(submissionId, invoiceId, invoice!, signalSet, subjects, token, ct).ConfigureAwait(false) is { } denied)
-        {
-            return denied;
         }
 
         var decision = BuildDecision(verb, stored, submissionId, invoiceId, decider, reason, signalSet, ChannelNameOf(row));
