@@ -280,7 +280,16 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         _creates.Should().ContainSingle().Which.Fields.Keys.Should().NotContain("sprk_description");
         outcome.MappingWarnings.Should().ContainSingle().Which.Should().Be(new RecordCreationWarning(
             RecordCreationWarning.MappingSourceUnavailableCode, null, MappingSourceReadProbe.SourceUnavailableWarning));
-        _probe.Asked.Should().ContainSingle().Which.Should().Be((CallerToken, "sprk_documents", TypedRouteDocument));
+        if (shape == "no-decision")
+        {
+            // Task 043 review (K1): with no decision from the route a document can never map, so not even the probe is asked.
+            _probe.Asked.Should().BeEmpty();
+        }
+        else
+        {
+            _probe.Asked.Should().ContainSingle().Which.Should().Be((CallerToken, "sprk_documents", TypedRouteDocument));
+        }
+
         _sourceReads.Should().BeEmpty("the document is not read app-only before the narrowing has shown it");
     }
 

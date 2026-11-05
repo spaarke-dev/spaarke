@@ -227,7 +227,7 @@ public class MappingSourceReadProbeTests
             $"probe sprk_documents({Readable})", $"narrowing {Readable}", $"read sprk_document({Readable})");
     }
 
-    public static TheoryData<string> DocumentNotShown => new() { "hidden", "narrowing-faults", "no-decision" };
+    public static TheoryData<string> DocumentNotShown => new() { "hidden", "narrowing-faults" };
 
     [Theory]
     [MemberData(nameof(DocumentNotShown))]
@@ -250,6 +250,25 @@ public class MappingSourceReadProbeTests
         result.Should().BeSameAs(MappingSourceRead.Unavailable);
         _events.Should().StartWith($"probe sprk_documents({Readable})", "the caller's Read is asked first");
         _events.Should().NotContain(e => e.StartsWith("read ", StringComparison.Ordinal), "the document is never read app-only");
+        _appOnly.Verify(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ReadAsync_ADocumentOnARouteWithNoDocumentDecision_IsTheOneUnavailable_WithNothingAsked()
+    {
+        // Task 043 review (K1): a route that passes no document decision can never map from a document, so neither the
+        // caller-rights probe nor the read runs. The answer depends only on the route and the table, never on the record:
+        // a readable, a denied and a missing document all give the same result after the same (no) work.
+        foreach (var id in new[] { Readable, Denied, Missing })
+        {
+            var probe = new RightsProbe(AccessRights.Read, _events);
+
+            var result = await Read(MappingSourceReader.ForCaller(probe, "caller-token"), Document, id);
+
+            result.Should().BeSameAs(MappingSourceRead.Unavailable);
+        }
+
+        _events.Should().BeEmpty("no probe, no narrowing and no read");
         _appOnly.Verify(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 

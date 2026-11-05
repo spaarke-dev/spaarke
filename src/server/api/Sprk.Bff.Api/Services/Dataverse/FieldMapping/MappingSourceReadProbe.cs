@@ -277,6 +277,15 @@ internal static class MappingSourceReadProbe
 
         if (reader.Probe is { } probe)
         {
+            // Task 043 review (K1): a route that carries no document decision can never map from a document, so the
+            // caller-rights probe is not asked. The answer depends only on the route and the table, never on the record.
+            if (IsDocumentSource(source.EntityLogicalName) && reader.DocumentShown is null)
+            {
+                logger?.LogInformation(
+                    "[FIELD-MAPPING-SOURCE] This create carries no document decision for the caller; a document source maps nothing.");
+                return MappingSourceRead.Unavailable;
+            }
+
             var check = await CheckCallerReadOfSourceAsync(
                     probe, reader.CallerBearerToken, source.EntityLogicalName, source.RecordId, ct)
                 .ConfigureAwait(false);

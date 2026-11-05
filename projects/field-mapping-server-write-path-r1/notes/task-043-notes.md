@@ -96,12 +96,34 @@ See the commit message and the final report for counts, publish delta and CVE (`
 - 048 (unmerged): touches `FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync`; this task changes `AuthorizePushSourceAsync`,
   a different region. Expect a clean merge.
 
+## Verification on the merged tip (30b2e5da34, work branch with 048)
+
+verify-suites: solution build 0 warnings, 0 errors; ArchTests 1940/1940; filtered suites 6836 passed, 0 failed, 7 skipped.
+Second filter (Analysis, Event, mapping source, push, chat update/delete, writer-only): 432/432. CVE: no vulnerable packages.
+
+## Review (2026-11-05)
+
+- code-review and adr-check (implementer): no fix-now finding.
+- Opus adversarial pass 1: no fix-now defect in the design. It re-derived the recorded decision (written only by
+  `AuthorizeCreateAsync`, after every check), the same-document binding, the uniform Unavailable on every non-allowed case,
+  field security on the caller read, and NFR-07.
+
+| Finding | Class | Outcome |
+|---|---|---|
+| The 201 `warnings` member is not shown by the Analysis wizard (`analysisService.ts`) | F2 (tracking) | Acceptance criterion added to task 028 (a34f2c2c03) |
+| A route with no document decision still probed the caller's rights on a document source | K1 | Fixed in round 1: `ReadAsync` returns Unavailable before the probe when the source is a document and the route passed no decision (depends only on route and table). Tests: `ReadAsync_ADocumentOnARouteWithNoDocumentDecision_IsTheOneUnavailable_WithNothingAsked`; the seam theory's no-decision case asserts no probe. Failing first: 2 of 193 with the fix reverted; 1041/1041 with it |
+| `POST /child-records/sprk_analysis` passes no document decision, so a Document to Analysis profile maps nothing there | K2 | Known limit; task 028 keeps the wizard on `/api/ai/analysis/create` (criterion added) |
+| The caller read of a document source fetches the whole row (no `$select`, by #2191) | K1 | Known limit; watch create latency under task 049 |
+| Other review items | - | Sent to UAC-r2 by message |
+
+## Known limits
+
+- Only the analysis create passes a document decision; on every other create route a document source maps nothing, with the
+  one warning.
+- AC2 "document does not exist" is held at the probe level; through the route the filter answers its existing 403 first.
+
 ## Release note
 
 A Document to Analysis field-mapping profile now fills the new analysis from its document when the user can read that
 document. When they cannot, the analysis is still created and the response says no fields were copied. The Manual Refresh push
 works from a document on the same terms.
-
-## Rework
-
-None after review: code-review and adr-check found no fix-now finding.
