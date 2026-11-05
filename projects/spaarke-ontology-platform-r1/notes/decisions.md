@@ -652,3 +652,7 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - A d0 fault still closes nothing.
     - All-or-nothing across d0 and d1 would turn the bound into a permanent regression from 089e, because nothing else closes Billing findings.
   - Known limits accepted: a record rule without its Exclude, the record rule's date window, the pair fragment. The fix range for (3) and the test for (2) get a scoped re-check.
+  - **Owner ruling (2026-11-05, relayed by ebilling): the effective date wins in the Superseded close, at d0 and d1.** This was a pre-existing 089e finding.
+    - A base finding closes only when every line's date, as the evaluator determines it, is on or after the new record-rule version's `sprk_inforcefrom`. A line dated earlier, or with no determinable date, keeps the finding open.
+    - It is ontology's rule applied to dates and matches D-203(4).
+    - The re-check covers four points. The filter must use the evaluator's own per-line date and the same comparison as `RecordRuleVersionOn` (no one-day mismatch). It must say whether line-level findings are judged by the invoice or by their own line (either is acceptable). The "record rule's date window" known limit is retired.
