@@ -136,9 +136,16 @@ public sealed record ResolvedPolicyVersion
     /// <summary><c>createdon</c> (UTC): which episode of a change a record rule's version belongs to. Internal: it is not part of the snapshot.</summary>
     internal DateTime? CreatedOn { get; init; }
 
+    /// <summary>
+    /// The code as <see cref="object.ToString"/> prints it. A record rule's code is <see cref="ProcedureAssignmentService.RecordRuleCodePrefix"/> plus
+    /// its policy id (<see cref="ProcedureAssignmentService.RecordRuleCode"/>), so it prints the token <c>record rule</c> instead (082c C17, K2).
+    /// </summary>
+    internal static string Printable(string policyCode) =>
+        policyCode.StartsWith(ProcedureAssignmentService.RecordRuleCodePrefix, StringComparison.Ordinal) ? "record rule" : policyCode;
+
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("PolicyCode = ").Append(PolicyCode).Append(", VersionNumber = ").Append(VersionNumber)
+        builder.Append("PolicyCode = ").Append(Printable(PolicyCode)).Append(", VersionNumber = ").Append(VersionNumber)
             .Append(", RuleType = ").Append(RuleType).Append(", InForceFrom = ").Append(InForceFrom);
         return true;
     }
@@ -185,7 +192,7 @@ public sealed record ResolvedRule(ResolvedPolicyVersion Version, AppliedProcedur
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("PolicyCode = ").Append(Version.PolicyCode).Append(", VersionNumber = ").Append(Version.VersionNumber)
+        builder.Append("PolicyCode = ").Append(ResolvedPolicyVersion.Printable(Version.PolicyCode)).Append(", VersionNumber = ").Append(Version.VersionNumber)
             .Append(", ProcedureName = ").Append(Procedure.ProcedureName).Append(", ProcedureVersionNumber = ").Append(Procedure.ProcedureVersionNumber)
             .Append(", Rank = ").Append(Procedure.Rank).Append(", RecordRule = ").Append(RecordRule is not null);
         return true;
@@ -202,7 +209,7 @@ public sealed record ExcludedRule(
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("PolicyCode = ").Append(Version.PolicyCode).Append(", ProcedureName = ").Append(Procedure.ProcedureName)
+        builder.Append("PolicyCode = ").Append(ResolvedPolicyVersion.Printable(Version.PolicyCode)).Append(", ProcedureName = ").Append(Procedure.ProcedureName)
             .Append(", Distance = ").Append(Distance).Append(", ReplacedByRecordRule = ").Append(ReplacedByRecordRule)
             .Append(", Overrides = ").Append(Overrides.Count);
         return true;

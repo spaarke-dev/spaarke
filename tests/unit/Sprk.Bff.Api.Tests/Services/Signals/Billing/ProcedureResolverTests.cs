@@ -1264,8 +1264,13 @@ public sealed class ProcedureResolverTests
         var applied = new AppliedProcedure(
             ids[8], "Billing guidelines", ids[6], 2, new ProcedureRank(ProcedureLevel.ManualParent, 1, false), ProcedureSources.Manual, false, rows);
         var slot = new RecordRuleSlot(ids[9], "BASE-1", ids[7], parent, row);
+        // K2: a record rule's code is BRR- plus its policy id, so no printed form may carry it.
+        var recordRuleVersion = version with { PolicyCode = ProcedureAssignmentService.RecordRuleCode(ids[2]) };
         var texts = new Dictionary<string, string>
         {
+            ["recordRuleVersion"] = recordRuleVersion.ToString(),
+            ["recordRule"] = new ResolvedRule(recordRuleVersion, applied, slot).ToString(),
+            ["excludedRecordRule"] = new ExcludedRule(recordRuleVersion, applied, rows, 1, ReplacedByRecordRule: false).ToString(),
             ["link"] = parent.ToString(),
             ["version"] = version.ToString(),
             ["rule"] = new ResolvedRule(version, applied, slot).ToString(),
@@ -1282,6 +1287,11 @@ public sealed class ProcedureResolverTests
             }
 
             text.Should().NotContain("SECRET", name).And.NotContain(reason, name).And.NotContain(MatterName, name).And.NotContain("incrementHours", name);
+        }
+
+        foreach (var name in new[] { "recordRuleVersion", "recordRule", "excludedRecordRule" })
+        {
+            texts[name].Should().Contain("record rule", name).And.NotContain(ProcedureAssignmentService.RecordRuleCodePrefix, name);
         }
 
         texts["link"].Should().Contain(Matter).And.Contain("Distance = 1");
