@@ -204,6 +204,17 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             return Error(tool, parseError!, ToolErrorCodes.ValidationFailed, startedAt);
         }
 
+        // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths
+        // (RecordTableRule.FixedAfterCreateColumns): an item of a Signal or a Decision Record that names either column is refused
+        // whole, on its shape alone, before any read, re-file, index step or write. Nothing is written.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(tablename, item.EnumerateObject().Select(p => p.Name)) is { } fixedRefusal)
+        {
+            return LogOutcome(context, tablename, recordId,
+                Error(tool, $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).",
+                    fixedRefusal.RefusalCode!, startedAt),
+                stopwatch);
+        }
+
         try
         {
             // Entity-set resolution under the USER's token (read-handler pattern): a table

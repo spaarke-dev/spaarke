@@ -139,6 +139,16 @@ internal static partial class RecordTableRules
         SecurableEntityRegistry.SecurityBusinessUnitAttribute,
     ];
 
+    /// <summary>
+    /// The core record pair of a Signal and a Decision Record (<see cref="RecordTableRule.FixedAfterCreateColumns"/>): the record
+    /// type lookup and the record id, set at create (the ontology writers, or the unified create) and fixed after it.
+    /// Compile-time constants only, so declaring them here cannot create a static-initialisation cycle. Declared before
+    /// <see cref="All"/>.
+    /// </summary>
+    private static readonly IReadOnlySet<string> CoreRecordPairColumns = Columns(
+        Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn,
+        Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn);
+
     /// <summary>Every registered table, in declaration order.</summary>
     internal static IReadOnlyList<RecordTableRule> All { get; } =
     [
@@ -408,6 +418,8 @@ internal static partial class RecordTableRules
             Kind = RecordTableKind.Child,
             MappingExclusion = OntologyContentIsNotMapped,
             CreatedOnlyByItsWriter = true,
+            // The core record pair is fixed after create on BFF update paths (update only: the create still takes it).
+            FixedAfterCreateColumns = CoreRecordPairColumns,
         },
         new RecordTableRule
         {
@@ -415,6 +427,8 @@ internal static partial class RecordTableRules
             Kind = RecordTableKind.Child,
             MappingExclusion = OntologyContentIsNotMapped,
             CreatedOnlyByItsWriter = true,
+            // The core record pair is fixed after create on BFF update paths (update only: the create still takes it).
+            FixedAfterCreateColumns = CoreRecordPairColumns,
         },
         new RecordTableRule
         {
@@ -435,6 +449,42 @@ internal static partial class RecordTableRules
     /// <summary>The rule of <paramref name="table"/>; throws when the registry has no entry (a view over a known table).</summary>
     internal static RecordTableRule Get(string table) =>
         Find(table) ?? throw new KeyNotFoundException($"The record table rules registry has no entry for '{table}'.");
+
+    /// <summary>
+    /// The reason code when a BFF update path's payload names a column of <see cref="RecordTableRule.FixedAfterCreateColumns"/>
+    /// (<see cref="RefuseFixedAfterCreateColumns"/>). Nothing is written.
+    /// </summary>
+    internal const string FixedAfterCreateReasonCode = "record_update.fixed_after_create";
+
+    /// <summary>
+    /// The ONE update-side check of <see cref="RecordTableRule.FixedAfterCreateColumns"/>: the refusal when an UPDATE of
+    /// <paramref name="table"/> names one of its fixed-after-create columns, or <c>null</c> when the update may proceed. Every
+    /// BFF update path that takes a caller-, model- or configuration-supplied payload asks it before anything is read or written:
+    /// the chat update tool (<c>DataverseUpdateRecordHandler</c>), the Update Record node and the action seam
+    /// (<c>UpdateRecordActionCore</c>), a playbook's output mapping (<c>DataverseUpdateHandler</c>) and the field-mapping push
+    /// (per rule). Each maps the answer to its own refusal. Shape only: it reads nothing, so it answers the same for any record.
+    /// The table is matched trimmed and in any case; a key in any form a writer sends (any case, <c>{nav}@odata.bind</c>,
+    /// <c>_{column}_value</c>) is matched by its column (<see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn"/>).
+    /// Never asked by a create: the create paths take these columns (<see cref="RecordTableRule.TableServerOwnedColumns"/> is the
+    /// create-side refusal).
+    /// </summary>
+    /// <param name="table">The table the update names.</param>
+    /// <param name="keys">The payload's keys, in any form a writer sends.</param>
+    internal static RecordOwnerResolution? RefuseFixedAfterCreateColumns(string? table, IEnumerable<string> keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (Find(table) is not { FixedAfterCreateColumns.Count: > 0 } rule)
+            return null;
+
+        // Trimmed after the normalization too, so a space before the '@' of a bind key ("sprk_corerecordtype @odata.bind")
+        // still names its column.
+        var named = keys.Select(k => Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k).Trim())
+            .FirstOrDefault(rule.FixedAfterCreateColumns.Contains);
+        return named is null
+            ? null
+            : RecordOwnerResolution.Refused(FixedAfterCreateReasonCode,
+                $"{named} of a {rule.Table} is set when the record is created and cannot be changed");
+    }
 
     /// <summary>
     /// Task 037 (FR-36): what <paramref name="rule"/>'s copied defaults (<see cref="ServerDefault.CopiedFrom"/>) come to on
@@ -954,6 +1004,24 @@ internal sealed record RecordTableRule
     /// Empty when no column is protected from mapping.
     /// </summary>
     public IReadOnlySet<string> MappingProtectedColumns { get; init; } = NoColumns;
+
+    /// <summary>
+    /// Columns of THIS table that are set at create and fixed after it: the create paths take them, and every BFF UPDATE path
+    /// that takes a caller-, model- or configuration-supplied payload refuses a payload naming one
+    /// (<see cref="RecordTableRules.RefuseFixedAfterCreateColumns"/>). Today the core record pair of a Signal and a Decision
+    /// Record. Update only, so not in <see cref="TableServerOwnedColumns"/> (which refuses on create too). Empty when the table
+    /// has none.
+    /// </summary>
+    /// <remarks>
+    /// <b>Component justification (CLAUDE.md §11).</b> Existing — <see cref="TableServerOwnedColumns"/> refuses a caller's
+    /// columns on create; <c>InheritedAccessPermission.AccessColumns</c> holds a Signal's pair, but asks it of the app-only
+    /// playbook writers only and holds no Decision Record. Extension — the first would refuse the pair on the create that sets
+    /// it, and the second is an access-input set whose identity rule leaves the chat tool and a confirmed proposal unasked, so an
+    /// update-only per-table set beside them in this registry is the narrow fit. Cost of doing nothing — the core record pair
+    /// stays changeable after create through the chat update tool, a confirmed proposal, the field-mapping push and, for a
+    /// Decision Record, the playbook writers.
+    /// </remarks>
+    public IReadOnlySet<string> FixedAfterCreateColumns { get; init; } = NoColumns;
 
     /// <summary>The column the platform autonumber fills (the create leaves it empty and retries on its alternate key).</summary>
     public string? AutonumberColumn { get; init; }

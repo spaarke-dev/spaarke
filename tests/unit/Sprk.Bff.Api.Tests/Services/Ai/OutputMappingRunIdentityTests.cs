@@ -195,8 +195,8 @@ public class OutputMappingRunIdentityTests
             MappedTable, Mapped, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, Person);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            MappedTable, Mapped, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), Person), Times.Once);
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            MappedTable, Mapped, It.IsAny<Dictionary<string, object?>>(), Person, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -209,9 +209,9 @@ public class OutputMappingRunIdentityTests
             MappedTable, Mapped, new Dictionary<string, object?> { ["sprk_aisummary"] = "x" },
             ConcurrencyMode.Optimistic, maxRetries: 1, CancellationToken.None, Person);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             MappedTable, Mapped, It.Is<Dictionary<string, object?>>(f => Equals(f["versionnumber"], 42L)),
-            It.IsAny<CancellationToken>(), Person), Times.Once);
+            Person, It.IsAny<CancellationToken>()), Times.Once);
         rows.Verify(r => r.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never, "a person's row version is never read app-only");
     }
@@ -382,8 +382,8 @@ public class OutputMappingRunIdentityTests
             reparent.SecureExitCaller.Should().BeNull("an app-only write acts for no person and is refused such a move");
         }
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            "sprk_event", Event, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
-            asPerson ? Person : null), Times.Once);
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            "sprk_event", Event, It.IsAny<Dictionary<string, object?>>(), asPerson ? Person : null,
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 }

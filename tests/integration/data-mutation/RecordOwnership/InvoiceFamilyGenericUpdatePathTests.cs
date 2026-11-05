@@ -96,14 +96,12 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     /// <summary>Neither the upsert nor the update-only write was sent: nothing was created or changed.</summary>
     private void NothingWritten() => Sent().Should().BeEmpty();
 
-    /// <summary>One write of the row. An invoice or line goes UPDATE-ONLY (If-Match: *, #2081); any other table keeps the upsert.</summary>
+    /// <summary>One write of the row, UPDATE-ONLY (If-Match: *): an invoice or line (#2081) and every other table alike.</summary>
     private void WrittenOnce(string table, Guid id)
     {
         var sent = Sent().Where(w => w.Table == table && w.Id == id).ToList();
         sent.Should().ContainSingle();
-        sent[0].Method.Should().Be(InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(table)
-            ? nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)
-            : nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync));
+        sent[0].Method.Should().Be(nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync));
         Sent().Should().ContainSingle("only that one write");
     }
 
