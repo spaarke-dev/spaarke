@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
@@ -40,6 +41,8 @@ public sealed partial class InvoiceAssignFirmServiceTests
     internal static readonly Guid OtherFirm = Guid.Parse("095d1b00-0000-4000-8000-0000000000f2");
     internal static readonly Guid Matter = Guid.Parse("095d1b00-0000-4000-8000-0000000000a1");
     internal static readonly Guid Decider = Guid.Parse("095d1b00-0000-4000-8000-0000000000d1");
+    /// <summary>095d-1c fix round 1: a second reviewer, for the repeat that must record the FIRST reviewer's stored decision.</summary>
+    internal static readonly Guid OtherCaller = Guid.Parse("095d1b00-0000-4000-8000-0000000000d2");
     internal static readonly DateTimeOffset Now = new(2026, 11, 4, 12, 30, 15, 500, TimeSpan.Zero);
 
     // ── The world ──
@@ -162,11 +165,16 @@ public sealed partial class InvoiceAssignFirmServiceTests
             (_, _, _) => { Calls.Add("link"); return Task.FromResult(Link); },
             (_, _, _, _) => { Calls.Add("rights"); return Task.FromResult(CloseRights); },
             (_, _) => { Calls.Add("filing"); return Task.FromResult(Filing); },
-            NullLogger<InvoiceAssignFirmService>.Instance,
+            Log,
             new FixedTime(Now));
 
-        public Task<AssignFirmResult> Assign(Guid? firm = null, string? note = "Firm confirmed by phone", ITrackingNumberAllocator? allocator = null) =>
-            Service(allocator).SetFirmAsync(InvoiceId, firm ?? Firm, note, Decider, "caller-token", CancellationToken.None);
+        /// <summary>095d-1c fix round 1: what the service logged (level, formatted text, structured parameters).</summary>
+        public readonly CapturingLogger Log = new();
+
+        public Task<AssignFirmResult> Assign(
+            Guid? firm = null, string? note = "Firm confirmed by phone", ITrackingNumberAllocator? allocator = null,
+            Guid? deciderUserId = null, CancellationToken ct = default) =>
+            Service(allocator).SetFirmAsync(InvoiceId, firm ?? Firm, note, deciderUserId ?? Decider, "caller-token", ct);
 
         public Entity Submission => Submissions[0];
 
@@ -272,6 +280,19 @@ public sealed partial class InvoiceAssignFirmServiceTests
 
         public Task ReleaseProcessingLockAsync(string eventId, string ownerId, CancellationToken cancellationToken = default) =>
             ReleaseProcessingLockAsync(eventId, cancellationToken);
+    }
+
+    internal sealed class CapturingLogger : ILogger<InvoiceAssignFirmService>
+    {
+        public readonly List<(LogLevel Level, string Message, Dictionary<string, object?> State)> Entries = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception),
+                (state as IEnumerable<KeyValuePair<string, object?>>)?.ToDictionary(p => p.Key, p => p.Value) ?? []));
     }
 
     internal sealed class FixedTime(DateTimeOffset now) : TimeProvider

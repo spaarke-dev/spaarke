@@ -1,5 +1,7 @@
+using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -66,12 +68,14 @@ public sealed partial class InvoiceAssignFirmServiceTests
             ["firmSetLines"] = 2, ["lines"] = 2, ["approval"] = 1, ["storedFiles"] = 2, ["findings"] = 1,
         }, "bounded counts, never a row per rename (1b review F1)");
         facts.Should().NotContainKey("renamed", "the full mapping stays in the stored member");
+        w.Log.Entries.Should().NotContain(e => e.State.ContainsKey("CallerUserId"), "only a repeat's completion log names the repeating caller");
     }
 
     [Theory(DisplayName = "095d-1c (seed proof 1): the record refused, faulting or unanswered after the apply is 503 incomplete at failedStep record - never 200, no id and no exception text (must fire)")]
     [InlineData("refused")]
     [InlineData("no-answer")]
     [InlineData("fault")]
+    [InlineData("timeout-cancel")]
     public async Task RecordFails_AfterTheApply_IsIncomplete_Never200(string kind)
     {
         var w = new World
@@ -80,6 +84,8 @@ public sealed partial class InvoiceAssignFirmServiceTests
             {
                 "refused" => throw new DecisionRecordRefusedException(DecisionRecordRefusalReason.BillingRecordLookupFailed, "secret writer text"),
                 "no-answer" => throw new TimeoutException("secret socket text"),
+                // 095d-1c fix round 1 (seed proof 5): an HTTP-client timeout is a TaskCanceledException while the REQUEST token is not cancelled.
+                "timeout-cancel" => throw new TaskCanceledException("secret timeout text"),
                 _ => throw new InvalidOperationException("secret fault text"),
             },
         };
@@ -143,13 +149,18 @@ public sealed partial class InvoiceAssignFirmServiceTests
         w.CloseRights = (DecisionCallerRefusal)refusal;
         w.OnRenumber = _ => RenumberResult.AlreadyRenumbered("INV-7.1", 1);
 
-        var result = await w.Assign();
+        // A different caller, with a note: the stored member (decider Decider, no note) is what is recorded, not the request.
+        var result = await w.Assign(deciderUserId: OtherCaller);
 
         (result.Status, result.Code).Should().Be((status, code));
         if (status == 200)
         {
             w.Calls.Should().Equal(["rights", "filing", "record"]);
-            w.Recorded.Should().ContainSingle();
+            var recorded = w.Recorded.Should().ContainSingle().Subject;
+            recorded.Decider.SystemUserId.Should().Be(Decider, "the stored member's decider, not the caller who repeated").And.NotBe(OtherCaller);
+            recorded.Values.Should().NotContainKey("note", "the stored member holds no note; the repeat's request note is not recorded");
+            recorded.Should().BeEquivalentTo(InvoiceAssignFirmService.BuildDecision(InvoiceId, SubmissionId, AssignFirmStoredDecision.Read(
+                JsonNode.Parse(w.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson)!)!.AsObject())!));
             return;
         }
 
@@ -232,5 +243,96 @@ public sealed partial class InvoiceAssignFirmServiceTests
 
         result.Status.Should().Be(409);
         w.Recorded.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095d-1c fix round 1 (seed proof 4): a repeat by ANOTHER caller records the stored member alone - the first caller's decider and note, not the repeater's (must fire)")]
+    public async Task Repeat_ByAnotherCaller_RecordsTheStoredMemberAlone()
+    {
+        var w = new World { OnRecord = _ => throw new TimeoutException("no answer") };
+
+        var first = await w.Assign(note: "N1 first note", deciderUserId: Decider);
+
+        (first.Outcome, first.FailedStep).Should().Be((AssignFirmOutcome.Incomplete, "record"));
+        Commit(w, Firm, "INV-7.1", 1, FindingsOf(w.Applied!).ToJsonString());
+        var storedByTheApply = AssignFirmStoredDecision.Read(FindingsOf(w.Applied!))!;
+        w.OnRecord = null;
+        w.OnRenumber = _ => RenumberResult.AlreadyRenumbered("INV-7.1", 1);
+        w.Recorded.Clear();
+
+        var again = await w.Assign(note: "N2 second note", deciderUserId: OtherCaller);
+
+        again.Outcome.Should().Be(AssignFirmOutcome.AlreadyAssigned);
+        var recorded = w.Recorded.Should().ContainSingle("exactly one record is written by the repeat").Subject;
+        recorded.Should().BeEquivalentTo(InvoiceAssignFirmService.BuildDecision(InvoiceId, SubmissionId, storedByTheApply),
+            "built from the stored member alone");
+        recorded.Decider.SystemUserId.Should().Be(Decider).And.NotBe(OtherCaller);
+        recorded.Values!["note"].Should().Be("N1 first note");
+        recorded.Values.Values.Should().NotContain(v => (v as string) == "N2 second note");
+        w.Transactions.Should().HaveCount(0, "a repeat never applies");
+        w.Log.Entries.Should().Contain(e => e.Level == LogLevel.Information && e.State.ContainsKey("CallerUserId") && (Guid)e.State["CallerUserId"]! == OtherCaller,
+            "095d-1c review K2: the repeat's completion log names the caller who asked");
+    }
+
+    [Fact(DisplayName = "095d-1c fix round 1 (seed proof 5): the caller's token cancelled while the record is in flight propagates - neither incomplete nor 200 (must not be swallowed)")]
+    public async Task RecordCancelled_ByTheCallersToken_Propagates()
+    {
+        using var cts = new CancellationTokenSource();
+        var w = new World
+        {
+            OnRecord = _ =>
+            {
+                cts.Cancel();
+                throw new OperationCanceledException(cts.Token);
+            },
+        };
+
+        var act = () => w.Assign(ct: cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        w.Applied.Should().NotBeNull("the apply committed before the record was asked");
+        w.Locks.Released.Should().BeEquivalentTo(w.Locks.Held, "both locks are released even when the request is cancelled");
+    }
+
+    [Fact(DisplayName = "095d-1c fix round 1 (K3 hardening, must fire): a stored decision whose id is not derived from its submission is 409 changed on a repeat - nothing recorded, the allocator not asked")]
+    public async Task Repeat_StoredDecisionIdNotDerivedFromTheSubmission_IsChanged_AndRecordsNothing()
+    {
+        var w = new World();
+        var stored = new AssignFirmStoredDecision(
+            Guid.NewGuid(), Firm, null, "INV-7.3", 3, "INV-7.1", 1, Decider, Now,
+            new InvoiceSubmissionAfterSteps.ResolvedSignalSet(Now.UtcDateTime, []), [], 0, "pending");
+        Commit(w, Firm, "INV-7.1", 1, new JsonObject { ["trackingNumber"] = "INV-7.1", [InvoiceAssignFirmService.StoredDecisionMember] = stored.ToJson() }.ToJsonString());
+
+        var result = await w.Assign();
+
+        (result.Status, result.Code).Should().Be((409, AssignFirmCodes.Changed));
+        w.Recorded.Should().BeEmpty();
+        w.ShouldHaveWrittenNothing();
+    }
+
+    [Theory(DisplayName = "095d-1c fix round 1 (K1): a repeat whose filing is another core record is logged at Error with Permanent=true and the filing code; a transient fault carries no such marker")]
+    [InlineData("transient", false)]
+    [InlineData("another core record", true)]
+    public async Task Repeat_FilingMismatch_PermanentIsMarkedInTheLog(string kind, bool permanent)
+    {
+        var w = Applied(Firm);
+        w.OnRenumber = _ => RenumberResult.AlreadyRenumbered("INV-7.1", 1);
+        w.Filing = kind == "transient"
+            ? new CoreAncestorResult(CoreAncestorStatus.Error, [], "fault") { IsPermanent = false }
+            : new CoreAncestorResult(CoreAncestorStatus.Derived, [new CoreAncestorStamp("sprk_matter", "sprk_matter", Guid.NewGuid())], null);
+
+        var result = await w.Assign();
+
+        (result.Outcome, result.FailedStep).Should().Be((AssignFirmOutcome.Incomplete, "filing"));
+        var marked = w.Log.Entries.Where(e => e.Level == LogLevel.Error && e.State.ContainsKey("Permanent")).ToList();
+        if (permanent)
+        {
+            var entry = marked.Should().ContainSingle().Subject;
+            entry.State["Permanent"].Should().Be(true);
+            entry.State["FilingCode"].Should().Be(AssignFirmCodes.CoreUnresolved);
+        }
+        else
+        {
+            marked.Should().BeEmpty();
+        }
     }
 }

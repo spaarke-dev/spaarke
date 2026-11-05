@@ -521,7 +521,7 @@ public sealed class InvoiceAssignFirmService
                 return repeatRefused;
             }
 
-            return await JudgeRepeatAsync(state, stored, firmId, repeatCheck.Core, filingAsked: false, ct).ConfigureAwait(false);
+            return await JudgeRepeatAsync(state, stored, firmId, deciderUserId, repeatCheck.Core, filingAsked: false, ct).ConfigureAwait(false);
         }
 
         var invoice = state.Invoice;
@@ -694,7 +694,7 @@ public sealed class InvoiceAssignFirmService
         {
             // 095d-1c (option 1, apply then record): the apply committed; the record follows from the decision that commit stored.
             RenumberOutcome.Renumbered => await RecordAppliedAsync(invoiceId, submissionId, lastBuilt, result.TrackingNumber, ct).ConfigureAwait(false),
-            RenumberOutcome.Conflict or RenumberOutcome.AlreadyRenumbered => await AfterConflictAsync(invoiceId, firmId, core, ct).ConfigureAwait(false),
+            RenumberOutcome.Conflict or RenumberOutcome.AlreadyRenumbered => await AfterConflictAsync(invoiceId, firmId, deciderUserId, core, ct).ConfigureAwait(false),
             _ => FromRefused(result.Reason, submissionId),
         };
     }
@@ -715,7 +715,7 @@ public sealed class InvoiceAssignFirmService
             return Incomplete(invoiceId, submissionId, IncompleteStepRecord, "build mismatch");
         }
 
-        return await RecordAsync(invoiceId, submissionId, committed.Stored, AssignFirmOutcome.Assigned, ct).ConfigureAwait(false);
+        return await RecordAsync(invoiceId, submissionId, committed.Stored, AssignFirmOutcome.Assigned, callerUserId: null, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -725,22 +725,30 @@ public sealed class InvoiceAssignFirmService
     /// a second call with the first record and writes nothing). It never applies.
     /// </summary>
     private async Task<AssignFirmResult> CompleteRepeatAsync(
-        State state, AssignFirmStoredDecision stored, (string Entity, Guid Id) core, bool filingAsked, CancellationToken ct)
+        State state, AssignFirmStoredDecision stored, Guid callerUserId, (string Entity, Guid Id) core, bool filingAsked, CancellationToken ct)
     {
         var invoiceId = state.Invoice.Id;
         var submissionId = state.Submission.Id;
         if (!filingAsked && await CheckFilingAsync(invoiceId, core, submissionId, ct).ConfigureAwait(false) is { } filing)
         {
+            // 095d-1c review K1: a derived core stamp that is another record (CoreUnresolved) will not heal by repeating; a transient fault will.
+            // Same response body either way; the marker lets an operator tell them apart in the log.
+            if (string.Equals(filing.Code, AssignFirmCodes.CoreUnresolved, StringComparison.Ordinal))
+            {
+                _logger.LogError("Set firm on invoice {InvoiceId}: the repeat's filing is a permanent mismatch (Permanent={Permanent}, FilingCode={FilingCode}); the record is not written.",
+                    invoiceId, true, filing.Code);
+            }
+
             return Incomplete(invoiceId, submissionId, IncompleteStepFiling, filing.Code);
         }
 
-        return await RecordAsync(invoiceId, submissionId, stored, AssignFirmOutcome.AlreadyAssigned, ct).ConfigureAwait(false);
+        return await RecordAsync(invoiceId, submissionId, stored, AssignFirmOutcome.AlreadyAssigned, callerUserId, ct).ConfigureAwait(false);
     }
 
     /// <summary>The one record write of Set firm: <see cref="BillingDecisionRecorder.RecordAsync"/> with <see cref="BuildDecision"/> of the stored
     /// decision. A refusal or a fault (including no answer) is <see cref="AssignFirmOutcome.Incomplete"/> at step <c>record</c>.</summary>
     private async Task<AssignFirmResult> RecordAsync(
-        Guid invoiceId, Guid submissionId, AssignFirmStoredDecision stored, AssignFirmOutcome outcome, CancellationToken ct)
+        Guid invoiceId, Guid submissionId, AssignFirmStoredDecision stored, AssignFirmOutcome outcome, Guid? callerUserId, CancellationToken ct)
     {
         BillingDecisionRecordResult recorded;
         try
@@ -752,8 +760,18 @@ public sealed class InvoiceAssignFirmService
             return Incomplete(invoiceId, submissionId, IncompleteStepRecord, (ex as DecisionRecordRefusedException)?.Reason.ToString() ?? ex.GetType().Name);
         }
 
-        _logger.LogInformation("Set firm on invoice {InvoiceId}: Decision Record {RecordId} ({State}).",
-            invoiceId, recorded.RecordId, recorded.AlreadyRecorded ? "already recorded" : "written");
+        var recordState = recorded.AlreadyRecorded ? "already recorded" : "written";
+        if (callerUserId is { } repeater)
+        {
+            // 095d-1c review K2: a repeat records the stored decider's decision; the log names who asked for the repeat.
+            _logger.LogInformation("Set firm on invoice {InvoiceId}: Decision Record {RecordId} ({State}); repeated by {CallerUserId}.",
+                invoiceId, recorded.RecordId, recordState, repeater);
+        }
+        else
+        {
+            _logger.LogInformation("Set firm on invoice {InvoiceId}: Decision Record {RecordId} ({State}).", invoiceId, recorded.RecordId, recordState);
+        }
+
         return Assigned(outcome, submissionId, stored.TrackingNumber, stored.PreviousTrackingNumber) with { DecisionRecordId = recorded.RecordId };
     }
 
@@ -800,7 +818,7 @@ public sealed class InvoiceAssignFirmService
     /// The submission changed since it was read (or the allocator saw it already moved): re-read. A stored decision now present is judged as a
     /// repeat (this firm: already assigned; another: 409). Without one, something else changed the row: 409, reload.
     /// </summary>
-    private async Task<AssignFirmResult> AfterConflictAsync(Guid invoiceId, Guid firmId, (string Entity, Guid Id) core, CancellationToken ct)
+    private async Task<AssignFirmResult> AfterConflictAsync(Guid invoiceId, Guid firmId, Guid callerUserId, (string Entity, Guid Id) core, CancellationToken ct)
     {
         var read = await ReadStateAsync(invoiceId, ct).ConfigureAwait(false);
         if (read.Failure is { } failure)
@@ -812,7 +830,7 @@ public sealed class InvoiceAssignFirmService
         // second check here; a repeat confirmed below records (095d-1c).
         if (read.State!.Stored is { } stored)
         {
-            return await JudgeRepeatAsync(read.State, stored, firmId, core, filingAsked: true, ct).ConfigureAwait(false);
+            return await JudgeRepeatAsync(read.State, stored, firmId, callerUserId, core, filingAsked: true, ct).ConfigureAwait(false);
         }
 
         _logger.LogWarning("Set firm on invoice {InvoiceId}: the invoice or its submission changed while the request was prepared; nothing changed.", invoiceId);
@@ -826,7 +844,7 @@ public sealed class InvoiceAssignFirmService
     /// confirmed completes the Decision Record (095d-1c, <see cref="CompleteRepeatAsync"/>).
     /// </summary>
     private async Task<AssignFirmResult> JudgeRepeatAsync(
-        State state, AssignFirmStoredDecision stored, Guid firmId, (string Entity, Guid Id) core, bool filingAsked, CancellationToken ct)
+        State state, AssignFirmStoredDecision stored, Guid firmId, Guid callerUserId, (string Entity, Guid Id) core, bool filingAsked, CancellationToken ct)
     {
         var submissionId = state.Submission.Id;
         if (stored.FirmId != firmId)
@@ -834,6 +852,14 @@ public sealed class InvoiceAssignFirmService
             _logger.LogInformation("Set firm on invoice {InvoiceId}: a firm was already assigned by another decision; nothing changed.", state.Invoice.Id);
             return AssignFirmResult.Refuse(StatusCodes.Status409Conflict, AssignFirmCodes.AssignedOtherFirm,
                 "This invoice's firm was already set by another decision.", submissionId);
+        }
+
+        // 095d-1c review K3: the apply stores the decision under the id derived from this submission. A stored member with any other id is not
+        // what the apply wrote; the record is never built from it (the writer would file a second decision under that id).
+        if (stored.DecisionId != DecisionIdFor(submissionId))
+        {
+            _logger.LogError("Set firm on invoice {InvoiceId}: the stored decision's id is not the one derived from its submission; nothing changed.", state.Invoice.Id);
+            return AssignFirmResult.Refuse(StatusCodes.Status409Conflict, AssignFirmCodes.Changed, "The invoice changed after its firm was set. Reload.", submissionId);
         }
 
         var firmInvoiceNumber = state.Submission.GetAttributeValue<string>(TrackingNumberAllocator.FirmInvoiceNumberColumn);
@@ -866,13 +892,13 @@ public sealed class InvoiceAssignFirmService
         switch (result.Outcome)
         {
             case RenumberOutcome.AlreadyRenumbered when string.Equals(result.TrackingNumber, stored.TrackingNumber, StringComparison.Ordinal):
-                return await CompleteRepeatAsync(state, stored, core, filingAsked, ct).ConfigureAwait(false);
+                return await CompleteRepeatAsync(state, stored, callerUserId, core, filingAsked, ct).ConfigureAwait(false);
 
             // 16.6.1 edge: a legacy row that held no sequence in the none scope was renumbered without a previous sequence, so the allocator
             // cannot tell it from a native row of the firm. The stored decision decides: it names this firm and the row holds its number.
             case RenumberOutcome.Refused when result.Reason == TrackingNumberReasons.NotUnnumbered && stored.PreviousSequence is null
                 && HoldsStoredNumber(state.Submission, stored):
-                return await CompleteRepeatAsync(state, stored, core, filingAsked, ct).ConfigureAwait(false);
+                return await CompleteRepeatAsync(state, stored, callerUserId, core, filingAsked, ct).ConfigureAwait(false);
 
             case RenumberOutcome.Refused when result.Reason != TrackingNumberReasons.NotUnnumbered:
                 return FromRefused(result.Reason, submissionId);
