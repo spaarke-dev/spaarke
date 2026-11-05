@@ -313,12 +313,28 @@ public class InvoiceSubmissionService
         ArgumentNullException.ThrowIfNull(core);
 
         // F1: the pre-check runs after the submission is saved and queued, so a slow read must not hold the 202 (a client timeout would
-        // resubmit a duplicate). The read gets PrecheckTimeLimit and no more; a timeout is a fault like any other (fail quiet, below).
+        // resubmit a duplicate). The 202 waits at most PrecheckTimeLimit: the wait itself is bounded (WaitAsync), because the budget token only
+        // takes effect between the loader's requests (the Dataverse SDK's channel call takes no token, so one stalled SOAP request would
+        // otherwise hold the 202). On a timeout the read is abandoned: it is cancelled so it stops at its next check, its fault (if any) is
+        // observed so it never reaches UnobservedTaskException, and the timeout is a fault like any other (fail quiet, below).
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
         budget.CancelAfter(PrecheckTimeLimit);
         try
         {
-            var resolution = await ReadProcedureResolutionAsync(InvoiceSubmissionProcessor.ToResolutionCore(core), firmId, budget.Token).ConfigureAwait(false);
+            var read = ReadProcedureResolutionAsync(InvoiceSubmissionProcessor.ToResolutionCore(core), firmId, budget.Token);
+            ProcedureResolution resolution;
+            try
+            {
+                resolution = await read.WaitAsync(PrecheckTimeLimit, ct).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                budget.Cancel();
+                _ = read.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                throw;
+            }
+
             return SubmissionHoldWarning.Precheck(resolution, DateOnly.FromDateTime(DateTime.UtcNow));
         }
         catch (Exception ex) when (IsCallerCancellation(ex, ct))

@@ -368,14 +368,10 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public async Task External_202_HasNoWarning_WhenThePrecheckReadTimesOut()
     {
         _h.PrecheckTimeLimit = TimeSpan.FromMilliseconds(50);
-        _h.ProcedureReadAsync = token =>
-        {
-            var never = new TaskCompletionSource<ProcedureResolution>(TaskCreationOptions.RunContinuationsAsynchronously);
-            token.Register(() => never.TrySetCanceled(token));
-            return never.Task;
-        };
+        // A read that IGNORES its token (as the Dataverse SDK's channel call does): only the wait itself can cut it off.
+        _h.ProcedureReadAsync = _ => new TaskCompletionSource<ProcedureResolution>(TaskCreationOptions.RunContinuationsAsynchronously).Task;
 
-        var response = await PostExternalAsync(Form());
+        var response = await PostExternalAsync(Form()).WaitAsync(TimeSpan.FromSeconds(10));
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         var text = await response.Content.ReadAsStringAsync();

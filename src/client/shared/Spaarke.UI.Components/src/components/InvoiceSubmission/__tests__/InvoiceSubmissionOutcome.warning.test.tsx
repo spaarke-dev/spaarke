@@ -129,6 +129,15 @@ describe('InvoiceSubmissionOutcome — the 202 provisional warning (082c-3)', ()
     ['absent', undefined],
     ['null', null],
     ['a blank message', { code: 'ebilling.submission.procedure_gap', message: '   ' }],
+    // The wire is untrusted (K4): a non-string message must not throw (`.trim` on a number) and renders nothing.
+    [
+      'a numeric message',
+      { code: 'ebilling.submission.procedure_gap', message: 42 } as unknown as InvoiceSubmissionWarning,
+    ],
+    [
+      'a null message',
+      { code: 'ebilling.submission.procedure_gap', message: null } as unknown as InvoiceSubmissionWarning,
+    ],
   ])('renders nothing for %s', async (_label, value) => {
     const getStatus = jest.fn().mockResolvedValue(view({ status: 'Processing' }));
     renderWithProviders(

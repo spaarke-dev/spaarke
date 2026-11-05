@@ -120,7 +120,8 @@ export interface InvoiceSubmissionOutcomeProps {
 
 /** The warning when it carries a sentence to show; null for a missing, null or blank one (nothing renders). */
 function nonBlank(warning: InvoiceSubmissionWarning | null | undefined): InvoiceSubmissionWarning | null {
-  return warning && warning.message.trim() ? warning : null;
+  // The wire is untrusted: a non-string message (a number, null) renders nothing rather than throwing.
+  return warning && typeof warning.message === 'string' && warning.message.trim() !== '' ? warning : null;
 }
 
 function toneFor(status: string | null | undefined): StatusBadgeTone {

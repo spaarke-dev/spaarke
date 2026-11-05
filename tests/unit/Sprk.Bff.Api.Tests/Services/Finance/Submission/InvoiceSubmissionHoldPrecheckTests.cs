@@ -190,7 +190,7 @@ public sealed class InvoiceSubmissionHoldPrecheckTests
         var log = new RecordingLogger();
         var h = new Harness { ProcedureRead = () => throw new OperationCanceledException(cts.Token) };
 
-        var act = () => h.Build(log).PrecheckHoldWarningAsync(Core, InvoiceSubmissionServiceTests.FirmId, cts.Token);
+        var act = () => h.Build(log).PrecheckHoldWarningAsync(Core, InvoiceSubmissionServiceTests.FirmId, cts.Token).WaitAsync(Bound);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         log.Entries.Should().BeEmpty();
@@ -207,18 +207,20 @@ public sealed class InvoiceSubmissionHoldPrecheckTests
         pending.IsCompleted.Should().BeFalse("the read has not completed and the budget is far away");
         cts.Cancel();
 
-        var act = () => pending;
+        var act = () => pending.WaitAsync(Bound);
         await act.Should().ThrowAsync<OperationCanceledException>();
         log.Entries.Should().BeEmpty();
     }
 
-    /// <summary>A read that never completes on its own and ends only when the token it was given is cancelled.</summary>
-    private static Task<ProcedureResolution> NeverCompletes(CancellationToken token)
-    {
-        var never = new TaskCompletionSource<ProcedureResolution>(TaskCreationOptions.RunContinuationsAsynchronously);
-        token.Register(() => never.TrySetCanceled(token));
-        return never.Task;
-    }
+    /// <summary>The bound on every awaited call of these tests: a regression fails red (a TimeoutException) instead of hanging the run.</summary>
+    private static readonly TimeSpan Bound = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// A read that never completes and IGNORES the token it was given, as the Dataverse SDK's channel call does (it takes no token): only a
+    /// wait the service itself bounds can cut it off.
+    /// </summary>
+    private static Task<ProcedureResolution> NeverCompletes(CancellationToken token) =>
+        new TaskCompletionSource<ProcedureResolution>(TaskCreationOptions.RunContinuationsAsynchronously).Task;
 
     [Fact(DisplayName = "082c-3 F1 fail quiet (seed 2): a read that never completes is cut off at the budget: no warning, no throw, the fault's type name logged and nothing else")]
     public async Task Service_AReadThatNeverCompletes_TimesOut_NoWarning_NoThrow()
@@ -226,13 +228,70 @@ public sealed class InvoiceSubmissionHoldPrecheckTests
         var log = new RecordingLogger();
         var h = new Harness { ProcedureReadAsync = NeverCompletes, PrecheckTimeLimit = TimeSpan.FromMilliseconds(50) };
 
-        var warning = await h.Build(log).PrecheckHoldWarningAsync(Core, InvoiceSubmissionServiceTests.FirmId, CancellationToken.None);
+        var warning = await h.Build(log).PrecheckHoldWarningAsync(Core, InvoiceSubmissionServiceTests.FirmId, CancellationToken.None).WaitAsync(Bound);
 
         warning.Should().BeNull();
         var entry = log.Entries.Should().ContainSingle().Subject;
         entry.Level.Should().Be(LogLevel.Warning);
-        entry.Message.Should().Contain(nameof(TaskCanceledException));
+        entry.Message.Should().Contain(nameof(TimeoutException));
         entry.Exception.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "082c-3 F1: the budget token is cancelled when the wait times out, so an abandoned read that does honour it stops at its next check")]
+    public async Task Service_ATimeout_CancelsTheAbandonedReadsToken()
+    {
+        CancellationToken seen = default;
+        var h = new Harness
+        {
+            ProcedureReadAsync = token =>
+            {
+                seen = token;
+                return new TaskCompletionSource<ProcedureResolution>(TaskCreationOptions.RunContinuationsAsynchronously).Task;
+            },
+            PrecheckTimeLimit = TimeSpan.FromMilliseconds(50),
+        };
+
+        (await h.Build().PrecheckHoldWarningAsync(Core, InvoiceSubmissionServiceTests.FirmId, CancellationToken.None).WaitAsync(Bound)).Should().BeNull();
+
+        seen.IsCancellationRequested.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "082c-3 F1: an abandoned read that faults after the timeout is observed: it raises no UnobservedTaskException")]
+    public async Task Service_AnAbandonedRead_ThatFaultsLater_RaisesNoUnobservedTaskException()
+    {
+        const string Marker = "ABANDONED-READ-FAULT-082c3-F1";
+        var unobserved = new List<Exception>();
+        void OnUnobserved(object? sender, UnobservedTaskExceptionEventArgs e) => unobserved.AddRange(e.Exception.Flatten().InnerExceptions);
+
+        TaskScheduler.UnobservedTaskException += OnUnobserved;
+        try
+        {
+            // Everything that references the abandoned task lives and dies inside this call, so it is collectable when it returns.
+            await TimeOutThenFaultTheAbandonedReadAsync(Marker).WaitAsync(Bound);
+
+            for (var i = 0; i < 3; i++)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= OnUnobserved;
+        }
+
+        unobserved.Where(e => e.Message == Marker).Should().BeEmpty("the abandoned read's late fault is observed by the service");
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static async Task TimeOutThenFaultTheAbandonedReadAsync(string marker)
+    {
+        var read = new TaskCompletionSource<ProcedureResolution>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var h = new Harness { ProcedureReadAsync = _ => read.Task, PrecheckTimeLimit = TimeSpan.FromMilliseconds(50) };
+
+        (await h.Build().PrecheckHoldWarningAsync(Core, InvoiceSubmissionServiceTests.FirmId, CancellationToken.None)).Should().BeNull();
+
+        read.SetException(new InvalidOperationException(marker));
     }
 
     [Fact(DisplayName = "082c-3 F1: the budget is a fixed two seconds, applied by default")]
