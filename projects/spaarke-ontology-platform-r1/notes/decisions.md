@@ -689,3 +689,19 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - **Known limits accepted:**
     - The census is re-runnable and the reconciliation pass counts it every run. It can still grow (a subgrid "Add existing", a refused filing), so it is run before each rollout.
     - A caller-scoped write (chat `update_record` as the user, or the model-driven form) can still set the label, because the column is unsecured by design. It is a label, not a hold, and the next writer re-derives it. -Verify does not catch a wrong non-blank value inside In Review.
+  - **Fix round 3 re-check (2026-11-05; `7a955cc983..0999003007`): F1 and F2 PASS. ebilling's own adversarial pass on the range is still running.**
+    - F1 helper: `InvoiceOpenHolds.ReasonsOf` / `ReasonsAsync` unite the firm hold (no firm, the invoice's own hold, a stored reason, or a `pipelineFindings` marker on ANY linked submission) with the Procedure reasons. The invoice's own hold is read app-only.
+    - F1 callers:
+      - Set firm derives from the state the write leaves: firm set, own hold cleared, the stored reason and the rewritten findings, plus the invoice's other linked submissions.
+      - The undo calls `ReasonsAsync`.
+      - The XML doc names the helper as the only derivation for future writers (re-check, 095d-2, 114).
+    - Approval is not routed through the helper (three codes, two DTO members). The agreement pin `InvoiceOpenHoldsTests` covers 8 stored states over the real `ApprovalWorld`. In each, the helper's detail and held answer equal approval's outcome and the GET's `Held || FirmNeeded`. Ontology accepts the pin in place of shared routing.
+    - Fixtures: production `pipelineFindings[].reasonCode`, including `ApprovalWorld.HoldForFirm`'s default.
+      - Must fire: after Set firm the detail is WaitingForFirm and approval refuses with FirmMissing.
+      - Must not fire: with the markers cleared the detail is blank, gap or unresolved.
+      - Another linked submission's hold is read.
+      - Seed proofs are listed.
+    - Unreadable findings give 659490001, never blank. Approval refuses that state with the firm code (095c-4 checks the firm first), so label and code name different reasons but agree that it is held. Accepted: the label is honest, since nothing readable names the firm.
+    - F2: the headline is "No billing terms in force for some work dates"; no copy of the old string remains in `src/` or `tests/`.
+    - The K note is in ebilling's `082-procedure-resolver.md`.
+    - Not reviewed by ontology (uac-r2 owns them): U1–U3, and P0 `9ad335b8f3`.
