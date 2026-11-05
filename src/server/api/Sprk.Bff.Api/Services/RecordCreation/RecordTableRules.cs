@@ -511,6 +511,31 @@ internal static partial class RecordTableRules
             ? RecordOwnerResolution.Refused(ChangedOnlyByItsWriterReasonCode, ChangedOnlyByItsWriterMessage(rule.Table))
             : null;
 
+    /// <summary>The reason code when a generic BFF delete path is asked to remove a row of a table only its writer changes
+    /// (<see cref="RefuseWriterOnlyTableDelete"/>). Nothing is removed.</summary>
+    internal const string RemovedOnlyByItsWriterReasonCode = "record_delete.changed_only_by_its_writer";
+
+    /// <summary>
+    /// The delete-side check of <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> (field-mapping-server-write-path-r1 task 048
+    /// fix round 2; owner decision 2026-11-05, D-204 extended to the general delete path): a Signal, a Decision Record and a Budget
+    /// Revision are changed only by their writers, so a generic delete of one is refused whole, or <c>null</c> when the table's
+    /// delete may proceed. It reads the same flag the create and update refusals read, so the three paths refuse one list. Table
+    /// only: it reads nothing, so it answers the same for any record, identity and approval. The table is matched trimmed and in any
+    /// case. The only generic delete whose table a caller chooses is the chat delete tool (<c>DataverseDeleteRecordHandler</c>, validate
+    /// and execute); every other delete names a fixed table (<c>WriterOnlyTablesUpdateGuardTests</c> lists them).
+    /// </summary>
+    /// <param name="table">The table the delete names.</param>
+    internal static RecordOwnerResolution? RefuseWriterOnlyTableDelete(string? table) =>
+        Find(table) is { CreatedOnlyByItsWriter: true } rule
+            ? RecordOwnerResolution.Refused(RemovedOnlyByItsWriterReasonCode, ChangedOnlyByItsWriterDeleteMessage(rule.Table))
+            : null;
+
+    /// <summary>The plain refusal message for a delete of a <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> table (the chat
+    /// delete tool words the same refusal for the model: <c>DataverseDeleteRecordHandler.ChangedOnlyByItsWriterChatMessage</c>).</summary>
+    internal static string ChangedOnlyByItsWriterDeleteMessage(string table) =>
+        $"'{table}' records are changed only by Spaarke itself and can't be removed by this operation; nothing was removed. " +
+        $"({RemovedOnlyByItsWriterReasonCode})";
+
     /// <summary>The refusal message for an update of a <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> table on every path a
     /// person reads it on (the Update Record node, a playbook's output mapping, the work-product persister, the field-mapping push,
     /// the child-records update): a plain sentence. The chat update tool words the same refusal for the model

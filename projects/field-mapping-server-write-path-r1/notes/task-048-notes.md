@@ -176,3 +176,39 @@ rework: none task 048
   (12 new `048 fix 1` must-fire tests and the 6 push-pair tests); the must-not-fire tests pass either way.
 - Publish delta (Release zip) against fresh origin/master d9bef8e90f: 41,108,226 -> 41,109,003 bytes, +777 bytes, 191 files both
   sides, 39.2 MB. CVE: `dotnet list package --vulnerable --include-transitive` reports none for Sprk.Bff.Api.
+
+## Fix round 2 (chat delete honours D-204)
+
+Owner decision 2026-11-05 (UAC-r2 and ontology agree): the general delete path honours D-204 for `sprk_signal`,
+`sprk_decisionrecord` and `sprk_budgetrevision`, the same registry flag (`RecordTableRule.CreatedOnlyByItsWriter`) the create and
+update refusals read. Ontology confirms none of their code removes these rows.
+
+- **Helper.** `RecordTableRules.RefuseWriterOnlyTableDelete(table)` (table only, trimmed and case-insensitive, reads the flag) returns
+  `RecordOwnerResolution.Refused("record_delete.changed_only_by_its_writer", plain message)` or null. Plain message:
+  "'{table}' records are changed only by Spaarke itself and can't be removed by this operation; nothing was removed.
+  (record_delete.changed_only_by_its_writer)".
+- **Chat delete tool** (`DataverseDeleteRecordHandler`): asks it in `ValidateChat` (so the gate shows the refusal and never a confirm
+  dialog) and in `ExecuteChatAsync` right after the arguments are parsed, before the approval check and before any Dataverse call,
+  for any record id, with or without `hasUserApproved`. The tool has one identity (the caller's own client), so there is no separate
+  system-principal branch. Its model-facing wording is `DataverseDeleteRecordHandler.ChangedOnlyByItsWriterChatMessage` (same code),
+  as the update tool's.
+- **Inventory of every other path that deletes a Dataverse row** (scan of `IDataverseUserClient.DeleteAsync`,
+  `IGenericEntityService.DeleteAsync` and `DataverseWebApiClient.DeleteAsync`; pinned by `WriterOnlyTablesDeleteGuardTests`):
+  - No playbook node executor, no action-seam step and no output-mapping handler deletes a row (searched `Services/Ai/Nodes`, the
+    action core, `DataverseUpdateHandler`; the node executor types have no delete kind).
+  - The only generic delete whose table a caller chooses is the chat tool above.
+  - Reasoned exclusions (15 members, each with its reason in `FixedTableDeletes`): compensations and routes whose table is a constant in
+    code (analysis promote, report create and delete, the two SPE admin routes, workspace layout, stored files, the membership
+    junction, the finance rate-card, rule-set and invoice-submission rollbacks and the submission commit gate), and the
+    isolated-create completion, which removes only the work assignment or project it was handed after creating it (its create path
+    already refuses the three tables). The external-access delete-own route is a fixed enum (document, to-do, event, service
+    request).
+  - The guard is a closed list with stale-entry checks; a new member that deletes through the three APIs fails it until it asks the
+    check or is listed with its reason. Limit: a delete on an API outside those three (the Dataverse SDK client directly, a raw HTTP
+    call) would not be seen.
+- **Tests.** Must fire (`DataverseDeleteRecordHandlerTests`, `048 fix 2`): each of the three tables, upper case, approved and not,
+  refused on validate and on execute with no Dataverse call. Must not fire: an ordinary table still validates, and the existing
+  `ExecuteChatAsync_ValidDelete_DeletesViaResolvedEntitySet` still deletes through the user's client. Guard
+  (`WriterOnlyTablesDeleteGuardTests`): the delete refusal equals the flag table by table and agrees with the update and create
+  refusals, its body reads the flag, both chat members ask it, and the controls (must fire: a delete through the entity service and
+  through the Web API client without the check; must not fire: a member that asks it, or is listed).
