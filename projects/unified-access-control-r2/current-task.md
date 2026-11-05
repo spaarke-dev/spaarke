@@ -4,7 +4,7 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-05 ~06:00Z (checkpoint #95: dev BFF = 909754869f with gate PASS; 095d-1 cleared; reviews and owed items below).
+> **Last Updated**: 2026-11-05 ~13:15Z (C19 cleared pending one answer; dev BFF = 909754869f, gate PASS; reviews and owed items below).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -35,6 +35,11 @@
     - one place;
     - external surfaces drop the flag;
     - sentinel scan with must-fire.
+  - **082c C19 CLEARED at 7c5b2c1739** (2026-11-05), pending one answer:
+    - the re-check confirms close only, the effective-date scope with mixed-date tests, the children-side failure dropping only the children, and the notes;
+    - K5 (c) option (iii) is a K: the close stays system-attributed, logs carry the assignment id, and option (i) is filed for 095d-2;
+    - (d) aggregate counts in the logs are OK;
+    - open question: do adjustment lines ever reach the evaluator's `request.Lines`? If yes, the close must count their dates.
   - Earlier conditions in force: 082c §3(c) pre-check conditions; 082d snapshot design; C22 (task 114 before 082c reaches master).
   - Still owed: 089b/089c, 095a, 095c; the full master PR; the NFR-05 census after deploy.
 - **field-mapping** (`-69`):
