@@ -61,6 +61,8 @@ public sealed class InvoiceReviewDetailWritersGuardTests
         // 082c-2 fix round 3 (uac-r2 U1): the external invoice reads null the column outside In Review (a projection of a READ response, never a row write).
         (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalInvoiceReviewDetail), "IsDetail"), // the column-name match Project uses to null the value and label in the response copy
         (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalInvoiceReviewDetail), "NeedsStatusRead"), // whether a $select names the column (to add the status)
+        // 082c-2 fix round 4 (R4-1): the fetch guard refuses a condition or an order on the column (the set UnfilterableColumns hands it; a refusal of a READ request).
+        (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalInvoiceReviewDetail), ".cctor"), // the one-name set of columns a partner may read but not filter or sort on
     ];
 
     private static readonly Assembly[] Scanned = [typeof(InvoiceSubmissionPersister).Assembly, typeof(IGenericEntityService).Assembly];

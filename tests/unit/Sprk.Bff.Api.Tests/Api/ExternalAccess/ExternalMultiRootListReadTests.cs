@@ -1274,6 +1274,82 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         ExternalInvoiceReviewDetail.Project(withoutColumn).Should().BeSameAs(withoutColumn, "a row that does not carry the column is untouched");
     }
 
+    // ---- 082c-2 fix round 4 (R4-1): the review detail is readable but nulled outside In Review, so it cannot be a filter or a sort key ----
+    //
+    // A condition on sprk_reviewdetail (attribute= or valueof=) or an order on it would let a partner select exactly the invoices that carry a
+    // stale label (value 659490002 outside In Review) although the read nulls it. The invoices module refuses all three; reading the column as a
+    // plain attribute is unchanged; no other module is affected.
+
+    private async Task<(Microsoft.AspNetCore.Http.IResult Result, bool Executed)> RunInvoicesFetchRawAsync(string fetchXml)
+    {
+        var executed = false;
+        var data = _fixture.Data.NewService();
+        var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+            new FetchRequestDto("sprk_invoice", fetchXml, PagingCookie: null),
+            InvoiceCaller(), Registry(), new FetchXmlEntityExtractor(),
+            (request, _) =>
+            {
+                executed = true;
+                return Task.FromResult(new FetchResponseDto(
+                    ProjectThroughFetch(request.FetchXml, new[] { InvoiceRowWithDetail("Stale", 659490000) }), MoreRecords: false, PagingCookie: null));
+            },
+            data.GetNonSecureRootsAsync, data.NarrowDocumentsAsync, NullLogger.Instance, CancellationToken.None,
+            data.GetLiveParentRootsAsync,
+            InvoiceHidingStub.NoneHidden().Seam);
+        return (result, executed);
+    }
+
+    private const string InvoiceFetchHead = "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_name'/><attribute name='sprk_project'/>";
+
+    [Theory(DisplayName = "082c-2 fix round 4 (R4-1, must fire): the invoices fetch refuses a condition attribute, a condition valueof and an order naming the review detail, in any case")]
+    [InlineData("<filter><condition attribute='sprk_reviewdetail' operator='eq' value='659490002'/></filter>")]
+    [InlineData("<filter><condition attribute='SPRK_ReviewDetail' operator='eq' value='659490002'/></filter>")]
+    [InlineData("<filter><condition attribute='sprk_reviewdetail' operator='in'><value>659490002</value></condition></filter>")]
+    [InlineData("<filter><condition attribute='sprk_name' operator='eq' valueof='sprk_reviewdetail'/></filter>")]
+    [InlineData("<filter><condition attribute='sprk_name' operator='eq' valueof='Sprk_ReviewDetail'/></filter>")]
+    [InlineData("<order attribute='sprk_reviewdetail' descending='false'/>")]
+    [InlineData("<order attribute='SPRK_REVIEWDETAIL' descending='true'/>")]
+    public async Task InvoicesModuleFetch_FilterOrOrderOnTheReviewDetail_IsRefusedAsColumnNotPermitted(string clause)
+    {
+        var (result, executed) = await RunInvoicesFetchRawAsync(InvoiceFetchHead + "<attribute name='sprk_reviewdetail'/>" + clause + "</entity></fetch>");
+
+        var problem = result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(400);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be(ExternalModuleDataEndpoints.ErrorFetchXmlColumnNotPermitted);
+        executed.Should().BeFalse("the guard refuses before any read");
+    }
+
+    [Theory(DisplayName = "082c-2 fix round 4 (R4-1, must not fire): the review detail as a plain attribute is still returned, and statuscode can still be filtered and sorted on")]
+    [InlineData("<attribute name='sprk_reviewdetail'/><attribute name='statuscode'/><filter><condition attribute='statuscode' operator='eq' value='659490000'/></filter><order attribute='statuscode'/>")]
+    [InlineData("<attribute name='sprk_reviewdetail'/><attribute name='statuscode'/><filter><condition attribute='statuscode' operator='eq' valueof='statuscode'/></filter>")]
+    [InlineData("<attribute name='sprk_reviewdetail'/><attribute name='statuscode'/>")]
+    public async Task InvoicesModuleFetch_PlainReviewDetailAttribute_AndAFilterOnStatus_AreStillAllowed(string clause)
+    {
+        var (result, executed) = await RunInvoicesFetchRawAsync(InvoiceFetchHead + clause + "</entity></fetch>");
+
+        var body = result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!;
+        executed.Should().BeTrue();
+        var row = body.Entities.Should().ContainSingle().Subject;
+        row.Should().ContainKey("sprk_reviewdetail").WhoseValue.Should().BeNull("the status is Approved, so the detail is nulled exactly as before");
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 4 (R4-1, must not fire): another module's condition on one of its readable columns is unaffected, and only the invoice table has an unfilterable set")]
+    public async Task DocumentsModuleFetch_ConditionAndOrderOnAReadableColumn_AreStillAllowed()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var fetch = "<fetch><entity name='sprk_document'><attribute name='sprk_documentid'/><attribute name='sprk_documentname'/><attribute name='sprk_project'/>"
+                    + "<filter><condition attribute='sprk_documentname' operator='like' value='A%'/></filter><order attribute='sprk_documentname'/></entity></fetch>";
+
+        var (body, _) = await RunDocumentsFetchAsync(caller, fetch, new[] { DocRow("A doc", project: RecordA) });
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("A doc");
+        ExternalInvoiceReviewDetail.UnfilterableColumns("sprk_invoice").Should().BeEquivalentTo(new[] { "sprk_reviewdetail" });
+        foreach (var other in new[] { "sprk_document", "sprk_project", "sprk_matter", "sprk_workassignment", null })
+        {
+            ExternalInvoiceReviewDetail.UnfilterableColumns(other).Should().BeNull(other);
+        }
+    }
+
     // The single-record read. The production invoices module refuses the single-record route at the Tier-2 gate (an invoice id is never in the
     // matter / project sets it is scoped by, so GetScopedRecordCoreAsync answers 403), so a test module that admits the record drives the path.
 

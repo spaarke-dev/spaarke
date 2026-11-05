@@ -33,7 +33,9 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// same as <c>Get-SubmissionHoldReasons</c> in the column script): unreadable findings do not assert the firm, but they never read as no hold, so the
 /// detail is never blank on their account. A read fault propagates from <see cref="ReasonsAsync"/>: the caller refuses or holds its write.</para>
 /// <para><b>Not covered:</b> the FR-20 hold (a Blocked or Processing submission, <c>FinanceBaseValues.HeldSubmissionConditions</c>). It has no
-/// review-detail label, and an Internal gap that is Blocked also stores its Procedure reason, which this does read.</para>
+/// review-detail label, and an Internal gap that is Blocked also stores its Procedure reason, which this does read. The pin
+/// (<c>InvoiceOpenHoldsTests</c>) covers the firm and Procedure holds. FR-20 (Blocked/Processing) and unapplied corrections refuse approval but carry
+/// no review-detail label by design.</para>
 /// </remarks>
 public static class InvoiceOpenHolds
 {

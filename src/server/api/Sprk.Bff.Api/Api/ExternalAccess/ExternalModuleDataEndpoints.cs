@@ -284,8 +284,11 @@ public static class ExternalModuleDataEndpoints
         // ONLY when it is a single-entity read of the module's own entity with NO join of any kind that
         // reads, filters on and sorts by ONLY the module's allow-listed columns (task 134). It runs BEFORE
         // scoping, so every caller — including one with an empty accessible set — gets the same refusal.
+        // 082c-2 fix round 4 (R4-1): an invoice module's review detail is readable but returned only while In Review, so a filter or sort on it
+        // would be a value oracle for the rows it is nulled on. Only the invoice module passes a set; every other module passes none.
         var guard = EvaluateFetchXmlGuard(
-            request.FetchXml, module.RecordEntity, module.ReadableColumns, entityExtractor);
+            request.FetchXml, module.RecordEntity, module.ReadableColumns, entityExtractor,
+            ExternalInvoiceReviewDetail.UnfilterableColumns(module.RecordEntity));
         if (!guard.IsAllowed)
         {
             return RejectFetchXml(guard, module, logger);
@@ -923,7 +926,8 @@ public static class ExternalModuleDataEndpoints
         string? fetchXml,
         string moduleRecordEntity,
         IReadOnlySet<string>? readableColumns,
-        IFetchXmlEntityExtractor entityExtractor)
+        IFetchXmlEntityExtractor entityExtractor,
+        IReadOnlySet<string>? unfilterableColumns = null)
     {
         ArgumentNullException.ThrowIfNull(entityExtractor);
         ArgumentException.ThrowIfNullOrWhiteSpace(moduleRecordEntity);
@@ -969,7 +973,7 @@ public static class ExternalModuleDataEndpoints
         }
 
         // ── (3) Column scope — task 134 / C6: rows are scoped above, columns here ──
-        var columnViolation = FindColumnViolation(document, readableColumns);
+        var columnViolation = FindColumnViolation(document, readableColumns, unfilterableColumns);
         return columnViolation is null
             ? new FetchXmlGuardResult(FetchXmlGuardVerdict.Allowed, referenced)
             : new FetchXmlGuardResult(FetchXmlGuardVerdict.ColumnNotPermitted, referenced, columnViolation);
@@ -1007,7 +1011,7 @@ public static class ExternalModuleDataEndpoints
     /// method must not be the place a missing list turns into "all columns".
     /// </para>
     /// </remarks>
-    private static string? FindColumnViolation(XDocument document, IReadOnlySet<string>? readableColumns)
+    private static string? FindColumnViolation(XDocument document, IReadOnlySet<string>? readableColumns, IReadOnlySet<string>? unfilterableColumns = null)
     {
         if (readableColumns is null || readableColumns.Count == 0)
         {
@@ -1058,12 +1062,12 @@ public static class ExternalModuleDataEndpoints
                         return "condition with entityname=";
                     }
                     var name = (string?)element.Attribute("attribute");
-                    if (!IsReadable(name, readableColumns))
+                    if (!IsReadable(name, readableColumns) || IsUnfilterable(name, unfilterableColumns))
                     {
                         return $"condition on '{name}'";
                     }
                     var valueOf = element.Attribute("valueof");
-                    if (valueOf is not null && !IsReadable(valueOf.Value, readableColumns))
+                    if (valueOf is not null && (!IsReadable(valueOf.Value, readableColumns) || IsUnfilterable(valueOf.Value, unfilterableColumns)))
                     {
                         return $"condition valueof '{valueOf.Value}'";
                     }
@@ -1077,7 +1081,7 @@ public static class ExternalModuleDataEndpoints
                         return "order by alias or entityname";
                     }
                     var name = (string?)element.Attribute("attribute");
-                    if (!IsReadable(name, readableColumns))
+                    if (!IsReadable(name, readableColumns) || IsUnfilterable(name, unfilterableColumns))
                     {
                         return $"order by '{name}'";
                     }
@@ -1094,6 +1098,14 @@ public static class ExternalModuleDataEndpoints
 
         return null;
     }
+
+    /// <summary>
+    /// 082c-2 fix round 4 (R4-1): a readable column that may be read but not filtered or sorted on (its returned value is shaped per row, so a
+    /// filter or sort is an oracle for the value the row hides). Compared case-insensitively; <c>null</c> set means none.
+    /// </summary>
+    private static bool IsUnfilterable(string? column, IReadOnlySet<string>? unfilterableColumns) =>
+        unfilterableColumns is not null && !string.IsNullOrWhiteSpace(column)
+        && unfilterableColumns.Any(c => string.Equals(c, column.Trim(), StringComparison.OrdinalIgnoreCase));
 
     /// <summary>A column is readable only if it is named (non-blank) and on the module's allow-list.</summary>
     private static bool IsReadable(string? column, IReadOnlySet<string> readableColumns) =>

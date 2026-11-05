@@ -887,7 +887,7 @@ Branch `task/ebilling-082c-2`, from `7a955cc983`. Six commits: F1, F2, U1-U3, P0
 | Set firm apply | `InvoiceAssignFirmService.cs:1079` (`ReasonsOf`, over the post-write findings, the stored reason, and the invoice's OTHER linked submissions read by `ReadStateAsync`) | the firm is set and the invoice's own hold is cleared in this write, so those two facts are passed false |
 | Approval | NOT wired through the helper (`InvoiceApprovalService.cs:341-342` GET, `:550` and `:559` POST) | see below |
 
-**Approval is not wired through the helper; an agreement pin proves it agrees.** Approval decides in three separate steps with three different refusal codes (`approve.held`, a firm need, `approve.procedure_held`) and its GET exposes `Held` and `FirmNeeded` separately. One helper that returns a set of reasons cannot express that without changing what approval answers. `InvoiceOpenHoldsTests` pins agreement instead: eight states over the real `ApprovalWorld` (firm only; firm and gap; gap only; unresolved only; own hold only; no firm only; unreadable findings; none). For each, the helper's detail and held answer equal approval's outcome and code, and the GET's `Held || FirmNeeded`. Any new hold source in approval that the helper lacks fails one of the eight.
+**Approval is not wired through the helper; an agreement pin proves it agrees.** Approval decides in three separate steps with three different refusal codes (`approve.held`, a firm need, `approve.procedure_held`) and its GET exposes `Held` and `FirmNeeded` separately. One helper that returns a set of reasons cannot express that without changing what approval answers. `InvoiceOpenHoldsTests` pins agreement instead: eight states over the real `ApprovalWorld` (firm only; firm and gap; gap only; unresolved only; own hold only; no firm only; unreadable findings; none). For each, the helper's detail and held answer equal approval's outcome and code, and the GET's `Held || FirmNeeded`. The pin covers the firm and Procedure holds. FR-20 (Blocked/Processing) and unapplied corrections refuse approval but carry no review-detail label by design. (Round 4, R4-2: this sentence said any new hold source in approval that the helper lacks would fail one of the eight; that was false, since no pin state plants the FR-20 hold or an unapplied correction and the helper reads neither.)
 
 **Unreadable holds fail closed: prefer 659490001.** When the findings JSON cannot be parsed, `InvoiceOpenHolds` yields `ProceduresUnresolved` (659490001, "Billing terms could not be checked"), never blank. That is the behaviour `InvoiceProcedureHold` already had (an unreadable findings document is an unresolved check) and `InvoiceFirmHold` already had for approval (unreadable counts as held). A read FAULT (the Dataverse call throws) propagates: the undo is held and retried (as every other read in it), and Set firm answers 503 from `ReadStateAsync`; the detail is never written from a failed read. The alternative, "keep the last value", was not needed.
 
@@ -938,7 +938,7 @@ Tests (`ExternalMultiRootListReadTests.cs`): grid and single record, each with m
 
 - **K (caller-scoped write).** A caller-scoped write can set the unsecured `sprk_reviewdetail` column (the schema leaves it unsecured; the generic write paths refuse it through `AccessColumns`, field mappings through `MappingProtectedColumns`, but a caller-scoped write the platform allows, from the form or `Xrm.WebApi`, can set it). It is a label, not a hold: approval never reads it. The next typed writer (Set firm, the undo, a status move) re-derives it, and U1 stops a non-In-Review row from showing it to a partner. `Deploy-EbillingInvoiceReviewDetailColumn.ps1 -Verify` catches a non-blank value outside In Review; it does NOT catch a wrong non-blank value inside In Review. Not fixed here (no code, by the brief).
 - **K2 above (for 095d-2) is partly met.** Set firm now derives through `InvoiceOpenHolds`, over every linked submission. 095d-2's re-run, which clears the firm markers, must derive through the same helper (`ReasonsAsync`) in its own write.
-- Approval is not on the helper (above); a new hold source in approval must be added to `InvoiceOpenHolds` too, and the agreement pin fails if it is not.
+- Approval is not on the helper (above); a new firm or Procedure hold source in approval must be added to `InvoiceOpenHolds` too, and the agreement pin covers those two kinds only (round 4, R4-2: it does not cover FR-20 or unapplied corrections, which carry no review-detail label by design).
 
 ### Verification
 
@@ -950,3 +950,51 @@ Tests (`ExternalMultiRootListReadTests.cs`): grid and single record, each with m
 | ArchTests, brief filter (`ReviewDetail`, `Redaction`) plus `ExternalInvoiceVisibility`, `ResubmissionOfAppOnlyWriteGuard`, `ADR010`, `InvoiceFirmHold`, `FindingsJson` | 0 failed |
 | ArchTests, broad guard set (`Guard`, `AppOnly`, `Invoice`, `Finance`, `Submission`, `External`, `Allocator`, `Redaction`, `Reader`, `Procedure`, `ADR010`, `Billing`, `Signal`) | 1619 passed, 0 failed |
 | Test attributes added | F1: 11 facts, 3 theories (7 rows); U1-U3: 7 facts, 3 theories (11 rows); P0: 2 facts, 3 theories (7 rows); F2 changes one assertion |
+
+## 082c-2 fix round 4 (adversarial pass on round 3) (2026-11-05)
+
+Branch `task/ebilling-082c-2`, from `0999003007`. One code fix (R4-1), one wording correction (R4-2), and this note.
+
+### R4-1: partners cannot filter or sort invoices on the review detail
+
+**The defect.** `sprk_invoice.sprk_reviewdetail` is partner-readable, and U1 nulls it unless `statuscode` is In Review. The fetch guard still admitted a FetchXML `condition attribute='sprk_reviewdetail'`, a `condition ... valueof='sprk_reviewdetail'` and an `order attribute='sprk_reviewdetail'`, because the column is on the allow-list. A partner could filter on 659490002 and get back exactly the non-In-Review invoices that carry a stale label, the value the read hides.
+
+**The fix.** `EvaluateFetchXmlGuard` (`ExternalModuleDataEndpoints.cs:930`) takes an optional `unfilterableColumns` set (default null: no behaviour change for any caller that does not pass one). `FindColumnViolation` refuses a condition `attribute`, a condition `valueof` and an `order attribute` naming a column in it, case-insensitively, through its existing column-refusal path (verdict `ColumnNotPermitted`, error code `DV_FETCHXML_COLUMN_NOT_PERMITTED`, the same 400 ProblemDetails). The fetch route passes `ExternalInvoiceReviewDetail.UnfilterableColumns(module.RecordEntity)` (`:287-291`), which is the one-name set `{ sprk_reviewdetail }` for `sprk_invoice` (`Applies`) and null for every other entity, so no other module, and no other column, changes behaviour. A plain `<attribute name='sprk_reviewdetail'/>` is still admitted and still projected (nulled outside In Review, U1). This is not generic guard behaviour changing other modules: the parameter is additive and only the invoice module supplies it, so the STOP condition did not apply.
+
+**What exists besides the fetch guard (reported, nothing else to refuse).**
+
+| Path | Finding |
+|---|---|
+| Single record read (`GetScopedRecordCoreAsync`, `GET /record/{entity}/{id}`) | Takes `$select` only. No filter, no order. The `$select` of the detail is allowed and judged on the real status (U1). Nothing to refuse. |
+| OData `$filter` / `$orderby` on this endpoint file | None exist. No route in `ExternalModuleDataEndpoints.cs` reads `$filter`, `$orderby` or any other query option than the record route's `$select`. |
+| Saved queries (`/savedquery/{id}`, `/savedqueries/{entity}`) | They return a registered view's definition, not an executed query the caller shapes; the caller supplies no condition or order. Not changed. |
+
+**Tests** (`ExternalMultiRootListReadTests.cs`, 11 cases in 3 attributes, through the real `ExecuteScopedFetchCoreAsync` over the production invoices module):
+
+- Must fire (7 rows): condition `attribute` (lower case, mixed case `SPRK_ReviewDetail`, with a `<value>` child), condition `valueof` (lower case, mixed case), `order` (lower case, upper case). Each answers 400 `DV_FETCHXML_COLUMN_NOT_PERMITTED` and the read double is never reached.
+- Must not fire (3 rows): the detail as a plain `<attribute>` is returned (null here, as the status is Approved); a filter and an order on `statuscode` still work; a `valueof` column comparison on `statuscode` still works.
+- Another module (1 fact): a documents fetch with a condition and an order on `sprk_documentname` is unaffected; `UnfilterableColumns` is `{ sprk_reviewdetail }` for `sprk_invoice` and null for the other five entities.
+- Guard list: `InvoiceReviewDetailWritersGuardTests.NonWriters` lists `ExternalInvoiceReviewDetail..cctor` (names the column in the set; never writes a row).
+
+**Seed** (`UnfilterableColumns` returns null, i.e. the refusal removed; restored, sha256 identical): 8 of 11 failed. The 7 must-fire rows, plus the another-module fact, which also pins that the invoice set is non-empty. The 3 must-not-fire rows passed, as they should. Restored: 11 of 11 passed.
+
+### R4-2: the approval pin does not cover every hold (wording only)
+
+The claim that any new hold source in approval which the helper lacks would fail one of the eight pin states is false. Approval also refuses on the FR-20 hold (`IsHeldAsync`: a Blocked or Processing linked submission) and on unapplied corrections; `InvoiceOpenHolds` reads neither, and no pin state plants them. Replaced with: "The pin covers the firm and Procedure holds. FR-20 (Blocked/Processing) and unapplied corrections refuse approval but carry no review-detail label by design." Changed in this file (the round 3 F1 paragraph and "Recorded, not changed") and in the `InvoiceOpenHolds` XML doc remark "Not covered" (comment only; that doc did not carry the "fails one of the eight" sentence, which lived only in these notes, so the correct statement was added to it). No code change.
+
+### Accepted known limits
+
+- **K1-a.** Set firm reads the invoice's other linked submissions once (`InvoiceAssignFirmService.cs:~1150`), not row-version conditioned. A native repoint between that read and the commit can leave the label missing a hold, but approval still refuses. Only native repoints create "others" (`InvoiceSubmissionPersister.cs:1853`, `SubmissionCommitGate.cs:430`).
+- **K1-b (pre-existing).** A null `versionnumber` would send the invoice update with `ConcurrencyBehavior.Default` (`InvoiceAssignFirmService.cs:1010-1018`, `:1269`). `versionnumber` is always present on Dataverse rows.
+
+### Owner ruling, 2026-11-05 (via uac-r2's `notes/decisions.md`)
+
+Flagged licensed systemusers read Decision Records and Signals as their Dataverse roles allow. No change.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Unit, the brief's filter (`ExternalModule`, `ExternalInvoiceReviewDetail`, `ExternalMultiRoot`, `ReviewDetail`) | 625 passed, 0 failed |
+| ArchTests (`ReviewDetail`, `ExternalInvoiceVisibility`, `ExternalModule`) | 16 passed, 0 failed (one failed first: the new `.cctor` was not on the writers guard list; added) |

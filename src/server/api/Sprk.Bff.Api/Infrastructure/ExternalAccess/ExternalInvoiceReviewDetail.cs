@@ -41,6 +41,16 @@ internal static class ExternalInvoiceReviewDetail
     internal static bool Applies(string? recordEntity) =>
         string.Equals(recordEntity, ExternalInvoiceVisibility.InvoiceTable, StringComparison.OrdinalIgnoreCase);
 
+    private static readonly IReadOnlySet<string> DetailOnly =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { InvoiceReviewDetail.Column };
+
+    /// <summary>
+    /// 082c-2 fix round 4 (R4-1): the columns a caller may read but not filter or sort on, for <paramref name="recordEntity"/>. The review detail
+    /// is returned only while In Review, so a condition (<c>attribute</c> or <c>valueof</c>) or an order on it would reveal the value on the rows
+    /// that null it. Empty (null) for every other entity: no other module changes behaviour.
+    /// </summary>
+    internal static IReadOnlySet<string>? UnfilterableColumns(string? recordEntity) => Applies(recordEntity) ? DetailOnly : null;
+
     /// <summary>The attributes the server must read for the projection to judge a row: the status, for an invoice module.</summary>
     internal static IEnumerable<string> RequiredAttributes(string? recordEntity) =>
         Applies(recordEntity) ? new[] { StatusColumn } : Array.Empty<string>();
