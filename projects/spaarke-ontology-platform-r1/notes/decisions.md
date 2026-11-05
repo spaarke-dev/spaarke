@@ -565,3 +565,16 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - First, field-mapping runs a read-only census of configured playbook nodes targeting them.
   - This extends D-204 from create to update, so the owner decides through field-mapping. uac-r2 classifies it.
 - **Consequence for D-36 extensibility (2026-11-04, uac-r2 second review K2).** Grouping through `CoreAncestorResolver` stays data-driven. Secure lineage, however, now holds a core pair whose type maps outside the closed core-table set. So a new core type needs its catalog row and a code change to that set before its Signals reconcile and suppress normally. Until then they are held: visible, never stamped, shares narrow only. This is accepted as fail-closed. The project CLAUDE.md data-and-security line is amended to match. The test rename or split is done on uac-r2's branch.
+- **082c-1 owner review (2026-11-04, `origin/task/ebilling-082c-1` at `a680dacf0d`; source diff read in full): PASS, with one change.**
+  - **Must change (Q1):** under Split (ExpenseRule), a higher-ranked valid version displaces a lower version's cap only when it **states a cap** (`MaxAmountPerItem` non-null).
+    - A codes-only higher version leaves the lower cap in force.
+    - The reasons: "limits replace" means a specific limit replaces the general one, and a type or part not covered at the specific level falls through (D-171(2), D-172 Q7 and round 3). Displacing a cap with no cap is fail-open.
+    - A deliberate "no cap here" is a rule-level Exclude (or a record rule in the base's slot), not precedence.
+    - Tests: a capless higher version keeps the lower cap (must-fire), and a capped higher version still displaces it.
+  - **Q2:** AiObservation is Additive (owner, D-172 round 3). D-205's list named only the types likely to raise rejections. Counting it on its own line in the overlap script is right.
+  - Accepted as built:
+    - the partition (C1), disjoint streams checked twice (C4), legacy ranks (C5);
+    - rank-only precedence with the valid-top rule (C6/C7), and C8 coverage by rank;
+    - one `RulesOn` per distinct date (C9), Duplicate priors from either stream (C10), the adjustment list without precedence;
+    - the 082c-1 interim throw on a gap (never a pass; removed by 082c-2), and `PrintMembers` on `BillingProcedureGap`.
+  - Dev legacy overlap count is 0 (dev has no rule sets), so no outcome changes on dev.
