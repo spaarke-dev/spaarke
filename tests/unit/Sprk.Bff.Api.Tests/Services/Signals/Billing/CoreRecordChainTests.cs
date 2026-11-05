@@ -337,7 +337,8 @@ public sealed class CoreRecordChainTests
 
         var read = () => ChildrenOf(Matter, M, max: 2);
 
-        await read.Should().ThrowAsync<CoreRecordChainUnreadableException>().WithMessage("More than 2 core records*");
+        var thrown = await read.Should().ThrowAsync<CoreRecordChainUnreadableException>().WithMessage("More than 2 core records*");
+        thrown.Which.CandidateCount.Should().Be(3, "the bound case carries the count the read had reached (fix round 1: the caller logs it)");
         _world.Queries.Should().NotContain(q => q.TopCount == 1, "no candidate's own chain was read");
     }
 
@@ -360,7 +361,8 @@ public sealed class CoreRecordChainTests
 
         var read = () => ChildrenOf(Matter, M);
 
-        await read.Should().ThrowAsync<CoreRecordChainUnreadableException>();
+        var thrown = await read.Should().ThrowAsync<CoreRecordChainUnreadableException>();
+        thrown.Which.CandidateCount.Should().BeNull("only the bound case carries a count; a chain that cannot be told is not a count of children");
     }
 
     [Fact(DisplayName = "082c C19 children: a read fault propagates (no partial list)")]

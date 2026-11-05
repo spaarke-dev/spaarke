@@ -234,7 +234,8 @@ public static class CoreRecordChain
             if (candidates.Count > maxChildren)
             {
                 throw new CoreRecordChainUnreadableException(
-                    $"More than {maxChildren} core records may be filed under {parentTable} {parentId}; the records under it are not read in part.");
+                    $"More than {maxChildren} core records may be filed under {parentTable} {parentId}; the records under it are not read in part.",
+                    candidates.Count);
             }
 
             if (!page.MoreRecords)
@@ -273,4 +274,11 @@ public static class CoreRecordChain
 /// The core-record chain could not be read in full (<see cref="CoreRecordChain"/>): the core record was not found, or what it is filed
 /// under cannot be told. The evaluation faults and the job retries; nothing is judged on a shortened chain.
 /// </summary>
-public sealed class CoreRecordChainUnreadableException(string message) : InvalidOperationException(message);
+public sealed class CoreRecordChainUnreadableException(string message, int? candidateCount = null) : InvalidOperationException(message)
+{
+    /// <summary>
+    /// Set only when <see cref="CoreRecordChain.ReadChildrenAsync"/> stopped at its bound: the candidate children it had counted when it
+    /// stopped (more than the bound; the true number may be larger, because the read does not go on). Null for every other fault.
+    /// </summary>
+    public int? CandidateCount { get; } = candidateCount;
+}

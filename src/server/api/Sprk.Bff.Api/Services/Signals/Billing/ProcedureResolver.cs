@@ -642,11 +642,19 @@ public sealed class ProcedureResolution
     }
 
     private static ResolvedPolicyVersion? Latest(IEnumerable<ResolvedPolicyVersion> versions, DateOnly date) => versions
-        .Where(v => v.InForceFrom is { } from && from <= date)
+        .Where(v => InForceOn(v.InForceFrom, date))
         .OrderByDescending(v => v.InForceFrom)
         .ThenByDescending(v => v.VersionNumber)
         .ThenByDescending(v => v.PolicyVersionId)
         .FirstOrDefault();
+
+    /// <summary>
+    /// Whether a version whose <c>sprk_inforcefrom</c> is <paramref name="inForceFrom"/> (a UTC date, <see cref="UtcDate"/>) is in force on the
+    /// work date <paramref name="date"/>: from its own day on, inclusive. The ONE comparison behind <see cref="Latest"/> and so behind
+    /// <see cref="RecordRuleVersionOn"/>; the 082c C19 close of a changed rule's base findings calls it too, so the close agrees with the
+    /// resolver on every date, the in-force day itself included.
+    /// </summary>
+    internal static bool InForceOn(DateOnly? inForceFrom, DateOnly date) => inForceFrom is { } from && from <= date;
 
     private static ResolvedPolicyVersion? Earliest(IEnumerable<ResolvedPolicyVersion> versions) => versions
         .OrderBy(v => v.InForceFrom)
@@ -1254,8 +1262,8 @@ public static class ProcedureResolver
     /// <summary>A date-only column as stored (the SDK returns it at midnight, kind Unspecified), as <c>ProcedureService</c> reads it.</summary>
     private static DateOnly? DateOf(DateTime? value) => value is { } v ? DateOnly.FromDateTime(v) : null;
 
-    /// <summary><c>sprk_inforcefrom</c> as a UTC date, as the loader reads it.</summary>
-    private static DateOnly? UtcDate(DateTime? value) => value is { } v
+    /// <summary><c>sprk_inforcefrom</c> as a UTC date, as the loader reads it (internal: the C19 close converts the instant it writes the same way).</summary>
+    internal static DateOnly? UtcDate(DateTime? value) => value is { } v
         ? DateOnly.FromDateTime(v.Kind == DateTimeKind.Local ? v.ToUniversalTime() : v)
         : null;
 }
