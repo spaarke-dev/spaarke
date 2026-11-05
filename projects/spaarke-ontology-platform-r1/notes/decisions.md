@@ -643,3 +643,12 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - The rule (c) fallback is narrowed to hole, after-end and not-applicable, through one helper shared by the evaluator, the invoice-gap suppression and the adjustment list.
   - A Follow-vs-Pin disagreement on the invoice date only is a known limit.
   - ebilling merges 082c-1 into work and starts 082c-2.
+- **082 C19 chain close (2026-11-05; `origin/task/ebilling-082-c19` `52622ea05c..d4e755317f`; service, resolver and notes read): readings 1 and 2 confirmed, reading 3 changed.**
+  - **Test applied:** the close may close a base finding only on an invoice where the resolver, after the change, no longer runs that exact base rule.
+  - **(1) A d2 grandchild is not closed (D-172, direct association only).** Its chain never reaches the record, so the change does not decide the rule there. This corrects ontology's brief, which had asked for d2 to be closed.
+  - **(2) "Nearer" means the resolver's nearer rule-level row.** A child with only a Procedure-level Pin is closed. Version selection and rule-level override are separate axes, and the close matches the exact base policy row through the resolver's own `RuleOverrideDeciders` and `IsRuleOverrideFor`, so the two cannot drift. Ontology asked for a must-not-fire test: a child pinned to a version whose rule is a different policy row keeps that rule's findings. Making a Pin block rule-level overrides would be a resolver change, for the owner.
+  - **(3) d0 still closes when only the d1 read fails** (a fault, the bound of 100 children, or an unexpected row).
+    - The answer is then `closeComplete=false`, and the Warning names the child count.
+    - A d0 fault still closes nothing.
+    - All-or-nothing across d0 and d1 would turn the bound into a permanent regression from 089e, because nothing else closes Billing findings.
+  - Known limits accepted: a record rule without its Exclude, the record rule's date window, the pair fragment. The fix range for (3) and the test for (2) get a scoped re-check.
