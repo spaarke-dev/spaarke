@@ -1286,6 +1286,97 @@ public sealed class StoredFileServiceTests
     }
 
     // =============================================================================================================================
+    // DEF-044: the cleanup deletes are pinned to the version they judged
+    // =============================================================================================================================
+
+    /// <summary>Runs <paramref name="reuse"/> the moment the gateway is asked to delete <paramref name="path"/>: a retry that lands after the delete was decided.</summary>
+    private static void ReuseJustBeforeTheDelete(StoredFileRig rig, string path, Action reuse) =>
+        rig.Gateway.BeforeOp = (op, name) =>
+        {
+            if (op == "delete" && name == InvoiceFilesContainer + "/" + path)
+            {
+                rig.Gateway.Now = rig.Gateway.Now.AddMinutes(5);
+                reuse();
+            }
+        };
+
+    [Fact(DisplayName = "DEF-044 must-fire (A1b): a failed row write whose own staged blob a concurrent retry REUSED since is kept: the delete is pinned to the staged ETag (412), the retry's bytes intact")]
+    public async Task CreateFails_BlobReusedByAConcurrentRetry_Kept()
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec(StoredFileIds.ForUpload(Submission), StoredFilePurpose.InvoiceSupportingFile) with { SubmissionId = Submission };
+        var path = PathOf(spec);
+        rig.Dataverse.CreateFault = new InvalidOperationException("Dataverse refused the create");
+        StagedBlob? retry = null;
+        ReuseJustBeforeTheDelete(rig, path,
+            () => retry = rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None).GetAwaiter().GetResult().Blob);
+
+        var act = () => rig.Service.CreateForAppAsync(spec, new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("Dataverse refused the create");
+        retry.Should().NotBeNull();
+        retry!.Reused.Should().BeTrue("the concurrent retry reused (rewrote) the blob this attempt had staged");
+        var blob = rig.Gateway.Get(InvoiceFilesContainer, path);
+        blob.Should().NotBeNull("a delete judged on the version this attempt wrote must not take the retry's blob");
+        blob!.ETag.Should().Be(retry.ETag);
+        blob.Content.Should().Equal(Pdf);
+        rig.Gateway.Calls.Should().Contain("delete " + InvoiceFilesContainer + "/" + path, "the delete was attempted, and refused");
+    }
+
+    [Fact(DisplayName = "DEF-044 must-not-fire (A2b): a failed row write over a blob THIS attempt wrote, and nobody reused, still deletes it (the pinned delete matches) and rethrows")]
+    public async Task CreateFails_OwnBlobNotReused_StillDeleted()
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec(StoredFileIds.ForUpload(Submission), StoredFilePurpose.InvoiceSupportingFile) with { SubmissionId = Submission };
+        rig.Dataverse.CreateFault = new InvalidOperationException("Dataverse refused the create");
+
+        var act = () => rig.Service.CreateForAppAsync(spec, new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("Dataverse refused the create");
+        rig.Gateway.Get(InvoiceFilesContainer, PathOf(spec)).Should().BeNull("this attempt's own blob is removed");
+        rig.Gateway.Calls.Count(c => c.StartsWith("delete ", StringComparison.Ordinal)).Should().Be(1);
+        rig.Gateway.Calls.Should().NotContain(c => c.StartsWith("overwrite ", StringComparison.Ordinal), "a first stage is a create, never a rewrite");
+    }
+
+    [Fact(DisplayName = "DEF-044 must-fire (A1c): DeleteStagedAsync that races a reuse (a retry rewrote the blob after its properties were read) is refused (412): false, the blob kept")]
+    public async Task DeleteStaged_RacesAReuse_Kept()
+    {
+        var rig = new StoredFileRig();
+        var staged = await StageCleanAsync(rig);
+        var spec = UploadSpec();
+        StagedBlob? retry = null;
+        ReuseJustBeforeTheDelete(rig, staged.BlobPath,
+            () => retry = rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None).GetAwaiter().GetResult().Blob);
+
+        var deleted = await rig.Service.DeleteStagedAsync(spec, CancellationToken.None);
+
+        deleted.Should().BeFalse("a blob changed since it was judged is kept");
+        retry.Should().NotBeNull();
+        retry!.Reused.Should().BeTrue();
+        var blob = rig.Gateway.Get(staged.Container, staged.BlobPath);
+        blob.Should().NotBeNull("the retry's blob survives");
+        blob!.ETag.Should().Be(retry.ETag);
+        blob.Content.Should().Equal(Pdf);
+        var calls = rig.Gateway.Calls.ToList();
+        calls.IndexOf("props " + staged.Container + "/" + staged.BlobPath).Should().BeGreaterThanOrEqualTo(0)
+            .And.BeLessThan(calls.IndexOf("delete " + staged.Container + "/" + staged.BlobPath), "the version is read BEFORE the delete is decided");
+    }
+
+    [Fact(DisplayName = "DEF-044 must-not-fire (A2): DeleteStagedAsync deletes a blob nobody reused with the ETag it read; a blob already gone is not an error and nothing is deleted")]
+    public async Task DeleteStaged_NoReuse_Deletes_AndGoneIsFalse()
+    {
+        var rig = new StoredFileRig();
+        var staged = await StageCleanAsync(rig);
+
+        (await rig.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None)).Should().BeTrue();
+        rig.Gateway.Get(staged.Container, staged.BlobPath).Should().BeNull();
+
+        var callsBefore = rig.Gateway.Calls.Count(c => c.StartsWith("delete ", StringComparison.Ordinal));
+        (await rig.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None)).Should().BeFalse("nothing was there");
+        rig.Gateway.Calls.Count(c => c.StartsWith("delete ", StringComparison.Ordinal)).Should().Be(callsBefore, "no delete is attempted for a blob that was not there at the read");
+    }
+
+    // =============================================================================================================================
     // Scan verdict (091 condition 3)
     // =============================================================================================================================
 
