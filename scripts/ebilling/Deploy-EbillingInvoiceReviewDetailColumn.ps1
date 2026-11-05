@@ -114,7 +114,7 @@ $Description = "Which kind of review an In Review invoice is in (blank = a norma
 
 function New-ReviewDetailDef {
     $opts = @()
-    foreach ($value in $Options.Keys) { $opts += @{ Value = [int]$value; Label = New-Label $Options[$value] } }
+    foreach ($value in $Options.Keys) { $opts += @{ Value = [int]$value; Label = New-Label $Options[[object]$value] } }
     return @{
         '@odata.type'    = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
         SchemaName       = $ColumnSchemaName
@@ -147,8 +147,8 @@ function Get-ColumnGaps {
         $have = @{}
         foreach ($o in @($pk.OptionSet.Options)) { $have[[int]$o.Value] = $o.Label.UserLocalizedLabel.Label }
         foreach ($value in $Options.Keys) {
-            if (-not $have.ContainsKey([int]$value)) { $gaps.Add("$Table.$Column has no option $value ('$($Options[$value])')") }
-            elseif ($have[[int]$value] -ne $Options[$value]) { $gaps.Add("$Table.$Column option $value is '$($have[[int]$value])', expected '$($Options[$value])'") }
+            if (-not $have.ContainsKey([int]$value)) { $gaps.Add("$Table.$Column has no option $value ('$($Options[[object]$value])')") }
+            elseif ($have[[int]$value] -ne $Options[[object]$value]) { $gaps.Add("$Table.$Column option $value is '$($have[[int]$value])', expected '$($Options[[object]$value])'") }
         }
         foreach ($value in $have.Keys) {
             if (-not $Options.Contains($value)) { $gaps.Add("$Table.$Column has an extra option $value ('$($have[$value])'); the set is closed") }
@@ -164,7 +164,7 @@ function Get-ColumnGaps {
 function Get-InvariantBreaks {
     $filter = "$Column ne null and statuscode ne $InReviewStatusCode"
     $rows = Invoke-Dv -Path "${EntitySet}?`$select=sprk_invoiceid,statuscode,$Column&`$filter=$filter&`$top=50"
-    return @($rows.value)
+    return ,@($rows.value)
 }
 
 # Rows of a read-only query, every page (follows @odata.nextLink), at most $ReadCap rows.
@@ -187,7 +187,7 @@ function Get-SubmissionHoldReasons($Submission) {
     $code = [string]$Submission.sprk_outcomereasoncode
     if ($code -eq $FirmMissingReason -or $ProcedureReasons -contains $code) { [void]$reasons.Add($code) }
     $json = [string]$Submission.sprk_findingsjson
-    if ([string]::IsNullOrWhiteSpace($json)) { return $reasons }
+    if ([string]::IsNullOrWhiteSpace($json)) { return ,$reasons }
     try {
         $root = $json | ConvertFrom-Json -ErrorAction Stop
         if ($root -isnot [pscustomobject]) { throw 'not an object' }
@@ -205,7 +205,7 @@ function Get-SubmissionHoldReasons($Submission) {
     } catch {
         [void]$reasons.Add($ProcedureReasons[0])
     }
-    return $reasons
+    return ,$reasons
 }
 
 # The reverse invariant (a warning, never a failure): In Review invoices with an open Procedure or firm hold and a BLANK review detail. Read only
