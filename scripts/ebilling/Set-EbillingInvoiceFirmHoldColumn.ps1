@@ -561,17 +561,46 @@ function Get-BillingDecisionKey([Guid]$InvoiceId, [Guid]$DecisionId) {
     $bytes = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes("billing-dr-$Table-$($InvoiceId.ToString('D'))-$($DecisionId.ToString('D'))"))
     return [Guid]::new([byte[]]$bytes[0..15])
 }
-# The stored member, as InvoiceAssignFirmService's AssignFirmStoredDecision.Read needs it: a decision id and a decidedOn; else unreadable.
+# The stored member, as InvoiceAssignFirmService's AssignFirmStoredDecision.Read needs it. A member is readable only with every key Read
+# requires: decisionId, firmId, deciderUserId (Guids), previousTrackingNumber and trackingNumber (non-empty text), sequence and firmSetLines
+# (integers), decidedOn (a date), firmMissingSignals (setReadAtUtc and a signals array of {id, policyCode}), and, when renamed is an array,
+# each entry's entity, id, column, from and to. Returns $null when the submission holds no member; Kind 'findings' when its findings JSON
+# does not parse (whether a Set firm was applied cannot be known); Kind 'member' when the member is present but unreadable.
+function Test-AssignFirmGuid($Node, [string]$Key) { $g = [Guid]::Empty; return ($Node -is [System.Collections.IDictionary]) -and [Guid]::TryParse("$($Node[$Key])", [ref]$g) -and $g -ne [Guid]::Empty }
+function Test-AssignFirmText($Node, [string]$Key) { return ($Node -is [System.Collections.IDictionary]) -and ($Node[$Key] -is [string]) -and ($Node[$Key].Length -gt 0) }
+function Test-AssignFirmInt($Node, [string]$Key) { return ($Node -is [System.Collections.IDictionary]) -and (($Node[$Key] -is [int]) -or (($Node[$Key] -is [long]) -and $Node[$Key] -ge [int]::MinValue -and $Node[$Key] -le [int]::MaxValue)) }
+function Test-AssignFirmMemberReadable($Member) {
+    if ($Member -isnot [System.Collections.IDictionary]) { return $false }
+    foreach ($k in 'decisionId', 'firmId', 'deciderUserId') { if (-not (Test-AssignFirmGuid $Member $k)) { return $false } }
+    foreach ($k in 'previousTrackingNumber', 'trackingNumber') { if (-not (Test-AssignFirmText $Member $k)) { return $false } }
+    foreach ($k in 'sequence', 'firmSetLines') { if (-not (Test-AssignFirmInt $Member $k)) { return $false } }
+    # firmMissingSignals: ResolvedSignalSet.Parse needs a readable setReadAtUtc and a signals array of {id (non-empty Guid), policyCode (text)}.
+    $set = $Member['firmMissingSignals']
+    if ($set -isnot [System.Collections.IDictionary] -or $set['signals'] -isnot [System.Collections.IList]) { return $false }
+    $readAt = $set['setReadAtUtc']
+    $parsed = [DateTimeOffset]::MinValue
+    if (-not (($readAt -is [DateTime]) -or ($readAt -is [DateTimeOffset]) -or
+            ($readAt -is [string] -and [DateTimeOffset]::TryParse($readAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsed)))) { return $false }
+    foreach ($signal in $set['signals']) { if (-not (Test-AssignFirmGuid $signal 'id') -or -not (Test-AssignFirmText $signal 'policyCode')) { return $false } }
+    if ($Member['renamed'] -is [System.Collections.IList]) {
+        foreach ($r in $Member['renamed']) {
+            if (-not (Test-AssignFirmText $r 'entity') -or -not (Test-AssignFirmGuid $r 'id') -or -not (Test-AssignFirmText $r 'column')) { return $false }
+            foreach ($k in 'from', 'to') { if ($r -isnot [System.Collections.IDictionary] -or $r[$k] -isnot [string]) { return $false } }
+        }
+    }
+    return $true
+}
 function Get-AssignFirmStored($Submission) {
     $json = $Submission.sprk_findingsjson
     if ([string]::IsNullOrWhiteSpace($json)) { return $null }
-    try { $root = $json | ConvertFrom-Json -AsHashtable -ErrorAction Stop } catch { return $null }
+    try { $root = $json | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
+    catch { return [pscustomobject]@{ Readable = $false; Kind = 'findings'; DecisionId = [Guid]::Empty; DecidedOn = [DateTimeOffset]::MinValue } }
     if ($root -isnot [System.Collections.IDictionary] -or -not $root.ContainsKey($AssignFirmMember)) { return $null }
     $member = $root[$AssignFirmMember]
     $decisionId = [Guid]::Empty
     $decidedOn = [DateTimeOffset]::MinValue
     $readable = $false
-    if ($member -is [System.Collections.IDictionary] -and [Guid]::TryParse("$($member['decisionId'])", [ref]$decisionId)) {
+    if ((Test-AssignFirmMemberReadable $member) -and [Guid]::TryParse("$($member['decisionId'])", [ref]$decisionId)) {
         $raw = $member['decidedOn']
         # ConvertFrom-Json turns an ISO date into a DateTime (its Kind depends on the PowerShell version); the BFF writes it in UTC ("O").
         if ($raw -is [DateTime]) {
@@ -584,18 +613,26 @@ function Get-AssignFirmStored($Submission) {
                 [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$decidedOn)
         }
     }
-    return [pscustomobject]@{ Readable = [bool]$readable; DecisionId = $decisionId; DecidedOn = $decidedOn }
+    return [pscustomobject]@{ Readable = [bool]$readable; Kind = 'member'; DecisionId = $decisionId; DecidedOn = $decidedOn }
 }
 $nowUtc = [DateTimeOffset]::UtcNow
-$applied = 0; $recorded = 0; $insideWindow = 0; $overdue = 0
+$applied = 0; $recorded = 0; $insideWindow = 0; $overdue = 0; $unreadable = 0
 foreach ($s in $submissions) {
     $stored = Get-AssignFirmStored $s
     if ($null -eq $stored) { continue }
-    $applied++
     $submissionId = [Guid]$s.sprk_invoicesubmissionid
+    if ($stored.Kind -eq 'findings') {
+        # Findings that do not parse: a Set-firm decision may or may not be stored in them, so nothing can be said of this submission.
+        $unreadable++
+        $what = "(f) submission $submissionId has findings that cannot be read - whether a Set firm was applied cannot be known"
+        if ($Verify) { Report 'FAIL' $what } else { Report 'INFO' "$what (-Verify fails on it)" }
+        continue
+    }
+    $applied++
     # The decision's subject is the invoice the submission's id derives (InvoiceAssignFirmService reads only that one), whatever the link says.
     $invoiceId = Get-InvoiceIdFor $submissionId
     if (-not $stored.Readable) {
+        $unreadable++
         if ($Verify) { Report 'FAIL' "(f) submission $submissionId carries a Set-firm decision that cannot be read - what was applied cannot be known" }
         else { Report 'INFO' "(f) submission $submissionId carries a Set-firm decision that cannot be read (-Verify fails on it)" }
         continue
@@ -612,7 +649,7 @@ foreach ($s in $submissions) {
     else { $insideWindow++; Report 'INFO' "$what (inside the $AppliedNoRecordWindowMinutes-minute window)" }
 }
 Report 'INFO' "(f) $applied submission(s) carry a Set-firm decision: $recorded recorded, $insideWindow without a record inside the window, $overdue older than it"
-if ($overdue -eq 0) { Report 'OK' "(f) no Set firm is applied without its Decision Record beyond the $AppliedNoRecordWindowMinutes-minute window" }
+if ($overdue -eq 0 -and $unreadable -eq 0) { Report 'OK' "(f) no Set firm is applied without its Decision Record beyond the $AppliedNoRecordWindowMinutes-minute window" }
 
 if ($IsDryRun) {
     if ($gaps.Count -gt 0) {
