@@ -36,7 +36,7 @@
     - the maker-as-assignee pass stays inline, with a test pinning both sides;
     - only the removal paths take the lease; fm's notes must show the reconcile re-derives Assigned-To grants, or the gap is filed;
     - in scope: the `ScanAssignedRootsAsync` cap (a uac defect): `$orderby` plus a recent-change window ≥3× the tick;
-    - in scope, PRIVATE wording: the create-time pass is skipped for roots created secure or Restricted; the post-provisioning sync grants;
+    - in scope, PRIVATE wording: isolated creates get no create-time pass; `CompleteIsolatedCreateAsync` runs it after isolation. The wizard's secure project is unchanged: fm verifies in its notes that provisioning doesn't change eligibility and that pre-move grants survive. If either fails, it becomes an fm issue (task 020);
     - Ks accepted: no invite when the reconcile grants first; duplicate passes collapse; `record-busy` acceptable only if the user sees a message, not a 500.
   - 044 field-security profile still owed (owner go here).
 - **ontology** (`-38`): owed TO them: Signals 200 from organic traffic, and the nightly suppression and Undetermined counts on 909754869f and on 0f53e053bf (live since 21:39:06Z).
