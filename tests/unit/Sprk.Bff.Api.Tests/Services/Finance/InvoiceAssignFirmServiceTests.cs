@@ -1092,6 +1092,26 @@ public sealed partial class InvoiceAssignFirmServiceTests
 
         result.Outcome.Should().Be(AssignFirmOutcome.AlreadyAssigned);
         result.TrackingNumber.Should().Be("INV-7.1");
+        // 095d-1c uac-r2 F3-1: the legacy branch completes the record like the native repeat (filing, then one record), not the 1b answer alone.
+        w.Recorded.Should().ContainSingle("the legacy repeat records the stored decision");
+        w.Calls.TakeLast(2).Should().Equal("filing", "record");
+        w.Transactions.Should().BeEmpty("a repeat applies nothing");
+    }
+
+    [Fact(DisplayName = "095d-1c uac-r2 F3-1: on the 16.6.1 legacy branch, a filing that cannot be confirmed is 503 incomplete at failedStep filing and records nothing (must fire)")]
+    public async Task Repeat_LegacyNoSequence_FilingNotConfirmed_IsIncomplete_AndRecordsNothing()
+    {
+        var w = Applied(Firm, previousSequence: null);
+        w.Submission[TrackingNumberAllocator.PreviousSequenceColumn] = null;
+        w.OnRenumber = _ => RenumberResult.Refused(TrackingNumberReasons.NotUnnumbered);
+        w.Filing = new CoreAncestorResult(CoreAncestorStatus.Error, [], "fault") { IsPermanent = false };
+
+        var result = await w.Assign();
+
+        (result.Outcome, result.Status, result.Code, result.FailedStep).Should().Be((AssignFirmOutcome.Incomplete, 503, AssignFirmCodes.Incomplete, "filing"));
+        w.Recorded.Should().BeEmpty("no record without the filing");
+        w.Calls.Should().NotContain("record");
+        w.Transactions.Should().BeEmpty();
     }
 
     [Theory(DisplayName = "095d-1b repeat (16.6.1, must not fire): not_unnumbered is not taken as already assigned when the stored decision had a previous sequence, or the row holds another number")]

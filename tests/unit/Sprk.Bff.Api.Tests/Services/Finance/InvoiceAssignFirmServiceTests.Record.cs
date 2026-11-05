@@ -96,6 +96,8 @@ public sealed partial class InvoiceAssignFirmServiceTests
         (result.Status, result.Code, result.FailedStep).Should().Be((503, AssignFirmCodes.Incomplete, "record"));
         result.Detail.Should().Be(IncompleteSentence, "one fixed sentence");
         result.Detail.Should().NotContain("secret").And.NotContain(InvoiceId.ToString()).And.NotContain(SubmissionId.ToString());
+        w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.State.ContainsKey("Step"))
+            .Which.State.Should().NotContainKey("CallerUserId", "095d-1c uac-r2 K2: only a repeat names its caller; the first apply's own incomplete does not");
         (result.DecisionId, result.DecisionRecordId, result.TrackingNumber, result.PreviousTrackingNumber).Should().Be((null, null, null, null));
         w.Applied.Should().NotBeNull("the apply committed before the record was asked");
         w.Recorded.Should().ContainSingle();
@@ -334,5 +336,26 @@ public sealed partial class InvoiceAssignFirmServiceTests
         {
             marked.Should().BeEmpty();
         }
+    }
+
+    [Theory(DisplayName = "095d-1c uac-r2 K2: a repeat's incomplete log carries the repeating caller as {CallerUserId}; the first apply's incomplete carries none; the response is unchanged")]
+    [InlineData("filing")]
+    [InlineData("record")]
+    public async Task Repeat_Incomplete_LogsTheRepeatingCaller(string step)
+    {
+        var w = Applied(Firm);
+        w.OnRenumber = _ => RenumberResult.AlreadyRenumbered("INV-7.1", 1);
+        if (step == "filing")
+            w.Filing = new CoreAncestorResult(CoreAncestorStatus.Error, [], "fault") { IsPermanent = false };
+        else
+            w.OnRecord = _ => throw new InvalidOperationException("the writer is down");
+
+        var result = await w.Assign(deciderUserId: OtherCaller);
+
+        (result.Outcome, result.Status, result.FailedStep).Should().Be((AssignFirmOutcome.Incomplete, 503, step));
+        result.Detail.Should().Be(IncompleteSentence, "the response is unchanged");
+        var entry = w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.State.ContainsKey("Step")).Subject;
+        entry.State["CallerUserId"].Should().Be(OtherCaller, "the repeating caller's attempt is auditable");
+        entry.Message.Should().NotContain("the writer is down", "no exception text in the log either");
     }
 }

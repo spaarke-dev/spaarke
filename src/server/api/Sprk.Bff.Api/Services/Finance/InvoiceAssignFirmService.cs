@@ -739,7 +739,7 @@ public sealed class InvoiceAssignFirmService
                     invoiceId, true, filing.Code);
             }
 
-            return Incomplete(invoiceId, submissionId, IncompleteStepFiling, filing.Code);
+            return Incomplete(invoiceId, submissionId, IncompleteStepFiling, filing.Code, callerUserId);
         }
 
         return await RecordAsync(invoiceId, submissionId, stored, AssignFirmOutcome.AlreadyAssigned, callerUserId, ct).ConfigureAwait(false);
@@ -757,7 +757,7 @@ public sealed class InvoiceAssignFirmService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return Incomplete(invoiceId, submissionId, IncompleteStepRecord, (ex as DecisionRecordRefusedException)?.Reason.ToString() ?? ex.GetType().Name);
+            return Incomplete(invoiceId, submissionId, IncompleteStepRecord, (ex as DecisionRecordRefusedException)?.Reason.ToString() ?? ex.GetType().Name, callerUserId);
         }
 
         var recordState = recorded.AlreadyRecorded ? "already recorded" : "written";
@@ -1247,11 +1247,22 @@ public sealed class InvoiceAssignFirmService
     /// <summary>
     /// 095d-1c: the apply committed and <paramref name="step"/> did not finish. 503 with the step and the fixed sentence; the log carries the
     /// cause as a reason code or an exception type name (never its message). The repeat finishes from the stored decision and never applies again.
+    /// 095d-1c uac-r2 K2: on a repeat <paramref name="callerUserId"/> is the repeating caller, a structured log parameter only (no response change),
+    /// so a caller's failed repeats can be audited; the first apply's own incomplete passes none.
     /// </summary>
-    private AssignFirmResult Incomplete(Guid invoiceId, Guid submissionId, string step, string cause)
+    private AssignFirmResult Incomplete(Guid invoiceId, Guid submissionId, string step, string cause, Guid? callerUserId = null)
     {
-        _logger.LogError("Set firm on invoice {InvoiceId}: the firm is set but the {Step} step did not finish ({Cause}); a repeat finishes it.",
-            invoiceId, step, cause);
+        if (callerUserId is { } repeater)
+        {
+            _logger.LogError("Set firm on invoice {InvoiceId}: the firm is set but the {Step} step did not finish ({Cause}); a repeat finishes it; repeated by {CallerUserId}.",
+                invoiceId, step, cause, repeater);
+        }
+        else
+        {
+            _logger.LogError("Set firm on invoice {InvoiceId}: the firm is set but the {Step} step did not finish ({Cause}); a repeat finishes it.",
+                invoiceId, step, cause);
+        }
+
         return new AssignFirmResult(AssignFirmOutcome.Incomplete, StatusCodes.Status503ServiceUnavailable, AssignFirmCodes.Incomplete, IncompleteDetail,
             SubmissionId: submissionId, FailedStep: step);
     }

@@ -54,6 +54,16 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         typeof(Sprk.Bff.Api.Services.Finance.InvoiceAssignFirmService),
     ];
 
+    /// <summary>
+    /// Types that name the column only to REFUSE a write (095d-1c F4-1), and read nothing: C1 lists them, C2 applies to them, and C3 does not
+    /// (they hold no Dataverse client). <see cref="RefusalOnlyTypesReadNothing"/> pins that they never reach <see cref="IGenericEntityService"/>.
+    /// </summary>
+    private static readonly Type[] RefusalOnlyTypes =
+    [
+        typeof(Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission), // names the column only to refuse app-only generic writes (095d-1c F4-1); reads nothing
+        typeof(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules), // names the column only to keep field mapping from writing it (095d-1c F4-1); reads nothing
+    ];
+
     /// <summary>The assemblies whose types may read Dataverse: the BFF and its data layer.</summary>
     private static readonly Assembly[] Scanned = [typeof(InvoiceSubmissionPersister).Assembly, typeof(IGenericEntityService).Assembly];
 
@@ -61,9 +71,10 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
     public void OnlyTheReviewedTypesNameTheColumn()
     {
         var naming = TypesNamingTheColumn(Scanned.SelectMany(a => a.GetTypes()));
+        Type[] listed = [.. ReviewedTypes, .. RefusalOnlyTypes];
 
-        var unreviewed = naming.Except(ReviewedTypes).Select(t => t.FullName).ToList();
-        var stale = ReviewedTypes.Except(naming).Select(t => t.FullName).ToList();
+        var unreviewed = naming.Except(listed).Select(t => t.FullName).ToList();
+        var stale = listed.Except(naming).Select(t => t.FullName).ToList();
         Assert.True(unreviewed.Count == 0,
             $"These types name {Column} but are not in the reviewed list: {string.Join(", ", unreviewed)}. The column is field-secured to the "
             + "BFF application user, so a read as the caller returns null. Read it through IGenericEntityService (app-only), record the "
@@ -74,7 +85,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
     [Fact(DisplayName = "122 (#2235) C2: no reviewed reader of sprk_findingsjson calls a caller-identity Dataverse seam")]
     public void TheReviewedReadersCallNoCallerIdentitySeam()
     {
-        var violations = CallerIdentityCalls(ReviewedTypes).ToList();
+        var violations = CallerIdentityCalls([.. ReviewedTypes, .. RefusalOnlyTypes]).ToList();
 
         Assert.True(violations.Count == 0,
             $"A type that reads {Column} calls a caller-identity Dataverse seam. The column is field-secured to the BFF application user, so "
@@ -88,6 +99,15 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         foreach (var type in ReviewedTypes)
         {
             Assert.True(UsesAppOnlyClient(type), $"{type.FullName} names {Column} but references no IGenericEntityService member: the scan cannot see its read");
+        }
+    }
+
+    [Fact(DisplayName = "095d-1c F4-1: the refusal-only types name sprk_findingsjson to refuse a write and never reach IGenericEntityService")]
+    public void RefusalOnlyTypesReadNothing()
+    {
+        foreach (var type in RefusalOnlyTypes)
+        {
+            Assert.False(UsesAppOnlyClient(type), $"{type.FullName} is listed as refusal-only but reaches IGenericEntityService; review it as a reader and move it to ReviewedTypes.");
         }
     }
 
