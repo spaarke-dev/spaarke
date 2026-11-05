@@ -578,3 +578,13 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - one `RulesOn` per distinct date (C9), Duplicate priors from either stream (C10), the adjustment list without precedence;
     - the 082c-1 interim throw on a gap (never a pass; removed by 082c-2), and `PrintMembers` on `BillingProcedureGap`.
   - Dev legacy overlap count is 0 (dev has no rule sets), so no outcome changes on dev.
+- **082c-1 contract points from ebilling's adversarial pass (2026-11-04):**
+  - **C8 at a tie: covered only by a STRICTLY higher rank.** Ties all apply (model 7.3), so a refused tie-mate's limit is in force and was never run. C8 is amended to "a higher rank". This is fail-closed, because more lines are marked not checked.
+  - **K4, invoice date after a Procedure's end (option c, ontology's):**
+    - For each Procedure, the invoice subject keeps the invoice date for version choice (the 072 rule, unchanged when a version is in force).
+    - When that Procedure has no version on the invoice date (a gap or not applicable), the invoice subject takes that Procedure's version on the latest dated line's work date.
+    - The invoice-date result (gap → hold) stands only when that date has no version either, or there are no dated lines.
+    - Reason: F2-d (owner) holds only *work* dated after an end. The invoice date is not work, and a hold on every late invoice for in-window work would be a false hold.
+    - Rejected: (a), which holds those invoices; and (b), which moves every invoice-level version choice to the latest work date, a wider semantic change that would need the owner.
+    - Legacy selection is unchanged.
+  - The D-205 Additive list is completed with AiObservation (D-172 round 3).
