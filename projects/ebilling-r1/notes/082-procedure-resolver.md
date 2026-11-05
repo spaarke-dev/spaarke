@@ -514,3 +514,24 @@ Dev has no rule sets to migrate, so the census is only meaningful on an environm
 - The interim throw goes when the gap hold lands. It is one spot in the processor, and `ProcedureGapNotYetHeldException` is deleted with it.
 - `BillingEvaluationResult.Gaps` carries `AppliesToInvoice` and `LineIndexes` for each gap, for the C11 `rules.not_checked` lines.
 - The C12 interim in the correction stays until 082d / 101.
+
+## 082c-1 adversarial pass and fix round 1
+
+Fixes follow the adversarial review of 082c-1 and ontology D-205. One commit per fix; the C8 tie and K4 each have their own commit so either can be reverted alone.
+
+| Finding | Fix |
+|---|---|
+| F1: a capless higher-ranked ExpenseRule displaced a lower version's cap | Under Split, `top` is taken from the valid versions that state a cap (`MaxAmountPerItem` non-null). Only those can put a lower version into `capDisplaced`; the code check is never displaced. This settles the "Split, literal reading" question above (ontology D-205 ruling). A deliberate "no cap on this record" is a rule-level Exclude, or a record rule in the base's slot, never precedence. Two tests that pinned the defect now use a capped higher version; new tests: capless higher version leaves the lower cap firing (must-fire), capped higher version displaces, capless at a tie applies beside it |
+| Cosmetic: a displaced cap was still listed as skipped in the currency "not checked" finding | A cap displaced on every subject it applies to is left out of the skipped list (test added) |
+| F2: C12 compared gaps as `(ProcedureId, WorkDate, Kind)`, so a line moved onto a date that already had another subject's gap brought in no new key | Compared per subject: `(ProcedureId, Kind, subject)` from `AppliesToInvoice` and `LineIndexes`; any after-side triple not in the before set refuses the correction. Must-fire: the fee line is moved onto the received date, where the undated expense line already holds a gap. Must-not-fire neighbour: an Hours correction applies |
+| F1-low: a C12 refusal surfaced as the generic 503 Incomplete ("Repeat the same request"), which never clears a gap | New `CorrectionProcedureGapException`, mapped to `CorrectionStatus.ProcedureGap` and a fixed-text 409 `ebilling.correction.procedure_gap` (same pattern as `CorrectionFirmMissingException`). No id, no `ex.Message`. Test covers the status, code, fixed detail and the HTTP mapping |
+| C8 tie (confirmed by ontology): a refused version was covered by a tie-mate | `RefusalScopeOf` covers a refused version's subject only for a Replace rule of strictly HIGHER rank (`> 0`, was `>= 0`). Tie test: Firm-level TimeIncrement 0.1 and 0.5, the 0.5 refused, a 0.3 line stays `rules.not_checked` (own commit) |
+| K2: a record rule's code prints a policy id | `PolicyCode` of a record rule is `BRR-` + the policy id. `ResolvedPolicyVersion`, `ResolvedRule` and `ExcludedRule` `PrintMembers` print the token `record rule` for such a code; C17 test extended |
+| K4: the invoice date after the last version, in a hole, or before the first, held the whole invoice | **K4 resolved by ontology rule (c).** The invoice subject keeps the invoice date for a Procedure's version whenever that Procedure has one on it. A Procedure with none on the invoice date is judged, for the invoice subject only, by its version on the LATEST dated line's work date. The invoice-date gap stands only when that date has none either, or when no line is dated. Legacy selection and line subjects are unchanged; no new `RulesOn` call (C9's one resolution and memo per date hold, tested). One existing gap test changed: the invoice no longer holds the gap when the dated lines are inside the window (own commit) |
+
+### Open items
+
+- **K1:** the interim throw retries the full pipeline. Acceptable because 082c-1..3 and 114 ship together.
+- **K4:** resolved by rule (c) above; nothing open with ontology.
+- **C20 census and the pair create test** belong to 082c-2.
+- **ForReaders and record rules (reported, not changed):** `ProcedureRulesOnDate.ForReaders()` builds `ProcedureReaderRule.PolicyCode` from `r.Version.PolicyCode`. For a record rule (`RecordRule is not null`) that is the `BRR-` code, which carries the record rule's policy id. The reader contract is uac-r2's; the decision on whether to blank or replace the code for record rules is theirs. The excluded-rule list is not affected (it carries the base rule's code).
