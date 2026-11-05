@@ -3372,6 +3372,188 @@ public class SubmissionOverrideServiceTests
         w.ClosedBy.Should().ContainKey(onInvoice);
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 114b (ontology D-201 ruling, 2026-11-05): a human decision closes a Signal as Acted, and names it in its record's resolved set,
+    // ONLY if the decision released that Signal's hold. The shared SubmissionIntegrity Signal stays Open while any hold reason remains.
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private const string OtherGapFindings = "{\"pipelineFindings\":[{\"reasonCode\":\"" + SubmissionReasonCodes.ProcedureGap + "\",\"values\":{}}],\"lineFindings\":[]}";
+
+    private static Guid AddSharedIntegritySignal(World w) =>
+        w.AddSignal("sprk_invoice", World.InvoiceId, Sprk.Bff.Api.Services.Signals.Billing.BillingRuleCatalogue.SystemPolicyCode);
+
+    private static IEnumerable<Guid> StoredSetIds(World w) =>
+        JsonNode.Parse(w.FindingsJson)![SubmissionOverrideService.HumanDecisionSetMember]!["signals"]!.AsArray()
+            .Select(s => Guid.Parse(s!["id"]!.GetValue<string>()));
+
+    private static void AssertLeftOpen(World w, Guid signal)
+    {
+        w.ClosedBy.Should().NotContainKey(signal, "its hold still stands, so the decision does not close it");
+        w.Closes.Should().NotContain(c => c.SignalId == signal);
+        var row = w.Signals.Single(s => s.Id == signal);
+        row.GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value.Should().Be(SignalWriter.SignalStatusOpen);
+        row.Contains("sprk_decisionrecord").Should().BeFalse("no Decision Record is linked to a Signal left open");
+        w.Recorded.Should().OnlyContain(d => d.ResolvedSignalIds == null || !d.ResolvedSignalIds.Contains(signal), "the record's resolved set excludes it");
+        StoredSetIds(w).Should().NotContain(signal, "the stored set excludes it");
+    }
+
+    [Fact(DisplayName = "114b must-fire (a): an Internal gap released while the firm hold remains leaves the shared SubmissionIntegrity Signal OPEN with no Decision Record; the record's resolved set and the stored set exclude it; the detail reads Waiting for the firm")]
+    public async Task Release_WhileTheFirmHoldRemains_LeavesTheSharedIntegritySignalOpen()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
+        w.InvoiceOwnHold = FirmMissing;
+        var shared = AddSharedIntegritySignal(w);
+        var rule = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        AssertLeftOpen(w, shared);
+        w.Recorded.Single().ResolvedSignalIds.Should().BeEquivalentTo([rule], "the rule Signal names no hold: it closes as before");
+        StoredSetIds(w).Should().BeEquivalentTo([rule]);
+        w.ClosedBy.Keys.Should().BeEquivalentTo([rule]);
+        w.InvoiceDetail.Should().Be(InvoiceReviewDetail.WaitingForFirm);
+        w.InvoiceDetail.Should().Be(659490002);
+        w.Code.Should().Be(SubmissionReasonCodes.Overridden, "the Procedure hold itself is released");
+    }
+
+    [Fact(DisplayName = "114b must-fire (b): two linked submissions on one invoice, only A overridden - the shared Signal that carries B's gap stays Open and is not in A's resolved set; A's own Signals close as Acted")]
+    public async Task Release_OfOneLinkedSubmission_DoesNotCloseTheSignalOfAnotherWhoseHoldStands()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
+        w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.ProcedureGap, OtherGapFindings));
+        var shared = AddSharedIntegritySignal(w);
+        var line = w.AddLine();
+        var onLine = w.AddSignal("sprk_billingevent", line, "EB-RATE");
+        var onInvoice = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        AssertLeftOpen(w, shared);
+        w.Recorded.Single().ResolvedSignalIds.Should().BeEquivalentTo([onLine, onInvoice], "A's own Signals");
+        w.ClosedBy.Keys.Should().BeEquivalentTo([onLine, onInvoice]);
+        w.ClosedBy.Values.Should().OnlyContain(r => r == result.RecordId!.Value, "closed as Acted by A's record");
+        w.InvoiceDetail.Should().Be(InvoiceReviewDetail.WaitingForBillingTerms, "B's gap still holds the invoice");
+    }
+
+    [Theory(DisplayName = "114b must-not-fire (c): with no hold left, the shared Signal closes as Acted exactly as before - after a Procedure release, and after an ordinary override")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Release_WithNoHoldLeft_ClosesTheSharedIntegritySignal(bool procedureRelease)
+    {
+        var w = procedureRelease ? await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal) : await World.CreateAsync();
+        var shared = AddSharedIntegritySignal(w);
+        var rule = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.Recorded.Single().ResolvedSignalIds.Should().BeEquivalentTo([shared, rule]);
+        StoredSetIds(w).Should().BeEquivalentTo([shared, rule]);
+        w.ClosedBy[shared].Should().Be(result.RecordId!.Value);
+        w.ClosedBy.Keys.Should().BeEquivalentTo([shared, rule]);
+        w.InvoiceDetail.Should().BeNull();
+    }
+
+    [Theory(DisplayName = "114b: an ordinary override (no Procedure hold) leaves the shared Signal open while a firm hold stands, and closes everything else")]
+    [InlineData("the invoice's own firm hold is still set")]
+    [InlineData("another linked submission still holds a gap")]
+    public async Task OrdinaryOverride_WhileAHoldStands_LeavesTheSharedIntegritySignalOpen(string remaining)
+    {
+        var w = await World.CreateAsync();
+        if (remaining.StartsWith("another", StringComparison.Ordinal))
+        {
+            w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.ProcedureGap, OtherGapFindings));
+        }
+        else
+        {
+            w.InvoiceOwnHold = FirmMissing;
+        }
+
+        var shared = AddSharedIntegritySignal(w);
+        var rule = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        AssertLeftOpen(w, shared);
+        w.ClosedBy.Keys.Should().BeEquivalentTo([rule]);
+    }
+
+    [Theory(DisplayName = "114b retry (d): a 409 or a 503 repeat gives the same filtered set - the shared Signal stays out of the record, the stored set and every close, even after the firm hold clears between attempts")]
+    [InlineData("409")]
+    [InlineData("503")]
+    public async Task Release_Repeat_NamesTheSameFilteredSet(string failure)
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
+        w.InvoiceOwnHold = FirmMissing;
+        var shared = AddSharedIntegritySignal(w);
+        var rule = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
+        if (failure == "409")
+        {
+            w.OnUpdate = () => w.Submission["versionnumber"] = w.Submission.GetAttributeValue<long>("versionnumber") + 1;
+        }
+        else
+        {
+            w.RecordFault = new TimeoutException("dataverse");
+        }
+
+        var first = await w.OverrideAsync();
+
+        if (failure == "409")
+        {
+            first.StatusCode.Should().Be(409);
+        }
+        else
+        {
+            first.StatusCode.Should().Be(503);
+            first.ErrorCode.Should().Be(BlockedSubmissionErrors.RecordUnavailable);
+        }
+
+        StoredSetIds(w).Should().BeEquivalentTo([rule], "the filtered set is stored before the record");
+        w.OnUpdate = null;
+        w.RecordFault = null;
+        w.InvoiceOwnHold = null; // the hold clears between attempts: the repeat still replays the stored set
+
+        var repeat = await w.OverrideAsync();
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.RecordCreates.Should().Be(1);
+        w.Recorded.Should().OnlyContain(d => d.ResolvedSignalIds!.SequenceEqual(new[] { rule }), "every attempt's record names the same filtered set");
+        AssertLeftOpen(w, shared);
+        w.ClosedBy.Keys.Should().BeEquivalentTo([rule]);
+    }
+
+    [Fact(DisplayName = "114b fail closed: a fault reading the remaining holds with the shared Signal open is 503 before any write, for an ordinary override too")]
+    public async Task OrdinaryOverride_WithTheSharedSignal_WhenTheHoldsCannotBeRead_IsUnavailable_BeforeAnyWrite()
+    {
+        var w = await World.CreateAsync();
+        var shared = AddSharedIntegritySignal(w);
+        w.HoldReadFault = new TimeoutException("dataverse");
+
+        var result = await w.OverrideAsync();
+
+        ShouldBeUnavailable(result);
+        w.RecordCreates.Should().Be(0);
+        w.Closes.Should().BeEmpty();
+        w.ClosedBy.Should().NotContainKey(shared);
+        w.AssertNothingWritten();
+    }
+
+    [Fact(DisplayName = "114b: a Return closes the set as before - the filter is the Override's (a Return releases no hold)")]
+    public async Task Return_IsUnchanged_ByTheHoldFilter()
+    {
+        var w = await World.CreateAsync();
+        w.InvoiceOwnHold = FirmMissing;
+        var shared = AddSharedIntegritySignal(w);
+
+        var result = await w.ReturnAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.ClosedBy.Should().ContainKey(shared);
+    }
+
     [Fact(DisplayName = "114: a Return of an SPA submission held by a Procedure hold is refused as it always was (not_internal); a Return of an Internal one with no deciding finding is allowed (C22)")]
     public async Task Return_OfAProcedureHold()
     {

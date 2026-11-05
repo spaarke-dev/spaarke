@@ -787,6 +787,7 @@ public sealed class SubmissionOverrideService
         InvoiceSubmissionAfterSteps.ResolvedSignalSet signalSet;
         IReadOnlyList<(string Entity, Guid Id)> subjects;
         var storeSet = false;
+        IReadOnlyList<(InvoiceSubmissionAfterSteps.ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)>? freshOpen = null;
         try
         {
             StoredSignalSetCheck.Result check;
@@ -806,8 +807,8 @@ public sealed class SubmissionOverrideService
             else
             {
                 var read = await InvoiceSubmissionAfterSteps.ReadOpenSignalSetWithSubjectsAsync(_entities, _time, invoiceId, _logger, ct).ConfigureAwait(false);
-                (signalSet, storeSet) = (read.Set, true);
-                check = new StoredSignalSetCheck.Result(true, null, read.Subjects);
+                (signalSet, storeSet, freshOpen) = (read.Set, true, read.Open);
+                check =new StoredSignalSetCheck.Result(true, null, read.Subjects);
             }
 
             if (!check.Trusted)
@@ -823,6 +824,64 @@ public sealed class SubmissionOverrideService
         {
             _logger.LogWarning(ex, "Submission {SubmissionId}: the Signals of invoice {InvoiceId} could not be read", submissionId, invoiceId);
             return Unavailable(submissionId, invoiceId);
+        }
+
+        // ── Task 114 (F4 review round; 114b order change): the holds that REMAIN are derived BEFORE any write (the set store, the Decision Record,
+        //    the Signal closes), so a fault reading them leaves nothing behind (503, no record, no closed Signal) while the hold stays in force. The
+        //    derivation does not depend on the record: it asks "what remains once this submission reads as released", through a provisional stamp
+        //    (the decision id; the real stamp, with the record id, is written below). 114b: it also runs BEFORE the authorisation, the Decision
+        //    Record's build and the set's store, because the same answer decides which Signals this decision may close (a Signal whose hold still
+        //    stands stays open), so the record's resolved set, the stored set and the close all name the same Signals. ──
+        var liftsProcedureHold = verb == Verb.Override && InvoiceProcedureHold.ReasonsOf(row).Count > 0;
+        var holdBearingOpen = verb == Verb.Override && freshOpen is { } openNow && openNow.Any(s => IsHoldBearingSignal(s.Signal, s.SubjectEntity, s.SubjectId, invoiceId));
+        (long InvoiceVersion, int? ReviewDetail)? releaseDetail = null;
+        IReadOnlySet<string>? remaining = null;
+        if (liftsProcedureHold || holdBearingOpen)
+        {
+            try
+            {
+                var writesDetail = liftsProcedureHold && await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false);
+                if (writesDetail || holdBearingOpen)
+                {
+                    var provisional = WithStamp(findingsJson!, OverrideMember, new BlockedDecisionStamp(decisionId, decider, _time.GetUtcNow(), reason));
+                    remaining = await InvoiceOpenHolds.ReasonsAfterAsync(
+                        _entities, invoice!, submissionId, new InvoiceOpenHolds.StoredSubmission(SubmissionReasonCodes.Overridden, provisional), ct).ConfigureAwait(false);
+                    if (writesDetail)
+                    {
+                        if (RowVersionOf(invoice!) is not { } invoiceVersion)
+                        {
+                            _logger.LogWarning("Invoice {InvoiceId} was read without a row version; the release of submission {SubmissionId} is not written", invoiceId, submissionId);
+                            return Unavailable(submissionId, invoiceId);
+                        }
+
+                        releaseDetail = (invoiceVersion, InvoiceReviewDetail.ReviewDetailOf(remaining));
+                    }
+                }
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                // Held, not guessed: nothing is written. The type only: a message can name rows.
+                _logger.LogWarning("Submission {SubmissionId}: the holds that remain on invoice {InvoiceId} could not be read ({ExceptionType}); nothing was written",
+                    submissionId, invoiceId, ex.GetType().Name);
+                return Unavailable(submissionId, invoiceId);
+            }
+        }
+
+        // ── Task 114b (ontology D-201 ruling, 2026-11-05): a human decision closes a Signal as Acted, and names it in its record's resolved set,
+        //    ONLY if the decision released that Signal's hold. The shared SubmissionIntegrity Signal of the invoice carries every hold reason of
+        //    every submission linked to it (firm_missing, procedure_gap, procedures_unresolved); while ANY reason remains after this release it
+        //    stays Open, with no Decision Record link (the 095d-2 re-run closes it as ConditionCleared once every reason clears). Only on a FRESH
+        //    read: a set already stored (with the record, or in the findings by an earlier attempt of this decision) is replayed verbatim, so a
+        //    retry names the same Signals. ──
+        if (storeSet && freshOpen is { } read0 && remaining is { Count: > 0 } && holdBearingOpen)
+        {
+            var kept = read0.Where(s => !IsHoldBearingSignal(s.Signal, s.SubjectEntity, s.SubjectId, invoiceId)).ToList();
+            _logger.LogInformation(
+                "Submission {SubmissionId}: {Count} Signal(s) of invoice {InvoiceId} stay open because the hold(s) {Holds} remain; the decision resolves {Resolved}",
+                submissionId, read0.Count - kept.Count, invoiceId, string.Join(",", remaining.Order(StringComparer.Ordinal)), kept.Count);
+            var keptIds = kept.Select(s => s.Signal.Id).ToHashSet();
+            signalSet = new InvoiceSubmissionAfterSteps.ResolvedSignalSet(signalSet.SetReadAtUtc, signalSet.Signals.Where(s => keptIds.Contains(s.Id)).ToList());
+            subjects = kept.Select(s => (s.SubjectEntity, s.SubjectId)).Distinct().ToList();
         }
 
         // ── FR-51, before any write: closing Signals (app identity, no impersonation) needs the caller's rights, asked as the caller. ──
@@ -841,38 +900,6 @@ public sealed class SubmissionOverrideService
             _logger.LogWarning("Submission {SubmissionId}: the decision would be refused before any write ({Reason})", submissionId, ex.Reason);
             return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status400BadRequest, BlockedSubmissionErrors.DecisionInvalid,
                 "The decision is not valid.", invoiceId);
-        }
-
-        // ── Task 114 (F4 review round): the holds that REMAIN are derived BEFORE any write (the set store, the Decision Record, the Signal closes),
-        //    so a fault reading them leaves nothing behind (503, no record, no closed Signal) while the hold stays in force. The derivation does not
-        //    depend on the record: it asks "what remains once this submission reads as released", through a provisional stamp (the decision id; the
-        //    real stamp, with the record id, is written below). ──
-        (long InvoiceVersion, int? ReviewDetail)? releaseDetail = null;
-        if (verb == Verb.Override && InvoiceProcedureHold.ReasonsOf(row).Count > 0)
-        {
-            try
-            {
-                if (await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false))
-                {
-                    var provisional = WithStamp(findingsJson!, OverrideMember, new BlockedDecisionStamp(decisionId, decider, _time.GetUtcNow(), reason));
-                    var remaining = await InvoiceOpenHolds.ReasonsAfterAsync(
-                        _entities, invoice!, submissionId, new InvoiceOpenHolds.StoredSubmission(SubmissionReasonCodes.Overridden, provisional), ct).ConfigureAwait(false);
-                    if (RowVersionOf(invoice!) is not { } invoiceVersion)
-                    {
-                        _logger.LogWarning("Invoice {InvoiceId} was read without a row version; the release of submission {SubmissionId} is not written", invoiceId, submissionId);
-                        return Unavailable(submissionId, invoiceId);
-                    }
-
-                    releaseDetail = (invoiceVersion, InvoiceReviewDetail.ReviewDetailOf(remaining));
-                }
-            }
-            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
-            {
-                // Held, not guessed: nothing is written. The type only: a message can name rows.
-                _logger.LogWarning("Submission {SubmissionId}: the holds that remain on invoice {InvoiceId} could not be read ({ExceptionType}); nothing was written",
-                    submissionId, invoiceId, ex.GetType().Name);
-                return Unavailable(submissionId, invoiceId);
-            }
         }
 
         // ── The set is stored BEFORE the record (049's way), so a retry closes exactly it. ──
@@ -1348,6 +1375,18 @@ public sealed class SubmissionOverrideService
         root[HumanDecisionSetMember] = node;
         return root.ToJsonString();
     }
+
+    /// <summary>
+    /// Task 114b (ontology D-201 ruling): true for the Signal that carries the invoice's hold reasons: the SubmissionIntegrity Signal
+    /// (<see cref="Sprk.Bff.Api.Services.Signals.Billing.BillingRuleCatalogue.SystemPolicyCode"/>) whose subject is the INVOICE itself. 049 and 082c-2
+    /// write every system finding of every submission linked to an invoice (firm_missing, procedure_gap, procedures_unresolved, and the
+    /// non-hold ones) to ONE such Signal per (policy, invoice) (<c>BillingFindingSignalMapper</c> groups by policy and subject), so the Signal
+    /// carries no per-submission mark and cannot be split by submission or by reason: it belongs to the holds as a whole, and while any reason
+    /// remains it stays open (fail toward open). Every other Signal (a rule's, or a system Signal on a line) names no hold and is closed as before.
+    /// </summary>
+    private static bool IsHoldBearingSignal(InvoiceSubmissionAfterSteps.ResolvedSignal signal, string subjectEntity, Guid subjectId, Guid invoiceId) =>
+        string.Equals(signal.PolicyCode, Sprk.Bff.Api.Services.Signals.Billing.BillingRuleCatalogue.SystemPolicyCode, StringComparison.Ordinal)
+        && subjectEntity == InvoiceReviewService.InvoiceEntity && subjectId == invoiceId;
 
     /// <summary>
     /// FR-51 when the set is not empty: AppendTo on the invoice's core record and Write on every Signal's subject, asked as the caller; a
