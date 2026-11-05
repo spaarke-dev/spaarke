@@ -105,6 +105,7 @@
 - [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization must be primary .…
 
 ## AI platform / models / competitors
+- [Opal (Frontier) computer-use agent (2026-11-05)](opal-frontier-computer-use-agent-2026-11-05.md) — browser-only CUA on W365 for Agents Cloud PC; allowlist default now ALLOW-ALL; billing/retention UNKNOWN
 - [MCP server in .NET BFF + Copilot DA widget (2026-11-05)](mcp-server-dotnet-bff-copilot-widget-2026-11-05.md) — C# SDK 2.3.1 + official Extensions.Apps (experimental MCPEXP003); stateless default; Entra SSO setup; no .NET Entra+widget MS sample; Dataverse MCP now 16 tools (invoke_api)
 - [Word vs Cowork plugin kinds + Harvey/Legora + Tuning (2026-11-02)](word-vs-cowork-plugin-kinds-harvey-legora-tuning-2026-11-02.md) — no target field; partner legal = MCP federated connectors (doc'd in Word); Harvey skills = its 5 MCP tools; custom federated connector = Word route; Tuning agents in Copilot app/Teams, paused→Copilot Studio
 - [Word won't run plugin skills (2026-11-02)](word-plugin-skills-not-executed-2026-11-02.md) — no host field; Word lists registry plugins but has no 3P skill loader; PPT org skills via admin Add agent; no Word ETA

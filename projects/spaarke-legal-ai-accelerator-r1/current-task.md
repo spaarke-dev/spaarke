@@ -18,7 +18,7 @@
 ### Critical Context
 - **The MCP and Copilot-surface work is split out** (owner, 2026-11-05) to `projects/spaarkeai-mcp-bff-api-r1`, in its own worktree `C:\code_files\spaarke-wt-spaarkeai-mcp-bff-api-r1`, branch `work/spaarkeai-mcp-bff-api-r1`. The owner works on it in a separate window; don't edit it from here.
 - **Word deliverable in R1:** the `.docx` Word playbook only (owner confirmed, 2026-11-05).
-- **Opal (Frontier):** researcher note `opal-frontier-computer-use-agent-2026-11-05.md`, pending.
+- **Opal (Frontier):** a browser-only computer-use agent on Windows 365 for Agents Cloud PCs. See researcher note `opal-frontier-computer-use-agent-2026-11-05.md`. Not an integration path for Spaarke. If evaluated: dev tenant, owner-only group, block-all plus allowlist, pool of 1.
 - **Word has never run our plugin.** No third-party skill loader is documented for Word (L25). But we have never tested a correctly built, instruction-only plugin there, and Harvey appears in Word.
 - **Cowork works**, and it currently has NO Spaarke install (clean-up done 2026-11-02).
 - **The component protocol** `notes/component-protocol.md` v0.2 is the design direction. Owner review is pending, except §4.5, which the owner approved.
