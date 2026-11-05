@@ -331,11 +331,15 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             .Select(g =>
             {
                 _ = BillingSystemFindings.GapKindText(g.Kind);
+
+                // K4 condition (c): what is written into the stored findings comes through the reader projection (ProcedureGap.ForReaders, the
+                // one mapping behind ProcedureRulesOnDate.ForReaders), never from the internal record's own members.
+                var reader = g.ForReaders();
                 return new SubmissionPipelineFinding(SubmissionReasonCodes.ProcedureGap, new Dictionary<string, string?>
                 {
-                    [SubmissionReasonCodes.ProcedureNameValue] = g.ProcedureName,
-                    [SubmissionReasonCodes.ProcedureWorkDateValue] = g.WorkDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                    [SubmissionReasonCodes.ProcedureGapKindValue] = g.Kind.ToString(),
+                    [SubmissionReasonCodes.ProcedureNameValue] = reader.ProcedureName,
+                    [SubmissionReasonCodes.ProcedureWorkDateValue] = reader.WorkDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    [SubmissionReasonCodes.ProcedureGapKindValue] = reader.Kind,
                 });
             })
             .ToList();

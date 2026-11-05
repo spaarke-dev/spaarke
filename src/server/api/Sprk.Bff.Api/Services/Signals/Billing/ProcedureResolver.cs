@@ -253,6 +253,14 @@ public enum ProcedureGapKind
 public sealed record ProcedureGap(
     Guid ProcedureId, string ProcedureName, DateOnly WorkDate, ProcedureGapKind Kind, IReadOnlyList<ProcedureOverrideRow> Overrides)
 {
+    /// <summary>
+    /// The reader-facing projection of this gap (uac-r2 U3; ebilling-r1 082c-2 fix round 1, K4 condition (c)): the Procedure's name, the date and
+    /// the kind's name, and nothing else. The ONE mapping: <see cref="ProcedureRulesOnDate.ForReaders"/> and every writer of a gap into a stored or
+    /// reader-facing surface (the gap pipeline finding in the stored findings JSON) take it from here, so a field is added to the reader view in
+    /// one place and never by a writer that reads the internal record.
+    /// </summary>
+    public ProcedureReaderGap ForReaders() => new(ProcedureName, WorkDate, Kind.ToString());
+
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
         builder.Append("ProcedureName = ").Append(ProcedureName).Append(", WorkDate = ").Append(WorkDate).Append(", Kind = ").Append(Kind)
@@ -322,7 +330,7 @@ public sealed record ProcedureRulesOnDate(
         ExcludedRules.Select(e => new ProcedureReaderExcludedRule(
             e.Version.PolicyCode, e.Procedure.ProcedureName, e.Distance, e.ReplacedByRecordRule)).ToList(),
         ExcludedProcedures.Select(e => new ProcedureReaderExcludedProcedure(e.ProcedureName, e.Overrides.Min(o => o.Distance))).ToList(),
-        Gaps.Select(g => new ProcedureReaderGap(g.ProcedureName, g.WorkDate, g.Kind.ToString())).ToList());
+        Gaps.Select(g => g.ForReaders()).ToList());
 
     /// <summary>uac-r2 option (a): a rule's reader code. A Procedure rule keeps its own catalogue code; a record rule gets its base rule's, or
     /// blank when that is missing or is itself a record-rule code (fail closed: never a <c>BRR-</c> code or any part of an id).</summary>

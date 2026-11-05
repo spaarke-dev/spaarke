@@ -144,6 +144,53 @@ public sealed class InvoiceSubmissionProcedureHoldTests
         json.Should().NotContain("Procedure row", "the whole stored copy, not only its reader parts");
     }
 
+    [Fact(DisplayName = "082c-2 K4 (c) sentinel, end to end: ids, the override rows' record and reason planted in the resolver's gap reach no stored findings, plan or status view; the gap is written through ForReaders")]
+    public async Task Sentinel_PlantedResolverOutput_ReachesNoStoredFindingsPlanOrView()
+    {
+        var procedureId = Guid.NewGuid();
+        var rowId = Guid.NewGuid();
+        var recordId = Guid.NewGuid();
+        var policyId = Guid.NewGuid();
+        var reason = "SENTINEL-REASON typed on a parent " + Guid.NewGuid().ToString("D");
+        var recordRuleCode = Sprk.Bff.Api.Services.Finance.Procedures.ProcedureAssignmentService.RecordRuleCode(Guid.NewGuid());
+        var planted = new ProcedureGap(
+            procedureId, "Ended", new DateOnly(2026, 3, 11), ProcedureGapKind.AfterLastVersion,
+            [new ProcedureOverrideRow(
+                rowId, ProcedureOverrideMode.FollowLatest, new CoreRecordLink("sprk_matter", recordId, 1), procedureId, null, policyId, null, reason)]);
+
+        // The outcome is the real processor's; the gap in its resolver output is replaced by the planted one and the pipeline finding is
+        // written by the real writer (ProcedureGapFindings), then stored by the real builder (BuildFindingsJson), mapped by part D, and
+        // shown by the status view's warning.
+        var real = await new ProcessorHarness { Procedures = Ended(new DateOnly(2025, 1, 1), new DateOnly(2026, 3, 10)) }.RunAsync();
+        var evaluation = real.Evaluation! with { Gaps = [new BillingProcedureGap(planted, AppliesToInvoice: true, LineIndexes: [0])] };
+        var outcome = real with
+        {
+            Evaluation = evaluation,
+            PipelineFindings = [.. real.PipelineFindings.Where(f => f.ReasonCode != SubmissionReasonCodes.ProcedureGap), .. InvoiceSubmissionProcessor.ProcedureGapFindings(evaluation)],
+        };
+
+        var json = InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId);
+        var view = JsonSerializer.Serialize(SubmissionHoldWarning.For(outcome.ReasonCode));
+        var everything = json + "\n" + view + "\n" + ReaderText(json);
+
+        everything.Should().Contain("Ended", "control: the gap's name is reader text");
+        foreach (var secret in new[] { procedureId, rowId, recordId, policyId })
+        {
+            everything.Should().NotContain(secret.ToString("D")).And.NotContain(secret.ToString("N")).And.NotContain(secret.ToString("B"));
+        }
+
+        everything.Should().NotContain("SENTINEL-REASON").And.NotContain(recordRuleCode);
+        ReaderSentinel.Scan(ReaderText(json) + "\n" + view).Should().BeEmpty();
+        var root = JsonNode.Parse(json)!.AsObject();
+        root["pipelineFindings"]!.AsArray().OfType<JsonObject>().Where(f => f["reasonCode"]!.GetValue<string>() == SubmissionReasonCodes.ProcedureGap)
+            .Should().ContainSingle().Which["values"]!.AsObject().Select(v => v.Key).Should().BeEquivalentTo(
+                [SubmissionReasonCodes.ProcedureNameValue, SubmissionReasonCodes.ProcedureWorkDateValue, SubmissionReasonCodes.ProcedureGapKindValue],
+                "the reader projection's three members, and nothing else");
+
+        // The reader projection is the one mapping: the gap's ForReaders() is what ProcedureRulesOnDate.ForReaders() lists.
+        planted.ForReaders().Should().Be(new ProcedureReaderGap("Ended", new DateOnly(2026, 3, 11), nameof(ProcedureGapKind.AfterLastVersion)));
+    }
+
     // ── 3(c) / C18: the status view's warning ──
 
     [Theory(DisplayName = "082c-2 3(c): the status view's warning is derived from the reason code with the owner-approved text; absent for any other reason")]

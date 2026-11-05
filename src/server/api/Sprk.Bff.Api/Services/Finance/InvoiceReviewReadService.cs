@@ -148,6 +148,8 @@ public sealed record ReviewSuggestionDto(string Kind, decimal? Amount);
 /// <param name="DetailWithheld">The values read are not returned: a duplicate across a secure wall (D-112, at write time), or a Duplicate whose
 /// earlier invoice the caller cannot read (D-176, at read time).</param>
 /// <param name="Overridden">The submission this finding blocked was overridden (an <c>override-submission</c> Decision Record exists for the invoice).</param>
+// ebilling-r1 082c-2 fix round 1 (uac-r2 K4): PolicyCode (a record rule's is its BRR- code) sits next to PolicyId on the INTERNAL review route only.
+// If any external module or SPA surface maps this DTO, it must go through ProcedureRulesOnDate.ForReaders() (base code + record-rule flag) first.
 public sealed record ReviewFindingDto(
     string RuleType,
     string PolicyCode,
