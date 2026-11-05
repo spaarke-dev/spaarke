@@ -24,10 +24,12 @@ namespace Spaarke.ArchTests;
 /// names no column literal, so <see cref="TheCommitGateUndoDerivesTheDetail"/> pins that it derives one.</para>
 /// <para><b>Pending writers</b> (each must recompute from the invoice's REMAINING reasons in its own transaction, and be added here): (2) the
 /// re-check that clears a gap or unresolved (no 082c-2 path clears one: 082d / 101's correction re-evaluation and the ebilling-r2 explicit
-/// re-check); (4) the 095d-2 re-run; (5) the 114 Override release; (8) the 089e chain close, only if it ends In Review (C19).</para>
+/// re-check); (4) the 095d-2 re-run; (5) the 114 Override release. The 089e chain close is NOT a pending writer (8): C19 found it writes
+/// <c>sprk_signal</c> only and never an invoice status, so it never needs the detail.</para>
 /// <para><b>Enforced by this test</b> (CLAUDE.md section 16 ladder): a type cannot say "only these methods write this column", so the rule is an
-/// ArchTest with must-fire and must-not-fire controls. <b>Not covered:</b> a writer that builds the column name at run time; the generic Update
-/// Record node and field mappings, which the column is refused to through <c>RecordTableRules</c>' <c>MappingProtectedColumns</c>.</para>
+/// ArchTest with must-fire and must-not-fire controls. <b>Not covered:</b> a writer that builds the column name at run time; the generic paths
+/// (app-only generic writes, field mappings and the Update Record node), which refuse the column through <c>ParentLineage</c>' <c>AccessColumns</c>
+/// (app-only generic writes) AND <c>RecordTableRules</c>' <c>MappingProtectedColumns</c> (field mappings, the Update Record node).</para>
 /// </remarks>
 public sealed class InvoiceReviewDetailWritersGuardTests
 {
