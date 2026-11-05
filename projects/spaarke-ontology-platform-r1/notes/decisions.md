@@ -582,6 +582,10 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - Census on dev (read-only): 0 of the 93 configured `sprk_playbooknode` rows name these tables.
     - Ontology confirmed output mapping is in scope. No legitimate playbook writes these tables through it. The writers (SignalWriter, DecisionRecordWriter, the Revise Budget writer and SignalEvaluationService's upsert) do not use any generic path.
     - Ontology asked for must-not-fire tests on the writers' own updates and for a rebase onto uac-r2's `5df0a80e1d`. Ontology reviews the diff before merge.
+  - **Delete gap (2026-11-05, found by fm's 048 review; private).** The chat `delete_record` tool does not refuse the three tables. Ontology supports extending D-204 to deletes; the owner decides through fm.
+    - Nothing of ours deletes these rows through a generic path. The writers never delete: a Signal ends by a close, and Decision Records are append-only.
+    - The exposure: Ontology Administrator holds Delete on `sprk_signal` and `sprk_budgetrevision`. A deleted revision makes an incorrect Signal look right.
+    - Proposed: refuse all three as delete targets, for the caller and the system principal, before any read, through the same registry flag. The same goes for any other generic delete path. No role change.
 - **Dev deploy of the lineage fix (master `909754869f`, live 2026-11-05 04:16:30Z; uac-r2 ran it with the owner's go): ontology PASS on the 30-minute gate and the AFTER read-back.**
   - Gate results:
     - 0 5xx and 0 held-pair Warnings;
