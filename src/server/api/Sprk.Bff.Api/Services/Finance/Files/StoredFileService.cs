@@ -66,7 +66,8 @@ public sealed class StoredFileService
 
     /// <summary>
     /// Stages the bytes of <paramref name="spec"/> (9.1 step 2): a refused spec, a length outside 0..int.MaxValue and different bytes
-    /// under an existing id are refusals with nothing written; the same bytes under an existing id are reused (a retry).
+    /// under an existing id are refusals with nothing written; the same bytes under an existing id are reused (a retry): write-once per
+    /// content, the same verified bytes are rewritten on reuse (DEF-044, owner 2026-11-05), see <see cref="StoredFileBlobs.StageAsync"/>.
     /// </summary>
     /// <exception cref="RequestFailedException">A storage fault.</exception>
     public Task<StageResult> StageAsync(StoredFileRowSpec spec, Stream content, CancellationToken ct) => StageAsync(spec, content, manifest: null, ct);

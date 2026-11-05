@@ -1,4 +1,5 @@
 using System.Globalization;
+using Azure;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Finance.Files;
@@ -486,8 +487,12 @@ public sealed record StoredFileRowSpec
 /// <param name="BlobPath">The blob name (also <c>sprk_blobpath</c>).</param>
 /// <param name="Sha256">Lower-case hex SHA-256 of the bytes.</param>
 /// <param name="SizeBytes">The length in bytes (already checked to fit the column).</param>
-/// <param name="Reused">True when the same bytes were already stored under the id (a retry).</param>
-public sealed record StagedBlob(string Container, string BlobPath, string Sha256, long SizeBytes, bool Reused);
+/// <param name="Reused">True when the same bytes were already stored under the id (a retry). A reuse REWRITES the blob with those same
+/// bytes (DEF-044, owner option B), so its ETag and Last-Modified move and Defender scans it again.</param>
+/// <param name="ETag">The blob's ETag as this stage left it: the create's, or the rewrite's on a reuse (DEF-044). A cleanup delete of a
+/// blob this stage wrote is pinned to it, so a delete that lost a race with a later reuse is refused. <c>null</c> where the facts were
+/// read back (<see cref="StoredFileService.GetStagedAsync"/>, <see cref="StoredFileService.ReadStagedSourceAsync"/>) rather than written.</param>
+public sealed record StagedBlob(string Container, string BlobPath, string Sha256, long SizeBytes, bool Reused, ETag? ETag = null);
 
 /// <summary>
 /// ebilling-r1 task 094 (from-email): what a from-email Invoice part's stage records beside its own source facts: the ordinals of the

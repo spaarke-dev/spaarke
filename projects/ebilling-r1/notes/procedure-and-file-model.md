@@ -312,7 +312,7 @@ Neither column confers access (section 5.2).
 ### 4.2 Blob layout and protection
 
 - **Containers:** `procedures`, `invoice-files`, `billing-exports`. **Path:** `{tenantId}/{parent table}/{parent id}/{file id}`.
-- **Write-once:** a file is never overwritten; a new file is a new row.
+- **Write-once per content:** a file is never overwritten with different content; a new file is a new row. The same verified bytes may be rewritten on reuse (a retry of the same deterministic id), so the blob's ETag and Last-Modified move and Defender scans it again (DEF-044, owner 2026-11-05).
 - **Malware scanning (Defender for Storage, on upload):**
   - The scan result is a blob index tag. The download route and every processing step read it on demand; nothing is queued, and there is no Event Grid receiver in R1.
   - Pending means wait (firm list: "Checking file…", content 409 `file_scan_pending`); Malicious means refuse (the file drops out of lists, content 404).
