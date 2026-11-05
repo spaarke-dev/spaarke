@@ -106,17 +106,19 @@ internal static class InvoiceSubmissionHttp
         .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
     /// <summary>202 with <c>Location</c> = the channel's status URL, or the refusal as ProblemDetails (ADR-019).</summary>
-    internal static IResult ToResult(InvoiceSubmissionOutcome outcome, Func<Guid, string> statusUrl, string traceId) => outcome.Kind switch
+    /// <remarks>ebilling-r1 082c-3: <paramref name="warning"/> is the external route's provisional pre-check warning, carried only on a 202; a refusal never carries it.</remarks>
+    internal static IResult ToResult(
+        InvoiceSubmissionOutcome outcome, Func<Guid, string> statusUrl, string traceId, SubmissionHoldWarning? warning = null) => outcome.Kind switch
     {
-        InvoiceSubmissionOutcomeKind.Received => Accepted(outcome.Receipt!, statusUrl(outcome.Receipt!.SubmissionId)),
+        InvoiceSubmissionOutcomeKind.Received => Accepted(outcome.Receipt!, statusUrl(outcome.Receipt!.SubmissionId), warning),
         InvoiceSubmissionOutcomeKind.OwnerRefused => outcome.FilingKept
             ? WithFilingKept(ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId))
             : ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "invoice submission", traceId),
         _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!, outcome.FilingKept, outcome.Extensions),
     };
 
-    private static IResult Accepted(InvoiceSubmissionReceipt receipt, string statusUrl) =>
-        Results.Accepted(statusUrl, new InvoiceSubmissionAccepted(receipt.SubmissionId, receipt.JobId, receipt.TrackingNumber, statusUrl));
+    private static IResult Accepted(InvoiceSubmissionReceipt receipt, string statusUrl, SubmissionHoldWarning? warning) =>
+        Results.Accepted(statusUrl, new InvoiceSubmissionAccepted(receipt.SubmissionId, receipt.JobId, receipt.TrackingNumber, statusUrl, warning));
 
     /// <summary>
     /// The route's own refusal: ProblemDetails with a top-level <c>errorCode</c>. <paramref name="filingKept"/> (contract section 6, "After step A",

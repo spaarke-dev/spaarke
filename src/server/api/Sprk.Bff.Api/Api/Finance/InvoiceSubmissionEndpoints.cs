@@ -1207,7 +1207,16 @@ public sealed record SubmitInvoiceCoreRecord
 /// <param name="JobId">The enqueued processing job.</param>
 /// <param name="TrackingNumber">The firm-scoped tracking number (D-87); never null (D-91).</param>
 /// <param name="StatusUrl">The status route of this submission on the channel it arrived through.</param>
-public sealed record InvoiceSubmissionAccepted(Guid SubmissionId, Guid JobId, string TrackingNumber, string StatusUrl);
+/// <param name="Warning">
+/// ebilling-r1 082c-3 (brief 082c section 7, R4 item 4): the PROVISIONAL billing-terms warning of the external (SPA) route's pre-check
+/// (<see cref="SubmissionHoldWarning.ForPrecheck"/>): today no billing terms are set up for the record. It is one fixed constant (the status
+/// view's gap code and the approved sentence), never a name, a date, a count or a rule code. Null, and then absent from the JSON, on every other
+/// answer, so a 202 without it is byte-for-byte what it was; the terminal status view's own warning (or none) replaces it.
+/// </param>
+public sealed record InvoiceSubmissionAccepted(
+    Guid SubmissionId, Guid JobId, string TrackingNumber, string StatusUrl,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    SubmissionHoldWarning? Warning = null);
 
 /// <summary>
 /// Task 095a (contract section 11): the 200 of <c>GET /api/finance/invoice-submissions?internetMessageId=...</c>: the fields of
