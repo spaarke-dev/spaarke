@@ -452,6 +452,19 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - If none remain, the Signal closes as `ConditionCleared`, with the record's id in the close facts for audit.
   - **The earlier "closed as Acted and linked to the record" no longer applies to the shared Signal.** Condition 4 holds: nothing closes before the record.
   - **Stored-file renames go inside the apply transaction.** `sprk_storedfile.sprk_name` is a Dataverse column, and `StoredFileBlobName.Build` uses ids only (`StoredFileContracts.cs:298-305`). This replaces ontology's earlier "rename after the record" addition, and the `files` failedStep and its census row are not needed.
+- **K-3 review of 095d-1c (2026-11-05; `origin/task/ebilling-095d-1c`, `637da3e730..3380f6cd1c`; service, endpoint, census and test diffs read): PASS.**
+  - **The number is allocated once.** The record is built only from the stored member the committed apply wrote, and only when its number equals the committed one; otherwise it fails closed.
+    - A repeat never applies (its builder throws), and the stored number must equal the allocator's AlreadyRenumbered one.
+    - `BuildDecision` reads the stored member only, DecidedOn included. So every call has the same id, hash and facts, and the writer's key lookup makes the write exactly-once.
+    - A repeat by another reviewer records the first reviewer's decider and note; this is tested.
+  - **Conditions 1-5 hold.**
+    - After the apply, every failure is 503 `incomplete` with failedStep `record` or `filing`.
+    - No Signal closes: `ResolvedSignalIds` is null, the set is in the facts, and `firmMissingCleared` is true.
+    - Census check (f) reports INFO inside its window, FAIL in -Verify after it, and FAIL for an unreadable member. Its key is pinned to `BillingDecisionKey.IdOf`, and it matches `reviewId` the same way the writer's own lookup does.
+  - **Accepted as built:**
+    - If the caller's token is cancelled after the apply, the call ends with neither 503 nor 200. Check (f) lists the row and a repeat finishes it.
+    - A permanent filing mismatch stays 503 `filing`, logged at Error with Permanent=true. It is for an operator to fix, not for a retry.
+  - **Carried to 095d-2:** the ConditionCleared close carries the record id, only once every reason has cleared; the `sprk_reviewdetail` writer list follows D-205.
 
 ## D-202 — Record-rule policy code: `BRR-{recordRulePolicyId:N}` (ontology position, 2026-11-03)
 
