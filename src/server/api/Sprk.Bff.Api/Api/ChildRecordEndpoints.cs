@@ -666,6 +666,13 @@ public static class ChildRecordEndpoints
             return Problem(StatusCodes.Status403Forbidden, DeniedCode, $"The {Noun(entity)} was not saved: {fixedRefusal.Reason}.");
         }
 
+        // Task 048 fix round 1 (K1): a Signal, a Decision Record and a Budget Revision are changed only by their writers
+        // (RecordTableRule.CreatedOnlyByItsWriter). Asked here, on the table alone, before any read or write, so the contract holds
+        // for any table a caller of this core passes (the browser re-file routes, the chat re-file and the decision executors'
+        // in-process update), whatever that caller checks first. Nothing is written.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(entity) is { } writerOnly)
+            return Problem(StatusCodes.Status403Forbidden, DeniedCode, writerOnly.Reason!);
+
         var meta = await user.GetAsync(
             $"EntityDefinitions(LogicalName='{entity}')?$select=EntitySetName,PrimaryIdAttribute", ct).ConfigureAwait(false);
         if (!meta.IsSuccess)

@@ -327,13 +327,15 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
                 NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
         }
         catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException ex)
-            when (ex.RefusalCode == Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.FixedAfterCreateReasonCode)
+            when (ex.RefusalCode is Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.FixedAfterCreateReasonCode
+                      or Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterReasonCode)
         {
-            // The core record pair is fixed after create on BFF update paths: the payload's shape was refused before anything
-            // was read or written — a validation failure of the configured payload, not a server fault. Matched on this code
-            // only; every other refusal of this type (the access-column refusal included) keeps the mapping below.
+            // The core record pair is fixed after create on BFF update paths, and (task 048) a Signal, a Decision Record and a
+            // Budget Revision are changed only by their writers: the configured payload was refused before any row was read or
+            // written — a validation failure of the configuration, not a server fault. Matched on these codes only; every other
+            // refusal of this type (the access-column refusal included) keeps the mapping below.
             _logger.LogWarning(
-                "UpdateRecord node {NodeId} refused: the payload names a column fixed after create ({Code})",
+                "UpdateRecord node {NodeId} refused: the configured update is not written ({Code})",
                 context.Node.Id,
                 ex.RefusalCode);
 

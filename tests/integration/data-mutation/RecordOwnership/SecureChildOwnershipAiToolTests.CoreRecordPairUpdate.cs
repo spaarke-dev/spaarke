@@ -10,8 +10,9 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// The core record pair (<c>sprk_corerecordtype</c> + <c>sprk_corerecordid</c>) of a Signal and a Decision Record is fixed after
 /// create on BFF update paths (<c>RecordTableRule.FixedAfterCreateColumns</c>). The chat update tool
 /// (<c>DataverseUpdateRecordHandler</c>) refuses an item of either table that names either column, in any key form, as a tool
-/// error with nothing written; the check is on the item's shape only, so it answers the same for any record id. Every other
-/// column of those tables, and the same column names on any other table, are written as before.
+/// error with nothing written; the check is on the item's shape only, so it answers the same for any record id. The same column
+/// names on any other table are written as before; any other column of those tables is refused whole since task 048 (changed
+/// only by their writers; <c>SecureChildOwnershipAiToolTests.WriterOnlyTableUpdate</c>).
 /// </summary>
 public sealed partial class SecureChildOwnershipAiToolTests
 {
@@ -124,12 +125,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     [Theory]
     [MemberData(nameof(CorePairTables))]
-    public async Task ChatUpdate_AnotherColumn_OnASignalOrDecisionRecord_IsWritten(string table)
+    public async Task ChatUpdate_AnotherColumn_OnASignalOrDecisionRecord_IsNotTheCorePairRefusal(string table)
     {
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal and a Decision Record are changed only by
+        // their writers, so another column is refused whole by that rule (WriterOnlyTableUpdate), never by this one.
         var result = await ChatUpdateOf(table, PairRow, ("sprk_name", Text("Renamed")));
 
-        result.Success.Should().BeTrue(result.ErrorMessage);
-        PatchedKeys().Should().BeEquivalentTo("sprk_name");
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterReasonCode);
+        _user.Patches.Should().BeEmpty();
     }
 
     // ── The shared update cores: today every caller passes a table without the pair; each core asks the check itself ──

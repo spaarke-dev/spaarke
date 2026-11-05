@@ -51,6 +51,32 @@ public class WriterOnlyTablesWritersGuardTests
         "Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler",
     ];
 
+    /// <summary>
+    /// Task 048 (D-204 extended to updates): the generic update paths, which refuse the three tables
+    /// (<c>RecordTableRules.RefuseWriterOnlyTableUpdate</c>), by full type name. A writer's own updates (a Signal's lifecycle and its
+    /// Decision Record link, the decision commit, the Budget Revision) must never route through one of them.
+    /// </summary>
+    internal static readonly string[] GeneralUpdate =
+    [
+        "Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler",
+        "Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordActionCore",
+        "Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordNodeExecutor",
+        "Sprk.Bff.Api.Services.Ai.PublicContracts.ActionSeam",
+        "Sprk.Bff.Api.Services.Ai.PublicContracts.IActionSeam",
+        "Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler",
+        "Sprk.Bff.Api.Services.Dataverse.IDataverseUpdateHandler",
+        "Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints",
+        "Sprk.Bff.Api.Services.Ai.TopicRegistryWorkProductPersister",
+    ];
+
+    /// <summary>The writers whose own updates of the three tables the update refusal must leave alone: the writers above, and
+    /// the decision commit that drives <c>DecisionRecordWriter</c> and the decision executors.</summary>
+    internal static readonly string[] UpdatingWriters =
+    [
+        .. Writers,
+        "Sprk.Bff.Api.Services.Signals.DecisionCommitService",
+    ];
+
     /// <summary>The writers' source: the file, and the class whose span is scanned (null: the whole file).</summary>
     internal static readonly (string File, string? Class)[] WriterSources =
     [
@@ -67,9 +93,15 @@ public class WriterOnlyTablesWritersGuardTests
     /// <summary>IL: the types in <paramref name="assembly"/> named in <paramref name="writers"/> (or nested in one of them) that
     /// depend on the general create, by the writer they belong to.</summary>
     internal static IReadOnlyList<string> WritersThatDependOnTheGeneralCreate(
-        System.Reflection.Assembly assembly, IReadOnlyCollection<string> writers)
+        System.Reflection.Assembly assembly, IReadOnlyCollection<string> writers) =>
+        WritersThatDependOnAny(assembly, writers, GeneralCreate);
+
+    /// <summary>IL: the types in <paramref name="assembly"/> named in <paramref name="writers"/> (or nested in one of them) that
+    /// depend on any of <paramref name="targets"/>, by the writer they belong to.</summary>
+    internal static IReadOnlyList<string> WritersThatDependOnAny(
+        System.Reflection.Assembly assembly, IReadOnlyCollection<string> writers, string[] targets)
     {
-        var dependents = Types.InAssembly(assembly).That().HaveDependencyOnAny(GeneralCreate).GetTypes();
+        var dependents = Types.InAssembly(assembly).That().HaveDependencyOnAny(targets).GetTypes();
         return dependents
             .Select(OutermostOf)
             .Where(t => t.FullName is { } name && writers.Contains(name, StringComparer.Ordinal))
@@ -130,6 +162,32 @@ public class WriterOnlyTablesWritersGuardTests
             "A Signal, Decision Record or Budget Revision is created only by its writer, and the general create refuses those "
             + "tables (RecordTableRule.CreatedOnlyByItsWriter; owner decision D-204), so a writer may not reach it: "
             + string.Join(", ", found));
+    }
+
+    [Fact(DisplayName = "048 (D-204, must not fire): the writers and the decision commit never depend on a generic update path, so their own updates are not refused (IL)")]
+    public void TheWriters_NeverDependOnTheGenericUpdatePaths_IL()
+    {
+        var bff = typeof(RecordCreationService).Assembly;
+
+        // Non-vacuity: every named writer and update path is a type of the BFF.
+        foreach (var type in UpdatingWriters.Concat(GeneralUpdate))
+            Assert.True(bff.GetType(type) is not null, $"{type} is not a type of the BFF: the guard lost its signal.");
+
+        var found = WritersThatDependOnAny(bff, UpdatingWriters, GeneralUpdate);
+        Assert.True(found.Count == 0,
+            "A Signal, Decision Record or Budget Revision is changed only by its writer, and the generic update paths refuse those "
+            + "tables (RecordTableRules.RefuseWriterOnlyTableUpdate; owner decision D-204), so a writer may not reach one: "
+            + string.Join(", ", found));
+    }
+
+    [Fact(DisplayName = "048 control (must fire / must not fire): a seeded dependency on a generic update path is found; a clean writer is not")]
+    public void Control_ASeededDependencyOnAGenericUpdatePath_IsFound()
+    {
+        var tests = typeof(WriterOnlyTablesWritersGuardTests).Assembly;
+
+        Assert.Equal([typeof(WriterGuardSeededUpdateFixture).FullName!],
+            WritersThatDependOnAny(tests,
+                [typeof(WriterGuardSeededUpdateFixture).FullName!, typeof(WriterGuardCleanFixture).FullName!], GeneralUpdate));
     }
 
     [Fact(DisplayName = "042c fix round 4 (D-204): the writers' source never names the general create")]
@@ -198,6 +256,16 @@ internal sealed class WriterGuardSeededFixture
 
     internal async Task<bool> WriteAsync() =>
         (await ((RecordCreationService)_service).CreateAsync(null!, null!, CancellationToken.None)).Succeeded;
+}
+
+/// <summary>Must-fire fixture (task 048): a generic update path is named only inside an async method's body (its state machine).</summary>
+internal sealed class WriterGuardSeededUpdateFixture
+{
+    private readonly object _handler = new();
+
+    internal async Task WriteAsync() =>
+        await ((Sprk.Bff.Api.Services.Dataverse.IDataverseUpdateHandler)_handler).UpdateAsync(
+            "sprk_signal", Guid.Empty, new Dictionary<string, object?>(), Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, 1, CancellationToken.None);
 }
 
 /// <summary>Must-not-fire fixture: an async writer that never names the general create.</summary>
