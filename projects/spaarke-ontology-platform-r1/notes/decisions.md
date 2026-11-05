@@ -592,6 +592,29 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
       - must-fire and must-not-fire tests;
       - model-driven admin privileges unchanged; Service Deleter untouched.
     - Ontology reviews the combined update + delete diff of 048 before merge.
+  - **fm 048 review (2026-11-05; `task/fm-048` `2a05764261..59d1008c9f`, contains `909754869f`): PASS, no findings.**
+    - One flag, all three directions. `RefuseWriterOnlyTableUpdate` / `RefuseWriterOnlyTableDelete` read `CreatedOnlyByItsWriter`.
+      - The ArchTest proves create, update and delete agree table by table, and that the compiled bodies read the flag.
+      - Matching is trimmed and case-insensitive.
+      - Both chat tools lower-case the logical name, then resolve it through `EntityDefinitions(LogicalName=…)`, so an entity-set name can't bypass the check.
+    - Chat `delete_record` refuses in ValidateChat and in Execute straight after parsing: before the approval argument, the metadata read and the delete. Tests check there are no Dataverse calls, approved or not.
+      - The tool has one identity, the caller's client.
+      - The text names no privilege and says nothing about whether the row exists.
+    - Other deletes: a closed list of 15 members with fixed tables, checked by an IL-scan ArchTest, plus must-fire and must-not-fire controls. Ontology spot-checked the list:
+      - `SecureRootInheritance` covers work assignments and projects only.
+      - External `DeleteRecordAsync` is limited to the closed `DeletableKind` enum.
+      - Accepted limit: raw HTTP and SDK deletes are outside the scan. None takes a caller-chosen table today.
+    - Update paths refuse on the table:
+      - chat `update_record` (validate and execute);
+      - the UpdateRecord node and the ActionSeam (`UpdateRecordActionCore`; only lookup-target metadata is read before the refusal, never the row);
+      - `DataverseUpdateHandler`;
+      - the field-mapping push (request check and child writer);
+      - `WorkProductRecordPersister`;
+      - `ChildRecordEndpoints` core;
+      - `OwnedChildWrite.RefileAsync`.
+    - Must-not-fire covers the writers (Revise Budget, the decision commit, the Signal close and DR link) and ordinary tables.
+    - The #2568 tests in `CoreRecordPairUpdateWriterTests` were changed from "other column written" to "refused whole". That is the intended consequence.
+    - No runtime test for the SignalEvaluationService upsert: not needed, since the writers ArchTest proves it never reaches a generic path.
 - **Dev deploy of the lineage fix (master `909754869f`, live 2026-11-05 04:16:30Z; uac-r2 ran it with the owner's go): ontology PASS on the 30-minute gate and the AFTER read-back.**
   - Gate results:
     - 0 5xx and 0 held-pair Warnings;
