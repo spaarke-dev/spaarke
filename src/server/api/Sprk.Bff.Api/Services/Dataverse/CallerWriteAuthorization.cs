@@ -27,6 +27,9 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// other with <c>using static</c>, so every moved body reads exactly as it did. A member declared in a class wins over
 /// an imported one, so never give a member of either class the name of a member of the other: the calls in that file
 /// would bind to it silently.</para>
+/// <para><b>Task 049 (NFR-02):</b> the questions are now asked concurrently (records at most
+/// <see cref="MaxRecordsAskedAtOnce"/> at once), every one is awaited, and the answer is still taken in the order above —
+/// the first refusal, failure or fault in that order, never the first to finish.</para>
 /// <para><b>ADR-008, path A</b> (this project's spec, "ADR Tensions"): route-level authorization stays in endpoint filters;
 /// these checks depend on the request body and also serve non-HTTP callers (chat tools, decision cores), so the write
 /// cores call them. <b>ADR-010:</b> a static class — no DI registration, no interface.</para>
@@ -60,7 +63,38 @@ internal static class CallerWriteAuthorization
             };
         }
 
-        // (1) The table's Create (and Append, when the row sets a lookup) privilege, by the names its metadata declares.
+        // Task 049 (NFR-02; UAC-r2's conditions, 2026-11-05): the three questions below — (1) the table's privileges, (3) no
+        // field-secured column, (2) AppendTo on every record named — read nothing the others decide, so they are asked
+        // together, and every one is awaited before anything is answered (nothing is written before every check returns).
+        // The answer is then taken in the order they were asked one by one before: the first refusal, failure or fault in
+        // that order answers, never the first to finish (NFR-07). So the same input gets the same answer as before.
+        var checkedLookups = item.Lookups.Where(l => serverSetLookupColumns?.Contains(l.Column) != true).ToArray();
+        var pair = PairOf(item);
+        var checks = new[]
+        {
+            CallerMayCreateInTableAsync(user, me, table, item, ct),
+            NoFieldSecuredColumnAsync(user, table, item, ct),
+            pair.InvalidId
+                ? Task.FromResult(new Outcome { Invalid = $"'{SecureRootInheritance.PairIdColumn}' must hold the id of the record this row is filed under." })
+                : CallerMayAppendToRecordsNamedAsync(user, me, table, pair, checkedLookups, ct),
+        };
+        await WhenAllSettledAsync(checks).ConfigureAwait(false);
+
+        for (var i = 0; i < checks.Length - 1; i++)
+        {
+            var answer = await checks[i].ConfigureAwait(false); // a fault rethrows here, in order: fail closed, as before
+            if (!answer.Succeeded)
+                return answer;
+        }
+
+        return await checks[^1].ConfigureAwait(false);
+    }
+
+    /// <summary>(1) of <see cref="CheckCallerMayCreateAsync"/>: the table's Create (and Append, when the row sets a lookup)
+    /// privilege, by the names its metadata declares, held by the caller.</summary>
+    private static async Task<Outcome> CallerMayCreateInTableAsync(
+        IDataverseUserClient user, Guid me, string table, DataverseWriteItemMapper.MappedItem item, CancellationToken ct)
+    {
         var metadata = await user.GetAsync($"EntityDefinitions(LogicalName='{table}')?$select=LogicalName,Privileges", ct)
             .ConfigureAwait(false);
         if (!metadata.IsSuccess)
@@ -86,9 +120,15 @@ internal static class CallerWriteAuthorization
 
         var heldBody = held.Body?.GetRawText();
         var missing = needed.FirstOrDefault(name => !CallerRecordAccessProbe.ResponseGrantsPrivilege(heldBody, name));
-        if (missing is not null)
-            return new Outcome { Denied = $"You do not have permission to create records in '{table}' ({missing})." };
+        return missing is not null
+            ? new Outcome { Denied = $"You do not have permission to create records in '{table}' ({missing})." }
+            : Outcome.Allowed;
+    }
 
+    /// <summary>(3) of <see cref="CheckCallerMayCreateAsync"/>: no column the row sets is under field-level security.</summary>
+    private static async Task<Outcome> NoFieldSecuredColumnAsync(
+        IDataverseUserClient user, string table, DataverseWriteItemMapper.MappedItem item, CancellationToken ct)
+    {
         // (3) No column under field-level security: an app-only write would pass the caller's column security. #1616: except
         // a BFF-managed pair (SecureRootInheritance.BffManagedPairTables) — it is secured so that ONLY this server writes it,
         // and what this server asks before writing it is the pair rule in (2) below (AppendTo AS THE CALLER on the record it
@@ -113,14 +153,18 @@ internal static class CallerWriteAuthorization
             }
         }
 
+        return Outcome.Allowed;
+    }
+
+    /// <summary>(2) of <see cref="CheckCallerMayCreateAsync"/>, for a pair whose id is a record id (or absent).</summary>
+    private static async Task<Outcome> CallerMayAppendToRecordsNamedAsync(
+        IDataverseUserClient user, Guid me, string table, PairWrite pair,
+        IReadOnlyCollection<DataverseWriteItemMapper.MappedLookup> checkedLookups, CancellationToken ct)
+    {
         // (2) AppendTo on every record a lookup names (the server-set ones name the caller) and on the record the ADR-024
         // pair names, whether or not it is secure (the pair's readers file the row under it): a missing, unreadable or
         // unappendable one is the same not-found as an unappendable lookup. The pair's record is ALWAYS asked — never
         // skipped because its id equals some lookup's — so it is resolved first and asked with the lookups in one pass.
-        var checkedLookups = item.Lookups.Where(l => serverSetLookupColumns?.Contains(l.Column) != true).ToArray();
-        var pair = PairOf(item);
-        if (pair.InvalidId)
-            return new Outcome { Invalid = $"'{SecureRootInheritance.PairIdColumn}' must hold the id of the record this row is filed under." };
         var target = await PairTargetAsync(user, table, pair.IdText, pair.TypeId, pair.TypeEntitySet, checkedLookups, ct)
             .ConfigureAwait(false);
         if (target.Refusal is { } refusal)
@@ -321,38 +365,94 @@ internal static class CallerWriteAuthorization
     // ── AppendTo and rights on a record, asked as the caller ───────────────────────────────────────────────────────
 
     /// <summary>
+    /// Task 049 (NFR-02; UAC-r2's conditions, 2026-11-05): at most this many records are asked AppendTo at once, so a write
+    /// naming many records does not flood Dataverse with the caller's questions.
+    /// </summary>
+    internal const int MaxRecordsAskedAtOnce = 4;
+
+    /// <summary>
     /// AS THE CALLER, AppendTo on each record in <paramref name="lookups"/> (<c>RetrievePrincipalAccess</c>) — the right a
     /// lookup onto a record costs. Shared by the create path and the update tool's re-file (verifier item 2), so a re-file
     /// onto a record the caller cannot see is denied before the owner decision is asked about it.
     /// </summary>
+    /// <remarks>Task 049 (NFR-02): the records are asked concurrently (at most <see cref="MaxRecordsAskedAtOnce"/> at once)
+    /// and every answer is awaited; the answer is then read in the lookups' order, so the first record that refuses — or whose
+    /// check faults, which rethrows (fail closed) — answers, exactly as when they were asked one by one, whichever finished
+    /// first. A missing record and an unappendable one still answer alike.</remarks>
     internal static async Task<Outcome> CheckCallerMayAppendToAsync(
         IDataverseUserClient user, Guid me, IEnumerable<DataverseWriteItemMapper.MappedLookup> lookups, CancellationToken ct)
     {
-        foreach (var lookup in lookups.DistinctBy(l => (l.RelatedEntitySet, l.RecordId)))
-        {
-            var rights = await RightsOnAsync(user, me, lookup.RelatedEntitySet, lookup.RecordId, ct).ConfigureAwait(false);
+        var distinct = lookups.DistinctBy(l => (l.RelatedEntitySet, l.RecordId)).ToArray();
+        if (distinct.Length == 0)
+            return Outcome.Allowed;
 
-            // An ORGANIZATION-OWNED target (the ADR-024 record-type catalog sprk_recordtype_ref, the matter-type and
-            // practice-area reference tables) has no record-level access: RetrievePrincipalAccess refuses the table (live,
-            // spaarkedev1 2026-10-07: 400 0x80040800 "The 'RetrievePrincipalAccess' method does not support entities of type
-            // 'sprk_recordtype_ref'"), so RightsOnAsync reads None and every ADR-024 resolver payload was refused as
-            // "not found". What a run-as-user create checks there is the table's AppendTo PRIVILEGE, and the row must exist.
-            // Ontology task 126 (#1399; uac-r2's rule, #1355 comment 6089838200 §6, D-113): a BUSINESS-OWNED target
-            // (systemuser, team, businessunit) is refused the same way; there the privilege's DEPTH must cover the row's
-            // business unit (CallerMayAppendToBusinessOwnedAsync).
-            if (!rights.HasFlag(AccessRights.AppendTo)
-                && !await CallerMayAppendToByPrivilegeAsync(user, me, lookup, ct).ConfigureAwait(false))
+        using var gate = new SemaphoreSlim(MaxRecordsAskedAtOnce, MaxRecordsAskedAtOnce);
+        var answers = distinct.Select(lookup => CallerMayAppendToGatedAsync(user, me, lookup, gate, ct)).ToArray();
+        await WhenAllSettledAsync(answers).ConfigureAwait(false);
+
+        for (var i = 0; i < distinct.Length; i++)
+        {
+            if (!await answers[i].ConfigureAwait(false)) // a fault rethrows here, in the lookups' order
             {
                 return new Outcome
                 {
-                    Denied = $"You do not have permission to file this record under the {lookup.RelatedTable} it names.",
+                    Denied = $"You do not have permission to file this record under the {distinct[i].RelatedTable} it names.",
                     ParentUnavailable = true,
-                    RefusedColumn = lookup.Column,
+                    RefusedColumn = distinct[i].Column,
                 };
             }
         }
 
         return Outcome.Allowed;
+    }
+
+    /// <summary>
+    /// Awaits every task to the end, whatever each ends in, without throwing: the caller then reads each one in its own
+    /// order (a fault rethrows there). WhenAll observes each task's fault, so none surfaces as unobserved.
+    /// </summary>
+    private static async Task WhenAllSettledAsync(IEnumerable<Task> tasks)
+    {
+        try
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Read below, task by task, in the order that decides the answer.
+        }
+    }
+
+    /// <summary>One record of <see cref="CheckCallerMayAppendToAsync"/>, holding one of the gate's places while it is asked.</summary>
+    private static async Task<bool> CallerMayAppendToGatedAsync(
+        IDataverseUserClient user, Guid me, DataverseWriteItemMapper.MappedLookup lookup, SemaphoreSlim gate, CancellationToken ct)
+    {
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await CallerMayAppendToAsync(user, me, lookup, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>AS THE CALLER, whether they may append to the one record <paramref name="lookup"/> names.</summary>
+    private static async Task<bool> CallerMayAppendToAsync(
+        IDataverseUserClient user, Guid me, DataverseWriteItemMapper.MappedLookup lookup, CancellationToken ct)
+    {
+        var rights = await RightsOnAsync(user, me, lookup.RelatedEntitySet, lookup.RecordId, ct).ConfigureAwait(false);
+
+        // An ORGANIZATION-OWNED target (the ADR-024 record-type catalog sprk_recordtype_ref, the matter-type and
+        // practice-area reference tables) has no record-level access: RetrievePrincipalAccess refuses the table (live,
+        // spaarkedev1 2026-10-07: 400 0x80040800 "The 'RetrievePrincipalAccess' method does not support entities of type
+        // 'sprk_recordtype_ref'"), so RightsOnAsync reads None and every ADR-024 resolver payload was refused as
+        // "not found". What a run-as-user create checks there is the table's AppendTo PRIVILEGE, and the row must exist.
+        // Ontology task 126 (#1399; uac-r2's rule, #1355 comment 6089838200 §6, D-113): a BUSINESS-OWNED target
+        // (systemuser, team, businessunit) is refused the same way; there the privilege's DEPTH must cover the row's
+        // business unit (CallerMayAppendToBusinessOwnedAsync).
+        return rights.HasFlag(AccessRights.AppendTo)
+            || await CallerMayAppendToByPrivilegeAsync(user, me, lookup, ct).ConfigureAwait(false);
     }
 
     /// <summary>
