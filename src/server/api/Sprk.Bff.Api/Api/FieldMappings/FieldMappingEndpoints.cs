@@ -696,6 +696,13 @@ public static class FieldMappingEndpoints
         {
             errors["targetEntity"] = ["Target entity must be a Dataverse logical name (letters, digits and underscores)."];
         }
+        else if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate(request.TargetEntity) is { } writerOnly)
+        {
+            // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision
+            // are changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter). A push aimed at one is refused on the
+            // request, before the source is authorized and before any profile, row or child is read or written.
+            errors["targetEntity"] = [writerOnly.Reason!];
+        }
 
         return errors;
     }
@@ -1039,6 +1046,15 @@ public static class FieldMappingEndpoints
         var updated = 0;
         var failed = 0;
         var skipped = 0;
+
+        // Task 048 fix round 1 (K1): a Signal, a Decision Record and a Budget Revision are changed only by their writers
+        // (RecordTableRule.CreatedOnlyByItsWriter). The push's request check refuses such a target first; this method asks it too,
+        // on the table alone before any child is read or written, so it holds for any caller. Every child fails, none is written.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate(targetEntity) is { } writerOnly)
+        {
+            return (0, childRecordIds.Length, 0,
+                childRecordIds.Select(id => new PushFieldMappingsError { RecordId = id, Error = writerOnly.Reason! }).ToArray(), []);
+        }
 
         // #2091 round 4: on a reparentable child, a lookup rule writes the column it NAMES or nothing. Its bind is planned by
         // the referenced table's navigation property, which can be another lookup to the same table — a filing move the rule
