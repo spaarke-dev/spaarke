@@ -23,6 +23,7 @@
     <RolePrivilege name="prvReadSharePointDocument" level="Global" />
     <RolePrivilege name="prvReadsprk_Policy" level="Deep" />
     <RolePrivilege name="prvReadsprk_PolicyVersion" level="Deep" />
+    <RolePrivilege name="prvReadsprk_procedure" level="Deep" />
     <RolePrivilege name="prvReadsprk_ruleset" level="Deep" />
     <RolePrivilege name="prvWriteSharePointData" level="Global" />
     <RolePrivilege name="prvWritesprk_Policy" level="Basic" />
