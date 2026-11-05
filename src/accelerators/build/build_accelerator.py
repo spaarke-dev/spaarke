@@ -279,7 +279,10 @@ def main(argv=None):
             results["gates"]["tests"] = "skipped"
 
         log("[8/8] package")
-        manifest, zips = build_plugins(acc, skill_dirs, t0, topic_ids)
+        # in_plugin: false = a personal skill (OneDrive folder or single-skill upload), zipped but not in the plugin
+        plugin_dirs = [d for s, d in zip(acc["skills"], skill_dirs) if s.get("in_plugin", True)]
+        results["personal_skills"] = [os.path.basename(d) for d in skill_dirs if d not in plugin_dirs]
+        manifest, zips = build_plugins(acc, plugin_dirs, t0, topic_ids)
         skill_zips = [zip_dir(d, d + ".zip", arc_prefix=os.path.basename(d) + "/") for d in skill_dirs]
     except GateFailure as ex:
         log(f"\nBUILD FAILED: {ex}")

@@ -13,6 +13,9 @@ core/
     ooxml_redline.py    edit plan -> surgical tracked changes, comments, bookmarks; external + clean copies
     summary_table.py    page-1 linked summary (internal redline)
     check_outputs.py    blocking checks incl. untracked-edit detection
+    xlsx_lite.py        stdlib .xlsx writer: styled cells, links, native bar charts with cached values
+    review_visuals.py   review dashboard (static HTML + SVG) and audit pack (.xlsx) from review.json + plan
+    library_grid.py     documents x topics grid (.xlsx) and heatmap (HTML); quotes checked against the text
     tests/              unittest on generated fixtures (must-fire + must-not-fire)
   schemas/            edit-plan, review-result, legal-playbook (JSON Schema)
   shared-references/  guardrails, standards protocol, playbook format (copied into skills)

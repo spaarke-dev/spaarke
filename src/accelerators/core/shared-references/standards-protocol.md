@@ -9,7 +9,9 @@ Look for standards **before** reading the agreement in detail, and say what you 
    in this order, and list what you find:
    - `Documents/Cowork/Playbooks/<practice>/` (for example `Documents/Cowork/Playbooks/nda/`);
    - the folder named in the attorney profile (`Documents/Cowork/Profile/legal-profile.md`,
-     line `Playbook folder:`).
+     line `Playbook folder:`). It may be a SharePoint team-site library (the firm's governed
+     playbooks) rather than OneDrive. If you cannot open it, say so in one line, name the path you
+     tried, and continue with the next source; never pretend you read it.
    A playbook file is Markdown in our format (`references/playbook-format.md`) or a `.docx` Word
    playbook. Prefer Markdown: it carries topic ids.
 3. **The Spaarke baseline** shipped in `references/` (for the NDA: `baseline-mutual.md`).

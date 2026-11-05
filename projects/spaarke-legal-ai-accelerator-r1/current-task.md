@@ -11,7 +11,7 @@
 | Field | Value |
 |-------|-------|
 | **Task** | NDA MVP spike: tenant tests per `notes/mvp-nda/runbook.md` (no POML tasks; pre-pipeline spike) |
-| **Step** | design.md **v0.5 drafted 2026-11-05**. It folds in results.md, protocol v0.2, the owner's 11-02 decisions, the expert redliner demo (`notes/demo-video/`) and the 11-04 discussion Q&A. Checks are in `notes/2026-11-05-external-inputs-review.md`. T-14 not started |
+| **Step** | **End-to-end POC prep done 2026-11-05** (`notes/poc-e2e/runbook.md` §4 items 1–8): fresh synthetic kit + answer key; plugin 0.1.2-poc (`nda-review` + dashboard + audit pack); personal skill `nda-library-review`; T-P13 probe skill; local dry run. Next: owner uploads the kit and runs Act 0. Earlier: design.md **v0.5 drafted 2026-11-05**. It folds in results.md, protocol v0.2, the owner's 11-02 decisions, the expert redliner demo (`notes/demo-video/`) and the 11-04 discussion Q&A. Checks are in `notes/2026-11-05-external-inputs-review.md`. T-14 not started |
 | **Status** | Waiting for the owner to review: design v0.5 (OD-20 to OD-25); `notes/solution-packs-and-components.md` (OD-26 to OD-32; OD-31 and OD-32 decided 2026-11-05); and `notes/playbook-library-and-grounding.md` (OD-33 to OD-38, from the owner's W1–W7 points, 2026-11-05). The Microsoft Legal for Cowork 1.0.10 skill texts are committed in `notes/legal-for-cowork-skills/` (internal reference only; never shipped) |
 | **Next Action** | (1) Owner review of the ODs above. (2) Fold both notes into design v0.6 (each note's edit table lists the edits). (3) Close the spike (design §16 Phase 0): L15/L16/L9/L10; Word A/B import retest; T-14 with T-P2/T-P7/T-P8; **T-P15** (Microsoft's four-column playbook vs our format, with T-P4 and T-P10); re-baseline gates on wiqd 0.24.0. Uncommitted: only the root `Screenshot 2026-11-04 234407.png`, a duplicate deliberately left out |
 
@@ -26,9 +26,10 @@
 ---
 
 ## State now
-- **Build:** `./src/accelerators/build/Build-Accelerator.ps1 -Practice nda` → BUILD OK. Gate tests 22 OK; engine tests 41 OK.
+- **Build:** `./src/accelerators/build/Build-Accelerator.ps1 -Practice nda` → BUILD OK. Gate tests 22 OK; engine tests 51 OK (41 + 10 in `test_visuals.py`).
 - **Package:**
-  - manifest 1.30, version 0.1.1-mvp, GUID `211eba15-6c68-5ecb-8cfb-ecb8779148e2`;
+  - manifest 1.30, version 0.1.2-poc (manifest 0.1.2), GUID `211eba15-6c68-5ecb-8cfb-ecb8779148e2`;
+  - `nda-review` is at 20 companion files (the gate limit; gap-log #1). `nda-library-review` is `in_plugin: false` (own zip);
   - single-line SKILL.md descriptions, with gate rule `description-plain`.
 - **Word playbook renderer** (`build/render_word_playbook.py`): Heading 1/2, `Topic ID:`/`Priority:`/`Review question:` lines, and General guidelines with MUST/MUST NOT.
 - **A/B import files** in OneDrive `Documents/Cowork/Test/for-T-12-desktop/` (generator in the previous session's scratchpad `make_ab.py`; regenerate from the renderer if lost).

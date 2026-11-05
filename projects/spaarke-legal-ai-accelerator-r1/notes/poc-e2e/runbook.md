@@ -100,7 +100,10 @@ The policy follows §7.2a of `playbook-library-and-grounding.md`:
 2. Personal setup (manual):
    - `Documents/Cowork/Profile/legal-profile.md` points to the library path, side = mutual, posture = balanced.
    - Cowork **Preferences** gets one line: `/`-reference the playbook.
-3. Install the POC plugin (0.1.2-poc: `nda-review` plus the dashboard step) with Publish "Only you". Add the POC skill `nda-library-review` as a personal skill folder.
+3. Install, all from `src/accelerators/build/out/` (build: `./src/accelerators/build/Build-Accelerator.ps1 -Practice nda`):
+   - **Plugin** `nda/t0/spaarke-nda-mvp.zip` (0.1.2: `nda-review` with the dashboard and audit pack, `accelerator-setup`): Plugins › Cowork › Add › Upload, Publish "Only you".
+   - **Personal skill** `nda/t0/skills/nda-library-review.zip`: unzip into OneDrive `Documents/Cowork/Skills/nda-library-review/` (or upload the single skill).
+   - **Probe skill** `poc/spaarke-visual-probe.zip` (T-P13, throwaway): same route; delete it after Act 3 step 1.
 4. Turn **Legal for Cowork ON** (it was OFF since the 11-02 clean-up).
 
 ### Act 1: build a playbook from precedents (Cowork → Word). Proves setup path B, T-P15.
@@ -121,7 +124,7 @@ Open `Matters/Brightwater Systems/Brightwater Mutual NDA.docx` via Word's open d
 5. Score it against `answer-key.md` (Brightwater: 6 RED, 7 YELLOW; policy NDA-3.3, 3.4, 3.5; General Counsel approval).
 
 ### Act 3: the attorney in Cowork, with redlining and visuals. Proves the Cowork deliverable, T-P2, T-P10, T-P13.
-1. **T-P13 visual probe first** (solution-packs note §5.6, items 1–3, 7 and 8). Run one throwaway skill and record what renders: PNG/SVG, HTML with and without script, `.xlsx`/`.pptx` charts, Markdown/Mermaid.
+1. **T-P13 visual probe first** (solution-packs note §5.6, items 1–3, 7 and 8). New task: "run the Spaarke visual probe". Record what renders: PNG/SVG inline or file-only, the static HTML, what the scripted HTML reports about itself (inline script, button, CDN, fetch), the `.xlsx`/`.pptx` charts, and the Markdown table, Mermaid and LaTeX in chat. Also record the probe's module list (`openpyxl`, `python-pptx`, `matplotlib`, `node`).
 2. New task: "Review this NDA" with the Brightwater NDA attached (or with the business email, to see whether Cowork finds the NDA itself), no skill named. Log **which skill ran** (T-P2: ours or Microsoft `review-contract`).
 3. `nda-review` should:
    - read the playbook from the **team-site** path in the profile (T-P10, Cowork side);
@@ -134,8 +137,10 @@ Open `Matters/Brightwater Systems/Brightwater Mutual NDA.docx` via Word's open d
    | Plan preview before files: changes by priority, escalations, approve / change | chat table (V3 card if T-P13 says cards render) |
    | `Redline with Comments (internal).docx`, with the page-1 linked summary table | V1 |
    | `Redline.docx` (external), `Clean Revised.docx` | V1 |
-   | `Review Dashboard.html`: static HTML + SVG; risk by topic, changes by priority, escalations, links to each change | V2 |
-   | `Audit Pack.xlsx`: change log, risk summary with a native chart, topic coverage | V1, if `openpyxl` is present (T-P13 item 1) |
+   | `Review Dashboard.html`: static HTML + SVG, no script; tiles, topics by rating, changes by priority, escalations, the change list, every topic with clause and quote | V2 |
+   | `Audit Pack.xlsx`: summary with two native charts, topics, change log, escalations and questions | V1 (stdlib writer `xlsx_lite.py`; no `openpyxl` needed) |
+
+   Both come from `review.json` (the topic-by-topic result the skill now writes in step 4) and the edit plan, via `review_visuals.py`, which refuses to write them if the two disagree. The skill also shows the plan in chat and asks Approve / Change before building any file.
 
 5. Open every output from Cowork's preview **and** from OneDrive in Word desktop. Log fidelity, for example whether the dashboard renders in the preview or only after download.
 
@@ -180,7 +185,7 @@ Outputs of 6c:
 Then a follow-up in the same task: "Redline the three RED ones". `nda-review` should run on each. Log whether Copilot sequences them or needs one task each (the race rules).
 
 **Measure:**
-- accuracy on all 16 against `answer-key.md` (every topic has an expected rating);
+- accuracy on all 16 against the answer key: download `NDA Library Review - data/` and run `C:\Python313\python.exe -B kit-src\poc_check.py score <folder>` (accuracy, confusion matrix, every miss);
 - the citation hit rate (spot-check 10 cells);
 - the number of NDAs before context or time limits bite (try 6, then 16);
 - elapsed time, and credits used (`/cost`).
@@ -190,9 +195,10 @@ Then a follow-up in the same task: "Redline the three RED ones". `nda-review` sh
 | # | Item | Notes |
 |---|---|---|
 | 1–4 | ✅ **Done 2026-11-05:** the fresh synthetic kit (all documents, playbook v1.0 and v1.1, answer key) | `kit-src/make_kit.py` + `to_pdf.ps1`; every file opened in Word desktop |
-| 5 | POC plugin 0.1.2-poc: `nda-review` + a quick `render_dashboard` (stdlib) + an optional `audit_pack` | POC quality: no gates beyond the existing build |
-| 6 | Personal skill `nda-library-review` (SKILL.md + scripts that reuse `segment_clauses` and the dashboard renderer) | Personal skill folder route, outside the plugin |
-| 7 | T-P13 probe skill | Throwaway |
+| 5 | ✅ **Done 2026-11-05:** POC plugin 0.1.2. `nda-review` writes `review.json`, shows the plan before building, and adds `Review Dashboard.html` + `Audit Pack.xlsx` via `review_visuals.py` (stdlib; `xlsx_lite.py` writes native charts without `openpyxl`) | Build OK with all gates; new engine tests `core/engines/tests/test_visuals.py` (10, must-fire and must-not-fire) |
+| 6 | ✅ **Done 2026-11-05:** personal skill `nda-library-review` (`library_grid.py`: Excel grid + HTML heatmap; every quote checked against the document text) | `in_plugin: false` in `accelerator.yaml`; zipped as its own skill |
+| 7 | ✅ **Done 2026-11-05:** T-P13 probe skill `skills/spaarke-visual-probe/` | Throwaway; zip in `build/out/poc/` |
+| 7a | ✅ Local dry run on the kit: `kit-src/poc_check.py simulate` (perfect reviews from the answer key) → both dashboards and workbooks built, opened in Excel desktop and rendered in Edge; the planted bad quote was caught; `poc_check.py score` = 100% on the simulation | Proves the scripts, not the model |
 | 8 | `gap-log.md` | Ready |
 
 ## 5. Who does what, and sessions

@@ -1,6 +1,6 @@
 # NDA accelerator: what the build assembles (design §5.5). Paths are relative to src/accelerators/.
 id: nda
-version: 0.1.1-mvp
+version: 0.1.2-poc # POC build for the end-to-end walk-through (notes/poc-e2e/runbook.md)
 wave: 1
 status: mvp-test # positions are test positions, not attorney-approved (design §8.4)
 
@@ -25,12 +25,24 @@ plugin:
 skills:
   - name: nda-review
     source: practices/nda/skills/nda-review
-    engines: [probe, safe_docx, segment_clauses, playbook_parse, ooxml_redline, summary_table, check_outputs]
+    engines:
+      [
+        probe,
+        safe_docx,
+        segment_clauses,
+        playbook_parse,
+        ooxml_redline,
+        summary_table,
+        check_outputs,
+        xlsx_lite,
+        review_visuals,
+      ]
     references:
       - core/shared-references/guardrails.md
       - core/shared-references/standards-protocol.md
       - core/shared-references/playbook-format.md
       - core/schemas/edit-plan.schema.json
+      - core/schemas/review-result.schema.json
       - practices/nda/positions/baseline-mutual.md
       - generated/topics.json
       - generated/review-checklist.md
@@ -45,6 +57,20 @@ skills:
       - { from: practices/nda/onboarding.md, as: onboarding-nda.md }
     assets:
       - { from: practices/nda/evals/corpus/nda-01-bluefin-harbor-mutual.docx, as: sample-nda.docx }
+
+  - name: nda-library-review # POC: personal skill folder, not in the plugin (runbook Act 6)
+    source: practices/nda/skills/nda-library-review
+    in_plugin: false
+    engines: [probe, safe_docx, segment_clauses, playbook_parse, xlsx_lite, review_visuals, library_grid]
+    references:
+      - core/shared-references/guardrails.md
+      - core/shared-references/standards-protocol.md
+      - core/shared-references/playbook-format.md
+      - core/schemas/review-result.schema.json
+      - core/schemas/edit-plan.schema.json
+      - practices/nda/positions/baseline-mutual.md
+      - generated/topics.json
+      - generated/review-checklist.md
 
 playbooks: # validated against topics.yaml at build; rendered for the Word legal plugin
   - source: practices/nda/positions/baseline-mutual.md
