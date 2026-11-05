@@ -1161,3 +1161,132 @@ Publish-size delta not re-measured this round (a fix to existing files; no packa
 #### Known limits (kept)
 
 K3 census above (nothing near the bound on dev). K4: about 300 sequential reads at the bound (latency, accepted). K5: above. K6: the pair-fragment spelling (a hand-edited pair that is not a GUID spelling is not a candidate).
+
+## 082c-3 implementation (2026-11-05)
+
+Branch `task/ebilling-082c-3` from `origin/work/ebilling-r1` at 767244e003. Contract: `notes/082c-brief.md` (section 5 item 3; section 7 External Access R4 items 3 and 4, uac-r2 conditions (a) to (d), the wording approved 2026-11-04). Client part is the submission-outcome warning only: the grid column and the `INVOICE_COLUMNS` entry moved to R4 (brief section 7, "R4: the grid column moves to R4"). No Dataverse write, no deploy.
+
+### What changed
+
+| Part | Where |
+|---|---|
+| **The 202 pre-check (BFF).** After the external (SPA) route has received the submission, it asks `InvoiceSubmissionService.PrecheckHoldWarningAsync(core, firmId)`. That reads the Procedure resolution (`ProcedureResolver.ReadAsync`, the loader's own call) for the record and firm the route filter decided, and judges TODAY (UTC date, the processor's received date): an applicable Procedure with no version today, i.e. `RulesOn(today).Gaps.Count > 0`. Held gives `SubmissionHoldWarning.ForPrecheck()`; otherwise null. Any fault gives null | `ExternalInvoiceSubmissionEndpoints.SubmitAsync`, `InvoiceSubmissionService.PrecheckHoldWarningAsync` and the seam `ReadProcedureResolutionAsync`, `SubmissionHoldWarning.Precheck` / `ForPrecheck` / `ProcedureGapPrecheckMessage` |
+| **Response shape.** `InvoiceSubmissionAccepted` gains a trailing `Warning` (`SubmissionHoldWarning?`, `JsonIgnore` when null). The 202 body is the four fields as before, plus `warning` only when held | `InvoiceSubmissionEndpoints.cs` (record), `InvoiceSubmissionHttp.ToResult` / `Accepted` |
+| **Client.** `warning?: { code, message } \| null` on `InvoiceSubmissionAccepted` and `InvoiceSubmissionStatusView` (new exported `InvoiceSubmissionWarning`). `InvoiceSubmissionOutcome` takes `submittedWarning` (the wizard passes `accepted.warning`): a caption (`Text` size 200, neutral foreground 3, `role="status"`) under Processing, dropped as soon as a terminal view arrives. A terminal Accepted view with a `warning` shows ONE `intent="warning"` bar, title "Received: on hold for review", the server's message and the tracking sentence, `role="status"`, in place of the green bar. Missing, null or blank renders nothing | `InvoiceSubmission/types.ts`, `InvoiceSubmissionOutcome.tsx`, `InvoiceSubmissionWizard.tsx`, `index.ts` |
+
+### The 202 body
+
+```
+202 Accepted, Location: <statusUrl>
+{ "submissionId": "...", "jobId": "...", "trackingNumber": "INV-1.1", "statusUrl": "/api/v1/external/invoice-submissions/..." }                      // not held, or a fault
+{ ..., "warning": { "code": "ebilling.submission.procedure_gap",
+                    "message": "As of today, no billing terms are set up for the record you chose. If the invoice's work dates are not covered either, it will be held for review, not rejected." } }   // held today
+```
+
+The code is the status view's gap code (`SubmissionReasonCodes.ProcedureGap`); the sentence is the R4 item 5 text the owner approved on 2026-11-04 (it differs from the draft in brief section 3(c), which R4 edited). Internal routes (including from-email) are unchanged: no pre-check, no member.
+
+### uac-r2 conditions (brief section 7)
+
+| Condition | How it holds | Test |
+|---|---|---|
+| (a) only after the submission's own authorization | The call is in the handler after `SubmitAsync` returned Received, which runs after the route filter. A refusal never runs it | `External_RefusedSubmission_NeverRunsThePrecheck` |
+| (b) record and firm from the authorized context | `scope.CoreRecord` and `scope.FirmId`, the values the request itself carries; no form field is read | `External_FormFieldsNamingAnotherRecordOrFirm_AreIgnored` (renamed in the review fixes; extra `firmId`, `coreRecordId`, `matterId`, `coreRecordKind` fields change neither warning nor outcome; the reads are for the filter's matter and firm) |
+| (c) one fixed sentence | The warning is a constant pair; the Procedure's name, dates and rule codes never reach it | `TheWarning_IsAnExactConstantPair_NoNamesDatesOrCodes` (a Procedure named "Secret Counterparty Terms" with rule `SECRET-RATE-CAP` gives the same pair; exact key set `code`, `message`; `ReaderSentinel` clean) |
+| (d) a fault omits the warning, never a distinct answer | `catch (Exception)` returns null; the 202 is unchanged (a read that outlives the 2 s budget is such a fault: the 202 stops waiting for it, F1 below). The log carries the fault's type name only (C16), no exception object. A caller who went away is not a fault: the cancellation propagates and nothing is logged | the four fail-quiet tests below |
+
+**Known limit (uac-r2, recorded):** the warning tells the partner that the record's billing terms for today are incomplete. The owner's rule requires that; it names nothing.
+
+### Decisions and deviations
+
+- **Where the 202 is built.** The brief points at `InvoiceSubmissionEndpoints.cs:1210`, which is only where the `InvoiceSubmissionAccepted` record is declared. The 202 is built in `InvoiceSubmissionHttp.Accepted`, shared by the internal and SPA routes; the SPA handler is `ExternalInvoiceSubmissionEndpoints.SubmitAsync`. The pre-check is in that handler (SPA only), and `ToResult` takes an optional `warning`. Not a disagreement; recorded.
+- **The predicate is not duplicated.** There is no extracted "will be held" predicate: the evaluator turns the resolver's `Gaps` into the hold. The pre-check asks the same resolver (`ProcedureResolution.RulesOn(date).Gaps`) for the single date today. The evaluator's invoice-subject fallback to the latest work date (rule (c)) and the per-line subjects need work dates, which a 202 does not have, so they do not apply; that difference is why the sentence says "if".
+- **Today is the UTC date**, as the processor's received date (`CreatedOnUtc`).
+- **Cost.** One resolver read (about the loader's 7 to 10 sequential Dataverse reads) on every SPA 202. The hold of the same submission reads it again in the job. Accepted: app-only and it fails quiet. The 202 waits at most the 2 s budget (review fix F1, below); the first version had no bound beyond the request's token.
+- **Provisional means provisional.** The caption lives in component state from the 202; a reload (the resume route has no 202) shows the terminal view only.
+- **Not in this slice.** The firm hold's warning bar (#2567): the status view carries no firm warning, so there is nothing to render; it lands when the server adds one. The invoices grid column and `INVOICE_COLUMNS` (R4). Any change to the Outlook add-in (it has its own types and calls the internal routes, which carry no pre-check).
+
+### Tests and seeds
+
+| Suite | Result |
+|---|---|
+| New BFF unit (`InvoiceSubmissionHoldPrecheckTests`) | 14 passed |
+| New BFF contract (`InvoiceSubmissionEndpointsContractTests`, "082c-3") | 6 passed |
+| BFF filter (`InvoiceSubmission`, `ExternalInvoice`, `SupersededSubmissionNote`, `FinanceEndpoints`) | 1645 passed, 0 failed |
+| ArchTests (`Invoice`, `External`, `Procedure`, `Submission`, `Route`, `Bff`, `Tenant`, `Reader`) | 668 passed, 0 failed |
+| Client new (`InvoiceSubmissionOutcome.warning.test.tsx`) | 17 passed; plus 1 added to the wizard test |
+| Client (`InvoiceSubmission` and `CreateInvoiceWizard`) | 8 suites, 135 passed |
+
+Seeds (each restored; the file `cmp`-identical afterwards):
+
+| Seed | Result |
+|---|---|
+| 1. The fault swallow removed (`catch ... when (never)`) | 4 failed: the service fault test, the resolution-fault test, the cancelled-caller test, and the contract test "survives a pre-check fault" |
+| 2. The gap predicate inverted (`Gaps.Count < 0`) | 7 failed (every must-fire test, including the contract test and the real-read test) |
+| 3. The drop-on-terminal removed (the caption shown whatever the status) | 5 failed: the terminal-without-warning test, Rejected and Failed, the held-bar handover and the wizard test |
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `dotnet build` BFF and unit tests | 0 warnings, 0 errors |
+| Client `tsc --noEmit` | 9 errors, all pre-existing and outside this slice (unbuilt sibling packages `@spaarke/auth` and `@spaarke/sdap-client`, and `FileUploadService`); none in `InvoiceSubmission`. `npm run build` is `tsc`, so it fails on the same 9 |
+| `eslint src/components/InvoiceSubmission`, `prettier --check` | clean |
+| Publish size (each side: `git archive` to a short path, `dotnet publish -c Release -r linux-x64 --self-contained false`, 191 files each; zipped with `Compress-Archive`) | origin/master 136,679,929 B raw / 41,103,935 B zip; branch base 767244e003 137,390,285 / 41,333,925; HEAD 137,394,341 / 41,334,771. **This slice: +4,056 B raw, +846 B zip.** HEAD vs master: +714,412 raw, +230,836 zip (the rest is the ebilling-r1 branch work before this slice). Zip total 41.3 MB, under the 55 MB review line; the raw size is pre-existing. No package change |
+
+### Review fixes (adversarial pass 1)
+
+**F1: the pre-check is bounded (pass 1, corrected in pass 2).** The pre-check runs after the submission is saved and queued, with about 8 to 10 sequential Dataverse reads. Bounded only by the request token, throttling could delay the 202 until the client timed out and resubmitted (a duplicate).
+
+- **Pass 1 was not enough.** A `CancelAfter` on a linked token source only takes effect BETWEEN requests: the Dataverse SDK's WCF `Channel.ExecuteAsync(request)` takes no token, so one stalled SOAP request kept the 202 waiting well past 2 s.
+- **Now (pass 2).** `PrecheckHoldWarningAsync` starts the read with the linked budget token (`CancelAfter(PrecheckTimeLimit)` kept, disposed with the method) and awaits it with `read.WaitAsync(PrecheckTimeLimit, ct)`. On a `TimeoutException` it calls `budget.Cancel()` (inside the `using` scope, so never after `Dispose`), attaches an `OnlyOnFaulted` continuation that reads `t.Exception` so a late fault is observed and never reaches `UnobservedTaskException`, and rethrows into the same fail-quiet catch.
+- **What is and is not bounded.** The 202 waits at most the budget. The abandoned read is cancelled at its next check between requests and may still run one in-flight SOAP request in the background until it returns. That request is app-only, read-only and its result is discarded; the bound is on the response, not on the background work.
+- **Timeout value: 2 seconds.** `InvoiceSubmissionService.PrecheckTimeout` is an `internal static readonly TimeSpan`, a code constant, **not** a new option or configuration surface (nothing to deploy or drift; a different value is a code change). `PrecheckTimeLimit` is a `protected internal virtual` property returning it, only so a test need not wait 2 s.
+- **A timeout is fail quiet:** the same catch as any fault. It logs the exception TYPE NAME only (`TimeoutException`, never the message or the object), returns null, and the 202 carries no `warning`.
+- **A real client abort still propagates.** The caller check is against the ORIGINAL `ct` (`ex is OperationCanceledException && ct.IsCancellationRequested`), which `WaitAsync` also observes; it is rethrown and not logged.
+- **Tests:** the read double now IGNORES its token (`new TaskCompletionSource<ProcedureResolution>(RunContinuationsAsynchronously).Task`), as the SDK call does, and every awaited call is bounded by `.WaitAsync(10 s)` so a regression fails red rather than hanging: `Service_AReadThatNeverCompletes_TimesOut_NoWarning_NoThrow`, `Service_ATimeout_CancelsTheAbandonedReadsToken`, `Service_AnAbandonedRead_ThatFaultsLater_RaisesNoUnobservedTaskException` (the read's task is dropped, a GC pass runs, the `UnobservedTaskException` event is watched for the marker exception), the two caller-cancel tests, `TheBudget_IsTwoSeconds_ByDefault`, and the contract test `External_202_HasNoWarning_WhenThePrecheckReadTimesOut`.
+- **Seeds (each restored; `git diff` shows the fix intact).** (1) `WaitAsync(...)` replaced by a plain `await read`: 4 unit tests fail red with the 10 s `TimeoutException` (timeout, token-cancelled, unobserved-fault, caller-abort) and the contract test fails the same way. (2) The `ContinueWith` observation removed: only the unobserved-fault test fails ("found InvalidOperationException: ABANDONED-READ-FAULT-082c3-F1"), so that test is discriminating; it passed three runs in a row with the fix.
+
+**Hygiene.** The pre-check's copy of the core-record-kind mapping is gone: `InvoiceSubmissionProcessor.ToResolutionCore` is now `internal static` and the service calls it, so there is one mapping (including the `_ => WorkAssignment` fall-through). No behaviour change; the existing kind-mapping theory still passes.
+
+**K3.** The existing "another record or firm" contract test added a `firmId` FORM field, which nothing reads (the firm is the `?firmId=` query). It is renamed `..._AreIgnored` and says so. New: `External_QueryNamingAnotherFirm_Is403_AndThePrecheckReadsNothing` (`?firmId=<another firm>`: 403, no `warning`, `PrecheckReads` empty, nothing written).
+
+**K4.** The held-Accepted warning `MessageBar` has `politeness="polite"`. Fluent v9 `@fluentui/react-message-bar` 9.6.20 types it (`politeness?: 'assertive' | 'polite'`), so it is supported and applied. It sits with the explicit `role="status"`.
+
+**K4 (pass 2).** The client treats the wire as untrusted: `nonBlank` now requires `typeof message === 'string'` before `.trim()`, so a numeric or null `message` renders nothing instead of throwing. Two jest cases added (numeric, null).
+
+**K2 (known limit, recorded).** The internal routes' OpenAPI schema (they share the `InvoiceSubmissionAccepted` record) lists a nullable `warning` member that those routes never send (no pre-check, `JsonIgnore` when null). Documentation noise only; not worth a second record type. Revisit if the internal routes ever need a distinct schema.
+
+#### Component justification (CLAUDE.md section 11)
+
+| New surface | 1. Existing | 2. Extension | 3. Cost of doing nothing |
+|---|---|---|---|
+| `InvoiceSubmissionService.PrecheckHoldWarningAsync` | Overlaps the processor's hold evaluation (`BillingFactLoader` reads the same resolution; `SubmissionHoldWarning` is the status view's warning); nothing else answers "is a Procedure without a version today" at intake (grep: `Precheck`, `Gaps.Count` in `Services/Finance`) | The loader and evaluator need work dates and run in the job, after the 202; the service already owns the intake, so the method sits there reusing `ProcedureResolver.ReadAsync` and `ProcedureResolution.RulesOn` | R4 item 4 (owner-approved, 2026-11-04) cannot be met: a partner learns their invoice is held only after polling, with no early notice |
+| `ReadProcedureResolutionAsync` (protected internal virtual) | `ProcedureResolver.ReadAsync` is the real read; no existing test seam at the service (grep: the loader's two calls are in `BillingFactLoader`, none at intake) | A `Func` constructor parameter would change the DI-built constructor for one test need; one overridable method keeps it | Tests could not model a record held for terms, a fault or a read that never completes without a full in-memory Dataverse (only the one `RealRead` test uses that); the F1 timeout would be untestable |
+| exported `InvoiceSubmissionWarning` (TS) | The status view carried a warning shape of its own; the Outlook add-in has separate types (not shared) | Reusing the one named type on both `InvoiceSubmissionAccepted.warning` and `InvoiceSubmissionStatusView.warning` is the extension: one type instead of two copies of `{ code, message }` | Two copies would drift (the 202 and the status view carry the same pair of fields); the `submittedWarning` prop would be untyped |
+| `submittedWarning` prop (`InvoiceSubmissionOutcome`) | `InvoiceSubmissionOutcome` takes the status view only; the 202 body is known to the wizard, not the view | Putting the 202's warning into the status view would invent a server-less fake status; a prop from the wizard (which holds `accepted`) is the minimal path | The provisional caption (R4 item 4) cannot show between the 202 and the first terminal view, the only window the pre-check exists for |
+| `InvoiceSubmissionAccepted.Warning` (the wire field) | The 202 record's four fields; the status view's `SubmissionHoldWarning` (same `{code, message}` pair); nothing else carries a notice at intake (grep: `Warning` in `InvoiceSubmissionEndpoints.cs`) | A separate response type or a header would fork the 202 contract for one optional notice; one trailing member, `JsonIgnore` when null, leaves the body byte-identical when unset | R4 item 4 (a partner learns early that the invoice may be held) has no carrier on the 202; the client would have to poll to find out |
+| `SubmissionHoldWarning.ForPrecheck`, `Precheck` and `ProcedureGapPrecheckMessage` | `SubmissionHoldWarning` already builds the held warning for the status view from the same resolver gaps; the status wording is "is on hold", which is false at 202 time | `Precheck` reuses the type and the code; only the sentence differs (provisional, the owner-approved R4 item 5 text), so a second constant beside the first rather than a second class | Reusing the status sentence would tell a partner their invoice IS held when it only MAY be; a parallel judging helper would drift from the evaluator's gap rule |
+| `PrecheckTimeout` and the `PrecheckTimeLimit` seam | No existing time budget at intake; the request token is the only bound (`ExternalInvoiceSubmissionEndpoints`) | An option or configuration key would be a new deploy surface for a constant; a code constant plus one overridable property (as `ReadProcedureResolutionAsync` is) keeps it local | A stalled Dataverse read holds the 202 past the client's timeout, the client resubmits, a duplicate invoice results (F1); without the seam the timeout tests would each wait 2 s |
+| the `warning` parameter on `InvoiceSubmissionHttp.ToResult` | `ToResult` and `Accepted` already shape the 202 for both routes | An optional trailing parameter extends them; a second `ToResult` overload or a post-hoc body rewrite would duplicate the Location and status handling | The SPA handler could not hand the warning to the shared 202 builder, so the field would never reach the body |
+
+#### Accepted known limits (review of 082c-3)
+
+- **K1: tone.** A green "Accepted" badge sits above the amber held bar. Pending R4's view on the badge tone.
+- **K1: "held today" is the UTC date; the hold is judged on the invoice and work dates.** After a Procedure's terms end, an invoice for EARLIER work gets a false warning; a hole between past versions (not today) gives a silent miss. The conditional wording ("If the invoice's work dates are not covered either, it will be held") and the drop of the caption on a terminal view contain both. The warning is provisional by construction.
+- **K2:** the 202 reuses `ebilling.submission.procedure_gap` (the brief's "reuse status-view constants"). No consumer branches on the 202's code today.
+- **K4:** `politeness="polite"` is applied (supported by the installed Fluent version, above).
+
+#### Review-fix gates
+
+| Gate | Result |
+|---|---|
+| `dotnet build` BFF | 0 warnings, 0 errors |
+| `Sprk.Bff.Api.Tests --filter InvoiceSubmission` | 1283 passed, 0 failed |
+| `Spaarke.ArchTests` (full) | 2041 passed, 0 failed |
+| Client `jest src/components/InvoiceSubmission` | 5 suites, 77 passed |
+| Client `tsc --noEmit` | 9 errors, the same pre-existing ones |
+
+### For the next slices and the peers
+
+- R4 and the word-add-in notices are in the 082c-3 report (not sent from this slice).
+- 114 and C22 are unchanged.

@@ -21,9 +21,12 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Domain.Signals.Billing;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Sprk.Bff.Api.Tests.Finance.Files;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -422,9 +425,49 @@ public sealed class InvoiceSubmissionServiceTests
         /// <summary>Task 191: the invoice reader's options the intake checks (configured by default, so every other test takes the normal path).</summary>
         public ContentUnderstandingOptions Reader { get; } = new() { Endpoint = "https://invoice-reader.test/" };
 
-        public InvoiceSubmissionService Build() =>
-            new(Allocator.Object, Entities.Object, RecordTypes.Object, Participations, Files.Service, Ownership.Object,
+        public InvoiceSubmissionService Build() => Build(NullLogger<InvoiceSubmissionService>.Instance);
+
+        /// <summary>
+        /// ebilling-r1 082c-3: the intake's billing-terms pre-check reads the Procedure resolution through
+        /// <see cref="InvoiceSubmissionService.ReadProcedureResolutionAsync"/>; this hook answers it (the core record and firm it was asked
+        /// for are recorded in <see cref="PrecheckReads"/>). Null (the default): an EMPTY resolution (no Procedures, so no warning and no
+        /// read on <see cref="Entities"/>), so every other test sees an intake that behaves exactly as before 082c-3.
+        /// </summary>
+        public Func<ProcedureResolution>? ProcedureRead { get; set; }
+
+        /// <summary>
+        /// F1: an ASYNC answer for the pre-check's read, given the token the service passes it (so a test can model a read that never completes
+        /// and honours only its token). When set, it wins over <see cref="ProcedureRead"/>.
+        /// </summary>
+        public Func<CancellationToken, Task<ProcedureResolution>>? ProcedureReadAsync { get; set; }
+
+        /// <summary>F1: the pre-check's time budget in a test (null: the service's own <see cref="InvoiceSubmissionService.PrecheckTimeout"/>).</summary>
+        public TimeSpan? PrecheckTimeLimit { get; set; }
+
+        /// <summary>Every (core record, firm) the pre-check read the Procedure resolution for.</summary>
+        public readonly List<(CoreRecordReference Core, Guid FirmId)> PrecheckReads = new();
+
+        public InvoiceSubmissionService Build(ILogger<InvoiceSubmissionService> logger) => new HarnessService(this, logger);
+
+        /// <summary>The service with NO pre-check seam: its Procedure read is the real resolver over <paramref name="entities"/>.</summary>
+        public InvoiceSubmissionService BuildReal(IGenericEntityService entities) =>
+            new(Allocator.Object, entities, RecordTypes.Object, Participations, Files.Service, Ownership.Object,
                 IsolationOver(() => Isolation), Jobs.Object, Monitor, Microsoft.Extensions.Options.Options.Create(Reader), NullLogger<InvoiceSubmissionService>.Instance);
+
+        private sealed class HarnessService(Harness h, ILogger<InvoiceSubmissionService> logger) : InvoiceSubmissionService(
+            h.Allocator.Object, h.Entities.Object, h.RecordTypes.Object, h.Participations, h.Files.Service, h.Ownership.Object,
+            IsolationOver(() => h.Isolation), h.Jobs.Object, h.Monitor, Microsoft.Extensions.Options.Options.Create(h.Reader), logger)
+        {
+            protected internal override Task<ProcedureResolution> ReadProcedureResolutionAsync(CoreRecordReference core, Guid firmId, CancellationToken ct)
+            {
+                h.PrecheckReads.Add((core, firmId));
+                return h.ProcedureReadAsync is { } readAsync
+                    ? readAsync(ct)
+                    : Task.FromResult(h.ProcedureRead?.Invoke() ?? new ProcedureKit().Build());
+            }
+
+            protected internal override TimeSpan PrecheckTimeLimit => h.PrecheckTimeLimit ?? base.PrecheckTimeLimit;
+        }
 
         /// <summary>The container and name the upload of <paramref name="submissionId"/> is staged under (the job derives the same).</summary>
         public (string Container, string Name) StagedName(Guid submissionId)

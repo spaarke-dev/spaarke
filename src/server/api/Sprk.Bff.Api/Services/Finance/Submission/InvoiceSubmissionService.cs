@@ -15,7 +15,9 @@ using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
@@ -293,6 +295,72 @@ public class InvoiceSubmissionService
 
         return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, ct);
     }
+
+    /// <summary>
+    /// ebilling-r1 082c-3 (brief 082c section 3(c), section 7 R4 item 4): the advisory pre-check the external (SPA) route runs on a RECEIVED
+    /// submission. It asks the Procedure resolver, for <paramref name="core"/> and <paramref name="firmId"/> and TODAY (UTC, as the processor's
+    /// received date), whether an applicable Procedure has no version on the date: the same fact the hold is made of
+    /// (<see cref="SubmissionHoldWarning.Precheck"/>). Returns the provisional warning (<see cref="SubmissionHoldWarning.ForPrecheck"/>), or null.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Fail quiet (uac-r2 (d)).</b> A fault of any kind (a read, an inconsistent resolution) means no warning and is never a distinct
+    /// answer: the 202 is unchanged. The log carries the fault's type name only, never its message (C16).</para>
+    /// <para><b>Authorization (uac-r2 (a), (b)).</b> Called by the route only after the submission's own authorization passed, with the core
+    /// record and firm the route's filter decided; this method reads app-only and takes nothing from the request.</para>
+    /// </remarks>
+    public virtual async Task<SubmissionHoldWarning?> PrecheckHoldWarningAsync(InvoiceCoreRecord core, Guid firmId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(core);
+
+        // F1: the pre-check runs after the submission is saved and queued, so a slow read must not hold the 202 (a client timeout would
+        // resubmit a duplicate). The 202 waits at most PrecheckTimeLimit: the wait itself is bounded (WaitAsync), because the budget token only
+        // takes effect between the loader's requests (the Dataverse SDK's channel call takes no token, so one stalled SOAP request would
+        // otherwise hold the 202). On a timeout the read is abandoned: it is cancelled so it stops at its next check, its fault (if any) is
+        // observed so it never reaches UnobservedTaskException, and the timeout is a fault like any other (fail quiet, below).
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(PrecheckTimeLimit);
+        try
+        {
+            var read = ReadProcedureResolutionAsync(InvoiceSubmissionProcessor.ToResolutionCore(core), firmId, budget.Token);
+            ProcedureResolution resolution;
+            try
+            {
+                resolution = await read.WaitAsync(PrecheckTimeLimit, ct).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                budget.Cancel();
+                _ = read.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                throw;
+            }
+
+            return SubmissionHoldWarning.Precheck(resolution, DateOnly.FromDateTime(DateTime.UtcNow));
+        }
+        catch (Exception ex) when (IsCallerCancellation(ex, ct))
+        {
+            // The caller's own token (a real client abort), not the budget's: it propagates.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Invoice submission: the billing-terms pre-check could not run; no warning is shown ({Fault})", ex.GetType().Name);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// F1: the most time the advisory pre-check's Dataverse reads may take before the 202 goes out without a warning. A fixed constant, not a
+    /// new option or configuration surface (notes 082c-3 "F1").
+    /// </summary>
+    internal static readonly TimeSpan PrecheckTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>The budget <see cref="PrecheckHoldWarningAsync"/> applies (a seam so a test need not wait <see cref="PrecheckTimeout"/>).</summary>
+    protected internal virtual TimeSpan PrecheckTimeLimit => PrecheckTimeout;
+
+    /// <summary>The pre-check's one read: the Procedure resolution the loader reads for an invoice of this firm on this record (a seam for tests).</summary>
+    protected internal virtual Task<ProcedureResolution> ReadProcedureResolutionAsync(CoreRecordReference core, Guid firmId, CancellationToken ct) =>
+        ProcedureResolver.ReadAsync(_entities, _logger, core, firmId, ct);
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // Submit an existing document (ebilling-r1 task 050a, D-134: the review-confirm route)

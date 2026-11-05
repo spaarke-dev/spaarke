@@ -26,7 +26,11 @@ using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
+using Sprk.Bff.Api.Tests.Domain.Signals.Billing;
 using Sprk.Bff.Api.Tests.Services.Finance.Submission;
 using Xunit;
 using static Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
@@ -250,6 +254,146 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         allocation.FirmId.Should().Be(FirmId);
         ((OptionSetValue)allocation.Fields!["sprk_channel"]).Value.Should().Be((int)InvoiceSubmissionChannel.Spa);
         _h.JobsSent.Should().ContainSingle().Which.JobType.Should().Be(InvoiceSubmissionService.JobType);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // External: the provisional billing-terms warning on the 202 (ebilling-r1 082c-3; uac-r2 conditions (a) to (d))
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static ProcedureResolution HeldForTerms()
+    {
+        var kit = new ProcedureKit().Procedure("Ended", from: new DateOnly(2000, 1, 1), to: new DateOnly(2001, 1, 1));
+        kit.Rule("Ended", "ENDED-INCREMENT", RuleType.TimeIncrement);
+        return kit.Build();
+    }
+
+    [Fact(DisplayName = "082c-3 must fire: a held-for-terms pre-check puts `warning {code, message}` (the exact approved constants) on the SPA 202")]
+    public async Task External_202_CarriesTheProvisionalWarning_WhenTheRecordIsHeldForTerms()
+    {
+        _h.ProcedureRead = HeldForTerms;
+
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("submissionId", "jobId", "trackingNumber", "statusUrl", "warning");
+        var warning = body.RootElement.GetProperty("warning");
+        warning.EnumerateObject().Select(p => p.Name).Should().Equal("code", "message");
+        warning.GetProperty("code").GetString().Should().Be("ebilling.submission.procedure_gap");
+        warning.GetProperty("message").GetString().Should().Be(
+            "As of today, no billing terms are set up for the record you chose. If the invoice's work dates are not covered either, it will be held for review, not rejected.");
+        _h.Allocations.Should().ContainSingle("the warning is advisory: the submission is received either way");
+    }
+
+    [Fact(DisplayName = "082c-3 must not fire: terms in force give a 202 with no `warning` member at all (the four fields, as before)")]
+    public async Task External_202_HasNoWarning_WhenTheRecordIsNotHeld()
+    {
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("submissionId", "jobId", "trackingNumber", "statusUrl");
+        _h.PrecheckReads.Should().ContainSingle("the pre-check ran, and judged the record not held");
+    }
+
+    [Fact(DisplayName = "082c-3 fail quiet (seed 1): a pre-check fault gives the same 202 without a warning; the submission is received and its job enqueued")]
+    public async Task External_202_SurvivesAPrecheckFault_WithNoWarning()
+    {
+        _h.ProcedureRead = () => throw new InvalidOperationException("SECRET-RECORD-NAME 6f1c0d7e-aaaa-4bbb-8ccc-0123456789ab");
+
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain("warning").And.NotContain("SECRET").And.NotContain("6f1c0d7e");
+        using var body = JsonDocument.Parse(text);
+        body.RootElement.GetProperty("trackingNumber").GetString().Should().Be("INV-1.1");
+        _h.Allocations.Should().ContainSingle();
+        _h.JobsSent.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "082c-3 (uac-r2 (a)): a refused submission never runs the pre-check (it runs only after the submission's own authorization passed and it was received)")]
+    public async Task External_RefusedSubmission_NeverRunsThePrecheck()
+    {
+        _h.ProcedureRead = HeldForTerms;
+        _resolver.Principal = Collaborator(AccessRights.Read);
+
+        var forbidden = await PostExternalAsync(Form());
+        var notPdf = await PostExternalAsync(Form(contentType: "text/plain", pdf: new byte[] { 1, 2, 3 }));
+
+        forbidden.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        notPdf.IsSuccessStatusCode.Should().BeFalse();
+        (await forbidden.Content.ReadAsStringAsync()).Should().NotContain("warning");
+        (await notPdf.Content.ReadAsStringAsync()).Should().NotContain("warning");
+        _h.PrecheckReads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "082c-3 (uac-r2 (b)): FORM fields naming another record or firm are ignored (the firm is the `?firmId=` query, not a field); the pre-check reads the filter's record and firm")]
+    public async Task External_FormFieldsNamingAnotherRecordOrFirm_AreIgnored()
+    {
+        _h.ProcedureRead = HeldForTerms;
+        var otherRecord = Guid.NewGuid();
+        var form = Form();
+        form.Add(new StringContent(OtherFirmId.ToString()), "firmId");
+        form.Add(new StringContent(otherRecord.ToString()), "coreRecordId");
+        form.Add(new StringContent(otherRecord.ToString()), "matterId");
+        form.Add(new StringContent("sprk_project"), "coreRecordKind");
+
+        var plain = await PostExternalAsync(Form());
+        var crafted = await PostExternalAsync(form);
+
+        crafted.StatusCode.Should().Be(plain.StatusCode);
+        using var plainBody = JsonDocument.Parse(await plain.Content.ReadAsStringAsync());
+        using var craftedBody = JsonDocument.Parse(await crafted.Content.ReadAsStringAsync());
+        craftedBody.RootElement.GetProperty("warning").GetRawText().Should().Be(plainBody.RootElement.GetProperty("warning").GetRawText());
+        _h.PrecheckReads.Should().HaveCount(2).And.OnlyContain(
+            r => r.Core == new CoreRecordReference(CoreRecordKind.Matter, MatterId) && r.FirmId == FirmId,
+            "the record and firm come from the authorized scope, never from the body");
+    }
+
+    [Fact(DisplayName = "082c-3 (uac-r2 (b), K3): the firm the caller NAMES (the `?firmId=` query) is another firm: 403 before the pre-check, which reads nothing")]
+    public async Task External_QueryNamingAnotherFirm_Is403_AndThePrecheckReadsNothing()
+    {
+        _h.ProcedureRead = HeldForTerms;
+
+        var response = await PostExternalAsync(Form(), $"?firmId={OtherFirmId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("warning");
+        _h.PrecheckReads.Should().BeEmpty("the pre-check runs only for the firm the caller's own authorization passed");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "082c-3 F1 (seed 2): a pre-check read that never completes is cut off at the budget; the 202 goes out with no `warning`, the submission is received and its job enqueued")]
+    public async Task External_202_HasNoWarning_WhenThePrecheckReadTimesOut()
+    {
+        _h.PrecheckTimeLimit = TimeSpan.FromMilliseconds(50);
+        // A read that IGNORES its token (as the Dataverse SDK's channel call does): only the wait itself can cut it off.
+        _h.ProcedureReadAsync = _ => new TaskCompletionSource<ProcedureResolution>(TaskCreationOptions.RunContinuationsAsynchronously).Task;
+
+        var response = await PostExternalAsync(Form()).WaitAsync(TimeSpan.FromSeconds(10));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain("warning");
+        using var body = JsonDocument.Parse(text);
+        body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("submissionId", "jobId", "trackingNumber", "statusUrl");
+        _h.PrecheckReads.Should().ContainSingle("the pre-check ran and was cut off");
+        _h.Allocations.Should().ContainSingle();
+        _h.JobsSent.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "082c-3 scope: the internal route's 202 never carries the warning and never runs the pre-check (the SPA channel only)")]
+    public async Task Internal_202_HasNoWarning_AndNeverRunsThePrecheck()
+    {
+        _h.ProcedureRead = HeldForTerms;
+        GrantInternalSubmit();
+
+        var response = await PostInternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("warning");
+        _h.PrecheckReads.Should().BeEmpty();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

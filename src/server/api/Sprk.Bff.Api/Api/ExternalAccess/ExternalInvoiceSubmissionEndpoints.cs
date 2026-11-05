@@ -131,7 +131,12 @@ public static class ExternalInvoiceSubmissionEndpoints
             CorrelationId = http.TraceIdentifier,
         }, ct);
 
-        return InvoiceSubmissionHttp.ToResult(outcome, StatusUrl, http.TraceIdentifier);
+        // ebilling-r1 082c-3 (uac-r2 conditions, brief section 7): the advisory billing-terms pre-check runs only AFTER the submission's own
+        // authorization passed and the submission was received, for the record and firm the filter decided (never a request field), and fails quiet.
+        var warning = outcome.Kind == InvoiceSubmissionOutcomeKind.Received
+            ? await service.PrecheckHoldWarningAsync(core, firmId, ct)
+            : null;
+        return InvoiceSubmissionHttp.ToResult(outcome, StatusUrl, http.TraceIdentifier, warning);
     }
 
     private static async Task<IResult> GetAsync(
