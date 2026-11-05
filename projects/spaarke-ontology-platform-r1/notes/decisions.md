@@ -670,3 +670,16 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
       - The audit is joined from three places: the Signal (resolution and dates), the record-rule version row (`sprk_inforcefrom`, `sprk_basedonversion`) and the change's completion log (`c704a9f2dc`: AssignmentId, RecordRuleVersionId and ClosedSignalIds; ontology asked for the ID list to be bounded).
       - **No Superseded link in 095d-2.** A successor link on `sprk_signal` would change the shared `SignalWriter` contract, so it needs an ontology design decision on request, not a billing task.
     - Dev census: at most 4 direct children per parent.
+- **082c-2 review (2026-11-05; `origin/task/ebilling-082c-2` at `60fecb03e7`, base `c61f510080`): two fix-now findings, the rest PASS.**
+  - **F1: Set firm blanks the review detail while the firm hold still refuses approval.**
+    - The Set firm writer derives from the Procedure reasons only. The apply keeps the stored `pipelineFindings[].reasonCode = firm_missing` marker, so `InvoiceFirmHold.IsHeld` stays true until 095d-2 (D-201 amendment).
+    - Its tests seed `{"code":"firm_missing"}`, a shape no reader reads.
+    - Fix: one shared open-hold helper (firm plus Procedure reasons, as the supersede undo already does) used by every writer and by approval. Re-test with fixtures in the production shape.
+  - **F2 (§0.3): the gap headline "No procedure associated with this invoice" asserts the opposite of the predicate.** A gap means a Procedure is associated but no version is in force on a work date. The headline must say only what the resolver found.
+  - **PASS:**
+    - one SubmissionIntegrity Signal for a gap plus firm_missing, retitled on a partial clear; the mapper order matches the review-detail priority;
+    - the gap-kind and cause maps are closed, every enum value is covered, and an unmapped one throws;
+    - the writers that blank on exit and the supersede undo.
+  - **Known limits accepted:**
+    - The census is re-runnable and the reconciliation pass counts it every run. It can still grow (a subgrid "Add existing", a refused filing), so it is run before each rollout.
+    - A caller-scoped write (chat `update_record` as the user, or the model-driven form) can still set the label, because the column is unsecured by design. It is a label, not a hold, and the next writer re-derives it. -Verify does not catch a wrong non-blank value inside In Review.
