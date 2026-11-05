@@ -1049,7 +1049,7 @@ internal static class InheritedAccessPermission
     /// <item>ebilling-r1 task 095d-1c (uac-r2 final review F4-1). <c>sprk_invoicesubmission</c>: the stored findings
     /// (<c>sprk_findingsjson</c>, <see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson"/>).
     /// They decide no access, but since 1c their <c>assignFirm</c> member decides the immutable Decision Record's decider, note and date
-    /// (<c>InvoiceAssignFirmService.BuildDecision</c>), so a generic write of the column could forge a record. The typed writers are the
+    /// (<c>InvoiceAssignFirmService.BuildDecision</c>), so only its typed writers may change it. The typed writers are the
     /// submission persister, <c>InvoiceCorrectionReevaluation</c>, <c>SubmissionOverrideService</c> and Set firm
     /// (<c>InvoiceAssignFirmService</c>); they go through <c>IGenericEntityService</c>, not these paths. Where the column is otherwise
     /// held: app-only generic writes (an Update Record node, an output mapping, Repair) are refused here. A person-run write is blocked by
