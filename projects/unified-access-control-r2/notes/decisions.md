@@ -227,3 +227,24 @@ The owner accepted every recommendation ("yes follow your recommendation for the
 - The BFF's invoice-family hiding for flagged callers stays as it is: it narrows rows by invoice visibility and does not narrow columns.
 
 **Rejected.** Option "exclude flagged users": refusing the two tables to flagged callers in the BFF read tools and the family route. Roles can't express it, because Basic User comes with unit membership. It would also limit expected functionality for licensed outside counsel, and the model-driven app would still show the rows through their roles.
+
+## 2026-11-05: Security roles: owner rulings on field-mapping task 046 (feature permission matrix)
+
+The matrix and gap table are in `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §5.1 (fm task 046). uac-r2 applies the role changes on dev with the owner's go; field-mapping builds the role-file changes and the apply script.
+
+- **Applied as additions** (owner, 2026-11-05):
+  - G1: Core User gets Create, Append and AppendTo on `sprk_reportcard` (Deep). AppendTo lets a KPI assessment be filed under a report card.
+  - G2: Office Add In User's AppendTo on `sprk_eventtype_ref` goes Deep → Global.
+  - G4: Office Add In User's AppendTo on `contact` goes Basic → Deep.
+  - G5: Billing Administrator gets Read on `sprk_procedure` (Deep). It is already on dev; the role file aligns.
+  - G6: Office Add In User, not Basic User, gets Write on `sprk_document` (Deep), for the Word version save.
+  - G7/G8: Office Add In User gets AppendTo on `account` and `sprk_budget` (Deep), for the typed event route.
+- **Not applied:**
+  - G3: Basic User stays as it is; the contact AppendTo comes through the Office add-on (G4).
+  - Office To Do and the Console's Do lane stay Core User features.
+- **Add-on roles may be held without a base role** (owner chose "standalone"). Each add-on must therefore meet its own features alone. Field-mapping extends the matrix and guard to check each add-on alone; the resulting additions come back to the owner as one batch before anything is applied.
+- **Ontology Administrator is the designated cleanup role** for `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision`.
+  - D-160/D-162 stand: it keeps Create, Write, Delete and Assign there. The owner wants a cleanup role other than System Administrator.
+  - It is the only person role with those rights, held by a few named admins, with Dataverse auditing on for the three tables.
+  - Every generic BFF path refuses changes to these tables (task 048), so the model-driven app, under this role, is the cleanup path.
+  - Console User's Append and AppendTo on these tables stay.
