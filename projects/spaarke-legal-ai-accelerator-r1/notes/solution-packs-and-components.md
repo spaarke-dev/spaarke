@@ -127,6 +127,7 @@ A **solution pack** is a customer-facing capability (e.g., "NDA Review"), delive
 | 9. Tests | Engine tests, gates, eval cases, routing evals, tenant tests |
 | 10. Not in this pack | Explicit negative scope, with who owns it instead |
 | 11. Open items | Spikes and owner decisions |
+| 12. Sources | Per-pack source sweep at pack start: GitHub, Hugging Face, standards bodies and government sources, each with its licence checked at source. It builds on the shared baseline (design §8.5; the 2026-10-31 and 2026-11-05 researcher notes). Excluded sources are listed with the reason, so nobody re-adds them. |
 
 ### 2.5 NDA Review pack: mini-spec (first fill)
 
@@ -379,7 +380,7 @@ Source: researcher note `github-hf-delta-sweep-cowork-mcp-2026-11-05.md` (licenc
 | `microsoft/cat-agent-skills` (`rich-html-presentation`, `chart-builder`) | MIT | Preview constraints; chart script pattern |
 | `NVIDIA/SkillEvaluator` Tier 1 only | Apache-2.0 | Offline skill-quality score as a lint gate. Tiers 2 and 3 send skill text to a hosted model: not used. |
 | `Dmitry-Kov/ooxml-integrity` | MIT (young, 0 stars) | A second, independent CI check for lost comment anchors and tracked changes. Trial beside `check_outputs`. |
-| Hugging Face `crosbylegal/RedlineBench` | CC BY 4.0 data, MIT code | Eval method: real `.docx` files with tracked changes, playbooks, attorney rubrics, "surgicalness" and verbosity metrics. The contracts are MSAs, not NDAs, so adopt the rubric and metrics, not the corpus. |
+| Hugging Face `crosbylegal/RedlineBench` | CC BY 4.0 data, MIT code | Eval method: real `.docx` files with tracked changes, playbooks, attorney rubrics, "surgicalness" and verbosity metrics. For NDA: the rubric and metrics. For the **MSA pack** (OD-32): the corpus as well, with attribution. |
 
 **Reference:**
 - `houfu/lq-plugin-cowork`: a 27-probe Cowork harness. It has no licence, so run it but don't copy it.
@@ -429,4 +430,5 @@ No public sample yet combines .NET, Entra, a widget and a declarative agent.
 | OD-28 | Component manifest, step includes and bill of materials in the build | Yes, Phase 1 |
 | OD-29 | Visual priority: deliverable visuals (V1) and the HTML dashboard (V2) first; the card (V3) optional with fallback | Yes |
 | OD-30 | T0 dashboard format | **Static HTML + CSS + SVG from Python** (previews likely block scripts, per the 2026-11-05 sweep). Interactive React only in the MCP App (V4). |
-| OD-31 | Adopt external tools found in the 2026-11-05 sweep (§7) | Yes for the CI gates; RedlineBench's rubric as an eval method |
+| OD-31 | Adopt external tools found in the 2026-11-05 sweep (§7) | **Decided (owner, 2026-11-05): adopt** all §7 "Adopt" items |
+| OD-32 | **MSA pack** in the library (owner, 2026-11-05). This reverses design §8.3 "Rejected: MSA review … duplicates Legal for Cowork". | Add it, without competing with Microsoft on routing. (a) Always ship **content**: an MSA Word playbook (Word) and an MSA legal playbook that Microsoft's `review-contract` can use in Cowork (protocol rule 1). (b) Add a Spaarke `msa-review` entry skill only for the **packaged deliverable** (internal and external redlines plus a clean copy, checked by script), as with NDA. When it ships, `nda-review`'s "use review-contract for MSAs" line changes, and routing coexistence is tested (T-P2). Eval corpus: RedlineBench (CC BY 4.0, attributed). Wave: R2 or later. |
