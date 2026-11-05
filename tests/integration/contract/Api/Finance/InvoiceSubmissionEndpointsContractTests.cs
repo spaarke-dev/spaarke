@@ -986,6 +986,135 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         (await foreignResponse.Content.ReadAsStringAsync()).Should().NotContain("INV-1.1");
     }
 
+    // ── ebilling-r1 task 095c (P2 precondition, uac-r2): sprk_invoicesubmission.sprk_vendororg may become blank for internal from-email
+    //    rows. The partner read routes must FAIL CLOSED on a submission with no firm: never read, listed or named. ──
+
+    /// <summary><paramref name="row"/> with no firm (<c>sprk_vendororg</c> never written, as a blank-able internal row would read).</summary>
+    private static Entity WithoutFirm(Entity row)
+    {
+        row.Attributes.Remove("sprk_vendororg").Should().BeTrue("the row must have carried a firm for this to be a blank-firm row");
+        return row;
+    }
+
+    [Fact(DisplayName = "095c A1 (uac-r2): the single read of a submission with no firm is the same 404 as a missing one, naming no field of the row; the caller's own firm's submission is still 200")]
+    public async Task External_get_of_a_submission_with_no_firm_is_the_same_404_as_a_missing_one()
+    {
+        var blank = Guid.NewGuid();
+        var row = WithoutFirm(StoredSubmission(blank, FirmId)); // the caller can otherwise reach it: the matter is readable and linked to their firm
+
+        await ReadIsTheSameAsMissingAsync(row, "a submission with no firm belongs to none of the caller's firms");
+        _h.Submission = row;
+        var body = await (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{blank}")).Content.ReadAsStringAsync();
+        body.Should().NotContain("INV-1.1").And.NotContain("trackingNumber").And.NotContain(MatterId.ToString());
+
+        // Control (must fire): the same row WITH the caller's firm is read, so the 404 above is the missing firm and nothing else.
+        row["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId);
+        (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{blank}")).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// The list's Dataverse double: answers a <c>sprk_invoicesubmission</c> query that names the firm column from <paramref name="store"/>,
+    /// EVALUATING every <c>In</c> condition of the query against the row's attributes (an entity reference by its id; an absent or null
+    /// attribute matches nothing), as Dataverse does. Every such query is recorded.
+    /// </summary>
+    private List<Microsoft.Xrm.Sdk.Query.QueryExpression> ListIsEvaluated(params Entity[] store)
+    {
+        var queries = new List<Microsoft.Xrm.Sdk.Query.QueryExpression>();
+        _h.Entities.Setup(e => e.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"
+                    && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_vendororg")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) =>
+            {
+                lock (queries) queries.Add(q);
+                return new EntityCollection(store.Where(row => q.Criteria.Conditions
+                    .Where(c => c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.In)
+                    .All(c => row.Attributes.TryGetValue(c.AttributeName, out var value)
+                        && value is EntityReference reference
+                        && c.Values.Contains(reference.Id))).ToList());
+            });
+        return queries;
+    }
+
+    [Fact(DisplayName = "095c A2 (uac-r2): the list never includes a submission with no firm (the query is firm In [caller's firms] with no OR/null branch, and the evaluated result keeps only the firm's row)")]
+    public async Task External_list_excludes_a_submission_with_no_firm()
+    {
+        var inFirm = SubmissionRow("INV-FIRM", Spa);
+        var blank = WithoutFirm(SubmissionRow("INV-BLANK", Spa));
+        var otherFirm = SubmissionRow("INV-OTHER", Spa);
+        otherFirm["sprk_vendororg"] = new EntityReference("sprk_organization", OtherFirmId);
+        var queries = ListIsEvaluated(blank, inFirm, otherFirm);
+
+        var response = await SendAsync(HttpMethod.Get, ExternalRoute);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("INV-FIRM", "positive control: the caller's firm's row is listed")
+            .And.NotContain("INV-BLANK").And.NotContain("INV-OTHER");
+
+        // Query level: the firm condition is a plain conjunct, an In over exactly the caller's firms, with no nested or alternative branch.
+        queries.Should().NotBeEmpty();
+        foreach (var query in queries)
+        {
+            query.Criteria.FilterOperator.Should().Be(Microsoft.Xrm.Sdk.Query.LogicalOperator.And);
+            query.Criteria.Filters.Should().BeEmpty("no OR / null branch can widen the firm condition");
+            var firm = query.Criteria.Conditions.Where(c => c.AttributeName == "sprk_vendororg").Should().ContainSingle().Subject;
+            firm.Operator.Should().Be(Microsoft.Xrm.Sdk.Query.ConditionOperator.In);
+            firm.Values.Cast<Guid>().Should().BeEquivalentTo(new[] { FirmId });
+        }
+    }
+
+    [Fact(DisplayName = "095c A2 (uac-r2): a caller with no firm is answered an empty list and no submission query is issued")]
+    public async Task External_list_of_a_caller_with_no_firm_issues_no_query()
+    {
+        _participations.Firms = Array.Empty<Guid>();
+        var queries = ListIsEvaluated(SubmissionRow("INV-FIRM", Spa), WithoutFirm(SubmissionRow("INV-BLANK", Spa)));
+
+        var response = await SendAsync(HttpMethod.Get, ExternalRoute);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Be("[]");
+        queries.Should().BeEmpty("an empty firm set reads nothing: the scope IS the query");
+    }
+
+    [Fact(DisplayName = "095c A4 (uac-r2): a blank firm id never reaches the list query (hygiene), and a set of only blanks reads nothing")]
+    public async Task External_list_drops_a_blank_firm_id_before_the_query()
+    {
+        _participations.Firms = new[] { Guid.Empty, FirmId };
+        var queries = ListIsEvaluated(SubmissionRow("INV-FIRM", Spa));
+        (await SendAsync(HttpMethod.Get, ExternalRoute)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        queries.Should().NotBeEmpty();
+        queries.SelectMany(q => q.Criteria.Conditions.Where(c => c.AttributeName == "sprk_vendororg"))
+            .Should().OnlyContain(c => c.Values.Cast<Guid>().SequenceEqual(new[] { FirmId }), "Guid.Empty is not a firm");
+
+        _participations.Firms = new[] { Guid.Empty };
+        queries.Clear();
+        var blankOnly = await SendAsync(HttpMethod.Get, ExternalRoute);
+        blankOnly.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await blankOnly.Content.ReadAsStringAsync()).Should().Be("[]");
+        queries.Should().BeEmpty("a firm set of only Guid.Empty is an empty firm set");
+    }
+
+    [Fact(DisplayName = "095c A3 (uac-r2): the replaced-by-correction note never names a correcting submission with no firm; one of the caller's firm is named")]
+    public async Task External_ReplacementWithNoFirm_IsNotNamed()
+    {
+        SeedSuperseded();
+        _h.PriorSubmissions.Clear();
+        AddReplacement(NewSubmissionId, NewInvoiceId, InvoiceStatusCodes.InReview, "INV-1.2");
+        WithoutFirm(_h.PriorSubmissions.Single());
+
+        var (blank, text) = await ReadAsync(ExternalRoute, OldSubmissionId);
+
+        blank.GetProperty("outcomeReasonCode").GetString().Should().Be(ReplacedByCorrection, "the old submission still answers that it was replaced");
+        text.Should().NotContain("replacedBy").And.NotContain("INV-1.2").And.NotContain(NewSubmissionId.ToString());
+
+        _h.PriorSubmissions.Clear();
+        AddReplacement(NewSubmissionId, NewInvoiceId, InvoiceStatusCodes.InReview, "INV-1.2");
+        (await ReadAsync(ExternalRoute, OldSubmissionId)).Body.GetProperty("replacedBy").GetProperty("submissionId").GetGuid()
+            .Should().Be(NewSubmissionId, "control: the same replacement is named once it carries the caller's firm");
+    }
+
     [Fact]
     public async Task External_get_of_own_firms_submission_on_a_record_the_caller_cannot_read_is_404()
     {
