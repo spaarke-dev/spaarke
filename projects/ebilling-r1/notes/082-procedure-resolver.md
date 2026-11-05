@@ -535,3 +535,34 @@ Fixes follow the adversarial review of 082c-1 and ontology D-205. One commit per
 - **K4:** resolved by rule (c) above; nothing open with ontology.
 - **C20 census and the pair create test** belong to 082c-2.
 - **ForReaders and record rules (reported, not changed):** `ProcedureRulesOnDate.ForReaders()` builds `ProcedureReaderRule.PolicyCode` from `r.Version.PolicyCode`. For a record rule (`RecordRule is not null`) that is the `BRR-` code, which carries the record rule's policy id. The reader contract is uac-r2's; the decision on whether to blank or replace the code for record rules is theirs. The excluded-rule list is not affected (it carries the base rule's code).
+
+## 082c-1 scoped re-checks and fix round 2
+
+Two scoped re-checks of the round-1 fix range, then one fix round.
+
+- **Ontology: PASS on the fix range.** One point, binding (item 1 below): the C12 correction message said "cannot be applied", but the value IS saved and only the rules were not re-run.
+- **Our re-check: no F-class finding.** One F4 (item 1, the same message point) and four K items (K1, K2, K4 depth, below), all fixed here. K3 is recorded only.
+
+| Item | Fix |
+|---|---|
+| F4 (ontology, binding): the C12 409 `ebilling.correction.procedure_gap` told the reviewer the correction "cannot be applied" | `CorrectionCodes.ProcedureGapDetail` is now exactly: "Saved, but its billing terms were not re-checked because the new dates have no terms in force; the invoice stays on hold until terms are set up or the dates are corrected." Status 409 and the code are unchanged. The log line says the same ("saved ... its rules were not re-run; the correction stays unapplied and holds approval"), and the status is the same outcome: the value is written, the follow-through is not, so `ReadUnappliedAsync` still lists the correction and approval answers 409 `corrections_pending`. Test (end to end over the approval world): after the outcome the date is stored, the stored findings are unchanged, and `ApproveAs` is refused with `corrections_pending` and writes nothing |
+| K1: the adjustment options used `RulesOn(invoiceDate)` only, so a rule that judged the invoice subject through the rule (c) fallback could not be cited (a cited rule must be in the options) | `BillingFactLoader.RulesInForceOn` / `LoadRulesOnAsync` and the `InvoiceAdjustmentService.LoadRules` seam take the latest dated line's work date. The service reads it from the invoice's Fee and Expense lines' stored `sprk_eventdate` (a correction already writes that column; an Adjustment line is never counted). Legacy selection is unchanged. Tests: the fallback rule is in the options and citable; no dated line gives none; the latest of several dates is used and an Adjustment line's date is not |
+| K2: the fallback keyed on "absent from `Procedures`", so it also lifted a `ConflictingParents` (pin vs follow) gap on the invoice date | **One shared definition**, `ProcedureRulesOnDate.FallbackProcedureIds` (+ `RulesWithFallback`), used by the evaluator and by the adjustment options (the loader). It lifts a Procedure with a hole, an end, or one not yet applicable on the invoice date, and only when it is applied on the work date. `ConflictingParents` and the pin gaps (`PinnedVersionRetired`, `PinnedVersionNotInForce`) stand. Tests: a ConflictingParents gap on the invoice date is not lifted (must-fire, evaluator end to end with a Follow and a Pin of version 1); a theory over all five gap kinds; a not-yet-applicable Procedure is lifted; the holes and ends tests of round 1 still hold |
+| K4 depth (code was correct by trace) | Tests: with several Procedures only the one without an invoice-date version falls back (the other keeps the invoice date's version 2, not the line's version 1); a fallback date that is itself in a hole leaves the gap standing (both the line's and the invoice's); a refused capped higher version under Split leaves the lower cap firing |
+
+Test support: `ProcedureKit.Pin(name, versionNumber)` adds a Pin on the kit's Matter beside the Follow row.
+
+### Known limits (recorded, not changed)
+
+- **K3:** a line moved between two gap kinds of the same Procedure (for example a hole to an end) is refused by C12 although it is unjudged on both sides, because the per-subject triple includes the kind. Fixing it needs a stored gap to compare against (082d / 101). It is rare.
+- **K (ontology D-205, accepted):** a Follow-vs-Pin disagreement that exists only on the invoice date, while the parents agree on every work date, still holds the invoice (`ConflictingParents` is not lifted by the rule (c) fallback). The disagreement is real and will hold the next invoice too; a person resolves it with a distance-0 assignment or an Override.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Filtered unit (`ProcedureResolver\|BillingFactLoader\|InvoiceComplianceEvaluator\|BillingRule\|InvoiceAdjustment\|InvoiceCorrection\|InvoiceSubmissionProcessor\|InvoiceApproval\|BillingEvaluat\|CoreRecordChain`) | 1476/1476 |
+| Contract tests of the adjustment endpoints (compiled into the same project) | 58/58 |
+| ArchTests (`Billing\|CoreRecordChain\|Procedure\|ADR010\|FindingsJson\|Finance\|ExceptionMessage`) | 162/162 |
+| Seeding (old behaviour restored in the three production files, then put back, `cp` from backups) | 8 of 518 failed: the K1 must-fire and the latest-date test, the K2 must-fire and its three pin / conflict theory rows, the item 1 end-to-end test and the C12 text assertion |
