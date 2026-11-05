@@ -149,7 +149,7 @@ internal static class SupersededSubmissionNote
             }
             catch (Exception ex) when (IsFault(ex, ct))
             {
-                logger.LogWarning(ex, "The replacement of submission {SubmissionId} could not be read; replacedBy is null", view.SubmissionId);
+                logger.LogWarning("The replacement of submission {SubmissionId} could not be read ({ExceptionType}); replacedBy is null", view.SubmissionId, ex.GetType().Name);
             }
         }
 
@@ -162,7 +162,7 @@ internal static class SupersededSubmissionNote
             }
             catch (Exception ex) when (IsFault(ex, ct))
             {
-                logger.LogWarning(ex, "The caller's right to read {Count} replacing submission(s) could not be decided; replacedBy is null", replacements.Count);
+                logger.LogWarning("The caller's right to read {Count} replacing submission(s) could not be decided ({ExceptionType}); replacedBy is null", replacements.Count, ex.GetType().Name);
             }
         }
 
