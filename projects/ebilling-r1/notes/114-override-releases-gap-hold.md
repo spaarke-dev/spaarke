@@ -144,7 +144,11 @@ Branch `task/ebilling-114b` (base `d120d64735`, which includes 114 at `c4b8d43e8
 
 **Accepted known limit.** A set stored by a pre-fix attempt (dev rows in flight) is replayed verbatim on retry and still names the shared Signal. The opposite direction too (K3): if a hold appears between a first attempt that stored the set and its retry, the replay closes the shared Signal as Acted although the new hold stands. Approval still refuses, because holds are stored state, not Signals. The same race exists within one attempt, because 049 takes no decision lock. This follows the frozen-set rule (D-122 / 074 K-5).
 
-**Pending ontology confirmation (K4).** A Return still closes the shared Signal while a firm hold stands. This is unchanged by 114b.
+**Return is outside the D-201 filter (ontology ruling `d1117ffe1b`, 2026-11-05).** Returned to Firm is terminal, so no later decision could close a
+Signal left open. The Return's record resolves every open Signal on the invoice as Acted, the shared Signal included. The filter applies only to a
+decision after which the invoice stays In Review (today: Override). A Return blanks `sprk_reviewdetail` through `InvoiceLifecycleService` in the
+same request as the status (D-205). Known limit: on an empty-set Override replay, the extra open-Signal read for the rights check runs before it, so
+a fault there answers 503 before 403. The read discloses nothing.
 
 **095d-2 obligation.** Its re-run closes the left-open shared Signal as `ConditionCleared`, with the record id in the close facts, once every reason clears (`InvoiceOpenHolds` over every linked submission is empty). Not in this slice.
 
