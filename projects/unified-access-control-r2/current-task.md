@@ -4,21 +4,21 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-04 ~17:00 local (checkpoint #92: core-pair branch has the lineage fix + fix round; 2nd Opus pass running; fm 042c reworked under D-204; ebilling 089e approved + dev roles applied).
+> **Last Updated**: 2026-11-04 late (checkpoint #93: core-pair work merged as PR #2568 / 909754869f; master ready for the next dev deploy, waiting on the owner's go).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green: `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys and settings changes need the owner's go IN THIS SESSION. Peers take the owner's go for THEIR live writes in THEIR sessions. |
-| **Active work** | Core-pair branch `fix/uac-core-pair-update`, worktree **C:/wtcore**, NOT pushed. Commits on 0d4aa87ee0: f90529a016, 2b8667a691, ce2bed5f70, 2fd3c52e40, 3509be3712 (pair fixed after create on every BFF update path; 2 Opus passes + Sonnet re-check, no F), **9aa627d3d1** (secure-child lineage reads the Signal/DR core pair), **e4d7492040** (its fix round: D/B/P/N id forms, ordinary-move service-request match, held unknown/blank type + Warning, tests). 2nd Opus pass on 3509be3712..e4d7492040: **no F**; K1 (Decision Record witnesses read without the pair) being fixed; K2 (rename the changed ontology test) asked of ontology; K3 accepted (fail-safe). **23b1e5fb00** (K1 + ontology's D36 test split) and **5df0a80e1d** (output mapping, Update Record node/ActionSeam and FM push use `UpdateExistingRecordFieldsAsync`; ArchTest `UpdateRecordFieldsCallerGuardTests`; the chat tool already sent If-Match). Opus pass on e4d7492040..5df0a80e1d: F1/F3/K3/K5 fixed in **ab57129730** (I reviewed the diff: OK). Integration suites PASSED (BFF 199/0, SPE 353/0). Master merged in (10ab503a68; ArchTests 1921/0, overlapping unit tests 2234/0). **PR #2568 open; waiting on CI** (Router + Client lint), then merge per Mode and queue it for the dev deploy. K4 = existing #2090 (comment added). Ontology PASSED 23b1e5fb00. FM notified of the push change. Ontology reviewed both lineage commits: PASS. |
+| **Active work** | None in flight. **PR #2568 MERGED** (squash **909754869f**): the core pair is fixed after create on BFF update paths; secure-child lineage reads the pair (held unknown/blank type); generic update paths update existing records only (ArchTest `UpdateRecordFieldsCallerGuardTests`). 4 Opus passes plus re-checks, all F fixed; ontology PASSED; integration BFF 199/0, SPE 353/0; all CI green. C:/wtcore removed. Known limits: #2090 (optimistic mode), the unindexed lineage `sprk_corerecordid` walk. |
 | **Dev state** | BFF = **d763dc120e** since 2026-11-03 22:26:31Z (my gate PASSED: `$TEMP/uacmerge/uacg/gated763_30m.txt`, script `gated763.sh`). Rollback: `deploy/rollback/wwwroot-20261103T220358Z` or redeploy 5796774091. Dev SPA = b083d62183. |
-| **Next action** | 1. When the 2nd pass reports: fix any F (Opus implementer in C:/wtcore), scoped re-check. 2. Run the FULL integration suites (`tests/integration/Sprk.Bff.Api.IntegrationTests` + `Spe.Integration.Tests`) once machine load allows (CPU was 90%+). 3. Push, PR with NEUTRAL wording ("core record pair fixed after create on BFF update paths; secure-child lineage reads the core record pair"); nothing about scenarios. Merge per Mode. 4. Next dev deploy (owner go here) with the read-back below. |
+| **Next action** | 1. **Dev BFF deploy of current master** (it holds #2550, #2551, #2562, #2564, #2568) — WAITS for the owner's go IN THIS SESSION; then follow the "Each deploy" list and the core-pair read-back below. 2. Reviews owed (below). 3. Own backlog. |
 
 ## Private items (tracked privately only, owner choice; never in issues/PRs/commits)
-- Core pair fixed after create, plus the lineage follow-up: both on the branch above.
-- fm 042c: my approval was WITHDRAWN (F), and the item is in rework. The owner chose **option 1 (ontology D-204)** in fm's session: the generic create refuses sprk_signal / sprk_decisionrecord / sprk_budgetrevision as whole tables, for the caller and the system principal alike. fm fix round 4 is running; ontology and I get the diff before any merge.
-- **Update-path follow-up (mine, F, found by fm 2026-11-04; details by message only):** goes on the core-pair branch after the 2nd pass. Generic update paths (UpdateRecordActionCore, DataverseUpdateHandler, chat update) use the existing-only update (`If-Match: *`) and refuse an unknown id. Audit every `UpdateRecordFieldsAsync` caller for upsert reliance; tests on every path. fm 042c r4 (4b45ba3cc5) APPROVED by me; ontology's review pending.
+- Core pair fixed after create, the lineage follow-up and the update-path follow-up: all MERGED in #2568 (909754869f). The post-deploy read-back is still owed.
+- fm 042c: the owner chose **option 1 (ontology D-204)** in fm's session (the generic create refuses sprk_signal / sprk_decisionrecord / sprk_budgetrevision as whole tables). Rework r4 approved by me (see next line).
+- fm 042c r4 (4b45ba3cc5) APPROVED by me; not on master yet. FM was told to keep #2568's push change and guard when it rebases.
 - Owner question (K, not a regression): on the output-mapping person path, the refusal for an unknown id differs from the refusal for a row the person can't write. Making them uniform would change #2257's stable code. Owner decides.
 - Withdrawn or closed today: the finance-filter "veto" item (matches the record routes, N2 / round 77), evaluator cost (already uniform; 403 0x80048306 = unknown), #2563 (closed).
 
@@ -30,7 +30,7 @@
   - my 30-minute gate (copy `gated763.sh`);
   - record it in `docs/procedures/dev-bff-deploy-coordination.md`;
   - notices before and after to ontology, word-add-in and R4 (`spaarke-wt-spa-external-access-platform-ad`).
-- **Queued:** #2550 (R3 docs/tests), #2551 (fm 020), #2562 (fm 042b), #2564 (fm 031, auto-merge), the core-pair branch (once its PR merges). Later: fm 042c (D-204 rework), ebilling's master PR.
+- **Queued (all on master now):** #2550, #2551, #2562, #2564, #2568 (909754869f). Later: fm 042c (D-204 rework), ebilling's master PR.
 - **Core-pair read-back (ontology's request):** snapshot BEFORE and AFTER the deploy plus one reconcile.
   - (a) The 7 project-core Signals: principalobjectaccess. Expected: no change; they carry matching stamps.
   - (b) The 4 service-request-core Decision Records: ownerid, owningbusinessunit, principalobjectaccess. Name any owner change.
