@@ -330,6 +330,10 @@ public sealed class TrackingNumberAllocator : ITrackingNumberAllocator
         await _phases.GetAsync(_readPhase, force: false, ct).ConfigureAwait(false) == TrackingScopePhase.P2ScopeKeyActive;
 
     /// <inheritdoc />
+    public async Task<bool> ScopeColumnExistsAsync(CancellationToken ct = default) =>
+        await _phases.GetAsync(_readPhase, force: false, ct).ConfigureAwait(false) != TrackingScopePhase.P0NoScopeColumn;
+
+    /// <inheritdoc />
     /// <remarks>
     /// Task 095d-1a. The loop is <see cref="CreateSubmissionAsync"/>'s: re-read the highest sequence in the scope, write, and treat only the
     /// alternate-key duplicate as a lost race (Dataverse refuses the transaction whole, so a retry cannot double-write). It differs in three

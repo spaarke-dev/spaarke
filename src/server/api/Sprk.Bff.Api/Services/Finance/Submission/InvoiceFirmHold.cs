@@ -162,12 +162,26 @@ public static class InvoiceFirmHold
     public static bool IsHeld(Entity submission)
     {
         ArgumentNullException.ThrowIfNull(submission);
-        if (string.Equals(submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode), SubmissionReasonCodes.FirmMissing, StringComparison.Ordinal))
+        return IsHeld(
+            submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode),
+            submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson),
+            out _);
+    }
+
+    /// <summary>
+    /// True when a submission's stored reason code and findings carry the firm_missing hold (pure; see the remarks). <paramref name="unreadable"/>
+    /// is true only when the answer is "held" BECAUSE the stored findings could not be read (fail closed): nothing readable names the firm. The
+    /// answer is the same as <see cref="IsHeld(Entity)"/>'s, which is this method with the flag dropped.
+    /// </summary>
+    public static bool IsHeld(string? reasonCode, string? findingsJson, out bool unreadable)
+    {
+        unreadable = false;
+        if (string.Equals(reasonCode, SubmissionReasonCodes.FirmMissing, StringComparison.Ordinal))
         {
             return true;
         }
 
-        var json = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
+        var json = findingsJson;
         if (string.IsNullOrWhiteSpace(json))
         {
             return false;
@@ -179,6 +193,7 @@ public static class InvoiceFirmHold
         {
             if (JsonNode.Parse(json) is not JsonObject root)
             {
+                unreadable = true;
                 return true;
             }
 
@@ -190,6 +205,7 @@ public static class InvoiceFirmHold
         }
         catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException)
         {
+            unreadable = true;
             return true; // fail closed: what the stored findings hold cannot be known
         }
     }

@@ -130,7 +130,8 @@ public class AccessTableAppOnlyWriterTests
 
         // ebilling-r1 095c-4 review fix + task 095c-5 (uac-r2 2026-11-04): an invoice's firm and its own field-secured firm hold. Neither decides
         // access; both decide whether the invoice can be approved and exported, and both have typed writers only (the persister; 095d's assign-firm).
-        ["sprk_invoice"] = ["sprk_firmhold", "sprk_vendororg"],
+        // ebilling-r1 082c-2 fix round 1 (uac-r2 F4): + its review detail, derived from the open hold reasons; typed writers only.
+        ["sprk_invoice"] = ["sprk_firmhold", "sprk_vendororg", "sprk_reviewdetail"],
 
         // UAC review F4 / DEF-043: a Signal's frozen core record and its invoice and invoice-line subjects.
         // uac-r2 re-check F1: + its regarding pair, which names the subject a Duplicate is judged by.
@@ -1030,6 +1031,44 @@ public class AccessTableAppOnlyWriterTests
         Code(invoice, "sprk_firmholds").Should().BeNull("a neighbouring name");
         CallerCode(invoice, "sprk_firmhold").Should().BeNull("the caller's own privileges (and field security) decide");
         CallerCode(invoice, "sprk_vendororg").Should().BeNull("the caller's own privileges decide");
+    }
+
+    [Fact]
+    public async Task AnAppOnlyWriteOfTheInvoicesReviewDetail_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode()
+    {
+        // ebilling-r1 082c-2 fix round 1 (uac-r2 F4): the review detail is derived from the open hold reasons by its typed writers (ontology D-205).
+        // A generic write could show a label no hold backs, or leave one on a closed invoice, so it is refused per column.
+        const string invoice = Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity;
+        foreach (var key in new[] { Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column, " SPRK_ReviewDetail " })
+        {
+            Code(invoice, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                invoice, Row, new Dictionary<string, object?> { [key] = null },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    invoice, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        InheritedAccessPermission.RefuseAppOnlyWrite(invoice, ["sprk_reviewdetail"])!.Reason
+            .Should().Contain("decides no access").And.Contain("only its typed writers derive it").And.NotContain("who may see");
+
+        // Must not fire: the same name on other tables, a neighbouring name, and the caller's own write.
+        Code(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity, "sprk_reviewdetail").Should().BeNull("only the invoice carries the column");
+        Code("sprk_billingevent", "sprk_reviewdetail").Should().BeNull("a line carries no review detail");
+        Code(invoice, "sprk_reviewdetails").Should().BeNull("a neighbouring name");
+        CallerCode(invoice, "sprk_reviewdetail").Should().BeNull("the caller's own privileges decide");
     }
 
     [Theory]

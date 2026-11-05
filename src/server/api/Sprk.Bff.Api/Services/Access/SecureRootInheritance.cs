@@ -332,8 +332,10 @@ internal abstract record PairParentAnswer
     internal sealed record NotAFilingParent(string? Unrepeated) : PairParentAnswer;
 
     /// <summary>What the pair names cannot be told (an id that is not a record id, no type, a type naming no table, a type read that
-    /// faulted). Never "no parent": every caller fails closed.</summary>
-    internal sealed record Unknown(string Reason) : PairParentAnswer;
+    /// faulted). Never "no parent": every caller fails closed. <paramref name="Transient"/> (ebilling-r1 082c-2 fix round 1, K1; additive):
+    /// true only where the type READ faulted (the <c>faultedTypes</c> repeat and the read's catch), so a caller that can retry may tell an
+    /// outage from stored data that is wrong. It decides nothing here: an Unknown is an Unknown to every access decision, whatever the flag.</summary>
+    internal sealed record Unknown(string Reason, bool Transient = false) : PairParentAnswer;
 }
 
 /// <summary>
@@ -574,7 +576,7 @@ public sealed partial class SecureRootInheritance
             return new PairParentAnswer.Unknown($"it names a record in {PairIdColumn} without that record's type");
 
         if (faultedTypes is not null && faultedTypes.Contains(typeRef))
-            return new PairParentAnswer.Unknown("the type of the record it is filed under could not be read");
+            return new PairParentAnswer.Unknown("the type of the record it is filed under could not be read", Transient: true);
 
         try
         {
@@ -596,7 +598,7 @@ public sealed partial class SecureRootInheritance
         {
             logger.LogWarning(ex, "[SECURE-INHERIT] The regarding type {TypeRef} could not be read.", typeRef);
             faultedTypes?.Add(typeRef);
-            return new PairParentAnswer.Unknown("the type of the record it is filed under could not be read");
+            return new PairParentAnswer.Unknown("the type of the record it is filed under could not be read", Transient: true);
         }
     }
 

@@ -100,6 +100,10 @@ public sealed partial class InvoiceAssignFirmServiceTests
         public readonly List<IReadOnlyList<OrganizationRequest>> Transactions = [];
 
         public bool P2 = true;
+
+        /// <summary>095d pre-P2 safety: whether <c>sprk_trackingscope</c> exists (false is P0). A read that names it while it does not exist faults whole, as
+        /// Dataverse does (the test double models it in <see cref="Route"/>).</summary>
+        public bool ScopeColumnExists = true;
         public bool? ActiveFirm = true;
         public InvoiceFirmLink Link = InvoiceFirmLink.Linked;
         public DecisionCallerRefusal CloseRights = DecisionCallerRefusal.None;
@@ -138,6 +142,7 @@ public sealed partial class InvoiceAssignFirmServiceTests
                 .Returns(Task.CompletedTask);
 
             Allocator.Setup(a => a.NumbersSubmissionsWithoutFirmAsync(It.IsAny<CancellationToken>())).ReturnsAsync(() => P2);
+            Allocator.Setup(a => a.ScopeColumnExistsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(() => ScopeColumnExists);
             Allocator.Setup(a => a.RenumberSubmissionAsync(
                     It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(),
                     It.IsAny<Func<RenumberCandidate, RenumberApply>>(), It.IsAny<CancellationToken>()))
@@ -166,7 +171,13 @@ public sealed partial class InvoiceAssignFirmServiceTests
             (_, _, _, _) => { Calls.Add("rights"); return Task.FromResult(CloseRights); },
             (_, _) => { Calls.Add("filing"); return Task.FromResult(Filing); },
             Log,
-            new FixedTime(Now));
+            new FixedTime(Now))
+        {
+            ReviewDetailProbe = ReviewDetailProbe,
+        };
+
+        /// <summary>082c-2: whether the review detail column exists (fixed per test; never the process-wide probe).</summary>
+        public ReviewDetailColumnProbe ReviewDetailProbe = ReviewDetailColumnProbe.Fixed(present: true);
 
         /// <summary>095d-1c fix round 1: what the service logged (level, formatted text, structured parameters).</summary>
         public readonly CapturingLogger Log = new();
@@ -219,6 +230,12 @@ public sealed partial class InvoiceAssignFirmServiceTests
             }
 
             var columns = q.ColumnSet.Columns;
+            if (!ScopeColumnExists && q.EntityName == "sprk_invoicesubmission" && columns.Contains(TrackingNumberAllocator.ScopeColumn))
+            {
+                // Dataverse's answer to a query that names a column the environment does not have (0x80041103): the read faults whole.
+                throw new InvalidOperationException("'sprk_invoicesubmission' entity doesn't contain attribute with Name = 'sprk_trackingscope'.");
+            }
+
             IEnumerable<Entity> rows = q.EntityName switch
             {
                 "sprk_invoice" => Invoice is null ? [] : [Invoice],
@@ -307,6 +324,129 @@ public sealed partial class InvoiceAssignFirmServiceTests
         (JsonObject)JsonNode.Parse((string)apply.SubmissionFields![InvoiceSubmissionPersister.SubmissionFindingsJson])!;
 
     // ── The apply (16.4 condition 2; 16.7 "renumber everything") ──
+
+    // 082c-2 fix round 3 (ontology F1): the review detail after Set firm is derived from the holds that REMAIN, through InvoiceOpenHolds (the
+    // firm hold as approval reads it, united with the Procedure holds). The apply keeps every findings member and the stored outcome reason, so a
+    // firm_missing marker survives it and the detail stays "Waiting for the firm" until 095d-2's re-run clears the markers. The fixtures use the
+    // production shape (pipelineFindings[].reasonCode; a lineFindings[] rules.not_checked cause), not a member nothing reads.
+
+    private const string FirmMarkerPipeline = "{\"reasonCode\":\"" + SubmissionReasonCodes.FirmMissing + "\",\"values\":{}}";
+
+    private static string LineCause(string cause) =>
+        $$"""{"code":"{{InvoiceSubmissionPersister.LineFindingRulesNotChecked}}","{{InvoiceFirmHold.LineFindingCauseMember}}":"{{cause}}"}""";
+
+    private static string Findings(string? pipeline = null, string? lines = null) =>
+        $$"""{"trackingNumber":"INV-7.3","pipelineFindings":[{{pipeline}}],"{{InvoiceSubmissionPersister.LineFindingsMember}}":[{{lines}}],"keep":1}""";
+
+    /// <summary>A world whose firm markers are cleared from the stored submission (no outcome reason, no firm finding), the invoice's own
+    /// hold still set (so Set firm is allowed), and the findings as given.</summary>
+    private static World WithFirmMarkersCleared(string findingsJson)
+    {
+        var w = new World();
+        w.Submission.Attributes.Remove(InvoiceSubmissionPersister.SubmissionReasonCode);
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = findingsJson;
+        return w;
+    }
+
+    private static int? DetailOf(World w) =>
+        Update(w.Applied!, "sprk_invoice", InvoiceId).Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column)?.Value;
+
+    [Theory(DisplayName = "082c-2 fix round 3 (F1, must fire): Set firm with a firm_missing marker still stored keeps 'Waiting for the firm', and approval, over the state the apply leaves, still refuses on the firm hold")]
+    [InlineData("reason", true, false, false)]
+    [InlineData("pipeline", false, true, false)]
+    [InlineData("line", false, false, true)]
+    [InlineData("all", true, true, true)]
+    public async Task ReviewDetail_SetFirm_FirmMarkerStillStored_StaysWaitingForTheFirm_AndApprovalRefuses(string marker, bool reason, bool pipeline, bool line)
+    {
+        var w = WithFirmMarkersCleared(Findings(
+            pipeline: pipeline ? FirmMarkerPipeline : null,
+            lines: line ? LineCause(SubmissionReasonCodes.FirmMissing) : null));
+        if (reason)
+        {
+            w.Submission[InvoiceSubmissionPersister.SubmissionReasonCode] = SubmissionReasonCodes.FirmMissing;
+        }
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned, marker);
+
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForFirm).And.Be(659490002, marker);
+
+        // Approval over the stored state the apply leaves: the firm set, the invoice's own hold cleared, the stored findings the apply wrote and the
+        // outcome reason it did not touch. The real approval service, the real firm hold: refused as held for the firm.
+        var approval = new ApprovalWorld();
+        approval.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var left = approval.HoldForFirm(reasonOnly: false, findingsJson: (string)w.Applied!.SubmissionFields![InvoiceSubmissionPersister.SubmissionFindingsJson]);
+        approval.Rows[("sprk_invoicesubmission", left)]["sprk_outcomereasoncode"] = reason ? SubmissionReasonCodes.FirmMissing : null;
+        var result = await approval.ApproveAs(ApprovalWorld.AliceUser);
+        result.Outcome.Should().Be(ApprovalOutcome.Held, marker);
+        result.Code.Should().Be(InvoiceApprovalCodes.FirmMissing, marker);
+        approval.Writes.Should().Be(0, "a refused approve writes nothing");
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (F1, must fire): the firm comes before a Procedure gap that is also stored (D-205 priority)")]
+    public async Task ReviewDetail_SetFirm_FirmMarkerAndGapStored_IsWaitingForTheFirm()
+    {
+        var w = WithFirmMarkersCleared(Findings(pipeline: FirmMarkerPipeline, lines: LineCause(SubmissionReasonCodes.ProcedureGap)));
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForFirm);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (F1, must not fire): with the firm markers cleared and no other hold, Set firm blanks the review detail in the same invoice update")]
+    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_NoOtherHold_IsBlank()
+    {
+        var w = WithFirmMarkersCleared(Findings());
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        Update(w.Applied!, "sprk_invoice", InvoiceId).Target.Attributes.Should().ContainKey(InvoiceReviewDetail.Column).WhoseValue.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (F1, must not fire): with the firm markers cleared and a Procedure gap open, the detail is 'Waiting for billing terms', not blank")]
+    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_GapStillOpen_IsWaitingForBillingTerms()
+    {
+        var w = WithFirmMarkersCleared(Findings(lines: LineCause(SubmissionReasonCodes.ProcedureGap)));
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForBillingTerms);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (F1, must not fire): with the firm markers cleared and the terms unresolved, the detail is 'Billing terms could not be checked'")]
+    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_Unresolved_IsBillingTermsNotChecked()
+    {
+        var w = WithFirmMarkersCleared(Findings(pipeline: "{\"reasonCode\":\"" + SubmissionReasonCodes.ProceduresUnresolved + "\",\"values\":{}}"));
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        DetailOf(w).Should().Be(InvoiceReviewDetail.BillingTermsNotChecked);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (F1): a Procedure hold stored on another submission linked to the invoice is read too, as approval reads it")]
+    public async Task ReviewDetail_SetFirm_AnotherLinkedSubmissionHoldsAGap_IsWaitingForBillingTerms()
+    {
+        var w = WithFirmMarkersCleared(Findings());
+        w.Submissions.Add(new Entity(TrackingNumberAllocator.SubmissionEntity, Guid.Parse("095d1b00-0000-4000-8000-000000000002"))
+        {
+            ["versionnumber"] = 3L,
+            [InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference(InvoiceReviewReadService.InvoiceEntity, InvoiceId),
+            [InvoiceSubmissionPersister.SubmissionReasonCode] = SubmissionReasonCodes.ProcedureGap,
+        });
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForBillingTerms);
+    }
+
+    [Fact(DisplayName = "082c-2 (mismatch): where the column does not exist yet, Set firm still applies and leaves the column out")]
+    public async Task ReviewDetail_SetFirm_ColumnMissing_LeavesItOut()
+    {
+        var w = new World { ReviewDetailProbe = ReviewDetailColumnProbe.Fixed(present: false) };
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        Update(w.Applied!, "sprk_invoice", InvoiceId).Target.Attributes.Should().NotContainKey(InvoiceReviewDetail.Column);
+    }
 
     [Fact(DisplayName = "095d-1b: a linked firm on a held no-firm invoice is assigned in ONE apply - the firm and the new number everywhere, the hold cleared, the decision stored")]
     public async Task Assigned_TheOneApply_CarriesTheFirmTheNumberTheHoldClearAndTheStoredDecision()
@@ -473,9 +613,9 @@ public sealed partial class InvoiceAssignFirmServiceTests
 
     // ── The real allocator: what the one transaction sends ──
 
-    private static TrackingNumberAllocator RealAllocator(World w) => new(
+    private static TrackingNumberAllocator RealAllocator(World w, TrackingScopePhase phase = TrackingScopePhase.P2ScopeKeyActive) => new(
         w.Entities.Object,
-        _ => Task.FromResult<TrackingScopePhase?>(TrackingScopePhase.P2ScopeKeyActive),
+        _ => Task.FromResult<TrackingScopePhase?>(phase),
         new TrackingScopePhaseCache(TimeProvider.System),
         NullLogger<TrackingNumberAllocator>.Instance);
 
@@ -714,6 +854,82 @@ public sealed partial class InvoiceAssignFirmServiceTests
         var result = await w.Assign();
         (result.Status, result.Code).Should().Be((503, TrackingNumberReasons.ScopeKeyInactive));
         w.ShouldHaveWrittenNothing();
+    }
+
+    // -- Pre-P2 safety (uac-r2): the scope column is read only once it exists --
+
+    /// <summary>The ColumnSet of every submission read the service issued.</summary>
+    private static List<string[]> SubmissionReadColumns(World w) =>
+        w.Entities.Invocations
+            .Where(i => i.Method.Name == nameof(IGenericEntityService.RetrieveMultipleAsync)
+                && i.Arguments[0] is QueryExpression { EntityName: "sprk_invoicesubmission" })
+            .Select(i => ((QueryExpression)i.Arguments[0]).ColumnSet.Columns.ToArray())
+            .ToList();
+
+    /// <summary>The ColumnSet of the service's state read of the submission (the one that carries the row version).</summary>
+    private static List<string[]> StateReadColumns(World w) => SubmissionReadColumns(w).Where(c => c.Contains("versionnumber")).ToList();
+
+    [Fact(DisplayName = "095d P0 (must fire): the submission read does NOT select sprk_trackingscope, and Set firm reaches its own 503 scope_key_inactive, not 503 unavailable")]
+    public async Task P0_TheScopeColumnIsNotSelected_AndSetFirmProceedsToItsNormalRefusal()
+    {
+        var w = new World { P2 = false, ScopeColumnExists = false };
+
+        var result = await w.Assign();
+
+        (result.Status, result.Code).Should().Be((503, TrackingNumberReasons.ScopeKeyInactive),
+            "the read succeeded and the P2 check refused; an unavailable code would be the read faulting on the missing column");
+        var reads = SubmissionReadColumns(w);
+        reads.Should().NotBeEmpty("the submission was read");
+        reads.Should().AllSatisfy(columns => columns.Should().NotContain(TrackingNumberAllocator.ScopeColumn));
+        w.ShouldHaveWrittenNothing();
+    }
+
+    [Theory(DisplayName = "095d P1 and P2 (positive control): the submission read still selects sprk_trackingscope")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task P1AndP2_TheScopeColumnIsStillSelected(bool p2)
+    {
+        var w = new World { P2 = p2, ScopeColumnExists = true };
+
+        var result = await w.Assign();
+
+        StateReadColumns(w).Should().ContainSingle("the state is read once").Which.Should().Contain(TrackingNumberAllocator.ScopeColumn);
+        if (p2)
+        {
+            result.Outcome.Should().Be(AssignFirmOutcome.Assigned);
+        }
+        else
+        {
+            (result.Status, result.Code).Should().Be((503, TrackingNumberReasons.ScopeKeyInactive), "P1: the column exists, the scope key is not Active yet");
+        }
+    }
+
+    [Theory(DisplayName = "095d P0 and P1 (REAL allocator phase source): the scope column is selected exactly when the allocator's phase has it, and before P2 the answer is scope_key_inactive")]
+    [InlineData(TrackingScopePhase.P0NoScopeColumn, false)]
+    [InlineData(TrackingScopePhase.P1ScopeColumn, true)]
+    public async Task RealAllocatorPhase_DecidesTheSelect(TrackingScopePhase phase, bool selected)
+    {
+        var w = new World { P2 = false, ScopeColumnExists = selected };
+
+        var result = await w.Assign(allocator: RealAllocator(w, phase));
+
+        (result.Status, result.Code).Should().Be((503, TrackingNumberReasons.ScopeKeyInactive));
+        StateReadColumns(w).Should().ContainSingle("the state is read once").Which.Contains(TrackingNumberAllocator.ScopeColumn).Should().Be(selected);
+        w.ShouldHaveWrittenNothing();
+    }
+
+    [Fact(DisplayName = "095d P0 (must fire): an unreadable phase reads as the cached one (P0), so the column is not selected and nothing faults")]
+    public async Task UnreadablePhase_ReadsAsP0_AndDoesNotSelectTheColumn()
+    {
+        var w = new World { P2 = false, ScopeColumnExists = false };
+        var allocator = new TrackingNumberAllocator(
+            w.Entities.Object, _ => Task.FromResult<TrackingScopePhase?>(null), new TrackingScopePhaseCache(TimeProvider.System),
+            NullLogger<TrackingNumberAllocator>.Instance);
+
+        var result = await w.Assign(allocator: allocator);
+
+        (result.Status, result.Code).Should().Be((503, TrackingNumberReasons.ScopeKeyInactive));
+        SubmissionReadColumns(w).Should().NotBeEmpty().And.AllSatisfy(columns => columns.Should().NotContain(TrackingNumberAllocator.ScopeColumn));
     }
 
     [Theory(DisplayName = "095d-1b refusal: the Signal-close rights refused are 403 and unavailable 503 (must fire)")]

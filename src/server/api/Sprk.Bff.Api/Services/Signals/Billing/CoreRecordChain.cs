@@ -123,7 +123,7 @@ public static class CoreRecordChain
                     break; // no pair, a repeat, or a type that is not a matter or project: no parent and no fault
                 case PairParentAnswer.Unknown unknown:
                     throw new CoreRecordChainUnreadableException(
-                        $"What the invoice's core record {table} {core.Id} is filed under cannot be told: {unknown.Reason}.");
+                        $"What the invoice's core record {table} {core.Id} is filed under cannot be told: {unknown.Reason}.", unknown.Transient);
                 default:
                     // The answer type is a closed set of four (a private base constructor stops other assemblies; a record's protected copy
                     // constructor still lets code in this one derive). A fifth must be decided here on purpose, never dropped as "no parent",
@@ -235,7 +235,7 @@ public static class CoreRecordChain
             {
                 throw new CoreRecordChainUnreadableException(
                     $"More than {maxChildren} core records may be filed under {parentTable} {parentId}; the records under it are not read in part.",
-                    candidates.Count);
+                    candidateCount: candidates.Count);
             }
 
             if (!page.MoreRecords)
@@ -274,8 +274,15 @@ public static class CoreRecordChain
 /// The core-record chain could not be read in full (<see cref="CoreRecordChain"/>): the core record was not found, or what it is filed
 /// under cannot be told. The evaluation faults and the job retries; nothing is judged on a shortened chain.
 /// </summary>
-public sealed class CoreRecordChainUnreadableException(string message, int? candidateCount = null) : InvalidOperationException(message)
+/// <param name="message">For operators only: it names the core record. Never shown to a reader.</param>
+/// <param name="transient">ebilling-r1 082c-2 fix round 1 (K1): the chain could not be read because a read FAULTED (an outage), not because the
+/// stored data is wrong, so a retry may help. False for every other cause (the core record is missing, a pair that names nothing readable).</param>
+/// <param name="candidateCount">Set only by the children read's bound (see <see cref="CandidateCount"/>).</param>
+public sealed class CoreRecordChainUnreadableException(string message, bool transient = false, int? candidateCount = null) : InvalidOperationException(message)
 {
+    /// <summary>True when only a failed read stopped the chain (a retry may help); false when the data is what cannot be read.</summary>
+    public bool Transient { get; } = transient;
+
     /// <summary>
     /// Set only when <see cref="CoreRecordChain.ReadChildrenAsync"/> stopped at its bound: the candidate children it had counted when it
     /// stopped (more than the bound; the true number may be larger, because the read does not go on). Null for every other fault.

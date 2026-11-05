@@ -39,6 +39,8 @@ public class BillingSystemPolicyTests
         BillingReasonCodes.CodingNoCodeSet,
         BillingReasonCodes.CodingUnavailable,
         BillingReasonCodes.SubmissionFirmMissing,
+        BillingReasonCodes.SubmissionProcedureGap,
+        BillingReasonCodes.SubmissionProceduresUnresolved,
     ];
 
     private static PolicyVersionValidator Validator() =>
@@ -238,6 +240,8 @@ public class BillingSystemPolicyTests
         BillingReasonCodes.CodingNoCodeSet => BillingSystemFindings.NoCodeSet(System),
         BillingReasonCodes.CodingUnavailable => BillingSystemFindings.CodingUnavailable(System),
         BillingReasonCodes.SubmissionFirmMissing => BillingSystemFindings.FirmMissing(System),
+        BillingReasonCodes.SubmissionProcedureGap => BillingSystemFindings.ProcedureGap(System, "Outside counsel guidelines", new DateOnly(2026, 6, 1), ProcedureGapKind.AfterLastVersion),
+        BillingReasonCodes.SubmissionProceduresUnresolved => BillingSystemFindings.ProceduresUnresolved(System, Sprk.Bff.Api.Services.Finance.Submission.SubmissionReasonCodes.CauseRowsInconsistent),
         _ => throw new ArgumentOutOfRangeException(nameof(reason)),
     };
 
@@ -363,6 +367,47 @@ public class BillingSystemPolicyTests
         mapping.ReasonCodes.Should().BeEquivalentTo(
             [BillingReasonCodes.CodingNoCodeSet, BillingReasonCodes.SubmissionInvoiceNumberMismatch, BillingReasonCodes.SubmissionFirmMissing],
             "the other notes are still merged reasons");
+    }
+
+    [Fact(DisplayName = "082c-2 C11 (ontology D-205 item 6): a gap plus firm_missing make ONE SubmissionIntegrity Signal; clearing the gap alone keeps it open with the title recomputed, clearing the firm retitles it")]
+    public void MapAll_GapAndFirmMissing_OneSignal_ClearingEitherRecomputesTheTitle()
+    {
+        var gap = BillingSystemFindings.ProcedureGap(System, "Outside counsel guidelines", new DateOnly(2026, 6, 1), ProcedureGapKind.HoleBetweenVersions);
+        var firm = BillingSystemFindings.FirmMissing(System);
+        var rules = new Dictionary<Guid, BillingRuleCandidate> { [VersionId] = SystemRule() };
+
+        var both = BillingFindingSignalMapper.MapAll([gap, firm], rules, Subjects()).Should().ContainSingle("one Signal per (policy, invoice)").Subject;
+        var gapCleared = BillingFindingSignalMapper.MapAll([firm], rules, Subjects()).Should().ContainSingle().Subject;
+        var firmCleared = BillingFindingSignalMapper.MapAll([gap], rules, Subjects()).Should().ContainSingle().Subject;
+
+        both.ReasonCodes.Should().BeEquivalentTo([BillingReasonCodes.SubmissionProcedureGap, BillingReasonCodes.SubmissionFirmMissing]);
+        both.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.FirmMissingHeadline, "the firm first: without it no Procedure can resolve");
+
+        // Clearing the gap: the same Signal (same policy and subject), still open, its reasons and fingerprint recomputed.
+        gapCleared.Request.SubjectId.Should().Be(both.Request.SubjectId);
+        gapCleared.Request.PolicyCode.Should().Be(both.Request.PolicyCode);
+        gapCleared.ReasonCodes.Should().Equal(BillingReasonCodes.SubmissionFirmMissing);
+        gapCleared.Fingerprint.Should().NotBe(both.Fingerprint, "the group is re-mapped, so the writer updates the open Signal");
+        gapCleared.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.FirmMissingHeadline);
+
+        // Clearing the firm: the title becomes the gap's.
+        firmCleared.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.ProcedureGapHeadline).And.Be("No billing terms in force for some work dates");
+        SignalWriter.RenderSentence(firmCleared.Request.MessageTemplate, firmCleared.Request.FactValues)
+            .Should().Contain("Outside counsel guidelines").And.Contain("2026-06-01").And.Contain("no version in force between versions");
+    }
+
+    [Fact(DisplayName = "082c-2: the note order is firm, unresolved, gap, then the invoice-number mismatch")]
+    public void MapAll_ProcedureHolds_RankAfterTheFirmAndBeforeTheMismatch()
+    {
+        var rules = new Dictionary<Guid, BillingRuleCandidate> { [VersionId] = SystemRule() };
+        var gap = BillingSystemFindings.ProcedureGap(System, "P", new DateOnly(2026, 6, 1), ProcedureGapKind.AfterLastVersion);
+        var unresolved = BillingSystemFindings.ProceduresUnresolved(System, Sprk.Bff.Api.Services.Finance.Submission.SubmissionReasonCodes.CauseChainUnreadable);
+        var mismatch = BillingSystemFindings.InvoiceNumberMismatch(System, "INV-100", "INV-1OO", 0.91m);
+
+        BillingFindingSignalMapper.MapAll([mismatch, gap, unresolved], rules, Subjects()).Single().Request.ShortHeadline
+            .Should().Be(BillingRuleCatalogue.ProceduresUnresolvedHeadline);
+        BillingFindingSignalMapper.MapAll([mismatch, gap], rules, Subjects()).Single().Request.ShortHeadline
+            .Should().Be(BillingRuleCatalogue.ProcedureGapHeadline);
     }
 
     [Fact(DisplayName = "D-125 review (a), must-not-fire: two coding notes keep the code order")]

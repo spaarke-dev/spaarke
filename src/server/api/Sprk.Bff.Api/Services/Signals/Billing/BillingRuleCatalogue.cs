@@ -255,7 +255,9 @@ public static class BillingRuleCatalogue
         // D-125: the values the four system reasons compare, as 049 reads them (BillingSystemFindings builds exactly these).
         RuleType.SubmissionIntegrity => Fields(
             "submission.invoiceNumber", "invoice.invoiceNumber", "line.codeKind", "line.refusedCode", "line.firmCode", "line.suggestedCode",
-            "codeSet.name"),
+            "codeSet.name",
+            // ebilling-r1 082c-2: the Procedure gap and the unresolved hold (BillingSystemFindings.ProcedureGap / ProceduresUnresolved).
+            "procedure.name", "procedure.workDate", "procedure.gapKind", "procedure.cause"),
         // Task 115: AddedFee's cap form only (the other two allowances are refused before evaluation); feeTotal / feeLimit are amounts.
         // AddedFee's finding is invoice level (ontology-r1 115 review F3-6), so it has no line token; rule.feeKind is the kind's label.
         RuleType.AddedFee => Fields("feeTotal", "feeLimit", "rule.feeKind"),
@@ -320,6 +322,8 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CodingNoCodeSet => NoCodeSetTemplate,
         BillingReasonCodes.CodingUnavailable => CodingUnavailableTemplate,
         BillingReasonCodes.SubmissionFirmMissing => FirmMissingTemplate,
+        BillingReasonCodes.SubmissionProcedureGap => ProcedureGapTemplate,
+        BillingReasonCodes.SubmissionProceduresUnresolved => ProceduresUnresolvedTemplate,
         BillingEvaluationReasons.CurrencyMissing => RatesNotCheckedPrefix + "missing.",
         BillingEvaluationReasons.CurrencyUnreliable => RatesNotCheckedPrefix + "unclear.",
         BillingEvaluationReasons.CurrencyNotUsd => RatesNotCheckedPrefix + "not USD.",
@@ -403,6 +407,22 @@ public static class BillingRuleCatalogue
     public const string FirmMissingTemplate =
         "This invoice was submitted without a firm, so its billing rules were not checked. A reviewer must add the firm before it can be approved.";
 
+    /// <summary>The message of <see cref="BillingReasonCodes.SubmissionProcedureGap"/> (ebilling-r1 082c-2, brief C11). Internal reviewers only
+    /// (C18: the external view never carries it); the gap kind is a closed text (<see cref="BillingSystemFindings.GapKindText"/>).</summary>
+    public const string ProcedureGapTemplate =
+        "No billing terms of the procedure {{procedure.name}} are in force on {{procedure.workDate}} ({{procedure.gapKind}}), so its billing rules were not checked on the work dated then. The invoice is on hold until the terms are set up or the dates are corrected.";
+
+    /// <summary>The message of <see cref="BillingReasonCodes.SubmissionProceduresUnresolved"/> (ebilling-r1 082c-2, brief C14, C15). The cause is
+    /// a closed text (<see cref="BillingSystemFindings.CauseText"/>); never an exception message.</summary>
+    public const string ProceduresUnresolvedTemplate =
+        "The billing terms of this invoice could not be checked ({{procedure.cause}}), so no billing rule was checked. The invoice is on hold for review.";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.SubmissionProcedureGap"/>'s Signal (brief 082c C11). A gap means a Procedure IS associated but no version is in force on some work date (ontology F2, 2026-11-05: the first wording said no procedure was associated), so the title says that, as <see cref="ProcedureGapTemplate"/> and the review detail "Waiting for billing terms" do.</summary>
+    public const string ProcedureGapHeadline = "No billing terms in force for some work dates";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.SubmissionProceduresUnresolved"/>'s Signal.</summary>
+    public const string ProceduresUnresolvedHeadline = "Billing terms could not be checked";
+
     /// <summary>The title of <see cref="BillingReasonCodes.SubmissionInvoiceNumberMismatch"/>'s Signal.</summary>
     public const string InvoiceNumberMismatchHeadline = "Invoice number differs from the submission";
 
@@ -469,6 +489,8 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CodingNoCodeSet => NoCodeSetHeadline,
         BillingReasonCodes.CodingUnavailable => CodingUnavailableHeadline,
         BillingReasonCodes.SubmissionFirmMissing => FirmMissingHeadline,
+        BillingReasonCodes.SubmissionProcedureGap => ProcedureGapHeadline,
+        BillingReasonCodes.SubmissionProceduresUnresolved => ProceduresUnresolvedHeadline,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd
             => RatesNotCheckedHeadline,
         BillingReasonCodes.DiscountNotCheckedNoRackRate => DiscountNotCheckedHeadline,
@@ -492,7 +514,8 @@ public static class BillingRuleCatalogue
             or BillingReasonCodes.CodingRefusedCodeNotShown or BillingReasonCodes.CodingCodeKindNotForLine
             or BillingReasonCodes.CodingFirmCodeMismatch or BillingReasonCodes.CodingCodeSetNeedsReview
             or BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown or BillingReasonCodes.CodingFirmCodeMismatchNotShown
-            or BillingReasonCodes.CodingNoCodeSet or BillingReasonCodes.CodingUnavailable or BillingReasonCodes.SubmissionFirmMissing => true,
+            or BillingReasonCodes.CodingNoCodeSet or BillingReasonCodes.CodingUnavailable or BillingReasonCodes.SubmissionFirmMissing
+            or BillingReasonCodes.SubmissionProcedureGap or BillingReasonCodes.SubmissionProceduresUnresolved => true,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd => true,
         // Task 115: "not checked" is a fact about the invoice's data, not a breach (as D-115).
         BillingReasonCodes.DiscountNotCheckedNoRackRate or BillingReasonCodes.AddedFeeNotChecked => true,

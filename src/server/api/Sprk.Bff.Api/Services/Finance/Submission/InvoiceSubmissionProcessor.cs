@@ -80,6 +80,7 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
     public async Task<SubmissionEvaluationOutcome> EvaluateAsync(
         Entity submission,
         Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>> loadDocument,
+        bool finalDelivery,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(submission);
@@ -198,27 +199,54 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             ReplacedInvoiceId = await ReplacedInvoiceAsync(snapshot, ct).ConfigureAwait(false),
             SubmittedFirmInvoiceNumber = snapshot.FirmInvoiceNumber,
         };
-        var evaluation = await _evaluate(request, ct).ConfigureAwait(false);
-
-        // 082c-1 interim: replaced by the gap hold in 082c-2.
-        // An invoice is never judged on a partial set of its rules (brief 082c section 5, item 1). Two cases end here, and both THROW, so the job
-        // retries and the submission ends Failed on the final delivery; neither is ever a pass, and nothing is persisted:
-        //  - the resolver faulted: ProcedureResolutionFaultException or CoreRecordChainUnreadableException from _evaluate above is NOT caught
-        //    here (nor anywhere on this path) and propagates as it is;
-        //  - the evaluation found a Procedure gap: a Procedure applies on a subject date with no version, so its rules judged nothing there.
-        if (evaluation.Gaps.Count > 0)
+        BillingEvaluationResult evaluation;
+        try
         {
-            throw new ProcedureGapNotYetHeldException(evaluation.Gaps.Count);
+            evaluation = await _evaluate(request, ct).ConfigureAwait(false);
         }
+        catch (Exception ex) when (finalDelivery && UnresolvedCauseOf(ex) is { } cause)
+        {
+            // 082c-2 (brief C14, ontology-r1 ruling; O2): the Procedures could not be resolved and this is the job's LAST delivery, so the
+            // invoice is held, never judged on a partial set (not on [W0] alone) and never passed. No rule finding at all (no evaluation, no
+            // decision); every line is rules.not_checked with this code as its cause (the persister). Any earlier delivery does not reach
+            // here: the filter is false, the fault propagates as it is, the job retries, and nothing is persisted. The log names the type
+            // only (C16: never ex.Message, which names row ids).
+            _logger.LogWarning("Invoice submission {SubmissionId}: the Procedures could not be resolved on the final delivery ({FaultType}, {Cause}); held",
+                snapshot.SubmissionId, ex.GetType().Name, cause);
+            var unresolved = new SubmissionPipelineFinding(
+                SubmissionReasonCodes.ProceduresUnresolved,
+                new Dictionary<string, string?> { [SubmissionReasonCodes.ProcedureCauseValue] = cause });
+            var (heldKind, heldReason) = HoldFor(snapshot.Channel, SubmissionReasonCodes.ProceduresUnresolved, coded: coding is not null);
+            return Log(new SubmissionEvaluationOutcome
+            {
+                Kind = heldKind,
+                SubmissionId = snapshot.SubmissionId,
+                ReasonCode = heldReason,
+                Submission = snapshot,
+                Read = read,
+                InvoiceNumber = numberCheck,
+                PipelineFindings = [.. pipelineFindings, unresolved],
+                Resolution = resolution,
+                Coding = coding,
+                EvaluationRequest = request,
+            });
+        }
+
+        // 082c-2 (brief C11, C13): one pipeline finding per gapped Procedure (its name, first gapped date and kind; never an id). They hold the
+        // invoice (Classify below) and never reach 073: a gap is not a rule finding.
+        pipelineFindings = [.. pipelineFindings, .. ProcedureGapFindings(evaluation)];
+        var gapped = evaluation.Gaps.Count > 0;
 
         // Step 5: decide (073). The only source of a rejection.
         var decision = await _decider.DecideAsync(evaluation, ct).ConfigureAwait(false);
 
-        var (kind, reasonCode) = Classify(decision, snapshot.Channel);
+        var (kind, reasonCode) = Classify(decision, snapshot.Channel, gapped);
         if (kind == SubmissionEvaluationKind.Accepted && codingHold is not null)
         {
-            // D-130 (b): accepted but uncoded; the reason code carries the coding code.
-            (kind, reasonCode) = (SubmissionEvaluationKind.AcceptedUncoded, codingHold);
+            // D-130 (b): accepted but uncoded; the reason code carries the coding code. 082c-2: the gap reason wins over a coding code (it is
+            // the hold that decides approval); the coding hold stays a pipeline finding beside it.
+            kind = SubmissionEvaluationKind.AcceptedUncoded;
+            reasonCode = gapped ? reasonCode : codingHold;
         }
 
         return Log(new SubmissionEvaluationOutcome
@@ -242,9 +270,16 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
     private static SubmissionPipelineFinding CodingHoldFinding(string holdCode, string cause) =>
         new(holdCode, new Dictionary<string, string?> { ["cause"] = cause });
 
-    /// <summary>Step 5a (notes 049 section 2): Accepted; Rejected on SPA is an automatic rejection; Rejected on Internal is blocked.</summary>
-    internal static (SubmissionEvaluationKind Kind, string? ReasonCode) Classify(SubmissionDecision decision, InvoiceSubmissionChannel channel)
+    /// <summary>Step 5a (notes 049 section 2): Accepted; Rejected on SPA is an automatic rejection; Rejected on Internal is blocked.
+    /// 082c-2 (brief C11): with a Procedure gap, Internal is Blocked and SPA is Accepted with <see cref="SubmissionReasonCodes.ProcedureGap"/>,
+    /// whatever 073 decided: never AutoRejected, even over a 073 rejection (the gap reason wins).</summary>
+    internal static (SubmissionEvaluationKind Kind, string? ReasonCode) Classify(SubmissionDecision decision, InvoiceSubmissionChannel channel, bool procedureGap)
     {
+        if (procedureGap)
+        {
+            return HoldFor(channel, SubmissionReasonCodes.ProcedureGap, coded: true);
+        }
+
         if (decision.Outcome != SubmissionOutcome.Rejected)
         {
             return (SubmissionEvaluationKind.Accepted, null);
@@ -261,6 +296,53 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             ? (SubmissionEvaluationKind.AutoRejected, deciding[0].Finding.ReasonCode)
             : (SubmissionEvaluationKind.Blocked, SubmissionReasonCodes.Blocked);
     }
+
+    /// <summary>082c-2: a Procedure hold (<paramref name="holdCode"/>: the gap or the unresolved hold). Internal is Blocked (the FR-20 hold);
+    /// SPA is Accepted, or AcceptedUncoded when the lines were not coded, with the hold as its reason. Never a rejection.</summary>
+    internal static (SubmissionEvaluationKind Kind, string? ReasonCode) HoldFor(InvoiceSubmissionChannel channel, string holdCode, bool coded) =>
+        channel == InvoiceSubmissionChannel.Spa
+            ? (coded ? SubmissionEvaluationKind.Accepted : SubmissionEvaluationKind.AcceptedUncoded, holdCode)
+            : (SubmissionEvaluationKind.Blocked, SubmissionReasonCodes.Blocked);
+
+    /// <summary>
+    /// 082c-2 (brief C14, C15): the cause of a Procedure resolution fault, or null for any other exception (which keeps today's path: it
+    /// propagates, and on the final delivery the job marks the submission Failed; never a pass).
+    /// </summary>
+    internal static string? UnresolvedCauseOf(Exception ex) => ex switch
+    {
+        // K1 (fix round 1): a chain a failed READ could not complete is an outage, not stored data that is wrong, so it reads as the cause whose
+        // text says it may clear (a retry will not help applies to chain_unreadable only).
+        CoreRecordChainUnreadableException { Transient: true } => SubmissionReasonCodes.CauseRowsInconsistent,
+        CoreRecordChainUnreadableException => SubmissionReasonCodes.CauseChainUnreadable,
+        ProcedureResolutionFaultException => SubmissionReasonCodes.CauseRowsInconsistent,
+        _ => null,
+    };
+
+    /// <summary>
+    /// 082c-2 (brief C11, C13): one <see cref="SubmissionReasonCodes.ProcedureGap"/> pipeline finding per gapped Procedure: its name, its first
+    /// gapped date and that date's kind. Ordered by date, then name, so the stored copy is stable. Names no id (C16). The kind is checked against
+    /// the closed map here, so an unmapped kind fails the evaluation rather than reaching a reader.
+    /// </summary>
+    internal static IReadOnlyList<SubmissionPipelineFinding> ProcedureGapFindings(BillingEvaluationResult evaluation) =>
+        evaluation.Gaps
+            .GroupBy(g => g.Gap.ProcedureId)
+            .Select(group => group.Select(g => g.Gap).OrderBy(g => g.WorkDate).ThenBy(g => g.Kind).First())
+            .OrderBy(g => g.WorkDate).ThenBy(g => g.ProcedureName, StringComparer.Ordinal)
+            .Select(g =>
+            {
+                _ = BillingSystemFindings.GapKindText(g.Kind);
+
+                // K4 condition (c): what is written into the stored findings comes through the reader projection (ProcedureGap.ForReaders, the
+                // one mapping behind ProcedureRulesOnDate.ForReaders), never from the internal record's own members.
+                var reader = g.ForReaders();
+                return new SubmissionPipelineFinding(SubmissionReasonCodes.ProcedureGap, new Dictionary<string, string?>
+                {
+                    [SubmissionReasonCodes.ProcedureNameValue] = reader.ProcedureName,
+                    [SubmissionReasonCodes.ProcedureWorkDateValue] = reader.WorkDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    [SubmissionReasonCodes.ProcedureGapKindValue] = reader.Kind,
+                });
+            })
+            .ToList();
 
     // ── 043 → 046 ──
 
@@ -492,15 +574,4 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             outcome.PipelineFindings.Count);
         return outcome;
     }
-}
-
-/// <summary>
-/// 082c-1 interim: replaced by the gap hold in 082c-2. The evaluation found a Procedure gap, which 082c-1 cannot yet hold, so the processor refuses
-/// to judge the invoice: the job retries and the submission ends Failed on the final delivery, never Accepted. The message names a count only (no
-/// Procedure, record or id): the job logs the type name, never <c>ex.Message</c>, and no reader sees it.
-/// </summary>
-internal sealed class ProcedureGapNotYetHeldException(int gaps)
-    : InvalidOperationException($"The evaluation found {gaps} Procedure gap(s); 082c-1 does not judge such an invoice (the gap hold is 082c-2).")
-{
-    public int Gaps { get; } = gaps;
 }

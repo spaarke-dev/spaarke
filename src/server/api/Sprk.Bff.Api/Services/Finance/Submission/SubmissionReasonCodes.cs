@@ -82,6 +82,46 @@ public static class SubmissionReasonCodes
     /// </summary>
     public const string FirmMissing = "ebilling.submission.firm_missing";
 
+    /// <summary>
+    /// ebilling-r1 082c-2 (brief 082c C11): an applicable Procedure has no version in force on a work date of the invoice, so its rules judged
+    /// nothing there. A <b>pipeline finding and hold</b>: one per gapped Procedure (values <see cref="ProcedureNameValue"/>,
+    /// <see cref="ProcedureWorkDateValue"/>, <see cref="ProcedureGapKindValue"/>), the lines dated in the gap <c>rules.not_checked</c> with this
+    /// code as their cause, and part D writes it as the SubmissionIntegrity reason <c>submission.procedure_gap</c>. SPA: the submission is
+    /// Accepted / AcceptedUncoded with this code as its reason, never AutoRejected (even when 073 rejected). Internal: Blocked. Approval is
+    /// refused until a re-check clears it (<see cref="InvoiceProcedureHold"/>).
+    /// </summary>
+    public const string ProcedureGap = "ebilling.submission.procedure_gap";
+
+    /// <summary>
+    /// ebilling-r1 082c-2 (brief 082c C14, ontology-r1 ruling): the invoice's Procedures could not be resolved on the job's final delivery
+    /// (<c>ProcedureResolutionFaultException</c> or <c>CoreRecordChainUnreadableException</c>). A <b>pipeline finding and hold</b> naming its
+    /// cause (<see cref="ProcedureCauseValue"/>: <see cref="CauseChainUnreadable"/> or <see cref="CauseRowsInconsistent"/>); no billing rule ran,
+    /// every line is <c>rules.not_checked</c> with this code as its cause. SPA: Accepted / AcceptedUncoded with this code as its reason. Internal:
+    /// Blocked. A delivery that is not the final one rethrows instead (the job retries; nothing is persisted).
+    /// </summary>
+    public const string ProceduresUnresolved = "ebilling.submission.procedures_unresolved";
+
+    /// <summary>The <see cref="ProcedureGap"/> value naming the Procedure (its catalogue name; never an id).</summary>
+    public const string ProcedureNameValue = "procedureName";
+
+    /// <summary>The <see cref="ProcedureGap"/> value naming the first work date in the gap (<c>yyyy-MM-dd</c>).</summary>
+    public const string ProcedureWorkDateValue = "workDate";
+
+    /// <summary>The <see cref="ProcedureGap"/> value naming the gap kind (<c>ProcedureGapKind</c>'s name; mapped through the closed
+    /// <c>BillingSystemFindings.GapKindText</c>).</summary>
+    public const string ProcedureGapKindValue = "gapKind";
+
+    /// <summary>The <see cref="ProceduresUnresolved"/> value naming the cause.</summary>
+    public const string ProcedureCauseValue = "cause";
+
+    /// <summary>K3 cause (brief 082c C15): the core record's chain could not be read in full (<c>CoreRecordChainUnreadableException</c>).
+    /// Permanent: a retry does not help until the record's stored parent data is repaired.</summary>
+    public const string CauseChainUnreadable = "chain_unreadable";
+
+    /// <summary>K3 cause (brief 082c C15): the Procedure rows are inconsistent (<c>ProcedureResolutionFaultException</c>). May clear once an
+    /// administrator's change completes.</summary>
+    public const string CauseRowsInconsistent = "rows_inconsistent";
+
     /// <summary>Transient (072 part L): the submission's core record changed between the evaluation and the commit, so the evaluation is
     /// not persisted and the job re-evaluates (once; a second change under one run retries with this code).</summary>
     public const string CoreRecordChanged = "ebilling.submission.core_record_changed";

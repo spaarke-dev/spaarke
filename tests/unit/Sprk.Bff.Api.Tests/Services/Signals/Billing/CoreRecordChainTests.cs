@@ -150,6 +150,22 @@ public sealed class CoreRecordChainTests
         await read.Should().ThrowAsync<CoreRecordChainUnreadableException>().WithMessage("*could not be read*");
     }
 
+    [Fact(DisplayName = "082c-2 fix round 1 (K1): a pair type READ fault is transient and a pair with no type is not; both fail closed the same way")]
+    public async Task PairTypeReadFault_IsTransient_AMissingType_IsNot_BothFailClosedAlike()
+    {
+        ProjectFiledUnder(P, M.ToString(), MatterType);
+        ProjectFiledUnder(P2, M.ToString(), null); // names a record without its type: stored data that is wrong
+        _world.FailingQueriesOf(RecordType);
+
+        var fault = await ((Func<Task>)(() => ChainOf(CoreRecordKind.Project, P))).Should().ThrowAsync<CoreRecordChainUnreadableException>();
+        var missing = await ((Func<Task>)(() => ChainOf(CoreRecordKind.Project, P2))).Should().ThrowAsync<CoreRecordChainUnreadableException>();
+
+        fault.Which.Transient.Should().BeTrue("the type read faulted: an outage, a retry may help");
+        missing.Which.Transient.Should().BeFalse("the data is wrong: a retry will not help");
+        fault.Which.Message.Should().Contain("cannot be told", "the same fail-closed outcome, whatever the flag");
+        missing.Which.Message.Should().Contain("cannot be told");
+    }
+
     // ── Work assignment: typed lookups only ─────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "082 chain: a work assignment typed under a project is [W 0, P 1]; the project's matter is not in it (no second hop)")]

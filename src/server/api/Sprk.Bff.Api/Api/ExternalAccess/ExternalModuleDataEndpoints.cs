@@ -284,8 +284,11 @@ public static class ExternalModuleDataEndpoints
         // ONLY when it is a single-entity read of the module's own entity with NO join of any kind that
         // reads, filters on and sorts by ONLY the module's allow-listed columns (task 134). It runs BEFORE
         // scoping, so every caller — including one with an empty accessible set — gets the same refusal.
+        // 082c-2 fix round 4 (R4-1): an invoice module's review detail is readable but returned only while In Review, so a filter or sort on it
+        // would be a value oracle for the rows it is nulled on. Only the invoice module passes a set; every other module passes none.
         var guard = EvaluateFetchXmlGuard(
-            request.FetchXml, module.RecordEntity, module.ReadableColumns, entityExtractor);
+            request.FetchXml, module.RecordEntity, module.ReadableColumns, entityExtractor,
+            ExternalInvoiceReviewDetail.UnfilterableColumns(module.RecordEntity));
         if (!guard.IsAllowed)
         {
             return RejectFetchXml(guard, module, logger);
@@ -350,6 +353,7 @@ public static class ExternalModuleDataEndpoints
                 .Concat(module.NarrowingAttributes)
                 .Concat(module.FileStateAttributes) // R3 ISS-011: read to derive hasFile, never returned (not readable columns)
                 .Concat(InvoiceFamilyKeyAttributes(module)) // task 098: the row id the (a′) predicate is keyed on
+                .Concat(ExternalInvoiceReviewDetail.RequiredAttributes(module.RecordEntity)) // 082c-2 fix round 3 (U1): the status the review detail is judged on
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             if (ruleAttributes.Count > 0)
@@ -405,6 +409,13 @@ public static class ExternalModuleDataEndpoints
             {
                 (scoped, invoiceTruncated) = await HideInvoiceRowsAsync(module, scoped, principal, hideInvoices, logger, ct)
                     .ConfigureAwait(false);
+            }
+
+            // 082c-2 fix round 3 (uac-r2 U1): the invoice's review detail is returned only while the row's statuscode is In Review (the status was
+            // projected server-side above, and is removed below unless the caller asked for it). Before the strip, which drops the status.
+            if (ExternalInvoiceReviewDetail.Applies(module.RecordEntity))
+            {
+                scoped = scoped.Select(ExternalInvoiceReviewDetail.Project).ToList();
             }
 
             // The response carries the readable columns the CALLER requested: a root column the server projected only for
@@ -596,8 +607,25 @@ public static class ExternalModuleDataEndpoints
             // (Register refuses a list missing the primary id or the declared PrimaryNameAttribute;
             // ExternalModuleColumnAllowListTests pins each declaration to live metadata). The strip is
             // defence in depth either way.
-            var record = await readRecord(entityLogicalName, id, selectFields, ct).ConfigureAwait(false);
-            return Results.Ok(StripToReadableColumns(record, module.ReadableColumns, keepLogicalName: false, out _));
+            // 082c-2 fix round 3 (uac-r2 U1): an invoice's review detail is returned only while its statuscode is In Review. A caller who asked for
+            // the detail but not the status still gets it judged on the real status: the status is read too, and removed unless asked for.
+            var readSelect = selectFields;
+            IReadOnlySet<string> returnable = module.ReadableColumns;
+            if (ExternalInvoiceReviewDetail.Applies(module.RecordEntity) && ExternalInvoiceReviewDetail.NeedsStatusRead(selectFields))
+            {
+                readSelect = selectFields!.Append(ExternalInvoiceReviewDetail.StatusColumn).ToArray();
+                var withoutStatus = new HashSet<string>(returnable, StringComparer.OrdinalIgnoreCase);
+                withoutStatus.Remove(ExternalInvoiceReviewDetail.StatusColumn);
+                returnable = withoutStatus;
+            }
+
+            var record = await readRecord(entityLogicalName, id, readSelect, ct).ConfigureAwait(false);
+            if (ExternalInvoiceReviewDetail.Applies(module.RecordEntity))
+            {
+                record = ExternalInvoiceReviewDetail.Project(record);
+            }
+
+            return Results.Ok(StripToReadableColumns(record, returnable, keepLogicalName: false, out _));
         }
         catch (RecordNotFoundException ex)
         {
@@ -898,7 +926,8 @@ public static class ExternalModuleDataEndpoints
         string? fetchXml,
         string moduleRecordEntity,
         IReadOnlySet<string>? readableColumns,
-        IFetchXmlEntityExtractor entityExtractor)
+        IFetchXmlEntityExtractor entityExtractor,
+        IReadOnlySet<string>? unfilterableColumns = null)
     {
         ArgumentNullException.ThrowIfNull(entityExtractor);
         ArgumentException.ThrowIfNullOrWhiteSpace(moduleRecordEntity);
@@ -944,7 +973,7 @@ public static class ExternalModuleDataEndpoints
         }
 
         // ── (3) Column scope — task 134 / C6: rows are scoped above, columns here ──
-        var columnViolation = FindColumnViolation(document, readableColumns);
+        var columnViolation = FindColumnViolation(document, readableColumns, unfilterableColumns);
         return columnViolation is null
             ? new FetchXmlGuardResult(FetchXmlGuardVerdict.Allowed, referenced)
             : new FetchXmlGuardResult(FetchXmlGuardVerdict.ColumnNotPermitted, referenced, columnViolation);
@@ -982,7 +1011,7 @@ public static class ExternalModuleDataEndpoints
     /// method must not be the place a missing list turns into "all columns".
     /// </para>
     /// </remarks>
-    private static string? FindColumnViolation(XDocument document, IReadOnlySet<string>? readableColumns)
+    private static string? FindColumnViolation(XDocument document, IReadOnlySet<string>? readableColumns, IReadOnlySet<string>? unfilterableColumns = null)
     {
         if (readableColumns is null || readableColumns.Count == 0)
         {
@@ -1033,12 +1062,12 @@ public static class ExternalModuleDataEndpoints
                         return "condition with entityname=";
                     }
                     var name = (string?)element.Attribute("attribute");
-                    if (!IsReadable(name, readableColumns))
+                    if (!IsReadable(name, readableColumns) || IsUnfilterable(name, unfilterableColumns))
                     {
                         return $"condition on '{name}'";
                     }
                     var valueOf = element.Attribute("valueof");
-                    if (valueOf is not null && !IsReadable(valueOf.Value, readableColumns))
+                    if (valueOf is not null && (!IsReadable(valueOf.Value, readableColumns) || IsUnfilterable(valueOf.Value, unfilterableColumns)))
                     {
                         return $"condition valueof '{valueOf.Value}'";
                     }
@@ -1052,7 +1081,7 @@ public static class ExternalModuleDataEndpoints
                         return "order by alias or entityname";
                     }
                     var name = (string?)element.Attribute("attribute");
-                    if (!IsReadable(name, readableColumns))
+                    if (!IsReadable(name, readableColumns) || IsUnfilterable(name, unfilterableColumns))
                     {
                         return $"order by '{name}'";
                     }
@@ -1069,6 +1098,14 @@ public static class ExternalModuleDataEndpoints
 
         return null;
     }
+
+    /// <summary>
+    /// 082c-2 fix round 4 (R4-1): a readable column that may be read but not filtered or sorted on (its returned value is shaped per row, so a
+    /// filter or sort is an oracle for the value the row hides). Compared case-insensitively; <c>null</c> set means none.
+    /// </summary>
+    private static bool IsUnfilterable(string? column, IReadOnlySet<string>? unfilterableColumns) =>
+        unfilterableColumns is not null && !string.IsNullOrWhiteSpace(column)
+        && unfilterableColumns.Any(c => string.Equals(c, column.Trim(), StringComparison.OrdinalIgnoreCase));
 
     /// <summary>A column is readable only if it is named (non-blank) and on the module's allow-list.</summary>
     private static bool IsReadable(string? column, IReadOnlySet<string> readableColumns) =>

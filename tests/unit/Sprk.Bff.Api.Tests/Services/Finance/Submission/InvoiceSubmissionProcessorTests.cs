@@ -58,7 +58,7 @@ public class InvoiceSubmissionProcessorTests
         h.Evaluated!.CoreRecord.Should().Be(new CoreRecordReference(CoreRecordKind.Matter, Matter));
     }
 
-    // ── 082c-1 interim: a gap or a resolver fault is never a pass ──
+    // ── 082c-2: the Procedure gap hold (C11, C13) and the final-delivery hold (C14, C15) ──
 
     /// <summary>A Procedure whose only version ended before the invoice date (1 June): the invoice date and the lines are in a gap.</summary>
     private static ProcedureResolution GappedProcedures()
@@ -68,18 +68,66 @@ public class InvoiceSubmissionProcessorTests
         return kit.Build();
     }
 
-    [Fact(DisplayName = "082c-1 interim: an evaluation with a Procedure gap throws; the invoice is not decided, so it can never be Accepted")]
-    public async Task AProcedureGap_Throws_NeverAPass()
+    [Fact(DisplayName = "082c-2 C11: SPA with a Procedure gap is Accepted with procedure_gap; one pipeline finding names the Procedure, its first date and kind (no id)")]
+    public async Task AProcedureGap_OnSpa_IsAcceptedAndHeld()
     {
         var h = new Harness { Procedures = GappedProcedures() };
 
-        var run = () => h.RunAsync();
+        var outcome = await h.RunAsync();
 
-        (await run.Should().ThrowAsync<ProcedureGapNotYetHeldException>()).Which.Gaps.Should().BeGreaterThan(0);
-        h.Evaluated.Should().NotBeNull("the gap is found by the evaluation, then refused before the decision");
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.ProcedureGap);
+        outcome.Evaluation!.Gaps.Should().NotBeEmpty();
+        outcome.Decision.Should().NotBeNull("the rules that did run are still decided");
+        var gap = outcome.PipelineFindings.Should().ContainSingle(p => p.ReasonCode == SubmissionReasonCodes.ProcedureGap).Subject;
+        gap.Values[SubmissionReasonCodes.ProcedureNameValue].Should().Be("Ended");
+        gap.Values[SubmissionReasonCodes.ProcedureGapKindValue].Should().Be(nameof(ProcedureGapKind.AfterLastVersion));
+        gap.Values[SubmissionReasonCodes.ProcedureWorkDateValue].Should().MatchRegex(@"^\d{4}-\d{2}-\d{2}$");
+        string.Join("|", gap.Values.Values).Should().NotContain(Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit.ProcedureId("Ended").ToString("D"));
     }
 
-    [Fact(DisplayName = "082c-1 interim control: a Procedure in force on every date (no gap) is evaluated and Accepted as before")]
+    [Fact(DisplayName = "082c-2 C11: Internal with a Procedure gap is Blocked (the FR-20 hold)")]
+    public async Task AProcedureGap_OnInternal_IsBlocked()
+    {
+        var h = new Harness { Procedures = GappedProcedures(), Channel = InvoiceSubmissionChannel.Internal };
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.Blocked);
+        outcome.PipelineFindings.Should().Contain(p => p.ReasonCode == SubmissionReasonCodes.ProcedureGap);
+    }
+
+    [Fact(DisplayName = "082c-2 C11: SPA with a gap and a 073 rejection is Accepted and held, never AutoRejected (the gap reason wins)")]
+    public async Task AProcedureGap_OverA073Rejection_OnSpa_IsNeverAutoRejected()
+    {
+        // The version ends on 10 January, so the aged 20 January line (which InvoiceAge rejects) and the invoice date are both in the gap.
+        var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Ended", from: new DateOnly(2025, 1, 1), to: new DateOnly(2026, 1, 10));
+        kit.Rule("Ended", "ENDED-INCREMENT", RuleType.TimeIncrement);
+        var h = new Harness { Procedures = kit.Build(), Rules = [InvoiceAgeReject()] };
+        h.Lines = [FeeLine(date: new DateOnly(2026, 1, 20))];
+
+        var outcome = await h.RunAsync();
+
+        outcome.Decision!.Outcome.Should().Be(SubmissionOutcome.Rejected, "control: 073 did reject");
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.ProcedureGap);
+    }
+
+    [Fact(DisplayName = "082c-2 C11: SPA with a gap and uncoded lines is AcceptedUncoded; the gap reason wins over the coding code, which stays a pipeline finding")]
+    public async Task AProcedureGap_Uncoded_OnSpa_KeepsTheGapReason()
+    {
+        var h = new Harness { Procedures = GappedProcedures() };
+        h.Coding.Failure = new FeatureDisabledException(SubmissionReasonCodes.AiLinearConsumersDisabled, "off");
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.AcceptedUncoded);
+        outcome.ReasonCode.Should().Be(SubmissionReasonCodes.ProcedureGap);
+        outcome.PipelineFindings.Select(p => p.ReasonCode).Should().Contain(SubmissionReasonCodes.CodingUnavailableHold);
+    }
+
+    [Fact(DisplayName = "082c-2 control: a Procedure in force on every date (no gap) is evaluated and Accepted with no reason and no gap finding")]
     public async Task AProcedureWithNoGap_IsAccepted_Control()
     {
         var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Open");
@@ -89,24 +137,99 @@ public class InvoiceSubmissionProcessorTests
         var outcome = await h.RunAsync();
 
         outcome.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        outcome.ReasonCode.Should().BeNull();
         outcome.Evaluation!.Gaps.Should().BeEmpty();
+        outcome.PipelineFindings.Should().BeEmpty();
     }
 
-    [Theory(DisplayName = "082c-1 interim: a resolver fault from the evaluation propagates as it is (never caught into a pass)")]
+    [Fact(DisplayName = "082c-2 C11: the classifier holds a gap on both channels whatever 073 decided; without a gap it is unchanged")]
+    public void Classify_HoldsAGap_OnBothChannels()
+    {
+        var accepted = new SubmissionDecision { Outcome = SubmissionOutcome.Accepted, Findings = [] };
+
+        InvoiceSubmissionProcessor.Classify(accepted, InvoiceSubmissionChannel.Spa, procedureGap: true)
+            .Should().Be((SubmissionEvaluationKind.Accepted, SubmissionReasonCodes.ProcedureGap));
+        InvoiceSubmissionProcessor.Classify(accepted, InvoiceSubmissionChannel.Internal, procedureGap: true)
+            .Should().Be((SubmissionEvaluationKind.Blocked, SubmissionReasonCodes.Blocked));
+        InvoiceSubmissionProcessor.Classify(accepted, InvoiceSubmissionChannel.Spa, procedureGap: false)
+            .Should().Be((SubmissionEvaluationKind.Accepted, (string?)null));
+    }
+
+    [Theory(DisplayName = "082c-2 C14 (1): a resolver fault on a delivery that is not the final one propagates as it is; nothing is held")]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task AResolverFault_Propagates(bool rowsInconsistent)
+    public async Task AResolverFault_BeforeTheFinalDelivery_Propagates(bool rowsInconsistent)
     {
         Exception fault = rowsInconsistent
             ? new ProcedureResolutionFaultException("two versions in force")
             : new CoreRecordChainUnreadableException("chain unreadable");
-        var h = new Harness { EvaluationFault = fault };
+        var h = new Harness { EvaluationFault = fault, FinalDelivery = false };
 
         var run = () => h.RunAsync();
 
         (await run.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(fault);
     }
 
+    [Theory(DisplayName = "082c-2 C14 (2), C15: a resolver fault on the final delivery is held with its cause; no rule result; SPA Accepted, Internal Blocked")]
+    [InlineData(true, InvoiceSubmissionChannel.Spa)]
+    [InlineData(false, InvoiceSubmissionChannel.Spa)]
+    [InlineData(true, InvoiceSubmissionChannel.Internal)]
+    [InlineData(false, InvoiceSubmissionChannel.Internal)]
+    public async Task AResolverFault_OnTheFinalDelivery_IsHeld(bool rowsInconsistent, InvoiceSubmissionChannel channel)
+    {
+        const string Sentinel = "SENTINEL-ex-message 0123456789abcdef0123456789abcdef";
+        Exception fault = rowsInconsistent ? new ProcedureResolutionFaultException(Sentinel) : new CoreRecordChainUnreadableException(Sentinel);
+        var h = new Harness { EvaluationFault = fault, FinalDelivery = true, Channel = channel };
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(channel == InvoiceSubmissionChannel.Spa ? SubmissionEvaluationKind.Accepted : SubmissionEvaluationKind.Blocked);
+        outcome.ReasonCode.Should().Be(channel == InvoiceSubmissionChannel.Spa ? SubmissionReasonCodes.ProceduresUnresolved : SubmissionReasonCodes.Blocked);
+        outcome.Evaluation.Should().BeNull("no rule finding at all");
+        outcome.Decision.Should().BeNull();
+        outcome.RulesSkippedForUnresolvedProcedures.Should().BeTrue();
+        var finding = outcome.PipelineFindings.Should().ContainSingle(p => p.ReasonCode == SubmissionReasonCodes.ProceduresUnresolved).Subject;
+        finding.Values[SubmissionReasonCodes.ProcedureCauseValue].Should().Be(
+            rowsInconsistent ? SubmissionReasonCodes.CauseRowsInconsistent : SubmissionReasonCodes.CauseChainUnreadable);
+        string.Join("|", outcome.PipelineFindings.SelectMany(p => p.Values.Values)).Should().NotContain("SENTINEL");
+    }
+
+    [Theory(DisplayName = "082c-2 fix round 1 (K1): a chain a failed READ could not complete is held as rows_inconsistent (it may clear); one that stored data could not complete stays chain_unreadable")]
+    [InlineData(true, SubmissionReasonCodes.CauseRowsInconsistent)]
+    [InlineData(false, SubmissionReasonCodes.CauseChainUnreadable)]
+    public async Task AChainThatAFailedReadCouldNotComplete_IsHeldAsTransient(bool transient, string cause)
+    {
+        var h = new Harness { EvaluationFault = new CoreRecordChainUnreadableException("chain unreadable", transient), FinalDelivery = true };
+
+        var outcome = await h.RunAsync();
+
+        outcome.PipelineFindings.Should().ContainSingle(p => p.ReasonCode == SubmissionReasonCodes.ProceduresUnresolved).Subject
+            .Values[SubmissionReasonCodes.ProcedureCauseValue].Should().Be(cause);
+        InvoiceSubmissionProcessor.UnresolvedCauseOf(new CoreRecordChainUnreadableException("x", transient)).Should().Be(cause);
+    }
+
+    [Fact(DisplayName = "082c-2 C14: a raw read fault on the final delivery keeps today's path (it propagates; the job marks the submission Failed); never held or passed")]
+    public async Task ARawFault_OnTheFinalDelivery_Propagates()
+    {
+        var fault = new TimeoutException("dataverse read timed out");
+        var h = new Harness { EvaluationFault = fault, FinalDelivery = true };
+
+        var run = () => h.RunAsync();
+
+        (await run.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(fault);
+    }
+
+    [Fact(DisplayName = "082c-2 (d), D-205 item 5: the gap-kind map is closed: every kind has its own text; an unmapped kind throws")]
+    public void GapKindMap_IsClosed()
+    {
+        var texts = Enum.GetValues<ProcedureGapKind>().Select(BillingSystemFindings.GapKindText).ToList();
+
+        texts.Should().OnlyContain(t => !string.IsNullOrWhiteSpace(t)).And.OnlyHaveUniqueItems();
+        var unmapped = () => BillingSystemFindings.GapKindText((ProcedureGapKind)99);
+        unmapped.Should().Throw<ArgumentOutOfRangeException>();
+        var unknownCause = () => BillingSystemFindings.CauseText("timeout");
+        unknownCause.Should().Throw<ArgumentOutOfRangeException>();
+    }
     [Fact(DisplayName = "097b: a Correction is judged with its replaced invoice derived on the server from sprk_resubmissionof; a New submission names none and reads nothing")]
     public async Task ACorrection_CarriesItsReplacedInvoice_DerivedFromItsResubmissionOf()
     {
@@ -841,7 +964,7 @@ public class InvoiceSubmissionProcessorTests
         public ProcedureResolution? Procedures { get; init; }
 
         /// <summary>082c: what the evaluation throws instead of evaluating (a resolver fault), or null.</summary>
-        public Exception? EvaluationFault { get; init; }
+        public Exception? EvaluationFault { get; set; }
 
         public InvoiceSubmissionChannel Channel
         {
@@ -883,7 +1006,10 @@ public class InvoiceSubmissionProcessorTests
             };
         }
 
-        public Task<SubmissionEvaluationOutcome> RunAsync() => Build().EvaluateAsync(Row, LoadDocument);
+        /// <summary>082c-2: the job's <c>IsFinalDelivery</c> (false by default: an earlier delivery).</summary>
+        public bool FinalDelivery { get; init; }
+
+        public Task<SubmissionEvaluationOutcome> RunAsync() => Build().EvaluateAsync(Row, LoadDocument, FinalDelivery);
 
         /// <summary>The document loader the harness hands the processor (counts the loads).</summary>
         public Task<InvoiceReadRequest> LoadDocument(SubmissionSnapshot snapshot, CancellationToken _)

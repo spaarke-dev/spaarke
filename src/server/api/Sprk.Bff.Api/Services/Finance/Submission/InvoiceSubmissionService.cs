@@ -2341,7 +2341,8 @@ public class InvoiceSubmissionService
     /// ebilling-r1 task 097f (EB-D-180): <paramref name="views"/> as a status route answers them, with the read-time note on each Accepted
     /// submission whose invoice is Superseded (<see cref="SupersededSubmissionNote.ApplyAsync"/>). Not part of <see cref="GetAsync"/> or
     /// <see cref="ListAsync"/>: the service's other callers (the intake's replays, the visibility decisions) must see the stored view. Never
-    /// throws for a read fault; the answer is then the one the views had.
+    /// throws for a read fault; the answer is then the one the views had, without a hold <see cref="InvoiceSubmissionView.Warning"/>: 082c-2 fix
+    /// round 2 (F2) - the warning is kept only while the view's invoice is In Review, so a status route never shows a hold that has ended.
     /// </summary>
     internal Task<IReadOnlyList<InvoiceSubmissionView>> WithReplacementNoteAsync(
         IReadOnlyList<InvoiceSubmissionView> views, ReplacementReadGate mayRead, CancellationToken ct) =>
@@ -2387,6 +2388,10 @@ public class InvoiceSubmissionService
             },
             ReceivedOn = row.GetAttributeValue<DateTime?>("sprk_receivedon"),
             OutcomeReasonCode = row.GetAttributeValue<string>("sprk_outcomereasoncode"),
+
+            // 082c-2 (brief 3(c)): derived from the reason code with fixed text; no stored text is read. The reason code outlives the hold, so the
+            // status routes keep it only while the invoice is In Review (fix round 2, F2: SupersededSubmissionNote.ApplyAsync, via WithReplacementNoteAsync).
+            Warning = SubmissionHoldWarning.For(row.GetAttributeValue<string>("sprk_outcomereasoncode")),
             DocumentId = row.GetAttributeValue<EntityReference>("sprk_document")?.Id,
             ChannelValue = channel,
             FirmId = row.GetAttributeValue<EntityReference>(TrackingNumberAllocator.FirmColumn)?.Id,

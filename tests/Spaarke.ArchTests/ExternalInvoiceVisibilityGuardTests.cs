@@ -97,6 +97,8 @@ public class ExternalInvoiceVisibilityGuardTests
             "Turns the record gate's answer into rights; the gate (EvaluateRecordGateAsync) applied the predicate first.",
         [$"{typeof(ExternalModuleDataEndpoints).FullName}::InvoiceFamilyKeyAttributes"] =
             "Projects sprk_invoiceid so the predicate can key each row (ExecuteScopedFetchCoreAsync applies it).",
+        [$"{typeof(ExternalInvoiceReviewDetail).FullName}::Applies"] =
+            "Decides whether a module is the invoice module for the review-detail projection (082c-2 fix round 3, U1); reads no row. The projection runs on rows the route already hid.",
         // ── reads that return no invoice-family row ──
         [$"{typeof(ExternalInvoiceSubmissionAuthorizationFilter).FullName}::DenyUnlinkedFirmAsync"] =
             "Checks the firm is linked to the core record (D-106); returns a refusal or nothing, no submission row.",

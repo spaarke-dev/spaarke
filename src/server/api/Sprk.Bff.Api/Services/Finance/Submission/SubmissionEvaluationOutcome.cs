@@ -413,6 +413,21 @@ public sealed record SubmissionEvaluationOutcome
     public bool RulesSkippedForNoFirm => Submission is { HasNoFirm: true };
 
     /// <summary>
+    /// 082c-2 (brief C14): true when the Procedures could not be resolved on the final delivery (the
+    /// <see cref="SubmissionReasonCodes.ProceduresUnresolved"/> pipeline finding), so no billing rule ran: there is no evaluation and no decision,
+    /// and the persister flags every line <c>rules.not_checked</c> with that code as its cause.
+    /// </summary>
+    public bool RulesSkippedForUnresolvedProcedures =>
+        PipelineFindings.Any(p => p.ReasonCode == SubmissionReasonCodes.ProceduresUnresolved);
+
+    /// <summary>082c-2 (brief C11): true when the evaluation found a Procedure gap (the outcome holds the invoice).</summary>
+    public bool HasProcedureGap => Evaluation is { Gaps.Count: > 0 };
+
+    /// <summary>082c-2 (brief C11): the lines dated in a Procedure gap: none of that Procedure's rules ran on them.</summary>
+    public IReadOnlySet<int> ProcedureGapLines =>
+        (Evaluation?.Gaps ?? []).SelectMany(g => g.LineIndexes).ToHashSet();
+
+    /// <summary>
     /// ebilling-r1 task 094 (procedure-and-file-model 9.1 step 2): the copies the job staged from the submission's source before the commit
     /// (one for a Submit Invoice source document; task 095: one per marked part of the .eml). The persister writes one Stored File row per
     /// copy and guards each distinct source at the version it was staged from. Empty for an upload (its file is the intake's stage). Set by

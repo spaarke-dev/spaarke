@@ -760,6 +760,7 @@ BigInt cannot be field-secured. Any non-blank value holds, so an unknown future 
 | Type | Use | Identity |
 |---|---|---|
 | `InvoiceFirmHold` | reads it (`HeldInvoicesAsync`, called by `CheckAsync` and `IsHeldAsync` from the callers listed below) | app-only `IGenericEntityService` |
+| `InvoiceOpenHolds` (082c-2 fix round 3) | reads it (`ReasonsAsync`, the supersede undo's read of the reopened invoice's own hold, united with the submissions' holds); never writes it | app-only `IGenericEntityService` (the one `SubmissionCommitGate` passes) |
 | `InvoiceSubmissionPersister` | writes it on the held invoice create | app-only transaction |
 | `InheritedAccessPermission` | names it only to refuse it to the generic writers | (registration only) |
 | 095d assign-firm (planned) | clears it | must be typed, app-only; must be added to the guard's reviewed list |

@@ -253,6 +253,14 @@ public enum ProcedureGapKind
 public sealed record ProcedureGap(
     Guid ProcedureId, string ProcedureName, DateOnly WorkDate, ProcedureGapKind Kind, IReadOnlyList<ProcedureOverrideRow> Overrides)
 {
+    /// <summary>
+    /// The reader-facing projection of this gap (uac-r2 U3; ebilling-r1 082c-2 fix round 1, K4 condition (c)): the Procedure's name, the date and
+    /// the kind's name, and nothing else. The ONE mapping: <see cref="ProcedureRulesOnDate.ForReaders"/> and every writer of a gap into a stored or
+    /// reader-facing surface (the gap pipeline finding in the stored findings JSON) take it from here, so a field is added to the reader view in
+    /// one place and never by a writer that reads the internal record.
+    /// </summary>
+    public ProcedureReaderGap ForReaders() => new(ProcedureName, WorkDate, Kind.ToString());
+
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
         builder.Append("ProcedureName = ").Append(ProcedureName).Append(", WorkDate = ").Append(WorkDate).Append(", Kind = ").Append(Kind)
@@ -310,15 +318,53 @@ public sealed record ProcedureRulesOnDate(
     /// </summary>
     // uac-r2 K1 (082b review): Level and Distance reveal that an assignment exists at that level. Acceptable only while Procedures are catalogue-level;
     // if Procedures are ever created per record, or named from the record, this becomes an F finding and the fields must go.
-    public ProcedureResolutionReaderView ForReaders() => new(
+    // uac-r2 decision (2026-11-04, option (a), binding for 082c-2): a record rule's own code is BRR- plus its policy id, a stable handle that
+    // correlates across invoices and records. The reader rule carries the BASE rule's catalogue code and the RecordRule flag instead; this is the
+    // ONE place that mapping lives, so every reader surface gets it from here. A base code that cannot be resolved is blank (the flag stays true),
+    // never the BRR- code, and is logged at Warning with no id.
+    public ProcedureResolutionReaderView ForReaders(ILogger? logger = null) => new(
         WorkDate,
         Rules.Select(r => new ProcedureReaderRule(
-            r.Version.PolicyCode, r.Procedure.ProcedureName, r.Procedure.ProcedureVersionNumber, r.Procedure.Rank.Level.ToString(),
+            ReaderCodeOf(r, logger), r.Procedure.ProcedureName, r.Procedure.ProcedureVersionNumber, r.Procedure.Rank.Level.ToString(),
             r.Procedure.Rank.Distance, r.Procedure.Pinned, r.RecordRule is not null)).ToList(),
         ExcludedRules.Select(e => new ProcedureReaderExcludedRule(
             e.Version.PolicyCode, e.Procedure.ProcedureName, e.Distance, e.ReplacedByRecordRule)).ToList(),
         ExcludedProcedures.Select(e => new ProcedureReaderExcludedProcedure(e.ProcedureName, e.Overrides.Min(o => o.Distance))).ToList(),
-        Gaps.Select(g => new ProcedureReaderGap(g.ProcedureName, g.WorkDate, g.Kind.ToString())).ToList());
+        Gaps.Select(g => g.ForReaders()).ToList());
+
+    /// <summary>uac-r2 option (a): a rule's reader code. A Procedure rule keeps its own catalogue code; a record rule gets its base rule's, or
+    /// blank when that is missing or is itself a record-rule code (fail closed: never a <c>BRR-</c> code or any part of an id).</summary>
+    internal static string ReaderCodeOf(ResolvedRule rule, ILogger? logger) =>
+        rule.RecordRule is not { } slot ? rule.Version.PolicyCode : BaseCodeForReaders(slot.BasePolicyCode, logger);
+
+    /// <summary>
+    /// 082c-2 fix round 2 (uac-r2 option (i)): whether a STORED policy code (a join key: <c>findings[].policyCode</c>, <c>signalPlan[]</c>,
+    /// <c>signalPlanRefusals[]</c>, the Signal's <c>sprk_policycode</c>) is a record rule's own <c>BRR-</c> code. The record-rule flag of a reader
+    /// member when only the key is at hand.
+    /// </summary>
+    internal static bool IsRecordRuleCode(string? policyCode) =>
+        policyCode?.StartsWith(ProcedureAssignmentService.RecordRuleCodePrefix, StringComparison.OrdinalIgnoreCase) == true; // as BaseCodeForReaders: a lower-case brr- is a record-rule key too
+
+    /// <summary>
+    /// 082c-2 fix round 2 (uac-r2 option (i)): the reader code of a STORED policy code, for a reader surface built from stored findings (the
+    /// internal join key stays as stored). A Procedure rule's catalogue code is its own; a record rule's (<see cref="IsRecordRuleCode"/>) is
+    /// its base rule's, which a stored key does not carry, so a caller that has none passes null and gets blank (fail closed: never the
+    /// <c>BRR-</c> key, never any part of an id), as <see cref="ReaderCodeOf(ResolvedRule, ILogger?)"/> does for a base it cannot resolve.
+    /// </summary>
+    internal static string ReaderCodeOf(string storedPolicyCode, string? baseCode, ILogger? logger) =>
+        IsRecordRuleCode(storedPolicyCode) ? BaseCodeForReaders(baseCode, logger) : storedPolicyCode;
+
+    private static string BaseCodeForReaders(string? baseCode, ILogger? logger)
+    {
+        if (string.IsNullOrWhiteSpace(baseCode)
+            || baseCode.StartsWith(ProcedureAssignmentService.RecordRuleCodePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            logger?.LogWarning("A record rule's base rule code could not be resolved for a reader view; its code is left blank");
+            return string.Empty;
+        }
+
+        return baseCode;
+    }
 }
 
 /// <summary>The reader-facing projection of <see cref="ProcedureRulesOnDate"/> (uac-r2 U3). Names no record.</summary>

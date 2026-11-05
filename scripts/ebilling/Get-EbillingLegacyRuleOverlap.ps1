@@ -17,6 +17,14 @@
     K5 (brief C20): record rules (policies in a record-scoped set, sprk_scope Record 100000002 or Firm record 100000003) whose Published version
     has no sprk_basedonversion. The resolver faults on such a row when its record rule is in force; backfill or retire them before 082c ships.
 
+    Linked projects with an empty pair (brief 082c (b), ontology D-205 item 4; 082c-2): projects linked to a matter through the Project to
+    Matter N:N (intersect sprk_project_sprk_matter) whose BFF-managed pair (sprk_regardingrecordid, sprk_regardingrecordtype) is empty. The
+    resolver walks the pair, not the N:N, so such a project gives its invoices no matter Procedures and no fault. Above 0 is a rollout gate:
+    backfill the pair with the owner's go. Re-runnable; the same count is the access reconciliation pass's ProjectsWithMatterLinkButNoPair
+    (task 195, every run). The create path is pinned by CreateProjectWizard.projectFiling.test.tsx ("writes the N:N, THEN files the project
+    under the matter through the BFF"). It can still grow: a refused or secure-blocked filing keeps the link with a visible warning, and a
+    link added outside the wizard (a subgrid "Add existing") writes no pair. Run it before each rollout, not once.
+
     Output is counts only: no record id, name, rule body or code. It makes GET requests only (one function, Invoke-DvGet); it writes nothing.
 
 .PARAMETER DataverseUrl
@@ -85,6 +93,8 @@ function Invoke-DvGet([string]$Path) {
 $sets = Invoke-DvGet "sprk_rulesets?`$select=sprk_rulesetid,sprk_scope,_sprk_firm_value,statuscode,_sprk_procedure_value&`$filter=sprk_domain eq $DomainBilling"
 $policies = Invoke-DvGet "sprk_policies?`$select=sprk_policyid,_sprk_ruleset_value,_sprk_currentversion_value,sprk_enabled,statecode&`$filter=sprk_domain eq $DomainBilling and _sprk_ruleset_value ne null"
 $versions = Invoke-DvGet "sprk_policyversions?`$select=sprk_policyversionid,_sprk_policy_value,sprk_ruletype,sprk_inforceto,sprk_publishstate,_sprk_basedonversion_value&`$filter=_sprk_policy_value ne null"
+$matterLinks = Invoke-DvGet "sprk_project_sprk_matterset?`$select=sprk_projectid,sprk_matterid"
+$projects = Invoke-DvGet "sprk_projects?`$select=sprk_projectid,sprk_regardingrecordid,_sprk_regardingrecordtype_value"
 
 # ---- Legacy sets ------------------------------------------------------------------------------------------------------------------
 $legacy = @($sets | Where-Object { -not $_._sprk_procedure_value -and $_.sprk_scope -in @($ScopeClientDefault, $ScopeFirm) })
@@ -140,6 +150,13 @@ $recordPublished = @($versions | Where-Object { $recordPolicyIds.Contains($_._sp
 $k5 = @($recordPublished | Where-Object { -not $_._sprk_basedonversion_value })
 $k5Rules = @($k5 | Select-Object -ExpandProperty _sprk_policy_value -Unique)
 
+# ---- 082c (b): linked projects with an empty pair --------------------------------------------------------------------------------
+$linkedProjectIds = [System.Collections.Generic.HashSet[string]]::new()
+foreach ($l in $matterLinks) { [void]$linkedProjectIds.Add($l.sprk_projectid) }
+$linkedEmptyPair = @($projects | Where-Object {
+        $linkedProjectIds.Contains($_.sprk_projectid) -and ([string]::IsNullOrWhiteSpace($_.sprk_regardingrecordid) -or -not $_._sprk_regardingrecordtype_value)
+    })
+
 # ---- Report -----------------------------------------------------------------------------------------------------------------------
 $census = [ordered]@{
     environment                       = $DataverseUrl
@@ -158,6 +175,8 @@ $census = [ordered]@{
     recordRulePublishedVersions       = $recordPublished.Count
     k5PublishedVersionsWithoutBasedOn = $k5.Count
     k5RecordRulesAffected             = $k5Rules.Count
+    projectsLinkedToAMatter           = $linkedProjectIds.Count
+    linkedProjectsWithAnEmptyPair     = $linkedEmptyPair.Count
 }
 
 if ($AsJson) { $census | ConvertTo-Json -Depth 4 }

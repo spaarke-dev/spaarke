@@ -257,6 +257,8 @@ internal static class ResubmissionOfWriteControlFixtures
 
         public Task<bool> NumbersSubmissionsWithoutFirmAsync(CancellationToken ct = default) => Task.FromResult(false);
 
+        public Task<bool> ScopeColumnExistsAsync(CancellationToken ct = default) => Task.FromResult(false);
+
         public Task<RenumberResult> RenumberSubmissionAsync(
             Guid submissionId, string rowVersion, Guid firmId, string firmInvoiceNumber, Func<RenumberCandidate, RenumberApply> buildApply,
             CancellationToken ct = default) =>

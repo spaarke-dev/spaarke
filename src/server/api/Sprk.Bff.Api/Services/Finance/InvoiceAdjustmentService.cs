@@ -98,6 +98,8 @@ public sealed record AdjustmentDto(
     Guid LineId, Guid AdjustmentId, string Method, decimal Value, decimal Amount, string Reason, Guid? RuleId, DateTimeOffset ReviewedOn);
 
 /// <summary>One rule a reviewer may cite on an adjustment (D-74): a published billing rule version in force on the invoice date. No document link (D-66).</summary>
+// ebilling-r1 082c-2 fix round 2 (uac-r2 K4): PolicyCode (a record rule's is its BRR- code) sits next to RuleId on the INTERNAL adjustment route only.
+// If any external module or SPA surface maps this DTO, it must go through ProcedureRulesOnDate.ForReaders() (base code + record-rule flag) first.
 public sealed record AdjustmentRuleOptionDto(
     Guid RuleId, string PolicyCode, string? Headline, Guid RuleSetId, string? RuleSetName, string Scope, int Version, string? ClauseReference, string? ClauseLocation);
 
