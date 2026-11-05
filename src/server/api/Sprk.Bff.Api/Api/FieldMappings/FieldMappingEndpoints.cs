@@ -1072,6 +1072,21 @@ public static class FieldMappingEndpoints
                         continue;
                     }
 
+                    // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths
+                    // (RecordTableRule.FixedAfterCreateColumns): a rule aimed at either is skipped, as above, and the rest applies.
+                    if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseFixedAfterCreateColumns(
+                            targetEntity, [rule.TargetField]) is { } fixedAfterCreate)
+                    {
+                        recordFieldResults.Add(new FieldMappingResultDto
+                        {
+                            SourceField = rule.SourceField,
+                            TargetField = rule.TargetField,
+                            Status = FieldMappingStatus.Skipped,
+                            ErrorMessage = $"{fixedAfterCreate.Reason}; the rule was skipped and nothing was written for it.",
+                        });
+                        continue;
+                    }
+
                     // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes
                     // them from the owning business unit), so a rule aimed at either is skipped — never written, never an error —
                     // and the dropped value is logged, ids only (the rule is applied to a scratch payload to read it).
@@ -1172,6 +1187,7 @@ public static class FieldMappingEndpoints
                     // guard above read its row; one deleted since must not be re-created by the upsert. The not-found answer
                     // is thrown so a re-file stops before its owner step, and it fails THIS child with the guard's code.
                     string? goneCode = null;
+                    var recordNotFound = false;
                     async Task Write(CancellationToken token)
                     {
                         if (Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(targetEntity))
@@ -1186,8 +1202,18 @@ public static class FieldMappingEndpoints
                             return;
                         }
 
-                        await dataverseService.UpdateRecordFieldsAsync(
-                            targetEntity, childRecordId, updatePayload, token, impersonateSystemUserId: callerSystemUserId);
+                        // Every other table is written UPDATE-ONLY too (still as the caller): the push updates existing records
+                        // and never creates one. An id that names no row writes nothing and fails THIS child (caught below).
+                        try
+                        {
+                            await dataverseService.UpdateExistingRecordFieldsAsync(
+                                targetEntity, childRecordId, updatePayload, callerSystemUserId, token);
+                        }
+                        catch (KeyNotFoundException)
+                        {
+                            recordNotFound = true;
+                            throw;
+                        }
                     }
 
                     Func<Task<bool>>? wasIsolated = null;
@@ -1244,6 +1270,21 @@ public static class FieldMappingEndpoints
                             refiled = !reparent.ParentsUnchanged;
                             refiledBy = reparent;
                         }
+                    }
+                    catch (KeyNotFoundException) when (recordNotFound)
+                    {
+                        // The record is gone (or never existed), or a row a lookup in this write names does not exist (both answer
+                        // 404); nothing was written or re-owned.
+                        failed++;
+                        var notFound = Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler.RecordNotFoundPhrase(
+                            personWording: false,
+                            refersToOtherRecord: Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler.CarriesLookupBind(updatePayload.Keys));
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = $"Not written: the {notFound}; nothing was written for it ({Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.RecordMissing})."
+                        });
+                        continue;
                     }
                     catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException) when (goneCode is not null)
                     {

@@ -28,7 +28,7 @@ namespace Sprk.Bff.Api.Tests.Seam.Ai.Nodes;
 /// </para>
 /// <para>
 /// The slice pinned here is the exact coerced <c>Dictionary&lt;string,object?&gt;</c> handed to
-/// <c>UpdateRecordFieldsAsync</c> — the observable contract 031 must not change: typed-mapping coercion
+/// <c>UpdateExistingRecordFieldsAsync</c> — the observable contract 031 must not change: typed-mapping coercion
 /// (Choice options-map / Boolean / Number), legacy <c>HeuristicParse</c> precedence, and the FAIL-LOUD
 /// contract for a metadata-confirmed Choice column with an unmatchable label.
 /// </para>
@@ -48,8 +48,8 @@ public class UpdateRecordNodeExecutorSeamTests
     {
         _fieldMappingMock = new Mock<IFieldMappingDataverseService>();
         _fieldMappingMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Strict: CreateScope() is only expected when a test opts in via UseMetadataFor(...). A missing
@@ -168,8 +168,8 @@ public class UpdateRecordNodeExecutorSeamTests
         result.ErrorMessage.Should().Contain("Invoice");
         result.ErrorMessage.Should().Contain("Other");
         _fieldMappingMock.Verify(
-            s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -179,9 +179,9 @@ public class UpdateRecordNodeExecutorSeamTests
     {
         Dictionary<string, object?>? captured = null;
         _fieldMappingMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, fields, _, _) => captured = fields)
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((_, _, fields, _, _) => captured = fields)
             .Returns(Task.CompletedTask);
         return () => captured;
     }

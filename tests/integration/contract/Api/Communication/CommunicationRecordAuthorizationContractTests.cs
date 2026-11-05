@@ -525,12 +525,12 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         (await response.Content.ReadAsStringAsync()).Should().Contain(reviewLogId.ToString());
-        _host.FieldMapping.Verify(f => f.UpdateRecordFieldsAsync(
+        _host.FieldMapping.Verify(f => f.UpdateExistingRecordFieldsAsync(
                 "sprk_matter",
                 matter,
                 It.Is<Dictionary<string, object?>>(d => d.Count == 1 && Equals(d["sprk_description"], expectedValue)),
-                It.IsAny<CancellationToken>(),
-                CallerSystemUserId),
+                CallerSystemUserId,
+                It.IsAny<CancellationToken>()),
             Times.Once);
         _host.Entities.Verify(e => e.CreateAsync(It.Is<DataverseEntity>(x => x.LogicalName == "sprk_emailreviewlog"), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -615,13 +615,13 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         (await response.Content.ReadAsStringAsync()).Should().Contain(taskId.ToString());
-        _host.FieldMapping.Verify(f => f.UpdateRecordFieldsAsync(
+        _host.FieldMapping.Verify(f => f.UpdateExistingRecordFieldsAsync(
                 "sprk_event",
                 taskId,
                 // Task 066 (D-28): the soft-cancel writes statuscode = Cancelled WITH its statecode (Inactive); never the deprecated column.
                 It.Is<Dictionary<string, object?>>(d => d.Count == 2 && Equals(d["statuscode"], 659490004) && Equals(d["statecode"], 1)),
-                It.IsAny<CancellationToken>(),
-                CallerSystemUserId),
+                CallerSystemUserId,
+                It.IsAny<CancellationToken>()),
             Times.Once);
         _host.Entities.Verify(e => e.CreateAsync(
                 It.Is<DataverseEntity>(x => x.LogicalName == "sprk_emailreviewlog"

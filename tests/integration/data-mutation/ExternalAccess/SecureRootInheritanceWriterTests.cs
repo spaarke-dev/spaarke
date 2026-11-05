@@ -140,10 +140,10 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     {
         var service = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
         service
-            .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((t, id, f, _, _) => ApplyFiling(t, id, f))
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((t, id, f, _, _) => ApplyFiling(t, id, f))
             .Returns(Task.CompletedTask);
         return service;
     }

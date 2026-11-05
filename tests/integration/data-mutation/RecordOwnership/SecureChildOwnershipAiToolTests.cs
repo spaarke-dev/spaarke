@@ -723,6 +723,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["team"] = "teams", ["businessunit"] = "businessunits",
             // #2084 round 2: a Signal and the rule it cites.
             ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
+            // The core record pair is fixed after create on BFF update paths: a Decision Record is driven through the chat update.
+            ["sprk_decisionrecord"] = "sprk_decisionrecords",
             // #2110: a communication's thread.
             ["sprk_communicationthread"] = "sprk_communicationthreads",
             // Field mapping task 017 (item 8): an invoice-family table filed by the regarding trio.

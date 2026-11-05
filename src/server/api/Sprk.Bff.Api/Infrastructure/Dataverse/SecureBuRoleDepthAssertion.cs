@@ -650,9 +650,12 @@ public static class SecureBuRoleDepthAssertion
     /// reaches <paramref name="secureBusinessUnitId"/>.
     /// </summary>
     /// <remarks>
-    /// <para>The anchor is the ROLE COPY's business unit for a directly-assigned role (Dataverse only
-    /// lets a user hold the copy that lives in their own BU) and the TEAM's business unit for a
-    /// team-assigned role (team privileges are evaluated against the team's BU, not the member's).</para>
+    /// <para>The anchor is the ROLE COPY's business unit for a directly-assigned role and the TEAM's business
+    /// unit for a team-assigned role (team privileges are evaluated against the team's BU, not the member's).
+    /// The role copy's business unit may differ from the user's home business unit: with cross-business-unit
+    /// ownership enabled (<c>EnableOwnershipAcrossBusinessUnits</c>), a user can be directly assigned the copy
+    /// of a role that lives in another business unit, so the census anchors a direct grant at the copy's unit,
+    /// never at the user's.</para>
     /// <para><c>Basic</c> reaches nothing by business unit — it matches only records the principal owns,
     /// which is why clause 2 exists separately. An UNRECOGNISED depth mask fails closed.</para>
     /// </remarks>
