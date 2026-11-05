@@ -4,114 +4,83 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-05 ~13:15Z (C19 cleared pending one answer; dev BFF = 909754869f, gate PASS; reviews and owed items below).
+> **Last Updated**: 2026-11-05 ~19:45Z (checkpoint #96: dev deploy of 0f53e053bf being prepared; 046 role rulings; reviews in flight).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Mode** | Final push, round-90 rules. Merge only when Router + "Client lint (type-aware ratchet)" are green: `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys and settings changes need the owner's go IN THIS SESSION. Peers take the owner's go for THEIR live writes in THEIR sessions. |
-| **Active work** | None in flight. No uncommitted files, no running agents. Waiting on peers (reviews) and the owner (items below). |
-| **Dev state** | BFF = **909754869f** (master with #2568) since 2026-11-05T04:16:30Z. Gate PASS, ontology PASS. Record: `notes/deploy-gate-2026-11-05-909754869f.md`. Rollback: `deploy/rollback/wwwroot-20261105T024806Z` in THIS worktree (d763dc120e) or redeploy d763dc120e. Dev SPA = b083d62183. |
-| **Next action** | 1. **Owed to ontology:** /api/v1/signals 200 from organic or UAT traffic (no self-token call unless the owner has seen the command), plus the suppression and `SuppressionPartitionUndeterminedException` counts after the first nightly `SignalReevaluationJob` on 909754869f. Query App Insights `spe-insights-dev-67e2xz` (rg `spe-infrastructure-westus2`), role `spaarke-bff-dev`. A non-zero Undetermined count or a Signals 5xx reopens the gate. 2. Re-check the review diffs as they arrive (below). 3. Own backlog. |
+| **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; peers take the owner's go for their own live writes in their sessions. |
+| **Active work** | **Dev BFF deploy of master `0f53e053bf`** (#2569 fm 042c + #2570 fm 048; Router green; 909754869f is an ancestor; src/server 13 files +231/−9). The owner said "deploy now, master as it is" but the go must NAME the SHA: ask for it once ebilling OKs. One Opus review agent is running (fm 043 access review). No uncommitted files. |
+| **Dev state** | BFF = **909754869f** since 2026-11-05T04:16:30Z (gate PASS; record `notes/deploy-gate-2026-11-05-909754869f.md`). Rollback snapshot `deploy/rollback/wwwroot-20261105T024806Z` is d763dc120e. Dev SPA = b083d62183. |
+| **Next action** | 1. Wait for ebilling's OK on 0f53e053bf (fm, word-add-in, ontology OK; provisioning standing). 2. Ask the owner for the go naming `0f53e053bf`. 3. Run the checklist below. 4. Answer fm on 043 when the review agent reports. |
 
-## Private items (tracked privately only, owner choice; never in issues/PRs/commits)
-- Core pair, lineage and update-path work: MERGED in #2568, deployed, read-back unchanged (7 project-core Signals, 4 SR-core DRs: owner/BU/POA unchanged; 0 SR-core Signals).
-- **Owner question (K, not a regression):** when a person runs a playbook update (output mapping), the refusal for an unknown id differs from the refusal for a row they can't write. Making the two uniform would change #2257's stable code. Owner decides.
-- The field-mapping push runs AS its caller, so for a person's write the boundary is their own Dataverse privileges plus field security (#2253 fix round 1, K2; by design). Confirmed again 2026-11-05.
+## Deploy 0f53e053bf: checklist
+- **Done (read-only):** 225 settings; the four switches (RootOwnerWrites, OrdinaryMovesWrites and Ebilling__Enabled true; StoredFileReconcile false); the 3 `Finance__FileStore__*` names present.
+- **Before the deploy:**
+  - the #2450 ancestor check and no non-comment `sprk_invoicestatus` under `src/server`;
+  - `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`;
+  - a detached worktree at the SHA (C:/wtdep is gone; recreate it);
+  - `Save-BffDevRollbackSnapshot.ps1 -RepoRoot <this worktree>`;
+  - the pre-deploy count of `record_creation.table_unsupported` over the prior 24h;
+  - a before-notice to word-add-in, R4 (`spaarke-wt-spa-external-access-platform-ad`), ontology, fm and ebilling.
+- **Deploy and gate:**
+  - `Deploy-BffApi.ps1 -Environment dev`, then `Test-BffDevDeployReadback.ps1`;
+  - the gate script `$TEMP/uacmerge/uacg/gate909.sh <start> <end>`;
+  - extra gate checks:
+    - 0 from organic traffic for `record_update.changed_only_by_its_writer` and `record_delete.changed_only_by_its_writer`;
+    - `record_creation.table_unsupported` compared with its pre-deploy count, NOT with 0;
+    - no 5xx on `/api/v1/signals*` or `POST /api/v1/signals/{id}/decision`;
+    - 0 5xx on the create, update and chat routes;
+    - 0 OWNERSHIP-REFUSED.
+  - A refusal from a WRITER path reopens the deploy.
+- **After:** an after-notice with the receive time (word-add-in needs it for the owner's Office saves and Submit Invoice read-back); a record in `notes/deploy-gate-2026-11-05-0f53e053bf.md`; Remove-WorktreeSafe.
 
 ## Reviews in flight
-- **ebilling** (`spaarke-wt-ebilling-r1-c7`):
-  - **095d-1 CLEARED** at b1930c9e21 (1a, 1b at d71b2f20f0, 1c with F4-1: `sprk_findingsjson` in the submission AccessColumns and MappingProtectedColumns, plus a field-security agreement test; F3-1; K2). 1c merges into work after ontology K-3. Wording nit sent (no re-check).
-  - **082c-2 (coming):** `sprk_reviewdetail` approved with conditions:
-    - a local closed choice;
-    - cleared on every exit from In Review, with a test;
-    - R4 renders it only In Review;
-    - `MappingProtectedColumns`, not ParentLineage AccessColumns;
-    - a known limit that every partner reader of the row sees it.
-  - **082c-2 (coming):** `ForReaders()` BRR code uses option (a):
-    - base catalog code plus an `IsRecordRule` flag, never an id;
-    - fail closed to blank;
-    - one place;
-    - external surfaces drop the flag;
-    - sentinel scan with must-fire.
-  - **082c C19 CLEARED at c704a9f2dc** (2026-11-05):
-    - the re-check confirms close only, the effective-date scope with mixed-date tests, the children-side failure dropping only the children, and the notes;
-    - K5 (c) option (iii) is a K: the close stays system-attributed, logs carry the assignment id, and option (i) is filed for 095d-2;
-    - (d) aggregate counts in the logs are OK;
-    - adjustment lines never reach the evaluator (verified); the close log now carries the assignment id, the version id and the closed Signal ids;
-    - waits only on ontology's ruling about the superseding version on the Signal row (provenance; no uac objection to deferring it to 095d-2).
-  - **082c-2 CLEARED for the merge into work at `5ec401ebaa`** (round 4 closed the filter oracle; the merge resolution is correct). Next: ebilling's master PR. Standing items: the pre-P2 table, the scope re-grep, the runbook lines, prevseq MappingProtectedColumns, C22, the full integration suites.
-  - **P2 blank-firm CLEARED** at `e8450e8d22` (no F): no-firm submissions are withheld from every external caller before any other check; Guid.Empty is dropped from `firmIds`. K1 (a) accepted: the tracking number goes with the invoice. Ebilling merges it into work and sends the owner the P2 request; the destructive steps need the owner's go in ebilling's session.
-  - Earlier conditions in force: 082c §3(c) pre-check conditions; 082d snapshot design; C22 (task 114 before 082c reaches master).
-  - Still owed: 089b/089c, 095a, 095c; the full master PR; the NFR-05 census after deploy.
+- **ebilling** (`-c7`):
+  - 082c-2 is merged into work (ef6eb01910); C19 and P2 blank-firm are cleared; DEF-044 is merged into work (1c581b33ae).
+  - Master PR coming. My items on its checklist: the pre-P2 table, the `sprk_trackingscope` re-grep, the runbook lines, prevseq MappingProtectedColumns, C22, the full integration suites.
+  - After it: my deploy, P2 migration (owner go in their session), seam test, L6 Defender check, before-notice, then I flip `Ebilling__StoredFileReconcileEnabled` (owner go HERE).
+  - Asked, no answer yet: the deploy OK; whether Core User's Write on `sprk_ebillingoverride` at Global on dev (not in the role file) is intended; the "New Billing Event" ribbon (no role creates lines).
 - **field-mapping** (`-69`):
-  - #2569 (042c, auto-merge) joins the next deploy batch.
-  - **048** extends D-204 to updates: chat update, the playbook step, the output mapping and the push; one shared list from `RecordTableRules`. Review it with ontology.
-  - Also owed: 044 field-security profile and 046 roles matrix (owner go HERE).
-  - **048 CLEARED** at `59d1008c9f` (2026-11-05, no F): D-204 extended to updates and to chat delete, owner decision 2026-11-05; table-only refusals on every generic update path, before any read; #2568's order kept. The MDA/Web API delete boundary is the 046 roles matrix. **049** (async assigned-access grant on create, plus concurrent caller checks): conditions sent 2026-11-05 (create only; app identity; the message carries only root, grantor and tenants; re-read current state; per-record lease; enqueue fails → inline; no surface claims access; bounded deterministic concurrent checks); awaiting the diff.
-  - ebilling: `sprk_reviewdetail` column live write on dev (run by ontology, owner go in their sessions); after-notice and -Verify owed. `StoredFileReconcileEnabled` is held for DEF-044 (#2296); a before-notice is owed before any change (the gate expects false).
-- **ontology** (`-38`): the 2 owed items above.
+  - **043** (a document as a mapping source, `de96647095`): the Opus access review agent is running; send the verdict by message.
+  - **046/046b:** fm builds the role files and the apply script (-WhatIf/-Apply/-Verify; root role through the Web API; read back every BU copy; KnownGaps removed); fm runs -WhatIf. I run -Apply on dev under the owner's go, given 2026-11-05, for:
+    - G1: Create, Append and AppendTo on reportcard (Core);
+    - G2;
+    - G4;
+    - G5: file alignment;
+    - G6: Office Add In gets Write on document (Deep);
+    - G7/G8: Office Add In gets AppendTo on account and sprk_budget (Deep).
 
-## Dev BFF deploy procedure
-- `docs/procedures/dev-bff-deploy-coordination.md` on master. Owner go per SHA HERE; peer OKs (ontology, word-add-in, field-mapping, ebilling; provisioning standing).
-- Gates:
-  - CI on the commit;
-  - #2450 ancestor and no `sprk_invoicestatus`;
-  - `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`;
-  - 225 settings, with `SecureRoot__Inheritance__RootOwnerWritesEnabled` and `SecureChild__Reconciliation__OrdinaryMovesWritesEnabled` true, `Ebilling__Enabled` true, `Ebilling__StoredFileReconcileEnabled` false, and the 3 `Finance__FileStore__*` names.
-- Steps:
-  1. Detached worktree at the SHA.
-  2. Snapshot with `Save-BffDevRollbackSnapshot.ps1 -RepoRoot <this worktree>`.
-  3. `Deploy-BffApi.ps1 -Environment dev`.
-  4. `Test-BffDevDeployReadback.ps1`.
-  5. Before/after notices to the peers plus R4.
-  6. Gate script `$TEMP/uacmerge/uacg/gate909.sh <start> <end>`.
-  7. Record in `notes/deploy-gate-<date>-<sha>.md`.
-  8. Remove-WorktreeSafe.
-- **Next batch:** #2569 (fm 042c, MERGED d9bef8e90f) + #2570 (fm 048, auto-merge; its PR diff equals the cleared range), then ebilling's master PR. Gate extras: 048 refusal codes count 0 from organic traffic. Ebilling's master PR (pre-checks: the 095c build runs on dev's pre-P2 schema (`sprk_trackingscope` absent or optional; the phase check fails closed; from-email unchanged), and if not, the deploy and P2 go together under one owner go; P2 migration and the seam test run AFTER the deploy; sprk_firmhold on dev; the Stored Files K4 backfill; C22; `Deploy-EbillingFormsViews.ps1` after the gate, owner go in ebilling's session).
-- **Peer live checks pending (their sessions, owner's go):**
-  - word-add-in: Office save smoke (one filed and one unfiled save), plus a Submit Invoice from an email;
-  - field-mapping: creates for 020/031/042b.
-
-## Email-to-AP (owner)
-- Completed demo batch **14680609-b198-48e2-8391-3ada84fda689**; the server side was verified OK. The owner still sees no buttons. Owed by the owner: the URL (org/app), an InPrivate retry, and the `&ribbondebug=true` Command checker on Email to AP.
-
-## Owner's VS Code issue (C:/code_files/spaarke window hangs)
-- **Done:**
-  - archived 3 transcripts (`~/.claude/projects/c--code-files-spaarke/_archive-2026-11-04/`);
-  - VS Code excludes `**/.claude/worktrees` (backup `%APPDATA%/Code/User/settings.backup-2026-11-04.json`);
-  - killed 2 rg scans by PID.
-- **Open:** may I clean up the old agent dirs in `C:/code_files/spaarke/.claude/worktrees` (123 dirs)? Use Remove-WorktreeSafe; skip anything used in the last 24h and the 3 dirty ones; list them first.
-
-## My own backlog
-- #2560 (share-mirror levels on RestrictedContentTables)
-- #2524
-- gate null-column hardening
-- SharePoint privileges census item
-- #2543, #2292
-- K-P1 for task 191
-- parked: 193 (C:/wt193), 197, #2427, 196a/196b
-- TASK-INDEX reconcile at wrap-up 090
-- known limits: lineage `sprk_corerecordid` walk unindexed; #2090 (optimistic mode)
+    The standalone add-on gap list goes to the owner before anything from it is applied. The guard pins Ontology Administrator as the only person role with C/W/D on the writer-only tables.
+  - **049:** conditions sent; waiting for the diff.
+  - 044 field-security profile still owed (owner go here).
+- **ontology** (`-38`): owed TO them: Signals 200 from organic traffic, and the nightly suppression and Undetermined counts on 909754869f (and on 0f53e053bf once live).
 
 ## Owner items outstanding
-- The person-path refusal question (above).
-- ~~Role question~~ DECIDED 2026-11-05: flagged licensed users read Decision Records and Signals per their roles; no change (`notes/decisions.md`).
-- Email to AP diagnostics.
-- The VS Code cleanup OK.
-- The Office saves and Submit Invoice for word-add-in.
-- fm's test creates (in fm's session).
-- 095a lookup-name question.
-- Click-test 195; Q1/Q4 private items.
+- **NEW (ontology recommendation): column auditing on the writer-only tables' lookups.**
+  - Today the org and the three tables audit, but no custom lookup column is audited.
+  - At least: Signal (sprk_matter, sprk_decisionrecord, sprk_policy, sprk_policyversion); DR (sprk_matter, sprk_project, sprk_policyversion); BudgetRevision (sprk_budget, sprk_matter).
+  - This is a solution schema change: it needs the owner's go and a notice to customer-provisioning. Not asked yet.
+- The person-path refusal uniformity question (private, K).
+- Email to AP diagnostics (batch 14680609-b198-48e2-8391-3ada84fda689): the owner's URL, an InPrivate retry, and ribbondebug.
+- VS Code agent-dir cleanup OK (`C:/code_files/spaarke/.claude/worktrees`, 123 dirs; Remove-WorktreeSafe; skip anything used in the last 24h and the dirty ones).
+- word-add-in: the owner's Office saves and Submit Invoice (read-back after the deploy notice).
+- 095a lookup-name question; click-test 195; Q1/Q4 private items.
 - Older: #2343, #2245, #2250, #2260, #2270, #2262, #2396, 191 F1/S4, 190 Apply, #2382, #2505; tasks 140/165/153.
 
+## Decided today (in notes/decisions.md)
+- Flagged licensed users read DR and Signals per their roles; no change.
+- 046 role rulings: the additions; Office To Do and the Do lane stay Core-only; add-ons may be standalone; Ontology Administrator is the cleanup role (D-160 stands; auditing verified on at table level).
+- D-204 extended to chat delete (fm 048, merged).
+
+## Private items (never in issues/PRs/commits)
+- Core pair, lineage and update paths: merged in #2568 and deployed; read-back unchanged.
+- The push runs as the caller (#2253 K2). The push's lack of external narrowing and the 404 timing are known limits of the round-77 class (fm notes only).
+
+## My own backlog
+- POST /api/v1/documents: route-ledger Pending (owner 166, medium). The body's ContainerId has no caller check and no Create privilege is asked. Caller: `SummarizeAnalysisStep.tsx:109`. Fix: G5 Create check plus a server-derived or validated container. fm asked me to classify it: it's mine.
+- #2560, #2524, gate null-column hardening, SharePoint census, #2543, #2292, K-P1 for task 191; parked: 193 (C:/wt193), 197, #2427, 196a/196b; TASK-INDEX reconcile at 090.
+
 ## Peers
-- This session: `spaarke-wt-unified-access-control-r2-20`
-- ebilling: `-c7`
-- field-mapping: `-69`
-- ontology: `-38`
-- provisioning: `-b8`
-- word-add-in: `-7b`
-- website: `spaarke-website-cb`
-- SPA: R3 closed; R4 = `spaarke-wt-spa-external-access-platform-ad` (copy it on SPA invoice or record-modal UI changes); `-8c` holds messages.
+uac-r2 `-20` (this session) · ebilling `-c7` · field-mapping `-69` · ontology `-38` · provisioning `-b8` · word-add-in `-7b` · website `spaarke-website-cb` · SPA R4 `spaarke-wt-spa-external-access-platform-ad` (copy it on SPA invoice or record-modal UI changes).
