@@ -58,6 +58,9 @@ public sealed class InvoiceReviewDetailWritersGuardTests
         (typeof(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules), ".cctor"), // MappingProtectedColumns of sprk_invoice (uac-r2)
         (typeof(Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission), ".cctor"), // AccessColumns of sprk_invoice: refused to app-only generic writes (uac-r2 F4)
         (typeof(Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission), "RefuseAppOnlyWrite"), // the refusal's reason text for the column
+        // 082c-2 fix round 3 (uac-r2 U1): the external invoice reads null the column outside In Review (a projection of a READ response, never a row write).
+        (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalInvoiceReviewDetail), "IsDetail"), // the column-name match Project uses to null the value and label in the response copy
+        (typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalInvoiceReviewDetail), "NeedsStatusRead"), // whether a $select names the column (to add the status)
     ];
 
     private static readonly Assembly[] Scanned = [typeof(InvoiceSubmissionPersister).Assembly, typeof(IGenericEntityService).Assembly];

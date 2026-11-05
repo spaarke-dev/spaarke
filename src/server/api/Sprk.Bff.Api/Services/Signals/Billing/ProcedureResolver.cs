@@ -343,7 +343,7 @@ public sealed record ProcedureRulesOnDate(
     /// member when only the key is at hand.
     /// </summary>
     internal static bool IsRecordRuleCode(string? policyCode) =>
-        policyCode?.StartsWith(ProcedureAssignmentService.RecordRuleCodePrefix, StringComparison.Ordinal) == true;
+        policyCode?.StartsWith(ProcedureAssignmentService.RecordRuleCodePrefix, StringComparison.OrdinalIgnoreCase) == true; // as BaseCodeForReaders: a lower-case brr- is a record-rule key too
 
     /// <summary>
     /// 082c-2 fix round 2 (uac-r2 option (i)): the reader code of a STORED policy code, for a reader surface built from stored findings (the

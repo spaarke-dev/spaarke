@@ -1430,6 +1430,7 @@ public sealed class ProcedureResolverTests
     [InlineData("BRR-0123456789abcdef0123456789abcdef", "", "", true)]
     [InlineData("BRR-0123456789abcdef0123456789abcdef", "BILL-BASE", "BILL-BASE", true)]
     [InlineData("BRR-0123456789abcdef0123456789abcdef", "BRR-fedcba9876543210fedcba9876543210", "", true)]
+    [InlineData("brr-0123456789abcdef0123456789abcdef", null, "", true)] // uac-r2 U3: the match ignores case, as BaseCodeForReaders does
     public void ReaderCode_OfAStoredKey(string stored, string? baseCode, string expected, bool recordRule)
     {
         ProcedureRulesOnDate.IsRecordRuleCode(stored).Should().Be(recordRule);

@@ -350,6 +350,7 @@ public static class ExternalModuleDataEndpoints
                 .Concat(module.NarrowingAttributes)
                 .Concat(module.FileStateAttributes) // R3 ISS-011: read to derive hasFile, never returned (not readable columns)
                 .Concat(InvoiceFamilyKeyAttributes(module)) // task 098: the row id the (a′) predicate is keyed on
+                .Concat(ExternalInvoiceReviewDetail.RequiredAttributes(module.RecordEntity)) // 082c-2 fix round 3 (U1): the status the review detail is judged on
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             if (ruleAttributes.Count > 0)
@@ -405,6 +406,13 @@ public static class ExternalModuleDataEndpoints
             {
                 (scoped, invoiceTruncated) = await HideInvoiceRowsAsync(module, scoped, principal, hideInvoices, logger, ct)
                     .ConfigureAwait(false);
+            }
+
+            // 082c-2 fix round 3 (uac-r2 U1): the invoice's review detail is returned only while the row's statuscode is In Review (the status was
+            // projected server-side above, and is removed below unless the caller asked for it). Before the strip, which drops the status.
+            if (ExternalInvoiceReviewDetail.Applies(module.RecordEntity))
+            {
+                scoped = scoped.Select(ExternalInvoiceReviewDetail.Project).ToList();
             }
 
             // The response carries the readable columns the CALLER requested: a root column the server projected only for
@@ -596,8 +604,25 @@ public static class ExternalModuleDataEndpoints
             // (Register refuses a list missing the primary id or the declared PrimaryNameAttribute;
             // ExternalModuleColumnAllowListTests pins each declaration to live metadata). The strip is
             // defence in depth either way.
-            var record = await readRecord(entityLogicalName, id, selectFields, ct).ConfigureAwait(false);
-            return Results.Ok(StripToReadableColumns(record, module.ReadableColumns, keepLogicalName: false, out _));
+            // 082c-2 fix round 3 (uac-r2 U1): an invoice's review detail is returned only while its statuscode is In Review. A caller who asked for
+            // the detail but not the status still gets it judged on the real status: the status is read too, and removed unless asked for.
+            var readSelect = selectFields;
+            IReadOnlySet<string> returnable = module.ReadableColumns;
+            if (ExternalInvoiceReviewDetail.Applies(module.RecordEntity) && ExternalInvoiceReviewDetail.NeedsStatusRead(selectFields))
+            {
+                readSelect = selectFields!.Append(ExternalInvoiceReviewDetail.StatusColumn).ToArray();
+                var withoutStatus = new HashSet<string>(returnable, StringComparer.OrdinalIgnoreCase);
+                withoutStatus.Remove(ExternalInvoiceReviewDetail.StatusColumn);
+                returnable = withoutStatus;
+            }
+
+            var record = await readRecord(entityLogicalName, id, readSelect, ct).ConfigureAwait(false);
+            if (ExternalInvoiceReviewDetail.Applies(module.RecordEntity))
+            {
+                record = ExternalInvoiceReviewDetail.Project(record);
+            }
+
+            return Results.Ok(StripToReadableColumns(record, returnable, keepLogicalName: false, out _));
         }
         catch (RecordNotFoundException ex)
         {

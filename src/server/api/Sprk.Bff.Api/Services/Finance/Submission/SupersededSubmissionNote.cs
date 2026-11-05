@@ -122,8 +122,9 @@ internal static class SupersededSubmissionNote
         }
         catch (Exception ex) when (IsFault(ex, ct))
         {
-            logger.LogWarning(ex, "Which invoices are superseded or In Review could not be read for {Count} submission(s); their answers carry no replacement note and no hold warning",
-                accepted.Concat(warned).Select(v => v.SubmissionId).Distinct().Count());
+            // C16: the exception TYPE only, never the exception (its message can carry ids or text the operator log must not hold).
+            logger.LogWarning("Which invoices are superseded or In Review could not be read for {Count} submission(s) ({ExceptionType}); their answers carry no replacement note and no hold warning",
+                accepted.Concat(warned).Select(v => v.SubmissionId).Distinct().Count(), ex.GetType().Name);
             return WithoutWarnings(views);
         }
 

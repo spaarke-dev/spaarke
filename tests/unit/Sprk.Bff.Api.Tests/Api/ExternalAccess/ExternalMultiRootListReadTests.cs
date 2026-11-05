@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse.FetchXml;
 using Sprk.Bff.Api.Services.Dataverse.Models;
+using Sprk.Bff.Api.Services.Finance;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
@@ -1151,6 +1152,215 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             data.GetLiveParentRootsAsync,
             hideInvoices);
         return (result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!, executed);
+    }
+
+    // ---- 082c-2 fix round 3 (uac-r2 U1): the review detail is returned only while the invoice is In Review ----
+    //
+    // A status change made outside the BFF (the native form, a field mapping, a playbook Update Record) can leave sprk_reviewdetail set on an
+    // invoice that is no longer In Review. The external reads return the column null then (value and display label), on the grid fetch and on
+    // the single-record read, judged on the row's real statuscode even when the caller did not ask for the status.
+
+    private const string DetailAndStatusFetch =
+        "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_name'/><attribute name='sprk_project'/>"
+        + "<attribute name='sprk_reviewdetail'/><attribute name='statuscode'/></entity></fetch>";
+
+    private const string DetailOnlyFetch =
+        "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_name'/><attribute name='sprk_project'/>"
+        + "<attribute name='sprk_reviewdetail'/></entity></fetch>";
+
+    private static IReadOnlyDictionary<string, object?> InvoiceRowWithDetail(string name, object? status, int detail = 659490002, bool label = true)
+    {
+        var row = new Dictionary<string, object?>(InvoiceRow(name, project: RecordA))
+        {
+            ["sprk_reviewdetail"] = new Microsoft.Xrm.Sdk.OptionSetValue(detail),
+        };
+        if (status is not null)
+        {
+            row["statuscode"] = status;
+        }
+
+        if (label)
+        {
+            row["@formattedValues"] = new Dictionary<string, string> { ["sprk_reviewdetail"] = "Waiting for the firm to be confirmed", ["statuscode"] = "Status" };
+        }
+
+        return row;
+    }
+
+    private static CallerPrincipal InvoiceCaller() => PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+
+    [Theory(DisplayName = "082c-2 fix round 3 (U1, must fire): the grid fetch returns the review detail null (value and label) when the invoice is not In Review")]
+    [InlineData(659490000)] // Approved
+    [InlineData(659490001)] // Sent to AP
+    [InlineData(659490002)] // Paid
+    [InlineData(659490003)] // Rejected
+    [InlineData(659490004)] // Returned to Firm
+    [InlineData(2)] // any other status, a value the lifecycle does not know included
+    public async Task InvoicesModuleFetch_ReviewDetail_IsNullOutsideInReview(int status)
+    {
+        var (body, _) = await RunInvoicesFetchAsync(
+            InvoiceCaller(), new[] { InvoiceRowWithDetail("Not in review", status) }, InvoiceHidingStub.NoneHidden().Seam, DetailAndStatusFetch);
+
+        var row = body.Entities.Should().ContainSingle().Subject;
+        row.Should().ContainKey("sprk_reviewdetail").WhoseValue.Should().BeNull($"status {status} is not In Review");
+        row["statuscode"].Should().Be(status, "the status itself is a readable column and is returned as asked");
+        ((IReadOnlyDictionary<string, string>)row["@formattedValues"]!).Keys.Should().NotContain("sprk_reviewdetail", "the display label is a value of the column too");
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (U1, positive control): the grid fetch returns the review detail, value and label, while the invoice is In Review")]
+    public async Task InvoicesModuleFetch_ReviewDetail_IsReturnedWhileInReview()
+    {
+        var (body, _) = await RunInvoicesFetchAsync(
+            InvoiceCaller(), new[] { InvoiceRowWithDetail("In review", InvoiceStatusCodes.InReview) }, InvoiceHidingStub.NoneHidden().Seam, DetailAndStatusFetch);
+
+        var row = body.Entities.Should().ContainSingle().Subject;
+        ((Microsoft.Xrm.Sdk.OptionSetValue)row["sprk_reviewdetail"]!).Value.Should().Be(659490002);
+        ((IReadOnlyDictionary<string, string>)row["@formattedValues"]!)["sprk_reviewdetail"].Should().Be("Waiting for the firm to be confirmed");
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (U1): in one page each row is judged on its own status")]
+    public async Task InvoicesModuleFetch_ReviewDetail_IsJudgedPerRow()
+    {
+        var (body, _) = await RunInvoicesFetchAsync(
+            InvoiceCaller(),
+            new[]
+            {
+                InvoiceRowWithDetail("A in review", InvoiceStatusCodes.InReview),
+                InvoiceRowWithDetail("B approved", InvoiceStatusCodes.Approved),
+                InvoiceRowWithDetail("C in review", InvoiceStatusCodes.InReview, detail: 659490000),
+            },
+            InvoiceHidingStub.NoneHidden().Seam, DetailAndStatusFetch);
+
+        body.Entities.ToDictionary(r => (string)r["sprk_name"]!, r => r["sprk_reviewdetail"] is Microsoft.Xrm.Sdk.OptionSetValue o ? (int?)o.Value : null)
+            .Should().BeEquivalentTo(new Dictionary<string, int?> { ["A in review"] = 659490002, ["B approved"] = null, ["C in review"] = 659490000 });
+    }
+
+    [Theory(DisplayName = "082c-2 fix round 3 (U1): a caller who asked for the detail but not the status is judged on the real status - which the server reads and does not return")]
+    [InlineData(659490000, false)]
+    [InlineData(1, true)]
+    public async Task InvoicesModuleFetch_DetailWithoutStatus_IsJudgedOnTheRealStatus_AndTheStatusIsNotReturned(int status, bool returned)
+    {
+        var (body, executed) = await RunInvoicesFetchAsync(
+            InvoiceCaller(), new[] { InvoiceRowWithDetail("Detail only", status, label: false) }, InvoiceHidingStub.NoneHidden().Seam, DetailOnlyFetch);
+
+        executed.Should().Contain("name=\"statuscode\"", "the server projects the status it judges on");
+        var row = body.Entities.Should().ContainSingle().Subject;
+        row.Keys.Should().NotContain("statuscode", "the caller did not ask for it");
+        (row.TryGetValue("sprk_reviewdetail", out var value) && value is not null).Should().Be(returned);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (U1, fail closed): a row that carries the detail but no readable status has it nulled")]
+    public async Task InvoicesModuleFetch_DetailWithNoReadableStatus_IsNull()
+    {
+        var (body, _) = await RunInvoicesFetchAsync(
+            InvoiceCaller(),
+            new[] { InvoiceRowWithDetail("No status", status: null), InvoiceRowWithDetail("Garbled status", status: "In Review") },
+            InvoiceHidingStub.NoneHidden().Seam, DetailAndStatusFetch);
+
+        body.Entities.Should().HaveCount(2).And.OnlyContain(r => r["sprk_reviewdetail"] == null);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (U1): the projection touches only the invoices module - a row of any other table is returned as it is")]
+    public void ReviewDetailProjection_AppliesOnlyToInvoices()
+    {
+        ExternalInvoiceReviewDetail.Applies("sprk_invoice").Should().BeTrue();
+        foreach (var other in new[] { "sprk_document", "sprk_project", "sprk_matter", "sprk_workassignment", null })
+        {
+            ExternalInvoiceReviewDetail.Applies(other).Should().BeFalse(other);
+            ExternalInvoiceReviewDetail.RequiredAttributes(other).Should().BeEmpty();
+        }
+
+        var withoutColumn = InvoiceRow("Plain", project: RecordA);
+        ExternalInvoiceReviewDetail.Project(withoutColumn).Should().BeSameAs(withoutColumn, "a row that does not carry the column is untouched");
+    }
+
+    // The single-record read. The production invoices module refuses the single-record route at the Tier-2 gate (an invoice id is never in the
+    // matter / project sets it is scoped by, so GetScopedRecordCoreAsync answers 403), so a test module that admits the record drives the path.
+
+    private static readonly Guid RecordInvoice = Guid.Parse("a0390000-0000-4000-8000-0000000000c1");
+
+    private static ExternalModuleRegistry RecordRegistry(string entity = "sprk_invoice")
+    {
+        var registry = new ExternalModuleRegistry();
+        registry.Register(new ExternalModuleDescriptor
+        {
+            Name = "invoices-test",
+            RecordEntity = entity,
+            RecordIdAttribute = entity + "id",
+            AccessibleRecordIds = p => p.GetAccessibleMatterIds(),
+            PrimaryNameAttribute = "sprk_name",
+            ReadableColumns = new HashSet<string> { entity + "id", "sprk_name", "statuscode", "sprk_reviewdetail" },
+        });
+        return registry;
+    }
+
+    private static async Task<(IReadOnlyDictionary<string, object?> Body, string[]? ReadSelect)> ReadInvoiceRecordAsync(
+        string? select, IReadOnlyDictionary<string, object?> stored, string entity = "sprk_invoice")
+    {
+        string[]? readSelect = null;
+        var caller = PrincipalWith(matters: new Dictionary<Guid, AccessRights> { [RecordInvoice] = AccessRights.Read });
+
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            entity, RecordInvoice, select, caller, RecordRegistry(entity),
+            (_, _, columns, _) =>
+            {
+                readSelect = columns;
+                // The double reads what it is asked for, as RecordService does.
+                var asked = columns is null ? null : new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
+                return Task.FromResult<IReadOnlyDictionary<string, object?>>(
+                    stored.Where(kv => asked is null || asked.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value));
+            },
+            NullLogger.Instance, CancellationToken.None);
+
+        return (result.Should().BeOfType<Ok<IReadOnlyDictionary<string, object?>>>().Subject.Value!, readSelect);
+    }
+
+    private static IReadOnlyDictionary<string, object?> StoredInvoice(int status) => new Dictionary<string, object?>
+    {
+        ["sprk_invoiceid"] = RecordInvoice,
+        ["sprk_name"] = "INV-1",
+        ["statuscode"] = status,
+        ["sprk_reviewdetail"] = new Microsoft.Xrm.Sdk.OptionSetValue(659490002),
+    };
+
+    [Fact(DisplayName = "082c-2 fix round 3 (U1, must fire): the single-record read returns the review detail null when the invoice is not In Review")]
+    public async Task InvoiceRecordRead_ReviewDetail_IsNullOutsideInReview()
+    {
+        var (body, _) = await ReadInvoiceRecordAsync("sprk_name,statuscode,sprk_reviewdetail", StoredInvoice(InvoiceStatusCodes.Approved));
+
+        body.Should().ContainKey("sprk_reviewdetail").WhoseValue.Should().BeNull();
+        body["statuscode"].Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (U1, positive control): the single-record read returns the review detail while the invoice is In Review")]
+    public async Task InvoiceRecordRead_ReviewDetail_IsReturnedWhileInReview()
+    {
+        var (body, _) = await ReadInvoiceRecordAsync("sprk_name,statuscode,sprk_reviewdetail", StoredInvoice(InvoiceStatusCodes.InReview));
+
+        ((Microsoft.Xrm.Sdk.OptionSetValue)body["sprk_reviewdetail"]!).Value.Should().Be(659490002);
+    }
+
+    [Theory(DisplayName = "082c-2 fix round 3 (U1): the single-record read of the detail without the status reads the status too, judges on it, and does not return it")]
+    [InlineData(InvoiceStatusCodes.Approved, false)]
+    [InlineData(InvoiceStatusCodes.InReview, true)]
+    public async Task InvoiceRecordRead_DetailWithoutStatus_IsJudgedOnTheRealStatus_AndTheStatusIsNotReturned(int status, bool returned)
+    {
+        var (body, readSelect) = await ReadInvoiceRecordAsync("sprk_name,sprk_reviewdetail", StoredInvoice(status));
+
+        readSelect.Should().Contain("statuscode");
+        body.Keys.Should().NotContain("statuscode");
+        (body.TryGetValue("sprk_reviewdetail", out var value) && value is not null).Should().Be(returned);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (U1): a record read of another entity is not touched (no status added to the read, the row as it is)")]
+    public async Task RecordRead_OfAnotherEntity_IsUntouched()
+    {
+        var stored = new Dictionary<string, object?> { ["sprk_invoiceid"] = RecordInvoice, ["sprk_name"] = "Other", ["sprk_reviewdetail"] = new Microsoft.Xrm.Sdk.OptionSetValue(1) };
+
+        var (body, readSelect) = await ReadInvoiceRecordAsync("sprk_name,sprk_reviewdetail", stored, entity: "sprk_matter");
+
+        readSelect.Should().Equal("sprk_name", "sprk_reviewdetail");
+        body["sprk_reviewdetail"].Should().NotBeNull();
     }
 
     // =====================================================================
