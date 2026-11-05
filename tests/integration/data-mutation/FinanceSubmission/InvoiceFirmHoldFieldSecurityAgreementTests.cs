@@ -1,7 +1,10 @@
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using FluentAssertions;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.FinanceSubmission;
@@ -39,6 +42,57 @@ public class InvoiceFirmHoldFieldSecurityAgreementTests
     [InlineData(@"\[Guid\]::new\(\[byte\[\]\]\$bytes\[0\.\.15\]\)", "$bytes[0..15]", "$bytes[0..14]")]
     [InlineData(@"if \(\$emptyFirmToSet\.Count -gt 0\) \{ Report 'INFO' ", "Report 'INFO' \"$($emptyFirmToSet.Count) invoice(s) have no firm", "Report 'MISSING' \"$($emptyFirmToSet.Count) invoice(s) have no firm")]
     public void TheScript_KeepsItsPass2Behaviours(string pattern, string from, string to)
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "ebilling", "Set-EbillingInvoiceFirmHoldColumn.ps1")).ReplaceLineEndings("\n");
+
+        Regex.IsMatch(script, pattern).Should().BeTrue("the shipped script has this behaviour");
+        script.Should().Contain(from);
+        Regex.IsMatch(script.Replace(from, to), pattern).Should().BeFalse("a seeded drift of it must fail the pin");
+    }
+
+    // ── 095d-1c: check (f), "Set firm applied, no Decision Record" ──
+
+    [Fact(DisplayName = "095d-1c: check (f) names the BFF's stored member, the assign-firm code, the Decision Record set and its invoice lookup")]
+    public void CheckF_NamesWhatTheBffWrites()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "ebilling", "Set-EbillingInvoiceFirmHoldColumn.ps1"));
+        static string? Value(string text, string name) =>
+            Regex.Match(text, $@"^\s*\${name}\s*=\s*'([^']+)'", RegexOptions.Multiline) is { Success: true } m ? m.Groups[1].Value : null;
+
+        Value(script, "AssignFirmMember").Should().Be(InvoiceAssignFirmService.StoredDecisionMember);
+        Value(script, "AssignFirmActionCode").Should().Be(InvoiceAssignFirmService.AssignFirmActionCode);
+        Value(script, "DecisionRecordSet").Should().Be("sprk_decisionrecords");
+        Value(script, "DecisionRecordInvoiceLookup").Should().Be($"_{TodoRegardingBuilder.RegardingLookupsByHostTable["sprk_decisionrecord"]["sprk_invoice"]}_value",
+            "the writer files a billing record under the invoice's regarding lookup");
+        DecisionRecordWriter.BillingSubjectEntityOf(InvoiceAssignFirmService.AssignFirmActionCode).Should().Be(Table, "an assign-firm record is filed under the invoice");
+    }
+
+    /// <summary>
+    /// The script's Get-BillingDecisionKey and Get-InvoiceIdFor were run in PowerShell 7.6 on 2026-11-04 for submission
+    /// <c>095d1b00-0000-4000-8000-000000000001</c> and printed these three ids (notes 16.9). The C# derivations must give the same, so the
+    /// script finds exactly the record the writer's "already recorded" lookup finds.
+    /// </summary>
+    [Fact(DisplayName = "095d-1c: check (f)'s key derivation equals BillingDecisionKey.IdOf (a vector computed by the script's own functions)")]
+    public void CheckF_KeyDerivation_EqualsTheWriters()
+    {
+        var submission = Guid.Parse("095d1b00-0000-4000-8000-000000000001");
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(submission);
+        var decision = InvoiceAssignFirmService.DecisionIdFor(submission);
+
+        invoice.Should().Be(Guid.Parse("029c724a-2f72-4a72-ea7b-4afcf625895d"));
+        decision.Should().Be(Guid.Parse("b2a5b9b4-fd9d-68e8-abd8-711ccfc0be29"));
+        BillingDecisionKey.IdOf(Table, invoice, decision).Should().Be(Guid.Parse("cdd9ab2a-00b1-bbc7-bfbb-9a52d592570b"));
+    }
+
+    // Behaviours of check (f) that no host runs in a unit test, pinned as source facts (each against the shipped script and a seeded drift).
+    [Theory(DisplayName = "095d-1c: check (f) keeps its key text, its sprk_steps match, its window FAIL in -Verify and its read-only query")]
+    [InlineData(@"""billing-dr-\$Table-\$\(\$InvoiceId\.ToString\('D'\)\)-\$\(\$DecisionId\.ToString\('D'\)\)""", "billing-dr-$Table-", "billing-dr-$Column-")]
+    [InlineData(@"-like ""\*`""reviewId`"":`""\$key`""\*""", "reviewId`\":`\"$key", "decisionId`\":`\"$key")]
+    [InlineData(@"if \(\$ageMinutes -gt \$AppliedNoRecordWindowMinutes\) \{", "-gt $AppliedNoRecordWindowMinutes", "-lt $AppliedNoRecordWindowMinutes")]
+    [InlineData(@"if \(\$Verify\) \{ Report 'FAIL' ""\$what \(older than", "if ($Verify) { Report 'FAIL' \"$what (older", "if ($Verify) { Report 'INFO' \"$what (older")]
+    [InlineData(@"Invoke-DvGet ""\$DecisionRecordSet`\?", "Invoke-DvGet \"$DecisionRecordSet`?", "Invoke-DvWrite PATCH \"$DecisionRecordSet`?")]
+    [InlineData(@"\$invoiceId = Get-InvoiceIdFor \$submissionId", "$invoiceId = Get-InvoiceIdFor $submissionId", "$invoiceId = $s._sprk_invoice_value")]
+    public void CheckF_KeepsItsBehaviours(string pattern, string from, string to)
     {
         var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "ebilling", "Set-EbillingInvoiceFirmHoldColumn.ps1")).ReplaceLineEndings("\n");
 

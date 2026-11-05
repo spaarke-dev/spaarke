@@ -333,7 +333,9 @@ internal static partial class RecordTableRules
         {
             Table = "sprk_invoicesubmission",
             Kind = RecordTableKind.Child,
-            MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_invoicesubmission"),
+            // 095d-1c F4-1: and the stored findings, whose assignFirm member decides the immutable Decision Record (typed writers only).
+            MappingProtectedColumns = Columns(
+                [.. InvoiceFamilyCoreLookupsOf("sprk_invoicesubmission"), Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson]),
             PreWriteRules = [InvoiceFamilyRule],
         },
         new RecordTableRule

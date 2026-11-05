@@ -1392,3 +1392,158 @@ uac-r2 approved everything else: the rights order, the route body, the kept orde
 **Correction of the earlier K2 line.** "A repeat by a different caller is confirmed safe in 1b" (adversarial pass 1) was wrong: it looked at the stored decision's content and missed the core-record rights, so a caller without them could read the DecisionId and tracking numbers, and could tell which firm was stored. The 1c requirement stands (1c still asks the close rights and the filing before it records on a repeat); the rights part now also holds for the 1b answer.
 
 **Tests.** Service `Repeat_WithoutCoreRights_IsRefusedTheSame_WhateverFirmIsNamed` (the stored firm and another firm: one `not_authorized` result, no DecisionId or tracking numbers, nothing written, no filing call). Contract `RepeatWithoutCoreRecordRights_IsRefusedIdentically_AsTheFirstApply` through the real filter stack (assigned with the stored firm, assigned with another firm, not yet assigned: one status and one body less `traceId`). The existing repeat tests for a caller with rights are unchanged. Seed: the check moved back below `JudgeRepeatAsync`; all three new cases failed; the fix was restored byte-identical (`cmp`).
+
+### 16.9 095d-1c: Decision Record, Signal facts, Incomplete (2026-11-04)
+
+Branch `task/ebilling-095d-1c` (from `work/ebilling-r1` `637da3e730`). Files: `InvoiceAssignFirmService.cs`, `InvoiceApprovalEndpoints.cs` (the route's Incomplete arm and its description), `scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1` (check (f)), and tests (`InvoiceAssignFirmServiceTests.cs` and its new partial `.Record.cs`, `InvoiceAssignFirmEndpointContractTests.cs`, `InvoiceFirmHoldFieldSecurityAgreementTests.cs`, `TrackingNumberAllocatorLiveTests.cs` made partial, and its new partial `.Renumber.cs`). No package, no DI registration, no new column, no new privilege, no new writer entry point. No escalation trigger fired.
+
+**What landed.**
+- **Apply, then record (option 1).** After `RenumberSubmissionAsync` answers `Renumbered`, the service writes ONE Decision Record through the existing billing path, `BillingDecisionRecorder.RecordAsync` (which calls `DecisionRecordWriter.WriteBillingDecisionAsync`). The decision is `BuildDecision(invoiceId, submissionId, stored)`, where `stored` is the decision the committed attempt stored. The builder runs once per attempt, so the service keeps the last one built and checks that its number is the committed number. If the numbers ever differ (the allocator cannot do this), the answer is Incomplete, and the repeat records from the row. The public constructor passes `recorder.RecordAsync`, and the test seam takes a `record` function next to `preflight`. The record is written inside both locks.
+- **Signal facts (16.7).** `ResolvedSignalIds` stays null and no Signal is closed. The facts are 1b's, unchanged: `firmMissingSignals` (the set and its read time), `firmMissingCleared` true, `policyCode`, `previousTrackingNumber` → `trackingNumber`, and the bounded `renamedCounts` (`firmSetLines`, `lines`, `approval`, `storedFiles`, `findings`). There is no per-row list. 16.7 does not conflict with the code: `BuildDecision` already had this shape, so 1c changes no fact.
+- **Incomplete.** This is the new outcome `AssignFirmOutcome.Incomplete`, code `ebilling.assign_firm.incomplete`, status 503. `failedStep` is `record` when the writer refused, faulted or gave no answer (any exception except a cancellation of this request). It is `filing` when a repeat cannot confirm the filing (below). Every Incomplete answer has one fixed sentence: "The firm was set, but its decision was not recorded. Repeat the request to finish it." The route renders `errorCode`, `failedStep` and `detail` only. It sends no decision id, no tracking number, no submission id and no exception text. The log carries the refusal reason or the exception type name, never a message.
+- **The repeat that finishes.** The order is 1b's, kept. For a stored decision, the core-record rights (`CheckCoreRightsAsync`: the single core, then `HumanDecisionSignalClose.AuthorizeAsync` as this caller) run first. Then `JudgeRepeatAsync`. When the allocator confirms the stored number (`AlreadyRenumbered`, or the 16.6.1 legacy edge), `CompleteRepeatAsync` asks the filing (`CheckFilingAsync`) and then records `BuildDecision` of the stored member alone. That is the same id and the same hash, so the writer answers a second call with the first record (`AlreadyRecorded`) and writes nothing. The repeat's builder still throws, so a repeat never applies. In a conflict lost to a commit for the same firm (`AfterConflictAsync`), the rights and the filing were already asked before this request's own apply attempt, so the filing is not asked again. A repeat naming another firm, a disagreeing number, or a builder trip records nothing.
+- **200 means recorded.** Since 1c, `assigned` and `alreadyAssigned` are answered only after the record was written or found. The 200 body is unchanged: `AssignFirmResult.DecisionRecordId` is set but not rendered, keeping 1b's contract and the brief's "no ids" rule.
+
+**Decisions and interpretations (for review).**
+1. **There is no `link` step in 1c.** In approval, "link" writes the record id onto the approval row. Set firm has no column for that. Adding one is an escalation trigger, and the record is found by its key (`BillingDecisionKey`) anyway. The Signal link belongs to the close, which 16.7 moves to 095d-2. So `failedStep` is `record` or `filing`. This deviates from 1b's seam note ("failedStep (record, link)").
+2. **The record names the stored decider, not the completing caller.** A repeat by another reviewer who holds the core-record rights finishes the record. The record still names the reviewer whose apply it records (`stored.DeciderUserId`), because the hash covers the confirmer, so a different confirmer would be refused as other content (K2). The completing caller's own rights are asked first, so a caller without them gets the 1b refusal and records nothing.
+3. **On a repeat, the filing is asked after the repeat is confirmed and before the record.** It is not asked before `JudgeRepeatAsync`. The rights already make a caller without access see one answer whatever firm it names, and the filing depends on the invoice only. A transient fault and a mismatched core stamp both give `failedStep` `filing` (503), because the firm is set, so a "nothing changed" refusal would be untrue. A permanent mismatch will not clear on a repeat; check (f) reports it once the window has passed.
+4. **Check (f) lives in `Set-EbillingInvoiceFirmHoldColumn.ps1`** (16.7, binding; it already reads every submission's findings as System Administrator). No new script.
+
+**Check (f): `-Verify` "applied, no record".** The check is read-only in every mode. For each submission whose findings carry the `assignFirm` member:
+- The invoice is the one the submission id derives (`Get-InvoiceIdFor`, as the service reads it).
+- The key is `BillingDecisionKey.IdOf("sprk_invoice", invoice, decisionId)`, computed by a PowerShell twin.
+- The check reads `sprk_decisionrecords` filtered on `_sprk_regardinginvoice_value` and `sprk_actioncode eq 'assign-firm'` (top 10), and matches `"reviewId":"<key>"` in `sprk_steps`.
+- With no match, the row is INFO while `decidedOn` is within `-AppliedNoRecordWindowMinutes` (default 60, range 1 to 10080). After that window, `-Verify` reports it as FAIL (exit 1); `-WhatIf` and `-Apply` only report it.
+- A member that cannot be read is FAIL in `-Verify`.
+
+The constants, the key derivation and the behaviours are pinned in `InvoiceFirmHoldFieldSecurityAgreementTests`. The key vector was computed by the script's own functions in PowerShell 7.6 for submission `095d1b00-0000-4000-8000-000000000001`: invoice `029c724a-2f72-4a72-ea7b-4afcf625895d`, decision `b2a5b9b4-fd9d-68e8-abd8-711ccfc0be29`, key `cdd9ab2a-00b1-bbc7-bfbb-9a52d592570b`. The C# gives the same three. The pinned behaviours are the key text, the `sprk_steps` match, the window comparison, FAIL under `-Verify`, the GET (never a write), and the derived invoice id. Each is checked against a seeded drift.
+
+**Read-only run on spaarkedev1 (2026-11-04, GETs only).** `-Verify -BffApplicationIds 5967251e-...,1e40baad-...` exited **0**. Check (f) found 0 submissions with a Set-firm decision; no assign-firm has run on dev. The decision-record query shape was checked separately with a GET: the filter on `_sprk_regardinginvoice_value` and `sprk_actioncode` answered 200, and an existing invoice-filed record's `sprk_steps` holds `"reviewId":"<guid>"` in the form the match expects.
+
+**Known limits (K-class, none on a real path).**
+- **K1.** Check (f) trusts any `assign-firm` row on the invoice that carries the key. The writer's own lookup also requires `createdby` = the writer identity, but the script does not know that identity. A person would have to hand-craft a Decision Record carrying the key to hide a missing one from the report. That does not hide it from the BFF: the writer would refuse to treat that row as the record, and would write its own.
+- **K2.** A cancelled request after the apply propagates the cancellation, as approval does. The client gets no Incomplete body, and the repeat or check (f) covers it.
+- **K3.** The live seam test was not run (it writes to Dataverse; the owner's go is needed). The 16.6 merge gate therefore stays open. Until it has run, a key fault in a pair that differs from the two the allocator accepts would be a 500, with nothing written.
+
+**The live seam test (16.6 merge gate, NOT RUN).** `TrackingNumberAllocatorLiveTests.TwoRenumbersIntoOneFirmScope_TheLosersFaultIsALostRacePair_AndItRetriesToTheNextNumber`, in the new partial `TrackingNumberAllocatorLiveTests.Renumber.cs`.
+- It is skipped unless `SPAARKE_LIVE_TRACKING_DATAVERSE_URL` is set. It also skips, with the reason, when a no-firm create or the renumber is refused (`scope_key_inactive`, `schema_missing`).
+- Per round, it creates two no-firm submissions with one firm invoice number, then renumbers both into one firm's scope at once. The production allocator runs over the production SDK client. A pass-through Strict mock around `ExecuteTransactionAsync` records each refused transaction's `FailedRequestIndex` and the fault codes in its chain.
+- It asserts that both renumbers commit, as `.1` and `.2`. Every refused transaction must be (index 0 or none, `0x80060892`) or (index 0, `0x80040237`). The loser must hold `.2`, and both rows must be in the firm's scope with a previous sequence.
+- It allows up to 5 rounds to see a collision; with none, it fails ("the seam was not measured").
+- It deletes its rows by id and prefix, and asserts by query that none are left.
+
+**Tests.**
+- New service cases in `InvoiceAssignFirmServiceTests.Record.cs` (16):
+  - the record after the apply: built from the stored decision, with the facts as above, and last in the order;
+  - the record refused, faulting or unanswered gives Incomplete at `record` (3 cases);
+  - with the REAL allocator, Incomplete and then the repeat: the same decision recorded, one transaction, and the order rights → filing → record;
+  - the record already written gives 200 with that record;
+  - the rights asked again on a repeat (refused 403, unavailable 503, granted 200);
+  - the filing on a repeat (a transient fault, and another core record) gives Incomplete at `filing` and nothing recorded;
+  - a builder trip applies and records nothing;
+  - a conflict lost to the same firm records without a second filing;
+  - another firm, or another number, records nothing (2 cases).
+- Two existing repeat tests also assert the record (`Repeat_SameFirm_IsAlreadyAssigned`) or no record (`Repeat_WithoutCoreRights_...`).
+- Contract: `RecordFailsAfterTheApply_Is503Incomplete_WithTheStepOnly`. It runs through the real route and filters. The body holds `errorCode`, `failedStep` and the sentence, and no id, number or exception text.
+- Agreement: 8 new cases for check (f).
+- Before the change, the new tests do not compile against 1b's service (no `record` seam, no `Incomplete`). The fail-closed guards are proven by the seeds below.
+
+**Gates.**
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- Filtered `Sprk.Bff.Api.Tests`, `InvoiceAssignFirm|DecisionRecordWriter|BillingDecisionRecorder|DecisionCommit|TrackingNumberAllocator|SignalEvaluation|BillingFindingSignalMapper|InvoiceFirmHoldFieldSecurityAgreement`: **903 pass, 0 fail, 3 skipped** (the live tests).
+- `Spaarke.ArchTests` `DecisionRecord|Immutability|RouteAuthorizationGuard|FinanceStepZeroCoverage|InvoicePdfWriter`: **117 pass**. The assign-firm guards (`FindingsJsonAppOnlyReadGuard|InvoiceFirmHoldAppOnlyGuard|SubmissionTrackingScopeNotAccess|RecordOwnerAssignmentCensus|BillingDecision`) also pass: **80**.
+- `dotnet format whitespace --verify-no-changes`: the two source files are clean. The test files report only ENDOFLINE, as do the unchanged LF files next to them (repo state).
+- The full suite was not run (the machine is loaded; the brief asked for filtered runs).
+
+**Seed proofs (2026-11-04).** Each seed was restored byte-identical (`cmp`, SHA-256 `4369d68b4fc76d18...` after the last restore). Each was run on the `InvoiceAssignFirm` filter (109 tests).
+1. **The record failing after the apply gives 503 Incomplete, never 200.** Seed: the record's catch answers `Assigned`. **5 fail**: the three record-failure cases, the real-allocator Incomplete-then-repeat case and the contract 503 case.
+2. **A repeat never applies twice.** Seed: the repeat's builder `_ => throw new RepeatMustNotApplyException()` replaced by one that builds an apply. **4 fail**: `Repeat_ThatReachesTheApplyBuilder_NeverAppliesAndRecordsNothing`, 1b's builder-trip case, `Repeat_SameFirm_IsAlreadyAssigned` and `Conflict_LostToACommittedDecision(sameFirm)`.
+3. **A repeat asks the rights again before recording.** Seed: the stored-decision branch derives the core without calling `CheckCoreRightsAsync`. **7 fail**: the three `Repeat_ReasksTheRights_...` cases, the real-allocator repeat (its order), 1b's two fix-round-3 service cases and the fix-round-3 contract case.
+
+**Publish size.** Method: `git archive` of each commit, then `dotnet publish src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Release -r linux-x64 --self-contained false`, framework-dependent, PDBs included, 192 files each side, measured uncompressed (`du -sb`). Base: the work base `637da3e730`, which holds 1a and 1b.
+| | Base `637da3e730` | Head `cf97f7c7c6` | Delta |
+|---|---:|---:|---:|
+| Publish folder | 137,561,672 | 137,569,632 | **+7,960 B** |
+| `Sprk.Bff.Api.dll` | 25,351,680 | 25,358,848 | +7,168 B |
+| `Sprk.Bff.Api.pdb` | 4,380,884 | 4,381,676 | +792 B |
+
+No package or file was added. The delta is far below the +5 MB threshold, and the total is far below 55 MB of first-party output (the folder is dominated by framework-dependent third-party assemblies, unchanged).
+
+**ADR check (inline).**
+- ADR-002: one owner. The service is the only writer of the assign-firm record and the allocator the only writer of the number. No plugin.
+- ADR-019: stable codes, and the fixed sentence with no exception text.
+- ADR-028 and the auth constraints: no new right, no new route. The caller's rights are asked again before a repeat records.
+- ADR-010: no DI change.
+- ADR-038: unit, contract and agreement tests; the live test is opt-in and skipped by default.
+- CLAUDE.md 11, component justification. The new surface is one outcome, one code and one script check.
+  - Existing: the 1b seam (`BuildDecision`), the recorder, and the firm-hold script's `-Verify`.
+  - Extension: each of those is extended; nothing new is added beside them.
+  - Cost of doing nothing: every `Assigned` leaves an "applied, no record" row, the Decision Record of an externally visible Tier4 decision never exists, and nobody is told.
+
+**For 095d-2.**
+- Close the shared Signal as ConditionCleared after the re-run, with the assign-firm record id in the close facts (16.7). Find the record by `BillingDecisionKey` (`sprk_invoice`, invoice, `DecisionIdFor(submission)`); `BillingDecisionRecorder.FindStoredResolvedSetAsync` uses the same lookup.
+- Keep the stored `assignFirm` member: the full mapping lives only there, and check (f) and the repeat read it.
+- A re-run that rewrites the findings must keep `assignFirm` intact, or the repeat answers `findings_unreadable` and check (f) loses the row.
+- `rulesRerun` stays "pending" in the stored member. If 095d-2 changes it, the change must not alter `BuildDecision`'s hashed values (`firm`, `note`), because only the facts carry `rulesRerun`.
+- The 16.6 live seam gate (K3 above) still has to run with the owner's go before 095d-1 merges to master. 095d-1 still never reaches master without 095d-2.
+
+#### 16.9 fix round 1 (adversarial pass 1 of 095d-1c, 2026-11-04)
+
+Scoped test and hardening fixes; no new endpoint, column, privilege or response-body change.
+
+**What changed.**
+- **A (F3), the repeat records from the stored member alone.** Test `World.Assign()` takes `deciderUserId` (default `Decider`) and `ct`. New `Repeat_ByAnotherCaller_RecordsTheStoredMemberAlone`: caller A with note N1 ends Incomplete (record fails); caller B repeats with N2; exactly one record is written by the repeat, equivalent to `BuildDecision(InvoiceId, SubmissionId, AssignFirmStoredDecision.Read(<stored findings>))`, decider A (not B), values carry N1 and not N2, no apply. `Repeat_ReasksTheRights_...` now repeats as another caller with a request note and, in the granted case, asserts the record's decider is the stored one and it holds no `note`.
+- **B (F3), the cancellation filter.** `RecordFails_AfterTheApply_IsIncomplete_Never200` gains `timeout-cancel` (a `TaskCanceledException` while the request token is not cancelled: 503 incomplete `record`). New `RecordCancelled_ByTheCallersToken_Propagates`: the caller's token is cancelled while the record is in flight and the `OperationCanceledException` propagates (neither Incomplete nor 200); both locks released.
+- **C (K3 hardening).** `JudgeRepeatAsync` refuses as the existing 409 `changed` when `stored.DecisionId != DecisionIdFor(submissionId)`, after the same-firm check and before the allocator is asked or anything is recorded. Test `Repeat_StoredDecisionIdNotDerivedFromTheSubmission_IsChanged_AndRecordsNothing` (nothing recorded, allocator not asked).
+- **D (K2).** A repeat's completion log ("Decision Record {RecordId} ({State})") now also carries `{CallerUserId}`: the caller's systemuserid is threaded `SetFirmAsync` to `AssignHeldAsync`/`AfterConflictAsync` to `JudgeRepeatAsync` to `CompleteRepeatAsync` to `RecordAsync(callerUserId)`. The first call's log is unchanged (`callerUserId` null). Asserted in the A test and, negatively, in `Assigned_RecordsTheStoredDecision_AfterTheApply` (test `World` now captures logs through a `CapturingLogger`).
+- **E (K1).** On a repeat, a filing mismatch whose code is `core_unresolved` (the derived core stamp is another record, or a permanent derivation error) logs at Error with `Permanent=true` and `FilingCode`; a transient fault does not. Response body unchanged. Test `Repeat_FilingMismatch_PermanentIsMarkedInTheLog` (transient: no marker; permanent: one marker).
+- **F (K4).** `Get-AssignFirmStored` in `scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1` (check (f)) treats a member as readable only with the keys `AssignFirmStoredDecision.Read` needs: `decisionId`, `firmId`, `deciderUserId` (Guids), `previousTrackingNumber`, `trackingNumber` (non-empty text), `sequence`, `firmSetLines` (integers), `decidedOn`, `firmMissingSignals` (`setReadAtUtc` and a `signals` array of `{id, policyCode}`), and for a `renamed` array each entry's `entity`, `id`, `column`, `from`, `to`. A member missing one, or findings JSON that does not parse, is FAIL under `-Verify` (INFO otherwise) with a neutral message that names only the submission id the script already prints; unreadable rows now also stop the "(f) OK" line. The script stays read-only (`Invoke-DvGet` only). No Pester tests exist for this script: parse-checked with `[System.Management.Automation.Language.Parser]::ParseFile` (0 errors) and the six helper functions were run over 16 sample submissions (good, empty signals/renamed, each required key missing, signals without `setReadAtUtc`, bad rename entry, findings not JSON, no member, blank): all classified as expected. That harness is a scratch script, not committed.
+
+**Tests.** Filtered run (`InvoiceAssignFirm | BillingDecisionRecorder | InvoiceFirmHoldFieldSecurityAgreement | DecisionRecordWriter`): 0 failed, 454 passed (448 before this round; +6 cases: `timeout-cancel`, the cancel-propagates test, the another-caller repeat, the stored-id test and the two filing-marker cases). `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors.
+
+**Seed proofs** (each restored; `git diff --exit-code` on the file passed after each restore, run on the committed tree):
+- Seed 4, the repeat builds the decision from the request (`stored = stored with { DeciderUserId = deciderUserId, Note = note }` in the repeat branch of `AssignHeldAsync`): `Repeat_ByAnotherCaller_RecordsTheStoredMemberAlone` FAILS, and the tightened `Repeat_ReasksTheRights_..._None` FAILS (2 failed).
+- Seed 5a, the filter simplified to `ex is not OperationCanceledException`: the `timeout-cancel` case FAILS (1 failed).
+- Seed 5b, the filter removed (`catch (Exception ex)`): `RecordCancelled_ByTheCallersToken_Propagates` FAILS (1 failed).
+- Seed 6, the stored-id check disabled (`if (false && ...)`): `Repeat_StoredDecisionIdNotDerivedFromTheSubmission_...` FAILS (1 failed).
+- Not seeded: D and E are log-only; their tests assert the structured parameters (a log-only test proves the parameter is present, not that an operator reads it).
+
+**Skipped / out of scope.** The writer's duplicate-record window (pre-existing, not 1c). Nothing else skipped.
+
+#### 16.9 fix round 2 (uac-r2 final review of 095d-1c, 2026-11-05)
+
+Scoped to the access boundary around the stored `assignFirm` member, one test gap and one audit log. No new endpoint, column, privilege or response-body change.
+
+**Correction to fix round 1 (item C).** The decision-id check in `JudgeRepeatAsync` (`stored.DecisionId != DecisionIdFor(submissionId)` is 409 `changed`) catches a mismatched or copied id. It does not catch an edit of the member: the id is derived from the submission, so an edited member that keeps the derived id passes it. The access boundary for the member is F4-1 below, not that check.
+
+**What changed.**
+- **F4-1 (access boundary), `sprk_findingsjson` on `sprk_invoicesubmission`.** Since 1c the stored `assignFirm` member decides the immutable Decision Record's decider, note and date, but the column was not in the app-only refusal's `AccessColumns`, so a system-run Update Record node, a system-run output mapping or Repair could write it (field security does not stop those: the BFF app user is in the writer profile). Now: (1) `ParentLineage.cs` lists `InvoiceSubmissionPersister.SubmissionFindingsJson` in `AccessColumns` for `sprk_invoicesubmission`, with a reason branch ("it decides no access; only typed writers write it: the submission persister, InvoiceCorrectionReevaluation, SubmissionOverrideService and Set firm (InvoiceAssignFirmService)"). The typed writers go through `IGenericEntityService` and never ask this refusal. (2) `RecordTableRules.cs` lists it in `MappingProtectedColumns` for `sprk_invoicesubmission`, beside the core lookups. (3) `FindingsJsonFieldSecurityAgreementTests` pins the column's field security (below).
+- **What was found while checking the claim "person-run and field-mapping paths are already blocked" (it was only partly true).** Verified: the secured column has one update-capable profile ("Spaarke BFF-Managed Field Writers", 4/4/4 in `FieldSecurityProfiles.xml`) and no reader profile, so a person-run write is blocked, except for System Administrators (a platform rule, see K5). Not true: `MappingProtectedColumns` for the submission held only the core lookups, so create-time and Repair mapping did not protect the column; and no field-security agreement test covered the column (only `sprk_firmhold`, `sprk_resubmissionof`, `sprk_sourceemaildocument`, the regarding pair, the secure flag and the firm reason had one). Both gaps are closed here. The code comment on `AccessColumns` states exactly what holds.
+- **Open finding, a decision for the owner and the field-mapping project (not changed here).** The field-mapping PUSH to existing rows (`FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync`) asks `RefuseAppOnlyWrite` as `WriteIdentity.Caller` and never reads `MappingProtectedColumns` (only the create and Repair mapping in `RecordCreationService` do). So for `sprk_findingsjson` the push relies on field security alone (System Administrators excepted) and on operator precondition (p4) of `Set-EbillingFindingsJsonFieldSecurity.ps1` (no `sprk_fieldmappingrule` row targets the column). Making the push honour `MappingProtectedColumns` would change it for every table (matter number, the secure-root access columns, which the push comment keeps editable for a Write holder on purpose), so it was not done here. For that reason the requested test "a mapping rule is refused through the real push" was not written (it would have to assert a hole); the tests go through the real create service instead (below).
+- **F3-1 (test).** `Repeat_LegacyNoSequence_StoredDecisionDecides` now also asserts one record written, the call order ending `filing`, `record`, and no transaction. New `Repeat_LegacyNoSequence_FilingNotConfirmed_IsIncomplete_AndRecordsNothing`: on the 16.6.1 branch a filing that cannot be confirmed is 503 incomplete at `filing`, with no record.
+- **K2 (log).** `Incomplete(...)` takes an optional `callerUserId`; a repeat's incomplete log (filing step, record step) carries `{CallerUserId}`; the first apply's incomplete passes none. The response is unchanged. Test `Repeat_Incomplete_LogsTheRepeatingCaller` (both steps; fixed sentence, no exception text), and the first-apply case in `RecordFails_AfterTheApply_IsIncomplete_Never200` asserts no `CallerUserId`.
+- **Guard.** `FindingsJsonAppOnlyReadGuardTests` C1: `InheritedAccessPermission` (`ParentLineage.cs`) and `RecordTableRules` now name the column, only to refuse or to keep mapping from writing it. They are in a new `RefusalOnlyTypes` list (C1 and C2 apply; C3 does not, they hold no client), each with a one-line note, and a new test `RefusalOnlyTypesReadNothing` pins that neither reaches `IGenericEntityService`. The guard is not widened otherwise.
+
+**Tests.** Filtered unit run (`InvoiceAssignFirm | BillingDecisionRecorder | InvoiceFirmHoldFieldSecurityAgreement | DecisionRecordWriter | ParentLineage | RefuseAppOnlyWrite | FieldSecurityAgreement | AccessTableAppOnlyWriterTests | RecordTableRules | RecordCreationServiceMappingSeamTests | FieldMapping | ContactAccessColumnGuard | InvoiceSubmissionPersister | SubmissionOverride | InvoiceCorrectionReevaluation`): 0 failed, 2570 passed. The round-1 filter alone (`InvoiceAssignFirm | BillingDecisionRecorder | InvoiceFirmHoldFieldSecurityAgreement | DecisionRecordWriter`): 0 failed, 457 passed (454 before; +3: the legacy filing failure and the two K2 cases). ArchTests (`FindingsJsonAppOnlyReadGuard | AccessTableReaderScan | RefuseAppOnlyWriteCallerIdentityGuard | SubmissionTrackingScopeNotAccessGuard | InvoiceFirmHoldAppOnlyGuard | RecordFamilyEdgesGuard | ResubmissionOfAppOnlyWriteGuard | SubmissionSourceEmailAppOnlyGuard`): 0 failed, 63 passed. `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings. New tests: `AnAppOnlyWriteOfTheSubmissionsFindingsJson_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode` (must fire: an app-only output-mapping write and an app-only Update Record node write, three key forms; must not fire: another table, a neighbouring name, the caller identity; the typed writers are evidenced by `InvoiceAssignFirmServiceTests`, which write the column through `IGenericEntityService` and still pass), the column added to the census (`TableAccessColumns`, `TheAccessColumnMap_IsBuiltFromTheReadersOwnConstants`, the `AccessTableReaderScanTests` reason text), `PostMappingDefault_TheSubmissionsFindingsJson_IsAnArgumentError` and `ProtectedFromMapping_TheFindingsJson_IsOnTheSubmissionOnly` (the create service), and `FindingsJsonFieldSecurityAgreementTests` (18 cases: solution, script, parser drifts, and in-memory controls).
+
+**Seed proofs** (each restored; byte-identical by `cmp` against the pre-seed copy, the tree being uncommitted at the time; the solution XML by `git diff --exit-code`):
+- F4-1 entry removed from `AccessColumns`: 7 failed (the new refusal test, the census equality, the readers-constants test and the four forms of `AnAccessColumn_InAnyForm_IsRefusedOnItsTable`).
+- F4-1 entry removed from `MappingProtectedColumns`: 2 failed (the post-mapping-default test and the protected-set test).
+- Field security, on the real `FieldSecurityProfiles.xml`: writer `CanUpdate` 4 changed to 0 fails the solution test and the controls (7 failed); a reader-profile row added on the column fails the same set (7 failed). The in-memory controls also fail on a reader grant, each changed writer mask element, another profile with update, and `IsSecured` 0; the System Administrator profile is exempt.
+- Guard: `InheritedAccessPermission` removed from `RefusalOnlyTypes` fails C1.
+- F3-1: the 16.6.1 branch changed to answer `Assigned(...)` directly (1b's form) fails the strengthened legacy test and the new filing-failure test (2 failed).
+- K2: `callerUserId` not passed to `Incomplete` fails both K2 cases (2 failed).
+
+**Accepted known limits.**
+- K3. The conflict path reuses the pre-apply core (the same window as the first apply).
+- K4. Check (f) reads 10 rows per invoice; this matters only with hand-made Decision Records.
+- K5 (platform). System Administrators keep full access to every secured column, `sprk_findingsjson` included (the platform's System Administrator field security profile has a row on each). The same for every secured column in the solution; not closed by code.
+
+**Shared file.** `RecordTableRules.cs` is shared with the field-mapping project: whoever lands second rebases and keeps the `sprk_findingsjson` entry in the `sprk_invoicesubmission` rule.
+
+**Skipped / out of scope.** The push's use of `MappingProtectedColumns` (open finding above). The `122-findings-json-field-secure.md` reviewed-readers list was not edited (it lists readers; the two new guard entries read nothing).
+
+The closing `rework:` line is a status marker read by `scripts/ai-cost/spend-report.py`, so it is updated to `fix-round-2`.
+
+rework: fix-round-2 task 095d-1c

@@ -30,7 +30,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.FinanceSubmission;
 /// and "a redelivered create never mints a second number" are actually decided.
 /// </summary>
 [Trait("Category", "Live")]
-public sealed class TrackingNumberAllocatorLiveTests
+public sealed partial class TrackingNumberAllocatorLiveTests
 {
     private const string UrlVar = "SPAARKE_LIVE_TRACKING_DATAVERSE_URL";
     private const string CallersVar = "SPAARKE_LIVE_TRACKING_CALLERS";
