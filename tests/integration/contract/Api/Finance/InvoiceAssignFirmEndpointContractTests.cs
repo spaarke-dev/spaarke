@@ -276,6 +276,31 @@ public sealed class InvoiceAssignFirmEndpointContractTests
         }
     }
 
+    [Fact(DisplayName = "095d-1c: a record that fails after the apply is 503 with errorCode incomplete, failedStep and the fixed sentence only - no id, no exception text, never 200")]
+    public async Task RecordFailsAfterTheApply_Is503Incomplete_WithTheStepOnly()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantInvoiceWrite();
+        host.GrantFirm(AccessRights.Read | AccessRights.AppendTo);
+        host.World.OnRecord = _ => throw new TimeoutException("secret socket text");
+
+        var response = await host.SendAsync(new { firmId = Firm });
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var body = await response.Content.ReadAsStringAsync();
+        var json = JsonNode.Parse(body)!;
+        json["errorCode"]!.GetValue<string>().Should().Be(AssignFirmCodes.Incomplete);
+        json["failedStep"]!.GetValue<string>().Should().Be("record");
+        json["detail"]!.GetValue<string>().Should().Be("The firm was set, but its decision was not recorded. Repeat the request to finish it.");
+        body.Should().NotContain("secret")
+            .And.NotContain(InvoiceId.ToString())
+            .And.NotContain(Services.Finance.InvoiceAssignFirmServiceTests.SubmissionId.ToString())
+            .And.NotContain(InvoiceAssignFirmService.DecisionIdFor(Services.Finance.InvoiceAssignFirmServiceTests.SubmissionId).ToString())
+            .And.NotContain("INV-7.");
+        json["decisionId"].Should().BeNull();
+        host.World.Applied.Should().NotBeNull("the apply was sent before the record");
+    }
+
     // ── Host ──
 
     private static async Task<string?> ErrorCode(HttpResponseMessage response) =>
