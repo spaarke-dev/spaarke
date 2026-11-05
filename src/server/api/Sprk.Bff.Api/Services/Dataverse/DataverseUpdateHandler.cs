@@ -243,7 +243,8 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     /// checked that the row exists, and a row deleted since must not be re-created by the upsert (ebilling-r1 #2081). It is
     /// refused like the guard, nothing created. #2257 (master merge): every write runs as <paramref name="impersonateSystemUserId"/>
     /// when the run has one (a person's run writes AS that person) and app-only otherwise; a person's "not found" is answered as
-    /// "could not be read", so it never tells them whether the id names a row they cannot read.
+    /// "could not be read", so it never tells them whether the id names a row they cannot read. Every other table is written
+    /// update-only as well (<see cref="RecordNotFoundRefusal"/>).
     /// </summary>
     private async Task PatchAsync(
         string entityLogicalName, Guid recordId, Dictionary<string, object?> fields, CancellationToken ct, Guid? impersonateSystemUserId)
@@ -260,8 +261,28 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             return;
         }
 
-        await _fieldMappingService.UpdateRecordFieldsAsync(entityLogicalName, recordId, fields, ct, impersonateSystemUserId);
+        // Every other table is written UPDATE-ONLY too: this handler updates an existing record and never creates one. An id
+        // that names no row writes nothing and is refused (RecordMissing, the code the re-file path gives a missing row).
+        try
+        {
+            await _fieldMappingService.UpdateExistingRecordFieldsAsync(entityLogicalName, recordId, fields, impersonateSystemUserId, ct);
+        }
+        catch (KeyNotFoundException)
+        {
+            throw RecordNotFoundRefusal(entityLogicalName, impersonateSystemUserId);
+        }
     }
+
+    /// <summary>
+    /// The refusal for an update whose record does not exist (the update-only write found no row; nothing was written). A
+    /// write made AS a person says "not found or could not be read", as the invoice path does for one
+    /// (<c>notFoundAsReadFailed</c>), so the answer does not depend on whether the id names a row they cannot read.
+    /// </summary>
+    internal static RecordOwnerUnresolvedException RecordNotFoundRefusal(string entityLogicalName, Guid? impersonateSystemUserId) =>
+        new(entityLogicalName, RecordOwnerRefusal.RecordMissing,
+            impersonateSystemUserId is null
+                ? $"The record was not found; nothing was updated ({RecordOwnerRefusal.RecordMissing})."
+                : $"The record was not found or could not be read; nothing was updated ({RecordOwnerRefusal.RecordMissing}).");
 
     /// <summary>
     /// Update record with optimistic concurrency control.

@@ -131,12 +131,12 @@ public class FieldMappingPushAuthorizationContractTests
         host.ProbedSources.Should().Equal(new[] { ("sprk_matters", MatterId) }, "the SOURCE is asked as the caller, by its entity set");
         host.ChildQueries.Should().ContainSingle().Which.Should().Be(
             ("sprk_events", $"$filter=_sprk_regardingmatter_value eq {MatterId:D}&$select=sprk_eventid&$top=501", CallerSystemUserId));
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            "sprk_event", ChildA, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), CallerSystemUserId), Times.Once);
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            "sprk_event", ChildB, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), CallerSystemUserId), Times.Once);
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null),
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            "sprk_event", ChildA, It.IsAny<Dictionary<string, object?>>(), CallerSystemUserId, It.IsAny<CancellationToken>()), Times.Once);
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            "sprk_event", ChildB, It.IsAny<Dictionary<string, object?>>(), CallerSystemUserId, It.IsAny<CancellationToken>()), Times.Once);
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()),
             Times.Never, "no app-only child write remains on this route");
         host.FieldMappings.Verify(f => f.QueryChildRecordIdsAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
@@ -158,8 +158,8 @@ public class FieldMappingPushAuthorizationContractTests
         var text = await response.Content.ReadAsStringAsync();
         JsonNode.Parse(text)!["totalRecords"]!.GetValue<int>().Should().Be(1);
         text.Should().NotContain(ChildB.ToString());
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), ChildB, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Never);
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), ChildB, It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // =========================================================================================
@@ -223,10 +223,10 @@ public class FieldMappingPushAuthorizationContractTests
         });
         dataverse.Requests.Should().OnlyContain(r => r.CallerId == CallerSystemUserId.ToString(),
             "every read on the push, metadata included, impersonates the caller");
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            "sprk_event", ChildA, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), CallerSystemUserId), Times.Once);
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            "sprk_event", ChildB, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), CallerSystemUserId), Times.Once);
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            "sprk_event", ChildA, It.IsAny<Dictionary<string, object?>>(), CallerSystemUserId, It.IsAny<CancellationToken>()), Times.Once);
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            "sprk_event", ChildB, It.IsAny<Dictionary<string, object?>>(), CallerSystemUserId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static HttpResponseMessage Rows(params object[] rows) => new(HttpStatusCode.OK)
@@ -295,8 +295,8 @@ public class FieldMappingPushAuthorizationContractTests
         var response = await host.SendAsync(Authenticated(PushBody()));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never, "a value the caller cannot read is never written anywhere");
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
         json["skippedCount"]!.GetValue<int>().Should().Be(2);
@@ -315,8 +315,8 @@ public class FieldMappingPushAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         Normalize(await response.Content.ReadAsStringAsync()).Should().Be(Normalize(await UnknownSourceBodyAsync()));
         host.ChildQueries.Should().BeEmpty();
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -375,8 +375,8 @@ public class FieldMappingPushAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>().Should().Be(reasonCode);
         host.ChildQueries.Should().BeEmpty("the route never guesses which lookup names the parent");
-        host.FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -706,9 +706,9 @@ public class FieldMappingPushAuthorizationContractTests
             Entities.Setup(e => e.RetrieveAsync(targetEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id));
             FieldMappings
-                .Setup(f => f.UpdateRecordFieldsAsync(
-                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-                .Callback((string _, Guid id, Dictionary<string, object?> payload, CancellationToken _, Guid? _) =>
+                .Setup(f => f.UpdateExistingRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .Callback((string _, Guid id, Dictionary<string, object?> payload, Guid? _, CancellationToken _) =>
                     Writes.Add((id, new Dictionary<string, object?>(payload))))
                 .Returns(Task.CompletedTask);
             // ebilling-r1 #2081: an invoice or line is pushed UPDATE-ONLY (If-Match: *), still as the caller.
@@ -835,8 +835,8 @@ public class FieldMappingPushAuthorizationContractTests
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
             FieldMappings.Verify(f => f.RetrieveRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
-            FieldMappings.Verify(f => f.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()), Times.Never);
+            FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
             ChildQueries.Should().BeEmpty("no child query — as the caller or app-only — before the source is authorized");
             SourceReads.Should().BeEmpty("no source read — as the caller or app-only — before the source is authorized");
         }

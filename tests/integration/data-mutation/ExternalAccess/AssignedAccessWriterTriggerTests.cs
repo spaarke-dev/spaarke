@@ -161,8 +161,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             "sprk_matter", matter, null, null,
             new[] { new RenderedLookup(Attorney1, "contact", contact.ToString("D")) }), CancellationToken.None);
 
-        fieldMappings.Verify(f => f.UpdateRecordFieldsAsync("sprk_matter", matter, It.IsAny<Dictionary<string, object?>>(),
-            It.IsAny<CancellationToken>(), null), Times.Once);
+        fieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync("sprk_matter", matter, It.IsAny<Dictionary<string, object?>>(),
+            null, It.IsAny<CancellationToken>()), Times.Once);
         _h.Grants.ActiveRowsOf(matter, contact).Should().ContainSingle();
     }
 

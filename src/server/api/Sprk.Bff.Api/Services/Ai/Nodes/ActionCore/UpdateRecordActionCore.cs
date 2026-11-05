@@ -238,12 +238,21 @@ internal sealed class UpdateRecordActionCore
                 return;
             }
 
-            await _fieldMappingService.UpdateRecordFieldsAsync(
-                input.EntityLogicalName,
-                input.RecordId,
-                updatePayload,
-                ct,
-                input.ImpersonateSystemUserId).ConfigureAwait(false);
+            // Every other table is written UPDATE-ONLY too: this node updates an existing record and never creates one. An id
+            // that names no row writes nothing and is refused, as the generic update handler refuses it.
+            try
+            {
+                await _fieldMappingService.UpdateExistingRecordFieldsAsync(
+                    input.EntityLogicalName,
+                    input.RecordId,
+                    updatePayload,
+                    input.ImpersonateSystemUserId,
+                    ct).ConfigureAwait(false);
+            }
+            catch (KeyNotFoundException)
+            {
+                throw DataverseUpdateHandler.RecordNotFoundRefusal(input.EntityLogicalName, input.ImpersonateSystemUserId);
+            }
         }
 
         // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,

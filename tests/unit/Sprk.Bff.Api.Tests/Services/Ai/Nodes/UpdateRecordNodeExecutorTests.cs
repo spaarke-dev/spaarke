@@ -590,10 +590,10 @@ public class UpdateRecordNodeExecutorTests
             .Setup(s => s.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, CancellationToken _) => Sprk.Bff.Api.Tests.TestInfrastructure.EntitySetNameFixtures.SetOf(table));
         _dataverseServiceMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, fields, _, _) => written.Add(fields))
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((_, _, fields, _, _) => written.Add(fields))
             .Returns(Task.CompletedTask);
 
         var serviceProviderMock = new Mock<IServiceProvider>();
@@ -604,6 +604,63 @@ public class UpdateRecordNodeExecutorTests
         scopeMock.Setup(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
         _scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
         return written;
+    }
+
+    #endregion
+
+    #region Update-only write
+
+    [Fact]
+    public async Task ExecuteAsync_ARecordIdThatNamesNoRow_FailsTheNode_AndNothingIsCreated()
+    {
+        // The node updates an existing record only (UpdateExistingRecordFieldsAsync, If-Match: *): Dataverse refuses an unknown
+        // id, nothing is written, and the node fails with the record-missing refusal (never the create-if-missing write).
+        var recordId = Guid.NewGuid();
+        var context = CreateValidContext($@"{{
+            ""entityLogicalName"":""sprk_document"",
+            ""recordId"":""{recordId}"",
+            ""fields"":{{""sprk_status"":""Completed""}}
+        }}");
+        SetupMockPassThrough();
+        _dataverseServiceMock
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                "sprk_document", recordId, It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new KeyNotFoundException("sprk_document record was not found."));
+
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("The record was not found; nothing was updated")
+            .And.Contain(Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.RecordMissing);
+        _dataverseServiceMock.Verify(
+            s => s.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AnExistingRecord_IsWrittenUpdateOnly()
+    {
+        var recordId = Guid.NewGuid();
+        var context = CreateValidContext($@"{{
+            ""entityLogicalName"":""sprk_document"",
+            ""recordId"":""{recordId}"",
+            ""fields"":{{""sprk_status"":""Completed""}}
+        }}");
+        SetupMockPassThrough();
+
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        _dataverseServiceMock.Verify(
+            s => s.UpdateExistingRecordFieldsAsync(
+                "sprk_document", recordId, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_status")), null,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        _dataverseServiceMock.Verify(
+            s => s.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            Times.Never);
     }
 
     #endregion
@@ -669,8 +726,8 @@ public class UpdateRecordNodeExecutorTests
         // Never a raw pass-through / raw-string field write and never an unhandled exception —
         // ExecuteAsync returns a controlled NodeOutput.Error before the Dataverse PATCH is issued.
         _dataverseServiceMock.Verify(
-            s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()),
+            s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -699,9 +756,9 @@ public class UpdateRecordNodeExecutorTests
 
         Dictionary<string, object?>? capturedFields = null;
         _dataverseServiceMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, fields, _, _) => capturedFields = fields)
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((_, _, fields, _, _) => capturedFields = fields)
             .Returns(Task.CompletedTask);
 
         // Act
@@ -732,9 +789,9 @@ public class UpdateRecordNodeExecutorTests
 
         Dictionary<string, object?>? capturedFields = null;
         _dataverseServiceMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, fields, _, _) => capturedFields = fields)
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((_, _, fields, _, _) => capturedFields = fields)
             .Returns(Task.CompletedTask);
 
         // Act
@@ -766,9 +823,9 @@ public class UpdateRecordNodeExecutorTests
 
         Dictionary<string, object?>? capturedFields = null;
         _dataverseServiceMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, _, fields, _, _) => capturedFields = fields)
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((_, _, fields, _, _) => capturedFields = fields)
             .Returns(Task.CompletedTask);
 
         // Act

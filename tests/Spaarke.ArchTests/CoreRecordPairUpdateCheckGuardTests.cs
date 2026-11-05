@@ -14,8 +14,9 @@ namespace Spaarke.ArchTests;
 /// below with a one-line reason it cannot carry the pair (its table or its columns are fixed).
 /// </summary>
 /// <remarks>
-/// <para><b>Generic update APIs</b>: <see cref="IFieldMappingDataverseService.UpdateRecordFieldsAsync"/> (the field-dictionary
-/// update of the Update Record node, a playbook's output mapping and the field-mapping push) and
+/// <para><b>Generic update APIs</b>: <see cref="IFieldMappingDataverseService.UpdateRecordFieldsAsync"/> and its update-only
+/// counterpart <c>UpdateExistingRecordFieldsAsync</c> (the field-dictionary update of the Update Record node, a playbook's
+/// output mapping and the field-mapping push, which write update-only) and
 /// <see cref="IDataverseUserClient.PatchAsync(string, string, CancellationToken)"/> with its row-version overload (the caller's
 /// own PATCH, which the chat update tool sends). A call through the interface or through a type that implements it counts.</para>
 /// <para><b>Why IL.</b> <see cref="IlCallScan"/> reads the compiled method references, so the receiver's TYPE decides (a Graph
@@ -24,9 +25,8 @@ namespace Spaarke.ArchTests;
 /// <c>&lt;Member&gt;</c> prefix the compiler gives it), so the check and the write must be in the same member; a check in a
 /// caller does not cover a helper that writes, which is listed instead. Overloads of one name are one entry. Types that
 /// implement a scanned API are the API itself and are not callers.</para>
-/// <para><b>Not covered</b>: an update sent through another API (<c>UpdateExistingRecordFieldsAsync</c>,
-/// <c>IGenericEntityService.UpdateAsync</c>, a hand-written <c>HttpClient</c> PATCH) and a method chosen at run time
-/// (<see cref="IlCallScan"/> remarks). Enforced by: this guard (ArchTests in CI and the Stop hook) and the behaviour tests
+/// <para><b>Not covered</b>: an update sent through another API (<c>IGenericEntityService.UpdateAsync</c>, a hand-written
+/// <c>HttpClient</c> PATCH) and a method chosen at run time (<see cref="IlCallScan"/> remarks). Enforced by: this guard (ArchTests in CI and the Stop hook) and the behaviour tests
 /// (<c>CoreRecordPairUpdateWriterTests</c>, <c>SecureChildOwnershipAiToolTests.CoreRecordPairUpdate</c>).</para>
 /// <para><b>Closed list, no baseline</b>: a listed method that no longer calls a scanned API, or now asks the check, fails the
 /// test, so the list only shrinks. <b>Controls</b>: <see cref="Detector_MustFireAndMustNotFire"/> runs the same detector over
@@ -41,7 +41,17 @@ public class CoreRecordPairUpdateCheckGuardTests
         (typeof(Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler), "PatchAsync",
             "Private write helper of UpdateAsync (through WriteAsync / UpdateWithOptimisticConcurrencyAsync), which asks the check first."),
 
+        // A helper whose callers ask the check first, on tables that hold no core record pair.
+        (typeof(Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard), "UpdateExistingAsync",
+            "Writes a sprk_invoice or sprk_billingevent only (IsUpdateOnlyTarget); its callers' members ask the check first."),
+
         // Fixed tables: none carries the core record pair.
+        (typeof(Sprk.Bff.Api.Services.Finance.FinanceRollupService), "WriteRollupAsync",
+            "Writes a matter's or project's finance rollup columns; a fixed column set."),
+        (typeof(Sprk.Bff.Api.Services.Finance.InvoiceTotalsService), "RecalculateAsync",
+            "Writes an adjustment sprk_billingevent's sprk_amount only; a fixed column set."),
+        (typeof(Sprk.Bff.Api.Services.ScorecardCalculatorService), "UpdateEntityGradesAsync",
+            "Writes a matter's or project's six grade columns; a fixed column set."),
         (typeof(Sprk.Bff.Api.Services.Dataverse.ProjectMatterFiling), "FileAsync",
             "Writes a sprk_project's regarding pair only."),
         (typeof(Sprk.Bff.Api.Api.Events.EventDueAssigneeWrite), "ApplyAsync",
@@ -127,7 +137,7 @@ public class CoreRecordPairUpdateCheckGuardTests
 
         Assert.True(problems.Count == 0,
             "The core record pair of a Signal and a Decision Record is fixed after create on BFF update paths. A method that sends a "
-            + "generic update (IFieldMappingDataverseService.UpdateRecordFieldsAsync, IDataverseUserClient.PatchAsync) asks "
+            + "generic update (IFieldMappingDataverseService.UpdateRecordFieldsAsync or UpdateExistingRecordFieldsAsync, IDataverseUserClient.PatchAsync) asks "
             + "RecordTableRules.RefuseFixedAfterCreateColumns before it writes, or is listed in FixedPayloadWriters with the reason "
             + "its table or columns are fixed:\n" + string.Join("\n", problems));
     }
@@ -194,7 +204,8 @@ public class CoreRecordPairUpdateCheckGuardTests
         if (declaring is null)
             return false;
 
-        return (target.Name == nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync)
+        return (target.Name is nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync)
+                    or nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)
                 && typeof(IFieldMappingDataverseService).IsAssignableFrom(declaring))
                || (target.Name == nameof(IDataverseUserClient.PatchAsync)
                    && typeof(IDataverseUserClient).IsAssignableFrom(declaring));

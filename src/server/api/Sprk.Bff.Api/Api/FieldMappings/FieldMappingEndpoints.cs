@@ -1187,6 +1187,7 @@ public static class FieldMappingEndpoints
                     // guard above read its row; one deleted since must not be re-created by the upsert. The not-found answer
                     // is thrown so a re-file stops before its owner step, and it fails THIS child with the guard's code.
                     string? goneCode = null;
+                    var recordNotFound = false;
                     async Task Write(CancellationToken token)
                     {
                         if (Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(targetEntity))
@@ -1201,8 +1202,18 @@ public static class FieldMappingEndpoints
                             return;
                         }
 
-                        await dataverseService.UpdateRecordFieldsAsync(
-                            targetEntity, childRecordId, updatePayload, token, impersonateSystemUserId: callerSystemUserId);
+                        // Every other table is written UPDATE-ONLY too (still as the caller): the push updates existing records
+                        // and never creates one. An id that names no row writes nothing and fails THIS child (caught below).
+                        try
+                        {
+                            await dataverseService.UpdateExistingRecordFieldsAsync(
+                                targetEntity, childRecordId, updatePayload, callerSystemUserId, token);
+                        }
+                        catch (KeyNotFoundException)
+                        {
+                            recordNotFound = true;
+                            throw;
+                        }
                     }
 
                     Func<Task<bool>>? wasIsolated = null;
@@ -1259,6 +1270,17 @@ public static class FieldMappingEndpoints
                             refiled = !reparent.ParentsUnchanged;
                             refiledBy = reparent;
                         }
+                    }
+                    catch (KeyNotFoundException) when (recordNotFound)
+                    {
+                        // The record is gone (or never existed); nothing was written or re-owned.
+                        failed++;
+                        errors.Add(new PushFieldMappingsError
+                        {
+                            RecordId = childRecordId,
+                            Error = $"Not written: the record was not found; nothing was written for it ({Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.RecordMissing})."
+                        });
+                        continue;
                     }
                     catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException) when (goneCode is not null)
                     {

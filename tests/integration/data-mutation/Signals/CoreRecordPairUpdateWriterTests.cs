@@ -46,10 +46,8 @@ public class CoreRecordPairUpdateWriterTests
     /// for a row that does not exist: a read comes back with no columns (<c>DataverseWebApiService.RetrieveRecordFieldsAsync</c>
     /// on a 404); <see cref="World"/> holds <see cref="Row"/> only, and its read of any other id faults as Dataverse's does. So
     /// "the same refusal for any record id" can fail. A Signal or Decision Record update is sent through
-    /// <see cref="IFieldMappingDataverseService.UpdateRecordFieldsAsync"/>, whose real PATCH carries no <c>If-Match</c> and so
-    /// would create a row for a missing id rather than fail; it is not faked to throw — the any-id tests assert instead that no
-    /// call reached <see cref="_writes"/> for either id. (<c>UpdateExistingRecordFieldsAsync</c> is the invoice family's
-    /// update-only write; no table driven here reaches it, so it has no setup.)
+    /// <c>UpdateExistingRecordFieldsAsync</c> (update-only, <c>If-Match: *</c>); it is not faked to throw for a missing id —
+    /// the any-id tests assert instead that no call reached <see cref="_writes"/> for either id.
     /// </summary>
     public CoreRecordPairUpdateWriterTests()
     {
@@ -203,9 +201,9 @@ public class CoreRecordPairUpdateWriterTests
                 PayloadSource: source is null ? UpdateRecordPayloadSource.Configuration : UpdateRecordPayloadSource.ConfirmedProposal),
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             table, Row, It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_name")),
-            It.IsAny<CancellationToken>(), user), Times.Once);
+            user, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -218,9 +216,9 @@ public class CoreRecordPairUpdateWriterTests
                 Lookups: null),
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_todo", Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_corerecordid")),
-            It.IsAny<CancellationToken>(), null), Times.Once);
+            null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── A playbook's output mapping (DataverseUpdateHandler) ──────────────────────────────────────────────────────
@@ -293,9 +291,9 @@ public class CoreRecordPairUpdateWriterTests
             table, Row, new Dictionary<string, object?> { [column] = "Renamed" }, ConcurrencyMode.None, maxRetries: 1,
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             table, Row, It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey(column)),
-            It.IsAny<CancellationToken>(), null), Times.Once);
+            null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── The field-mapping push (a configured rule per column: a refused rule is skipped, the rest applies) ───────
@@ -314,9 +312,9 @@ public class CoreRecordPairUpdateWriterTests
 
         (updated, failed).Should().Be((1, 0));
         errors.Should().BeEmpty();
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             table, Row, It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_description")),
-            It.IsAny<CancellationToken>(), Caller), Times.Once);
+            Caller, It.IsAny<CancellationToken>()), Times.Once);
         results.Should().ContainSingle(r => r.TargetField == target).Which.Status.Should().Be(FieldMappingStatus.Skipped);
         results.Single(r => r.TargetField == target).ErrorMessage.Should().Contain("cannot be changed").And.Contain("nothing was written");
     }
@@ -328,9 +326,9 @@ public class CoreRecordPairUpdateWriterTests
 
         (updated, failed).Should().Be((1, 0));
         errors.Should().BeEmpty();
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_todo", Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_corerecordid")),
-            It.IsAny<CancellationToken>(), Caller), Times.Once);
+            Caller, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static FieldMappingRuleDto Rule(string source, string target) =>
