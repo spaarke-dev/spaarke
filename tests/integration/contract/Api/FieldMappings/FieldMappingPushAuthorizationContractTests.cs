@@ -380,6 +380,33 @@ public class FieldMappingPushAuthorizationContractTests
             Times.Never);
     }
 
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 043 review round 2 (F1, iv; must-not-fire): only a DOCUMENT source is resolved by the
+    /// target's ownership primary order. A matter source whose target has two lookups to it is still the existing 409, with the
+    /// same reason code and wording, even where that order (sprk_analysis: sprk_regardingmatter is declared) would name one.
+    /// </summary>
+    [Fact]
+    public async Task Push_FromANonDocumentSource_WithTwoLookupsOnTheTarget_IsStillTheAmbiguous409()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(
+            targetEntity: "sprk_analysis", targetSet: "sprk_analysises", lookupsToSource: ["sprk_regardingmatter", "sprk_secondmatter"]);
+
+        var response = await host.SendAsync(Authenticated(PushBody(targetEntity: "sprk_analysis")));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        var problem = JsonNode.Parse(body)!;
+        problem["reasonCode"]!.GetValue<string>().Should().Be(FieldMappingEndpoints.ParentLookupAmbiguousReasonCode);
+        problem["detail"]!.GetValue<string>().Should().Be(
+            "'sprk_analysis' has 2 lookups to 'sprk_matter', so which one names the parent is ambiguous. Nothing was updated.");
+        host.ChildQueries.Should().BeEmpty("the route never guesses which lookup names the parent");
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     [Theory]
     [InlineData("sprk_event')/x?$filter=('")]
     [InlineData("sprk event")]

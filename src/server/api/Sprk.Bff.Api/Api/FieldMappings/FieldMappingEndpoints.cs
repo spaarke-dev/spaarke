@@ -556,7 +556,7 @@ public static class FieldMappingEndpoints
             // property binds each target lookup.
             var targetRelationships = await ReadManyToOneRelationshipsAsync(
                 impersonatedQuery, request.TargetEntity, callerSystemUserId.Value, ct);
-            var (parentLookup, parentLookupCount) = ResolveParentLookup(targetRelationships, request.SourceEntity);
+            var (parentLookup, parentLookupCount) = ResolveParentLookup(targetRelationships, request.SourceEntity, request.TargetEntity);
             if (parentLookup is null)
             {
                 logger.LogWarning(
@@ -934,10 +934,15 @@ public static class FieldMappingEndpoints
     /// sprk_reportcard each have exactly one lookup to sprk_matter (sprk_regardingmatter); sprk_invoice has exactly one
     /// (sprk_matter). No schema change, no per-table convention, no deactivated profile. A metadata fault propagates
     /// to the route's 500 — never to a guessed lookup.
+    /// <para>Task 043 review round 2 (F1): a DOCUMENT source whose target has several lookups to it is resolved by
+    /// <see cref="DocumentOwnershipParentColumn"/> (<c>sprk_analysis</c> has three: <c>sprk_documentid</c>,
+    /// <c>sprk_outputfileid</c>, <c>sprk_regardingdocument</c>). Every other source, and a target that defines no such column,
+    /// keeps the 409. <c>Matches</c> stays the number of lookups found, so the 409's wording is unchanged.</para>
     /// </remarks>
     internal static (string? Attribute, int Matches) ResolveParentLookup(
         IEnumerable<Dictionary<string, System.Text.Json.JsonElement>> relationships,
-        string sourceEntity)
+        string sourceEntity,
+        string targetEntity)
     {
         var matches = relationships
             .Where(r => r.TryGetValue("ReferencedEntity", out var referenced)
@@ -948,10 +953,43 @@ public static class FieldMappingEndpoints
                 ? attribute.GetString()
                 : null)
             .Where(a => !string.IsNullOrWhiteSpace(a) && IsLogicalName(a!))
+            .Select(a => a!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        return matches.Length == 1 ? (matches[0], 1) : (null, matches.Length);
+        if (matches.Length == 1)
+            return (matches[0], 1);
+
+        return matches.Length > 1
+               && MappingSourceReadProbe.IsDocumentSource(sourceEntity)
+               && DocumentOwnershipParentColumn(targetEntity, matches) is { } documentParent
+            ? (documentParent, matches.Length)
+            : (null, matches.Length);
+    }
+
+    /// <summary>
+    /// Task 043 review round 2 (F1): of <paramref name="targetEntity"/>'s lookups to <c>sprk_document</c>
+    /// (<paramref name="documentLookups"/>), the one that files its row under the document, as ownership defines it and fixed in
+    /// code by the target table, never by the request: citations (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsCitation"/>) and
+    /// Secure-only links (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsSecureOnlyParent"/>) left out, then the first in the table's
+    /// ownership primary order (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.InPrimaryOrder{TValue}"/>, the order
+    /// <c>RecordOwnershipContext.PrimaryOrdered</c> reads). It must be a column the table's declared order
+    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureChildLineage.Table.LookupOrder"/>) names; a table with no declared order,
+    /// or a first column it does not name (the order's by-name fallback), defines none, and <see langword="null"/> keeps the 409.
+    /// For <c>sprk_analysis</c> this is <c>sprk_documentid</c>, the analysed document (its writer's primary).
+    /// </summary>
+    internal static string? DocumentOwnershipParentColumn(string targetEntity, IReadOnlyCollection<string> documentLookups)
+    {
+        if (!Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(targetEntity, out var lineage))
+            return null;
+
+        var filing = documentLookups
+            .Where(c => !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsCitation(targetEntity, c)
+                        && !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsSecureOnlyParent(targetEntity, c))
+            .Select(c => new KeyValuePair<string, string>(c, c));
+        var first = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.InPrimaryOrder(targetEntity, filing).Select(c => c.Key).FirstOrDefault();
+
+        return first is not null && lineage.LookupOrder.Contains(first, StringComparer.OrdinalIgnoreCase) ? first : null;
     }
 
     /// <summary>A Dataverse logical name: letters, digits and underscores only (it is interpolated into OData).</summary>

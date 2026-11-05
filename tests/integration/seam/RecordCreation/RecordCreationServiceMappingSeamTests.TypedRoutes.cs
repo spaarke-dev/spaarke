@@ -306,6 +306,47 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         outcome.MappingWarnings.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Task 043 review round 2 (F2): the same-document binding of <see cref="AnalysisEndpoints.MappingDocumentDecisionOf"/>. With
+    /// nothing recorded by the filter there is no decision (a document source maps nothing); with document X recorded the decision
+    /// shows X and no other document.
+    /// </summary>
+    [Fact]
+    public async Task MappingDocumentDecisionOf_ShowsOnlyTheDocumentTheFilterRecorded_AndIsNullWhenItRecordedNone()
+    {
+        AnalysisEndpoints.MappingDocumentDecisionOf(new DefaultHttpContext())
+            .Should().BeNull("a request the filter recorded no document on carries no decision");
+
+        var http = new DefaultHttpContext();
+        Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.RecordDocumentAttachAuthorized(http, TypedRouteDocument);
+        var decision = AnalysisEndpoints.MappingDocumentDecisionOf(http);
+
+        decision.Should().NotBeNull();
+        (await decision!(TypedRouteDocument, CancellationToken.None)).Should().BeTrue("the document the filter allowed is shown");
+        (await decision(OtherDocument, CancellationToken.None)).Should().BeFalse("any other document is not");
+    }
+
+    /// <summary>
+    /// Task 043 review round 2 (F2) through the route: when the document the filter allowed is not the mapping source, the analysis
+    /// is still created, nothing is mapped, the 201 body carries the one warning, and the source document is never read app-only.
+    /// </summary>
+    [Fact]
+    public async Task TypedAnalysisRoute_TheFilterAllowedAnotherDocument_MapsNothing_WithTheOneWarning_NothingReadAppOnly()
+    {
+        TheDocumentOfAnAnalysis();
+
+        var result = await RouteCreateAnalysis(TypedRouteDocument, filterAllowed: OtherDocument);
+
+        StatusOf(result).Should().Be(StatusCodes.Status201Created, DetailOf(result));
+        _creates.Should().ContainSingle().Which.Fields.Keys.Should().NotContain("sprk_description");
+        _sourceReads.Should().BeEmpty("the document is not read app-only when the route's decision does not show it");
+        _journal.Should().NotContain("source-read");
+        BodyWithoutId(result).Should().Be(
+            $$"""{"analysisId":"{id}","warnings":["{{MappingSourceReadProbe.SourceUnavailableWarning}}"]}""");
+    }
+
+    private static readonly Guid OtherDocument = Guid.Parse("a0310000-0000-4000-8000-000000000043");
+
     /// <summary>The analysis route's create body for <paramref name="document"/>, mapped as the caller with
     /// <paramref name="documentShown"/> as the narrowing's answer.</summary>
     private RecordCreationRequest AnalysisUnder(Guid document, Func<Guid, CancellationToken, Task<bool>>? documentShown) =>

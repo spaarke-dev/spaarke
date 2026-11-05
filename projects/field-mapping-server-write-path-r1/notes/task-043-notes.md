@@ -23,8 +23,18 @@ NFR-01, NFR-07; UAC-r2 task 188 (the external document narrowing); ADR-010, ADR-
 - When the caller cannot read the document, or the narrowing does not show it, or either check faults, nothing is copied. The
   analysis is still created, and the body carries the one `SourceUnavailableWarning`. The text is the same in every case, and
   the document is not read app-only.
-- The push treats a document source as it treats any other: Read (and the narrowing for an external caller) decides it, and
+- The push authorizes a document source as it does any other: Read (and the narrowing for an external caller) decides it, and
   every other outcome is the push's existing uniform 404.
+- Which children a push from a document updates (review round 2, F1): the target's lookup to `sprk_document`. When the target
+  has several, the push uses the one that files the target row under the document. That is the first in the target table's
+  ownership primary order (`RecordOwnershipContext.InPrimaryOrder`), with citations and Secure-only links left out, and it must
+  be a column the table's `SecureChildLineage` order declares. For `sprk_analysis` (three lookups: `sprk_documentid`,
+  `sprk_outputfileid`, `sprk_regardingdocument`) that is `sprk_documentid`, the analysed document. An analysis that names the
+  document only as its output file or as its regarding record is not updated. A target that defines no such column
+  (`sprk_billingexport`) is still the existing 409 `field_mapping_parent_lookup_ambiguous`. Every non-document source keeps
+  today's behaviour, its 409 included.
+- The analysis create's 201 `warnings` member carries every warning of the create (`RecordCreationOutcome.Warnings`), not only
+  mapping warnings. This is intended: it is the same member `ChildRecordEndpoints` returns (review round 2, K3).
 - Every refusal on every route is unchanged (NFR-07). The external-hidden and narrowing-fault cases on the analysis create are
   still the filter's existing 403, because `AttachDocumentCheck` decides them before the handler runs.
 
@@ -55,6 +65,7 @@ NFR-01, NFR-07; UAC-r2 task 188 (the external document narrowing); ADR-010, ADR-
 | `AnalysisEndpoints.MappingDocumentDecisionOf` | none (`grep MappingDocumentDecision` - no matches before this task) | A private lambda inline would hide it from the seam tests | Same as the row above |
 | `MappingSourceReader.DocumentShown`, the `documentShown` parameters | none | Optional parameters on the existing factories; no new type | The route's decision cannot reach the service's mapping step |
 | `CreateAnalysisResponse.Warnings` | `ChildRecordEndpoints`' `{ id, warnings }` | Additive optional member | The caller is not told that nothing was copied (AC6) |
+| `FieldMappingEndpoints.DocumentOwnershipParentColumn` (review round 2) | `RecordOwnershipContext.InPrimaryOrder`, `RecordOwnershipResolver.IsCitation` / `IsSecureOnlyParent`, `SecureChildLineage.LookupOrder` | It composes those; changing `ResolveParentLookup` for every source would change other sources' 409 (NFR-07) | A Manual Refresh from a document to an analysis is always the 409 against the real schema |
 
 No new endpoint, DI registration, interface, package or background work (ADR-010).
 
@@ -125,5 +136,60 @@ Second filter (Analysis, Event, mapping source, push, chat update/delete, writer
 ## Release note
 
 A Document to Analysis field-mapping profile now fills the new analysis from its document when the user can read that
-document. When they cannot, the analysis is still created and the response says no fields were copied. The Manual Refresh push
-works from a document on the same terms.
+document. When they cannot, the analysis is still created and the response says no fields were copied. Manual Refresh on a
+document pushes the profile's values to the analyses of that document (those whose analysed document it is) when the user can
+read the document. Analyses that name it only as their output file or regarding record are not changed.
+
+## Review round 2 (2026-11-05)
+
+Second independent review. Each finding was checked against the code first.
+
+| Finding | Class | Outcome |
+|---|---|---|
+| F1: a push from a document to an analysis always got the 409 `field_mapping_parent_lookup_ambiguous`. `sprk_analysis` has three lookups to `sprk_document` (`sprk_Document.xml`); the AC5 double listed one | F1 | Fixed. `ResolveParentLookup` takes the target table; for a document source with several matches, `DocumentOwnershipParentColumn` picks the target's ownership primary (above, Behaviour). No refusal's status, code or wording changed (NFR-07): the 409 still counts every lookup found |
+| F3: no test of the same-document binding in `AnalysisEndpoints.MappingDocumentDecisionOf` | F3 | Fixed: nothing recorded gives null; X recorded shows X and not Y; through the route, a filter-allowed document that is not the mapping source gives the one warning, with nothing read app-only |
+| K3: the analysis 201 `warnings` carries every create warning | K3 | Kept as intended (matches `ChildRecordEndpoints`); stated under Behaviour |
+| K4: `IsDocumentShownAsync`'s null branch is unreachable after round 1 | K4 | Kept as defence in depth, with a one-line comment |
+
+### F1 rule and its reach
+
+The rule is composed from existing definitions only: `RecordOwnershipResolver.IsCitation`, `RecordOwnershipResolver.IsSecureOnlyParent`,
+`RecordOwnershipContext.InPrimaryOrder` and `SecureChildLineage.Children[target].LookupOrder`. It is fixed by the target table, never
+by the request. Every target in the schema with several lookups to `sprk_document`, and what the push now does
+(`DocumentOwnershipParentColumn_IsFixedByTheTargetTable` pins all four):
+
+| Target | Lookups to `sprk_document` | Before | Now |
+|---|---|---|---|
+| `sprk_analysis` | `sprk_documentid`, `sprk_outputfileid`, `sprk_regardingdocument` | 409 | `sprk_documentid` |
+| `sprk_document` | `sprk_parentdocument`, `sprk_canonicaldocument` (Secure-only) | 409 | `sprk_parentdocument` |
+| `sprk_invoicesubmission` | `sprk_document`, `sprk_reportdocument` | 409 | `sprk_document` (its submitted PDF; the report is an output, per its lineage comment) |
+| `sprk_billingexport` | `sprk_csvdocument`, `sprk_jsondocument` | 409 | 409 (not in `SecureChildLineage`) |
+
+The `sprk_document` and `sprk_invoicesubmission` rows are a consequence of the same rule, not separately asked for. No profile for
+either is known.
+
+### Tests
+
+| File | Added or changed |
+|---|---|
+| `FieldMappingPushDocumentSourceTests.cs` | The double now returns all three analysis lookups (and a matter lookup), with a different analysis under each. AC5 positive: the one child query is `_sprk_documentid_value`, and only the two analysed rows are written. New: a document to `sprk_billingexport` push is the existing 409 with the same wording and nothing read or written; the rule's answer for each of the four targets |
+| `FieldMappingPushAuthorizationContractTests.cs` | Must-not-fire: a matter source with two lookups on `sprk_analysis` (where the order would name `sprk_regardingmatter`) is still the 409, with the same wording |
+| `RecordCreationServiceMappingSeamTests.TypedRoutes.cs` | `MappingDocumentDecisionOf`: null with nothing recorded; X shown, Y not. Route: filter allowed another document, so 201 with the one warning, nothing mapped, nothing read app-only |
+
+### Failing-first evidence
+
+| Change or mutation | Failed / total | Failing tests |
+|---|---|---|
+| Production F1 change not yet made (tests only) | 2 / 67 (push filter) | AC5 positive, internal and external |
+| The document gate removed (every source disambiguated) | 2 / 67 | the new must-not-fire, and the existing ambiguous-409 theory |
+| The declared-order requirement removed | 1 / 67 | the `sprk_billingexport` 409 |
+| `MappingDocumentDecisionOf` always answers true | 2 / 172 (seam filter) | the helper test and the route test |
+| `MappingDocumentDecisionOf` non-null when nothing is recorded | 1 / 172 | the helper test |
+
+The push counts are before the four-target pin was added. Each mutation was restored from a backup copy, and both suites passed after.
+
+### Verification (round 2, branch tip before commit)
+
+verify-suites: solution build 0 warnings, 0 errors; ArchTests 1940/1940; filtered suites 6844 passed, 0 failed, 7 skipped.
+Second filter (AnalysisEndpoints, FieldMappingPush, MappingSource, RecordCreationServiceMappingSeam, EventEndpoints, ChildRecord):
+939/939.

@@ -354,6 +354,7 @@ internal static class MappingSourceReadProbe
     {
         if (reader.DocumentShown is not { } documentShown)
         {
+            // Unreachable since review round 1 (ReadAsync returns before the probe when there is no decision); kept as defence in depth.
             logger?.LogInformation(
                 "[FIELD-MAPPING-SOURCE] This create carries no document decision for the caller; a document source maps nothing.");
             return false;
