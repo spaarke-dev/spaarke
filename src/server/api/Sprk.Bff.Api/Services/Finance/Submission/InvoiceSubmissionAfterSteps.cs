@@ -1539,6 +1539,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// <summary>One stored billing finding (the fields the record needs).</summary>
     internal sealed record StoredFinding(string ReasonCode, Guid PolicyVersionId);
 
+    /// <summary>Task 114: one stored Procedure hold (082c-2), as its pipeline finding carries it: reader members only, never an id.
+    /// <paramref name="Code"/> is a gap or an unresolved reason; the gap carries the name, the first gapped work date and the kind, the
+    /// unresolved one its cause.</summary>
+    internal sealed record StoredProcedureHold(string Code, string? ProcedureName, string? WorkDate, string? GapKind, string? Cause);
+
     /// <summary>
     /// <c>sprk_findingsjson</c> (<see cref="InvoiceSubmissionPersister.BuildFindingsJson"/>) read back: the kind, the decision, the
     /// findings the record needs, the Signal plan, and the pipeline and coding findings the system Signals are mapped from.
@@ -1576,6 +1581,33 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 or SubmissionReasonCodes.ProcedureGap or SubmissionReasonCodes.ProceduresUnresolved)
             || CodingFindings.Count > 0
             || CodeSet?["needsReview"]?.GetValue<bool>() == true;
+
+        /// <summary>
+        /// Task 114: the stored Procedure holds (<see cref="SubmissionReasonCodes.ProcedureGap"/>, <see cref="SubmissionReasonCodes.ProceduresUnresolved"/>)
+        /// the pipeline findings name, in stored order: the reader members the 082c-2 writer stored (the Procedure's name, the first gapped work
+        /// date, the kind or the cause; never an id). A value that is not there reads as null. The Override release records them.
+        /// </summary>
+        internal IReadOnlyList<StoredProcedureHold> ProcedureHolds()
+        {
+            var holds = new List<StoredProcedureHold>();
+            foreach (var pipeline in PipelineFindings.OfType<JsonObject>())
+            {
+                if (Text(pipeline, "reasonCode") is not ({ } code and (SubmissionReasonCodes.ProcedureGap or SubmissionReasonCodes.ProceduresUnresolved)))
+                {
+                    continue;
+                }
+
+                var values = pipeline["values"] as JsonObject;
+                holds.Add(new StoredProcedureHold(
+                    code,
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureNameValue),
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureWorkDateValue),
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureGapKindValue),
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureCauseValue)));
+            }
+
+            return holds;
+        }
 
         /// <summary>The system findings under <paramref name="policy"/> (<see cref="BillingSystemFindings"/>). A value missing on one side of
         /// a comparison is not a finding and is left out.</summary>

@@ -102,6 +102,7 @@ $FirmHold = 'sprk_firmhold'
 $FirmMissingReason = 'ebilling.submission.firm_missing'
 $ProcedureReasons = @('ebilling.submission.procedures_unresolved', 'ebilling.submission.procedure_gap')
 $RulesNotChecked = 'rules.not_checked'
+$OverriddenReason = 'ebilling.submission.overridden'
 $ReadCap = 20000        # most In Review invoices with a blank detail read for the reverse invariant
 $ChunkSize = 20         # invoice ids per submission read
 
@@ -185,22 +186,25 @@ function Get-Pages([string]$Path) {
 function Get-SubmissionHoldReasons($Submission) {
     $reasons = [System.Collections.Generic.HashSet[string]]::new()
     $code = [string]$Submission.sprk_outcomereasoncode
-    if ($code -eq $FirmMissingReason -or $ProcedureReasons -contains $code) { [void]$reasons.Add($code) }
+    # Task 114: a submission released by an Override (reason code overridden) holds NO Procedure reason - its findings keep the gap as evidence
+    # (InvoiceProcedureHold.ReasonsOf); the firm marker is its own hold and is still read.
+    $released = $code -eq $OverriddenReason
+    if ($code -eq $FirmMissingReason -or (-not $released -and $ProcedureReasons -contains $code)) { [void]$reasons.Add($code) }
     $json = [string]$Submission.sprk_findingsjson
     if ([string]::IsNullOrWhiteSpace($json)) { return ,$reasons }
     try {
         $root = $json | ConvertFrom-Json -ErrorAction Stop
         if ($root -isnot [pscustomobject]) { throw 'not an object' }
-        if ($ProcedureReasons -contains [string]$root.reasonCode) { [void]$reasons.Add([string]$root.reasonCode) }
+        if (-not $released -and $ProcedureReasons -contains [string]$root.reasonCode) { [void]$reasons.Add([string]$root.reasonCode) }
         foreach ($finding in @($root.pipelineFindings)) {
             if ($null -eq $finding) { continue }
             $c = [string]$finding.reasonCode
-            if ($c -eq $FirmMissingReason -or $ProcedureReasons -contains $c) { [void]$reasons.Add($c) }
+            if ($c -eq $FirmMissingReason -or (-not $released -and $ProcedureReasons -contains $c)) { [void]$reasons.Add($c) }
         }
         foreach ($line in @($root.lineFindings)) {
             if ($null -eq $line -or [string]$line.code -ne $RulesNotChecked) { continue }
             $cause = [string]$line.cause
-            if ($cause -eq $FirmMissingReason -or $ProcedureReasons -contains $cause) { [void]$reasons.Add($cause) }
+            if ($cause -eq $FirmMissingReason -or (-not $released -and $ProcedureReasons -contains $cause)) { [void]$reasons.Add($cause) }
         }
     } catch {
         [void]$reasons.Add($ProcedureReasons[0])

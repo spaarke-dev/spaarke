@@ -555,7 +555,8 @@ public sealed class InvoiceApprovalService
 
             // ── 082c-2 (brief C11, C14): a Procedure hold, both channels (the stored submission state, never sprk_reviewdetail). After the FR-20 and
             //    firm holds (the review-detail priority: the firm first), before I-2. An Internal gap is Blocked, so the FR-20 hold answers first;
-            //    this one still refuses once 114's Override releases that submission, until a re-check clears the gap. ──
+            //    this one answers for an SPA gap (Accepted) until a re-check clears it or task 114's Override releases it: a released submission
+            //    (reason code Overridden) holds no Procedure reason (InvoiceProcedureHold.ReasonsOf), so an Internal gap passes here once overridden. ──
             if (await InvoiceProcedureHold.ReasonsAsync(_entities, invoiceId, ct).ConfigureAwait(false) is { Count: > 0 } procedureHolds)
             {
                 _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice is held for its Procedures ({Reasons}); nothing changed.",

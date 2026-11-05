@@ -50,6 +50,17 @@ public sealed class InvoiceOpenHoldsTests
         InvoiceReviewDetail.ReviewDetailOf(InvoiceOpenHolds.ReasonsOf(false, false, [])).Should().BeNull();
     }
 
+    [Fact(DisplayName = "114 (must fire / must not fire): a submission released by an override holds no Procedure reason, even with the gap kept in its findings; the firm marker beside it still holds")]
+    public void ReasonsOf_AReleasedSubmission_HoldsNoProcedureReason_ButTheFirmStillHolds()
+    {
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, GapFinding)]).Should().BeEmpty("released: not blank only because it is kept as evidence");
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, FirmAndGapFindings)])
+            .Should().BeEquivalentTo([SubmissionReasonCodes.FirmMissing], "the firm hold is independent of the release");
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, GapFinding), Stored(null, GapFinding)])
+            .Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "another, unreleased submission still holds (control)");
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(null, GapFinding)]).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "control: unreleased");
+    }
+
     [Theory(DisplayName = "082c-2 fix round 3 (F1, fail closed, must fire): findings that cannot be read are never blank - 'Billing terms could not be checked', and the firm is not asserted from them")]
     [InlineData("{not json")]
     [InlineData("[1,2]")]
@@ -113,6 +124,10 @@ public sealed class InvoiceOpenHoldsTests
         { "no firm only", InvoiceReviewDetail.WaitingForFirm, true },
         { "unreadable findings", InvoiceReviewDetail.BillingTermsNotChecked, true },
         { "none", null, false },
+
+        // Task 114: a released (Overridden) submission holds no Procedure reason, whatever its findings keep as evidence; the firm hold is its own.
+        { "gap released by an override", null, false },
+        { "firm + gap, gap released by an override", InvoiceReviewDetail.WaitingForFirm, true },
     };
 
     private static void Plant(ApprovalWorld w, string state)
@@ -141,6 +156,12 @@ public sealed class InvoiceOpenHoldsTests
                 break;
             case "unreadable findings":
                 PlantSubmission(w, null, "{not json");
+                break;
+            case "gap released by an override":
+                PlantSubmission(w, SubmissionReasonCodes.Overridden, GapFinding);
+                break;
+            case "firm + gap, gap released by an override":
+                PlantSubmission(w, SubmissionReasonCodes.Overridden, FirmAndGapFindings);
                 break;
             case "none":
                 PlantSubmission(w, null, "{\"pipelineFindings\":[],\"lineFindings\":[{\"line\":0,\"code\":\"rules.not_checked\",\"message\":\"The Rate rule could not be checked on this line.\"}]}");

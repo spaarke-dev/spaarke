@@ -26,7 +26,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <remarks>
 /// <para><b>This is the only derivation future writers may use</b> (the re-check that clears a gap, 095d-2's re-run, 114's Override release,
 /// and any other writer of the review detail): ask it for the reasons that remain AFTER the write (<see cref="ReasonsOf"/> over the state the
-/// write leaves, or <see cref="ReasonsAsync"/> where the write changes nothing the holds read). Never derive the detail from one hold alone, and
+/// write leaves, <see cref="ReasonsAfterAsync"/> where it must read the other rows and substitute the one it writes (task 114's Override
+/// release), or <see cref="ReasonsAsync"/> where the write changes nothing the holds read). Never derive the detail from one hold alone, and
 /// never from the invoice's own <c>sprk_reviewdetail</c>: a label that is blank while approval refuses is the defect this exists to prevent.</para>
 /// <para><b>Fail closed.</b> Stored findings that cannot be read are held (as <see cref="InvoiceFirmHold"/> and <see cref="InvoiceProcedureHold"/>
 /// both rule), and they are reported here as <see cref="SubmissionReasonCodes.ProceduresUnresolved"/> ("billing terms could not be checked", the
@@ -78,7 +79,18 @@ public static class InvoiceOpenHolds
     /// reads: the invoice's firm column and own hold column, and each linked submission's reason code and findings). The invoice row supplies its
     /// id and firm column, so it must have been read with <see cref="InvoiceSubmissionPersister.InvoiceVendorOrg"/>. Throws on a read fault.
     /// </summary>
-    public static async Task<IReadOnlySet<string>> ReasonsAsync(IGenericEntityService entities, Entity invoice, CancellationToken ct)
+    public static Task<IReadOnlySet<string>> ReasonsAsync(IGenericEntityService entities, Entity invoice, CancellationToken ct) =>
+        ReasonsAfterAsync(entities, invoice, replacedSubmissionId: null, replacement: default, ct);
+
+    /// <summary>
+    /// <see cref="ReasonsAsync"/> for the state a write is ABOUT to leave: the same app-only reads, with the stored state of submission
+    /// <paramref name="replacedSubmissionId"/> replaced by <paramref name="replacement"/> (the reason code and findings the write stores). A
+    /// writer that changes what the holds read (task 114's Override release sets the submission's reason code) derives its review detail
+    /// from this, so the detail it writes is what approval will read once the write lands. Every other submission is read as stored. A null
+    /// <paramref name="replacedSubmissionId"/> replaces nothing. The replaced submission is counted even when the read does not return it.
+    /// </summary>
+    public static async Task<IReadOnlySet<string>> ReasonsAfterAsync(
+        IGenericEntityService entities, Entity invoice, Guid? replacedSubmissionId, StoredSubmission replacement, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(invoice);
@@ -105,10 +117,15 @@ public static class InvoiceOpenHolds
         };
         query.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoice.Id);
         var submissions = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
+            .Where(s => replacedSubmissionId is null || s.Id != replacedSubmissionId)
             .Select(s => new StoredSubmission(
                 s.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode),
                 s.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson)))
             .ToList();
+        if (replacedSubmissionId is not null)
+        {
+            submissions.Add(replacement);
+        }
 
         return ReasonsOf(InvoiceFirmHold.HasNoFirm(invoice), invoiceHoldSet, submissions);
     }

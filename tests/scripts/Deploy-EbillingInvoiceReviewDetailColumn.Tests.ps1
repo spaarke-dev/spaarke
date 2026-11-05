@@ -15,7 +15,7 @@ BeforeAll {
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errors)
     if ($errors.Count -gt 0) { throw "The script does not parse: $($errors[0].Message)" }
 
-    $wantedVariables = 'Table', 'Column', 'ColumnSchemaName', 'Options', 'FirmMissingReason', 'ProcedureReasons', 'RulesNotChecked', 'Description', 'InReviewStatusCode', 'EntitySet'
+    $wantedVariables = 'Table', 'Column', 'ColumnSchemaName', 'Options', 'FirmMissingReason', 'ProcedureReasons', 'RulesNotChecked', 'OverriddenReason', 'Description', 'InReviewStatusCode', 'EntitySet'
     $wantedFunctions = 'New-ReviewDetailDef', 'Get-ColumnGaps', 'Get-InvariantBreaks', 'Get-SubmissionHoldReasons'
 
     $pieces = [System.Collections.Generic.List[string]]::new()
@@ -136,6 +136,19 @@ Describe 'Get-SubmissionHoldReasons: the reverse invariant read' {
         $r.Contains('ebilling.submission.firm_missing') | Should -BeTrue
         $r.Contains('ebilling.submission.procedure_gap') | Should -BeTrue
         $r.Contains('ebilling.submission.procedures_unresolved') | Should -BeTrue
+    }
+
+    It 'task 114: a submission released by an Override holds no Procedure reason (the gap stays in its findings as evidence); the firm marker still holds' {
+        $gap = '{"reasonCode":"ebilling.submission.procedure_gap","pipelineFindings":[{"reasonCode":"ebilling.submission.procedure_gap"}],' +
+               '"lineFindings":[{"code":"rules.not_checked","cause":"ebilling.submission.procedures_unresolved"}]}'
+        $released = Get-SubmissionHoldReasons ([pscustomobject]@{ sprk_outcomereasoncode = 'ebilling.submission.overridden'; sprk_findingsjson = $gap })
+        $released.Count | Should -Be 0
+        $held = Get-SubmissionHoldReasons ([pscustomobject]@{ sprk_outcomereasoncode = $null; sprk_findingsjson = $gap })
+        $held.Contains('ebilling.submission.procedure_gap') | Should -BeTrue
+        $firm = '{"pipelineFindings":[{"reasonCode":"ebilling.submission.firm_missing"},{"reasonCode":"ebilling.submission.procedure_gap"}]}'
+        $both = Get-SubmissionHoldReasons ([pscustomobject]@{ sprk_outcomereasoncode = 'ebilling.submission.overridden'; sprk_findingsjson = $firm })
+        $both.Count | Should -Be 1
+        $both.Contains('ebilling.submission.firm_missing') | Should -BeTrue
     }
 
     It 'holds findings that cannot be parsed as procedures not checked (fail closed)' {

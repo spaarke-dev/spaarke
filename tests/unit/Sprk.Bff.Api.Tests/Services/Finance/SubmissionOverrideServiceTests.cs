@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Finance;
@@ -18,7 +19,9 @@ using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Tests.Api.Finance;
+using Sprk.Bff.Api.Tests.Domain.Signals.Billing;
 using Sprk.Bff.Api.Tests.Services.Signals;
 using Xunit;
 using ProcessorTests = Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionProcessorTests;
@@ -107,6 +110,25 @@ public class SubmissionOverrideServiceTests
         /// <summary>The writes that stored the decision's Signal set in the findings (before the record); <see cref="Updates"/> holds the rest.</summary>
         public List<Dictionary<string, object>> SetStores { get; } = [];
 
+        // ── Task 114: the release transaction (submission state + the invoice's review detail), and the holds the derivation reads app-only ──
+
+        /// <summary>The release transactions sent (<see cref="Updates"/> also holds each one's submission fields).</summary>
+        public List<IReadOnlyList<OrganizationRequest>> Transactions { get; } = [];
+
+        /// <summary>The invoice's own <c>sprk_firmhold</c> as the app-only read returns it; null = not set.</summary>
+        public string? InvoiceOwnHold { get; set; }
+
+        /// <summary>Other submissions linked to the invoice, as the app-only read returns them.</summary>
+        public List<Entity> OtherSubmissions { get; } = [];
+
+        /// <summary>Thrown by the app-only reads of the invoice's holds (the derivation).</summary>
+        public Exception? HoldReadFault { get; set; }
+
+        /// <summary>The invoice's stored review detail option; null = blank.</summary>
+        public int? InvoiceDetail => Invoice?.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column)?.Value;
+
+        public long InvoiceVersion => Invoice!.GetAttributeValue<long>("versionnumber");
+
         public Mock<IGenericEntityService> Entities { get; } = new(MockBehavior.Strict);
         public Mock<IInvoiceLifecycleService> Lifecycle { get; } = new(MockBehavior.Strict);
         public Mock<IIdempotencyService> Idempotency { get; } = new(MockBehavior.Strict);
@@ -129,6 +151,9 @@ public class SubmissionOverrideServiceTests
 
         private readonly string _initialJson;
 
+        /// <summary>The findings JSON the submission was stored with (before any decision).</summary>
+        public string InitialJson => _initialJson;
+
         public static async Task<World> CreateAsync(Func<JsonObject, JsonObject>? editFindings = null)
         {
             var harness = new ProcessorHarness { Rules = [ProcessorTests.InvoiceAgeReject()], Channel = InvoiceSubmissionChannel.Internal };
@@ -138,7 +163,28 @@ public class SubmissionOverrideServiceTests
             return new World(outcome, editFindings);
         }
 
-        private World(SubmissionEvaluationOutcome outcome, Func<JsonObject, JsonObject>? editFindings)
+        /// <summary>Task 114: a Procedure hold (082c-2) as the REAL processor stores it, on <paramref name="channel"/>: <paramref name="unresolved"/> false is a
+        /// Procedure gap (the version ended before the line's work date), true is a final-delivery resolver fault. Internal is Rejected / Blocked, SPA is
+        /// Accepted with the hold as its reason (<see cref="InvoiceSubmissionPersister.TerminalFor"/>). No rule finding, so no deciding finding (C22).</summary>
+        public static async Task<World> CreateHeldAsync(
+            InvoiceSubmissionChannel channel, bool unresolved = false, bool detailColumnPresent = true, Func<JsonObject, JsonObject>? editFindings = null)
+        {
+            var harness = unresolved
+                ? new ProcessorHarness { Channel = channel, EvaluationFault = new ProcedureResolutionFaultException("rows"), FinalDelivery = true }
+                : new ProcessorHarness { Channel = channel, Procedures = EndedProcedure(new DateOnly(2025, 1, 1), new DateOnly(2026, 3, 10)) };
+            var outcome = await harness.RunAsync();
+            var terminal = InvoiceSubmissionPersister.TerminalFor(outcome);
+            terminal.ReasonCode.Should().Be(
+                channel == InvoiceSubmissionChannel.Internal ? SubmissionReasonCodes.Blocked
+                : unresolved ? SubmissionReasonCodes.ProceduresUnresolved : SubmissionReasonCodes.ProcedureGap, "the fixture must be the real hold");
+            return new World(outcome, editFindings, channel, terminal.Status, terminal.ReasonCode, detailColumnPresent);
+        }
+
+        private World(
+            SubmissionEvaluationOutcome outcome, Func<JsonObject, JsonObject>? editFindings,
+            InvoiceSubmissionChannel channel = InvoiceSubmissionChannel.Internal,
+            InvoiceSubmissionStatus status = InvoiceSubmissionStatus.Rejected, string? reasonCode = SubmissionReasonCodes.Blocked,
+            bool detailColumnPresent = true)
         {
             var json = JsonNode.Parse(InvoiceSubmissionPersister.BuildFindingsJson(outcome, InvoiceId))!.AsObject();
             json = editFindings?.Invoke(json) ?? json;
@@ -147,9 +193,9 @@ public class SubmissionOverrideServiceTests
             // The held state task 049 leaves (D-101): the submission Rejected with the blocked code, its invoice In Review.
             Submission = new Entity(FinanceBaseValues.SubmissionEntity, SubmissionId)
             {
-                ["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal),
-                [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Rejected),
-                [InvoiceSubmissionPersister.SubmissionReasonCode] = SubmissionReasonCodes.Blocked,
+                ["sprk_channel"] = new OptionSetValue((int)channel),
+                [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)status),
+                [InvoiceSubmissionPersister.SubmissionReasonCode] = reasonCode,
                 [InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", InvoiceId),
                 [InvoiceSubmissionPersister.SubmissionFindingsJson] = _initialJson,
                 ["sprk_trackingnumber"] = "INV-100.1",
@@ -208,6 +254,50 @@ public class SubmissionOverrideServiceTests
                     }
 
                     Submission["versionnumber"] = Submission.GetAttributeValue<long>("versionnumber") + 1;
+                    return Task.CompletedTask;
+                });
+
+            // Task 114: the release as one transaction, all-or-nothing as Dataverse is: every UpdateRequest is conditional on its row version
+            // (IfRowVersionMatches), a mismatch on either row applies nothing and faults with the code Dataverse words it with.
+            Entities.Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<OrganizationRequest>>(), It.IsAny<CancellationToken>()))
+                .Returns((IReadOnlyList<OrganizationRequest> requests, CancellationToken _) =>
+                {
+                    Order.Add("update");
+                    OnUpdate?.Invoke();
+                    if (UpdateFault is { } fault)
+                    {
+                        return Task.FromException(fault);
+                    }
+
+                    var updates = requests.Cast<UpdateRequest>().ToList();
+                    updates.Should().OnlyContain(u => u.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches, "each row is conditional on the version read");
+                    foreach (var update in updates)
+                    {
+                        var current = update.Target.LogicalName == FinanceBaseValues.SubmissionEntity ? Submission : Invoice!;
+                        if (update.Target.RowVersion != current.GetAttributeValue<long>("versionnumber").ToString(System.Globalization.CultureInfo.InvariantCulture))
+                        {
+                            return Task.FromException(new DataverseTransactionException(
+                                "Transaction rolled back: a row version no longer matches (0x80060882, ConcurrencyVersionMismatch).", Array.IndexOf(updates.ToArray(), update), false, null));
+                        }
+                    }
+
+                    Transactions.Add(requests);
+                    foreach (var update in updates)
+                    {
+                        var current = update.Target.LogicalName == FinanceBaseValues.SubmissionEntity ? Submission : Invoice!;
+                        if (update.Target.LogicalName == FinanceBaseValues.SubmissionEntity)
+                        {
+                            Updates.Add(update.Target.Attributes.ToDictionary(a => a.Key, a => a.Value));
+                        }
+
+                        foreach (var (key, value) in update.Target.Attributes)
+                        {
+                            current[key] = value;
+                        }
+
+                        current["versionnumber"] = current.GetAttributeValue<long>("versionnumber") + 1;
+                    }
+
                     return Task.CompletedTask;
                 });
 
@@ -301,7 +391,10 @@ public class SubmissionOverrideServiceTests
                         : Recorder.FindStoredResolvedSetAsync(code, invoice, decisionId, ct);
                 },
                 Clock,
-                Queue.Submitter);
+                Queue.Submitter)
+            {
+                ReviewDetailProbe = ReviewDetailColumnProbe.Fixed(detailColumnPresent),
+            };
 
             // The open-Signal read (049's ReadOpenSignalSetAsync): the invoice's lines, then the Signals on the invoice or a line.
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
@@ -309,6 +402,30 @@ public class SubmissionOverrideServiceTests
                 {
                     // A stored set's check reads its Signals by id (StoredSignalSetCheck): told apart from the open-set read.
                     SignalQueries.Add(query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_signalid") ? query.EntityName + ":byid" : query.EntityName);
+
+                    // Task 114: the derivation's app-only reads of the holds that remain (InvoiceOpenHolds): the invoice's own hold, and the
+                    // submissions linked to the invoice (this one as stored, and any other).
+                    if (query.EntityName is "sprk_invoice" or FinanceBaseValues.SubmissionEntity)
+                    {
+                        if (HoldReadFault is { } holdFault)
+                        {
+                            return Task.FromException<EntityCollection>(holdFault);
+                        }
+
+                        if (query.EntityName == "sprk_invoice")
+                        {
+                            var own = new Entity("sprk_invoice", InvoiceId);
+                            if (InvoiceOwnHold is not null)
+                            {
+                                own[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceOwnHold;
+                            }
+
+                            return Task.FromResult(new EntityCollection([own]));
+                        }
+
+                        return Task.FromResult(new EntityCollection([Copy(Submission, [.. Submission.Attributes.Keys]), .. OtherSubmissions]));
+                    }
+
                     if (SignalReadFault is { } fault)
                     {
                         return Task.FromException<EntityCollection>(fault);
@@ -436,11 +553,15 @@ public class SubmissionOverrideServiceTests
             }
         }
 
+        public static readonly Guid Firm = Guid.Parse("10500000-0000-4000-8000-0000000000f1");
+
         public void SetInvoiceStatus(InvoiceLifecycleStatus status) =>
             Invoice = new Entity("sprk_invoice", InvoiceId)
             {
                 ["statuscode"] = new OptionSetValue(InvoiceStatusCodes.StatusCodeOf(status)),
                 ["sprk_matter"] = new EntityReference("sprk_matter", Matter),
+                ["versionnumber"] = 500L,
+                [InvoiceSubmissionPersister.InvoiceVendorOrg] = new EntityReference("sprk_organization", Firm), // Task 114: the firm is on the invoice
             };
 
         public void SetSubmission(InvoiceSubmissionStatus status, string? code)
@@ -463,6 +584,7 @@ public class SubmissionOverrideServiceTests
             RecordCreates.Should().Be(0, "no Decision Record");
             Recorded.Should().BeEmpty("the recorder was never reached");
             Updates.Should().BeEmpty("no submission write");
+            Transactions.Should().BeEmpty("no release transaction");
             Transitions.Should().BeEmpty("no invoice move");
             Notified.Should().BeEmpty("no notice");
             Closes.Should().BeEmpty("no Signal closed");
@@ -2925,6 +3047,389 @@ public class SubmissionOverrideServiceTests
         w.Closes.Should().HaveCount(closes, "no close in no one's name");
         w.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("names no decider", StringComparison.Ordinal)
             && e.Message.Contains(recordId.ToString("D"), StringComparison.Ordinal));
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 114: the Override releases a Procedure hold (082c-2's gap and unresolved holds), on either channel
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static ProcedureResolution EndedProcedure(DateOnly from, DateOnly to)
+    {
+        var kit = new ProcedureKit().Procedure("Ended", from: from, to: to);
+        kit.Rule("Ended", "ENDED-INCREMENT", RuleType.TimeIncrement);
+        return kit.Build();
+    }
+
+    private const string FirmMissing = SubmissionReasonCodes.FirmMissing;
+
+    /// <summary>The Procedure hold code a world was built with.</summary>
+    private static string HoldCodeOf(bool unresolved) => unresolved ? SubmissionReasonCodes.ProceduresUnresolved : SubmissionReasonCodes.ProcedureGap;
+
+    private static UpdateRequest InvoiceWriteOf(World w) =>
+        w.Transactions.Single().Cast<UpdateRequest>().Single(u => u.Target.LogicalName == "sprk_invoice");
+
+    [Theory(DisplayName = "114: a privileged Override with a reason releases a Procedure hold - Internal (Blocked) and SPA (Accepted), gap and unresolved: Accepted / Overridden, ONE Decision Record naming the hold, the invoice stays In Review, nothing else is created")]
+    [InlineData(InvoiceSubmissionChannel.Internal, false)]
+    [InlineData(InvoiceSubmissionChannel.Spa, false)]
+    [InlineData(InvoiceSubmissionChannel.Internal, true)]
+    [InlineData(InvoiceSubmissionChannel.Spa, true)]
+    public async Task Override_ReleasesAProcedureHold_OnEitherChannel(InvoiceSubmissionChannel channel, bool unresolved)
+    {
+        var w = await World.CreateHeldAsync(channel, unresolved);
+        InvoiceProcedureHold.ReasonsOf(w.Submission).Should().BeEquivalentTo([HoldCodeOf(unresolved)], "control: the fixture holds the invoice");
+        var held = JsonNode.Parse(w.FindingsJson)!["pipelineFindings"]!.AsArray().OfType<JsonObject>()
+            .Single(f => f["reasonCode"]!.GetValue<string>() == HoldCodeOf(unresolved));
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        result.Outcome.Should().Be("Overridden");
+        w.RecordCreates.Should().Be(1, "exactly one Decision Record (D-100)");
+        w.Status.Should().Be(InvoiceSubmissionStatus.Accepted);
+        w.Code.Should().Be(SubmissionReasonCodes.Overridden);
+        InvoiceProcedureHold.ReasonsOf(w.Submission).Should().BeEmpty("approval stops answering procedure_held for it");
+        IsHeld(w.Submission).Should().BeFalse("the FR-20 hold is lifted too");
+        w.InvoiceStatus.Should().Be(InvoiceLifecycleStatus.InReview, "an override releases the hold; the invoice stays In Review for approval");
+        w.Transitions.Should().BeEmpty();
+        w.Notified.Should().ContainSingle().Which.Should().Be(new SubmissionDecidedNotification(
+            World.SubmissionId, SubmissionDecisionOutcome.Accepted, channel, World.InvoiceId, null));
+
+        // What the record names: the hold(s) released, from the stored finding (a gap: the Procedure and its first gapped work date).
+        var decision = w.Recorded.Single();
+        decision.ActionCode.Should().Be("override-submission");
+        decision.Reason.Should().Be(Reason);
+        decision.Facts["channel"].Should().Be(channel == InvoiceSubmissionChannel.Internal ? "Internal" : "SPA");
+        decision.Values![SubmissionOverrideService.ReleasedHoldsValue].Should().Be(HoldCodeOf(unresolved));
+        decision.Values[SubmissionOverrideService.ReleasedHoldDetailValue].Should().Be(unresolved
+            ? held["values"]!["cause"]!.GetValue<string>()
+            : $"Ended ({held["values"]!["workDate"]!.GetValue<string>()})", "the Procedure and the work date of the gap (a reader member: never an id)");
+
+        // The findings are kept (FR-37, I-5): the hold finding is still stored, beside the decision.
+        var after = JsonNode.Parse(w.FindingsJson)!.AsObject();
+        after["pipelineFindings"]!.ToJsonString().Should().Be(JsonNode.Parse(_initialJsonOf(w))!["pipelineFindings"]!.ToJsonString());
+        after["override"]!["reason"]!.GetValue<string>().Should().Be(Reason);
+    }
+
+    private static string _initialJsonOf(World w) => w.InitialJson;
+
+    [Fact(DisplayName = "114 must-not-fire: the last reason released leaves the review detail BLANK, written explicitly (not skipped), in the SAME transaction as the submission's state, each row conditioned on its version")]
+    public async Task Release_OfTheLastHold_BlanksTheDetail_InTheSameTransaction()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa);
+        w.Invoice![InvoiceReviewDetail.Column] = new OptionSetValue(InvoiceReviewDetail.WaitingForBillingTerms);
+        var submissionVersion = w.Submission.GetAttributeValue<long>("versionnumber");
+        var invoiceVersion = w.InvoiceVersion;
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.InvoiceDetail.Should().BeNull("nothing else holds the invoice");
+        var requests = w.Transactions.Single().Cast<UpdateRequest>().ToList();
+        requests.Should().HaveCount(2).And.OnlyContain(u => u.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches);
+        requests[0].Target.LogicalName.Should().Be(FinanceBaseValues.SubmissionEntity);
+        requests[0].Target.RowVersion.Should().Be((submissionVersion + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "the version read after the Signal set was stored (our own write moved it)");
+        requests[1].Target.LogicalName.Should().Be("sprk_invoice");
+        requests[1].Target.RowVersion.Should().Be(invoiceVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        requests[1].Target.Attributes.Keys.Should().Equal([InvoiceReviewDetail.Column], "only the detail: no status, no firm");
+        requests[1].Target.Contains(InvoiceReviewDetail.Column).Should().BeTrue("a blank is written explicitly, never skipped");
+        requests[1].Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Should().BeNull();
+        w.Updates.Should().ContainSingle("the one transaction carries the submission's state");
+    }
+
+    public static TheoryData<string, int?> RemainingHolds => new()
+    {
+        { "the invoice's own firm hold is still set", InvoiceReviewDetail.WaitingForFirm },
+        { "the invoice names no firm", InvoiceReviewDetail.WaitingForFirm },
+        { "another linked submission still holds a gap", InvoiceReviewDetail.WaitingForBillingTerms },
+        { "another linked submission still could not be checked", InvoiceReviewDetail.BillingTermsNotChecked },
+        { "another linked submission is itself released", null },
+    };
+
+    [Theory(DisplayName = "114 must-fire: the release re-derives the detail through InvoiceOpenHolds from the holds that REMAIN - never blank while another hold stays (the firm hold still open: 659490002, and approval is still refused)")]
+    [MemberData(nameof(RemainingHolds))]
+    public async Task Release_ReDerivesTheDetail_FromTheRemainingHolds(string remaining, int? expected)
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
+        switch (remaining)
+        {
+            case "the invoice's own firm hold is still set":
+                w.InvoiceOwnHold = FirmMissing;
+                break;
+            case "the invoice names no firm":
+                w.Invoice!.Attributes.Remove(InvoiceSubmissionPersister.InvoiceVendorOrg);
+                break;
+            case "another linked submission still holds a gap":
+                w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.ProcedureGap, "{\"pipelineFindings\":[],\"lineFindings\":[]}"));
+                break;
+            case "another linked submission still could not be checked":
+                w.OtherSubmissions.Add(OtherSubmission(null, "{\"pipelineFindings\":[{\"reasonCode\":\"" + SubmissionReasonCodes.ProceduresUnresolved + "\",\"values\":{}}],\"lineFindings\":[]}"));
+                break;
+            case "another linked submission is itself released":
+                w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.Overridden, "{\"pipelineFindings\":[{\"reasonCode\":\"" + SubmissionReasonCodes.ProcedureGap + "\",\"values\":{}}],\"lineFindings\":[]}"));
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(remaining), remaining, null);
+        }
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.InvoiceDetail.Should().Be(expected, remaining);
+        InvoiceWriteOf(w).Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column)?.Value.Should().Be(expected, remaining);
+
+        // And it is exactly what approval reads once the write lands (the agreement pin, InvoiceOpenHoldsTests, runs the real approval over
+        // these stored states): the detail is the derivation over the post-write rows, with the released gap not among them.
+        var post = InvoiceOpenHolds.ReasonsOf(
+            invoiceHasNoFirm: w.Invoice!.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg) is null,
+            invoiceHoldSet: w.InvoiceOwnHold is not null,
+            [new InvoiceOpenHolds.StoredSubmission(w.Code, w.FindingsJson), .. w.OtherSubmissions
+                .Select(s => new InvoiceOpenHolds.StoredSubmission(
+                    s.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode),
+                    s.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson)))]);
+        InvoiceReviewDetail.ReviewDetailOf(post).Should().Be(expected, remaining);
+        post.Contains(SubmissionReasonCodes.ProcedureGap).Should().Be(remaining == "another linked submission still holds a gap",
+            "the released gap is gone from the invoice's holds");
+    }
+
+    private static Entity OtherSubmission(string? reasonCode, string findingsJson) =>
+        new(FinanceBaseValues.SubmissionEntity, Guid.NewGuid())
+        {
+            [InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", World.InvoiceId),
+            [InvoiceSubmissionPersister.SubmissionReasonCode] = reasonCode,
+            [InvoiceSubmissionPersister.SubmissionFindingsJson] = findingsJson,
+        };
+
+    [Fact(DisplayName = "114: the release is for that invoice only - a second invoice held by the same gap stays held; no Procedure Version, assignment, override row or Signal is written")]
+    public async Task Release_IsForThatInvoiceOnly()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa);
+        var secondInvoice = Guid.NewGuid();
+        var second = new Entity(FinanceBaseValues.SubmissionEntity, Guid.NewGuid())
+        {
+            [InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", secondInvoice),
+            [InvoiceSubmissionPersister.SubmissionStatus] = w.Submission[InvoiceSubmissionPersister.SubmissionStatus],
+            [InvoiceSubmissionPersister.SubmissionReasonCode] = SubmissionReasonCodes.ProcedureGap,
+            [InvoiceSubmissionPersister.SubmissionFindingsJson] = w.FindingsJson,
+        };
+        var secondBefore = second.Attributes.ToDictionary(a => a.Key, a => a.Value);
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        InvoiceProcedureHold.ReasonsOf(second).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "the second invoice is still held by the same gap");
+        second.Attributes.ToDictionary(a => a.Key, a => a.Value).Should().BeEquivalentTo(secondBefore);
+        w.Transactions.Single().Cast<UpdateRequest>().Select(u => u.Target.Id).Should().BeEquivalentTo([World.SubmissionId, World.InvoiceId], "this submission and this invoice, nothing else");
+        w.Records.Created.Select(e => e.LogicalName).Should().OnlyContain(n => n == "sprk_decisionrecord",
+            "no Procedure Version, assignment, override row or Signal: the strict entity double refuses any other write");
+        w.Entities.Invocations.Select(i => i.Method.Name).Where(n => n.Contains("Create", StringComparison.Ordinal) || n.Contains("Delete", StringComparison.Ordinal))
+            .Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "114 negative: without the privilege, with a privilege probe that faults, or without a reason, the release is refused with 105's codes and nothing is written")]
+    [InlineData("no privilege", 403, "ebilling.override.not_permitted")]
+    [InlineData("probe fault", 403, "ebilling.override.not_permitted")]
+    [InlineData("no reason", 400, "ebilling.reason_required")]
+    public async Task Release_Refusals_WriteNothing(string case_, int status, string code)
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa);
+        switch (case_)
+        {
+            case "no privilege":
+                w.Probe.Release(EbillingOverridePrivilege.PrivilegeName);
+                break;
+            case "probe fault":
+                w.Probe.PrivilegeFault = new HttpRequestException("dataverse down");
+                break;
+        }
+
+        var result = await w.OverrideAsync(reason: case_ == "no reason" ? "  " : Reason);
+
+        result.Kind.Should().Be(BlockedDecisionKind.Refused);
+        result.StatusCode.Should().Be(status);
+        result.ErrorCode.Should().Be(code);
+        w.AssertNothingWritten();
+        InvoiceProcedureHold.ReasonsOf(w.Submission).Should().NotBeEmpty("still held");
+    }
+
+    [Theory(DisplayName = "114 fail closed: stored findings that do not name the hold are refused - an Accepted submission with the Procedure reason, and an Internal Blocked one with no deciding finding (C22 is lifted only for a stored Procedure hold)")]
+    [InlineData(InvoiceSubmissionChannel.Spa)]
+    [InlineData(InvoiceSubmissionChannel.Internal)]
+    public async Task Release_WhenTheStoredFindingsDoNotNameTheHold_IsRefused(InvoiceSubmissionChannel channel)
+    {
+        var w = await World.CreateHeldAsync(channel, editFindings: json =>
+        {
+            json["pipelineFindings"] = new JsonArray();
+            return json;
+        });
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Refused);
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.FindingsUnreadable);
+        w.AssertNothingWritten();
+    }
+
+    [Fact(DisplayName = "114: an invoice that is no longer In Review is refused with 105's invoice_not_held, and nothing is written")]
+    public async Task Release_WhenTheInvoiceIsNotInReview_IsRefused()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa);
+        w.SetInvoiceStatus(InvoiceLifecycleStatus.Superseded);
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.InvoiceNotHeld);
+        w.AssertNothingWritten();
+    }
+
+    [Theory(DisplayName = "114: a row that changed after it was read (the invoice, or the submission) applies NOTHING - 409 concurrent_change, the detail untouched; the repeat finds the record and finishes")]
+    [InlineData("invoice")]
+    [InlineData("submission")]
+    public async Task Release_WhenARowChanged_AppliesNothing_AndTheRepeatFinishes(string changed)
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa);
+        w.Invoice![InvoiceReviewDetail.Column] = new OptionSetValue(InvoiceReviewDetail.WaitingForBillingTerms);
+        w.OnUpdate = () =>
+        {
+            var row = changed == "invoice" ? w.Invoice! : w.Submission;
+            row["versionnumber"] = row.GetAttributeValue<long>("versionnumber") + 1;
+        };
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Refused);
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.ConcurrentChange);
+        w.Transactions.Should().BeEmpty("all or nothing");
+        w.Code.Should().Be(SubmissionReasonCodes.ProcedureGap, "the submission is still held");
+        w.InvoiceDetail.Should().Be(InvoiceReviewDetail.WaitingForBillingTerms, "the detail was not touched");
+        w.RecordCreates.Should().Be(1);
+
+        w.OnUpdate = null;
+        var repeat = await w.OverrideAsync();
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.RecordCreates.Should().Be(1, "the repeat finds the record: no second one");
+        w.InvoiceDetail.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "114: a repeat of a released SPA submission is a no-op - AlreadyDecided, no second record, no second write; a Return of it is refused")]
+    public async Task Release_Repeat_IsANoOp()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa);
+        await w.OverrideAsync();
+
+        var repeat = await w.OverrideAsync();
+        var returned = await w.ReturnAsync();
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.RecordCreates.Should().Be(1);
+        w.Transactions.Should().HaveCount(1);
+        returned.StatusCode.Should().Be(409);
+        returned.ErrorCode.Should().Be(BlockedSubmissionErrors.AlreadyOverridden);
+    }
+
+    [Fact(DisplayName = "114: where the review detail column does not exist yet, the release still happens - the submission alone, by the single conditional write (the holds are the stored state)")]
+    public async Task Release_WhenTheDetailColumnIsMissing_StillReleases_WithoutTheInvoiceWrite()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa, detailColumnPresent: false);
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.Transactions.Should().BeEmpty();
+        w.Updates.Should().ContainSingle();
+        InvoiceProcedureHold.ReasonsOf(w.Submission).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "114 fail closed: a fault reading the holds that remain writes no release (503), the record stands, and the repeat finishes with no second record")]
+    public async Task Release_WhenTheRemainingHoldsCannotBeRead_IsUnavailable_AndTheRepeatFinishes()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa);
+        w.HoldReadFault = new TimeoutException("a message that names row " + Guid.NewGuid());
+
+        var result = await w.OverrideAsync();
+
+        ShouldBeUnavailable(result);
+        w.Code.Should().Be(SubmissionReasonCodes.ProcedureGap, "the hold is still in force");
+        w.Transactions.Should().BeEmpty();
+        w.RecordCreates.Should().Be(1);
+        w.Log.Entries.Should().NotContain(e => e.Message.Contains("names row", StringComparison.Ordinal), "the log names the exception type, never its message (C16)");
+
+        w.HoldReadFault = null;
+        (await w.OverrideAsync()).Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.RecordCreates.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "114: a Return of an SPA submission held by a Procedure hold is refused as it always was (not_internal); a Return of an Internal one with no deciding finding is allowed (C22)")]
+    public async Task Return_OfAProcedureHold()
+    {
+        var spa = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa);
+        var refused = await spa.ReturnAsync();
+        refused.StatusCode.Should().Be(409);
+        refused.ErrorCode.Should().Be(BlockedSubmissionErrors.NotInternal);
+        spa.AssertNothingWritten();
+
+        var internalHold = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
+        var returned = await internalHold.ReturnAsync();
+        returned.Kind.Should().Be(BlockedDecisionKind.Decided);
+        returned.Outcome.Should().Be("Returned");
+        internalHold.Transitions.Should().Equal(InvoiceLifecycleStatus.ReturnedToFirm);
+        internalHold.Recorded.Single().Values.Should().NotContainKey(SubmissionOverrideService.ReleasedHoldsValue, "a return releases no hold");
+    }
+
+    [Fact(DisplayName = "114: the read of an SPA Procedure hold shows it as blocked with an Override (privileged caller) and no Return; once released it reads Overridden")]
+    public async Task Get_ShowsAProcedureHoldAsOverridable()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa);
+
+        var before = (await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None))!;
+        await w.OverrideAsync();
+        var after = (await w.Service.GetAsync(World.SubmissionId, World.Token, CancellationToken.None))!;
+
+        before.State.Should().Be(BlockedSubmissionStates.Blocked);
+        before.CanOverride.Should().BeTrue();
+        before.CanReturn.Should().BeFalse();
+        after.State.Should().Be(BlockedSubmissionStates.Overridden);
+        after.CanOverride.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "114: the Decision Record's facts shape is unchanged - a gap release carries exactly the facts keys of an ordinary override, and an ordinary override adds no hold value")]
+    public async Task Release_KeepsTheFactsShape()
+    {
+        var ordinary = await World.CreateAsync();
+        var gap = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
+
+        await ordinary.OverrideAsync();
+        await gap.OverrideAsync();
+
+        gap.Recorded.Single().Facts.Keys.Should().BeEquivalentTo(ordinary.Recorded.Single().Facts.Keys);
+        ordinary.Recorded.Single().Values!.Keys.Should().BeEquivalentTo(["submissionId", "trackingNumber"]);
+        ordinary.Transactions.Should().BeEmpty("an override that lifts no Procedure hold writes only the submission, as before");
+        ordinary.Updates.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "114: Classify - an Accepted submission with a Procedure reason is held on any channel, one reading Overridden is released; anything else keeps its disposition")]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.ProcedureGap, "ProcedureHeld")]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.ProceduresUnresolved, "ProcedureHeld")]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden, "Overridden")]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Accepted, null, "NotInternal")]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.ProcedureGap, "NotInternal")]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Failed, SubmissionReasonCodes.ProcedureGap, "NotInternal")]
+    [InlineData(InvoiceSubmissionChannel.Internal, InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked, "Blocked")]
+    [InlineData(InvoiceSubmissionChannel.Internal, InvoiceSubmissionStatus.Accepted, null, "AcceptedByProcessing")]
+    public void Classify_ProcedureHolds(InvoiceSubmissionChannel channel, InvoiceSubmissionStatus status, string? code, string expected)
+    {
+        var row = new Entity(FinanceBaseValues.SubmissionEntity, Guid.NewGuid())
+        {
+            ["sprk_channel"] = new OptionSetValue((int)channel),
+            [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)status),
+            [InvoiceSubmissionPersister.SubmissionReasonCode] = code,
+        };
+
+        SubmissionOverrideService.Classify(row).ToString().Should().Be(expected);
     }
 
     private static string FindFromRepoRoot(params string[] parts)

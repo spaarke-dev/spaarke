@@ -22,7 +22,7 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <summary>
 /// The Procedure holds of 082c-2: <see cref="SubmissionReasonCodes.ProcedureGap"/> (a work date with no billing terms in force) and
 /// <see cref="SubmissionReasonCodes.ProceduresUnresolved"/> (the terms could not be checked). Either refuses approval
-/// (<c>ebilling.approve.procedure_held</c>) until a re-check clears it.
+/// (<c>ebilling.approve.procedure_held</c>) until a re-check clears it or a privileged Override releases it (task 114).
 /// </summary>
 /// <remarks>
 /// <para><b>The hold is the stored submission state, never the invoice's <c>sprk_reviewdetail</c>.</b> The review detail is a derived label for
@@ -35,9 +35,12 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// </list>
 /// <para>Stored findings that cannot be parsed hold as <see cref="SubmissionReasonCodes.ProceduresUnresolved"/> (fail closed: what they hold cannot
 /// be known). A read fault throws, and every caller refuses or answers unavailable: held, never "not held".</para>
-/// <para><b>Clearing (recorded for 114, 095d-2 and the ebilling-r2 re-check).</b> No 082c-2 path clears a Procedure hold: it lasts as long as the
-/// stored state names it. A future re-check or the 114 Override release must rewrite that state (or mark it released) in the transaction that
-/// recomputes the review detail.</para>
+/// <para><b>Clearing (recorded for 114, 095d-2 and the ebilling-r2 re-check).</b> A Procedure hold lasts as long as the stored state names it.
+/// <b>Task 114's Override release marks it released</b>: the submission's outcome reason code becomes
+/// <see cref="SubmissionReasonCodes.Overridden"/> (and its status Accepted), the one state only <c>SubmissionOverrideService</c> writes, and a
+/// submission in that state holds no Procedure reason, whatever its stored findings still name (an override never rewrites a finding, FR-37).
+/// The release recomputes the review detail in the same transaction (<see cref="InvoiceOpenHolds"/>). A future re-check (ebilling-r2) must
+/// rewrite the stored state, or mark it released, in the transaction that recomputes the review detail.</para>
 /// </remarks>
 public static class InvoiceProcedureHold
 {
@@ -88,6 +91,14 @@ public static class InvoiceProcedureHold
     public static IReadOnlySet<string> ReasonsOf(string? reasonCode, string? json)
     {
         var reasons = new HashSet<string>(StringComparer.Ordinal);
+
+        // Task 114: an Override released this submission's Procedure holds. Its findings still name them (they are kept as evidence and read
+        // as Overridden), so the released state is the outcome reason, not the findings.
+        if (string.Equals(reasonCode, SubmissionReasonCodes.Overridden, StringComparison.Ordinal))
+        {
+            return reasons;
+        }
+
         if (reasonCode is { } reason && IsHoldCode(reason))
         {
             reasons.Add(reason);
