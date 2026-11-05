@@ -569,6 +569,16 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - Census on dev (read-only): 0 of the 93 configured `sprk_playbooknode` rows name these tables.
     - Ontology confirmed output mapping is in scope. No legitimate playbook writes these tables through it. The writers (SignalWriter, DecisionRecordWriter, the Revise Budget writer and SignalEvaluationService's upsert) do not use any generic path.
     - Ontology asked for must-not-fire tests on the writers' own updates and for a rebase onto uac-r2's `5df0a80e1d`. Ontology reviews the diff before merge.
+- **Dev deploy of the lineage fix (master `909754869f`, live 2026-11-05 04:16:30Z; uac-r2 ran it with the owner's go): ontology PASS on the 30-minute gate and the AFTER read-back.**
+  - Gate results:
+    - 0 5xx and 0 held-pair Warnings;
+    - 0 SuppressionPartitionUndeterminedException;
+    - the secure-child reconcile made 0 reassign or put-back writes.
+  - Read-back, before and after, unchanged:
+    - the 7 project-core Signals: owner and BU unchanged, 0 shares;
+    - the 4 service-request-core Decision Records: owner and BU unchanged, 0 shares;
+    - 0 service-request-core Signals.
+  - Still open: Worklist `/api/v1/signals` 200, to be confirmed from organic or UAT traffic, and the suppression and Undetermined counts after the first nightly `SignalReevaluationJob`. Either a non-zero Undetermined count or a 5xx reopens this.
 - **Consequence for D-36 extensibility (2026-11-04, uac-r2 second review K2).** Grouping through `CoreAncestorResolver` stays data-driven. Secure lineage, however, now holds a core pair whose type maps outside the closed core-table set. So a new core type needs its catalog row and a code change to that set before its Signals reconcile and suppress normally. Until then they are held: visible, never stamped, shares narrow only. This is accepted as fail-closed. The project CLAUDE.md data-and-security line is amended to match. The test rename or split is done on uac-r2's branch.
 - **082c-1 owner review (2026-11-04, `origin/task/ebilling-082c-1` at `a680dacf0d`; source diff read in full): PASS, with one change.**
   - **Must change (Q1):** under Split (ExpenseRule), a higher-ranked valid version displaces a lower version's cap only when it **states a cap** (`MaxAmountPerItem` non-null).
