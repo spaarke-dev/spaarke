@@ -610,3 +610,8 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - F2: correction gaps compared per subject;
     - record-rule codes print as "record rule".
   - **Point:** the correction result with a new gap (`ebilling.correction.procedure_gap`) tells the user the correction "cannot be applied", but logs "saved, but … its rules were not re-run". One of the two is wrong. ebilling makes the text match the stored state and proves with a test that approval stays refused after this outcome (C12).
+- **082c-1 cleared (2026-11-04, `6a12553fce..88b16f8729`): PASS.**
+  - The correction text matches the saved state, and the approval-refused test closes C12.
+  - The rule (c) fallback is narrowed to hole, after-end and not-applicable, through one helper shared by the evaluator, the invoice-gap suppression and the adjustment list.
+  - A Follow-vs-Pin disagreement on the invoice date only is a known limit.
+  - ebilling merges 082c-1 into work and starts 082c-2.
