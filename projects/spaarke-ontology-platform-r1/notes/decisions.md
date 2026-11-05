@@ -465,6 +465,10 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - If the caller's token is cancelled after the apply, the call ends with neither 503 nor 200. Check (f) lists the row and a repeat finishes it.
     - A permanent filing mismatch stays 503 `filing`, logged at Error with Permanent=true. It is for an operator to fix, not for a retry.
   - **Carried to 095d-2:** the ConditionCleared close carries the record id, only once every reason has cleared; the `sprk_reviewdetail` writer list follows D-205.
+- **Ruling 2026-11-05 (ebilling 114 asked; Override close vs a hold that remains): ontology's call, ebilling's fix.** A human decision closes as Acted, and names in its record's resolved set, only Signals whose hold the decision released. A Signal whose hold is still in `InvoiceOpenHolds.ReasonsAfterAsync` stays open: the shared SubmissionIntegrity Signal while firm_missing remains (it closes `ConditionCleared` through the 095d-2 re-run, as above), and a Procedure Signal of another linked submission that this Override did not release. Before 114 the Override closed every open Signal on the invoice; 114 widens that, because Internal gap + firm_missing is now overridable (was refused, C22).
+  - **Fix shape:** filter the set before `BuildDecision` and before the set is stored. Today `ReasonsAfterAsync` (`SubmissionOverrideService.cs` ~:858) runs after `BuildDecision` (~:834), so the order must change. The record's facts may name the left-open Signal and why. No firm hold left → the shared Signal closes Acted as before (must-not-fire).
+  - **Known limit:** a set stored by a pre-fix attempt is replayed verbatim on retry; dev-only, in-flight rows.
+  - Requested in 114's scope before the master PR; otherwise a filed issue that blocks 114's master PR.
 
 ## D-202 — Record-rule policy code: `BRR-{recordRulePolicyId:N}` (ontology position, 2026-11-03)
 
