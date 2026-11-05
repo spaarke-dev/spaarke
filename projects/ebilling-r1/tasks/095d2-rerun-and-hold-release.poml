@@ -135,6 +135,13 @@
     <criterion>uac-r2 condition 3 (binding): the Procedures run in the re-run. A new hold removes the override stamp in the same write; Override stays under D-142.</criterion>
     <criterion>Placement (uac-r2 Q7): if the re-run can call AI coding (owner Q3 answer), the handler lives in Services/Ai/Jobs/ (bff-extensions section D, Path C comply);
       if it never calls AI, Services/Jobs/Handlers/. State the reason in the Placement Justification. One IJobHandler, one DI registration, no new direct model calls.</criterion>
+    <criterion>ontology Q1 (D-201 note 402e210116): the ConditionCleared close is linked to the assign-firm record via LinkConditionClearedRecordAsync ONLY when the
+      re-run started by that decision is the run that finds no reason left; resolvedBy = the assign-firm decider; expectedPriorRecordId = null; the record's
+      ResolvedSignalIds stays empty. The writer's doc comment names both uses (Do-lane and this Decide-lane close); the writer tests add a Decide-lane link
+      plus its ForeignLink and NotApplicable outcomes. Must-not-fire: a Signal cleared later by another path is not linked.</criterion>
+    <criterion>ontology Q2: a changed reason set closes the Signal as Superseded (record-free) and opens episode n+1, only when the reason set actually changed
+      (must-not-fire: an unchanged set re-run supersedes nothing). A stored Override or Return set naming the superseded Signal closes it as LeftAsIs
+      (HumanDecisionSignalClose ~:104), not as a failure: test that a retry does not loop on 503.</criterion>
     <criterion>Wording: commits, PR and notes describe the change, never a sequence of who could see what when.</criterion>
   </acceptance-criteria>
 

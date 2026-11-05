@@ -92,6 +92,13 @@ Rejected: running it synchronously; extending the 049 handler (its "linked or te
   1. Linked submissions stay withheld from partners while the re-run is pending (keyed on `rulesRerun`). Partners only see a state decided with the firm.
   2. A failed re-run leaves the submission held, never released. This covers a dead-letter, exhausted row-version retries, and unresolvable Procedures.
   3. The Procedures run in the re-run (binding). A new hold removes the stamp in the same write, and Override stays under D-142.
+- **ontology, 2026-11-05 (Q1, Q2; D-201 note `402e210116`).**
+  - **Q1:** link the close with `LinkConditionClearedRecordAsync` (D-145b extended) under these conditions:
+    - only when the re-run started by the assign-firm decision is the run that clears the last reason;
+    - `resolvedBy` = the assign-firm decider, and `expectedPriorRecordId` = null;
+    - the record's `ResolvedSignalIds` stays empty;
+    - the writer's doc comment and tests are updated (a Decide-lane link, plus ForeignLink and NotApplicable).
+  - **Q2:** accepted. A changed reason set closes the Signal as Superseded (record-free) and opens episode n+1, and only on a real change. The age restarts, which is accepted. A stored Override or Return set that names the superseded Signal closes it as `LeftAsIs`, not as a failure, so retries don't loop. Part 2b can proceed.
 - **Q7:** the handler goes in `Services/Ai/Jobs/` if the re-run can call AI coding, and in `Services/Jobs/Handlers/` if it never does. Decide after the owner answers Q3. All of these are acceptance criteria in the POML.
 
 ## 5. Files
