@@ -221,6 +221,14 @@ internal sealed class UpdateRecordActionCore
                 $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).");
         }
 
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter, the list the general create refuses). Refused
+        // whole, for every payload source and identity (the node and the action seam alike), before any row is read or written.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(input.EntityLogicalName) is { } writerOnly)
+        {
+            throw new RecordOwnerUnresolvedException(input.EntityLogicalName, writerOnly.RefusalCode!, writerOnly.Reason!);
+        }
+
         async Task Patch(CancellationToken ct)
         {
             // ebilling-r1 #2081: an invoice or line is written UPDATE-ONLY (If-Match: *, impersonation kept). The guard below

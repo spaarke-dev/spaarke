@@ -4,7 +4,7 @@
     <title>A Signal or Decision Record create asks the owner about its core record and checks the caller's AppendTo on it (#2561, DI-019)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
     <gate>042b (#2562) merged to master</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api (RecordCreationService create path and CallerWriteAuthorization's use); adds a caller AppendTo check on a Secure family (tags security, bff-api); UAC-r2 ruled #2561 F-class 2026-11-04.</rigor-reason>
     <model-tier>opus</model-tier>

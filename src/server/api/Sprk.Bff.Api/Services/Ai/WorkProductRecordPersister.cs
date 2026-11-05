@@ -185,6 +185,16 @@ public sealed partial class TopicRegistryWorkProductPersister : IWorkProductReco
                 "Fix the registry row.");
         }
 
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter). A registry row that targets one is refused as a
+        // bad mapping, as above, before anything is written.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate(mapping.HostEntity) is { } writerOnly)
+        {
+            throw new InvalidOperationException(
+                $"Work-product persistence for output '{entry.Key}': registry row for topic '{topic}' targets " +
+                $"{mapping.HostEntity}.{mapping.TargetField}, which is not written: {writerOnly.Reason} Fix the registry row.");
+        }
+
         // ── 2. Derive the envelope VERBATIM from the stored ledger entry (ADR-040: the
         // ledger SessionOutput is the source the persisted envelope derives from).
         var envelopeJson = JsonSerializer.Serialize(

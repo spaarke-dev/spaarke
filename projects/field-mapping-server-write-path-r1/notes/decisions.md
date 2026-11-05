@@ -800,3 +800,13 @@ Numbering note (2026-11-04): the "task 043" planned on 2026-11-02 for the `sprk_
 ## 2026-11-04 — The generic update tools do not change Signal, Decision Record or Budget Revision rows (owner; D-204 extended)
 
 **Decision (owner, this session):** chat's update-record tool, the playbook Update Record node and (subject to ontology's answer) playbook output mapping refuse to change `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision`. These rows are changed only by their own processes (the Signal lifecycle and evaluation, the decision commit, the budget revision executor), which are unchanged. Requested by ontology; UAC-r2 classifies it as an integrity rule. Read-only census on dev: none of the 93 configured playbook nodes targets these tables. Task 048.
+
+## 2026-11-05 — Chat delete honours D-204 (owner)
+
+**Decision (owner, this session):** the general delete path (chat `dataverse.delete_record`, and any other generic delete of a caller- or config-chosen table) refuses `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision`, reading the same `CreatedOnlyByItsWriter` flag. Admin privileges in the model-driven app are unchanged; person-role Delete privileges are task 046's question. Ontology and UAC-r2 agree. Added to task 048.
+
+## 2026-11-05 — NFR-02 exceeded on the server create path: speed up the server (owner)
+
+**Finding:** task 021's live timing (notes/task-021-live.md): the Create Matter create p95 rose by +2634 ms (budget +500 ms). Server medians: CallerChecks 983 ms (sequential AppendTo per bound record), PostCreate 1331 ms (the I-12 L1 assigned-access grant and the membership event inside the request), TableRules 302, Owner 261, FieldMapping 176, Create 136.
+
+**Decision (owner, this session):** speed up the server rather than raise the budget: run the per-record caller checks concurrently, and move the assigned-access grant (and membership event) out of the request so it completes within seconds after the record is returned. UAC-r2 reviews the grant timing. Then create the Project to Matter profile on dev (owner approved 2026-11-05) and re-measure. The 021 wizard deploy waits for that. Task 049.
