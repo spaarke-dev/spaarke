@@ -36,9 +36,9 @@
 | 043 | [A Document is a field-mapping source (owner 2026-11-04)](043-document-as-mapping-source.poml) | FR-03, FR-04, FR-19 | opus / high | FULL | none | 031 | 🔲 [open] |
 | 044 | [Core pair written whole, only by the server and the ledger writers: field security (owner 2026-11-04)](044-core-pair-server-only-field-security.poml) | FR-41 | opus / high | FULL | none | 042c; dev import gated on the owner's go in UAC-r2's session | 🔲 [open] |
 | 045 | [Regarding pair always complete and propagated: inventory + design first (owner 2026-11-04)](045-regarding-pair-complete-and-propagated.poml) | FR-23, FR-41 | opus / high | FULL | none | 042c, 044; part B after owner approval | 🔲 [open] |
-| 046 | [Feature permission matrix, proposed role changes (UAC-r2), role guard (owner 2026-11-04)](046-feature-permission-matrix-and-role-guard.poml) | FR-08, FR-26 | opus / high | FULL | none | 031, 042c | 🔲 [open] |
-| 048 | [Signal, Decision Record and Budget Revision changed only by their writers: generic update tools refuse them (owner 2026-11-04, D-204 extended)](048-writer-only-tables-refused-by-generic-updates.poml) | FR-41 | opus / high | FULL | none | 042c | 🔄 fix rounds 1-2 (K fixes; chat delete honours D-204, owner 2026-11-05); then UAC-r2 + ontology review |
-| 049 | [Create path within NFR-02: concurrent caller checks, assigned-access grant after the response (owner 2026-11-05)](049-create-path-latency-nfr02.poml) | NFR-02 | opus / high | FULL | none | 021, 042c | 🔄 Parts A/C started; Part B waits on UAC-r2's conditions |
+| 046 | [Feature permission matrix, proposed role changes (UAC-r2), role guard (owner 2026-11-04)](046-feature-permission-matrix-and-role-guard.poml) | FR-08, FR-26 | opus / high | FULL | none | 031, 042c | 🔄 matrix + guard done (task/fm-046); review; role changes with UAC-r2 |
+| 048 | [Signal, Decision Record and Budget Revision changed only by their writers: generic update tools refuse them (owner 2026-11-04, D-204 extended)](048-writer-only-tables-refused-by-generic-updates.poml) | FR-41 | opus / high | FULL | none | 042c | ✅ [done] PR #2570 merged 2026-11-05 (0f53e053bf) |
+| 049 | [Create path within NFR-02: concurrent caller checks, assigned-access grant after the response (owner 2026-11-05)](049-create-path-latency-nfr02.poml) | NFR-02 | opus / high | FULL | none | 021, 042c | 🔄 Parts A/C done; Part B (grant job) in progress under UAC-r2's conditions |
 
 ## Phase 3 — W3 Product creators onto the service
 
