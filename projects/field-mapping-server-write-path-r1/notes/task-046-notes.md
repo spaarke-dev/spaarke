@@ -7,15 +7,15 @@ Rigor FULL (POML). Model opus, effort high.
 
 | File | What |
 |---|---|
-| `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §5.1 | The feature permission matrix, the role model, the writer-only-table rule, gaps G1-G8, the three named gaps. Nothing else in the file changed. |
-| `tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs` | The declared table (`Requirements`, 148 privilege rows over 25 feature entries after fix round 1; 87 over 21 before), the role-file scan, the ratchet baseline (`KnownGaps`, 11 entries = G1 x2, G2-G6, G7 x2, G8, each with its held depth), the evidence-path check, must-fire and must-not-fire controls. |
+| `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §5.1 | The feature permission matrix, the role model, the writer-only-table rule, gaps G1-G10, the three named gaps. Nothing else in the file changed. |
+| `tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs` | The declared table (`Requirements`, 180 privilege rows over 30 feature entries after fix round 2; 148 over 25 after fix round 1; 87 over 21 before), the role-file scan, the ratchet baseline (`KnownGaps`, 10 entries = G1 x2, G2-G6, G7 x2, G8, each with its held depth; 12 after fix round 2, adding G9 and G10), the evidence-path check, must-fire and must-not-fire controls. |
 | this file | Evidence, the dev read, the proposed role changes, the added scope. |
 
 No `Roles/*.xml` file changed and no role, privilege or profile was written on any environment (`git diff --stat` of the branch lists only the three files above; every Dataverse call was a GET).
 
 ## Added scope (2026-11-05, from the coordinator)
 
-1. **Delete (and Write) on the writer-only tables.** UAC-r2 and ontology asked that person-role Delete and Write on `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision` go into the matrix. Recorded as the rule "created, changed and removed only by their writers; person roles hold at most Read on them" (doc §5.1; worded as a rule in fix round 1). The BFF's generic paths already refuse these tables (042c create; 048 update and delete, branch `task/fm-048`). The role-level proposal keeps the app users' roles separate from the person roles (dev read: Spaarke Ontology Service is held only by the app users `mi-ontology-writer-dev` and `SDAP-BFF-SPE-API`; no app user holds a person role that the proposal changes) and leaves Service Deleter untouched. The proposal itself goes to UAC-r2 by message (see "Sent to UAC-r2").
+1. **Delete (and Write) on the writer-only tables.** UAC-r2 and ontology asked that person-role Delete and Write on `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision` go into the matrix. Recorded as a rule (doc §5.1; owner ruling 2026-11-05, `notes/decisions.md` on the work branch, "Role rulings on task 046's gaps"): no person role holds Create, Write or Delete on them, except Spaarke Ontology Administrator, the designated cleanup role (ontology D-160). The BFF's generic paths already refuse these tables (042c create; 048 update and delete, branch `task/fm-048`). Task 046b's guard pins the rule.
 2. **From 031:** the event-type gap (G2; Basic User alone holds no Create on `sprk_event`, so its missing event-type AppendTo matters only together with Office Add In User, which holds it at Deep); ebilling-r1's Procedure Read for Billing Administrator (G5); Console User and AppendTo on matter and project (no failing gap with a base role; doc §5.1).
 
 ## Derivation (code, not docs)
@@ -36,9 +36,9 @@ Role model source: `docs/guides/office-addins-admin-guide.md` §7.5 (one base ro
 
 | Role | XML | Dev | Difference |
 |---|---|---|---|
-| Access Administrator, AI Analysis Admin, AI Analysis User, Basic User, Console User, Office Add In User, Ontology Administrator, Ontology Service, Reporting Access Admin / Author / Viewer | equal | equal | none |
+| Every other Spaarke role but one | equal | equal | none |
 | Billing Administrator | 24 | 25 | dev holds `prvReadsprk_procedure` Deep (G5; ebilling-r1 089e applied it on dev; its file change is on that branch) |
-| Core User | 781 | 782 | one privilege on dev only; passed to UAC-r2 by message (not reconciled here) |
+| One further role | — | — | one difference; passed to UAC-r2 by message (not reconciled here) |
 
 ## Proposed role changes (for UAC-r2; applying any of them is UAC-r2's, with the owner's go per change set, read-back and census)
 
@@ -52,17 +52,17 @@ Role model source: `docs/guides/office-addins-admin-guide.md` §7.5 (one base ro
 | G6 | Spaarke Basic User | `prvWritesprk_Document` | none → Deep | Office version save (Word FR-11) for Basic User; or UAC-r2 declares the version save Core User only (fix round 1) |
 | G7 | Spaarke Basic User or Spaarke Office Add In User | `prvAppendToAccount`, `prvAppendToContact` | Basic → Deep | Event (typed route) regarding an account or a contact, Basic User + Office Add In User (G3's change covers the contact) (fix round 1) |
 | G8 | Spaarke Basic User or Spaarke Office Add In User | `prvAppendTosprk_Budget` | none → Deep | Event (typed route) regarding a budget, Basic User + Office Add In User; or such events are Core User only (fix round 1) |
-| WO | person roles | Create, Write and Delete on the three writer-only tables | — | D-204 (writers only); the role-by-role list is in the UAC-r2 message |
+| G9 | Spaarke Basic User or Spaarke AI Analysis User | `prvWritesprk_Document` | none → Deep | Analysis run (`/api/ai/analysis/execute`) with a playbook that can write documents, Basic User + AI Analysis User; or such runs are Core User only (fix round 2) |
 
 ## Questions for UAC-r2 (no gap recorded until answered)
 
 1. Is Office To Do meant for Basic User + Office Add In User? Neither role holds `prvCreatesprk_Todo`; the role guide lists To Do outside Office Add In User. Today it is a Core User feature.
-2. Is the Console's Do-lane (Write on a Signal's To Do or event subject) meant for Basic User + Console User? Neither holds Write there. Today it is a Core User + Console User feature.
+2. Is the Console's decision commit meant for Basic User + Console User? It asks Write on each Signal's subject in every lane (matter, project, communication, event, To Do, work assignment, invoice or invoice line: `SignalWriter.VerifiedSubjects`), and the actions ask Create on what they create; Basic User holds none of that Write at Deep. Today it is a Core User + Console User feature. (Owner ruling 2026-11-05, `decisions.md`: the Console Do lane stays Core-only.)
 3. Should an add-on role be assignable without a base role? The matrix assumes not (both named Console and Office cases rest on it).
 
 ## Sent to UAC-r2
 
-Prepared by this task and handed to the main session to send in UAC-r2's session (this agent has no channel to it): the matrix, G1-G5, the questions above, the dev/XML differences, and a session-only list of grants beyond what the features ask. **UAC-r2's answer: pending** (record it here when it arrives).
+Prepared by this task and handed to the main session to send in UAC-r2's session (this agent has no channel to it): the matrix, G1-G5, the questions above and the dev/XML differences. **UAC-r2's answer: pending** (record it here when it arrives).
 
 ## Guard
 
@@ -76,7 +76,7 @@ Prepared by this task and handed to the main session to send in UAC-r2's session
 
 ## Known limits
 
-- K4: depths are declared from the ownership rule (team-owned rows need Deep; organization-owned any depth; rows owned outside the users' business units, such as event types and analysis playbooks and scopes, Global); a row owned by a user in another business unit is outside this static check (the live caller checks still decide). Account rows are taken as team-owned like contacts (G7); not read on dev.
+- K4: depths are declared from the ownership rule (team-owned rows need Deep; organization-owned any depth; rows owned outside the users' business units, such as event types and analysis playbooks and scopes, Global); a row owned by a user in another business unit is outside this static check (the live caller checks still decide). Account rows are taken as team-owned like contacts (G7); not read on dev. Identity contacts (the assignee rows) are owned by the default team of the customer business unit, so whether a Deep grant reaches them depends on where users sit relative to that business unit: to be confirmed on dev. `sprk_organization` (the budget inquiry's outside firm, fix round 2) is user-owned; its AppendTo row is declared at Deep on the same terms, to be confirmed on dev.
 - Not guarded (fix round 1): the chat create, update and delete tools and the push's child writes act on tables chosen at run time; the doc marks them.
 - The guard reads source role files only; dev drift is this task's one-off read, not a recurring check.
 
@@ -122,3 +122,31 @@ Branch `task/fm-046` at `51036cd193` (the work branch, task 048 included, merged
 **Verification (fix round 1).** `dotnet build tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj`: 0 Warning(s), 0 Error(s). `FeatureRolePrivilege` filter: 10 / 10 passed. Whole `Spaarke.ArchTests`: 1949 / 1949 passed. `Sprk.Bff.Api.Tests` not run (no `src/` change).
 
 **For UAC-r2 (with the earlier message):** G6, G7, G8 above.
+
+## Fix round 2 (2026-11-05, second independent review)
+
+Branch `task/fm-046` at `5f595baeba`; line numbers are from that tree. No `src/` file and no role file changed.
+
+| Finding | Outcome |
+|---|---|
+| F4-1 wording | Fixed. Doc §5.1: the writer-only paragraph states the owner's rule (no person role holds Create, Write or Delete on the three tables, except Spaarke Ontology Administrator, the cleanup role, ontology D-160); the proposal sentence and the Service Deleter aside are gone; the role-model paragraph no longer says who holds the writer role; the chat row says the tools refuse the tables for every caller. Notes: added-scope item 1 says "recorded as a rule" and names no app user and no holder; the "WO" proposal row is deleted. Grep of the doc section, the notes and the test for other lines that list or imply current grants: the dev-read table no longer names the differing role, and "Sent to UAC-r2" lists the matrix, the gaps, the questions and the differences. Fix round 1's row "F4 Person roles hold Read on them" quotes the earlier wording; the rule now in force is the owner's above. |
+| F3-1 subject Write | Fixed. `DecisionCallerRights.CheckAsync` asks Write on each distinct subject (`:67-83`) with no lane filter; subjects are `SignalWriter.VerifiedSubjects` (`:503-507`). [Core, Console] Deep rows for Write on all eight (the To Do and event rows were there; the Do-lane actions' own Write, `DecisionActionExecutors.cs:774,787`, added to the evidence). Core User holds seven. Invoice line: Core User holds only Read on `sprk_billingevent`, and nothing in the commit route keeps a line-subject Signal off it: `HumanDecisionSignalClose.cs` (the billing decisions) asks a line subject's Write on its parent invoice because the application writes lines (D-90), and says `DecisionCallerRights` itself, and so the commit route, still asks Write on the line. Baselined as **G10** (held: none); not a role change, so it waits on ontology and ebilling (ask the parent invoice on this route too, or keep line Signals off it). Question 2 corrected to every lane. |
+| F3-2 action asks | Fixed. Feature "Decision actions (Console)", [Core, Console]: Create on `sprk_todo`, `sprk_event`, `sprk_workassignment`, `sprk_budget` (Basic; by name, `:217,588,1247,1321,1355,1386,1449`); Append on the same four and AppendTo on `sprk_recordtype_ref` (Basic; the child-records create files the row under the core, `:1278-1281,1299`, `DecisionRouteCores.cs:74-85`); Write on `sprk_budget` (Deep, `:523`); AppendTo on `contact` (Deep, `:880,1254-1255`); AppendTo on `sprk_eventtype_ref` (Global, assign task, `:1462-1463`, not in the review's list); budget inquiry: Create and Append on `sprk_servicerequest` (Basic, `BudgetInquiryExecutor.cs:181,276-282`) and AppendTo on `sprk_organization` (Deep, the outside firm, `:352`; depth caveat in Known limits). AppendTo on the core record is the existing commit rows. All held by Core User. Doc: the intro no longer says every fixed-table privilege has a row; the commit row lists each action's asks. |
+| F1-1 analysis run Write | Fixed. `AnalysisAuthorizationFilter.cs:922-952` asks `write` on every document when the run can write (the document-profile playbook, or `RunCanWriteDocuments`, `:970`); wired at `AnalysisEndpoints.cs:118-120`. Feature "Analysis run (writing playbook)": [Core] held; [Basic, AiUser] holds none: **G9**. The doc's new row also states the run's other asks, so they are rows too ("Analysis run", both role sets): Read on each document (Deep, `:943-952`) and the playbook-use Read (Global, `:930-931`, `PlaybookAuthorizationFilter.cs:307-345`); all held. Doc: new matrix row and gap row; G9 added to the proposed changes. |
+| K1 Signal depth reason | Fixed: the comment cites I-18 (owned by the writer identity, owning business unit = the matter's) for Signals and I-6 for core records. |
+| K2 writer rows | Fixed. [Writer] Global: Read on `sprk_signal` and `sprk_decisionrecord` (`SignalWriter.cs:1046,1168`, `DecisionRecordWriter.cs:2722`); Append on `sprk_signal`, `sprk_decisionrecord`, `sprk_budgetrevision` (the lookups they set: `SignalWriter.cs:1083,1197`, `DecisionRecordWriter.cs:2163,2946`, `DecisionActionExecutors.cs:433,455`). All held. Doc writer row updated. |
+| K3 quick create assignee | Fixed: Read (Deep) on the assignee contact; AppendTo (Deep) for a matter or project (through `RecordCreationService`); an invoice's assignee is asked Read only (the filter's; the service identity creates the invoice, `OfficeService.cs:2234-2292`). |
+| K4 contact depth | Fixed: Known limits now say identity contacts are owned by the customer business unit's default team, so whether Deep reaches them depends on where users sit, to be confirmed on dev (and the same for the user-owned `sprk_organization`). |
+| K6 KnownGaps count | Fixed: the code held 10 entries at fix round 1 (the notes said 11); 12 now. |
+
+**Counts.** `Requirements`: 180 rows over 30 features (148 over 25 before). `KnownGaps`: 12 (G1 x2, G2-G6, G7 x2, G8, G9, G10).
+
+**Every new row proven (role files mutated in place from scratch copies, restored from those copies after each run; `git status` showed only the three task files after).**
+- Mutation 1, privileges no earlier row declares: Core User minus Write on matter, project, communication, invoice, work assignment and budget, Create and Append on budget and service request, AppendTo on organization; Ontology Service minus Read on Signal and Decision Record and Append on Signal, Decision Record and Budget Revision. Old guard (`5f595baeba`): 10 / 10 passed. New guard: `FeatureRequirementsAreHeldByTheirRoles` failed listing exactly those 16 rows (9 others passed).
+- Mutation 2, privileges other features already declare: Core User minus Create and Append on To Do, event and work assignment, AppendTo on contact and record type, Write on document, and AppendTo on event type Global → Deep. Both guards fail (the wizard, Office and event rows); the new guard alone lists the 10 new rows (9 "Decision actions (Console)", 1 "Analysis run (writing playbook)").
+- Mutation 3, the analysis run's Read rows: Core User, Basic User and AI Analysis User minus Read on `sprk_document`, and Read on `sprk_analysisplaybook` Global → Deep. Both guards fail (the create rows); the new guard alone lists the 4 "Analysis run" rows.
+- Baseline: the new guard with the G9 entry removed failed with "Analysis run (writing playbook, Basic User + AI Analysis User): prvWritesprk_Document ... held: none"; with the G10 entry removed, "Decision commit (Console): prvWritesprk_BillingEvent ... held: none". Unmutated: old and new guard 10 / 10 passed.
+
+**Verification (fix round 2).** `dotnet build tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --no-incremental`: 0 Warning(s), 0 Error(s). `FeatureRolePrivilege` filter: 10 / 10 passed. Whole `Spaarke.ArchTests`: 1949 / 1949 passed. `Sprk.Bff.Api.Tests` not run (no `src/` change).
+
+**For UAC-r2:** G9. **For ontology and ebilling:** G10.

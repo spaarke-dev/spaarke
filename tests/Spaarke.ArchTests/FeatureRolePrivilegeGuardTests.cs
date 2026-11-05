@@ -209,8 +209,26 @@ public class FeatureRolePrivilegeGuardTests
             + Bff + "Api/Filters/EntityAccessFilter.cs:115-155",
             EntityAccessTablesAppendTo),
 
+        // Analysis run (POST /api/ai/analysis/execute, fix round 2 F1-1): when the run can write (the document-profile playbook, or
+        // a playbook with a node that writes documents), Write is asked on every document instead of Read. Documents are team-owned
+        // (I-6): Deep.
+        .. For("Analysis run (writing playbook)", [Core], "Deep",
+            Bff + "Api/Ai/AnalysisEndpoints.cs:118-120; " + Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:922-952,970", "prvWritesprk_Document"),
+        .. For("Analysis run (writing playbook, Basic User + AI Analysis User)", [Basic, AiUser], "Deep",
+            Bff + "Api/Ai/AnalysisEndpoints.cs:118-120; " + Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:922-952,970", "prvWritesprk_Document"),
+        // Any other run: Read on every document, and the playbook-use decision (Read on the playbook unless it is public).
+        .. For("Analysis run", [Core], "Deep",
+            Bff + "Api/Ai/AnalysisEndpoints.cs:115-120; " + Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:26-28,943-952", "prvReadsprk_Document"),
+        .. For("Analysis run", [Core], "Global",
+            Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:930-931; " + Bff + "Api/Filters/PlaybookAuthorizationFilter.cs:307-345", "prvReadsprk_analysisplaybook"),
+        .. For("Analysis run (Basic User + AI Analysis User)", [Basic, AiUser], "Deep",
+            Bff + "Api/Ai/AnalysisEndpoints.cs:115-120; " + Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:26-28,943-952", "prvReadsprk_Document"),
+        .. For("Analysis run (Basic User + AI Analysis User)", [Basic, AiUser], "Global",
+            Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:930-931; " + Bff + "Api/Filters/PlaybookAuthorizationFilter.cs:307-345", "prvReadsprk_analysisplaybook"),
+
         // Decision commit in the Console (POST /api/v1/signals/{signalId}/decision): every Signal and its core record read as the
-        // caller, AppendTo on the core record, Write on the subject. Signals and core records are team-owned (I-6): Deep.
+        // caller, AppendTo on the core record, Write on the subject. Signals are owned by the writer identity, their owning business
+        // unit set to the matter's (I-18); core records by business-unit default owner teams (I-6): Deep.
         .. For("Decision commit (Console)", [Core, Console], "Deep",
             Bff + "Services/Signals/SignalCoreRecordAccess.cs:191-193; " + Bff + "Services/Signals/DecisionCommitService.cs:456-466",
             "prvReadsprk_Signal"),
@@ -220,14 +238,58 @@ public class FeatureRolePrivilegeGuardTests
         .. For("Decision commit (Console)", [Core, Console], "Deep",
             Bff + "Services/Signals/DecisionCallerRights.cs:61; " + Bff + "Services/Dataverse/CoreAncestorResolver.cs:67-73",
             "prvAppendTosprk_Matter", "prvAppendTosprk_Project", "prvAppendTosprk_WorkAssignment", "prvAppendTosprk_ServiceRequest"),
-        .. For("Decision commit (Console)", [Core, Console], "Deep", Bff + "Services/Signals/DecisionCallerRights.cs:42,79",
-            "prvWritesprk_Todo", "prvWritesprk_Event"),
+        // Write on each Signal's subject, in every lane (fix round 2 F3-1): the subject is one of SignalWriter.VerifiedSubjects. The
+        // Do-lane actions ask the same Write on an event, To Do or work assignment subject. Invoice line (sprk_billingevent): G10.
+        .. For("Decision commit (Console)", [Core, Console], "Deep",
+            Bff + "Services/Signals/DecisionCallerRights.cs:42,67-83; " + Bff + "Services/Signals/SignalWriter.cs:503-507; "
+            + Bff + "Services/Signals/Actions/DecisionActionExecutors.cs:774,787",
+            "prvWritesprk_Matter", "prvWritesprk_Project", "prvWritesprk_Communication", "prvWritesprk_Event", "prvWritesprk_Todo",
+            "prvWritesprk_WorkAssignment", "prvWritesprk_Invoice", "prvWritesprk_BillingEvent"),
+
+        // The decision actions, asked as the caller before anything is written (fix round 2 F3-2). Create by name, at any depth; the
+        // row is created through the child-records core (RecordCreationService as the caller), which asks Append on the table (the
+        // row is filed under the core record) and AppendTo on the record type of the ADR-024 pair (organization-owned).
+        .. For("Decision actions (Console)", [Core, Console], "Basic",
+            Bff + "Services/Signals/Actions/DecisionActionExecutors.cs:217,588,1247,1321,1355,1386,1449; " + Bff + "Api/Filters/CommunicationRecordAuthorizationFilter.cs:158",
+            "prvCreatesprk_Todo", "prvCreatesprk_Event", "prvCreatesprk_WorkAssignment", "prvCreatesprk_Budget"),
+        .. For("Decision actions (Console)", [Core, Console], "Basic",
+            Bff + "Services/Signals/Actions/DecisionActionExecutors.cs:1278-1281,1299; " + Bff + "Services/Signals/Actions/DecisionRouteCores.cs:74-85; "
+            + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:63-90",
+            "prvAppendsprk_Todo", "prvAppendsprk_Event", "prvAppendsprk_WorkAssignment", "prvAppendsprk_Budget"),
+        .. For("Decision actions (Console)", [Core, Console], "Basic",
+            Bff + "Services/Signals/Actions/DecisionActionExecutors.cs:1281; " + Bff + "Services/Signals/Actions/BudgetInquiryExecutor.cs:348; "
+            + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:390-409",
+            "prvAppendTosprk_RecordType_Ref"),
+        // Revise budget: Write on the chosen budget (the revision itself is the writer's).
+        .. For("Decision actions (Console)", [Core, Console], "Deep", Bff + "Services/Signals/Actions/DecisionActionExecutors.cs:523", "prvWritesprk_Budget"),
+        // Add To Do, assign work, assign task (an assignee) and reassign: AppendTo on the contact.
+        .. For("Decision actions (Console)", [Core, Console], "Deep", Bff + "Services/Signals/Actions/DecisionActionExecutors.cs:880,1254-1255,1323,1399,1451",
+            "prvAppendToContact"),
+        // Assign task: AppendTo on the Task event type (the type rows are owned outside the users' business units).
+        .. For("Decision actions (Console)", [Core, Console], "Global", Bff + "Services/Signals/Actions/DecisionActionExecutors.cs:1462-1463",
+            "prvAppendTosprk_EventType_Ref"),
+        // Budget inquiry: a service request created as the caller (CheckCallerMayCreateAsync, then RecordCreationService), filed
+        // under the matter (the core AppendTo row above) and naming the outside firm when the caller picks one.
+        .. For("Decision actions (Console)", [Core, Console], "Basic",
+            Bff + "Services/Signals/Actions/BudgetInquiryExecutor.cs:146,181,276-282; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:63-90",
+            "prvCreatesprk_ServiceRequest", "prvAppendsprk_ServiceRequest"),
+        .. For("Decision actions (Console)", [Core, Console], "Deep",
+            Bff + "Services/Signals/Actions/BudgetInquiryExecutor.cs:181,352; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:116-131",
+            "prvAppendTosprk_Organization"),
 
         // Signal, Decision Record and Budget Revision writers (the app users' role; D-204: only they create these rows).
         .. For("Signal and Decision Record writers", [Writer], "Global",
             Bff + "Services/Signals/SignalWriter.cs:526,653,720; " + Bff + "Services/Signals/DecisionRecordWriter.cs:511,559; "
             + Bff + "Services/Signals/Actions/DecisionActionExecutors.cs:390,455",
             "prvCreatesprk_Signal", "prvWritesprk_Signal", "prvCreatesprk_DecisionRecord", "prvCreatesprk_BudgetRevision"),
+        // The writers read the rows they close, link and verify, and set lookups on what they create and update (fix round 2 K2).
+        .. For("Signal and Decision Record writers", [Writer], "Global",
+            Bff + "Services/Signals/SignalWriter.cs:1046,1168; " + Bff + "Services/Signals/DecisionRecordWriter.cs:2722",
+            "prvReadsprk_Signal", "prvReadsprk_DecisionRecord"),
+        .. For("Signal and Decision Record writers", [Writer], "Global",
+            Bff + "Services/Signals/SignalWriter.cs:1083,1197; " + Bff + "Services/Signals/DecisionRecordWriter.cs:2163,2946; "
+            + Bff + "Services/Signals/Actions/DecisionActionExecutors.cs:433,455",
+            "prvAppendsprk_Signal", "prvAppendsprk_DecisionRecord", "prvAppendsprk_BudgetRevision"),
 
         // Billing (ebilling-r1 task 089e, owner-approved): removing or previewing a Procedure override asks Read on the Procedure.
         // The route (ProcedureAssignmentEndpoints.cs) comes with ebilling-r1 089e; on this branch the requirement is its task.
@@ -258,6 +320,10 @@ public class FeatureRolePrivilegeGuardTests
             "G7. UAC-r2 decision asked by task 046 fix round 1: AppendTo on contact at Deep for Basic User + Office Add In User (G3's change covers it)."),
         new("Event (typed route, Office Add In User)", "prvAppendTosprk_Budget", "none",
             "G8. UAC-r2 decision asked by task 046 fix round 1: AppendTo on sprk_budget at Deep for Basic User + Office Add In User, or events regarding a budget are Core User only."),
+        new("Analysis run (writing playbook, Basic User + AI Analysis User)", "prvWritesprk_Document", "none",
+            "G9. UAC-r2 decision asked by task 046 fix round 2: Write on sprk_document at Deep for Basic User + AI Analysis User, or a run that can write documents is Core User only."),
+        new("Decision commit (Console)", "prvWritesprk_BillingEvent", "none",
+            "G10. Ontology and ebilling decision asked by task 046 fix round 2: the commit route asks Write on an invoice line subject itself; the application writes lines (D-90), so it asks the parent invoice as the billing decisions do (HumanDecisionSignalClose), or line Signals are not decided on this route."),
     ];
 
     private static readonly string[] DepthOrder = ["Basic", "Local", "Deep", "Global"];
