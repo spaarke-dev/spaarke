@@ -391,7 +391,7 @@ public class BillingSystemPolicyTests
         gapCleared.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.FirmMissingHeadline);
 
         // Clearing the firm: the title becomes the gap's.
-        firmCleared.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.ProcedureGapHeadline).And.Be("No procedure associated with this invoice");
+        firmCleared.Request.ShortHeadline.Should().Be(BillingRuleCatalogue.ProcedureGapHeadline).And.Be("No billing terms in force for some work dates");
         SignalWriter.RenderSentence(firmCleared.Request.MessageTemplate, firmCleared.Request.FactValues)
             .Should().Contain("Outside counsel guidelines").And.Contain("2026-06-01").And.Contain("no version in force between versions");
     }

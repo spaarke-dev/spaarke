@@ -417,8 +417,8 @@ public static class BillingRuleCatalogue
     public const string ProceduresUnresolvedTemplate =
         "The billing terms of this invoice could not be checked ({{procedure.cause}}), so no billing rule was checked. The invoice is on hold for review.";
 
-    /// <summary>The title of <see cref="BillingReasonCodes.SubmissionProcedureGap"/>'s Signal (brief 082c C11, verbatim).</summary>
-    public const string ProcedureGapHeadline = "No procedure associated with this invoice";
+    /// <summary>The title of <see cref="BillingReasonCodes.SubmissionProcedureGap"/>'s Signal (brief 082c C11). A gap means a Procedure IS associated but no version is in force on some work date (ontology F2, 2026-11-05: the first wording said no procedure was associated), so the title says that, as <see cref="ProcedureGapTemplate"/> and the review detail "Waiting for billing terms" do.</summary>
+    public const string ProcedureGapHeadline = "No billing terms in force for some work dates";
 
     /// <summary>The title of <see cref="BillingReasonCodes.SubmissionProceduresUnresolved"/>'s Signal.</summary>
     public const string ProceduresUnresolvedHeadline = "Billing terms could not be checked";
