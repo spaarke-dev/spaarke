@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-04 ~20:30Z. Session ebilling-r1-c7 (authoritative; d4 is the duplicate). The work head is pushed. The dev BFF is still master d763dc120e: **none of this work is on master or the dev BFF yet.**
+> **Last Updated**: 2026-11-04 ~20:30Z. Session ebilling-r1-c7 (authoritative; d4 is the duplicate). The work head is pushed. The dev BFF is master d763dc120e; uac-r2 is deploying master 909754869f (owner go; ebilling OK given 2026-11-04 with creator-person -Verify PASS, StoredFileReconcileEnabled=false; confirm the after notice): **none of this work is on master or the dev BFF yet.**
 
 ## Quick Recovery (READ THIS FIRST)
 
