@@ -130,3 +130,4 @@
 ## Meta
 - [Knowledge base layout](knowledge-base-layout.md) — `knowledge/` tree convention; SOURCE/NOTES/README
 - [Cascade delete privileges/Archive (2026-10-17)](dataverse-cascade-delete-privileges-archive-2026-10-17.md) — child Delete priv checked, whole op fails (documented); Archive 'internal use only'; PUT+MergeLabels
+- [Defender for Storage overwrite->rescan (2026-11-05)](defender-storage-overwrite-rescan-2026-11-05.md) — Put Blob/PutBlockList overwrite triggers an on-upload scan (documented); tag fate on overwrite, identical-bytes skip and cap behaviour undocumented; not scanned at cap/filter/error
