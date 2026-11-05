@@ -47,6 +47,8 @@
   - #2569 (042c, auto-merge) joins the next deploy batch.
   - **048** extends D-204 to updates: chat update, the playbook step, the output mapping and the push; one shared list from `RecordTableRules`. Review it with ontology.
   - Also owed: 044 field-security profile and 046 roles matrix (owner go HERE).
+  - 048 review: no F; two K fixes coming (the endpoint and push check the refusal themselves; a plain refusal message). The chat delete tool doesn't check the three D-204 tables. For uac it's a K, because it runs as the caller (same as the MDA). My recommendation: settle Delete on those tables in the 046 roles matrix; add the chat guard in 048 only if the owner extends D-204 to deletes (fm is asking the owner).
+  - ebilling: `sprk_reviewdetail` column live write on dev (run by ontology, owner go in their sessions); after-notice and -Verify owed. `StoredFileReconcileEnabled` is held for DEF-044 (#2296); a before-notice is owed before any change (the gate expects false).
 - **ontology** (`-38`): the 2 owed items above.
 
 ## Dev BFF deploy procedure
