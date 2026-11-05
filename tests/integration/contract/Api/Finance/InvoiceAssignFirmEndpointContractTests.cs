@@ -140,6 +140,42 @@ public sealed class InvoiceAssignFirmEndpointContractTests
         seen.Select(x => x.Body).Distinct().Should().ContainSingle("the same body whatever the firm is: " + string.Join(" | ", seen.Select(x => x.Name + "=" + x.Body)));
     }
 
+    [Fact(DisplayName = "095d-1b fix round 3 (F1): an already-assigned invoice and a caller without the core record's rights give one status and one body for the stored firm and for another firm, equal to the body for a not-yet-assigned invoice (must fire)")]
+    public async Task RepeatWithoutCoreRecordRights_IsRefusedIdentically_AsTheFirstApply()
+    {
+        var storedFirm = Services.Finance.InvoiceAssignFirmServiceTests.OtherFirm;
+        var cases = new (string Name, Guid FirmId, bool Assigned)[]
+        {
+            ("assigned, names the stored firm", storedFirm, true),
+            ("assigned, names another firm", Firm, true),
+            ("not yet assigned", Firm, false),
+        };
+
+        var seen = new List<(string Name, HttpStatusCode Status, string Body)>();
+        foreach (var (name, firmId, assigned) in cases)
+        {
+            await using var host = await Host.StartAsync();
+            host.GrantInvoiceWrite();
+            host.Access.Grant(FirmSet, firmId, AccessRights.Read | AccessRights.AppendTo);
+            host.World.CloseRights = DecisionCallerRefusal.CoreAppendToMissing;
+            if (assigned)
+            {
+                Services.Finance.InvoiceAssignFirmServiceTests.CommitStoredDecision(host.World, storedFirm);
+            }
+
+            var response = await host.SendAsync(new { firmId });
+
+            var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+            body.Remove("traceId");
+            seen.Add((name, response.StatusCode, body.ToJsonString()));
+            host.World.ShouldHaveWrittenNothing();
+        }
+
+        seen.Select(x => x.Status).Distinct().Should().ContainSingle().Which.Should().Be(HttpStatusCode.Forbidden);
+        seen.Select(x => x.Body).Distinct().Should().ContainSingle("the same body in all three: " + string.Join(" | ", seen.Select(x => x.Name + "=" + x.Body)));
+        seen[0].Body.Should().NotContain("INV-7").And.NotContain(storedFirm.ToString("D"), "no stored decision content");
+    }
+
     [Theory(DisplayName = "095d-1b: a body that names no firm is 400 firm_required after the invoice check and before any firm check")]
     [InlineData("{}")]
     [InlineData("""{"firmId":"00000000-0000-0000-0000-000000000000"}""")]

@@ -1354,7 +1354,7 @@ clear removed makes `RealAllocator_TheOneTransaction_ClearsTheHold_AndCarriesThe
 | F3 | The findings-size refusal (409 `too_large` above 1,048,576 characters, measured with the longest number the allocator can hand out) had no test. | Tests only. | `Refused_FindingsAboveTheSize_JustOver` (must fire: refused, nothing written, no preflight) and `..._AtTheLimit_IsAssigned` (must not fire). Seed: the check disabled makes the must-fire test fail; restored (`cmp`). |
 
 **Known limits recorded by this pass.**
-- K2: a repeat by a different caller is confirmed safe in 1b (the stored decision names the firm and the number; a different firm is 409). 095d-1c MUST ask the Signal-close rights (and the filing) again before it records on a repeat; 1b answers `alreadyAssigned` without them.
+- K2 (CORRECTED in fix round 3: this line missed the core-record rights; see the uac-r2 review below): a repeat by a different caller is confirmed safe in 1b (the stored decision names the firm and the number; a different firm is 409). 095d-1c MUST ask the Signal-close rights (and the filing) again before it records on a repeat; 1b answers `alreadyAssigned` without them.
 - The 1c seams: every `Assigned` in 1b leaves an "applied, no record" row (the apply committed, no Decision Record, firm_missing Signal still open). 1b therefore stays off any environment users touch until 1c lands.
 - 095d-2 must keep the stored `assignFirm` member (the full mapping lives only there now; the facts carry counts).
 - K3 (display only): the line Signals keep the old invoice number in `sprk_regardingrecordname`. 095d-2's re-map should refresh it, or it is recorded there as a limit.
@@ -1380,3 +1380,15 @@ No F findings. Six known-limit items (K1-K6); K1, K3 and K4 are fixed, K2, K5 an
 **K5: the 2-minute lock against the allocator's worst case (known limit).** The invoice-decision lock lasts 2 minutes; the allocator's worst case can run longer. The row versions still prevent a second apply; only the unconditioned name updates (the approval's and the stored files') rely on the lock.
 
 **K6: known limit, safe.** A pre-send `InvalidOperationException` from the allocator gives the "may not have been set" text; that is safe, because the repeat decides from the stored decision.
+
+#### 095d-1b uac-r2 review and fix round 3 (2026-11-04)
+
+uac-r2 approved everything else: the rights order, the route body, the kept order, the firm filter, `ParentLineage` and the policy key.
+
+**F1 (binding): the stored-decision branch ran before the core-record rights.** `AssignHeldAsync` sent a stored decision to `JudgeRepeatAsync` before `_closeRights`. For an invoice whose firm was already set, a caller with Write on the invoice and no AppendTo or close rights on the core record got an answer that depended on the firm named: the same firm gave 200 `alreadyAssigned` with the DecisionId and the tracking numbers, and another firm gave 409 `assigned_other_firm`.
+
+**Fix.** The single-core check and `_closeRights` moved into one helper (`CheckCoreRightsAsync`) that both paths call. A repeat now runs it BEFORE `JudgeRepeatAsync`; a failing caller gets the same `not_authorized` result as a first apply, so the route renders the same `sdap.access.deny.insufficient_rights` body. The filing is not asked for a repeat. The first-apply order is unchanged (the helper sits where the inline check was). `AfterConflictAsync` is reached only after that check and is left as it was, with a comment saying so.
+
+**Correction of the earlier K2 line.** "A repeat by a different caller is confirmed safe in 1b" (adversarial pass 1) was wrong: it looked at the stored decision's content and missed the core-record rights, so a caller without them could read the DecisionId and tracking numbers, and could tell which firm was stored. The 1c requirement stands (1c still asks the close rights and the filing before it records on a repeat); the rights part now also holds for the 1b answer.
+
+**Tests.** Service `Repeat_WithoutCoreRights_IsRefusedTheSame_WhateverFirmIsNamed` (the stored firm and another firm: one `not_authorized` result, no DecisionId or tracking numbers, nothing written, no filing call). Contract `RepeatWithoutCoreRecordRights_IsRefusedIdentically_AsTheFirstApply` through the real filter stack (assigned with the stored firm, assigned with another firm, not yet assigned: one status and one body less `traceId`). The existing repeat tests for a caller with rights are unchanged. Seed: the check moved back below `JudgeRepeatAsync`; all three new cases failed; the fix was restored byte-identical (`cmp`).

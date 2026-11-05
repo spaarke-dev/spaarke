@@ -486,8 +486,15 @@ public sealed class InvoiceAssignFirmService
         var submissionId = state.Submission.Id;
 
         // ── A stored decision: the apply already committed. A repeat, never a second apply (1a K3). ──
+        // 095d-1b F1: the core-record rights come first, so a caller without them gets one answer whatever firm it names (never the stored decision).
         if (state.Stored is { } stored)
         {
+            var repeatCheck = await CheckCoreRightsAsync(state.Invoice, invoiceId, submissionId, callerBearerToken, ct).ConfigureAwait(false);
+            if (repeatCheck.Failure is { } repeatRefused)
+            {
+                return repeatRefused;
+            }
+
             return await JudgeRepeatAsync(state, stored, firmId, ct).ConfigureAwait(false);
         }
 
@@ -516,35 +523,14 @@ public sealed class InvoiceAssignFirmService
             return Unavailable(invoiceId, "hold", ex);
         }
 
-        if (EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice) is not { } core
-            || InvoiceSubmissionService.CoreRecordKindOfTable(core.Entity) is not { } coreKind)
+        var rights = await CheckCoreRightsAsync(invoice, invoiceId, submissionId, callerBearerToken, ct).ConfigureAwait(false);
+        if (rights.Failure is { } rightsRefused)
         {
-            _logger.LogError("Set firm on invoice {InvoiceId}: the invoice names no single core record; nothing changed.", invoiceId);
-            return AssignFirmResult.Refuse(StatusCodes.Status500InternalServerError, AssignFirmCodes.CoreUnresolved, "The invoice names no single core record.", submissionId);
+            return rightsRefused;
         }
 
-        // ── As for approval: the Signal-close rights (AppendTo on the core record, Write on the Signal's subject) and the recorder's filing. ──
-        DecisionCallerRefusal refusal;
-        try
-        {
-            refusal = await _closeRights(new DecisionCoreRecord(core.Entity, core.Id), invoiceId, callerBearerToken, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return Unavailable(invoiceId, "signal-rights", ex);
-        }
-
-        switch (refusal)
-        {
-            case DecisionCallerRefusal.None:
-                break;
-            case DecisionCallerRefusal.Unavailable:
-                return AssignFirmResult.Refuse(StatusCodes.Status503ServiceUnavailable, AssignFirmCodes.Unavailable, "The firm could not be set; nothing was changed. Try again.", submissionId);
-            default:
-                _logger.LogWarning("Set firm on invoice {InvoiceId}: the caller may not record this decision ({Refusal}); nothing changed.", invoiceId, refusal);
-                return AssignFirmResult.Refuse(StatusCodes.Status403Forbidden, AssignFirmCodes.NotAuthorized,
-                    "You do not have permission to record a decision on this invoice's record.", submissionId);
-        }
+        var core = rights.Core;
+        var coreKind = rights.CoreKind;
 
         if (await CheckFilingAsync(invoiceId, core, submissionId, ct).ConfigureAwait(false) is { } filing)
         {
@@ -685,6 +671,45 @@ public sealed class InvoiceAssignFirmService
     }
 
     /// <summary>
+    /// The core-record rights, in one place for both the first apply and a repeat: the invoice's single core record, then the Signal-close rights
+    /// (AppendTo on the core record, Write on the Signal's subject). The recorder's filing is not part of it (a repeat needs no filing).
+    /// A failing caller gets the same <c>not_authorized</c> refusal whatever firm it names.
+    /// </summary>
+    private async Task<(AssignFirmResult? Failure, (string Entity, Guid Id) Core, InvoiceCoreRecordKind CoreKind)> CheckCoreRightsAsync(
+        Entity invoice, Guid invoiceId, Guid submissionId, string? callerBearerToken, CancellationToken ct)
+    {
+        if (EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice) is not { } core
+            || InvoiceSubmissionService.CoreRecordKindOfTable(core.Entity) is not { } coreKind)
+        {
+            _logger.LogError("Set firm on invoice {InvoiceId}: the invoice names no single core record; nothing changed.", invoiceId);
+            return (AssignFirmResult.Refuse(StatusCodes.Status500InternalServerError, AssignFirmCodes.CoreUnresolved, "The invoice names no single core record.", submissionId), default, default);
+        }
+
+        // ── As for approval: the Signal-close rights (AppendTo on the core record, Write on the Signal's subject). ──
+        DecisionCallerRefusal refusal;
+        try
+        {
+            refusal = await _closeRights(new DecisionCoreRecord(core.Entity, core.Id), invoiceId, callerBearerToken, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return (Unavailable(invoiceId, "signal-rights", ex), default, default);
+        }
+
+        switch (refusal)
+        {
+            case DecisionCallerRefusal.None:
+                return (null, core, coreKind);
+            case DecisionCallerRefusal.Unavailable:
+                return (AssignFirmResult.Refuse(StatusCodes.Status503ServiceUnavailable, AssignFirmCodes.Unavailable, "The firm could not be set; nothing was changed. Try again.", submissionId), default, default);
+            default:
+                _logger.LogWarning("Set firm on invoice {InvoiceId}: the caller may not record this decision ({Refusal}); nothing changed.", invoiceId, refusal);
+                return (AssignFirmResult.Refuse(StatusCodes.Status403Forbidden, AssignFirmCodes.NotAuthorized,
+                    "You do not have permission to record a decision on this invoice's record.", submissionId), default, default);
+        }
+    }
+
+    /// <summary>
     /// The submission changed since it was read (or the allocator saw it already moved): re-read. A stored decision now present is judged as a
     /// repeat (this firm: already assigned; another: 409). Without one, something else changed the row: 409, reload.
     /// </summary>
@@ -696,6 +721,7 @@ public sealed class InvoiceAssignFirmService
             return failure;
         }
 
+        // Reached only after AssignHeldAsync's core-record rights check passed (095d-1b F1), so no second check here.
         if (read.State!.Stored is { } stored)
         {
             return await JudgeRepeatAsync(read.State, stored, firmId, ct).ConfigureAwait(false);

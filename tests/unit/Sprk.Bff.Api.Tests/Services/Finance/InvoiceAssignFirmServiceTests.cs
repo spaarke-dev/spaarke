@@ -973,12 +973,18 @@ public sealed class InvoiceAssignFirmServiceTests
     private static World Applied(Guid firm, int? previousSequence = 3)
     {
         var w = new World();
+        CommitStoredDecision(w, firm, previousSequence);
+        return w;
+    }
+
+    /// <summary>Commits a stored Set firm for <paramref name="firm"/> into an existing world (the contract tests start from a host's world).</summary>
+    internal static void CommitStoredDecision(World w, Guid firm, int? previousSequence = 3)
+    {
         var stored = new AssignFirmStoredDecision(
             InvoiceAssignFirmService.DecisionIdFor(SubmissionId), firm, null, "INV-7.3", previousSequence, "INV-7.1", 1, Decider, Now,
             new InvoiceSubmissionAfterSteps.ResolvedSignalSet(Now.UtcDateTime, []), [], 0, "pending");
         var findings = new JsonObject { ["trackingNumber"] = "INV-7.1", [InvoiceAssignFirmService.StoredDecisionMember] = stored.ToJson() };
         Commit(w, firm, "INV-7.1", 1, findings.ToJsonString(), previousSequence);
-        return w;
     }
 
     // ── Repeats (1a review K3; 16.6.1) ──
@@ -1008,6 +1014,23 @@ public sealed class InvoiceAssignFirmServiceTests
         var w = Applied(OtherFirm);
         var result = await w.Assign();
         (result.Status, result.Code).Should().Be((409, AssignFirmCodes.AssignedOtherFirm));
+        w.ShouldHaveWrittenNothing();
+    }
+
+    [Theory(DisplayName = "095d-1b fix round 3 (F1): a repeat by a caller without the core record's rights is one refusal for the stored firm and for another firm, and carries none of the stored decision (must fire)")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Repeat_WithoutCoreRights_IsRefusedTheSame_WhateverFirmIsNamed(bool namesTheStoredFirm)
+    {
+        var w = Applied(OtherFirm);
+        w.CloseRights = DecisionCallerRefusal.CoreAppendToMissing;
+
+        var result = await w.Assign(namesTheStoredFirm ? OtherFirm : Firm);
+
+        result.Should().Be(AssignFirmResult.Refuse(403, AssignFirmCodes.NotAuthorized,
+            "You do not have permission to record a decision on this invoice's record.", SubmissionId));
+        (result.DecisionId, result.TrackingNumber, result.PreviousTrackingNumber).Should().Be((null, null, null), "no stored decision content is returned");
+        w.Calls.Should().Contain("rights").And.NotContain("filing", "a repeat needs no filing");
         w.ShouldHaveWrittenNothing();
     }
 
