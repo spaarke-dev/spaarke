@@ -182,16 +182,64 @@ public sealed class InvoiceSubmissionHoldPrecheckTests
         log.Entries.Should().ContainSingle().Which.Message.Should().Contain(nameof(ProcedureResolutionFaultException));
     }
 
-    [Fact(DisplayName = "082c-3 fail quiet: a caller that went away gives no warning and no log")]
-    public async Task Service_ACancelledCaller_GivesNoWarning_AndNoLog()
+    [Fact(DisplayName = "082c-3 F1: a caller that went away is not swallowed: the cancellation propagates (and is not logged as a fault)")]
+    public async Task Service_ACancelledCaller_Propagates_AndLogsNothing()
     {
         using var cts = new CancellationTokenSource();
         cts.Cancel();
         var log = new RecordingLogger();
         var h = new Harness { ProcedureRead = () => throw new OperationCanceledException(cts.Token) };
 
-        (await h.Build(log).PrecheckHoldWarningAsync(Core, InvoiceSubmissionServiceTests.FirmId, cts.Token)).Should().BeNull();
+        var act = () => h.Build(log).PrecheckHoldWarningAsync(Core, InvoiceSubmissionServiceTests.FirmId, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
         log.Entries.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "082c-3 F1: the caller's token cancelled WHILE the read is pending propagates (the original token, not the budget's, decides)")]
+    public async Task Service_TheCallerAbortsDuringTheRead_Propagates()
+    {
+        using var cts = new CancellationTokenSource();
+        var log = new RecordingLogger();
+        var h = new Harness { ProcedureReadAsync = NeverCompletes, PrecheckTimeLimit = TimeSpan.FromMinutes(5) };
+
+        var pending = h.Build(log).PrecheckHoldWarningAsync(Core, InvoiceSubmissionServiceTests.FirmId, cts.Token);
+        pending.IsCompleted.Should().BeFalse("the read has not completed and the budget is far away");
+        cts.Cancel();
+
+        var act = () => pending;
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        log.Entries.Should().BeEmpty();
+    }
+
+    /// <summary>A read that never completes on its own and ends only when the token it was given is cancelled.</summary>
+    private static Task<ProcedureResolution> NeverCompletes(CancellationToken token)
+    {
+        var never = new TaskCompletionSource<ProcedureResolution>(TaskCreationOptions.RunContinuationsAsynchronously);
+        token.Register(() => never.TrySetCanceled(token));
+        return never.Task;
+    }
+
+    [Fact(DisplayName = "082c-3 F1 fail quiet (seed 2): a read that never completes is cut off at the budget: no warning, no throw, the fault's type name logged and nothing else")]
+    public async Task Service_AReadThatNeverCompletes_TimesOut_NoWarning_NoThrow()
+    {
+        var log = new RecordingLogger();
+        var h = new Harness { ProcedureReadAsync = NeverCompletes, PrecheckTimeLimit = TimeSpan.FromMilliseconds(50) };
+
+        var warning = await h.Build(log).PrecheckHoldWarningAsync(Core, InvoiceSubmissionServiceTests.FirmId, CancellationToken.None);
+
+        warning.Should().BeNull();
+        var entry = log.Entries.Should().ContainSingle().Subject;
+        entry.Level.Should().Be(LogLevel.Warning);
+        entry.Message.Should().Contain(nameof(TaskCanceledException));
+        entry.Exception.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "082c-3 F1: the budget is a fixed two seconds, applied by default")]
+    public void TheBudget_IsTwoSeconds_ByDefault()
+    {
+        InvoiceSubmissionService.PrecheckTimeout.Should().Be(TimeSpan.FromSeconds(2));
+        new Harness().Build().PrecheckTimeLimit.Should().Be(InvoiceSubmissionService.PrecheckTimeout);
     }
 
     // ── The real read: the resolver over an in-memory Dataverse (the loader's own call, not the seam) ──

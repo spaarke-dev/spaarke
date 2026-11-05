@@ -311,29 +311,36 @@ public class InvoiceSubmissionService
     public virtual async Task<SubmissionHoldWarning?> PrecheckHoldWarningAsync(InvoiceCoreRecord core, Guid firmId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(core);
+
+        // F1: the pre-check runs after the submission is saved and queued, so a slow read must not hold the 202 (a client timeout would
+        // resubmit a duplicate). The read gets PrecheckTimeLimit and no more; a timeout is a fault like any other (fail quiet, below).
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(PrecheckTimeLimit);
         try
         {
-            var reference = new CoreRecordReference(
-                core.Kind switch
-                {
-                    InvoiceCoreRecordKind.Matter => CoreRecordKind.Matter,
-                    InvoiceCoreRecordKind.Project => CoreRecordKind.Project,
-                    _ => CoreRecordKind.WorkAssignment,
-                },
-                core.RecordId);
-            var resolution = await ReadProcedureResolutionAsync(reference, firmId, ct).ConfigureAwait(false);
+            var resolution = await ReadProcedureResolutionAsync(InvoiceSubmissionProcessor.ToResolutionCore(core), firmId, budget.Token).ConfigureAwait(false);
             return SubmissionHoldWarning.Precheck(resolution, DateOnly.FromDateTime(DateTime.UtcNow));
+        }
+        catch (Exception ex) when (IsCallerCancellation(ex, ct))
+        {
+            // The caller's own token (a real client abort), not the budget's: it propagates.
+            throw;
         }
         catch (Exception ex)
         {
-            if (!IsCallerCancellation(ex, ct))
-            {
-                _logger.LogWarning("Invoice submission: the billing-terms pre-check could not run; no warning is shown ({Fault})", ex.GetType().Name);
-            }
-
+            _logger.LogWarning("Invoice submission: the billing-terms pre-check could not run; no warning is shown ({Fault})", ex.GetType().Name);
             return null;
         }
     }
+
+    /// <summary>
+    /// F1: the most time the advisory pre-check's Dataverse reads may take before the 202 goes out without a warning. A fixed constant, not a
+    /// new option or configuration surface (notes 082c-3 "F1").
+    /// </summary>
+    internal static readonly TimeSpan PrecheckTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>The budget <see cref="PrecheckHoldWarningAsync"/> applies (a seam so a test need not wait <see cref="PrecheckTimeout"/>).</summary>
+    protected internal virtual TimeSpan PrecheckTimeLimit => PrecheckTimeout;
 
     /// <summary>The pre-check's one read: the Procedure resolution the loader reads for an invoice of this firm on this record (a seam for tests).</summary>
     protected internal virtual Task<ProcedureResolution> ReadProcedureResolutionAsync(CoreRecordReference core, Guid firmId, CancellationToken ct) =>

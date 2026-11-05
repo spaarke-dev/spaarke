@@ -328,8 +328,8 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         _h.PrecheckReads.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "082c-3 (uac-r2 (b)): a body naming another record or firm changes neither the warning nor the outcome; the pre-check reads the filter's record and firm")]
-    public async Task External_FormFieldsNamingAnotherRecordOrFirm_ChangeNothing()
+    [Fact(DisplayName = "082c-3 (uac-r2 (b)): FORM fields naming another record or firm are ignored (the firm is the `?firmId=` query, not a field); the pre-check reads the filter's record and firm")]
+    public async Task External_FormFieldsNamingAnotherRecordOrFirm_AreIgnored()
     {
         _h.ProcedureRead = HeldForTerms;
         var otherRecord = Guid.NewGuid();
@@ -349,6 +349,42 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         _h.PrecheckReads.Should().HaveCount(2).And.OnlyContain(
             r => r.Core == new CoreRecordReference(CoreRecordKind.Matter, MatterId) && r.FirmId == FirmId,
             "the record and firm come from the authorized scope, never from the body");
+    }
+
+    [Fact(DisplayName = "082c-3 (uac-r2 (b), K3): the firm the caller NAMES (the `?firmId=` query) is another firm: 403 before the pre-check, which reads nothing")]
+    public async Task External_QueryNamingAnotherFirm_Is403_AndThePrecheckReadsNothing()
+    {
+        _h.ProcedureRead = HeldForTerms;
+
+        var response = await PostExternalAsync(Form(), $"?firmId={OtherFirmId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("warning");
+        _h.PrecheckReads.Should().BeEmpty("the pre-check runs only for the firm the caller's own authorization passed");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "082c-3 F1 (seed 2): a pre-check read that never completes is cut off at the budget; the 202 goes out with no `warning`, the submission is received and its job enqueued")]
+    public async Task External_202_HasNoWarning_WhenThePrecheckReadTimesOut()
+    {
+        _h.PrecheckTimeLimit = TimeSpan.FromMilliseconds(50);
+        _h.ProcedureReadAsync = token =>
+        {
+            var never = new TaskCompletionSource<ProcedureResolution>(TaskCreationOptions.RunContinuationsAsynchronously);
+            token.Register(() => never.TrySetCanceled(token));
+            return never.Task;
+        };
+
+        var response = await PostExternalAsync(Form());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain("warning");
+        using var body = JsonDocument.Parse(text);
+        body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("submissionId", "jobId", "trackingNumber", "statusUrl");
+        _h.PrecheckReads.Should().ContainSingle("the pre-check ran and was cut off");
+        _h.Allocations.Should().ContainSingle();
+        _h.JobsSent.Should().ContainSingle();
     }
 
     [Fact(DisplayName = "082c-3 scope: the internal route's 202 never carries the warning and never runs the pre-check (the SPA channel only)")]

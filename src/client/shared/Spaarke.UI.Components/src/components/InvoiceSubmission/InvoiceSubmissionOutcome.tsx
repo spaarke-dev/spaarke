@@ -253,7 +253,7 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
 
       {heldWarning && (
         // 082c-3 (R4 item 3): ONE warning bar in place of the green Accepted bar (not stacked), in a polite status region, not an alert.
-        <MessageBar intent="warning" role="status" data-testid="invoice-submission-held-warning">
+        <MessageBar intent="warning" role="status" politeness="polite" data-testid="invoice-submission-held-warning">
           <MessageBarBody>
             <MessageBarTitle>Received: on hold for review</MessageBarTitle>
             {heldWarning.message}

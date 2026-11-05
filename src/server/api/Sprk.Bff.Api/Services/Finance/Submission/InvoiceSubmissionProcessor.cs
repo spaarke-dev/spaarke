@@ -546,7 +546,8 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         return confidence;
     }
 
-    private static CoreRecordReference ToResolutionCore(InvoiceCoreRecord core) => new(
+    /// <summary>The one mapping of a submission's core record to the resolver's reference (the processor's loads and the intake's advisory pre-check, 082c-3, both call it).</summary>
+    internal static CoreRecordReference ToResolutionCore(InvoiceCoreRecord core) => new(
         core.Kind switch
         {
             InvoiceCoreRecordKind.Matter => CoreRecordKind.Matter,

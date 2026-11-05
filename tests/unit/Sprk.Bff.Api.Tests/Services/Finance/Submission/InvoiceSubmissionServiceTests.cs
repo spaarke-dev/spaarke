@@ -435,6 +435,15 @@ public sealed class InvoiceSubmissionServiceTests
         /// </summary>
         public Func<ProcedureResolution>? ProcedureRead { get; set; }
 
+        /// <summary>
+        /// F1: an ASYNC answer for the pre-check's read, given the token the service passes it (so a test can model a read that never completes
+        /// and honours only its token). When set, it wins over <see cref="ProcedureRead"/>.
+        /// </summary>
+        public Func<CancellationToken, Task<ProcedureResolution>>? ProcedureReadAsync { get; set; }
+
+        /// <summary>F1: the pre-check's time budget in a test (null: the service's own <see cref="InvoiceSubmissionService.PrecheckTimeout"/>).</summary>
+        public TimeSpan? PrecheckTimeLimit { get; set; }
+
         /// <summary>Every (core record, firm) the pre-check read the Procedure resolution for.</summary>
         public readonly List<(CoreRecordReference Core, Guid FirmId)> PrecheckReads = new();
 
@@ -452,8 +461,12 @@ public sealed class InvoiceSubmissionServiceTests
             protected internal override Task<ProcedureResolution> ReadProcedureResolutionAsync(CoreRecordReference core, Guid firmId, CancellationToken ct)
             {
                 h.PrecheckReads.Add((core, firmId));
-                return Task.FromResult(h.ProcedureRead?.Invoke() ?? new ProcedureKit().Build());
+                return h.ProcedureReadAsync is { } readAsync
+                    ? readAsync(ct)
+                    : Task.FromResult(h.ProcedureRead?.Invoke() ?? new ProcedureKit().Build());
             }
+
+            protected internal override TimeSpan PrecheckTimeLimit => h.PrecheckTimeLimit ?? base.PrecheckTimeLimit;
         }
 
         /// <summary>The container and name the upload of <paramref name="submissionId"/> is staged under (the job derives the same).</summary>
