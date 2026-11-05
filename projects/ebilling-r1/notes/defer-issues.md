@@ -1287,7 +1287,7 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on branch, pending review (`task/ebilling-def044-b`, owner option B 2026-11-05; not Closed until reviewed and merged). It must be Closed before StoredFileReconcileJob is enabled anywhere |
+| **Status** | Fixed, merged into work at `1c581b33ae` (owner option B 2026-11-05; 1 adversarial pass, F1 fixed; filtered 6232/0). Not Closed until it is on master AND the L6 live check (Defender rescans an overwrite; notes 090 §14.3) passes on dev. It must be Closed before StoredFileReconcileJob is enabled anywhere |
 | **Urgency** | medium |
 | **Filed** | 2026-10-23 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2296 |
