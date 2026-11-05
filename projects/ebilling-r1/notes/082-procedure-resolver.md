@@ -566,3 +566,88 @@ Test support: `ProcedureKit.Pin(name, versionNumber)` adds a Pin on the kit's Ma
 | Contract tests of the adjustment endpoints (compiled into the same project) | 58/58 |
 | ArchTests (`Billing\|CoreRecordChain\|Procedure\|ADR010\|FindingsJson\|Finance\|ExceptionMessage`) | 162/162 |
 | Seeding (old behaviour restored in the three production files, then put back, `cp` from backups) | 8 of 518 failed: the K1 must-fire and the latest-date test, the K2 must-fire and its three pin / conflict theory rows, the item 1 end-to-end test and the C12 text assertion |
+
+## C19 — chain close (2026-11-05)
+
+Branch `task/ebilling-082-c19`, from `origin/work/ebilling-r1` at `52622ea05c`. Code commit `36819ca13a`. No Dataverse read or write, no deploy.
+
+### The status question (rule 1): the close changes no invoice
+
+The 089e close (`ProcedureAssignmentService.SupersedeBaseFindingsAsync`) goes `SignalClosureService.SupersedeInPassAsync` → `CloseAsync` → `SignalWriter.CloseAsync`, which writes `sprk_signal` only (`UpdateIfRowVersionMatchesAsync("sprk_signal", …)`). It reads invoices (state, status, firm, core lookups) to choose findings and never writes `sprk_invoice`. An invoice keeps its status and its hold reasons. **So the chain close is not a `sprk_reviewdetail` writer** (D-205 writer list item 8 resolves to "not a writer"), and C19 does not wait for 082c-2.
+
+### What changed
+
+- **`CoreRecordChain.ReadChildrenAsync(entities, logger, parentTable, parentId, maxChildren, ct)`** (`CoreRecordChain.cs:144-261`): the reverse read. Candidates are the rows whose typed filing lookup (`TypedFilingColumns`) names the parent, and, on a table whose pair is BFF-managed (a project), the rows whose pair text holds the parent id's first 8 hex digits (the `ListFiledRootsAsync` technique, task 158 r1: every spelling `Guid.TryParse` accepts carries them). **Each candidate is verified by the forward chain** (`ReadAsync`): it is a child only if the parent is one of its distance-1 links. So the reverse read cannot disagree with the chain the resolver judges by; lookalike fragments, a pair of a non-filing type and intermediates drop out there. Returns each child's own chain. A work assignment has no children and reads nothing. No second hop.
+- **`ProcedureResolver`** (`ProcedureResolver.cs:738`, `:860-889`): `IsRuleOverrideFor` (the firm rule: the row's Firm is empty or the invoice's firm) now used by `RulesOn` too, and `RuleOverrideDeciders(overrides, basePolicyId, firmId)` (the rows at the nearest distance decide). `ReadOverridesAsync` is internal, so the close reads a child's rows by the resolver's own read and fault rules.
+- **`ProcedureAssignmentService`** (`ProcedureAssignmentService.cs:755-758`, `:781-782`, `:787-788`, `:793-865`; docs and messages at `:60-61`, `:467-468`, `:721`, `:725`, `:729-743`, `:748-749`): `ChildrensInReviewInvoicesAsync` selects the d1 invoices; `SupersedeBaseFindingsAsync` reads d0 and d1 in full before the one close. `ChangeCloseCompleteMessage` and `ChangeCloseIncompleteMessage` now say the close covers the record and the records directly under it. The catch logs the exception type name.
+
+### Design
+
+- **Bound:** `MaxChildRecords = 100` candidate children. Every candidate query is paged (page size capped at the bound + 1). Past the bound `ReadChildrenAsync` throws `CoreRecordChainUnreadableException` before any candidate's chain is read. The child invoices: one query per child table and 500-id chunk, more than one page throws (as the d0 read).
+- **Fail closed:** any fault in the reverse read, a child's chain (an `Unknown` pair included), a child's override rows (a row the BFF never writes throws `ProcedureResolutionFaultException`), the invoice reads or the bound throws inside the existing `try`. The existing catch answers `PolicyFailures = 1`: **nothing is closed, not even d0**, the change stays 201 with `closeComplete=false` and `ChangeCloseIncompleteMessage`. Never a partial close.
+- **Nearer wins (the resolver's rule, reused):** for each child invoice, the override rows on that child's chain are read with `ReadOverridesAsync`, and the invoice is kept only when THIS record is among `RuleOverrideDeciders(rows, baseRule, invoiceFirm)`. A child with its own row of the rule (for every firm, or for the invoice's firm) decides it nearer (distance 0), so it is skipped. A child's row for another firm does not decide this firm's invoice. A work assignment's second distance-1 parent with its own row decides together with this record (one distance), so the invoice is still this change's.
+- **Identity:** app-only reads through the service's `IGenericEntityService`, as the d0 selection's; the caller-scoped count is unchanged.
+- **FR-05:** a child invoice filed on two core records has no chain and is never closed. (The d0 read is unchanged and does not apply this filter.)
+
+### Component justification (CLAUDE.md §11)
+
+1. **Existing:** `CoreRecordChain.ReadAsync` (forward, d0 + d1); `SecureRootInheritance.ListFiledRootsAsync` (reverse, for access: follows intermediates, which D-172 forbids for billing); the resolver's private override read and nearest rule.
+2. **Extension:** extended in place: the reverse read is a member of `CoreRecordChain` and reuses its forward read for verification; the nearer rule and the override read stay in `ProcedureResolver` and are shared. `ListFiledRootsAsync` cannot be reused because it follows intermediates (the `CoreRecordChainNoMultiHopGuardTests` allow-list forbids it in this file; the guard passes unchanged).
+3. **Cost of doing nothing:** a changed rule's base findings stay open on every In Review invoice of the record's direct children although the resolver no longer runs that rule there, and the reviewer sees stale findings with no close.
+
+No new endpoint, column, privilege, package, DI registration or background work. Placement (§10): BFF, in the files that own the chain, the resolver and the change.
+
+### Tests
+
+`ProcedureAssignmentServiceTests` ("082c C19", 10 cases), `CoreRecordChainTests` ("082c C19 children", 7 cases); `RuleSetServiceTests.Harness` evaluates `Like`.
+
+| Brief case | Test |
+|---|---|
+| d0 still closed; a d1 child invoice closed | must-fire: d0, a work assignment by its lookup, a project by its pair (a line finding) in one close |
+| a d2 grandchild closed | **Deviation: not closed.** must-not-fire, with the sibling (below) |
+| a child with a nearer version in force not closed | nearer wins: own row for every firm and for the invoice's firm not closed; a row for another firm and a Procedure-level Pin closed |
+| a sibling under another parent not closed | must-not-fire |
+| a chain read fault → nothing closed | theory: chain read fault, override-row read fault, a row the BFF never writes |
+| the bound reached → fail closed | past the bound (101): nothing closed, no child chain read; at the bound (100): closed |
+| idempotent re-run closes nothing more | a resolved finding is not targeted; the repeated change is 409 and closes nothing more |
+
+Edge cases added: a firm-scoped change on the children (the firm filter reaches d1); an invoice on two core records (FR-05). Chain level: children of a matter and of a project, lookalike fragment and non-filing type dropped, a work assignment reads nothing, the bound (past and at), an `Unknown` pair and a read fault propagate.
+
+**Fail before:** the base `ProcedureAssignmentService.cs` (with only the `MaxChildRecords` constant added so the tests compile) fails 11 of 94: the 10 C19 cases and the updated 089e message assertion. The chain tests do not compile against the base (`ReadChildrenAsync` is new).
+
+### Seeds (each restored; the file byte-identical afterwards)
+
+Filter `ProcedureAssignmentServiceTests|CoreRecordChainTests`, 126 tests.
+
+| Seed | Result |
+|---|---|
+| S1: nearer-wins skip removed in the service (every child invoice kept) | 1 failed (nearer wins) |
+| S2: nearer-wins removed in the resolver (`RuleOverrideDeciders` returns every distance) | 1 failed (nearer wins) |
+| S3: a children fault swallowed (treated as no children) | 4 failed (the three fault rows and the bound) |
+| S4: the bound removed in `ReadChildrenAsync` | 2 failed (chain bound, service bound) |
+
+### Gates
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Unit `CoreRecordChain\|Procedure\|Supersed\|AssignmentOverride\|SignalClosure\|RuleSetService\|BillingFactLoader\|InvoiceComplianceEvaluator` | 1398/1398 |
+| ArchTests `CoreRecordChain\|SignalClosureServiceDerivation\|ProcedureRetireSelection\|RouteAuthorizationGuard\|ProcedureRolePrivilege\|ProcedureResolver\|FinanceStepZero\|RecordOwnerAssignmentCensus` | 191/191 |
+| ArchTests `Billing\|ExceptionMessage\|Finance\|ADR010\|Signal` | 134/134 |
+| ArchTests `OverriddenCreatedOnWriteGuard` | 7/7 |
+| Publish size (`git archive`, `dotnet publish -c Release -r linux-x64 --self-contained false`, `Compress-Archive -CompressionLevel Optimal`), base `52622ea05c` vs tip `36819ca13a` | 137,597,908 → 137,613,012 B raw (**+15,104 B**); 41,416,760 → 41,424,785 B zip (**+8,025 B**); `Sprk.Bff.Api.dll` +12,800 B; 192 files and 139 dlls each, file lists identical; no package added |
+
+### Deviations
+
+1. **The d2 grandchild is NOT closed** (the brief's closed set says "closed"). D-172 is direct association only: `CoreRecordChain` stops at distance 1, the ArchTest forbids a second hop, and the 082b resolver test "a Procedure assigned on M applies on P (d1) and does not apply on W1 under P" pins it. A grandchild's chain never reaches the record, so the record's change does not decide the rule there; closing its findings would close findings the rule still raises. The test asserts the grandchild stays open. **For the caller to confirm.**
+2. **"Nearer Procedure/version in force" read as the resolver's rule-level nearer row.** In the resolver, rule-level overrides are grouped by base rule and decided by distance; a Procedure-level row (Follow, Pin, Exclude of the Procedure) does not decide a rule-level override. So a child with only a Procedure-level Pin IS closed (tested, to make the reading visible). Skipping it would close less than the resolver excludes. **For the caller (or ontology) to confirm.**
+3. **Fail closed covers d0 too**, as rule 3 says ("closes nothing"): on a matter with more than 100 direct children, or any child read fault, the record's own findings are no longer closed (089e closed them). The answer says so (`closeComplete=false`).
+4. **Logs:** the existing catch keeps logging the exception object (the file's idiom); it now also names the exception type. The new exception texts carry table names and ids only (operator text). No reader surface changed beyond the two constant messages.
+
+### Known limits (K) and items for 082d / 114
+
+- **K: a record rule without its Exclude row** on a child is not seen as a nearer row (the close reads Exclude rows only). The BFF never writes that state, and the resolver faults on it for that child's invoices (`RuleOverridesOf`), so those invoices are held by the resolver anyway.
+- **K: the record rule's date window.** As at d0, the close does not compare work dates with the record rule's effective-from; it closes the base findings on every In Review invoice that takes the change.
+- **K: the pair fragment.** A project whose pair text does not carry the parent id's 8-hex fragment (a hand edit that is not a GUID spelling) is not a candidate; the forward chain would answer `Unknown` for it, and its findings stay open, as before.
+- **082d / 114:** none needed for C19. The ProcedureGap re-check (082c-2) and the 114 Override release are separate writers. If 082d adds a stored snapshot of the deciding rows, the close could read it instead of the override rows.
+- **Observation (not changed):** the repo's lint-staged pre-commit hook backs up the staged state with `git stash` (shared stack, FAILURE-MODES G-18) and drops it on success.
