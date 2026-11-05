@@ -1956,8 +1956,8 @@ public class ExternalDataService
 
     /// <summary>
     /// ebilling-r1 task 098 review round 4b: THE decision of the external submission routes (list and single read) for
-    /// <paramref name="caller"/>, read app-only (<see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>): with an
-    /// invoice, the invoice predicate; without one, the submission's own source. Keyed by submission id. An internal systemuser
+    /// <paramref name="caller"/>, read app-only (<see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>): no firm,
+    /// withheld; with an invoice, the invoice predicate; without one, the submission's own source. Keyed by submission id. An internal systemuser
     /// (the same test as <see cref="HideInvoicesForAsync"/>) sees every one and causes no read; every other caller gets the
     /// decision. A failed read withholds every asked submission (<see cref="InvoiceVisibilityResult.Faulted"/>). Bound to
     /// <see cref="ExternalInvoiceSubmissionHiding"/> by <c>AddExternalAccess</c>, with the effective root flags it needs.
