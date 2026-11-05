@@ -57,8 +57,8 @@ public sealed record RecordRuleView(
 
 /// <summary>
 /// A changed rule as written: the Exclude row (kind <c>RuleChanged</c>) and the record rule that replaces the rule for the record. Task 089e:
-/// the base rule's open findings on the In Review invoices filed DIRECTLY on the record then close <c>Superseded</c> (not yet those of the
-/// records under it: 082). <see cref="CloseComplete"/> says whether that close of the record's own invoices finished, and
+/// the base rule's open findings on the In Review invoices filed on the record, and (082c C19) on the records DIRECTLY under it where this
+/// change decides the rule, then close <c>Superseded</c>. <see cref="CloseComplete"/> says whether that close finished, and
 /// <see cref="VisibleOpenInvoices"/> / <see cref="AffectedText"/> how many of those invoices THE CALLER can Read (null when that cannot be
 /// told). <see cref="Message"/> always says what the close covered: <see cref="ProcedureAssignmentService.ChangeCloseCompleteMessage"/> or
 /// <see cref="ProcedureAssignmentService.ChangeCloseIncompleteMessage"/>.
@@ -464,7 +464,8 @@ public class ProcedureAssignmentService
     /// the next change reuses them. A create that collides on a derived id or the code key is a retry only when the row it collided with
     /// is the same record's set, or a rule of that set based on THIS rule. Anything else is refused 409.</para>
     /// <para>Task 089e (owner option (b), 2026-11-04): after the commit, the open findings the BASE rule raised on the In Review invoices filed
-    /// directly on this record (only that firm's, for a firm-scoped change) close <c>Superseded</c> (<see cref="SupersedeBaseFindingsAsync"/>).
+    /// on this record and (082c C19) on the records directly under it that take the change (only that firm's, for a firm-scoped change) close
+    /// <c>Superseded</c> (<see cref="SupersedeBaseFindingsAsync"/>).
     /// The close records the resolution only, not the record rule's version. The close is best effort: the change stays committed whatever it
     /// does, and the result says whether it completed, what it covered, and how many of those invoices the caller can see. A transaction that
     /// gives no answer (pass-1 K2) is read back: when the record rule's version row is there (stage 3 alone writes it; fix round 2), the change
@@ -717,38 +718,44 @@ public class ProcedureAssignmentService
 
     /// <summary>The result message when the change's close of the base rule's findings completed (task 089e, pass-1 F2: it says what it covered).</summary>
     internal const string ChangeCloseCompleteMessage =
-        "The rule was changed. Open findings of the rule it replaces were closed on invoices filed directly on this record. Findings on invoices of the records under it are not closed by this change; they stay open for the reviewer.";
+        "The rule was changed. Open findings of the rule it replaces were closed on invoices filed on this record and on the records directly under it, except where a record under it has its own change or exclusion of that rule. Records further down do not take this change, so their findings stay open for the reviewer.";
 
     /// <summary>The result message when the change's close of the base rule's findings did not complete (task 089e).</summary>
     internal const string ChangeCloseIncompleteMessage =
-        "The rule was changed, but some findings of the rule it replaces could not be closed now. They stay open on this record's invoices for the reviewer to resolve. The close covers only invoices filed directly on this record, not those of the records under it.";
+        "The rule was changed, but some findings of the rule it replaces could not be closed now. They stay open for the reviewer to resolve on the invoices of this record and of the records directly under it.";
 
     /// <summary>
     /// Task 089e (owner option (b), 2026-11-04): closes as <c>Superseded</c> the open findings of the base rule <paramref name="basePolicyId"/>
-    /// on the In Review invoices filed directly on this record (for a firm-scoped change, that firm's invoices only), through the existing
+    /// on the In Review invoices filed on this record and on the records directly under it that take the change (for a firm-scoped change,
+    /// that firm's invoices only), through the existing
     /// close (<see cref="SignalClosureService.SupersedeInPassAsync"/>). The close records the resolution only: the record rule's version is
     /// passed as the current version, but with every target outside the base rule's scope it decides nothing, and no version is stored.
     /// The reads are bounded by the record (pass-1 K4), never org-wide:
     /// <list type="number">
     /// <item>this record's In Review invoices: one query on the core lookup, the state and, for a firm-scoped change, the firm;</item>
+    /// <item>082c C19: the In Review invoices of the records DIRECTLY under it on which this change decides the rule
+    /// (<see cref="ChildrensInReviewInvoicesAsync"/>: bounded, nearer rows win, a fault or the bound closes nothing);</item>
     /// <item>only those invoices' lines;</item>
     /// <item>the base rule's open Signals regarding those invoices or lines, through the close's own selection
     /// (<see cref="SignalClosureService.SelectOpenSignalsOfPolicyOnSubjectsAsync"/>).</item>
     /// </list>
     /// A Signal's invoice is its own invoice when it names one, else its line's invoice (as before), and it is kept only when that is one of
-    /// the record's In Review invoices. The invoice reads are app-only, as the counter's are; the caller-scoped count is made from what this
+    /// those In Review invoices. The invoice reads are app-only, as the counter's are; the caller-scoped count is made from what this
     /// returns. Never throws: a fault is counted as a policy failure, so the result is incomplete.
     /// </summary>
     /// <remarks>Run after the commit, as <see cref="RemoveAsync"/> runs its close: closing first would leave closed findings behind a change that
     /// failed. Unlike that close, nothing finishes this one later (the nightly run does not evaluate Billing rules, and the base rule stays on),
-    /// so the result says the rest stay open for the reviewer. Distance 0 only (pass-1 F2): the model also covers the record's direct
-    /// children, which needs 082's <c>CoreRecordChain</c> (hand-off in the 089 notes).</remarks>
+    /// so the result says the rest stay open for the reviewer. Distance 0 and 1 (082c C19, the pass-1 F2 hand-off): a record's direct
+    /// children take its change; their own children do not (D-172), so the close never reaches them.</remarks>
     private async Task<(SignalClosureOutcome Outcome, IReadOnlyList<OpenPolicySignal> Closed)> SupersedeBaseFindingsAsync(
         string coreTable, Guid recordId, Guid? firmId, Guid basePolicyId, string baseCode, Guid recordRuleVersionId, Guid assignmentId)
     {
         try
         {
+            // d0, then the d1 children (082c C19). Both are read in full before anything closes: a fault or the bound closes nothing.
             var mine = await RecordsInReviewInvoicesAsync(coreTable, recordId, firmId);
+            var ofChildren = await ChildrensInReviewInvoicesAsync(coreTable, recordId, firmId, basePolicyId);
+            mine.UnionWith(ofChildren);
             var lineInvoices = mine.Count == 0 ? new Dictionary<Guid, Guid>() : await LinesOfInvoicesAsync(mine);
             var open = mine.Count == 0
                 ? Array.Empty<OpenPolicySignal>()
@@ -771,16 +778,89 @@ public class ProcedureAssignmentService
                 baseCode, recordRuleVersionId, targets.Select(t => t.Signal).ToList(), CancellationToken.None, outsideScope: static _ => true);
             var closedIds = after.Where(s => s.Resolution == SignalWriter.ResolutionSuperseded).Select(s => s.Id).ToHashSet();
             _logger.LogInformation(
-                "Override {AssignmentId}: {Closed} of {Targeted} finding(s) of base rule {BaseCode} on {CoreTable} {RecordId}'s In Review invoices closed Superseded; complete={Complete}",
-                assignmentId, outcome.Closed, targets.Count, baseCode, coreTable, recordId, outcome.IsComplete);
+                "Override {AssignmentId}: {Closed} of {Targeted} finding(s) of base rule {BaseCode} on {CoreTable} {RecordId}'s In Review invoices ({ChildInvoices} of records directly under it) closed Superseded; complete={Complete}",
+                assignmentId, outcome.Closed, targets.Count, baseCode, coreTable, recordId, ofChildren.Count, outcome.IsComplete);
             return (outcome, targets.Where(t => closedIds.Contains(t.Signal.Id)).ToList());
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Override {AssignmentId}: rule changed; the open findings of base rule {BaseCode} on {CoreTable} {RecordId}'s invoices could not be closed now. They stay open for the reviewer",
-                assignmentId, baseCode, coreTable, recordId);
+            _logger.LogError(ex, "Override {AssignmentId}: rule changed; the open findings of base rule {BaseCode} on {CoreTable} {RecordId}'s invoices could not be closed now ({ExceptionType}). They stay open for the reviewer",
+                assignmentId, baseCode, coreTable, recordId, ex.GetType().Name);
             return (SignalClosureOutcome.None with { PolicyFailures = 1 }, Array.Empty<OpenPolicySignal>());
         }
+    }
+
+    /// <summary>The most core records directly under a record the change's close reads (082c C19). Past it the close closes nothing.</summary>
+    internal const int MaxChildRecords = 100;
+
+    /// <summary>
+    /// ebilling-r1 082c C19 (the 089e hand-off): the In Review invoices of the core records DIRECTLY under this record (D-172: distance 1
+    /// only; a grandchild's chain does not reach this record, so it does not inherit the change) on which this change decides the base rule.
+    /// </summary>
+    /// <remarks>
+    /// <list type="number">
+    /// <item>The children: <see cref="CoreRecordChain.ReadChildrenAsync"/>, the inverse of the chain the resolver judges by, at most
+    /// <see cref="MaxChildRecords"/>. Past the bound, or on any fault, it throws.</item>
+    /// <item>Their open (Active, In Review) invoices, filed on exactly one core record, that child (FR-05: an invoice with two core lookups
+    /// has no chain); for a firm-scoped change, of that firm. One query per child table and chunk; more than one page throws.</item>
+    /// <item><b>Nearer wins</b>, by the resolver's own rule: the override rows on each child's chain
+    /// (<see cref="ProcedureResolver.ReadOverridesAsync"/>, which also faults on a row the BFF never writes), and an invoice is kept only when
+    /// THIS record is among the rows that decide the base rule for the invoice's firm (<see cref="ProcedureResolver.RuleOverrideDeciders"/>).
+    /// A child with its own change or Exclude of the rule for that firm decides it nearer, so its invoices are not this change's.</item>
+    /// </list>
+    /// App-only reads, as the d0 selection's. Throws on any fault, so the caller closes nothing.
+    /// </remarks>
+    private async Task<HashSet<Guid>> ChildrensInReviewInvoicesAsync(string coreTable, Guid recordId, Guid? firmId, Guid basePolicyId)
+    {
+        var children = await CoreRecordChain.ReadChildrenAsync(_entities, _logger, coreTable, recordId, MaxChildRecords, CancellationToken.None);
+        var kept = new HashSet<Guid>();
+        if (children.Count == 0)
+        {
+            return kept;
+        }
+
+        var lookups = InvoiceFamilyCoreRecordGuard.CoreRecordLookups[AffectedInvoiceCounter.InvoiceEntity];
+        var columns = lookups.Select(l => l.Column).Append(InvoiceFirmColumn).ToArray();
+        foreach (var group in children.GroupBy(c => c[0].Table))
+        {
+            var coreColumn = lookups.Single(l => l.CoreEntity == group.Key).Column;
+            foreach (var batch in group.Chunk(MaxInValues))
+            {
+                var query = new QueryExpression(AffectedInvoiceCounter.InvoiceEntity) { ColumnSet = new ColumnSet(columns) };
+                query.Criteria.AddCondition(coreColumn, ConditionOperator.In, batch.Select(c => (object)c[0].Id).ToArray());
+                query.Criteria.AddCondition("statecode", ConditionOperator.Equal, InvoiceStatusCodes.StateActive);
+                query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, InvoiceStatusCodes.InReview);
+                if (firmId is { } firm)
+                {
+                    query.Criteria.AddCondition(InvoiceFirmColumn, ConditionOperator.Equal, firm);
+                }
+
+                var rows = await ReadAsync(query, CancellationToken.None);
+                if (rows.MoreRecords)
+                {
+                    throw new InvalidOperationException("More In Review invoices on the records under the record than one page.");
+                }
+
+                var byChild = rows.Entities
+                    .Where(r => lookups.Count(l => r.GetAttributeValue<EntityReference>(l.Column) is not null) == 1)
+                    .ToLookup(r => r.GetAttributeValue<EntityReference>(coreColumn)?.Id ?? Guid.Empty);
+                foreach (var chain in batch.Where(c => byChild.Contains(c[0].Id)))
+                {
+                    var overrides = await ProcedureResolver.ReadOverridesAsync(_entities, chain, CancellationToken.None);
+                    foreach (var invoice in byChild[chain[0].Id])
+                    {
+                        var invoiceFirm = invoice.GetAttributeValue<EntityReference>(InvoiceFirmColumn)?.Id;
+                        if (ProcedureResolver.RuleOverrideDeciders(overrides, basePolicyId, invoiceFirm)
+                            .Any(d => d.Table == coreTable && d.Id == recordId))
+                        {
+                            kept.Add(invoice.Id);
+                        }
+                    }
+                }
+            }
+        }
+
+        return kept;
     }
 
     /// <summary>

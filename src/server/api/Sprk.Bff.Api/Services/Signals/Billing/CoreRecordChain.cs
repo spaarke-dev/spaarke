@@ -141,6 +141,124 @@ public static class CoreRecordChain
             .ThenBy(p => p.Id)];
     }
 
+    /// <summary>
+    /// ebilling-r1 082c C19: the core records DIRECTLY filed under <paramref name="parentTable"/> <paramref name="parentId"/>, the inverse of
+    /// <see cref="ReadAsync"/>: each child is returned as its own chain (the child at distance 0, the parent among its distance-1 links), in a
+    /// stable order (table, then id). No second hop: a child's own children are never read.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><b>Candidates</b>, app-only: the rows whose TYPED filing lookup (<see cref="SecureRootInheritance.TypedFilingColumns"/>) names the
+    /// parent, and, on a table whose pair is BFF-managed, the rows whose pair text holds the parent id's first 8 hex digits (every spelling
+    /// <see cref="Guid.TryParse(string?, out Guid)"/> accepts carries them; Dataverse compares text without case).</item>
+    /// <item><b>The forward chain decides.</b> Each candidate's own chain is read with <see cref="ReadAsync"/> and the candidate is kept only
+    /// when the parent is one of its distance-1 links, so the reverse read can never disagree with the chain the resolver judges by. A
+    /// fragment match that names another record, a pair of a type that is not a filing parent, and an intermediate filing drop out there.</item>
+    /// <item><b>Bounded, fail closed:</b> every candidate query is paged; more than <paramref name="maxChildren"/> candidates throws
+    /// <see cref="CoreRecordChainUnreadableException"/> before any candidate is verified, and a candidate whose chain cannot be read throws as
+    /// <see cref="ReadAsync"/> does. A caller never acts on part of the children.</item>
+    /// <item>A work assignment has no children: no typed lookup and no pair names one as a filing parent. Nothing is read.</item>
+    /// </list>
+    /// NoLock, app-only: as <see cref="ReadAsync"/>, for PROCEDURE SELECTION only, never an access decision.
+    /// </remarks>
+    public static async Task<IReadOnlyList<IReadOnlyList<CoreRecordLink>>> ReadChildrenAsync(
+        IGenericEntityService entities, ILogger logger, string parentTable, Guid parentId, int maxChildren, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxChildren, 1);
+        if (parentId == Guid.Empty)
+        {
+            throw new ArgumentException("The parent record id must not be empty.", nameof(parentId));
+        }
+
+        var parent = TableOf(KindOf(parentTable));
+        if (parent != SecureRootInheritance.Matter && parent != SecureRootInheritance.Project)
+        {
+            return [];
+        }
+
+        var candidates = new SortedSet<(string Table, Guid Id)>(Comparer<(string Table, Guid Id)>.Create((a, b) =>
+        {
+            var byTable = string.CompareOrdinal(a.Table, b.Table);
+            return byTable != 0 ? byTable : a.Id.CompareTo(b.Id);
+        }));
+        foreach (var (table, columns) in SecureRootInheritance.TypedFilingColumns)
+        {
+            foreach (var (column, filingParent) in columns)
+            {
+                if (filingParent == parent)
+                {
+                    var query = new QueryExpression(table) { ColumnSet = new ColumnSet(column), NoLock = true };
+                    query.Criteria.AddCondition(column, ConditionOperator.Equal, parentId);
+                    await AddCandidatesAsync(entities, query, candidates, maxChildren, parent, parentId, ct).ConfigureAwait(false);
+                }
+            }
+
+            if (SecureRootInheritance.PairNamesAParentOnItsOwn(table))
+            {
+                var query = new QueryExpression(table) { ColumnSet = new ColumnSet(SecureRootInheritance.PairIdColumn), NoLock = true };
+                query.Criteria.AddCondition(SecureRootInheritance.PairIdColumn, ConditionOperator.Like, $"%{parentId.ToString("N")[..8]}%");
+                await AddCandidatesAsync(entities, query, candidates, maxChildren, parent, parentId, ct).ConfigureAwait(false);
+            }
+        }
+
+        var children = new List<IReadOnlyList<CoreRecordLink>>();
+        foreach (var (table, id) in candidates)
+        {
+            var chain = await ReadAsync(entities, logger, new CoreRecordReference(KindOf(table), id), ct).ConfigureAwait(false);
+            if (chain.Any(l => l.Distance == 1 && l.Table == parent && l.Id == parentId))
+            {
+                children.Add(chain);
+            }
+        }
+
+        return children;
+    }
+
+    /// <summary>Adds every row of <paramref name="query"/>, page by page; past <paramref name="maxChildren"/> candidates in all it throws.</summary>
+    private static async Task AddCandidatesAsync(
+        IGenericEntityService entities, QueryExpression query, SortedSet<(string Table, Guid Id)> candidates, int maxChildren,
+        string parentTable, Guid parentId, CancellationToken ct)
+    {
+        query.PageInfo = new PagingInfo { Count = Math.Min(ChildPageSize, maxChildren + 1), PageNumber = 1 };
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var page = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            foreach (var row in page.Entities.Where(r => r.Id != Guid.Empty && r.Id != parentId))
+            {
+                candidates.Add((query.EntityName, row.Id));
+            }
+
+            if (candidates.Count > maxChildren)
+            {
+                throw new CoreRecordChainUnreadableException(
+                    $"More than {maxChildren} core records may be filed under {parentTable} {parentId}; the records under it are not read in part.");
+            }
+
+            if (!page.MoreRecords)
+            {
+                return;
+            }
+
+            query.PageInfo.PageNumber++;
+            query.PageInfo.PagingCookie = page.PagingCookie;
+        }
+    }
+
+    /// <summary>The page size of a children read (<see cref="ReadChildrenAsync"/>), capped by its bound.</summary>
+    private const int ChildPageSize = 5000;
+
+    /// <summary>The kind of core table <paramref name="table"/>; any other table throws.</summary>
+    private static CoreRecordKind KindOf(string table) => table switch
+    {
+        SecureRootInheritance.Matter => CoreRecordKind.Matter,
+        SecureRootInheritance.Project => CoreRecordKind.Project,
+        SecureRootInheritance.WorkAssignment => CoreRecordKind.WorkAssignment,
+        _ => throw new ArgumentOutOfRangeException(nameof(table), table, "Not a core table."),
+    };
+
     /// <summary>The core table of <paramref name="kind"/>.</summary>
     internal static string TableOf(CoreRecordKind kind) => kind switch
     {

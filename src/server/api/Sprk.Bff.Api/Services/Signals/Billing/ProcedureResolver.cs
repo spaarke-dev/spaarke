@@ -735,7 +735,7 @@ public sealed class ProcedureResolution
     {
         // Rule-level rows for this invoice's firm: the row's Firm is empty or the invoice's firm (an excluded rule for F still runs on G's).
         var excludes = _rows.Overrides
-            .Where(o => o.PolicyId == basePolicyId && (o.FirmId is null || o.FirmId == _rows.FirmId))
+            .Where(o => ProcedureResolver.IsRuleOverrideFor(o, basePolicyId, _rows.FirmId))
             .ToList();
 
         // The record rule of this rule in each record-scoped set on the chain (already narrowed to this firm at read). It is found by its
@@ -857,7 +857,36 @@ public static class ProcedureResolver
 
     // ── Override rows on the chain ─────────────────────────────────────────────────────────────────────────────
 
-    private static async Task<IReadOnlyList<ProcedureOverrideRow>> ReadOverridesAsync(
+    /// <summary>Whether <paramref name="row"/> is a rule-level override of <paramref name="basePolicyId"/> for an invoice of
+    /// <paramref name="firmId"/>: the row's Firm is empty or that firm (an excluded rule for F still runs on G's). One rule for
+    /// <see cref="ProcedureResolution.RulesOn"/> and <see cref="RuleOverrideDeciders"/>.</summary>
+    internal static bool IsRuleOverrideFor(ProcedureOverrideRow row, Guid basePolicyId, Guid? firmId) =>
+        row.PolicyId == basePolicyId && (row.FirmId is null || row.FirmId == firmId);
+
+    /// <summary>
+    /// ebilling-r1 082c C19: the chain records whose rule-level override rows of <paramref name="basePolicyId"/> decide for an invoice of
+    /// <paramref name="firmId"/> on the chain <paramref name="overrides"/> was read for (<see cref="ReadOverridesAsync"/>): the rows at the
+    /// NEAREST distance, as <see cref="ProcedureResolution.RulesOn"/> decides (6.5: the nearer override wins; at one distance every row
+    /// decides). Empty when the chain has no such row. Pure. A change always writes its Exclude row (the resolver faults on a record rule
+    /// without one), so the rows are the whole set of rule-level overrides on the chain.
+    /// </summary>
+    internal static IReadOnlyList<CoreRecordLink> RuleOverrideDeciders(IReadOnlyList<ProcedureOverrideRow> overrides, Guid basePolicyId, Guid? firmId)
+    {
+        ArgumentNullException.ThrowIfNull(overrides);
+        var rows = overrides.Where(o => IsRuleOverrideFor(o, basePolicyId, firmId)).ToList();
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        var nearest = rows.Min(o => o.Distance);
+        return rows.Where(o => o.Distance == nearest).Select(o => o.ChainRecord).Distinct().ToList();
+    }
+
+    /// <summary>The active override rows on <paramref name="chain"/>, each placed at the nearest chain record it names; rows the BFF never
+    /// writes throw <see cref="ProcedureResolutionFaultException"/>. Internal for the C19 chain close, which reads a child's rows by the same
+    /// rule.</summary>
+    internal static async Task<IReadOnlyList<ProcedureOverrideRow>> ReadOverridesAsync(
         IGenericEntityService entities, IReadOnlyList<CoreRecordLink> chain, CancellationToken ct)
     {
         var query = new QueryExpression(ProcedureAssignmentEntity.Entity)
