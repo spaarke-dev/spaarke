@@ -277,4 +277,102 @@ public sealed class CoreRecordChainTests
         answer.Should().BeOfType<PairParentAnswer.Unknown>();
         _world.Queries.Should().BeEmpty();
     }
+
+    // ── 082c C19: the reverse read (ReadChildrenAsync) ─────────────────────────────────────────────────────
+
+    private Task<IReadOnlyList<IReadOnlyList<CoreRecordLink>>> ChildrenOf(string table, Guid id, int max = 10) =>
+        CoreRecordChain.ReadChildrenAsync(_entities.Object, NullLogger.Instance, table, id, max, CancellationToken.None);
+
+    private static readonly Guid W2 = Guid.Parse("08200000-0000-4000-8000-0000000000c2");
+    private static readonly Guid W3 = Guid.Parse("08200000-0000-4000-8000-0000000000c3");
+
+    [Fact(DisplayName = "082c C19 children: a matter's children are the work assignments typed under it and the projects whose pair names it, each with its own chain; a grandchild is not one (no second hop)")]
+    public async Task Children_OfAMatter_AreItsDirectFilings_Only()
+    {
+        ProjectFiledUnder(P, M.ToString("B").ToUpperInvariant(), MatterType); // any spelling Guid.TryParse accepts
+        ProjectFiledUnder(P2, P.ToString(), ProjectType); // under P, so a grandchild of M
+        _world.Add(WorkAssignment, W, ("sprk_regardingmatter", Ref(Matter, M)));
+        _world.Add(WorkAssignment, W2, ("sprk_regardingproject", Ref(Project, P))); // a grandchild of M
+        _world.Add(WorkAssignment, W3, ("sprk_regardingmatter", Ref(Matter, M2))); // another matter's
+
+        var children = await ChildrenOf(Matter, M);
+
+        children.Should().HaveCount(2);
+        children[0].Should().Equal(new CoreRecordLink(Project, P, 0), new CoreRecordLink(Matter, M, 1));
+        children[1].Should().Equal(new CoreRecordLink(WorkAssignment, W, 0), new CoreRecordLink(Matter, M, 1));
+    }
+
+    [Fact(DisplayName = "082c C19 children: a project's children are its projects and work assignments; a pair that only shares the id fragment, or names another type, is dropped by the forward chain")]
+    public async Task Children_OfAProject_AreVerifiedByTheForwardChain()
+    {
+        ProjectFiledUnder(P, M.ToString(), MatterType);
+        ProjectFiledUnder(P2, P.ToString(), ProjectType);
+        var lookalike = Guid.Parse(P.ToString("N")[..8] + "-9999-4999-8999-999999999999");
+        var other = Guid.NewGuid();
+        ProjectFiledUnder(other, lookalike.ToString(), ProjectType); // the fragment matches; the id does not
+        var asDocument = Guid.NewGuid();
+        ProjectFiledUnder(asDocument, P.ToString(), DocumentType); // the id matches; the type is not a filing parent
+        _world.Add(WorkAssignment, W, ("sprk_regardingproject", Ref(Project, P)));
+
+        var children = await ChildrenOf(Project, P);
+
+        children.Select(c => c[0]).Should().Equal(new CoreRecordLink(Project, P2, 0), new CoreRecordLink(WorkAssignment, W, 0));
+        children.Should().OnlyContain(c => c.Contains(new CoreRecordLink(Project, P, 1)));
+    }
+
+    [Fact(DisplayName = "082c C19 children: a work assignment has no children, and nothing is read")]
+    public async Task Children_OfAWorkAssignment_AreNone_WithNoRead()
+    {
+        (await ChildrenOf(WorkAssignment, W)).Should().BeEmpty();
+        _world.Queries.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "082c C19 children: more candidates than the bound fails closed before any child chain is read")]
+    public async Task Children_PastTheBound_FailClosed()
+    {
+        foreach (var id in new[] { W, W2, W3 })
+        {
+            _world.Add(WorkAssignment, id, ("sprk_regardingmatter", Ref(Matter, M)));
+        }
+
+        var read = () => ChildrenOf(Matter, M, max: 2);
+
+        var thrown = await read.Should().ThrowAsync<CoreRecordChainUnreadableException>().WithMessage("More than 2 core records*");
+        thrown.Which.CandidateCount.Should().Be(3, "the bound case carries the count the read had reached (fix round 1: the caller logs it)");
+        _world.Queries.Should().NotContain(q => q.TopCount == 1, "no candidate's own chain was read");
+    }
+
+    [Fact(DisplayName = "082c C19 children: exactly the bound is read in full")]
+    public async Task Children_AtTheBound_AreRead()
+    {
+        foreach (var id in new[] { W, W2 })
+        {
+            _world.Add(WorkAssignment, id, ("sprk_regardingmatter", Ref(Matter, M)));
+        }
+
+        (await ChildrenOf(Matter, M, max: 2)).Should().HaveCount(2);
+    }
+
+    [Fact(DisplayName = "082c C19 children: a candidate whose chain cannot be told fails closed (no partial list)")]
+    public async Task Children_WithAnUnknownPair_FailClosed()
+    {
+        ProjectFiledUnder(P, M.ToString(), null); // the pair names M without a type: UAC answers Unknown
+        _world.Add(WorkAssignment, W, ("sprk_regardingmatter", Ref(Matter, M)));
+
+        var read = () => ChildrenOf(Matter, M);
+
+        var thrown = await read.Should().ThrowAsync<CoreRecordChainUnreadableException>();
+        thrown.Which.CandidateCount.Should().BeNull("only the bound case carries a count; a chain that cannot be told is not a count of children");
+    }
+
+    [Fact(DisplayName = "082c C19 children: a read fault propagates (no partial list)")]
+    public async Task Children_ReadFault_Propagates()
+    {
+        _world.Add(WorkAssignment, W, ("sprk_regardingmatter", Ref(Matter, M)));
+        _world.FailingQueriesOf(Project);
+
+        var read = () => ChildrenOf(Matter, M);
+
+        await read.Should().ThrowAsync<InvalidOperationException>().WithMessage("Test:*");
+    }
 }

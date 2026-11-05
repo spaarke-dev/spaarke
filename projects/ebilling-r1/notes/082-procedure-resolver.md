@@ -566,3 +566,165 @@ Test support: `ProcedureKit.Pin(name, versionNumber)` adds a Pin on the kit's Ma
 | Contract tests of the adjustment endpoints (compiled into the same project) | 58/58 |
 | ArchTests (`Billing\|CoreRecordChain\|Procedure\|ADR010\|FindingsJson\|Finance\|ExceptionMessage`) | 162/162 |
 | Seeding (old behaviour restored in the three production files, then put back, `cp` from backups) | 8 of 518 failed: the K1 must-fire and the latest-date test, the K2 must-fire and its three pin / conflict theory rows, the item 1 end-to-end test and the C12 text assertion |
+
+## C19 — chain close (2026-11-05)
+
+Branch `task/ebilling-082-c19`, from `origin/work/ebilling-r1` at `52622ea05c`. Code commit `36819ca13a`. No Dataverse read or write, no deploy.
+
+### The status question (rule 1): the close changes no invoice
+
+The 089e close (`ProcedureAssignmentService.SupersedeBaseFindingsAsync`) goes `SignalClosureService.SupersedeInPassAsync` → `CloseAsync` → `SignalWriter.CloseAsync`, which writes `sprk_signal` only (`UpdateIfRowVersionMatchesAsync("sprk_signal", …)`). It reads invoices (state, status, firm, core lookups) to choose findings and never writes `sprk_invoice`. An invoice keeps its status and its hold reasons. **So the chain close is not a `sprk_reviewdetail` writer** (D-205 writer list item 8 resolves to "not a writer"), and C19 does not wait for 082c-2.
+
+### What changed
+
+- **`CoreRecordChain.ReadChildrenAsync(entities, logger, parentTable, parentId, maxChildren, ct)`** (`CoreRecordChain.cs:144-261`): the reverse read. Candidates are the rows whose typed filing lookup (`TypedFilingColumns`) names the parent, and, on a table whose pair is BFF-managed (a project), the rows whose pair text holds the parent id's first 8 hex digits (the `ListFiledRootsAsync` technique, task 158 r1: every spelling `Guid.TryParse` accepts carries them). **Each candidate is verified by the forward chain** (`ReadAsync`): it is a child only if the parent is one of its distance-1 links. So the reverse read cannot disagree with the chain the resolver judges by; lookalike fragments, a pair of a non-filing type and intermediates drop out there. Returns each child's own chain. A work assignment has no children and reads nothing. No second hop.
+- **`ProcedureResolver`** (`ProcedureResolver.cs:738`, `:860-889`): `IsRuleOverrideFor` (the firm rule: the row's Firm is empty or the invoice's firm) now used by `RulesOn` too, and `RuleOverrideDeciders(overrides, basePolicyId, firmId)` (the rows at the nearest distance decide). `ReadOverridesAsync` is internal, so the close reads a child's rows by the resolver's own read and fault rules.
+- **`ProcedureAssignmentService`** (`ProcedureAssignmentService.cs:755-758`, `:781-782`, `:787-788`, `:793-865`; docs and messages at `:60-61`, `:467-468`, `:721`, `:725`, `:729-743`, `:748-749`): `ChildrensInReviewInvoicesAsync` selects the d1 invoices; `SupersedeBaseFindingsAsync` reads d0 and d1 in full before the one close. `ChangeCloseCompleteMessage` and `ChangeCloseIncompleteMessage` now say the close covers the record and the records directly under it. The catch logs the exception type name.
+
+### Design
+
+- **Bound:** `MaxChildRecords = 100` candidate children. Every candidate query is paged (page size capped at the bound + 1). Past the bound `ReadChildrenAsync` throws `CoreRecordChainUnreadableException` before any candidate's chain is read. The child invoices: one query per child table and 500-id chunk, more than one page throws (as the d0 read).
+- **Fail closed:** any fault in the reverse read, a child's chain (an `Unknown` pair included), a child's override rows (a row the BFF never writes throws `ProcedureResolutionFaultException`), the invoice reads or the bound throws inside the existing `try`. The existing catch answers `PolicyFailures = 1`: **nothing is closed, not even d0**, the change stays 201 with `closeComplete=false` and `ChangeCloseIncompleteMessage`. Never a partial close. *(Superseded for the records under the record by fix round 1 below: a d0 fault still closes nothing; a children fault drops only the children's set.)*
+- **Nearer wins (the resolver's rule, reused):** for each child invoice, the override rows on that child's chain are read with `ReadOverridesAsync`, and the invoice is kept only when THIS record is among `RuleOverrideDeciders(rows, baseRule, invoiceFirm)`. A child with its own row of the rule (for every firm, or for the invoice's firm) decides it nearer (distance 0), so it is skipped. A child's row for another firm does not decide this firm's invoice. A work assignment's second distance-1 parent with its own row decides together with this record (one distance), so the invoice is still this change's.
+- **Identity:** app-only reads through the service's `IGenericEntityService`, as the d0 selection's; the caller-scoped count is unchanged.
+- **FR-05:** a child invoice filed on two core records has no chain and is never closed. (The d0 read is unchanged and does not apply this filter.)
+
+### Component justification (CLAUDE.md §11)
+
+1. **Existing:** `CoreRecordChain.ReadAsync` (forward, d0 + d1); `SecureRootInheritance.ListFiledRootsAsync` (reverse, for access: follows intermediates, which D-172 forbids for billing); the resolver's private override read and nearest rule.
+2. **Extension:** extended in place: the reverse read is a member of `CoreRecordChain` and reuses its forward read for verification; the nearer rule and the override read stay in `ProcedureResolver` and are shared. `ListFiledRootsAsync` cannot be reused because it follows intermediates (the `CoreRecordChainNoMultiHopGuardTests` allow-list forbids it in this file; the guard passes unchanged).
+3. **Cost of doing nothing:** a changed rule's base findings stay open on every In Review invoice of the record's direct children although the resolver no longer runs that rule there, and the reviewer sees stale findings with no close.
+
+No new endpoint, column, privilege, package, DI registration or background work. Placement (§10): BFF, in the files that own the chain, the resolver and the change.
+
+### Tests
+
+`ProcedureAssignmentServiceTests` ("082c C19", 10 cases), `CoreRecordChainTests` ("082c C19 children", 7 cases); `RuleSetServiceTests.Harness` evaluates `Like`.
+
+| Brief case | Test |
+|---|---|
+| d0 still closed; a d1 child invoice closed | must-fire: d0, a work assignment by its lookup, a project by its pair (a line finding) in one close |
+| a d2 grandchild closed | **Deviation: not closed.** must-not-fire, with the sibling (below) |
+| a child with a nearer version in force not closed | nearer wins: own row for every firm and for the invoice's firm not closed; a row for another firm and a Procedure-level Pin closed |
+| a sibling under another parent not closed | must-not-fire |
+| a chain read fault → nothing closed | theory: chain read fault, override-row read fault, a row the BFF never writes |
+| the bound reached → fail closed | past the bound (101): nothing closed, no child chain read; at the bound (100): closed |
+| idempotent re-run closes nothing more | a resolved finding is not targeted; the repeated change is 409 and closes nothing more |
+
+Edge cases added: a firm-scoped change on the children (the firm filter reaches d1); an invoice on two core records (FR-05). Chain level: children of a matter and of a project, lookalike fragment and non-filing type dropped, a work assignment reads nothing, the bound (past and at), an `Unknown` pair and a read fault propagate.
+
+**Fail before:** the base `ProcedureAssignmentService.cs` (with only the `MaxChildRecords` constant added so the tests compile) fails 11 of 94: the 10 C19 cases and the updated 089e message assertion. The chain tests do not compile against the base (`ReadChildrenAsync` is new).
+
+### Seeds (each restored; the file byte-identical afterwards)
+
+Filter `ProcedureAssignmentServiceTests|CoreRecordChainTests`, 126 tests.
+
+| Seed | Result |
+|---|---|
+| S1: nearer-wins skip removed in the service (every child invoice kept) | 1 failed (nearer wins) |
+| S2: nearer-wins removed in the resolver (`RuleOverrideDeciders` returns every distance) | 1 failed (nearer wins) |
+| S3: a children fault swallowed (treated as no children) | 4 failed (the three fault rows and the bound) |
+| S4: the bound removed in `ReadChildrenAsync` | 2 failed (chain bound, service bound) |
+
+### Gates
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Unit `CoreRecordChain\|Procedure\|Supersed\|AssignmentOverride\|SignalClosure\|RuleSetService\|BillingFactLoader\|InvoiceComplianceEvaluator` | 1398/1398 |
+| ArchTests `CoreRecordChain\|SignalClosureServiceDerivation\|ProcedureRetireSelection\|RouteAuthorizationGuard\|ProcedureRolePrivilege\|ProcedureResolver\|FinanceStepZero\|RecordOwnerAssignmentCensus` | 191/191 |
+| ArchTests `Billing\|ExceptionMessage\|Finance\|ADR010\|Signal` | 134/134 |
+| ArchTests `OverriddenCreatedOnWriteGuard` | 7/7 |
+| Publish size (`git archive`, `dotnet publish -c Release -r linux-x64 --self-contained false`, `Compress-Archive -CompressionLevel Optimal`), base `52622ea05c` vs tip `36819ca13a` | 137,597,908 → 137,613,012 B raw (**+15,104 B**); 41,416,760 → 41,424,785 B zip (**+8,025 B**); `Sprk.Bff.Api.dll` +12,800 B; 192 files and 139 dlls each, file lists identical; no package added |
+
+### Deviations
+
+1. **The d2 grandchild is NOT closed** (the brief's closed set says "closed"). D-172 is direct association only: `CoreRecordChain` stops at distance 1, the ArchTest forbids a second hop, and the 082b resolver test "a Procedure assigned on M applies on P (d1) and does not apply on W1 under P" pins it. A grandchild's chain never reaches the record, so the record's change does not decide the rule there; closing its findings would close findings the rule still raises. The test asserts the grandchild stays open. **For the caller to confirm.**
+2. **"Nearer Procedure/version in force" read as the resolver's rule-level nearer row.** In the resolver, rule-level overrides are grouped by base rule and decided by distance; a Procedure-level row (Follow, Pin, Exclude of the Procedure) does not decide a rule-level override. So a child with only a Procedure-level Pin IS closed (tested, to make the reading visible). Skipping it would close less than the resolver excludes. **For the caller (or ontology) to confirm.**
+3. **Fail closed covers d0 too**, as rule 3 says ("closes nothing"): on a matter with more than 100 direct children, or any child read fault, the record's own findings are no longer closed (089e closed them). The answer says so (`closeComplete=false`). *(Superseded by fix round 1, ontology 3: d0 closes when only the children's side fails.)*
+4. **Logs:** the existing catch keeps logging the exception object (the file's idiom); it now also names the exception type. The new exception texts carry table names and ids only (operator text). No reader surface changed beyond the two constant messages.
+
+### Known limits (K) and items for 082d / 114
+
+- **K: a record rule without its Exclude row** on a child is not seen as a nearer row (the close reads Exclude rows only). The BFF never writes that state, and the resolver faults on it for that child's invoices (`RuleOverridesOf`), so those invoices are held by the resolver anyway.
+- ~~**K: the record rule's date window.**~~ **Retired by fix round 1** (owner 2026-11-05): the close now compares every judged date with the record rule's in-force day, at d0 and d1.
+- **K: the pair fragment.** A project whose pair text does not carry the parent id's 8-hex fragment (a hand edit that is not a GUID spelling) is not a candidate; the forward chain would answer `Unknown` for it, and its findings stay open, as before.
+- **082d / 114:** none needed for C19. The ProcedureGap re-check (082c-2) and the 114 Override release are separate writers. If 082d adds a stored snapshot of the deciding rows, the close could read it instead of the override rows.
+- **Observation (not changed):** the repo's lint-staged pre-commit hook backs up the staged state with `git stash` (shared stack, FAILURE-MODES G-18) and drops it on success.
+
+### C19 fix round 1 (2026-11-05)
+
+Branch `task/ebilling-082-c19`, from `d4e755317f`. Code and tests `0895e22dae`; census script `bbc40cbe3d`. No Dataverse write, no deploy; one read-only census run against dev (item 5).
+
+#### 1. The effective date wins (owner, 2026-11-05) — `ProcedureAssignmentService.cs:261`, `:623`, `:654`, `:856-900`; `ProcedureResolver.cs:657`, `:1266`
+
+- **Rule:** a record rule version runs only from its own `sprk_inforcefrom`; `RecordRuleVersionOn` returns null for earlier work dates, so the base rule still runs there. The close therefore closes a base finding only on an invoice where the record rule, not the base rule, runs on **every date the resolver judges the invoice on** (`TakesTheChange`). Applies at d0 and d1 (it was wrong at d0 under 089e).
+- **Invoice-level, not line-level.** All of an invoice's findings close together or not at all: one earlier-dated line keeps even its later lines' findings open. (Accepted: invoice-level for all findings.)
+- **Which dates (reused, not re-derived):** the evaluator's own selection, `InvoiceComplianceEvaluator.cs:223-225`. A line is judged on its work date, else on the invoice date; the invoice subject is judged on the invoice date. In stored form: the line's `sprk_eventdate` as `DateOnly.FromDateTime` (as `InvoiceCorrectionReevaluation.cs:1578` and `InvoiceCorrectionService.cs:582` read it), the invoice's date from `InvoiceAdjustmentService.InvoiceDateOf` (`sprk_invoicedate`, else the UTC day the row was created: the evaluator's received-on fallback). Only Fee and Expense lines are judged (`InvoiceCorrectionReevaluation.cs:1671`), so an adjustment line's date keeps nothing open. **The invoice's own date is part of the test** (the evaluator judges the invoice subject on it, so the base rule still runs on invoice-level findings while the invoice date is earlier). An invoice with no determinable date stays open.
+- **Same comparison as the resolver:** `ProcedureResolution.InForceOn(inForceFrom, date)` is the single expression `Latest` selects by (so `RecordRuleVersionOn` too); the close calls it. The change captures ONE instant (`Clock`, `ProcedureAssignmentService.cs:623`), writes it as the version's `sprk_inforcefrom` (`:1732`) and dates the close by its UTC day through `ProcedureResolver.UtcDate` (the conversion the resolver reads the stored value with). A change is refused when the rule already has a row (`HasRowAsync`, `ProcedureAssignmentService.cs:587`, 409), so the new version is always the first of its episode and `RecordRuleVersionOn(date)` returns it exactly when `InForceOn` holds. On the in-force day itself the record rule runs, so the close agrees with the resolver there (tested at 00:00:00, 14:30:00 and 23:59:59 UTC).
+- **Message:** `ChangeCloseCompleteMessage` no longer says every finding closed; it names the date rule ("work all dated on or after the change") and that earlier-dated invoices stay open.
+- **Retired known limit:** "the record rule's date window" (C19 known limits) is fixed at d0 and d1.
+
+#### 2. Ontology 3: the children's side fails alone — `ProcedureAssignmentService.cs:776-852`
+
+d0 is read first (a d0 fault, or a fault reading d0's lines, closes nothing: the outer catch, `ChangeCloseIncompleteMessage`). d1 is read next inside its own catch; a chain fault, a row fault, a row the BFF never writes, the bound or a fault reading the children's invoice lines drops the d1 set only (all or nothing within d1). d0 still closes; the answer is `closeComplete=false` with the new constant `ChangeCloseChildrenOpenMessage` (the invoices of the records under it stay open for the reviewer; no ids). The bound is logged at Warning with the count the read reached (`CoreRecordChainUnreadableException.CandidateCount`, `CoreRecordChain.cs:283`; "more than 100 ... (101 counted ...)"); any other children fault is logged at Error with the exception type name. Supersedes C19 design "Fail closed" (children side) and deviation 3.
+
+#### 3. Ontology 2: a pinned child keeps a different policy's findings
+
+Test only: a child under a Procedure-level Pin to a version whose rule is a different policy keeps that policy's open findings; the changed rule's own finding on the same invoice closes (a Procedure-level row does not decide a rule-level override, deviation 2).
+
+#### 4. F4: exception type name only — `ProcedureAssignmentService.cs:848`
+
+The close's catch logs `{ExceptionType}` = `ex.GetType().Name`, no exception object. The new children logs do the same. Tests assert that no log entry of a change carries an exception object and that no id of a record or invoice under the record is logged.
+
+#### 5. K3 census — `scripts/ebilling/Get-EbillingChildRecordCounts.ps1`
+
+Read-only (GET, `@odata.nextLink`), counts only unless `-ListFlagged`. Per matter and project it counts the candidates `ReadChildrenAsync` counts against the bound (typed work-assignment filings and BFF-managed project pairs by the 8-hex fragment, inactive rows included, before forward verification) and flags parents at or over 80% of `MaxChildRecords`. Dev run: 65 matters, 30 projects, 19 filed work assignments, 8 projects with pair text; 17 parents have children; **max 4; 0 parents at or over 80; 0 over 100.** (The existing `Get-EbillingLegacyRuleOverlap.ps1` is a rule census and does not fit; this script copies its read-only access pattern.)
+
+#### uac-r2 conditions (K5: the Secure child is closed app-only)
+
+- **(a) Close only — confirmed by reading.** The close is `SignalClosureService.SupersedeInPassAsync` → `CloseAsync` (`SignalClosureService.cs:393`) → `SignalWriter.CloseAsync` (`SignalWriter.cs:952`), whose only write is `UpdateIfRowVersionMatchesAsync("sprk_signal", …)` of status, resolution type, `sprk_resolvedon` and `sprk_lastevaluated` (`:966-977`). It never reopens (a resolved Signal is not targeted), creates, edits a finding's content or deletes, and the reads before it are selections for the close, not shown to the caller. One-line comment at the call (`ProcedureAssignmentService.cs`, "Close only") and a remark paragraph on `SupersedeBaseFindingsAsync`.
+- **(b) Scope is only what the effective-date rule supersedes.** Targets are the base rule's open findings on invoices that pass `TakesTheChange`. The test with a mixed-date invoice that stays open on a record under the record is `Change_OnTheChildren_ClosesTheFullyDatedInvoice_AndKeepsTheMixedDateOneOpen` (it is also the d1 "one earlier line" case of the date table); it asserts the close targeted only the fully-dated invoice's findings.
+- **(c) Audit — NOT satisfiable from the existing close facts; stopped, for a decision.** Today a Superseded close records neither the triggering decision nor an actor: `SignalWriter.CloseAsync` writes status, resolution type, resolved-on and last-evaluated only, and states that `sprk_decisionrecord` and `sprk_resolvedby` are not written (`SignalWriter.cs:944-947`; `SignalClosureService.cs:42-44`). The rule change itself writes no Decision Record (nothing in `Services/Finance/Procedures` names one); its trace is the Exclude row (`sprk_procedureassignment`) and the record rule's version. Recording the decision on the Signal therefore needs a new write: a rule-change Decision Record plus a link entry for Superseded closes (like `LinkConditionClearedRecordAsync`), or `sprk_resolvedby` (which would name the caller as the resolver, against "never as having seen the child", and breaks the writer's FR-16 system-only close). Both are design decisions (a new Decision Record writer call and class in the change path, D-205 writer list, uac-r2/ontology ruling), so none was guessed; no code or test was added for (c).
+  - **uac-r2 ruling (2026-11-05): option (iii), accepted as K.** The close stays system-attributed (`sprk_resolvedby` never the caller). The close's completion log line now carries the triggering rule-change row (`{AssignmentId}`, the Exclude row whose `createdby` and time are the audit), the record rule version and the closed Signal ids (`{ClosedSignalIds}`), so an operator joins "this rule change closed these Signals". Option (i) (a link written on the Superseded close) is NOT filed for 095d-2: ontology ruled (D-205) that a Superseded link would change the shared `SignalWriter` contract (the ConditionCleared link is the D-145b exception) and is an ontology design ask if ever wanted.
+  - **Adjustment lines never reach the evaluator (uac-r2 question, answered):** they are created only by a reviewer after the submission is judged (`InvoiceAdjustmentService.cs:651`); the submission path builds `request.Lines` from the parsed submission's Fee and Expense lines (an invoice-level adjustment total is a header field, `InvoiceSubmissionProcessor.cs:278`, not a line), and the correction re-evaluation keeps Fee and Expense rows only (`InvoiceCorrectionReevaluation.cs:1671`). So skipping an adjustment line's date in the close matches what the evaluator judges.
+  - **The superseding version on the Signal row (ontology condition):** not written today, by 089e's design (`SignalClosureService.cs:125-129`: "the close records no successor version on the Signal (the writer stores the resolution only)"). Since this round the completion log carries it (`{RecordRuleVersionId}`) with the closed Signal ids. **Ontology ruling (2026-11-05, recorded under D-205): no row write is owed.** Every system close except a Do-lane ConditionCleared is record-free (D-145b); the ontology evaluator's own Superseded-on-version-change stores no successor either. The K is "log join plus the version row" (the Signal's Superseded resolution, resolved-on, policy code and subject; the record-rule version row's `sprk_inforcefrom` and `sprk_basedonversion`; this log line), with no follow-up owed. The closed-id list is bounded (`MaxClosedSignalIdsLogged` = 50, then "+N more"; test `ClosedSignalIdsForLog_IsBounded`).
+  - **(d) ruling:** aggregate counts in operator logs are acceptable (not a caller surface; no ids or names); the response stays caller-scoped with constant messages.
+- **(d) Response and logs.** The response carries the caller-scoped count (`AffectedInvoiceCounter.CountVisibleOpenInvoicesAsync` on the closed findings, probed with the caller's token) and constant messages. Log lines touched: the close's completion, no-target, children-unread (Warning/Error) and catch lines carry the changed record (`{CoreTable} {RecordId}`, supplied by the caller), the assignment id (the caller's own Exclude row), aggregate counts and the exception type name only; no child record, invoice, number or name. The counts in the logs are aggregate operator counts (hidden invoices included), not caller-scoped; a caller-scoped log count would need the rights probe per log line. Noticed, not changed: the shared writer logs each closed Signal's id at Information (`SignalWriter.cs:978`); it names no record or number.
+- **(e) K5 recorded:** a Secure child's invoice findings are closed by the BFF identity although the caller may not read the child. Reasoning (D-172): a record's change is a rule of that record that its direct children take by association, so the rule the child's invoices are judged by changes whether or not the caller can see the child; leaving the base findings open there would show a rule the resolver no longer runs. The close only resolves findings (see (a)); it reveals nothing to the caller (counts are caller-scoped, messages are constants). uac-r2 accepted K5 (2026-11-05) with (a)–(e); the audit is the log join in (c) plus the version row; no follow-up owed.
+
+#### Tests
+
+`ProcedureAssignmentServiceTests` 94 → 127 (+33: the date table, 24 rows at d0 and d1; adjustment line; mixed-date child; in-force instants, 3 rows; children fault, 4 rows; d0 fault, 2 rows; bound; pinned different policy; the old fault theory and bound test replaced). `ProcedureResolverTests` +3 rows (the resolver side of the same instants). `CoreRecordChainTests`: the count on the bound exception and its absence on the others. The test world dates every invoice and line on the in-force day by default (the existing C19 cases keep their meaning) and fixes the clock.
+
+| Table (d0 and d1) | Result |
+|---|---|
+| lines on and after the day (the day itself among them) | closed |
+| one October line; a mixed-date invoice; the day before; invoice date before the day | open |
+| line with no work date: invoice date on or after / before | closed / open |
+| no date at all; invoice with no date and dated lines | open |
+| no lines: invoice date on or after / before | closed / open |
+
+#### Seeds (each restored; `cmp` against the backup shows the file byte-identical)
+
+| Seed | Result |
+|---|---|
+| S1: date filter dropped (`TakesTheChange` returns true) | 20 of 127 failed (every "open" row of the table incl. the October line, the in-force instants, the mixed-date child) |
+| S2: a children fault rethrown (the round-0 behaviour) | 5 failed (the 4 children-fault rows and the bound) |
+| S3: a d0 fault swallowed (d0 treated as empty) | 2 failed (the d0 must-not-fire rows) |
+| S4: `InForceOn` `<=` → `<` | 34 of 219 failed (close and resolver sides, the in-force-day rows and the existing resolver date tests) |
+
+#### Gates
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Unit `ProcedureAssignmentService\|CoreRecordChain\|ProcedureResolver\|RuleSetService\|BillingFactLoader\|InvoiceComplianceEvaluator\|SignalClosure` | 782/782 |
+| ArchTests `CoreRecordChain\|ProcedureResolver\|ExceptionMessage\|Billing\|SignalClosure` | 114/114 |
+| ArchTests `Procedure\|RecordOwnerAssignmentCensus\|FinanceStepZero\|ADR010\|OverriddenCreatedOnWriteGuard` | 94/94 |
+
+Publish-size delta not re-measured this round (a fix to existing files; no package, endpoint, registration or background work added). Round 0 measured +15,104 B raw.
+
+#### Known limits (kept)
+
+K3 census above (nothing near the bound on dev). K4: about 300 sequential reads at the bound (latency, accepted). K5: above. K6: the pair-fragment spelling (a hand-edited pair that is not a GUID spelling is not a candidate).

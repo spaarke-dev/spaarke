@@ -628,6 +628,10 @@ public sealed class RuleSetServiceTests
                 ConditionOperator.Equal => actual is not null && Equals(actual, wanted[0]),
                 ConditionOperator.In => actual is not null && wanted.Any(w => Equals(actual, w)),
                 ConditionOperator.Null => actual is null,
+                // 082c C19: Dataverse LIKE (% any run, _ one character, case-insensitive), for the reverse chain read's pair candidates.
+                ConditionOperator.Like => actual is string text && wanted[0] is string pattern && System.Text.RegularExpressions.Regex.IsMatch(text,
+                    "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace("%", ".*").Replace("_", ".") + "$",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline),
                 _ => throw new NotSupportedException(c.Operator.ToString()),
             };
         }
