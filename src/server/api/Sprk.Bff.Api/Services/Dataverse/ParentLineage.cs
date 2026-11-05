@@ -1020,6 +1020,11 @@ internal static class InheritedAccessPermission
     /// firm, or the hold when there is none), and Set firm (task 095d-1b, <c>InvoiceAssignFirmService</c>) sets the firm and clears the hold
     /// in its one renumber transaction. No
     /// playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</item>
+    /// <item>ebilling-r1 082c-2 fix round 1 (uac-r2 review F4). <c>sprk_invoice.sprk_reviewdetail</c> (<c>InvoiceReviewDetail.Column</c>):
+    /// the partner-readable label of which kind of review a held invoice is in, DERIVED from its open hold reasons (ontology D-205). It
+    /// decides no access and no hold (approval reads the stored submission state), but a generic write would show a label no hold backs, or
+    /// leave one on a closed invoice. Its writers are typed (<c>InvoiceReviewDetailWritersGuardTests</c>); the record-creation mapping
+    /// refuses it as well (<c>RecordTableRules.MappingProtectedColumns</c>).</item>
     /// <para>Not listed: <c>sprk_billingevent.sprk_invoice</c>. A same-invoice repeat Duplicate about a line is judged by the
     /// line's current invoice, the event's invoice (read as the caller), so the column is read. It is not refused because
     /// the supported detach / move / re-attach sequence (<see cref="InvoiceFamilyCoreRecordGuard.DetachMoveReattachHint"/>, D-96)
@@ -1167,6 +1172,8 @@ internal static class InheritedAccessPermission
             {
                 Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn,
                 Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceVendorOrg,
+                // ebilling-r1 082c-2 fix round 1 (uac-r2, F4): the review detail is DERIVED from the open hold reasons (D-205) by its typed writers.
+                Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column,
             },
             [Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -1323,6 +1330,8 @@ internal static class InheritedAccessPermission
                 ? "it decides no access; only the tracking number allocator writes it"
                 : !isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode, StringComparison.OrdinalIgnoreCase)
                     ? "it decides no access, but it holds the invoice from approval and export; only the submission pipeline writes it"
+                    : isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column, StringComparison.OrdinalIgnoreCase)
+                        ? "it decides no access; it says why the invoice is held for review, and only its typed writers derive it"
                     : isInvoice
                         ? "it decides no access, but it decides whether the invoice can be approved and exported; only the submission pipeline writes it"
                         : "it decides who may see what";

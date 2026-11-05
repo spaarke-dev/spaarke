@@ -42,7 +42,7 @@ public class AccessTableReaderScanTests
             ["sprk_communication"] = "A child record: its internal-only flag is refused per column (AccessColumns), its owner is refused (OwnerColumns); the rest follows its parents.",
             ["sprk_event"] = "A child record; its access follows its parents, its owner and creator are refused (OwnerColumns, CreatorColumns).",
             ["sprk_todo"] = "A child record; its access follows its parents, its owner and creator are refused.",
-            ["sprk_invoice"] = "A child record; its access follows its parents, its owner and creator are refused. Its firm (sprk_vendororg) and its firm hold (sprk_firmhold, task 095c-5, field-secured) decide no access but hold the invoice from approval and export; both are typed-writer only and refused per column (AccessColumns).",
+            ["sprk_invoice"] = "A child record; its access follows its parents, its owner and creator are refused. Its firm (sprk_vendororg) and its firm hold (sprk_firmhold, task 095c-5, field-secured) decide no access but hold the invoice from approval and export; both are typed-writer only and refused per column (AccessColumns). Its review detail (sprk_reviewdetail, task 082c-2, derived from the open hold reasons) decides no access and no hold; it is typed-writer only and refused per column too (AccessColumns).",
             ["sprk_servicerequest"] = "A child record; its requester is refused (CreatorColumns), its access follows its parents.",
             ["account"] = "A customer account; no access decision reads its columns.",
 

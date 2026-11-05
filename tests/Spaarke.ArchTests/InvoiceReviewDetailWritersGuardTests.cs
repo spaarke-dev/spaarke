@@ -50,6 +50,8 @@ public sealed class InvoiceReviewDetailWritersGuardTests
         (typeof(ReviewDetailColumnProbe), "MarkMissing"), // the log-once warning
         (typeof(Sprk.Bff.Api.Infrastructure.DI.ExternalAccessModule), "AddExternalAccess"), // ReadableColumns of sprk_invoice (uac-r2)
         (typeof(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules), ".cctor"), // MappingProtectedColumns of sprk_invoice (uac-r2)
+        (typeof(Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission), ".cctor"), // AccessColumns of sprk_invoice: refused to app-only generic writes (uac-r2 F4)
+        (typeof(Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission), "RefuseAppOnlyWrite"), // the refusal's reason text for the column
     ];
 
     private static readonly Assembly[] Scanned = [typeof(InvoiceSubmissionPersister).Assembly, typeof(IGenericEntityService).Assembly];
