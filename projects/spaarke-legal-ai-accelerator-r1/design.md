@@ -1,19 +1,44 @@
 # Spaarke Solution Accelerator R1: Practice Accelerators for Copilot for legal and Cowork (T0/T1 foundation)
 
-> **Status:** Draft v0.4 for owner review → `/design-to-spec` after the decisions in §18 are made.
-> **Date:** 2026-10-31 (v0.3 earlier the same day; v0.2 2026-10-30; v0.1 2026-10-29)
+> **Status:** Draft v0.5 for owner review → `/design-to-spec` after the decisions in §18 are made.
+> **Date:** 2026-11-05 (v0.4 2026-10-31; v0.3 earlier that day; v0.2 2026-10-30; v0.1 2026-10-29)
 > **Author:** Ralph Schroeder + Claude Code
 > **Companion documents:**
 > - [solution-strategy.md](solution-strategy.md): the program vision
 > - [references.md](references.md): curated reference set
 > - [notes/poc-2026-10-30-cowork-nda-review.md](notes/poc-2026-10-30-cowork-nda-review.md): the NDA proof of concept run in Cowork
+> - [notes/mvp-nda/results.md](notes/mvp-nda/results.md) and [run-log.md](notes/mvp-nda/run-log.md): the NDA MVP tenant tests (2026-11-01/02). Findings are cited as L1–L27 and S1–S19.
+> - [notes/component-protocol.md](notes/component-protocol.md): the component protocol (v0.2), summarized in §5.10
+> - [notes/2026-11-05-external-inputs-review.md](notes/2026-11-05-external-inputs-review.md): the expert redliner demo and the 2026-11-04 discussion Q&A, checked against our evidence
 >
 > **Tags:**
 > - `[Cited]`: Microsoft documentation, checked 2026-10-29/30
 > - `[Observed]`: seen in the 2026-10-30 POC
+> - `[Tested]`: verified in our tenant during the NDA MVP, 2026-11-01/02 (results L#/S#)
 > - `[Judgment]`: our assessment
 > - `[Open]`: owner decision
 > - `[Verify]`: must be proven in the test tenant (§12)
+> - `[Proposed]`: a v0.5 change awaiting owner approval (§18)
+
+**Changes in v0.5** (2026-11-05; from the NDA MVP tenant tests, component protocol v0.2, the owner's 2026-11-02 decisions, the expert redliner demo and the 2026-11-04 discussion Q&A):
+1. **Tenant evidence folded in.** Spikes S1, S2, S3, S9, S10, S13, S17 and S19 are answered, S5 in part. §12 now has a status column, and stale claims are corrected throughout.
+2. **Python scripts in Cowork are verified, not assumed.** Our engines ran on the current service from an uploaded plugin and from a OneDrive skill folder (Python 3.12, lxml, python-docx, LibreOffice). Microsoft documents that scripts are executed but not the runtime, so every engine skill still runs `probe.py` first (§5.2, §5.6).
+3. **Word corrected:**
+   - Our plugin is *listed* in Word but never *runs* there: Word has no loader for third-party skills (L21, L25).
+   - Word's Legal plugin imports our Word playbook into a saved, editable playbook object (L24). That import drops the Topic ID and the fallback position, so the renderer was reshaped.
+   - The declarative-agent option is removed from R1 (owner, 2026-11-02).
+   - Changed sections: §2.1, §2.4, §5.4, OD-18.
+4. **New §5.10: component protocol.** One job per primitive (positions in playbooks, procedures in skills, defaults in the profile); non-overlap rules with Microsoft Legal; governed and personal playbooks. `[Proposed]`: keep one Cowork plugin and defer the Knowledge/Engines split until a Word probe shows it is needed (OD-20).
+5. **Playbook locations replace the old lookup order** (§5.3). Governed playbooks sit in a read-only SharePoint library (T-P10 to prove); personal ones in OneDrive. This also fixes L16.
+6. **New skill rules from the MVP defects** (§5.7):
+   - never reuse plans or outputs from other tasks (L15);
+   - read playbooks only from designated locations (L16);
+   - keep outputs in the task folder (L10, L17);
+   - one-line descriptions (L22);
+   - use approved model language verbatim.
+7. **Ideas taken from the expert demo** (§5.7, §8.2): a plan-preview card before files are generated, an optional Excel audit pack, and verbatim insertion of approved clause wording.
+8. **`[Proposed]` R1 scope narrowed to Core + NDA** (OD-21). Legal Intake and Invoice Review move to R2, and the six-accelerator roadmap stays.
+9. **Out of scope, made explicit:** declarative agents, Copilot Tuning, an Office add-in for redlining, App Store / partner listing, and the MCP connector (v2).
 
 **Changes in v0.4** (owner review round 4, 2026-10-31, from the owner's tenant screenshots; two new researcher notes):
 1. **Word corrected.**
@@ -91,7 +116,9 @@ The 2026-10-30 POC showed the approach works end to end, inside the user's tenan
 - Python scripts produced a Word redline with surgical tracked changes, margin comments, a linked summary table, and a clean version.
 - The results were emailed.
 
-R1 builds the **foundation** and the **first six accelerators**, in three waves. It also defines how their content stays aligned with the Spaarke platform's own AI content: JPS Actions, Skills and Knowledge. That way the IT tier (T2) and the platform tier (T3) build on the same content, not a copy of it.
+The 2026-11-01/02 NDA MVP repeated this on the current service with a packaged, tested build: 11 Cowork runs on three models, every output checked by script `[Tested]`.
+
+R1 builds the **foundation** and the **NDA accelerator** `[Proposed]` (OD-21; v0.4 had six accelerators in three waves, which stay as the roadmap in §8.3). It also defines how their content stays aligned with the Spaarke platform's own AI content: JPS Actions, Skills and Knowledge. That way the IT tier (T2) and the platform tier (T3) build on the same content, not a copy of it.
 
 ---
 
@@ -102,7 +129,7 @@ R1 builds the **foundation** and the **first six accelerators**, in three waves.
 | Term | Meaning |
 |---|---|
 | **Copilot for legal** | Umbrella name for **two** legal plugins. Not a synonym for Word. |
-| **The legal plugin in Word** | Admin policy name: "Legal Skills in M365 Copilot in Word". The user turns it on in the Copilot pane in **Word for Windows desktop** (`…` › **Manage plugins & skills** › Legal). It shows three skill toggles with the same names as three Legal for Cowork skills: *Legal reasoning*, *Edit contract*, *Draft new contract*. In practice: "Review contract" against a playbook (native tracked changes) and `@Draft-new-contract` from a precedent (content-control placeholders). **What we can add to it:** a `.docx` Word playbook, attached for each review. Whether *our* plugin can appear in Word's plugin menu is undocumented (§2.4.6). |
+| **The legal plugin in Word** | Admin policy name: "Legal Skills in M365 Copilot in Word". The user turns it on in the Copilot pane in **Word for Windows desktop** (`…` › **Manage plugins & skills** › Legal). It shows three skill toggles with the same names as three Legal for Cowork skills: *Legal reasoning*, *Edit contract*, *Draft new contract*. In practice: "Review contract" against a playbook (native tracked changes) and `@Draft-new-contract` from a precedent (content-control placeholders).<br>**Tested:**<ul><li>It is present in Word desktop and absent in Word for the web (S5).</li><li>It imports our Word playbook into a saved, editable playbook object, with one topic per Name / Rules / Examples (L24).</li></ul>**What we can add to it:** a `.docx` Word playbook. Our own plugin is **listed** in Word's plugin menu but **never runs** (L21, L25; §2.4.7). |
 | **Legal for Cowork** | Microsoft's built-in plugin of 20 legal skills, running inside Cowork. The tenant showed `legal-for-cowork` v1.0.10 at the POC `[Observed]`; no ID or version is documented. MC1509799 calls it "Cowork for Legal". Read-only to us. |
 | **Copilot Cowork ("Cowork")** | Copilot's general-purpose multi-step agent mode. **Our platform at T0/T1**: it takes our skills and plugins, and runs our scripts. |
 | **Agent Skill** | The open skill format Cowork uses ([agentskills.io](https://agentskills.io/home)): a folder holding `SKILL.md` plus optional `references/`, `scripts/` and `assets/`. |
@@ -159,9 +186,9 @@ Microsoft's own positioning is a single line for each: Word for "deep document w
 | **Model** | **User model picker, GA May 2026** (Auto / Claude / GPT, with reasoning level). Anthropic models are excluded from the EU Data Boundary; EU and UK tenants have them off by default. Whether the legal plugin follows the picker is not documented. | User picks: Claude Opus 5.5 / Sonnet 5.5 / Fable 5.1, GPT 6.1 Sol and others, Grok 4.7. EU Data Boundary tenants get **GPT only**. |
 | **What it reads** | The open document plus what the user attaches: a Word playbook, a precedent, agreement context | Everything the user can reach in M365 (files, mail, Teams, meetings), attachments, plugin connectors, **and our skills, references and scripts** |
 | **What it produces** | Native tracked changes in the open document, per-topic analysis with clickable citations, content-control drafts | New files in `OneDrive/Cowork/`, in-place edits to Office files (with version history), mail, Teams posts, Adaptive Cards. `edit-contract` produces native tracked changes. |
-| **What persists** | Nothing documented. The playbook is parsed for each review; no saved or shared rules. | Custom instructions (20 KB), private Projects, skills in OneDrive, Automations. **Memory is conversation-scoped.** |
-| **What we can add** | **Documented today:**<ul><li>the Word playbook `.docx`;</li><li>a declarative agent in **All agents** (chat only; no document edits).</li></ul>**Undocumented, to test:** our own plugin in "Manage plugins & skills" (S17). Custom skills in Office apps are documented for Excel (preview) and PowerPoint, not Word. Word has no custom instructions and no memory. | Skills, references, scripts, a plugin, and later a connector |
-| **Runs our scripts?** | Not documented for Word (Excel's preview runs Office.js scripts, not Python) | Yes: Python in the Cowork sandbox |
+| **What persists** | **A saved playbook object** `[Tested]` L24. "Save playbook" keeps the imported topics (Name / Rules / Examples) for the user. It is editable by the user, so it can drift from our master. The import is lossy: it dropped the `[nda.*]` ID from the heading and the "Acceptable fallback" line. Whether a saved playbook is offered in a new chat, or can be shared or replaced centrally, is T-P4. Without a saved playbook, nothing carries across chats (S19). | Custom instructions (20 KB), private Projects, skills in OneDrive, Automations. **Memory is conversation-scoped.** |
+| **What we can add** | **The Word playbook `.docx`**, rendered in the shape the Legal plugin imports (§5.5).<br>**Tested, doesn't work:** our plugin appears in Word's plugin menu, and its skills can be picked as chips, but Word never loads them (S17, L21, L25). The manifest has no field to limit a plugin to one host.<br>**Out of R1:** a declarative agent (owner, 2026-11-02).<br>Custom skills in Office apps are documented for Excel (preview, Office.js) and PowerPoint, not Word. Word has no custom instructions. | Skills, references, scripts, a plugin, and later a connector |
+| **Runs our scripts?** | **No** `[Tested]`: Word Copilot said "Python execution isn't available here" (L21). Excel's preview runs Office.js scripts, not Python. | **Yes** `[Tested]`: Python 3.12.15 with lxml and python-docx, from a plugin and from a OneDrive folder skill (S2, T-02, T-03) |
 
 #### 2.4.2 Same expertise, different objects
 
@@ -176,6 +203,7 @@ Microsoft's own positioning is a single line for each: Word for "deep document w
   - Microsoft publishes **no playbook schema, sample or template** anywhere.
 - **Our Cowork skills and Microsoft's Word plugin draw on the same positions** only because we render both from one source (§6). Microsoft provides no link between them.
 - **Partner plugins** (iManage, NetDocuments, Harvey and others) extend Cowork and Copilot Chat, **not** the Word plugin. None ships playbooks.
+- **How third parties reach Word.** Harvey appears in Word. Its package is one remote MCP tool with 5 operations, plus 5 one-line skills with no procedure and no instructions `[Tested]` (L26). Its Word presence most likely comes from the MCP tool, not from skill execution. For Spaarke, that points the Word route for *tools* to the v2 connector (§10), not to plugin skills.
 
 #### 2.4.3 Interaction map
 
@@ -214,42 +242,47 @@ There is no in-product router, so every accelerator states this in its install g
 1. The attorney asks for a playbook review (a starter or a prompt).
 2. Copilot asks for the playbook, and the attorney picks **Upload file** or **Attach from Cloud** (`.docx` only).
 3. Copilot parses it into topics and rules, which the attorney can edit.
-4. **Run Review**.
+4. Optionally, **Save playbook**. This keeps the parsed topics as the user's own playbook object `[Tested]` (L24).
+5. **Run Review**.
 
-The next review starts again at step 1. Nothing is remembered, there is no default playbook and no library setting, and there is no way to automate the choice `[Cited]` (S19 re-checks whether a new chat remembers).
+There is no default playbook, no library setting, and no way to automate the choice `[Cited]`. A new chat doesn't remember an *attached* playbook: it re-found ours by search, and by the topic IDs in comments left in the document (S19, L18). Whether a *saved* playbook is offered in a new chat is T-P4.
+
+Plain Word Copilot, without the Legal plugin (Word web, T-12), applied our Word playbook and quoted our `nda.*` topic IDs in every comment. Its edits were whole-clause replacements, with no summary and no copies `[Tested]`.
 
 | Surface | How the playbook gets in | Automatic? | What we ship |
 |---|---|---|---|
 | **Word, legal plugin** | Attached for each review (above) | **No** | Word playbooks with predictable names in **one** SharePoint `Legal Playbooks` library (T1) or a OneDrive folder (T0), so one search in Attach from Cloud finds them. A one-line "how to attach" card in each guide. |
 | **Cowork, our skills** | The skill reads it: our baseline in the skill's `references/`, or the customer's file found by the lookup order in §5.3 | **Yes**: no attach step; the provenance line names what was used | Skills that look the playbook up, and say which one they used |
 | **Cowork, Legal for Cowork's `review-contract`** | Attached per conversation, or `/`-referenced in the attorney's custom instructions or a Project | Partly: a `/` reference in Preferences or a Project is included in every task | A ready-made `/`-reference line for Preferences or a practice Project (onboarding step 5) |
-| **Word, a Spaarke declarative agent** (optional) | The agent's knowledge points at the SharePoint playbook library | Yes, as knowledge, but chat only: no edits to the document | Optional (§2.4.7) |
-
-So **automation of playbook selection exists only in Cowork**, and it is the main reason our review skills live there. In Word, our job is to make the right Word playbook easy to find.
+So **automation of playbook selection exists only in Cowork**, and it is the main reason our review skills live there. In Word, our job is to make the right Word playbook easy to find and import:
+- the one-line onboarding card "type `/` and the playbook name" (L19: "Attach cloud files" did nothing in Word web);
+- predictable names;
+- a version line, so a stale saved copy can be spotted.
 
 #### 2.4.7 Getting Spaarke into Word: what is possible
 
 | Channel | Status | Can it be tailored by practice or document type? | R1 decision |
 |---|---|---|---|
-| **Our plugin in Word's "Manage plugins & skills"** | **Undocumented.** The menu exists and is still rolling out. Microsoft's admin docs say plugins are "primarily available … in the Copilot channel". No Word skills page exists, and Excel's custom skills (preview) run Office.js, not Python. | If it works, plugins contribute prompt starters, as the Legal plugin does `[Observed]` | **Test, don't depend** (S17). If our uploaded plugin appears and runs in Word, it becomes a bonus channel. |
-| **A Spaarke declarative agent in "All agents"** | **Documented, GA.** Agents in the store appear in Word's Copilot pane. | Yes: one agent per practice, with its own `conversation_starters`, instructions and playbook-library knowledge | **Optional in R1** (S18 first). It can't edit the open document, and 2025 reports say it couldn't read the selection on desktop. It suits Q&A against the playbook, not redlining. |
+| **Our plugin in Word's "Manage plugins & skills"** | **Tested: listed, never run** (S17, L21, L25). A user-uploaded plugin shows in Word's picker, arriving toggled off in Word web. Its skills can be picked as chips. With the toggle on and three different routes tried, Word ran its own generic suggestions and said it hadn't loaded the skill. Word has no documented loader for third-party skills, and the shared Plugins button (MC1484008) lists plugins in every app without loading them. | — | **Not a channel in R1.** It is a **hazard**: a user who picks our skill in Word gets a generic review that looks like ours. Mitigations: onboarding and the README say "Spaarke reviews run in Cowork"; raise with Microsoft; re-test after admin deploy (T-14) and after Microsoft documents Word skills. |
+| **A Spaarke declarative agent in "All agents"** | **Documented, GA.** Agents in the store appear in Word's Copilot pane. | Yes, in principle | **Out of R1** (owner, 2026-11-02). Untested (S18 dropped). It suits Q&A against the playbook, not redlining. Revisit after R1. |
+| **A Spaarke MCP connector** | **The route third parties use** (Harvey, L26). Federated connectors are admin-created, with Entra SSO. | Tools, not skills | **v2** (§10, protocol §7) |
 | **Prompt starters for the whole organization or by document type** | **Not possible in Word.** Organizational prompts show only in Copilot Chat, Edge and Teams. Word's only document-type sensing is "auto-detects a legal document". | — | Not in R1 |
 | **A Spaarke Word add-in button that opens Copilot with plugins and playbooks set** | **Not possible today.** No Office.js API opens the Copilot pane, fills in a prompt, switches a plugin or attaches a file. Microsoft has withdrawn its 2025 "Copilot agents in Office add-ins" pages. | — | Not in R1. A Spaarke ribbon (the existing Word add-in already shows *Save to Spaarke / Quick Save / Open Spaarke*) **could**: <ul><li>open the right Word playbook for a chosen practice;</li><li>copy a ready prompt for the attorney to paste;</li><li>run Spaarke's own review in its task pane (T3).</li></ul>That belongs to the Word add-in project. Re-check when Microsoft documents Word skills. |
 
 #### 2.4.8 Do references, scripts and assets work in Word?
 
-**Not as far as anything documents.** The Word legal plugin is Microsoft's own package. Nothing documents Word loading a third-party plugin's `references/` or `assets/`, or running its `scripts/`:
+**No** `[Tested]` (L21, L25). The Word legal plugin is Microsoft's own package. Nothing documents Word loading a third-party plugin's `references/` or `assets/`, or running its `scripts/`:
 - Excel's preview runs Office.js scripts in a Copilot-managed runtime.
 - Declarative-agent skills run in a no-network sandbox.
 - Neither is documented for Word.
 
 So in R1:
 - **Our references, scripts and assets serve Cowork.**
-- **Word receives rendered content only:** Word playbooks, and optionally an agent's instructions and knowledge.
+- **Word receives rendered content only:** the Word playbook.
 
-If S17 shows our plugin running in Word, a later release would add a Word-specific skill. It would carry no Python and would hand redlining back to Word's own tracked changes.
+If Microsoft later documents Word skills and T-P7 shows our instruction-only skills loading there, protocol rule 4.2 still applies. Review in Word = Microsoft Legal + our Word playbook, so we would ship no competing Word review skill.
 
-Live checks that remain: S6 (`create-playbook` output and Word attach), S13 (`edit-contract` tracked-change fidelity) and S17–S19 (§12).
+Live checks that remain: S6 (`create-playbook` output), T-P4 (saved-playbook reuse), T-P6 (protected `.docx` import), T-P7 (Word probe plugin) and T-P10 (read-only library) (§12).
 
 ---
 
@@ -268,10 +301,9 @@ Live checks that remain: S6 (`create-playbook` output and Word attach), S13 (`ed
    - Word playbook rendering;
    - the T1 library template;
    - licence and attribution handling.
-4. **Six practice accelerators** in three waves (§8.3; owner decision 2026-10-31):
-   - Wave 1: NDA (built from the POC), Legal Intake (output: an email to a designated mailbox), Invoice Review.
-   - Wave 2: Commercial Real Estate, Employment.
-   - Wave 3: U.S. Patent Applications.
+4. **The NDA practice accelerator**, to release quality `[Proposed]` (OD-21). The MVP build in `src/accelerators/` is the starting point, and it closes the MVP fix queue (L9, L10/L17, L15, L16) and the attorney content gap (model language for all topics, H2).
+   - The roadmap of six accelerators stays as decided on 2026-10-31 (§8.3), but Legal Intake and Invoice Review move to **R2**. Wave 2 (CRE, Employment) and Wave 3 (U.S. Patent Applications) follow.
+   - Reason: Core, the build and the gates, onboarding, the playbook model and the Word path are all still being proven on NDA. Spreading across three practices before that settles multiplies rework.
 5. **Content sourcing** (§8.5): a source register per practice, recording licence, what we take and what attorneys must write.
 6. **The Spaarke content comparison** (§7.3):
    - evaluate the existing Spaarke Actions, Skills and Knowledge for the same practices as an **untested candidate source**, against the researched content and on the same corpus;
@@ -298,7 +330,9 @@ Live checks that remain: S6 (`create-playbook` output and Word attach), S13 (`ed
   - Foundry agents and Routines.
 - **T3 work:** Policy versions, Decision Record, Obligations, Finance Intelligence.
 - **Any change to the BFF, Dataverse, the Spaarke Console or the Office add-ins.**
-- **Partner Center listing, pricing, a download portal.**
+- **Partner Center / Microsoft 365 App Store listing, pricing, a download portal.** Distribution in R1 is upload and share (test) plus admin deploy (production, T-14).
+- **Declarative agents, Copilot Tuning, and an Office add-in for redlining** (owner, 2026-11-02).
+- **Hosting deterministic logic on Spaarke servers for T0/T1.** Engines ship inside the skill package and run in the customer's Cowork sandbox (§5.6). A BFF-hosted engine is the T2 connector path (§10).
 - **Jurisdictions other than the United States** (OD-6).
 
 ---
@@ -310,7 +344,7 @@ Live checks that remain: S6 (`create-playbook` output and Word attach), S13 (`ed
 | **UC-1** | Attorney (firm or department) | Installs the NDA Accelerator, either by copying its skill folders into OneDrive `Documents/Cowork/Skills/` or by uploading the plugin `.zip`. In a new Cowork session, they ask "review this NDA" and answer one question card. They get back a redline with comments and a linked summary table, a clean version and an emailed cover note. | T0 |
 | **UC-2** | Attorney | Runs **onboarding** (`/accelerator-setup`, §8.1a): environment check, skill choice and install, legal playbook (the group's, imported, built from precedents, or baseline), personalization, a trial run and refinement. It writes their attorney profile and a custom-instructions block to paste. Later reviews ask at most one question and state "Standards: <org> NDA – Disclosing v1.2". | T0 |
 | **UC-3** | Attorney | Attaches the accelerator's Word playbook (`NDA – Disclosing.docx`) in the legal plugin in Word, runs a playbook review and accepts tracked changes. The Word playbook uses the same topics and positions as the Cowork skill. | T0 |
-| **UC-4** | Knowledge lawyer / practice lead | Creates a `Legal Playbooks` SharePoint library from the accelerator's template and edits the group's legal playbook there. Shares the accelerator plugin with the group through Cowork. Optionally builds an Agent Builder agent for Copilot Chat users. | T1 |
+| **UC-4** | Knowledge lawyer / practice lead | Creates a `Legal Playbooks` SharePoint library from the accelerator's template, read-only for attorneys (§5.3), and maintains the group's legal playbook master there. Shares the accelerator plugin with the group through Cowork, or asks the admin to deploy it to the group. | T1 |
 | **UC-5** | Practice-group member | Reviews use the group's legal playbook from the library ahead of any personal copy, so the whole group reviews against the same positions and version. | T1 |
 | **UC-6** | Attorney | Sets up an automation from a shipped recipe: "when a file lands in Incoming NDAs, run the NDA review with my defaults and email me the results". It runs unattended, asks nothing and states its defaults on page 1. | T0 |
 | **UC-7** | Attorney at a Spaarke customer (optional, OD-11) | Asks "Review the NDA on matter PAT-935426". The skill finds the matter and its documents, with Spaarke's AI summaries (read-only). Until the connector project ships, the file itself is copied to OneDrive. | T0 / T3 bridge |
@@ -335,13 +369,17 @@ Core             onboarding (setup) · help · shared references · engines  sha
 
 | Fact | Basis |
 |---|---|
-| Skills install by putting a folder in `Documents/Cowork/Skills/<name>/` in OneDrive, or by uploading a plugin `.zip`. New or changed skills are picked up by **new** sessions. | `[Cited]` `[Observed]` |
+| Skills install by putting a folder in `Documents/Cowork/Skills/<name>/` in OneDrive, or by uploading a plugin `.zip`. New or changed skills are picked up by **new** sessions. Both routes ran the same engines identically. Folder skills appeared in `/` within about a minute; plugin upload goes through Plugins › Add › Upload → Publish ("Only you" or specific users). | `[Cited]` `[Tested]` S1, T-01, T-02 |
+| A unified (M365) package keeps our name, icons and version. A Claude-format zip also converts on upload, but its display name comes from the `name` slug and its version shows as 1.1.0. | `[Tested]` T-03 |
+| Folder-skill quirks: a YAML block scalar in `description` shows literally (`>-`) in the `/` menu; removing the folder does **not** unregister the skill (delete it in Plugins instead). | `[Tested]` L22, L23 |
 | At session start Cowork loads every skill's name and description (about 100 tokens each). It loads a skill's body when a request matches, and its `references/` only when the body says to read them. | `[Cited]` |
 | A skill can be invoked explicitly as `/skill-name`. | `[Cited]` |
 | Limits: 50 custom skills per user; `SKILL.md` ≤ 1 MB; ≤ 20 companion files per skill (5 MB each, 10 MB total); ≤ 20 skills per plugin. No documented limit on plugins. | `[Cited]` |
-| Scripts run in a temporary Linux workspace. Python with `lxml` was observed, and so were document renderers (the POC rendered pages to images). Node.js and installing packages mid-session were claimed but not observed. The workspace can reset mid-session. | `[Observed]` / `[Verify]` S2 |
+| **Scripts run.** Microsoft documents `scripts/` files as "Executed, not loaded into context", but not the runtime. On the current service (2026-11-01) we saw:<ul><li>Python 3.12.15, lxml 6.1.3, python-docx 1.2.0;</li><li>LibreOffice (`soffice`) and `pdftoppm`;</li><li>a writable working folder.</li></ul>Plugin skills run from `/mnt/shared/plugins/<id>/<version>/skills/<name>`. That path is an implementation detail, never hard-coded. Node.js and installing packages mid-session remain unobserved. The workspace can reset mid-session. | `[Cited]` `[Tested]` S2, T-03, T-05 |
 | A skill can *ask for* Cowork's built-in skills in prose ("present this as an Adaptive Card", "use Communications instead"); the model then loads them. There is no call contract, and routing is the model's choice (§5.2a). | `[Cited]` (handoff wording) / `[Verify]` |
-| Outputs persist only when saved to OneDrive or SharePoint. The default is `Documents/Cowork/Tasks/<task>/output`. | `[Observed]` |
+| Outputs persist only when saved to OneDrive or SharePoint. A run's files go to `Documents/Cowork/Tasks/<task>/output/` with no approval needed. The rest of `Documents/Cowork/` is read-only to the agent: a write there (e.g., the profile) needs a Copy/Edit approval card. | `[Tested]` S3, L10 |
+| A later session reads the profile and finds a playbook in `Documents/Cowork/Playbooks/<practice>/` without being told. Discovery is a search, though: GPT 5.5 also picked up a playbook from another folder and a previous task's plan (L15, L16), so skills must name exact locations (§5.7). | `[Tested]` T-06, T-07, T-11 |
+| Copilot chooses the skill by matching the request against enabled skills' descriptions: "Review this NDA" → `nda-review`; "Review this MSA" → Legal for Cowork's `review-contract`, with our plugin not loaded. | `[Tested]` S9, T-09 |
 | Send, post and delete actions need the user's approval unless pre-approved. | `[Observed]` |
 | SharePoint Embedded returns 403 to Cowork's Graph access. Dataverse is readable under the user's own security roles where the tenant provides it. | `[Observed]` |
 | **Personalization.** Custom instructions are set in Customize › Preferences (20 KB) and are included in every task; no skill can write them. Projects carry their own instructions, take precedence over global ones, and are **private to their creator**. **Memory is conversation-scoped.** There is no `copilot-instructions.md` file; the POC's description of one was Cowork's own claim, not documentation. | `[Cited]` |
@@ -398,19 +436,21 @@ Priority: High
 
 Each `## topic:` heading carries a **topic ID** from the accelerator's topic catalogue (§6.2).
 
-**Where the customer layer lives.** A skill looks in this order and uses the first legal playbook it finds:
+**Where the customer layer lives: two kinds of playbook, in named places only** (protocol §6; replaces v0.4's lookup order):
 
-| Order | Location | Maintained by |
-|---|---|---|
-| 1 | SharePoint `Legal Playbooks/<practice>/` (T1: shared, versioned) | Practice lead |
-| 2 | OneDrive `Documents/Cowork/Playbooks/<practice>/` (T0) | Attorney |
-| 3 | `references/baseline-positions.md` inside the skill | Spaarke |
+| Kind | Location | Editable by the attorney? | How a skill finds it |
+|---|---|---|---|
+| **Governed** (Spaarke baseline or firm-approved) | SharePoint `Legal Playbooks/<practice>/`, **read-only** for attorneys and editable by the playbook owner | No | The library path recorded in the profile. ❓ T-P10: can Cowork read it, and can Word import from it? |
+| **Personal** (the attorney's own) | OneDrive `Documents/Cowork/Playbooks/<practice>/` `[Tested]` T-07 | Yes | That exact folder |
+| **Baseline** (fallback) | `references/` inside the skill | No | Used when neither of the above exists, and labelled "Spaarke baseline positions (not tailored)" |
 
-The **attorney profile** is a Markdown file in OneDrive, proposed as `Documents/Cowork/Profile/legal-profile.md` (from the POC). It records the T1 library URL. Two points are not documented, so S3 must prove them:
-- whether Cowork can save to a folder we choose (its outputs default to `OneDrive/Cowork/`);
-- whether a skill can read the file in a new session without the user attaching it.
+Rules:
+- **Named locations only** (L16). A skill reads playbooks only from the locations above or from a file the user attaches in that request, and ignores anything else search returns.
+- **Source labels.** `review_basis.source = customer` only for a governed or personal playbook. Spaarke-published playbook files carry a marker that maps to `spaarke-baseline`, and `check_outputs` rejects a mismatch.
+- **Ambiguity.** If more than one candidate playbook applies, the skill asks which. If there is none, it says so on page 1.
+- **Fallback if T-P10 fails** (Cowork can't read a read-only library): setup copies the governed playbook into OneDrive with its version line, and the skill warns when the copy is older than the library version.
 
-If either fails, the fallback is that onboarding puts the profile's defaults into the attorney's **custom instructions** (§8.1a), which every task receives. If there is more than one candidate playbook, the skill asks which to use. If there is none, it says so on page 1.
+The **attorney profile** is `Documents/Cowork/Profile/legal-profile.md` `[Tested]` S3. Setup writes it after one approval card. A later session reads it unprompted, and with it `nda-review` asked no questions (L11). The custom-instructions block (§8.1a) stays as a complement: it is always loaded, but no skill can write it.
 
 **Provenance rule.** Every substantive output begins with the standards it used:
 - With a playbook: *"Standards: Acme Legal NDA – Disclosing v1.2 (SharePoint) · Accelerator nda 1.0.0 · Side: disclosing · Posture: balanced"*.
@@ -424,9 +464,9 @@ The skill never invents a position the playbook lacks; it reports that the playb
 |---|---|---|---|
 | **Cowork, personal skills** | Skill folders copied into OneDrive | Attorney | 50 skills; picked up next session; no mobile |
 | **Cowork, plugin** | Plugin `.zip` (skills; later the connector) | Attorney (upload, then share with named users); admin for org-wide | ≤ 20 skills; blocked under Information Barriers or when the admin disallows organization-built plugins |
-| **Legal plugin in Word** | Word playbook `.docx` | Attorney (attaches per review) | `.docx` only; topics → rules → example clauses; Word desktop only |
-| **Declarative agent (optional T1)**: Agent Builder, or shipped in our package | Instructions + ≤ 8 skills + playbook-library knowledge + `conversation_starters` per practice | Practice lead | Instructions < 20,000 characters; scripts run in a sandbox with no network. Appears in **Copilot Chat, Teams and Word's "All agents"**, but **can't edit the open Word document** (§2.4.7). |
-| **Our plugin in Word's "Manage plugins & skills"** | — | — | **Undocumented; not relied on** (S17) |
+| **Cowork, admin-deployed plugin** | The same `.zip`, through admin center › Agents (production route) | Customer admin, scoped to users or groups | ❓ T-14: does it change where the plugin appears (Cowork, Word, PowerPoint "Organization")? Admin center › Agents › Tools › Skills also has its own **Upload** (L26), to try |
+| **Legal plugin in Word** | Word playbook `.docx` | Attorney (imports, optionally saves as a playbook) | `.docx` only; Name / Rules / Examples per topic; **Word for Windows desktop only** `[Tested]` S5; the saved copy is the user's own and can drift (L24) |
+| **Our plugin in Word's "Manage plugins & skills"** | — (listed, never executed) | — | `[Tested]` S17, L21: a hazard to manage, not a channel (§2.4.7) |
 
 SharePoint site skills run only in Copilot in SharePoint, not in Cowork `[Cited]`, so they are dropped from R1.
 
@@ -469,10 +509,9 @@ src/accelerators/
 | Output | Target |
 |---|---|
 | `t0/skills/<name>/` folders + `t0/<practice>-plugin.zip` | Cowork |
-| `t0/word-playbooks/*.docx` | Legal plugin in Word |
+| `t0/word-playbooks/*.docx` | Legal plugin in Word. Rendered in the shape the plugin imports (L24): Heading 1 title; Heading 2 per topic; `Topic ID:`, `Priority:`, `Review question:` and `Fallback position:` lines inside the topic body; a General guidelines section; how-to text and version in document properties. *Done 2026-11-02; the A/B import retest is still owed.* |
 | `t0/automation-recipes.md` | Cowork Automations (§5.8) |
 | `t1/legal-playbooks-library.zip` | SharePoint T1 template |
-| `t1/agent-builder-setup.md` | Optional T1 |
 | `platform/jps/*.json` | Spaarke Actions (validated with `jps-validate`, not deployed; §7) |
 | `manifest.json` | Version and content hash of every output (§6.4) |
 | Guides, `evals/` | Delivery collateral |
@@ -502,7 +541,9 @@ src/accelerators/
    - existing revisions are untouched.
 5. **Alignment check** (§6.5).
 
-**T0 packaging** (OD-7, after spike S1): ship both the skill folders and a plugin `.zip`. If Cowork converts a Claude-format plugin cleanly, the same package also runs in Claude.
+**T0 packaging** (OD-7, decided by S1): the **unified (M365) plugin `.zip` is primary**. It uses manifest 1.30, a stable deterministic app GUID and our own name, icons and version. Skill folders are the no-upload alternative. The Claude-format zip converts, but loses the name and version, so it serves only Claude-ecosystem reuse.
+
+**Gates added during the MVP:** `description-plain` (one-line description, L22), `description-routing`, `cli-drift` (every script flag SKILL.md uses exists), a `__pycache__` re-lint before packaging (L7), topic prefixes taken from the catalogue (R13), and 22 gate tests in all. **Planned:** T-P5 (flag position text inside skills), and a lint requiring the L15/L16 sentences in every review skill.
 
 ### 5.6 Core engines: what they are, where they come from, and why
 
@@ -564,7 +605,7 @@ So we build no engine for:
 | `profile_check.py`, `instructions_block.py` (new, onboarding) | Profile has no silent gaps and valid markers; composes the custom-instructions block and enforces ≤ 20 KB | None | claude-for-legal "never write a profile with silent gaps" | **Add** (§8.1a) |
 | `calc_dates.py` | Notice windows, critical dates, business-day rules; fails on unknown holiday data and cites the rule | Partner "Calculate Working Day" connector (T2 only) | The behaviour of `lexdays`, not its code | **Keep.** Uses stdlib `datetime` and a JSON holiday asset per jurisdiction, with source and date. |
 | `calc_amounts.py` | Rent steps, invoice arithmetic; writes **formulas** (`<f>`) into Excel, never model-computed totals | Not documented for Cowork | Anthropic xlsx: "Use formulas, never hardcoded results" | **Keep.** Uses `decimal`. |
-| `ledes_parse.py` (Wave 1) | LEDES 1998B parse plus UTBMS code validation | None | `ledes-parser` is stale and says "do not rely" | **Build** with stdlib `csv` |
+| `ledes_parse.py` (Invoice Review, R2) | LEDES 1998B parse plus UTBMS code validation | None | `ledes-parser` is stale and says "do not rely" | **Build** with stdlib `csv` |
 | `claims_check.py` (Wave 3) | Claim numbering, dependency, antecedent basis | None | MIT `claims_analyzer.py` as a reference for which checks to make | **Build** with stdlib `re` |
 
 **Open-source libraries considered and not used:**
@@ -577,15 +618,26 @@ So we build no engine for:
 | `lexdays` | **AGPL-3.0** | Never vendor it |
 | `holidays` | MIT | Only if `dateutil` is present |
 
+**Status after the MVP** `[Tested]`:
+- `probe`, `segment_clauses`, `ooxml_redline`, `summary_table`, `check_outputs` and `playbook_parse` are built, with 41 engine tests.
+- They ran unmodified in Cowork on three models. One adversarial code review found 21 defects, all fixed with regression tests (results R1–R21).
+- Word desktop opens every output without repair.
+- POC Appendix D's limitations are closed (L1).
+
+**Compared with the expert redliner demo** (`notes/2026-11-05-external-inputs-review.md`):
+- The demo segments **plain text** with a stdlib-only script and leaves the redline to Cowork's built-in Word skill.
+- That avoids `lxml`, but it can't anchor comments, bookmarks or the linked summary, and our T-12/T-13 show the built-ins' edits are whole-paragraph or comment-free.
+- We keep the OOXML engines. Stdlib plain-text segmentation is the documented fallback if `lxml` ever disappears from the sandbox.
+
 **Engine rules:**
-- Python 3 standard library plus `lxml` only, until S2 confirms more. If `lxml` is missing, stop and report; **never fall back to `xml.etree` for writing**, because it rewrites namespace prefixes and breaks `mc:Ignorable`.
+- Python 3 standard library plus `lxml`. `python-docx` is present (S2) but not yet relied on. `probe.py` runs first in every engine skill, because the runtime is undocumented and can change. If `lxml` is missing, stop and report; **never fall back to `xml.etree` for writing**, because it rewrites namespace prefixes and breaks `mc:Ignorable`.
 - No network access and no secrets.
 - Follow the Agent Skills scripting rules: JSON in and out, `--help`, diagnostics on stderr, meaningful exit codes, idempotent, `--dry-run` where it writes.
 - Each skill says what to do if a script can't run: stop and report. It never silently falls back to arithmetic by the model.
 - Each skill carries its own copy of the engines it needs (Anthropic duplicates its `office/` tree per skill for the same reason) and stays within 20 files and 10 MB. Test fixtures stay outside the shipped skill.
 - The same engines are tested against the same golden fixtures as their later C# twins in the BFF (§6.3).
 
-Before Wave 1, fix the engine limitations the POC lists (Appendix D) and build in its OOXML gotchas (Appendix E).
+The engine limitations the POC lists (Appendix D) are fixed and its OOXML gotchas (Appendix E) are built in (L1, 2026-10-31).
 
 ### 5.7 Skill design rules
 
@@ -605,9 +657,21 @@ Before Wave 1, fix the engine limitations the POC lists (Appendix D) and build i
 8. **Human approval at every boundary.**
    - Email defaults to the requesting attorney, with options "draft only" or "do not send".
    - Never address a counterparty unless the user names them.
+   - Onboarding warns against a blanket "Always allowed: Send email". The expert demo ran with it on. Pre-approval is scoped to the attorney's own address or the intake mailbox only.
 9. **Verification discipline.** Cite authority only from the document, the shipped references or a fetched official source. Tag anything else `[verify]`.
-10. **Model-agnostic.** Evaluate on GPT and Claude, because EU Data Boundary tenants get GPT only.
-11. **Size discipline.** `SKILL.md` stays lean; detail goes in `references/`, one level deep. Each `SKILL.md` follows the POC's sections: when to use, when not to use, workflow, output table, guardrails, common issues.
+10. **Model-agnostic.** Evaluate on GPT and Claude, because EU Data Boundary tenants get GPT only. On the same NDA (T-11, all Medium):
+    - Sonnet 5.5 cost 71 credits, Auto 118 and GPT 5.5 230;
+    - all three passed the checks;
+    - GPT needed guard rails (L15–L17).
+
+    Onboarding recommends Sonnet or Auto and states the credits per run.
+11. **Fresh inputs only** (L15). Build the plan only from this document's `clauses.json` and the playbook. Never open an `edit-plan.json`, `clauses.json` or output from another task. The checks verify a package against its own plan, so they can't detect a reused plan; the skill text and an eval case must.
+12. **Named locations only** (L16, §5.3). Read playbooks only from the governed library, the personal folder, the attached file or the shipped baseline, and label the source correctly.
+13. **Outputs stay in the task's `output/` folder** (L10, L17). Name the path in the reply. Copy beside the original only on request, because each copy costs an approval card.
+14. **Approved wording verbatim.** Where the playbook has model language for a topic, an edit uses it word for word. The model drafts new language only when none exists, and the comment says so. (From the expert demo's `standard-clauses` asset; positions and wording still live in the playbook, not the skill.)
+15. **Optional plan preview** `[Proposed]`. Before generating files, show the plan as an Adaptive Card: counts, High items, escalations, and Approve / Change. Skipped in unattended mode. Rendering works (expert demo); whether the buttons send anything back is S7.
+16. **One-line descriptions** (L22). The frontmatter `description` is one plain line naming triggers and "Do NOT use for…" neighbours (gated).
+17. **Size discipline.** `SKILL.md` stays lean; detail goes in `references/`, one level deep. Each `SKILL.md` follows the POC's sections: when to use, when not to use, workflow, output table, guardrails, common issues.
 
 ### 5.8 Automations
 
@@ -651,7 +715,60 @@ Legal Playbooks/
 └── Accelerators/               current skill folders and plugin .zip for the group
 ```
 
-To give the group the skills, the practice lead shares the plugin with named users in Cowork, or members copy the skill folders. The library is where the group's legal playbooks are kept and versioned.
+To give the group the skills, the practice lead shares the plugin with named users in Cowork, the admin deploys it to the group (T-14), or members copy the skill folders. The library is where the group's legal playbooks are kept and versioned. Attorneys get **Read** only on `Legal Playbooks/<practice>/` (§5.3).
+
+### 5.10 Component protocol (summary of `notes/component-protocol.md` v0.2)
+
+The protocol answers, for every primitive we use, what it is for, how it is built, who manages it and how it is distributed. Its rules are binding on the spec.
+
+**One job per primitive:**
+
+| Primitive | Holds | Never holds |
+|---|---|---|
+| Topic catalogue (`topics.yaml`) | Stable topic IDs: the join key across playbooks, skills, comments and evals | — |
+| Legal playbook (master Markdown; one per agreement type) | **Positions**: preferred, fallback, prohibited, model language, rationale, priority. Positions shared across types live once in `core/positions/` and are compiled into each playbook. | Procedures |
+| Word playbook (`.docx`) | The same positions, rendered for Microsoft's Legal plugin | Anything edited by hand |
+| Skill | **Procedures** | Positions (a position in a skill is a defect; gate T-P5) |
+| Profile | One attorney's **defaults** | Positions, procedures |
+| Plugin | **Distribution** of skills, and later connectors | Content of its own |
+| Connector (MCP, v2) | Live tools and data | — |
+
+**Non-overlap rules:**
+1. **Microsoft first.** Before building a skill, inventory what Microsoft Legal (Word and Cowork) and installed third parties already do (T-P1). Where Microsoft owns a task, Spaarke supplies content (a playbook), not a competing skill.
+2. **In Word, review = Microsoft Legal + the Spaarke Word playbook.** No Spaarke Word review skill. This withdraws the `nda-review-inline` idea of 2026-11-02.
+3. **NDAs in Cowork route to Spaarke `nda-review`** because of the packaged, checked output (owner-approved, 2026-11-02). A customer who doesn't want the package uses Microsoft's `review-contract` with our playbook and switches our plugin off.
+4. **Every description names its neighbours' owners** ("Do NOT use for MSAs (use review-contract)"). This is gated.
+5. **Playbooks complement, never overlap.** One playbook per agreement type; a routing step or the user picks it.
+
+**Orchestration.**
+- Copilot, not Spaarke, picks the skill.
+- Toggles are per user and per app (`[Tested]`).
+- Onboarding gives a recommended toggle set per role, so users don't switch plugins while working.
+
+**Plugin structure** `[Proposed]` (OD-20).
+- *Protocol v0.2 proposes two plugins per practice:*
+  - **K (Knowledge)**: instruction-only skills, safe to load anywhere including Word, with no review procedure;
+  - **E (Engines)**: Cowork-only, holding `nda-review` and its scripts.
+- *v0.5 recommends deferring the split, for four reasons:*
+  - Word has no third-party skill loader (L25). Harvey reaches Word through an MCP tool (L26).
+  - K's candidate skills are thin: setup, playbook routing, and "explain our position".
+  - The manifest can't limit E to Cowork, so E still lists in Word and the L21 hazard remains either way.
+  - The split adds a second install and an untested cross-plugin hand-off (T-P3).
+- *Instead:*
+  - ship one Cowork plugin per practice;
+  - gate the K rule now: no instruction-only skill may contain a review procedure;
+  - run the cheap one-skill Word probe (T-P7);
+  - split only if T-P7 shows Word loads instruction-only skills and a Word-side skill would add something Microsoft Legal doesn't.
+
+**Ownership.**
+
+| Role | Owns |
+|---|---|
+| Spaarke legal engineering | The catalogue, the baseline playbook (with attorney review) and knowledge skills |
+| Spaarke engineering | Engines, the build and gates, releases, and the v2 connector |
+| Customer knowledge management | Customer playbook masters and the read-only library |
+| Customer admin | Deployment, the Legal Cloud Policy and library permissions |
+| Attorney | Profile, toggles and their own saved Word playbooks |
 
 ---
 
@@ -703,7 +820,7 @@ It is used by the Cowork edit plan and summary, the JPS Action `output` section,
 - the provenance line in every output.
 
 **Customer master**: at any time, a customer's legal playbook has exactly one master copy. Never two.
-- At T0/T1, the master is the SharePoint or OneDrive Markdown file, and the Word `.docx` is rendered from it.
+- At T0/T1, the master is the playbook owner's Markdown file: the Spaarke repo for the baseline, and the customer's knowledge-management source for customer playbooks. The governed library and the personal folder hold **published outputs** (the Markdown copy Cowork reads and the rendered `.docx`), never a second master (protocol §6). Word saved playbooks are user copies; drift is detected by the `Topic ID:` and version lines, and changes go back to the owner.
 - At T3, Spaarke becomes the master (Policy versions, in the ontology project) and **exports** the file for Cowork and Word.
 
 ### 6.3 What may differ by surface
@@ -859,9 +976,13 @@ We port the *pattern*, re-pointed from Claude's `~/.claude/...` paths to OneDriv
 - It records every default it chose as `[DEFAULT]`.
 - It keeps the interview lean, because authoring and evaluating skills bills credits.
 
+**MVP status** `[Tested]` T-05:
+- The Quick path ran: two question cards, the probe, a profile written after one approval card, the instructions block, and a trial review.
+- S3 is answered: the profile lands where asked and is read back unprompted in a new session.
+- Still to build: the Full path, routes 4a–4c, `--redo`, the diff on overwrite, and `playbook_import.py`.
+
 **What remains unverified** (spikes):
 - whether a skill can drive Skill Management (S14);
-- where saved files land, and whether they can be read back without being attached (S3);
 - whether plugin skills count toward the 50 cap (S15).
 
 Each has a fallback:
@@ -885,7 +1006,33 @@ Changes on the way in:
 
 The POC's test NDA (RPX / Helios IP) may be kept for informational and test use.
 
-### 8.3 The six accelerators (owner decision 2026-10-31)
+**MVP status (2026-11-02)** `[Tested]`:
+- **Built:** `src/accelerators/` holds the `nda-review` and `accelerator-setup` skills, the engines, the build and gates, the mutual baseline (24 topics), the Word renderer, and an eval corpus (nda-01 to nda-03, msa-01) with a golden plan.
+- **Proven in Cowork** (T-05 to T-11, S9, S10):
+  - the internal redline (page-1 linked summary), external redline and clean copy;
+  - side and posture overrides;
+  - counterparty revisions kept;
+  - prompt injection quoted and refused;
+  - "don't email" honoured;
+  - MSA routed away.
+- **Open before release:**
+  - **L9:** `unchanged` prints topic IDs and reasons, so page 1 spills to page 2;
+  - **L10/L17:** output location;
+  - **L15:** a reused plan;
+  - **L16:** playbook discovery;
+  - **the receiving and disclosing baselines;**
+  - **model language for 19 of 24 topics**, plus a **named approving attorney** (H2, OD-5);
+  - **R16:** does the clean copy accept the other side's changes? Owner decision pending;
+  - **L13:** run-to-run variance. Option: one default action per topic in the playbook, plus a per-topic tolerance in `expected/`.
+
+**Candidate additions from the expert demo** `[Proposed]` (OD-24):
+- **Excel audit pack:** Change Log, Risk Summary, Human Review Checklist and Coverage Summary. An engine generates it deterministically from `edit-plan.json`, so it costs no model work and matches the redline exactly.
+- **Privilege header** on the internal redline only (attorney decision on wording).
+- **Plan-preview card** before files are generated (§5.7-15).
+
+### 8.3 The six accelerators (roadmap; owner decision 2026-10-31; R1/R2 split `[Proposed]` OD-21)
+
+*v0.5:* the set and order stand. R1 delivers **NDA** only. **Legal Intake** and **Invoice Review** (Wave 1 in v0.4) move to R2, followed by Wave 2 and Wave 3. The table below is kept for planning.
 
 | | **NDA** | **Legal Intake** | **Invoice Review** | **Commercial Real Estate** | **Employment** | **U.S. Patent Applications** |
 |---|---|---|---|---|---|---|
@@ -994,7 +1141,7 @@ What remains is **written by our attorneys**: positions, thresholds, escalation 
 | Option | What it is | Who builds and hosts it | Can it do intake? | Tier |
 |---|---|---|---|---|
 | **Question card** | Cowork asks the user structured questions (choices, text) when a skill says to. The POC's intake was one card with five questions `[Observed]`. | Nothing to host; written in `SKILL.md` | Yes, for fixed options. It can't look up Spaarke data. | T0 |
-| **Adaptive Card** | Cowork's built-in render-ui skill draws a card (tables, KPIs, charts), e.g., a risk dashboard. | Nothing to host; the skill asks for it | Display only. Whether buttons send anything back is unverified (S7). | T0 |
+| **Adaptive Card** | Cowork's built-in render-ui skill draws a card (tables, KPIs, charts), e.g., a risk dashboard. | Nothing to host; the skill asks for it | Display only. Whether buttons send anything back is unverified (S7). The expert demo rendered a donut chart, KPIs and a clause table from a skill before generating files; that is the pattern for the plan preview (§5.7-15). | T0 |
 | **MCP elicitation form** | Our MCP tool asks Cowork to collect input against a JSON schema (text, number, true/false, pick-list), and Cowork renders a native form `[Cited]`. | Our MCP server (connector project) | Yes, for simple flat forms whose options can come from Spaarke at call time | T2 |
 | **MCP App** | An open extension of MCP. A tool declares an HTML UI resource, and Cowork renders it inline or full screen in a sandboxed frame. The UI talks to the host through a message bridge, can call our tools, and can send results back into the conversation `[Cited]`. | Our MCP server serves the UI (React/Fluent v9; we already have the `widget-design` skill and `knowledge/mcp-apps/`) | Yes: dependent pick-lists, type-ahead look-ups (client, matter, practice area), validation, file attach | T2 |
 
@@ -1065,7 +1212,7 @@ Applied to Legal Front Door (§9.2):
 
 ### 9.2 Worked case: Legal Front Door / Service Request intake
 
-**T0/T1, no Spaarke (R1 Wave 1, §8.3):** the `legal-intake` skill asks question cards (request type, then that type's fields: urgency, counterparty, deadline, attachments). It then emails the structured request to the **designated intake mailbox**, with the requester's approval. At T3 that mailbox can be a Spaarke-monitored intake mailbox.
+**T0/T1, no Spaarke (R2 under OD-21, §8.3):** the `legal-intake` skill asks question cards (request type, then that type's fields: urgency, counterparty, deadline, attachments). It then emails the structured request to the **designated intake mailbox**, with the requester's approval. At T3 that mailbox can be a Spaarke-monitored intake mailbox.
 
 **T2, with the connector:**
 1. The `spaarke_submit_service_request` tool returns an **MCP App** form, built in Fluent v9 and reusing our existing service-request wizard components where practical.
@@ -1108,7 +1255,9 @@ Cowork, Agent Skills in Microsoft surfaces and Copilot for legal all shipped in 
 - confuse Microsoft's Cowork with Anthropic's "Claude Cowork";
 - add manifest fields the schema rejects.
 
-Workstream K follows `knowledge/README.md` conventions and runs **before** any authoring.
+Workstream K follows `knowledge/README.md` conventions.
+
+*v0.5 status:* not started. The NDA MVP was built from the researcher notes in `.claude/agent-memory/researcher/` (2026-10-29 → 11-02) instead. K1–K3, K5 and K7 are now the first spec tasks, written from tested facts (results.md), not just documentation. K4 (declarative agents) shrinks to MCP Apps only. K8 pins only the sources the NDA accelerator actually uses.
 
 | # | Deliverable | Content |
 |---|---|---|
@@ -1134,31 +1283,46 @@ The researcher notes from 2026-10-29/30 in `.claude/agent-memory/researcher/` ar
 - a SharePoint site;
 - no Information Barriers.
 
-The POC already answered parts of S2 and S9 in a Spaarke tenant.
+The POC already answered parts of S2 and S9 in a Spaarke tenant. The NDA MVP (2026-11-01/02) answered most of the rest in the Spaarke tenant. Results live in `notes/mvp-nda/results.md` (S#, L#) and `run-log.md`; SC-2 points there.
 
-| # | Question | Decides |
+| # | Question | Status (2026-11-05) | Decides |
+|---|---|---|---|
+| S1 | Claude-format conversion; folder skills vs plugin skills; non-admin upload when org plugins are disallowed | ✅ **Answered** (T-01 to T-03): upload works; the Claude format converts but loses name and version; folder skills run identically. The disallowed-policy case is still open (customer-like tenant) | OD-7 → unified package primary |
+| S2 | Sandbox: Python, packages, renderers, egress, limits, reset | ✅ **Answered** (T-05): Python 3.12.15, lxml, python-docx, soffice, pdftoppm. Egress from scripts not tested (not needed) | §5.6 |
+| S3 | Read the profile and playbook in a new session without attaching; where saves land | ✅ **OneDrive answered** (T-05 to T-07). The SharePoint read-only library → T-P10 | §5.3 |
+| S4 | Updates on re-share; each recipient's own profile | 🔲 Open (needs a second user) | UC-1, UC-5 |
+| S5 | Word playbook structure for the Legal plugin | 🟡 **Partly** (L24): imports 24/24 topics, but drops the Topic ID and fallback. Renderer reshaped; **A/B import retest owed** in Word desktop | §5.5 |
+| S6 | `review-contract` with our playbook; `create-playbook` output format and location | 🔲 Open | §2.4.4; onboarding route 4c |
+| S7 | Adaptive Card control and button feedback | 🟡 Rendering shown in the expert demo; buttons untested | §5.7-15, §9.1 |
+| S8 | Engine-written Excel formulas survive delivery | 🔲 Open (R2 practices; also the audit pack, OD-24) | CRE, Invoice Review |
+| S9 | Selection beside Legal for Cowork; "review this MSA" doesn't trigger ours | ✅ **Answered** (T-06, T-07, T-09) | §5.7-1 |
+| S10 | Same skill on GPT and Claude | ✅ **Answered** (T-11): all pass; GPT needs guard rails (L15–L17); Sonnet ≈ 60% of Auto's credits | §5.7-10 |
+| S11 | Unattended automation end to end | 🔲 Open | §5.8, SC-11 |
+| S12 | Read-only Dataverse access in a customer-like tenant | 🔲 Open, gated with OD-11 | OD-11 |
+| S13 | `edit-contract` fidelity | ✅ **Answered** (T-13): word-level tracked changes in place, no comments, summary or copies; edits the original | §5.6 positioning |
+| S14 | A skill driving Skill Management | 🔲 Open | §8.1a step 3 |
+| S15 | Do plugin skills count toward the 50 cap? | 🔲 Open | §8.1a |
+| S16 | Specialist hand-off and panel | 🔲 Open (not needed for NDA) | §5.8a |
+| S17 | Our plugin in Word | ✅ **Answered** (T-12b, retest): listed, never run (L21, L25). The admin-deploy variant → T-14 / T-P8 | §2.4.7 |
+| S18 | Declarative agent in Word | ⛔ **Dropped**: out of R1 (owner, 2026-11-02) | — |
+| S19 | Playbook persistence | 🟡 **Partly** (T-15): an attached playbook isn't remembered across chats. Saved-playbook reuse → T-P4 | §2.4.6 |
+
+**Tests added by the component protocol (§8 there):**
+
+| # | Question | Status |
 |---|---|---|
-| S1 | Does a Claude-format plugin upload and convert cleanly? Do skill folders copied into OneDrive behave the same as plugin skills? Can a non-admin upload when the admin has disallowed organization-built plugins? | OD-7 packaging; install guide |
-| S2 | **Sandbox probe skill:** Python version, OS, `lxml`/`openpyxl`/`python-docx`, Node.js, installing packages mid-session, outbound HTTPS, run-time limits, reset behaviour | Engine dependencies (§5.6) |
-| S3 | Can skills reliably read the legal playbook and profile at run time, from OneDrive and from a SharePoint library, **in a new session, without the user attaching them**? When asked to save `Documents/Cowork/Profile/legal-profile.md`, where does the file actually land? | §5.3 and §8.1a, or their fallback (custom-instructions block; embed in the skill) |
-| S4 | When a plugin is shared with specific users, do they get updates on re-share? Does each recipient's own profile apply? | UC-1, UC-5 |
-| S5 | Which Word playbook `.docx` structure does the legal plugin in Word parse best? Do topic IDs survive in headings? Are edits kept between reviews? | §6.2 Word target |
-| S6 | Does Legal for Cowork's `review-contract` use a legal playbook bundled in our skill or found in the library? Run `create-playbook` on 3 precedents: what format and name does it produce, and where is it saved? Can Word "Attach from Cloud" use it for a review? Does `playbook_import.py` convert it? | Hand-offs (§2.4.4, §5.7-1); onboarding route 4c |
-| S7 | For an Adaptive Card from a skill: what can we control, and do buttons send anything back? | §9.1 |
-| S8 | Do Excel outputs with **formulas** (dates, totals) written by an engine survive delivery? | CRE, Invoice Review |
-| S9 | With Legal for Cowork installed, is our skill chosen for its trigger phrases, and not for "review this MSA"? Does `/skill-name` work? | §5.7-1 |
-| S10 | Does the same skill perform equally on GPT-only (EU Data Boundary) and on Auto? | §5.7-10 |
-| S11 | Does an automation recipe run unattended end to end (folder trigger → review → email to self), with pre-approval scoped to the attorney's own address? | §5.8 |
-| S12 | In a **customer-like** tenant, what provides read-only Dataverse access (the Business apps plugin? Dataverse MCP?), and is it on by default? | OD-11 |
-| S13 | Run Legal for Cowork's `edit-contract` on a OneDrive `.docx`, then open it in Word. Are the changes word-level `w:ins`/`w:del`, paragraph-level, or plain edits? Are comments added? | §5.6 positioning of `ooxml_redline.py` |
-| S14 | Can a skill drive **Skill Management** to create or install another skill from a full `SKILL.md` it carries? Is the text kept verbatim or re-drafted? What Skill Report score and conflict-scan result do our skills get? | §8.1a step 3; lint thresholds |
-| S15 | Do plugin skills (Legal for Cowork's 20, and ours) count toward the 50-skill cap? | §8.1a cap warning; skill count per accelerator |
-| S17 | **Our plugin in Word:**<ol><li>Upload the NDA plugin through Admin › Agents › Registry, scoped to the tester.</li><li>After 30 minutes and after 24 hours, check Word's "Manage plugins & skills". Does it appear, as the org "Patent" plugin might?</li><li>If it appears: does it trigger, do its prompt starters show, do `references/` load and do `scripts/` run?</li></ol>Also: what do `/` and `@` list in Word's pane? | §2.4.7, §2.4.8 |
-| S18 | **Declarative agent in Word:** an Agent Builder agent with SharePoint playbook-library knowledge, opened from All agents on Word desktop. Does it see the open document and the selection? Can it insert text? Do its starters show? | §2.4.7; whether to ship one per practice |
-| S19 | **Playbook persistence and formats:**<ul><li>Word: in a new chat, "use the same playbook as before"; is it remembered?</li><li>Cowork `review-contract` with the same playbook as `.docx`, then as `.md`, then `/`-referenced in Preferences.</li><li>Do per-skill toggles in the Legal plugin (Word) change behaviour? What does Cowork's "Legal (19)" count mean?</li><li>Does the legal plugin follow Word's model picker?</li></ul> | §2.4.6 |
-| S16 | Specialist pattern: does a skill reliably hand off to `/contract-specialist` and resume? Does a panel of N specialists in one skill stay anchored to each specialist file? What does `/cost` show for N = 1, 3, 5? Does an egress probe from a script fail as expected? | §5.8a |
-
-Results go to `notes/spikes.md`, each with its design consequence.
+| T-P1 | Inventory of what Microsoft Legal (Word, Cowork) and installed third parties do, mapped against our skills | 🔲 |
+| T-P2 | Routing with Legal for Cowork **on** and Spaarke on: 5 prompts × 2 configurations | 🔲 (T-14) |
+| T-P3 | Cross-plugin hand-off, K → E | Needed only if OD-20 chooses the split |
+| T-P4 | Saved Word playbooks: offered in a new chat? Shareable? Centrally replaceable? | 🔲 |
+| T-P5 | Build gate that detects positions inside skills | 🔲 |
+| T-P6 | Does the Legal plugin import a Restrict-Editing-protected or labelled `.docx`? | 🔲 |
+| T-P7 | Does Word load any instruction-only third-party skill? One-skill harmless probe plugin | 🔲 (with T-14) |
+| T-P8 | Does admin deployment change where the plugin appears (Cowork, Word, PowerPoint "Organization")? | 🔲 (T-14) |
+| T-P9 | Harvey's Word package | ✅ One MCP tool plus thin skills (L26) |
+| T-P10 | Word import and Cowork read from a read-only SharePoint library | 🔲 |
+| T-P11 | Default plugin-availability policy for partner publishers in a fresh, customer-like tenant (from the 2026-11-04 discussion) | 🔲 (customer-like tenant) |
+| T-P12 | Python scripts still run after Ignite (17–20 Nov 2026): re-run `probe.py` | 🔲 |
 
 ---
 
@@ -1167,7 +1331,12 @@ Results go to `notes/spikes.md`, each with its design consequence.
 **Method:**
 - **Lavern's pre-registered rubric.** Expected issues are written down by topic ID before the run, then scored on recall, precision and hallucinations.
 - **Anthropic's eval-first practice.** At least 3 cases per skill, including at least one negative case, each run with and without the skill.
-- **The POC's behaviour cases:** no playbook, receiving side, do-not-send, already redlined, MSA must not trigger, unattended, prompt injection.
+- **The POC's behaviour cases:** no playbook, receiving side, do-not-send, already redlined, MSA must not trigger, unattended, prompt injection. C4–C7 passed on the first run `[Tested]` (L14).
+- **Cases added from the MVP:**
+  - a previous task's `edit-plan.json` is present and must be ignored (L15);
+  - a Spaarke playbook outside the named folders must not be labelled "customer" (L16);
+  - run-to-run variance on the same document, measured, with a per-topic tolerance in `expected/` (L13).
+- **Credits per run** are recorded with `/cost` for each model (T-11: Sonnet 5.5 71, Auto 118, GPT 5.5 230).
 
 **Corpus.** Only public documents go in the repo:
 - SEC EDGAR exhibits, CUAD, ContractNLI and the CC BY LegalBench tasks for contracts;
@@ -1224,7 +1393,9 @@ Customer documents stay in the customer's tenant.
 **Architecture tensions:**
 - **BFF hygiene (§10) / hot path:** not applicable to R1, which touches neither `Sprk.Bff.Api` nor `src/solutions/SpaarkeAi/**`. The connector project will need both.
 - **ADR-002:** no direct Dataverse writes from Cowork (§10). Path C: comply.
-- **ADR-038:** content evals and Python engine tests live with the accelerator source. If ADR-038 governs only the .NET/TypeScript test tree, this is Path C. Otherwise it is Path A, with Python added to CI. Confirm at design-to-spec.
+- **ADR-038:** content evals and the Python engine and gate tests (41 + 22) live with the accelerator source (`core/engines/tests/`, `build/tests/`). Today they run only through `Build-Accelerator.ps1`: **no CI job runs them** `[Proposed]` (OD-23).
+  - Path A (project exception): keep the tests beside the source, and add a GitHub Actions job on `src/accelerators/**` that runs the build with all gates.
+  - Decide at design-to-spec. Either way, a CI job is required, because rules that only run locally drift.
 - **ADR-039 (agentic placement):** all R1 skills produce drafts for human review, and sends and writes need approval. Compliant.
 - **Agent cost:** offline eval runs are metered, so budget them per accelerator.
 
@@ -1232,27 +1403,30 @@ Customer documents stay in the customer's tenant.
 
 ## 16. Phasing (to be refined by `/project-pipeline`)
 
+*v0.5 `[Proposed]`, following OD-21. The NDA MVP spike (2026-10-31 → 11-02) already did much of v0.4's Phase 0 and Phase 1 for NDA.*
+
 | Phase | Content | Exit |
 |---|---|---|
-| **0. Knowledge, spikes, content model** | Workstream K; test tenant; spikes S1–S15; NDA `sources.md` and `topics.yaml` from the researched sources (§8.5); the review-result, edit-plan and legal-playbook schemas; Spaarke NDA content snapshot | Knowledge and skills registered; `notes/spikes.md` complete; schemas approved |
-| **1. Foundation** | Source layout; engines from the POC plus `probe`, import/render and onboarding tools, with tests; build pipeline with all gates; Core skills, including `accelerator-setup`; Word renderer; JPS generator; T1 template; eval harness | One command builds every output for an empty practice; every gate passes; SC-16 met on the NDA module |
-| **2. Wave 1** | Per practice: sources → topics → Spaarke comparison (§7.3) → skills; NDA (from the POC) → Legal Intake → Invoice Review; attorney sign-off; evals; guides; automation recipes | Each accelerator passes SC-4 to SC-11 and SC-16 to SC-19 |
-| **3. Wave 2** | Commercial Real Estate; Employment | Same criteria |
-| **3b. Wave 3** | U.S. Patent Applications | Same criteria |
-| **4. Pilot readiness** | IT one-pager; sprint runbook; dry-run sprint with a practice lead playing the customer | Dry run completed in ≤ 5 days, with a timed before/after |
+| **0. Close the spike** *(before `/design-to-spec`)* | Owner decisions OD-20 to OD-24; fix queue L15, L16, L9, L10/L17; the Word A/B import retest (S5); T-14 admin deploy with T-P2, T-P7, T-P8; project registration (OD-10) and a project `CLAUDE.md` for the standing directives | results.md updated; this design at v0.6 with no stale claims |
+| **1. Knowledge and foundation hardening** | Workstream K (K1–K3, K5, K7) from the tested facts; CI job for the engine and gate tests (OD-23); gates T-P5 and the "no review procedure in instruction-only skills" rule; onboarding Full path and routes 4a–4d; `playbook_import.py`; the T1 library template; T-P10 governed library; JPS generator (validated, not deployed) | One command builds every NDA output; every gate passes in CI and fails on its seeded fixture; SC-16 met |
+| **2. NDA to release quality** | NDA `sources.md` and pins; the Spaarke NDA content comparison (§7.3); receiving and disclosing baselines; model language for every topic; named attorney sign-off (OD-5); evals on GPT and Claude, including the new cases (§13); guides, the IT one-pager and automation recipes; OD-24 candidates if approved | NDA passes SC-4 to SC-11, SC-13 and SC-16 to SC-19 |
+| **3. Pilot readiness** | Sprint runbook; dry-run sprint with a practice lead playing the customer, in a customer-like tenant (OD-3; T-P11) | Dry run completed in ≤ 5 days, with a timed before/after |
+| *R2* | Legal Intake, Invoice Review; then CRE, Employment; then U.S. Patent Applications | Same criteria per accelerator |
 
 ---
 
 ## 17. Success criteria (closed set for spec authoring)
 
+*v0.5: under OD-21, "each accelerator" means the NDA accelerator in R1.*
+
 | ID | Criterion |
 |---|---|
-| SC-1 | K1–K4 knowledge folders exist with SOURCE.md (pinned SHAs and dates) and NOTES.md; K5–K6 skills exist and are registered (K7); K8 pins carry LICENSE/NOTICE |
-| SC-2 | `notes/spikes.md` records S1–S19, each with its result, evidence and design consequence |
-| SC-3 | One command builds every output for an accelerator. All gates (spec, Microsoft, lint, engine tests, alignment) pass on the release and **fail** on each seeded violation fixture |
+| SC-1 | K1–K3 knowledge folders exist with SOURCE.md (pinned SHAs and dates) and NOTES.md, including the tested facts from results.md; the K5 skill exists and is registered (K7); K8 pins carry LICENSE/NOTICE |
+| SC-2 | `notes/mvp-nda/results.md` (or its successor) records S1–S17, S19 and T-P1 to T-P12, each with its result, evidence and design consequence, or an explicit "dropped" with the reason |
+| SC-3 | One command builds every output for an accelerator. All gates (spec, Microsoft, lint, engine tests, alignment) pass on the release and **fail** on each seeded violation fixture, **in CI** as well as locally (OD-23) |
 | SC-4 | For each accelerator, installing by folder copy and by plugin upload both work, the skills run, and a second user receives them by sharing |
 | SC-5 | NDA: a review produces an internal redline (summary page, surgical tracked changes, one comment per change, working section links), an external redline and a clean version. Engine checks pass, and page renders show no table spill or contrast failures |
-| SC-6 | For each accelerator with Word playbooks, a review in the legal plugin in Word produces tracked changes on a corpus document, using the same topics as the Cowork skill |
+| SC-6 | For each accelerator with Word playbooks, the Word playbook imports into the legal plugin in **Word desktop** with every topic present, each topic's `Topic ID:` and fallback position kept in its Rules, and the version line visible. A review then produces tracked changes on a corpus document, using the same topics as the Cowork skill. |
 | SC-7 | Customer layer: changing a position in the library's legal playbook changes the outcome for that topic in Cowork and, after re-rendering, in Word. Every output carries the provenance line. With no playbook, outputs say "Spaarke baseline (not tailored)" |
 | SC-8 | Alignment: every topic ID in every output (legal playbook, Word playbook, JPS file, eval rubric) is in `topics.yaml`; version stamps match `manifest.json`; generated JPS files pass `jps-validate` |
 | SC-9 | Evaluation: each skill has ≥ 3 cases, including ≥ 1 negative. Each accelerator meets the §13 pass bar on GPT and Claude. Cowork acceptance runs are recorded |
@@ -1265,7 +1439,9 @@ Customer documents stay in the customer's tenant.
 | SC-16 | Onboarding: on a fresh account, `accelerator-setup` completes the Quick path in ≤ 5 minutes and the Full path in ≤ 20. Each run produces:<ul><li>an installed skill set;</li><li>a legal playbook (by each of routes a–d);</li><li>a rendered Word playbook;</li><li>a profile with no unmarked gaps;</li><li>a custom-instructions block ≤ 20 KB;</li><li>a successful trial run.</li></ul>A paused run resumes, and `--redo` shows a diff before overwriting. **Negative:** it never installs or overwrites without an explicit yes, and never sends mail. |
 | SC-17 | For each accelerator, `notes/spaarke-content-comparison-<p>.md` records the mapping, the eval scores for the Spaarke Action and the Agent Skill on the same corpus, and the per-topic decision. Every Spaarke gap or defect found has a GitHub issue. **Negative:** no Agent Skill content comes from Spaarke without passing that comparison and attorney approval. |
 | SC-18 | Each practice has `sources.md` (§8.5) listing every source used, with licence, version or date, and what was taken. **Negative:** no content from a non-commercial, ShareAlike or AGPL source ships in a skill. |
-| SC-19 | Each accelerator's guide and `accelerator-help` state which flows belong in Word and which in Cowork (§2.4.4). Our skills' descriptions route a single-document review in Word to Microsoft's plugin. |
+| SC-19 | Each accelerator's guide and `accelerator-help` state which flows belong in Word and which in Cowork (§2.4.4), including "Spaarke reviews run in Cowork; in Word, pick Microsoft's Legal plugin with the Spaarke Word playbook, not our skill" (L21). Our skills' descriptions route a single-document review in Word to Microsoft's plugin. |
+| SC-20 | **Negative (MVP defects):** with a previous task's `edit-plan.json` and a Spaarke playbook outside the named folders both present, a review on each eval model neither reuses the plan (L15) nor labels the stray playbook "customer" (L16), and its outputs stay in the task's `output/` folder (L10, L17) |
+| SC-21 | Approved model language: every baseline topic has model language. In an eval run, every edit on a topic that has model language uses it verbatim, and every other edit's comment says the wording was drafted (§5.7-14) |
 
 ---
 
@@ -1274,12 +1450,12 @@ Customer documents stay in the customer's tenant.
 | # | Decision | Recommendation |
 |---|---|---|
 | OD-1 | Naming | "Spaarke Solution Accelerator" (program) and "Practice Accelerator" (per practice) |
-| OD-2 | Practice set and waves | **Decided 2026-10-31.** Wave 1: NDA, Legal Intake (email to a designated mailbox), Invoice Review. Wave 2: CRE, Employment. Wave 3: U.S. Patent Applications. Alternate: Privacy/DPA |
+| OD-2 | Practice set and waves | **Decided 2026-10-31.** Wave 1: NDA, Legal Intake (email to a designated mailbox), Invoice Review. Wave 2: CRE, Employment. Wave 3: U.S. Patent Applications. Alternate: Privacy/DPA. *(v0.5: the R1/R2 split is OD-21.)* |
 | OD-3 | Test tenant and credit budget | A dedicated demo tenant with ≥ 2 Copilot licences and a capped spending policy. The Spaarke tenant served for the POC, but S1 and S12 need a customer-like tenant |
 | OD-4 | Source location | `src/accelerators/` in this repo for R1 |
 | OD-5 | Legal sign-off | Name the approving attorney(s) for each practice |
 | OD-6 | Jurisdiction | United States only in R1 |
-| OD-7 | T0 packaging | Ship both: skill folders (simplest install) and a plugin `.zip` (sharing, and later the connector). Use Claude format if S1 passes |
+| OD-7 | T0 packaging | **Answered by S1.** The unified (M365) plugin `.zip` is primary (it keeps the name, icons, version and a stable GUID); skill folders are the no-upload alternative; the Claude-format zip is for Claude-ecosystem reuse only |
 | OD-8 | Getting accelerators to attorneys | Manual delivery in R1 (sprint, email, the T1 library); a portal later |
 | OD-9 | Evaluation models | GPT on Azure OpenAI, and Claude |
 | OD-10 | Project setup | Register with `/devops-project-start`, give R1 its own worktree, then run `/design-to-spec` |
@@ -1289,13 +1465,24 @@ Customer documents stay in the customer's tenant.
 | OD-14 | Connector project | Open "spaarke-cowork-connector" as R1's successor (BFF-hosted MCP, OAuth, document tools, intake forms and MCP Apps), designed in parallel with R1 Phase 2 |
 | OD-15 | Role of existing Spaarke content | An untested candidate, compared on the same corpus (§7.3). Findings are filed to the Spaarke backlog and are not fixed in R1 |
 | OD-16 | Scope of `ooxml_redline.py` | The packaged Cowork deliverable and batch work only. A single-document review in Word goes to Microsoft's plugin. Revisit after S13 |
-| OD-18 | Spaarke's presence in Word | R1: Word playbooks only, made easy to attach (§2.4.6). Test our plugin in Word (S17) and a declarative agent (S18); adopt whichever works as a bonus channel. The add-in launcher is not possible today; record it for the Word add-in project |
-| OD-19 | Specialist reviewers | A specialist panel inside one skill in R1 (§5.8a); standalone `/specialist` skills only if S16 passes; Foundry specialists through the connector at T2 |
-| OD-17 | Where the attorney's defaults live | Both: a profile file (rich, versioned) and a pasted custom-instructions block (always loaded). If S3 fails, the block alone |
+| OD-18 | Spaarke's presence in Word | **Decided (owner, 2026-11-02; S17).** R1: the Word playbook only, in the shape the Legal plugin imports, made easy to find (§2.4.6). Our plugin is listed in Word but doesn't run there; we manage that hazard through onboarding. No declarative agent, Copilot Tuning or Office add-in in R1. The Word route for *tools* is the v2 MCP connector |
+| OD-19 | Specialist reviewers | A specialist panel inside one skill (§5.8a); standalone `/specialist` skills only if S16 passes; Foundry specialists through the connector at T2. *(Not needed for NDA in R1.)* |
+| OD-17 | Where the attorney's defaults live | **Answered by S3:** both. A profile file, read unprompted in new sessions (T-06), and a pasted custom-instructions block |
+| **OD-20** | Plugin structure: one plugin, or Knowledge (K) + Engines (E) per practice (protocol §3) | `[Proposed]` **One Cowork plugin per practice for now.** Gate "no review procedure in instruction-only skills" so a split stays mechanical. Run the Word probe (T-P7); split only if Word loads instruction-only skills *and* a Word-side skill would add something Microsoft Legal doesn't (§5.10) |
+| **OD-21** | R1 scope | `[Proposed]` **Core + NDA to release quality.** Legal Intake and Invoice Review move to R2, with the rest of the roadmap unchanged (§3.1, §8.3, §16) |
+| **OD-22** | Approving attorney for NDA content (OD-5 for NDA; owner item H2) | Name them before Phase 2. Their first job is model language for the 19 topics that lack it, and the receiving and disclosing baselines |
+| **OD-23** | Where the Python tests run (ADR-038) | `[Proposed]` Path A: the tests stay beside `src/accelerators/`, and a CI job runs the build and gates on every change there (§15) |
+| **OD-24** | Additions from the expert demo | `[Proposed]` Adopt verbatim approved wording (§5.7-14) now. Prototype the plan-preview card (§5.7-15, after S7) and the engine-generated Excel audit pack (§8.2). The privilege header waits for attorney wording |
+| **OD-25** | R16: what the clean copy contains | Keep "all changes accepted, disclosed in the reply", or also offer a copy with only our changes accepted. Owner decision pending since 2026-10-31 |
 
 ## 19. Next steps
 
-1. Owner review of this design and the decisions in §18.
-2. Register the project and create its worktree (OD-10).
-3. `/design-to-spec` → `/project-pipeline`. Phase 0 (Workstream K, spikes, content model) goes first.
-4. If OD-14 is accepted, capture the connector project as an Idea issue now, so its BFF placement work can start in parallel.
+1. Owner review of v0.5: OD-20 to OD-25 and the `[Proposed]` items. Protocol v0.2 is reviewed at the same time, since §5.10 summarizes it.
+2. Close the spike (§16 Phase 0):
+   - fix L15, L16, L9 and L10/L17;
+   - Word A/B import retest (S5);
+   - T-14 admin deploy with T-P2, T-P7 and T-P8;
+   - record the results in results.md.
+3. Register the project (OD-10; the worktree already exists). Add a project `CLAUDE.md` holding the standing directives that now live in `current-task.md`.
+4. Revise to v0.6 with the decisions and T-14 results, then `/design-to-spec` → `/project-pipeline`.
+5. If OD-14 is accepted, capture the connector project as an Idea issue now, so its BFF placement work can start in parallel.

@@ -219,3 +219,11 @@ I couldn't find a public original. A video titled "Copilot Cowork: Enhanced SKIL
 2. Check whether a skill installed by copying a folder into OneDrive gets a Skill Report evaluation and shows up in "Your skills".
 3. Check whether plugin skills count toward the 50 custom-skill limit (install Legal for Cowork and then add 50 custom skills).
 4. Check whether Adaptive Card buttons (Action.Submit / Action.Execute) feed back into the conversation.
+
+---
+
+## Addendum 2026-11-05: re-check of documented script execution (no change)
+**Question**: Does Learn still document `scripts/` as executed in Cowork skills, and did anything change since 10-30?
+**Findings**: No change. cowork-plugin-development (ms.date 2026-10-02, updated 2026-11-03) still lists "Scripts (`scripts/`) | Executed, not loaded into context" and `scripts/extract-clauses.py`; still no interpreter, packages, egress or time-limit text. use-cowork (ms.date 2026-11-03, updated 2026-11-04) adds only "Some background operations, like script execution, run without displaying individual steps" (already known) and repeats 50 skills / 1 MB SKILL.md / 20 companion files / 10 MB per skill. whats-new (Nov 2026) has only the Planner plugin; no skill or script entries. cowork-faq repeats 50 skills; admin pages (agent365 manage-plugins-skills-mcp-servers, ms.date 2026-10-14) say nothing on scripts. No Cowork MC/roadmap item in 10-15..11-05 touches scripts (MC1493223 "Skills in Copilot Chat" is 2026-10-09, says skills may include "supporting files or scripts", nothing on runtime). Caveat: MC check was via mc.merill.net title listing only (bodies not read; 200 of 4,059 shown).
+**Sources**: learn.microsoft.com/en-us/copilot/cowork/{use-cowork,cowork-plugin-development,cowork-faq,whats-new,cowork-admin-governance}; learn.microsoft.com/en-us/microsoft-agent-365/admin/manage-plugins-skills-mcp-servers; mc.merill.net/message/MC1493223
+**Open questions**: Runtime still undocumented; our tenant evidence (Python 3.12.15, lxml 6.1.3, python-docx 1.2.0) remains the only source for versions/packages. Note: the old `/microsoft-365/copilot/cowork/` URL for cowork-plugin-development now 404s; use `/copilot/cowork/`.

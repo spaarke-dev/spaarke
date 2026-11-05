@@ -1,6 +1,6 @@
 # Current Task State - spaarke-legal-ai-accelerator-r1 (NDA MVP spike, tenant tests)
 
-> **Last Updated**: 2026-11-02 (by context-handoff)
+> **Last Updated**: 2026-11-05 (design v0.5 draft)
 > **Recovery**: Read "Quick Recovery" section first
 > **Branch**: `work/spaarke-legal-ai-accelerator-r1` · **Worktree**: `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-r1`
 
@@ -11,11 +11,14 @@
 | Field | Value |
 |-------|-------|
 | **Task** | NDA MVP spike: tenant tests per `notes/mvp-nda/runbook.md` (no POML tasks; pre-pipeline spike) |
-| **Step** | Protocol drafted (v0.2). T-P9 and the leftover check are done (2026-11-02, results L26/L27). T-14 not started |
-| **Status** | waiting for the owner to review protocol v0.2 (K/E split) before the build split and T-14 |
-| **Next Action** | Owner review of `notes/component-protocol.md` v0.2. Then do Next Actions 2–3. T-14 can also try the admin route Agents › Tools › Skills › **Upload** (L26) |
+| **Step** | design.md **v0.5 drafted 2026-11-05**. It folds in results.md, protocol v0.2, the owner's 11-02 decisions, the expert redliner demo (`notes/demo-video/`) and the 11-04 discussion Q&A. Checks are in `notes/2026-11-05-external-inputs-review.md`. T-14 not started |
+| **Status** | waiting for the owner to review design v0.5 (OD-20 to OD-25) **and** `notes/solution-packs-and-components.md` v0.1 (components by surface, solution packs + mini-spec, build-time components, Python explainer, visuals ladder; proposed OD-26 to OD-30, T-P13 visual probe). On approval, fold it into design v0.6 per its §6 |
+| **Next Action** | Owner review of v0.5 §18. Then close the spike (design §16 Phase 0): fix L15/L16/L9/L10; Word A/B import retest; T-14 with T-P2/T-P7/T-P8. T-14 can also try Agents › Tools › Skills › **Upload** (L26). Uncommitted: design.md, the new review note, `notes/demo-video/`, the discussion note |
 
 ### Critical Context
+- **The MCP and Copilot-surface work is split out** (owner, 2026-11-05) to `projects/spaarkeai-mcp-bff-api-r1`, in its own worktree `C:\code_files\spaarke-wt-spaarkeai-mcp-bff-api-r1`, branch `work/spaarkeai-mcp-bff-api-r1`. The owner works on it in a separate window; don't edit it from here.
+- **Word deliverable in R1:** the `.docx` Word playbook only (owner confirmed, 2026-11-05).
+- **Opal (Frontier):** researcher note `opal-frontier-computer-use-agent-2026-11-05.md`, pending.
 - **Word has never run our plugin.** No third-party skill loader is documented for Word (L25). But we have never tested a correctly built, instruction-only plugin there, and Harvey appears in Word.
 - **Cowork works**, and it currently has NO Spaarke install (clean-up done 2026-11-02).
 - **The component protocol** `notes/component-protocol.md` v0.2 is the design direction. Owner review is pending, except §4.5, which the owner approved.
