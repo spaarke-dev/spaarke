@@ -184,3 +184,12 @@ Owner, verbatim: "keep 'In Review' there should be some explanation description 
   8. the 089e chain close (C19). *ebilling to confirm in C19 whether that path changes an invoice's status or only closes Signals; it is a writer only if it ends In Review.*
 - **Invariant:** non-blank ⇒ statuscode In Review. Checked in the census or a `-Verify`, plus a unit test on the derivation (every reason combination maps to its priority value).
 - Writers 3 and 4 make 095d a consumer: 095d-1b (Set firm) is not yet merged; the recompute lands with 082c-2 or with 095d, whichever adds the column second.
+
+**uac-r2 on `sprk_reviewdetail` (2026-11-04): APPROVED with conditions (binding).**
+- (a) **Local** choice (not global), closed options; option values never reused for another meaning; code writes only the three named values or null.
+- (b) **No stale text:** the detail never outlives the hold. Every exit from In Review (reject, cancel, approve, pay, correction, the 114 Override) recomputes it to blank in the same write (matches ontology writer 6). **Test:** a non-In-Review invoice never carries a detail. Defence in depth: R4 renders the label only when `statuscode` = In Review (asked of R4).
+- (c) If a test snapshots `ReadableColumns`, update it with a one-line reason; no other column added.
+- **Not in ParentLineage `AccessColumns`** (that list is for access-deciding columns). Instead: the writers ArchTest, and add it to `sprk_invoice`'s `MappingProtectedColumns` (`RecordTableRules.cs` ~:295) so a field-mapping rule cannot set it. Whether the generic Update Record node / output mapping should also be refused (a typed-writer-only list) is ebilling's and ontology's call; decide in 082c-2.
+- **Known limit (record):** the outcome screen reaches only the submitter, but the grid and record show the detail to every partner user who can read that invoice row. It names no firm and describes an invoice they can already see; accepted. `sprk_firmhold` stays field-secured; the column is never derived from it beyond the closed label.
+- For uac-r2's 082c-2 review send together: the `ReadableColumns` hunk, the writers ArchTest and the clear-on-exit tests. The dev column apply needs the owner's go in session (entity-scoped publish).
+- R4: the blank line "The client is reviewing this invoice." shows only on In Review. Send R4 the option values when 082c-2 adds the column.
