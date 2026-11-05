@@ -8,72 +8,20 @@
 
 | Field | Value |
 |---|---|
-| **Active** | **020 ✅** PR #2551 merged aef86b89f7 (2026-11-03T23:21Z); a lint-ratchet fix was added in the PR (94ce92d3c3). It is not on dev yet: the live Matter/Project route check needs a uac-r2 deploy and the owner's OK for test rows. **Task 042b:** the implementer `fm-042b` finished steps 0–5. `task/fm-042b` tip 20bdd9f7e5 (base cfebe65f9b), not pushed; worktree `C:\code_files\spaarke\.claude\worktrees\agent-ac26f071a1fb351e7`.
-- Its numbers:
-  - AC1–AC14 met except the AC3 pair half;
-  - verify-suites 6659/0/7; ArchTests 1911; publish delta +811 B; no CVE.
-- **Both adversarial passes are done** and found the same **F1**: a caller-sent stamp that disagrees with the intermediate's root keeps the #2483 window open. **Owner chose A' (replace)** 2026-11-03 (decisions.md, c1428c181d); UAC-r2 agrees.
-- **Fix round 1 done:** tip **f37c63ef1c** (fix c0fbc125ee + docs).
-  - `CoreAncestorRestamper.PlanStampOfRowAsync` (full plan) and `RecordCreationService.AsTheRowEnds` (step 7 and Repair).
-  - Failing-first 5/10 → 10/10; AC14 782/0; verify-suites 6667/0/7; ArchTests 1911; publish +829 B vs cfebe65f9b; no CVE.
-  - design §15.3/15.4 (rows 8–10)/15.6 updated.
-  - Review item 3 (the Signal/DR core pair) is outside OwnerQuestionOf, so it was filed as **#2561 / DI-019** (7e7613eeb3), not fixed.
-- **Scoped Sonnet re-check: no F.** **Fix round 2 done**, tip **4eef7f7f00** (fix 89027b1a76):
-  - deleted the dead `PlanMissingStampAsync`;
-  - I-16 follows the plan (local row only);
-  - added the two-column test and the parity guard;
-  - Repair restamp/reconcile ordering is §15.4 row 11 (K3).
-  - Counts: AC14 785/0, verify-suites 6670/0/7, ArchTests 1911, +764 B, no CVE.
-  - I read the round-2 code diff.
-- **Full diff cfebe65f9b..4eef7f7f00 sent to UAC-r2 for AC15** on 2026-11-04 (local worktree; not pushed).
-- Filed from the reviews: #2556 / DI-017 (report-card regarding; AC3 second half), #2557 / DI-018 (thread-only communication), #2561 / DI-019.
-- **Then:**
-  1. Fix any F-findings through SendMessage to fm-042b.
-  2. Send the full diff cfebe65f9b..tip to UAC-r2 for its full pass (AC15).
-  3. Merge to the work branch `--no-ff` and run verify-suites.
-  4. Open the PR: ADR-008 path A, §15.4 K lines, UAC-r2 verdict, Closes #2483, DI-009 closed. Enable auto-merge.
-- **Open questions:**
-  - Q1: the AC3 pair half cannot hold, because `TodoRegardingBuilder.RegardingLookupByEntity` lacks `sprk_reportcard` while the client writes it. Proposed DI-P1, for an owner decision.
-  - Q2 (closed): Signal / DR 409 NoOwnerSource under a team-owned intermediate of a Secure root is K1, agreed by UAC-r2. It is §15.4 row 8. No real writer is affected.
-  - Note: the shared stash top `lint-staged automatic backup` (1e84ffafed, 2026-11-04 00:19Z, ebilling files) belongs to ebilling-r1's session, not this one. Leave it.
-- **020 so far:**
-  - the route creates sprk_matter and sprk_project;
-  - the optional mapping source is passed as query params;
-  - only matter and project infer a source;
-  - a secure-parent project is created into isolation;
-  - F-1: a Matter naming `sprk_issecure` is refused;
-  - F-2: a JSON-null `sprk_issecure` / `sprk_accessinheritance` is refused on project and WA, through one service helper.
-
-  Per fm-020 (not checked by me): 6618 passed / 0 failed / 7 skipped, ArchTests 1911/1911, publish +591 B, no CVE.
-- **Reviews done:**
-  - Opus adversarial review: 0 blocking, 11 K-class findings.
-  - UAC-r2: "OK WITH NOTES, merge when CI green" (decisions.md 2026-11-03).
-- **Round 3 (sent to fm-020):**
-  - #1: Matter route refusal tests;
-  - #5: an HTTP-binding test;
-  - #6: comments in EntityCreationService.ts;
-  - #7: lazy CallerRecordAccessProbe;
-  - #8: normalise JsonBody keys in the helper;
-  - UAC-r2 note 1: refusal text;
-  - notes corrections #4, #10, #9, #11.
-
-  Items #2 and #3 are written into POML 021/022 notes (uncommitted, see below).
-- **041 ✅** PR #2541 merged 249809ce0b (2026-11-03T19:50Z). It is not on the dev BFF yet; that needs an R3 deploy.
-- **005 `-Apply` done on dev 2026-11-03** (36 migrated, VERIFY PASS, idempotent).
-- **019 ✅, 042a ✅.** |
-| **Next Action** | 1. 042b: read the fm-042b-recheck1 report. F-findings go to fm-042b (SendMessage).
-   - Then send the full 042b diff to uac-r2 for AC15.
-   - Then merge `task/fm-042b` into the work branch `--no-ff`, run verify-suites, push, and open the PR.
-   - Then TASK-INDEX 042b ✅ and the POML marked completed.
-2. After uac-r2 deploys #2551: read-only route checks (5xx on POST /api/v1/child-records/*), then ask the owner HERE for an OK on Matter/Project test rows.
-3. After a real dev upload: re-run the 041 read-only checks and send them to uac-r2.
-4. Then the DI-019 / #2561 follow-up task. UAC-r2 ruled it F 2026-11-04: in step 7, read the catalog and put the core first in the owner question, plus a caller AppendTo check on the core record, which is missing today. Create it with task-create after 042b merges.
-5. Next: W3, starting with 021 (fix item #2, ReferenceLookupColumns / PostMappingDefaults, before cutover). |
+| **Active** | Checkpoint 2026-11-04 (late). uac-r2 session is now **`spaarke-wt-unified-access-control-r2-20`** (-38 and -09 gone).
+- **031** (FR-19): merged into the work branch LOCALLY as **603ae09027** (`--no-ff` of task/fm-031 a620880de1), NOT pushed yet. verify-suites + ArchTests running in background (log scratchpad `verify-031-merged`). UAC-r2 verdict for the PR: "UAC-r2: OK with notes (route-authorised exemption pinned to (column, id); closed allow-list + ArchTest; uniform 403; event route adds checks, removes none). No F findings." K items: K-2 resolved by (column,id); K-3 ArchTest name pin; K-4 doubles → 046; K-5 BuildCreateEventPayload → 063 (noted in 063 POML). Event type stays K1 (Basic + Office lack AppendTo on sprk_eventtype_ref → 046). Release notes in notes/task-031-notes.md.
+- **042c** (#2561): task/fm-042c, worktree `C:/code_files/spaarke/.claude/worktrees/agent-a854bfc2eb0fcc94d`. Fix round 1 pushed 6d87258cd3 (ForRow(coreRecord) one builder, core words, id normalised, DI-P3 K1 row 13). **B' fill-or-clear** (owner: never a half pair, never refuse) being built by agent fm-042c-b2 (verify running). UAC-r2 conditions a–g + additions (normalised filled id; type+id same catalog row; warnings no root id/Secure; create only; stamp-order theory → K2 or F). Then: 2nd adversarial pass, diff to UAC-r2, merge work branch in (031 overlap in RecordCreationService step 5), PR.
+- **021**: code done on task/fm-021 c2b3c327ec (not merged). Live p95 + deploy wait on #2551 on dev + owner OK (~40 test matters + code-page deploy).
+- **New tasks 043–046** written (5450e1a5af): 043 doc as mapping source; 044 core pair field security (UAC-r2 gate); 045 regarding pair complete+propagated (inventory first); 046 roles matrix (+ ebilling Procedure Read entry, d70346386b). #2524 task becomes 047 when written.
+- **Private (do NOT write publicly):** core-pair re-point on update — UAC-r2 owns (F), fixing on fix/uac-core-pair-update. |
+| **Next Action** | 1. When `verify-031-merged` passes: push the work branch, open PR to master (body: summary, behaviour changes, ADR-008 path A, placement/§11, publish delta +972 B / CVE clean, verification, UAC-r2 verdict line, K items, 🤖 footer), `gh pr merge --auto --merge`; TASK-INDEX 031 ✅ after merge.
+2. On fm-042c-b2 report: check, launch 2nd Opus adversarial pass (full 042c), then diff to UAC-r2, merge origin/work into task/fm-042c (resolve step 5 overlap), verify, merge, PR.
+3. Owner questions open: inactive playbook refused at analysis start? (pre-existing, not 031). 021 live OK. Family 1.0.56, 076, #2556.
+4. After uac-r2 deploys #2551/#2562: read-only checks → uac-r2. |
 | **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
-| **Waiting on** | - PR #2562 (042b) auto-merge on CI. UAC-r2 AC15: OK with notes; row 12 added (b76c31413c). The merged branch passed: verify-suites 6670/0/7, ArchTests 1911. After the merge: TASK-INDEX 042b ✅, POML completed, DI-009 closed, then create the DI-019 task.
-- Owner: the Family 1.0.56 look (the four #2513 items on dev) and the 076 narrower-user pass. **Done 2026-11-03:** 005 `-Apply` on dev (36 migrated, VERIFY PASS, idempotent); pid 53128 (the pre-crash session) stopped on the owner's "kill it".
+| **Waiting on** | - Owner: the Family 1.0.56 look (the four #2513 items on dev) and the 076 narrower-user pass. **Done 2026-11-03:** 005 `-Apply` on dev (36 migrated, VERIFY PASS, idempotent); pid 53128 (the pre-crash session) stopped on the owner's "kill it".
 - 041 live proof: dev BFF d763dc120e (carries #2541) is live since 2026-11-03T22:26:31Z. The post-deploy check passed on what existed (0 5xx; no index or child-records traffic; no rows since the deploy). The startup logger exception is pre-existing (#2549, DI-016). After the next real upload or create on dev, re-run the read-only checks (document `sprk_searchindexname` = spaarke-files-index; no `sprk_ai_search_index` on new rows). Send the results to **uac-r2** (it now runs dev deploys), and copy R3 (`spa-external-access-platform-f2`) only for its rollout record §17.
 - Rows to delete later: see `notes/task-019-notes.md` (the check-C event is the owner's and stays).
 - #2518 (ontology writer identity not provisioned): ontology's to own. |

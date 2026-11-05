@@ -415,10 +415,15 @@ public class SecureChildOwnershipWriterTests
 
         var response = await host.Client.PostAsJsonAsync("/api/ai/analysis/create", new { name = "Review", documentId, skillIds = Array.Empty<Guid>(), knowledgeIds = Array.Empty<Guid>(), toolIds = Array.Empty<Guid>() });
 
+        // Task 031 (FR-19): the capture seam moved. The row is created by RecordCreationService (its ONE app-only create), so the
+        // owner the row was written with is read from that create's body, not from IAnalysisDataverseService.CreateAnalysisAsync
+        // (this route no longer calls it). The asserted fact is unchanged: the document's NAMED team owns the new analysis.
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        host.Analyses.Verify(a => a.CreateAnalysisAsync(
-            documentId, "Review", It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
-            Directory.SecureNamedTeam, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Once);
+        var (table, _, fields) = host.AppOnlyCreates.Should().ContainSingle().Subject;
+        table.Should().Be("sprk_analysis");
+        BindOf(fields, "sprk_DocumentId@odata.bind").Should().Be($"/sprk_documents({documentId:D})");
+        BindOf(fields, "sprk_name").Should().Be("Review");
+        BindOf(fields, "ownerid@odata.bind").Should().Be($"/teams({Directory.SecureNamedTeam:D})");
     }
 
     [Fact]
@@ -427,17 +432,21 @@ public class SecureChildOwnershipWriterTests
         // c1-r1 (owner round 13 item 9): the caller's object id (the fake auth's oid) resolves to their systemuser.
         var documentId = Guid.NewGuid();
         var callerSystemUser = Guid.Parse("c1c1c1c1-0000-4000-8000-0000000000a5");
+        // Task 031: the service records the person WhoAmI names on the caller's own token, so the caller's Dataverse names them here too.
         await using var host = await AnalysisHost.StartAsync(World()
             .WithUser(callerSystemUser, Guid.Parse("00000000-0000-0000-0000-000000000aaa"), Directory.ChildBu)
             .WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam)
-            .Resolver());
+            .Resolver(), callerSystemUser);
 
         var response = await host.Client.PostAsJsonAsync("/api/ai/analysis/create", new { name = "Review", documentId, skillIds = Array.Empty<Guid>(), knowledgeIds = Array.Empty<Guid>(), toolIds = Array.Empty<Guid>() });
 
+        // Task 031: read from the service's ONE app-only create (see the test above): the named team owns it, and the signed-in
+        // caller - resolved from the oid to their systemuser - is recorded as the person who asked.
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        host.Analyses.Verify(a => a.CreateAnalysisAsync(
-            documentId, "Review", It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
-            Directory.SecureNamedTeam, callerSystemUser, It.IsAny<CancellationToken>()), Times.Once);
+        var (_, _, fields) = host.AppOnlyCreates.Should().ContainSingle().Subject;
+        BindOf(fields, "sprk_DocumentId@odata.bind").Should().Be($"/sprk_documents({documentId:D})");
+        BindOf(fields, "ownerid@odata.bind").Should().Be($"/teams({Directory.SecureNamedTeam:D})");
+        BindOf(fields, "sprk_CreatedByPerson@odata.bind").Should().Be($"/systemusers({callerSystemUser:D})");
     }
 
     [Fact]
@@ -452,7 +461,14 @@ public class SecureChildOwnershipWriterTests
         host.Analyses.Verify(a => a.CreateAnalysisAsync(
             It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
             It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.AppOnlyCreates.Should().BeEmpty("task 031: the service's one create is also never made");
     }
+
+    /// <summary>A bind (or plain string) of the service's create body as text; the service writes it as a string or a JSON string.</summary>
+    private static string? BindOf(IReadOnlyDictionary<string, object?> fields, string key) =>
+        fields.TryGetValue(key, out var value)
+            ? value as string ?? (value is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element ? element.GetString() : null)
+            : null;
 
     // =====================================================================================
     // Review logs — CommunicationEnrichmentService (propose) and CommunicationProposalApplyService (apply audit)
@@ -1029,14 +1045,17 @@ public class SecureChildOwnershipWriterTests
         public Mock<IAnalysisDataverseService> Analyses { get; } = new(MockBehavior.Loose);
         public HttpClient Client { get; private set; } = null!;
 
-        public static async Task<AnalysisHost> StartAsync(IRecordOwnershipResolver ownership)
+        /// <summary>Task 031: every app-only create RecordCreationService makes (table, id, Web API body).</summary>
+        public List<(string Table, Guid Id, Dictionary<string, object?> Fields)> AppOnlyCreates { get; } = new();
+
+        public static async Task<AnalysisHost> StartAsync(IRecordOwnershipResolver ownership, Guid? callerSystemUser = null)
         {
             var host = new AnalysisHost();
-            await host.InitializeAsync(ownership);
+            await host.InitializeAsync(ownership, callerSystemUser);
             return host;
         }
 
-        private async Task InitializeAsync(IRecordOwnershipResolver ownership)
+        private async Task InitializeAsync(IRecordOwnershipResolver ownership, Guid? callerSystemUser)
         {
             Analyses.Setup(a => a.CreateAnalysisAsync(
                     It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<AnalysisRegardingTarget?>(),
@@ -1069,6 +1088,16 @@ public class SecureChildOwnershipWriterTests
             builder.Services.AddSingleton(aiAuthorization.Object);
             builder.Services.AddSingleton(ownership);
             builder.Services.AddSingleton(Analyses.Object);
+
+            // Task 031 (FR-19): the route creates through RecordCreationService, as the caller, over this host's real owner resolver.
+            var appOnly = new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Loose);
+            appOnly.Setup(a => a.UpdateRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) => AppOnlyCreates.Add((table, id, fields)))
+                .Returns(Task.CompletedTask);
+            builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(
+                new SecureChildOwnershipAiToolTests.ScriptedUserClient(callerSystemUser ?? Guid.Parse("c1c1c1c1-0000-4000-8000-0000000000e1")));
+            builder.Services.AddSingleton(RouteRecordCreation.Default(ownership, appOnly.Object));
 
             // Task 162 (sweep integration): /create is gated as the caller BEFORE the owner question (G5: the Create
             // privilege, analysis.attach on the document, Read on each scope row). Not this suite's subject (162's

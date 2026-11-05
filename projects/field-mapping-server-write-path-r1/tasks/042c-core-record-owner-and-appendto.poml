@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042c" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>A Signal or Decision Record create asks the owner about its core record and checks the caller's AppendTo on it (#2561, DI-019)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>042b (#2562) merged to master</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api (RecordCreationService create path and CallerWriteAuthorization's use); adds a caller AppendTo check on a Secure family (tags security, bff-api); UAC-r2 ruled #2561 F-class 2026-11-04.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive: a missing AppendTo check lets a caller attach a row to a Secure record they cannot append to; the owner question must match the reconciler's order.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordCreationService.cs, which 042b just changed; runs alone after 042b.</parallel-reason>
+    <deps>042b</deps>
+    <tags>bff-api, security, ownership, testing</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>When RecordCreationService creates a sprk_signal or sprk_decisionrecord whose payload names a core pair (sprk_corerecordtype, a lookup to the sprk_recordtype_ref catalog, plus sprk_corerecordid, a string), (1) check the caller's AppendTo on the core record the pair names, as the caller, before anything reads it app-only, and (2) put that core record FIRST in the create's owner question, in the order RecordOwnershipContext.ForExistingRowAsync uses, so the create's owner equals the reconciler's for the written row.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Dataverse record ownership and Secure Record isolation. Security fails closed. Follow ADRs strictly.</role>
+  <goal>A Signal or Decision Record created through the service (chat dataverse.create_record is the reachable path) is refused when the caller may not append to its core record, and otherwise gets the owner the secure-child reconciler gives the written row. No other table's create changes.</goal>
+
+  <context>
+    <background>#2561 / DI-019 (notes/defer-issues.md) and its 2026-11-04 scope comment; UAC-r2 ruling 2026-11-04 (F-class, option 1 plus the core AppendTo check; option 2, refusing chat creates, rejected). Found in 042b fix round 1 (notes/task-042b-notes.md "Review item 3"). Today the create's AppendTo covers the row's lookups and the ADR-024 regarding pair only (CallerWriteAuthorization.cs ~:116-131, RecordCreationService.cs ~:858 and ~:1066, DataverseCreateRecordHandler.RefuseSecureFilingAsync ~:840-871); nothing reads sprk_corerecordid on a create path. Line numbers are at 042b's merge; re-grep.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (step 5 AppendTo set; step 7 DecideOwnerAsync ~:1065 / OwnerQuestionOf ~:1171)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/CallerWriteAuthorization.cs (only if the core pair needs a call beside the regarding pair at ~:116-131; prefer calling PairTargetAsync with the core pair's id and type)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseCreateRecordHandler.cs (only if RefuseSecureFilingAsync must ask the same core AppendTo before the service; the service check must not be duplicated in a way that changes the refusal)</file>
+      <file role="modify">tests/integration/data-mutation/RecordOwnership/WriterBuilderOwnershipParityTests.cs (Signal and DR cases with a core pair)</file>
+      <file role="modify">tests/integration/data-mutation/RecordOwnership/ChatCreatedChildStampTests.cs or a new file under tests/integration/data-mutation/RecordOwnership/ (chat create of Signal and DR with a core pair)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CallerWriteAuthorization.cs PairTargetAsync (~:182): reads a pair's TYPE through the catalog AS THE CALLER and returns the lookup to ask AppendTo on; the same shape for the core pair</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs ForExistingRowAsync (~:655-751, core first via CoreTableOfRecordTypeAsync ~:732, ~:937): the order to match</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs and DecisionRecordWriter.cs: their own owner question; read only, unchanged</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="042b" status="required">The A' owner question (AsTheRowEnds) is on master; this task adds the core record to it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §6 gotcha 2026-10-20">Brief line 1: `git switch -c task/fm-042c &lt;tip of work/field-mapping-server-write-path-r1&gt;` (must contain 042b's merge), then confirm this POML exists on the branch.</constraint>
+    <constraint source="UAC-r2 ruling 2026-11-04">The core AppendTo is asked AS THE CALLER, with the same refusal shape as any other parent the caller cannot append to (the uniform not-found / AccessDenied the lookups get); no new refusal kind, code or enum member. An unknown or unresolvable record type (no catalog row readable as the caller, or a catalog row naming no table) refuses fail-closed with an existing code (PairTargetAsync's Invalid / not-found shapes). The core record is never read app-only before the caller's AppendTo on it.</constraint>
+    <constraint source="ADR-008 path A">The check lives in CallerWriteAuthorization / the service; route filters unchanged. Cite path A in the PR.</constraint>
+    <constraint source="NFR-07">Every existing single-condition refusal keeps its code, status and words; tables other than sprk_signal and sprk_decisionrecord are unchanged (asserted by the existing suites).</constraint>
+    <constraint source="ontology-r1 (w2-coordination.md)">SignalWriter and DecisionRecordWriter are not changed; no field mapping into these rows.</constraint>
+    <constraint source="ADR-038">KEEP paths only (tests/integration/data-mutation/**, tests/integration/seam/**); no new file under tests/unit/Sprk.Bff.Api.Tests/**; no Mock&lt;HttpMessageHandler&gt;.</constraint>
+    <constraint source="CLAUDE.md §10">Placement and publish delta: see notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/field-mapping-server-write-path-r1/design.md (§15, especially §15.3 and §15.4 row 8)</file>
+      <file>projects/field-mapping-server-write-path-r1/notes/task-042b-notes.md (Review item 3; DI-P2)</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (I-6)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Branch (constraint 1); declare FULL rigor; /conflict-check for RecordCreationService.cs and CallerWriteAuthorization.cs.</step>
+    <step order="1">Write the AC2-AC6 tests failing first.</step>
+    <step order="2">Step 5: resolve the core pair through the catalog as the caller and add its record to the AppendTo set (reuse PairTargetAsync).</step>
+    <step order="3">Step 7: put the core record first in the owner question for sprk_signal and sprk_decisionrecord, matching ForExistingRowAsync's order; the catalog answer from step 5 is reused (no second read).</step>
+    <step order="4">Build; filtered suites and ArchTests; publish delta; CVE.</step>
+    <step order="5">One adversarial pass (security tag: two); then the diff to UAC-r2 for its review. Fix every finding. Record in notes/task-042c-notes.md.</step>
+    <step order="6">After merge: close DI-019 and #2561 with the PR link; TASK-INDEX ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If matching the reconciler needs a change to RecordOwnershipResolver or SecureChildReconciler (not only the create's question), STOP and escalate to UAC-r2.</trigger>
+    <trigger>If any existing refusal code, status or word would change, or the check needs a new refusal kind, STOP and escalate (NFR-07).</trigger>
+    <trigger>If the chat handler and the service would give different refusals for the same core-pair condition, STOP and escalate.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/CallerWriteAuthorization.cs (if needed)</output>
+    <output type="test">The test files in relevant-files</output>
+    <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-042c-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: for sprk_signal and sprk_decisionrecord with a core pair, step 5 asks the caller's AppendTo on the core record (asserted by the probe list); the catalog row is read as the caller; no app-only read of the core record happens before that check (asserted by call order).</criterion>
+    <criterion testable="true">AC2: Signal and Decision Record each: a Secure core with an ordinary subject, the caller holding AppendTo on both, is owned at create by the core's Secure owner, and that owner equals ResolveOwnerAsync(ForExistingRowAsync(written row)).</criterion>
+    <criterion testable="true">AC3 (negative): Signal and Decision Record each: a caller WITHOUT AppendTo on the core record is refused with the same code, status and words as an unappendable lookup, and nothing is created. No existence check (UAC-r2 2026-11-04): a core record that exists but the caller may not append to, one that exists but the caller cannot read, and one that does not exist give byte-identical refusals (code, status, words), asserted in one theory.</criterion>
+    <criterion testable="true">AC4 (negative): an unknown record type, an unreadable catalog row, a catalog row naming no table, and a non-guid sprk_corerecordid each refuse fail-closed with an existing code; nothing is created.</criterion>
+    <criterion testable="true">AC5 (must-not-fire): a core and subject that agree give the same owner as before this task; a Signal or DR without a core pair keeps today's probes, owner and refusals (a must-not-fire test for each, UAC-r2 2026-11-04); every other table's AppendTo probe list and owner are unchanged (existing suites green with unchanged assertions).</criterion>
+    <criterion testable="true">AC6: the chat dataverse.create_record path gives the AC2-AC4 outcomes (the reachable path), with chat's tool error codes.</criterion>
+    <criterion testable="true">AC7: BFF build 0 errors, 0 warnings; verify-suites.sh and ArchTests pass; publish delta against a fresh master build and the CVE result are recorded; UAC-r2's verdict line is in the PR; DI-019 and #2561 close on merge.</criterion>
+    <criterion testable="true">AC2 amended (owner + UAC-r2, 2026-11-04; notes/decisions.md): a Secure core with the caller holding AppendTo gets the existing row-8 409 NoOwnerSource byte-identical (OwnerDecided unchanged); an ordinary core in BU Y with the subject in BU X is owned by Y's team = the reconciler's.</criterion>
+    <criterion testable="true">AC8 (owner 2026-11-04, never a half pair, never a refusal; UAC-r2 conditions a-g): a core TYPE with a missing/blank core ID is filled from 042b's step-6&#189; plan (never probed as the caller); a sent type that disagrees with the planned root is replaced by the planned pair; no derivable root clears the type; each with a warning naming neither the root id nor its Secure state; a planning FAULT is the existing 503 stamp_unavailable and nothing is cleared or written; a filled Secure root gives the row-8 409. A source-scan ArchTest (type written implies id written) with must-fire and must-not-fire controls. An ID with no type stays refused with core-specific words.</criterion>
+    <criterion testable="true">Test scope: AC1-AC8 only; anything beyond needs a one-line reason in the notes. One seeding proof: remove the core from the AppendTo set once and show AC3 fails (recorded, reverted).</criterion>
+  </acceptance-criteria>
+
+  <notes>Placement Justification (CLAUDE.md §10, bff-extensions.md): a modification inside RecordCreationService (and its use of CallerWriteAuthorization) in the BFF, where the synchronous write path that owns I-6 lives; no new endpoint, service, package or background work; expected publish delta ≈ 0, measured against a fresh master build; CVE check run.
+§11: no new surface expected (PairTargetAsync is reused). If a helper is added, answer the three questions in the notes.
+ADR-008 path A: the check is in CallerWriteAuthorization / the service.
+Release note: a Signal or Decision Record created through chat that names a core record the caller may not append to is now refused.
+Added 2026-11-04 from UAC-r2's ruling on #2561 (F-class, follow-up straight after 042b).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
