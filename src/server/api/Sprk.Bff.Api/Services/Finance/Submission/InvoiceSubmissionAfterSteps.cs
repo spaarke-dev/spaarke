@@ -754,8 +754,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         (await ReadOpenSignalSetWithSubjectsAsync(entities, time, invoiceId, logger, ct).ConfigureAwait(false)).Set;
 
     /// <summary><see cref="ReadOpenSignalSetAsync"/> with the distinct subjects (the invoice and the lines) its Signals are on, which a
-    /// human decision's caller must be able to Write (105, FR-51).</summary>
-    internal static async Task<(ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects)> ReadOpenSignalSetWithSubjectsAsync(
+    /// human decision's caller must be able to Write (105, FR-51). <c>Open</c> is each Signal with its own subject (task 114b: an Override
+    /// leaves open a Signal whose hold still stands, which needs the Signal's own subject).</summary>
+    internal static async Task<(ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects,
+        IReadOnlyList<(ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)> Open)> ReadOpenSignalSetWithSubjectsAsync(
         IGenericEntityService entities, TimeProvider time, Guid invoiceId, ILogger logger, CancellationToken ct)
     {
         var setReadAt = time.GetUtcNow().UtcDateTime;
@@ -771,7 +773,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         // Ordered by id so the record's hash is stable.
         return (
             new ResolvedSignalSet(setReadAt, open.Select(s => s.Signal).DistinctBy(s => s.Id).OrderBy(s => s.Id).ToList()),
-            open.Select(s => (s.SubjectEntity, s.SubjectId)).Distinct().ToList());
+            open.Select(s => (s.SubjectEntity, s.SubjectId)).Distinct().ToList(),
+            open);
     }
 
     /// <summary>
