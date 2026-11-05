@@ -15,6 +15,8 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
+using Sprk.Bff.Api.Services.RecordCreation;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
@@ -42,12 +44,12 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     private static readonly Guid TypedRouteDocument = Guid.Parse("a0310000-0000-4000-8000-000000000001");
 
     /// <summary>The caller as the route handlers see them: an <c>oid</c>, a bearer token, and the probe as the request's own service.</summary>
-    private DefaultHttpContext RouteHttpContext()
+    private DefaultHttpContext RouteHttpContext(CallerRecordAccessProbe? probe = null)
     {
         var http = new DefaultHttpContext
         {
             TraceIdentifier = FixedCorrelation,
-            RequestServices = new ServiceCollection().AddSingleton<CallerRecordAccessProbe>(_probe).BuildServiceProvider(),
+            RequestServices = new ServiceCollection().AddSingleton<CallerRecordAccessProbe>(probe ?? _probe).BuildServiceProvider(),
             User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("oid", CallerOid.ToString("D"))], "test")),
         };
         http.Request.Headers.Authorization = $"Bearer {CallerToken}";
@@ -72,16 +74,27 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             RouteHttpContext(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 
-    private Task<IResult> RouteCreateAnalysis(Guid document)
+    /// <param name="document">The body document.</param>
+    /// <param name="filterAllowed">Task 043: the document the route filter's Document check allowed (Read + AppendTo, then the
+    /// external document narrowing), recorded as <c>AnalysisAuthorizationFilter.AuthorizeCreateAsync</c> records it; <c>null</c>
+    /// for a request the filter recorded nothing on.</param>
+    /// <param name="probe">The request's caller-rights probe (default: the harness's).</param>
+    private Task<IResult> RouteCreateAnalysis(Guid document, Guid? filterAllowed = null, CallerRecordAccessProbe? probe = null)
     {
         var analyses = new Mock<IAnalysisDataverseService>(MockBehavior.Strict);
+        var http = RouteHttpContext(probe);
+        if (filterAllowed is { } allowed)
+            Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.RecordDocumentAttachAuthorized(http, allowed);
         return AnalysisEndpoints.CreateAnalysis(
             new CreateAnalysisRequest("Analysis - NDA.pdf", document, [], [], []),
-            Service(), _user, analyses.Object, NullLogger<AnalysisOrchestrationService>.Instance, RouteHttpContext(),
+            Service(), _user, analyses.Object, NullLogger<AnalysisOrchestrationService>.Instance, http,
             CancellationToken.None);
     }
 
-    /// <summary>An analysis filed under a document the caller can read, with a profile that copies the document's description.</summary>
+    /// <summary>
+    /// An analysis filed under a document the caller can read, with a profile that copies the document's description, and its
+    /// name onto the analysis's name (which the request always sends, so it shows fill-only).
+    /// </summary>
     private void TheDocumentOfAnAnalysis()
     {
         _world.WithRecord("sprk_document", TypedRouteDocument, Directory.ChildBu, owningTeam: Directory.ChildTeam);
@@ -90,14 +103,26 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         _sources[("sprk_document", TypedRouteDocument)] = new Entity("sprk_document", TypedRouteDocument)
         {
             ["sprk_documentdescription"] = "From the document",
+            ["sprk_documentname"] = "NDA.pdf",
         };
         _user.Columns["sprk_analysis"] = new()
         {
             ["sprk_name"] = ("String", true),
             ["sprk_description"] = ("Memo", true),
         };
-        Profile("sprk_document", "sprk_analysis", Rule("sprk_documentdescription", "sprk_description", Memo));
+        Profile("sprk_document", "sprk_analysis",
+            Rule("sprk_documentdescription", "sprk_description", Memo),
+            Rule("sprk_documentname", "sprk_name", Text));
     }
+
+    /// <summary>The 201 body exactly as the route serializes it (web defaults, as Minimal API writes it).</summary>
+    private static string AnalysisBodyOf(IResult result) =>
+        JsonSerializer.Serialize(
+            result.Should().BeOfType<Created<CreateAnalysisResponse>>().Subject.Value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+    /// <summary>The 201 body with the new row's id taken out, so two creates' bodies can be compared byte for byte.</summary>
+    private static string BodyWithoutId(IResult result) =>
+        AnalysisBodyOf(result).Replace(((Created<CreateAnalysisResponse>)result).Value!.AnalysisId.ToString("D"), "{id}", StringComparison.Ordinal);
 
     // =====================================================================================
     // POST /api/v1/events
@@ -167,28 +192,181 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     // =====================================================================================
 
     /// <summary>
-    /// The analysis route asks for the mapping of the document it is anchored to (FR-19, FR-03), and the service answers as it
-    /// does for every source it cannot read as the caller (FR-04): a <c>sprk_document</c> is not one of the types the caller-read
-    /// check can authorize (<c>EntityAccessFilter.TryResolveEntitySet</c> has no <c>sprk_document</c> entry: that map is the
-    /// document-ASSOCIATION lockstep map), so nothing is mapped, the source is never read with the app's identity, and the
-    /// rest of the create (name, document bind, owner, person) is exactly the route's. Pins the fail-closed outcome so a future
-    /// widening of the type map is a visible, deliberate change.
+    /// Task 043 AC1 (owner 2026-11-04; flips 031's fail-closed pin): the analysis route asks for the mapping of the document it is
+    /// anchored to (FR-19, FR-03). The caller's own Read on the document is asked on the Document access path's set
+    /// (<c>sprk_documents</c>) BEFORE the document is read app-only (FR-04); the route filter's decision on the body document
+    /// stands for the external document narrowing. The profile's value fills the untouched column, the request's own name wins
+    /// (fill-only, FR-02), the read is masked to the caller, and the 201 body has no warnings member.
     /// </summary>
     [Fact]
-    public async Task TypedAnalysisRoute_AnchoredToADocument_AsksForTheProfile_ButAnUnauthorizableSourceMapsNothing_FailClosed()
+    public async Task TypedAnalysisRoute_ADocumentTheCallerCanRead_MapsItsProfile_FillOnly_ReadAsTheCaller_WithNoWarnings()
     {
         TheDocumentOfAnAnalysis();
 
-        var result = await RouteCreateAnalysis(TypedRouteDocument);
+        var result = await RouteCreateAnalysis(TypedRouteDocument, filterAllowed: TypedRouteDocument);
 
         StatusOf(result).Should().Be(StatusCodes.Status201Created, DetailOf(result));
         var (table, _, fields) = _creates.Should().ContainSingle().Subject;
         table.Should().Be("sprk_analysis");
-        _journal.Should().Contain("profile", "FR-19: the route asked for the Document to Analysis profile (the source inferred from the document bind)");
-        fields.Keys.Should().NotContain("sprk_description", "FR-04: a source the caller-read check cannot authorize maps nothing");
-        _sourceReads.Should().BeEmpty("the document is never read with the app's identity when the caller's right to read it was not established");
-        StringOf(fields, "sprk_name").Should().Be("Analysis - NDA.pdf");
+        StringOf(fields, "sprk_description").Should().Be("From the document", "FR-19: the Document to Analysis profile fills the column");
+        StringOf(fields, "sprk_name").Should().Be("Analysis - NDA.pdf", "FR-02: the request's own value wins");
         StringOf(fields, "sprk_DocumentId@odata.bind").Should().Be($"/sprk_documents({TypedRouteDocument:D})");
+        _probe.Asked.Should().ContainSingle().Which.Should().Be((CallerToken, "sprk_documents", TypedRouteDocument));
+        _journal.Should().ContainInOrder("profile", "probe", "source-read", "user:source-read");
+        _callerRead.Paths.Should().Equal($"sprk_documents({TypedRouteDocument:D})");
+        ((Created<CreateAnalysisResponse>)result).Value!.Warnings.Should().BeNull();
+        AnalysisBodyOf(result).Should().NotContain("warnings", "AC6: no warnings, no member");
+    }
+
+    public static TheoryData<string> DocumentNotReadable => new() { "cannot-read", "probe-faults" };
+
+    /// <summary>
+    /// Task 043 AC2: a document the caller cannot read and a probe that faults give the same create (201, nothing mapped) with
+    /// the one uniform warning in a byte-identical body, and the document is never read app-only (the probe answered first). A
+    /// document that does not exist never reaches the handler on this route (the filter's Read + AppendTo refuses it, 403, the
+    /// authorization contract suite); that a missing document and a denied one get the same answer from the mapping read
+    /// itself is <c>MappingSourceReadProbeTests</c>'.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(DocumentNotReadable))]
+    public async Task TypedAnalysisRoute_ADocumentTheCallerCannotRead_MapsNothing_WithTheOneWarning_InTheSameBody(string shape)
+    {
+        TheDocumentOfAnAnalysis();
+        CallerRecordAccessProbe? probe = null;
+        if (shape == "cannot-read")
+        {
+            _readable.Remove(TypedRouteDocument);
+            _rights[TypedRouteDocument] = AccessRights.Write | AccessRights.AppendTo | AccessRights.Append;
+        }
+        else
+        {
+            probe = new FaultingProbe(_journal);
+        }
+
+        var result = await RouteCreateAnalysis(TypedRouteDocument, filterAllowed: TypedRouteDocument, probe: probe);
+
+        StatusOf(result).Should().Be(StatusCodes.Status201Created, DetailOf(result));
+        _creates.Should().ContainSingle().Which.Fields.Keys.Should().NotContain("sprk_description");
+        StringOf(_creates.Single().Fields, "sprk_name").Should().Be("Analysis - NDA.pdf");
+        _journal.Should().Contain("probe").And.NotContain("source-read", "the document is not read app-only before the caller's Read allowed it");
+        _sourceReads.Should().BeEmpty();
+        BodyWithoutId(result).Should().Be(
+            $$"""{"analysisId":"{id}","warnings":["{{MappingSourceReadProbe.SourceUnavailableWarning}}"]}""",
+            "AC2/AC6: the same body for each case, naming no record");
+    }
+
+    public static TheoryData<string> DocumentNotShown => new() { "hidden", "narrowing-faults", "no-decision" };
+
+    /// <summary>
+    /// Task 043 AC3 at the service: for a caller who can read the document, a document the external document narrowing does not
+    /// show (hidden, a faulted narrowing, or no decision from the route) maps nothing, with the same one warning as AC2, and is
+    /// never read app-only. Where it shows it, AC1's outcome. (Through the real route filter: the authorization contract suite.)
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(DocumentNotShown))]
+    public async Task CreateAsync_ADocumentTheNarrowingDoesNotShow_MapsNothing_WithTheOneWarning(string shape)
+    {
+        TheDocumentOfAnAnalysis();
+        Func<Guid, CancellationToken, Task<bool>>? decision = shape switch
+        {
+            "hidden" => (_, _) => Task.FromResult(false),
+            "narrowing-faults" => (_, _) => throw new HttpRequestException("narrowing read failed"),
+            _ => null,
+        };
+
+        var outcome = await Service().CreateAsync(AnalysisUnder(TypedRouteDocument, decision), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _creates.Should().ContainSingle().Which.Fields.Keys.Should().NotContain("sprk_description");
+        outcome.MappingWarnings.Should().ContainSingle().Which.Should().Be(new RecordCreationWarning(
+            RecordCreationWarning.MappingSourceUnavailableCode, null, MappingSourceReadProbe.SourceUnavailableWarning));
+        if (shape == "no-decision")
+        {
+            // Task 043 review (K1): with no decision from the route a document can never map, so not even the probe is asked.
+            _probe.Asked.Should().BeEmpty();
+        }
+        else
+        {
+            _probe.Asked.Should().ContainSingle().Which.Should().Be((CallerToken, "sprk_documents", TypedRouteDocument));
+        }
+
+        _sourceReads.Should().BeEmpty("the document is not read app-only before the narrowing has shown it");
+    }
+
+    [Fact]
+    public async Task CreateAsync_ADocumentTheNarrowingShows_MapsItsProfile()
+    {
+        TheDocumentOfAnAnalysis();
+
+        var outcome = await Service().CreateAsync(
+            AnalysisUnder(TypedRouteDocument, (id, _) => Task.FromResult(id == TypedRouteDocument)), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_description").Should().Be("From the document");
+        outcome.MappingWarnings.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Task 043 review round 2 (F2): the same-document binding of <see cref="AnalysisEndpoints.MappingDocumentDecisionOf"/>. With
+    /// nothing recorded by the filter there is no decision (a document source maps nothing); with document X recorded the decision
+    /// shows X and no other document.
+    /// </summary>
+    [Fact]
+    public async Task MappingDocumentDecisionOf_ShowsOnlyTheDocumentTheFilterRecorded_AndIsNullWhenItRecordedNone()
+    {
+        AnalysisEndpoints.MappingDocumentDecisionOf(new DefaultHttpContext())
+            .Should().BeNull("a request the filter recorded no document on carries no decision");
+
+        var http = new DefaultHttpContext();
+        Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.RecordDocumentAttachAuthorized(http, TypedRouteDocument);
+        var decision = AnalysisEndpoints.MappingDocumentDecisionOf(http);
+
+        decision.Should().NotBeNull();
+        (await decision!(TypedRouteDocument, CancellationToken.None)).Should().BeTrue("the document the filter allowed is shown");
+        (await decision(OtherDocument, CancellationToken.None)).Should().BeFalse("any other document is not");
+    }
+
+    /// <summary>
+    /// Task 043 review round 2 (F2) through the route: when the document the filter allowed is not the mapping source, the analysis
+    /// is still created, nothing is mapped, the 201 body carries the one warning, and the source document is never read app-only.
+    /// </summary>
+    [Fact]
+    public async Task TypedAnalysisRoute_TheFilterAllowedAnotherDocument_MapsNothing_WithTheOneWarning_NothingReadAppOnly()
+    {
+        TheDocumentOfAnAnalysis();
+
+        var result = await RouteCreateAnalysis(TypedRouteDocument, filterAllowed: OtherDocument);
+
+        StatusOf(result).Should().Be(StatusCodes.Status201Created, DetailOf(result));
+        _creates.Should().ContainSingle().Which.Fields.Keys.Should().NotContain("sprk_description");
+        _sourceReads.Should().BeEmpty("the document is not read app-only when the route's decision does not show it");
+        _journal.Should().NotContain("source-read");
+        BodyWithoutId(result).Should().Be(
+            $$"""{"analysisId":"{id}","warnings":["{{MappingSourceReadProbe.SourceUnavailableWarning}}"]}""");
+    }
+
+    private static readonly Guid OtherDocument = Guid.Parse("a0310000-0000-4000-8000-000000000043");
+
+    /// <summary>The analysis route's create body for <paramref name="document"/>, mapped as the caller with
+    /// <paramref name="documentShown"/> as the narrowing's answer.</summary>
+    private RecordCreationRequest AnalysisUnder(Guid document, Func<Guid, CancellationToken, Task<bool>>? documentShown) =>
+        new(AnalysisEndpoints.AnalysisTable, new RecordCreationPayload.WebApi(JsonSerializer.SerializeToElement(
+            AnalysisEndpoints.BuildCreatePayload(new CreateAnalysisRequest("Analysis - NDA.pdf", document, [], [], [])))))
+        {
+            CorrelationId = FixedCorrelation,
+            Mapping = RecordCreationMapping.ForCaller(_probe, CallerToken, documentShown: documentShown),
+        };
+
+    /// <summary>The production probe whose rights question throws (a RetrievePrincipalAccess fault), journaled like the harness's.</summary>
+    private sealed class FaultingProbe(List<string> journal)
+        : CallerRecordAccessProbe(new HttpClient(), new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+    {
+        public override Task<AccessRights> GetCallerRightsAsync(
+            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+        {
+            journal.Add("probe");
+            throw new HttpRequestException("RetrievePrincipalAccess failed");
+        }
     }
 
     [Fact]
