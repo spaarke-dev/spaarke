@@ -161,12 +161,11 @@ by the request. Every target in the schema with several lookups to `sprk_documen
 | Target | Lookups to `sprk_document` | Before | Now |
 |---|---|---|---|
 | `sprk_analysis` | `sprk_documentid`, `sprk_outputfileid`, `sprk_regardingdocument` | 409 | `sprk_documentid` |
-| `sprk_document` | `sprk_parentdocument`, `sprk_canonicaldocument` (Secure-only) | 409 | `sprk_parentdocument` |
-| `sprk_invoicesubmission` | `sprk_document`, `sprk_reportdocument` | 409 | `sprk_document` (its submitted PDF; the report is an output, per its lineage comment) |
+| `sprk_document` | `sprk_parentdocument`, `sprk_canonicaldocument` (Secure-only) | 409 | 409 (unchanged; see the follow-up below) |
+| `sprk_invoicesubmission` | `sprk_document`, `sprk_reportdocument` | 409 | 409 (unchanged; see the follow-up below) |
 | `sprk_billingexport` | `sprk_csvdocument`, `sprk_jsondocument` | 409 | 409 (not in `SecureChildLineage`) |
 
-The `sprk_document` and `sprk_invoicesubmission` rows are a consequence of the same rule, not separately asked for. No profile for
-either is known.
+The `sprk_document` and `sprk_invoicesubmission` rows keep the 409: the rule is limited to the analysis (follow-up below).
 
 ### Tests
 
@@ -193,3 +192,10 @@ The push counts are before the four-target pin was added. Each mutation was rest
 verify-suites: solution build 0 warnings, 0 errors; ArchTests 1940/1940; filtered suites 6844 passed, 0 failed, 7 skipped.
 Second filter (AnalysisEndpoints, FieldMappingPush, MappingSource, RecordCreationServiceMappingSeam, EventEndpoints, ChildRecord):
 939/939.
+
+### Round 2 follow-up (main session)
+
+The round-2 rule also resolved two other targets that had always answered the 409: a document's own lookups
+(`sprk_parentdocument`) and an invoice submission's (`sprk_document`). Neither is in the owner's rule (Document to Analysis),
+so the rule is now limited to `sprk_analysis` (`FieldMappingEndpoints.DocumentPushTarget`); every other target keeps the
+existing 409, unchanged (NFR-07). The theory `DocumentOwnershipParentColumn_IsFixedByTheTargetTable` pins all four targets.

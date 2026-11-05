@@ -227,12 +227,13 @@ public class FieldMappingPushDocumentSourceTests
     /// <summary>
     /// Review round 2 (F1): every target in the schema with several lookups to <c>sprk_document</c>
     /// (<c>src/dataverse/solutions/SpaarkeMaster/Other/Relationships</c>, 2026-11-05) and the one column the rule picks, so a
-    /// change to the ownership order that moves a push is seen here. <c>null</c>: no defined column, the existing 409.
+    /// change to the ownership order that moves a push is seen here. <c>null</c>: the existing 409. Only the analysis is resolved
+    /// (the owner's rule is Document to Analysis); a document's own lookups and an invoice submission's keep the 409.
     /// </summary>
     [Theory]
     [InlineData("sprk_analysis", "sprk_regardingdocument,sprk_outputfileid,sprk_documentid", "sprk_documentid")]
-    [InlineData("sprk_document", "sprk_canonicaldocument,sprk_parentdocument", "sprk_parentdocument")]
-    [InlineData("sprk_invoicesubmission", "sprk_reportdocument,sprk_document", "sprk_document")]
+    [InlineData("sprk_document", "sprk_canonicaldocument,sprk_parentdocument", null)]
+    [InlineData("sprk_invoicesubmission", "sprk_reportdocument,sprk_document", null)]
     [InlineData("sprk_billingexport", "sprk_csvdocument,sprk_jsondocument", null)]
     public void DocumentOwnershipParentColumn_IsFixedByTheTargetTable(string target, string lookups, string? expected) =>
         FieldMappingEndpoints.DocumentOwnershipParentColumn(target, lookups.Split(',')).Should().Be(expected);

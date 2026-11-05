@@ -980,6 +980,12 @@ public static class FieldMappingEndpoints
     /// </summary>
     internal static string? DocumentOwnershipParentColumn(string targetEntity, IReadOnlyCollection<string> documentLookups)
     {
+        // Review round 2 follow-up: the owner's rule (2026-11-04) makes a document a mapping source for an ANALYSIS. Only that
+        // target is resolved here; every other target with several lookups to a document (a document's own, an invoice
+        // submission's) keeps the existing 409, unchanged.
+        if (!string.Equals(targetEntity, DocumentPushTarget, StringComparison.OrdinalIgnoreCase))
+            return null;
+
         if (!Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.TryGetValue(targetEntity, out var lineage))
             return null;
 
@@ -991,6 +997,9 @@ public static class FieldMappingEndpoints
 
         return first is not null && lineage.LookupOrder.Contains(first, StringComparer.OrdinalIgnoreCase) ? first : null;
     }
+
+    /// <summary>The one target a push from a document resolves among several document lookups (task 043): the analysis.</summary>
+    internal const string DocumentPushTarget = "sprk_analysis";
 
     /// <summary>A Dataverse logical name: letters, digits and underscores only (it is interpolated into OData).</summary>
     internal static bool IsLogicalName(string value)
