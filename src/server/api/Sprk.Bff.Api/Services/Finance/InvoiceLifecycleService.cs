@@ -286,9 +286,14 @@ public interface IInvoiceLifecycleService
     /// <param name="invoiceId">The invoice to reopen.</param>
     /// <param name="current">Its status, as the caller read it together with <paramref name="rowVersion"/>.</param>
     /// <param name="rowVersion">Its <c>versionnumber</c> from that same read.</param>
+    /// <param name="reviewDetail">
+    /// 082c-2 fix round 1 (ontology D-205 writer 7, the undo): the review detail the reopened invoice's REMAINING hold reasons derive
+    /// (<c>InvoiceReviewDetail.ReviewDetailOf</c>), written in the same request as the status. The close blanked it, and a reopened invoice that is
+    /// still held for billing terms or a firm must say so. Null: none of the three reasons is open (the detail stays blank).
+    /// </param>
     /// <remarks>Pure: no I/O. The caller owns the transaction and, after it commits, the invoice's re-index (task 152).</remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="rowVersion"/> is not positive (no version was read).</exception>
-    InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion);
+    InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion, int? reviewDetail = null);
 }
 
 /// <summary>
@@ -337,8 +342,8 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
     /// <summary>
     /// 082c-2 (ontology D-205 writers 6 and 7; uac-r2 condition (b)): whether a move to <paramref name="target"/> also writes the review
     /// detail. Every move out of In Review writes it blank in the same write as the status, so a closed invoice never carries a hold label;
-    /// the column is left out only where it does not exist yet. A move back to In Review (the supersede undo) writes nothing: the undo
-    /// reopens the old invoice with the detail it was closed with, blank (known limit, recorded in notes/082-procedure-resolver.md).
+    /// the column is left out only where it does not exist yet. A move back to In Review (the supersede undo) does not blank it: the caller
+    /// passes the detail the reopened invoice's remaining holds derive (fix round 1, F2; see <see cref="BuildSupersedeUndoRequest"/>).
     /// </summary>
     private static bool BlanksReviewDetail(InvoiceLifecycleStatus target) => target != InvoiceLifecycleStatus.InReview;
 
@@ -417,8 +422,8 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
         BuildConditionalTransition(invoiceId, current, InvoiceLifecycleStatus.Superseded, rowVersion);
 
     /// <inheritdoc />
-    public InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion) =>
-        BuildConditionalTransition(invoiceId, current, InvoiceLifecycleStatus.InReview, rowVersion);
+    public InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion, int? reviewDetail = null) =>
+        BuildConditionalTransition(invoiceId, current, InvoiceLifecycleStatus.InReview, rowVersion, reviewDetail);
 
     /// <summary>
     /// The status pair as an update conditional on <paramref name="rowVersion"/>, for one of the <see cref="IsAllowedInTransaction"/> moves.
@@ -426,7 +431,7 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
     /// when the invoice no longer has that version, so a status read earlier is never written over.
     /// </summary>
     private InvoiceTransitionRequestResult BuildConditionalTransition(
-        Guid invoiceId, InvoiceLifecycleStatus current, InvoiceLifecycleStatus target, long rowVersion)
+        Guid invoiceId, InvoiceLifecycleStatus current, InvoiceLifecycleStatus target, long rowVersion, int? reviewDetail = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rowVersion);
 
@@ -451,6 +456,11 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
         if (BlanksReviewDetail(target) && ReviewDetailProbe.WriteColumn)
         {
             row[InvoiceReviewDetail.Column] = null;
+        }
+        else if (!BlanksReviewDetail(target) && reviewDetail is { } detail && ReviewDetailProbe.WriteColumn)
+        {
+            // Fix round 1 (F2, D-205 writer 7's undo): the reopened invoice shows the detail its remaining holds derive, in the status write.
+            row[InvoiceReviewDetail.Column] = InvoiceReviewDetail.ValueOf(detail);
         }
 
         return InvoiceTransitionRequestResult.Built(

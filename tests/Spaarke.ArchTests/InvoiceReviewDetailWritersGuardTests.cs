@@ -17,7 +17,11 @@ namespace Spaarke.ArchTests;
 /// count for the method they were written in). The set of (type, source method) pairs that load it is exactly <see cref="Writers"/> plus
 /// <see cref="NonWriters"/>.</para>
 /// <para><b>Writers</b> (ontology D-205 numbering): (1) the submission persister's held create; (3) the 095d-1 Set firm apply; (6) every exit from
-/// In Review and (7) the correction's Superseded close, both in <see cref="InvoiceLifecycleService"/>, the one home of the invoice status.</para>
+/// In Review and (7) the correction's Superseded close, both in <see cref="InvoiceLifecycleService"/>, the one home of the invoice status.
+/// The supersede undo (fix round 1, F2) is the other half of (7): <c>SubmissionCommitGate.ReopenSupersededAsync</c> derives the detail from the
+/// reopened invoice's remaining holds with <see cref="InvoiceReviewDetail.ReviewDetailOf"/> and hands it to
+/// <see cref="IInvoiceLifecycleService.BuildSupersedeUndoRequest"/>, which writes it in <c>BuildConditionalTransition</c> (listed below). The gate
+/// names no column literal, so <see cref="TheCommitGateUndoDerivesTheDetail"/> pins that it derives one.</para>
 /// <para><b>Pending writers</b> (each must recompute from the invoice's REMAINING reasons in its own transaction, and be added here): (2) the
 /// re-check that clears a gap or unresolved (no 082c-2 path clears one: 082d / 101's correction re-evaluation and the ebilling-r2 explicit
 /// re-check); (4) the 095d-2 re-run; (5) the 114 Override release; (8) the 089e chain close, only if it ends In Review (C19).</para>
@@ -71,6 +75,21 @@ public sealed class InvoiceReviewDetailWritersGuardTests
         Assert.True(stale.Count == 0, $"These reviewed methods no longer name {Column}; remove them: {string.Join(", ", stale)}");
     }
 
+    [Fact(DisplayName = "082c-2 fix round 1 (F2): the supersede undo derives the review detail (ReviewDetailOf) in SubmissionCommitGate.ReopenSupersededAsync")]
+    public void TheCommitGateUndoDerivesTheDetail()
+    {
+        var derivers = MethodsCallingReviewDetailOf(IlCallScan.WithNested(typeof(SubmissionCommitGate)));
+
+        Assert.True(derivers.Contains($"{typeof(SubmissionCommitGate).FullName}::ReopenSupersededAsync"),
+            "The supersede undo reopens the old invoice In Review, so it must carry the detail the invoice's remaining holds derive (D-205 writer 7). "
+            + $"SubmissionCommitGate no longer calls InvoiceReviewDetail.ReviewDetailOf in ReopenSupersededAsync; it calls it in: {string.Join(", ", derivers)}");
+
+        // Controls: a method that calls ReviewDetailOf is seen; one that does not, is not.
+        Assert.Contains(Key((typeof(ReviewDetailDeriverControlFixture), nameof(ReviewDetailDeriverControlFixture.Derive))),
+            MethodsCallingReviewDetailOf(IlCallScan.WithNested(typeof(ReviewDetailDeriverControlFixture))));
+        Assert.Empty(MethodsCallingReviewDetailOf(IlCallScan.WithNested(typeof(ReviewDetailUnrelatedControlFixture))));
+    }
+
     [Fact(DisplayName = "082c-2 controls: the scan fires on a method that names the column, and not on one that names another column")]
     public void Controls()
     {
@@ -80,6 +99,12 @@ public sealed class InvoiceReviewDetailWritersGuardTests
     }
 
     private static string Key((Type Type, string Method) entry) => $"{entry.Type.FullName}::{entry.Method}";
+
+    private static HashSet<string> MethodsCallingReviewDetailOf(IEnumerable<Type> types) =>
+        IlCallScan.MethodReferences(types)
+            .Where(r => r.Target.Name == nameof(InvoiceReviewDetail.ReviewDetailOf) && r.Target.DeclaringType == typeof(InvoiceReviewDetail))
+            .Select(r => Key((IlCallScan.Outermost(r.Caller), IlCallScan.SourceMethodName(r.Caller, r.CallerMethod))))
+            .ToHashSet(StringComparer.Ordinal);
 
     private static HashSet<string> MethodsNamingTheColumn(IEnumerable<Type> types) =>
         IlCallScan.StringLoads(types)
@@ -92,6 +117,12 @@ public sealed class InvoiceReviewDetailWritersGuardTests
 internal static class ReviewDetailWriterControlFixture
 {
     public static string Write() => "sprk_reviewdetail";
+}
+
+/// <summary>Derives the detail from reasons (must-fire for the derivation scan). Never run; only its IL is read.</summary>
+internal static class ReviewDetailDeriverControlFixture
+{
+    public static int? Derive() => InvoiceReviewDetail.ReviewDetailOf(null);
 }
 
 /// <summary>Names another column only (must-not-fire).</summary>

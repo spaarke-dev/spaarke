@@ -101,8 +101,8 @@ public sealed class InvoiceReviewDetailLifecycleTests
         }
     }
 
-    [Fact(DisplayName = "082c-2 (D-205 writer 7): the correction's Superseded close blanks the detail in the same request; the undo writes none")]
-    public void Supersede_Blanks_TheUndoDoesNotWrite()
+    [Fact(DisplayName = "082c-2 (D-205 writer 7): the correction's Superseded close blanks the detail in the same request; the undo writes none unless the caller derived one")]
+    public void Supersede_Blanks_TheUndoWritesOnlyADerivedDetail()
     {
         var stored = new StoredInvoice();
         var lifecycle = Lifecycle(stored);
@@ -113,8 +113,28 @@ public sealed class InvoiceReviewDetailLifecycleTests
         stored.ShouldHoldTheInvariant("the Superseded close");
 
         var undo = lifecycle.BuildSupersedeUndoRequest(InvoiceId, InvoiceLifecycleStatus.Superseded, (long)stored.Row["versionnumber"]!);
-        undo.Request!.Target.Attributes.Keys.Should().NotContain(InvoiceReviewDetail.Column,
-            "the undo reopens the invoice as it was closed (known limit: the detail stays blank until its next writer)");
+        undo.Request!.Target.Attributes.Keys.Should().NotContain(InvoiceReviewDetail.Column, "no detail was derived: no hold is open, so blank is right");
+
+        // Fix round 1 (F2): the commit gate derives the detail from the reopened invoice's remaining holds and the undo carries it in the status write.
+        var withDetail = lifecycle.BuildSupersedeUndoRequest(
+            InvoiceId, InvoiceLifecycleStatus.Superseded, (long)stored.Row["versionnumber"]!, InvoiceReviewDetail.WaitingForBillingTerms);
+        withDetail.Request!.Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value.Should().Be(659490000);
+        withDetail.Request.Target.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+        stored.Apply(withDetail.Request);
+        stored.Status.Should().Be(InvoiceLifecycleStatus.InReview);
+        stored.ShouldHoldTheInvariant("the undo with a derived detail: In Review may carry one");
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 1: the undo's detail is left out where the column does not exist yet, and the reopen still happens")]
+    public void Undo_WithADetail_ColumnMissing_LeavesItOut()
+    {
+        var stored = new StoredInvoice();
+        var lifecycle = Lifecycle(stored, columnPresent: false);
+
+        var undo = lifecycle.BuildSupersedeUndoRequest(InvoiceId, InvoiceLifecycleStatus.Superseded, 9, InvoiceReviewDetail.WaitingForFirm);
+
+        undo.Succeeded.Should().BeTrue();
+        undo.Request!.Target.Attributes.Keys.Should().BeEquivalentTo("statecode", "statuscode");
     }
 
     [Fact(DisplayName = "082c-2 (mismatch): where the column does not exist yet, every move still happens and leaves the column out")]

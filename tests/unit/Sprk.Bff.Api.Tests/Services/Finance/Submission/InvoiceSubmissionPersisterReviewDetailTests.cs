@@ -91,6 +91,76 @@ public partial class InvoiceSubmissionPersisterTests
         InvoiceProcedureHold.ReasonsOf(submission).Should().Contain(SubmissionReasonCodes.ProcedureGap, "the hold is the stored state, not the column");
     }
 
+    [Fact(DisplayName = "082c-2 fix round 1 (D-205 writer 1, the no-firm case): an Internal no-firm held create writes 'Waiting for the firm to be confirmed' on the invoice create")]
+    public async Task ReviewDetail_NoFirmInternalHold_IsWaitingForTheFirm()
+    {
+        var outcome = await NoFirmTwoLines().RunAsync();
+        outcome.Submission!.FirmId.Should().BeNull("the setup: a submission with no firm");
+        var store = NoFirmStore();
+
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+
+        var invoice = CreatedInvoice(store);
+        invoice.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+        invoice.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value.Should().Be(InvoiceReviewDetail.WaitingForFirm).And.Be(659490002);
+        invoice.Attributes.Should().NotContainKey("sprk_vendororg", "the same create holds the invoice for the firm");
+    }
+
+    private static void TamperTheStagedBlob(Store s) =>
+        s.Files.Gateway.Overwrite(s.StagedBlob!.Container, s.StagedBlob.BlobPath, "%PDF-tampered"u8.ToArray(), s.Files.Gateway.Now.AddMinutes(5));
+
+    [Fact(DisplayName = "082c-2 fix round 1 (D-205 writer 7, the undo; F2): the undo of a correction reopens a held-for-gap invoice In Review WITH its gap detail, in the status request")]
+    public async Task SupersedeUndo_ReopensAHeldInvoice_WithTheDetailItsRemainingHoldsDerive()
+    {
+        object? detailAfterTheClose = "unset";
+        var store = CorrectionStore(afterCommit: s =>
+        {
+            detailAfterTheClose = s.OldInvoice!.Contains(InvoiceReviewDetail.Column) ? s.OldInvoice[InvoiceReviewDetail.Column] : null;
+            TamperTheStagedBlob(s);
+        });
+        store.OldInvoice![InvoiceReviewDetail.Column] = new OptionSetValue(InvoiceReviewDetail.WaitingForBillingTerms);
+        store.OldInvoiceSubmissions.Add(new Entity("sprk_invoicesubmission", EarlierSubmission)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", OldInvoiceId),
+            ["sprk_outcomereasoncode"] = SubmissionReasonCodes.ProcedureGap,
+        });
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        result.UndoHeld.Should().BeFalse();
+        detailAfterTheClose.Should().BeNull("the Superseded close blanked the detail in the same request (writer 7)");
+        store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+        store.OldInvoiceWrites.Should().ContainSingle("the reopen is one request");
+        store.OldInvoiceWrites[0].Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value
+            .Should().Be(InvoiceReviewDetail.WaitingForBillingTerms).And.Be(659490000, "the detail travels with the status, not in a later write");
+        store.OldInvoice.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value.Should().Be(659490000);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 1 (F2): the undo derives the detail from the firm hold too, and leaves it blank when no hold is open")]
+    public async Task SupersedeUndo_FirmHoldGivesTheFirmDetail_NoHoldGivesNone()
+    {
+        // A no-firm invoice held for its firm (and for a gap) is corrected by a no-firm correction (095c-3/5: a firm on one side only is refused).
+        var firmHeld = NoFirmStore(CorrectionStore(afterCommit: TamperTheStagedBlob));
+        firmHeld.OldInvoice!.Attributes.Remove("sprk_vendororg");
+        firmHeld.OldInvoice[InvoiceFirmHold.InvoiceHoldColumn] = SubmissionReasonCodes.FirmMissing;
+        firmHeld.OldInvoiceSubmissions.Add(new Entity("sprk_invoicesubmission", EarlierSubmission)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", OldInvoiceId),
+            ["sprk_outcomereasoncode"] = SubmissionReasonCodes.ProcedureGap,
+        });
+        (await firmHeld.Build().PersistAsync(await CorrectionOutcomeAsync(InvoiceSubmissionProcessorTests.NoFirm()), null))
+            .Status.Should().Be(SubmissionPersistStatus.Undone);
+        firmHeld.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+        firmHeld.OldInvoice!.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value
+            .Should().Be(InvoiceReviewDetail.WaitingForFirm, "the firm comes before the gap (D-205 priority)");
+
+        var notHeld = CorrectionStore(afterCommit: TamperTheStagedBlob);
+        (await notHeld.Build().PersistAsync(await CorrectionOutcomeAsync(), null)).Status.Should().Be(SubmissionPersistStatus.Undone);
+        notHeld.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+        notHeld.OldInvoiceWrites.Should().ContainSingle().Which.Target.Attributes.Keys.Should().NotContain(InvoiceReviewDetail.Column, "no hold is open: blank is a normal review");
+    }
+
     [Theory(DisplayName = "082c-2: HoldReasonsOf names the same Procedure holds the stored-state reader finds in what the outcome persists")]
     [InlineData("gap")]
     [InlineData("unresolved")]

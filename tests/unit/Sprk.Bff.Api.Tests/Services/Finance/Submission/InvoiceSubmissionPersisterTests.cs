@@ -3426,10 +3426,16 @@ public partial class InvoiceSubmissionPersisterTests
                         return Task.FromResult(new EntityCollection(OldInvoice is { } held && asked.Contains(held.Id) ? [Copy(held)] : []));
                     }
 
+                    // The submissions that name an invoice (InvoiceFirmHold's In read; 082c-2 fix round 1: InvoiceProcedureHold's Equal read, which the
+                    // supersede undo makes of the old invoice): only OldInvoiceSubmissions, empty unless a test plants one.
                     if (q.EntityName == FinanceBaseValues.SubmissionEntity
-                        && q.Criteria.Conditions.Any(c => c.AttributeName == InvoiceSubmissionPersister.SubmissionInvoice && c.Operator == ConditionOperator.In))
+                        && q.Criteria.Conditions.Any(c => c.AttributeName == InvoiceSubmissionPersister.SubmissionInvoice
+                            && (c.Operator == ConditionOperator.In || c.Operator == ConditionOperator.Equal)))
                     {
-                        return Task.FromResult(new EntityCollection());
+                        var named = q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToHashSet();
+                        return Task.FromResult(new EntityCollection(OldInvoiceSubmissions
+                            .Where(s => s.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice) is { } r && named.Contains(r.Id))
+                            .Select(Copy).ToList()));
                     }
 
                     return Task.FromResult(q.EntityName == InvoiceSubmissionPersister.LineEntity
@@ -3773,6 +3779,9 @@ public partial class InvoiceSubmissionPersisterTests
 
         /// <summary>Task 097c: the old invoice as Dataverse keeps it (statecode, statuscode, versionnumber, firm, core lookup); null: none.</summary>
         public Entity? OldInvoice { get; set; }
+
+        /// <summary>082c-2 fix round 1: submission rows that name the old invoice (its stored outcome reason and findings), as the holds read them.</summary>
+        public List<Entity> OldInvoiceSubmissions { get; } = [];
 
         /// <summary>Task 095c-5 review K1: non-null, the app-only read of the replaced invoice's firm hold throws this.</summary>
         public Exception? HoldReadFault { get; set; }

@@ -543,7 +543,17 @@ public class SubmissionCommitGate
 
         var version = old.GetAttributeValue<long?>(InvoiceReviewService.VersionNumber)
             ?? throw new InvalidOperationException($"The versionnumber of invoice {oldId} could not be read; its reopen is held.");
-        var built = _lifecycle.BuildSupersedeUndoRequest(oldId, current, version);
+        // 082c-2 fix round 1 (F2, D-205 writer 7's undo): the close blanked the review detail; the reopened invoice is In Review again with
+        // whatever holds it still has, so its detail is derived from them (the Procedure reasons the stored submissions name, plus the firm hold),
+        // in the same request as the status. A read fault propagates: the undo is held and retried, as for every other read here.
+        var remaining = new HashSet<string>(
+            await InvoiceProcedureHold.ReasonsAsync(_entities, oldId, ct).ConfigureAwait(false), StringComparer.Ordinal);
+        if (await InvoiceFirmHold.IsHeldAsync(_entities, oldId, ct).ConfigureAwait(false))
+        {
+            remaining.Add(SubmissionReasonCodes.FirmMissing);
+        }
+
+        var built = _lifecycle.BuildSupersedeUndoRequest(oldId, current, version, InvoiceReviewDetail.ReviewDetailOf(remaining));
         if (!built.Succeeded)
         {
             // Defensive: the builder refuses only a status other than Superseded, which returned above.

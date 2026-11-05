@@ -599,7 +599,7 @@ internal sealed class WorldLifecycle(ExportDataverse dataverse) : IInvoiceLifecy
     public InvoiceTransitionRequestResult BuildSupersedeRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion) =>
         throw new NotSupportedException();
 
-    public InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion) =>
+    public InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion, int? reviewDetail = null) =>
         throw new NotSupportedException();
 }
 

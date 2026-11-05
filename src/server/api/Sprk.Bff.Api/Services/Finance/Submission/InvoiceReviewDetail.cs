@@ -27,10 +27,11 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// <c>scripts/ebilling/Deploy-EbillingInvoiceReviewDetailColumn.ps1 -Verify</c> and by the unit tests.</para>
 /// <para><b>Writers</b> (each named in <c>InvoiceReviewDetailWritersGuardTests</c>): the submission persister's held create; the 095d-1 Set firm
 /// apply (<c>InvoiceAssignFirmService</c>, recomputed from the remaining Procedure reasons); <see cref="InvoiceLifecycleService"/>'s every move
-/// out of In Review (approve, reject, return to firm, cancel; and Approved / Sent to AP / Paid onwards) and the correction's Superseded close.
+/// out of In Review (approve, reject, return to firm, cancel; and Approved / Sent to AP / Paid onwards) and the correction's Superseded close,
+/// whose undo (<c>SubmissionCommitGate.ReopenSupersededAsync</c>) reopens the invoice with the detail its remaining holds derive (fix round 1).
 /// Pending writers, each to recompute from the remaining reasons in its own transaction: the re-check that clears a gap or unresolved (no
-/// 082c-2 path clears one; 082d / 101 and the ebilling-r2 re-check), the 095d-2 re-run, the 114 Override release, and the 089e chain close
-/// if it ends In Review (C19).</para>
+/// 082c-2 path clears one; 082d / 101 and the ebilling-r2 re-check), the 095d-2 re-run and the 114 Override release. The 089e chain close is
+/// NOT a writer: it writes the Signal only (C19), so it neither sets nor clears an invoice's detail.</para>
 /// <para><b>Not a hold.</b> Approval reads the stored submission state (<see cref="InvoiceProcedureHold"/>, <see cref="InvoiceFirmHold"/>), so
 /// the holds hold on an environment where this column does not exist yet (<see cref="ReviewDetailColumnProbe"/>).</para>
 /// </remarks>
