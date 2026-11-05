@@ -4,7 +4,7 @@
     <title>A Document is a field-mapping source: the caller's Read on the document decides, through the Document access path (owner 2026-11-04)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
     <gate>031 merged to master</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api (MappingSourceReadProbe, MappingSourceCallerMask, the push source check, the analysis create response); a caller Read decision (tags bff-api, security).</rigor-reason>
     <model-tier>opus</model-tier>
