@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Signal, Decision Record and Budget Revision rows are changed only by their writers: the generic update tools refuse them (owner 2026-11-04, D-204 extended)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>042c merged (PR #2569): the CreatedOnlyByItsWriter registry flag exists on master</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes refusal behaviour on chat and playbook update paths in the BFF (.cs, bff-api); security-adjacent integrity rule reviewed by UAC-r2 and ontology.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Three update paths owned by different features; must not break the writers' own updates or #2568's existing-only update rule.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches the update handlers, not RecordCreationService or CallerWriteAuthorization; may run beside 043 and 046. Not beside 044/045 if they edit the same handlers (check with /conflict-check).</parallel-reason>
+    <deps>042c</deps>
+    <tags>bff-api, ai, security, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the generic update tools refuse to change sprk_signal, sprk_decisionrecord and sprk_budgetrevision, for the caller and for the BFF identity, before anything is written: the chat update-record tool, the playbook Update Record node, and the playbook output-mapping update (unless ontology names a legitimate use; see constraints). Reuse 042c's registry flag (`RecordTableRule.CreatedOnlyByItsWriter`) so create and update read one list. The writers' own updates (SignalWriter lifecycle, SignalEvaluationService, the decision commit, DecisionRecordWriter, the budget revision executor) are unchanged.</prompt>
+  <role>SPAARKE platform developer, BFF write path and AI tool handlers. Security fails closed. Follow ADRs strictly.</role>
+  <goal>A chat or playbook update aimed at one of the three tables is refused with one clear message and nothing written; every other table's update is unchanged; the writers still update these rows; a guard keeps the update tools and the registry in agreement.</goal>
+
+  <context>
+    <background>Owner decision 2026-11-04 (notes/decisions.md, "changed only by their writers"), extending D-204 from create to update at ontology's request; UAC-r2 classifies it as an integrity rule, not an access defect. Read-only census on dev 2026-11-04: none of the 93 sprk_playbooknode rows with a config names these tables, so no configured playbook breaks. #2568 (master 909754869f) already moved the generic update paths to existing-only updates (UpdateExistingRecordFieldsAsync) and added UpdateRecordFieldsCallerGuardTests; keep both.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseUpdateRecordHandler.cs (the chat update-record tool: validate and execute)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/UpdateRecordActionCore.cs and Services/Ai/Nodes/UpdateRecordNodeExecutor.cs (the playbook Update Record node)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/DataverseUpdateHandler.cs (playbook output mapping), subject to ontology's answer</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (CreatedOnlyByItsWriter, 042c) and DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter / CreatedOnlyByItsWriterCreateBlockedMessage (042c): copy the shape for updates</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/WriterOnlyTablesWritersGuardTests.cs (042c) and the registry guard: extend or copy for the update tools</file>
+      <file role="canonical-reference">Writers (read only, must keep working): Services/Signals/SignalWriter.cs, DecisionRecordWriter.cs, DecisionCommitService.cs, Services/Finance/SignalEvaluationService.cs, the budget revision path in DecisionActionExecutors.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="042c" status="required">The CreatedOnlyByItsWriter registry flag and the writers guard.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §6 gotcha 2026-10-20">Brief line 1: `git switch -c task/fm-048 &lt;tip of work/field-mapping-server-write-path-r1&gt;` (must contain 042c's merge), then confirm this POML exists on the branch.</constraint>
+    <constraint source="owner 2026-11-04">Scope is the generic update tools only. Do not change any writer, SignalEvaluationService, the decision commit, or the create path. Chat keeps updating every other table.</constraint>
+    <constraint source="ontology 2026-11-04">Playbook output mapping (DataverseUpdateHandler) is included unless ontology names a legitimate playbook that writes one of the three tables through it; record ontology's answer in the notes before coding that part.</constraint>
+    <constraint source="#2568 / UAC-r2">Keep #2568's existing-only update rule and UpdateRecordFieldsCallerGuardTests; add no caller of UpdateRecordFieldsAsync.</constraint>
+    <constraint source="NFR-07">One new refusal message for an update of these tables, modelled on 042c's create message; no existing refusal's kind, code or wording changes.</constraint>
+    <constraint source="confidentiality (repo is public)">Notes, PR text and commits state the goal positively ("these rows are changed only by their writers"); no scenario of misuse.</constraint>
+    <constraint source="ADR-038">KEEP paths only (tests/integration/**, tests/Spaarke.ArchTests/**); no new file under tests/unit/Sprk.Bff.Api.Tests/**.</constraint>
+    <constraint source="CLAUDE.md §10">Placement, publish delta against a fresh master build, CVE check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/field-mapping-server-write-path-r1/notes/decisions.md (2026-11-04 D-204 sections)</file>
+      <file>projects/field-mapping-server-write-path-r1/notes/task-042c-notes.md (Fix round 4)</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Branch (constraint 1); declare FULL rigor; /conflict-check for the update handlers.</step>
+    <step order="1">Inventory every generic update path that can target the three tables (chat update tool, Update Record node, output mapping, any other caller of UpdateExistingRecordFieldsAsync with a caller-chosen table); record it in notes/task-048-notes.md with ontology's answer on output mapping.</step>
+    <step order="2">Write the must-fire and must-not-fire tests failing first; add the refusal reading the registry flag at the earliest point of each path, before any Dataverse call.</step>
+    <step order="3">Build; verify-suites.sh and ArchTests; publish delta; CVE. One Opus adversarial pass; fix every finding.</step>
+    <step order="4">Send the diff to UAC-r2 and ontology; record both verdicts; then merge to the work branch and open the PR with auto-merge.</step>
+    <step order="5">After merge: TASK-INDEX `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any first-party flow updates one of the three tables through a generic update path, STOP and escalate to the owner with the flow named.</trigger>
+    <trigger>If a writer's own update would be refused, STOP.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>042c's CreatedOnlyByItsWriter flag and the create-side refusals in RecordCreationService and DataverseCreateRecordHandler.</existing>
+    <extension>Yes: the update tools read the same flag; no new registry, service, endpoint or package.</extension>
+    <cost-of-doing-nothing>The owner's rule that these rows are changed only by their writers holds for creates but not for chat or playbook updates.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">The refusal in the chat update tool, the Update Record node and (per ontology) output mapping</output>
+    <output type="test">Must-fire / must-not-fire tests at KEEP paths; the guard extended to the update tools</output>
+    <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-048-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: for each of the three tables, a chat update (validate and execute) and a playbook Update Record node run are refused with the new message and make no Dataverse write; output mapping likewise unless ontology's recorded answer excludes it.</criterion>
+    <criterion testable="true">AC2 (must-not-fire): an update of another table (e.g. sprk_matter, sprk_event) through each path is unchanged; existing suites pass with unchanged assertions.</criterion>
+    <criterion testable="true">AC3 (writers untouched): a Signal lifecycle update by SignalWriter, a SignalEvaluationService run and a decision commit still update these rows.</criterion>
+    <criterion testable="true">AC4: a guard fails if an update tool stops reading the registry flag (seeded drift caught; clean passes).</criterion>
+    <criterion testable="true">AC5: build 0 warnings; verify-suites.sh and ArchTests pass; publish delta and CVE recorded; UAC-r2's verdict and ontology's pass are in the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>Added 2026-11-04 from the owner's decision extending D-204 to updates. Release note: chat and playbook update tools no longer change Signal, Decision Record or Budget Revision rows; those are changed by their own processes (Signal evaluation, decision commit).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
