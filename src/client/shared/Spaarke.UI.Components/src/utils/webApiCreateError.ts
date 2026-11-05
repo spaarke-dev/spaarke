@@ -34,6 +34,9 @@ const ACCESS_DENIED_PATTERNS: readonly RegExp[] = [
 /** The BFF child-record route's reasonCode for a refusal by the caller's own rights (ChildRecordEndpoints.DeniedCode). */
 const BFF_CHILD_RECORD_DENIED = 'child_record.denied';
 
+/** The route's uniform not-found (ChildRecordEndpoints.NotFoundCode): a record the payload binds, or the parent, that the caller cannot use. */
+const BFF_CHILD_RECORD_NOT_FOUND = 'child_record.not_found';
+
 /**
  * The privilege a refusal names, as Dataverse writes it: `prvAppendToContact`, `prvCreatesprk_Project`, or the filled
  * "does not have AppendToAccess right(s)" form, or the SecLib "AccessRights: AppendToAccess" form. AppendTo is listed
@@ -100,18 +103,38 @@ function messageOf(err: unknown): string {
   return '';
 }
 
+/** Options for {@link describeWebApiCreateError}. */
+export interface IDescribeCreateErrorOptions {
+  /** True when the record is created with no parent (a root create, for example a matter): the route's "filed under" not-found text does not apply. */
+  rootCreate?: boolean;
+}
+
 /**
  * Describe a create (or update) failure for the user.
  *
  * @param err        What the save threw (an `Xrm.WebApi` error object, an `Error`, or anything else).
  * @param recordNoun The record being saved, as the sentence names it ("project", "matter", "to do").
+ * @param options    `rootCreate` for a record created with no parent (see {@link IDescribeCreateErrorOptions}).
  */
-export function describeWebApiCreateError(err: unknown, recordNoun: string): IWebApiCreateErrorText {
+export function describeWebApiCreateError(
+  err: unknown,
+  recordNoun: string,
+  options?: IDescribeCreateErrorOptions
+): IWebApiCreateErrorText {
   const raw = messageOf(err).trim();
   const code = codeOf(err);
 
   if (reasonCodeOf(err) === BFF_CHILD_RECORD_DENIED) {
     return { message: neutralSentence(recordNoun), isAccessDenied: true };
+  }
+
+  // A ROOT create has no parent, so the route's detail ("A record this matter is filed under was not found") is wrong:
+  // the not-found can only be one of the values the user selected (a bound lookup it may not use).
+  if (options?.rootCreate && reasonCodeOf(err) === BFF_CHILD_RECORD_NOT_FOUND) {
+    return {
+      message: `One of the values you selected was not found, or you don't have permission to link it to this ${recordNoun}. Ask your administrator.`,
+      isAccessDenied: true,
+    };
   }
 
   if ((code !== undefined && ACCESS_DENIED_CODES.has(code)) || ACCESS_DENIED_PATTERNS.some(p => p.test(raw))) {

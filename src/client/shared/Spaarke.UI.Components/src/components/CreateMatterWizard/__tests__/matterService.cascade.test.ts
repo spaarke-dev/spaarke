@@ -20,7 +20,9 @@
 import { MatterService } from '../matterService';
 import type { ICreateMatterFormState } from '../formTypes';
 import type { IDataService } from '../../../types/serviceInterfaces';
+import { EntityCreationService } from '../../../services/EntityCreationService';
 import type { IUserBuCascadeDefaults } from '../../../services/EntityCreationService';
+import type { IUploadedFile } from '../wizardTypes';
 
 const MOCK_BU_ID = 'bu-guid-xyz';
 const MOCK_CONTAINER_ID = 'spe-container-from-host';
@@ -178,5 +180,53 @@ describe('MatterService — BU cascade defaults are not written onto the matter 
     expectNoCascadeColumns(createBody(fetchMock));
     expect(dataService.retrieveRecord).not.toHaveBeenCalledWith('businessunit', expect.anything(), expect.anything());
     expect(dataService.retrieveRecord).not.toHaveBeenCalledWith('systemuser', expect.anything(), expect.anything());
+  });
+});
+
+// Fix round 1 (task 021, finding 4): the server's FileIndexRequest has no searchIndexName (FR-40: the index follows the
+// content type), so the wizard no longer names an index when it indexes the uploaded files.
+describe('MatterService — file indexing names no search index (task 021 fix round 1)', () => {
+  beforeEach(() => {
+    jest.spyOn(console, 'info').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('calls indexUploadedFiles without a search index name, even when the host resolved one', async () => {
+    const file = { id: 'item-1', name: 'a.pdf', size: 10, webUrl: 'https://x/a.pdf', driveId: 'b!drive' };
+    jest.spyOn(EntityCreationService.prototype, 'uploadFilesToSpe').mockResolvedValue({
+      success: true,
+      successCount: 1,
+      failureCount: 0,
+      uploadedFiles: [file],
+      errors: [],
+    } as never);
+    jest
+      .spyOn(EntityCreationService.prototype, 'createDocumentRecords')
+      .mockResolvedValue({ success: true, linkedCount: 1, createdDocumentIds: ['doc-1'], warnings: [] });
+    const index = jest.spyOn(EntityCreationService.prototype, 'indexUploadedFiles').mockResolvedValue([]);
+    const cascadeDefaults: IUserBuCascadeDefaults = {
+      businessUnitId: MOCK_BU_ID,
+      containerId: MOCK_CONTAINER_ID,
+      searchIndexName: MOCK_BU_SEARCH_INDEX,
+    };
+
+    const result = await new MatterService(
+      makeDataService(),
+      makeFetch(),
+      BFF_BASE,
+      MOCK_CONTAINER_ID,
+      'tenant-1'
+    ).createMatter(makeForm(), [{ id: 'u1', name: 'a.pdf' } as unknown as IUploadedFile], {}, cascadeDefaults);
+
+    expect(result.status).not.toBe('error');
+    expect(index).toHaveBeenCalledTimes(1);
+    const args = index.mock.calls[0];
+    expect(args).toHaveLength(4);
+    expect(JSON.stringify(args)).not.toContain(MOCK_BU_SEARCH_INDEX);
   });
 });

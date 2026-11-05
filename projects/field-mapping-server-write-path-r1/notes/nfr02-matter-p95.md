@@ -22,7 +22,13 @@
 
 **Cleanup.** The 2 × (≥ 20 + 1) test matters are test data on dev. Name them with a fixed prefix (`NFR02-before-…`, `NFR02-after-…`) so they can be found; deleting them is a write to existing rows and needs the owner's OK.
 
+## How the 2026-11-05 run differed, and how a browser run must observe (fix round 1)
+
+The stub's in-frame `PerformanceObserver` cannot see the OLD path's create: `Xrm.WebApi` sends `POST sprk_matters` from the PARENT frame, not the code page's iframe, so a `resource` entry never appears in the frame's timeline. The 2026-11-05 run therefore used a **scripted HTTP replay** of each side's network sequence (see `task-021-live.md`, deviation 1), not this method. A future browser run must observe at the **top window** (the observer registered in the page that sends the request), or use Playwright `requestfinished` (or `page.on("response")` with `request.timing()`) so both the parent-frame Xrm create and the iframe's BFF call are seen.
+
 ## Results
+
+The live results are in `task-021-live.md` (verdict FAIL: p95 +2634 ms against the +500 ms budget).
 
 | Run | Bundle / BFF build | n | p50 (ms) | p95 (ms) | max (ms) |
 |---|---|---|---|---|---|

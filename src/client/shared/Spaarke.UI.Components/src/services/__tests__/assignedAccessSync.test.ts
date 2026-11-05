@@ -118,28 +118,25 @@ describe('the client writers call the sync route after their create (criterion 1
   const matterFetch = (): jest.Mock =>
     jest.fn(async (url: string) => (url === MATTER_ROUTE ? ok({ id: CREATED }) : ok()));
 
-  it('Create Matter: syncs the created matter', async () => {
+  // Fix round 1 (task 021): on a root create the server runs AssignedAccessMaterializer.RunAfterWriteAsync in the create
+  // request, so the Create Matter wizard no longer calls the sync route (a second grant pass would only repeat it).
+  it('Create Matter: does NOT call the sync route -- the server grants the Assigned * access inside the create', async () => {
     const fetchMock = matterFetch();
 
     const result = await new MatterService(dataService(), fetchMock, BFF).createMatter(matterForm, [], {});
 
     expect(result.status).not.toBe('error');
-    expect(syncCalls(fetchMock)).toEqual([{ url: SYNC_URL, body: { recordType: 'matter', recordId: CREATED } }]);
+    expect(fetchMock.mock.calls.some(([url]) => url === MATTER_ROUTE)).toBe(true);
+    expect(syncCalls(fetchMock)).toEqual([]);
   });
 
-  it('Create Matter: a failed sync is logged and does NOT fail the wizard', async () => {
-    const fetchMock = jest.fn(async (url: string) =>
-      url === SYNC_URL
-        ? Promise.reject(new TypeError('Failed to fetch'))
-        : url === MATTER_ROUTE
-          ? ok({ id: CREATED })
-          : ok()
-    );
+  it('Create Matter: with an Assigned attorney, the create still succeeds and no access-sync warning is logged', async () => {
+    const fetchMock = matterFetch();
 
     const result = await new MatterService(dataService(), fetchMock, BFF).createMatter(matterForm, [], {});
 
-    expect(result.status).not.toBe('error');
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('[AssignedAccessSync]'), expect.anything());
+    expect(result.status).toBe('success');
+    expect(console.warn).not.toHaveBeenCalledWith(expect.stringContaining('[AssignedAccessSync]'), expect.anything());
   });
 
   const projectForm: ICreateProjectFormState = {

@@ -394,3 +394,78 @@ describe('the BFF-routed create wizards show the neutral sentence for the BFF re
     expect(result.errorMessage).not.toMatch(/prv|sprk_/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix round 1 (task 021, F1): a ROOT create (the matter has no parent) answers the uniform 404 when a value it binds
+// is missing or not the caller's to use. The shared sentence says "a record this matter is filed under", which is wrong
+// here: the matter is filed under nothing. The matter's catch maps it to the sentence below.
+// ---------------------------------------------------------------------------
+
+const ROOT_NOT_FOUND_SENTENCE =
+  "One of the values you selected was not found, or you don't have permission to link it to this matter. Ask your administrator.";
+
+const BFF_NOT_FOUND = {
+  type: 'https://tools.ietf.org/html/rfc9110#section-15.5.5',
+  title: 'Not found',
+  status: 404,
+  detail: 'A record this matter is filed under was not found. The matter was not saved.',
+  reasonCode: 'child_record.not_found',
+};
+
+describe('a root create (matter) that gets the BFF uniform not-found', () => {
+  beforeEach(() => {
+    (global as any).fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ value: [] }) });
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(console, 'info').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('describeWebApiCreateError with { rootCreate: true } maps child_record.not_found to the access-denied sentence', () => {
+    const err = new ChildRecordWriteError(BFF_NOT_FOUND.detail, 404, 'child_record.not_found');
+    expect(describeWebApiCreateError(err, 'matter', { rootCreate: true })).toEqual({
+      message: ROOT_NOT_FOUND_SENTENCE,
+      isAccessDenied: true,
+    });
+  });
+
+  it('without the option the not-found keeps its own detail (the child wizards still say "filed under")', () => {
+    const err = new ChildRecordWriteError(BFF_NOT_FOUND.detail, 404, 'child_record.not_found');
+    expect(describeWebApiCreateError(err, 'to do')).toEqual({ message: BFF_NOT_FOUND.detail, isAccessDenied: false });
+  });
+
+  it('the Matter wizard shows the sentence, never "filed under", and does not prefix "Failed to create"', async () => {
+    const fetch = throwingAuthenticatedFetch(async (url: string, init?: RequestInit) =>
+      CHILD_CREATE.test(url) && (init?.method ?? 'GET').toUpperCase() === 'POST'
+        ? fakeResponse(404, BFF_NOT_FOUND)
+        : fakeResponse(200, {})
+    );
+
+    const result = await new MatterService(readOnlyDataService(), fetch, BFF).createMatter(MATTER_FORM, [], {});
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toBe(ROOT_NOT_FOUND_SENTENCE);
+    expect(result.errorMessage).not.toMatch(/filed under/i);
+  });
+
+  it('a different reasonCode on the matter create still gets the "Failed to create matter record" prefix', async () => {
+    const fetch = throwingAuthenticatedFetch(async (url: string, init?: RequestInit) =>
+      CHILD_CREATE.test(url) && (init?.method ?? 'GET').toUpperCase() === 'POST'
+        ? fakeResponse(400, {
+            title: 'Bad',
+            status: 400,
+            detail: 'Name is required.',
+            reasonCode: 'child_record.invalid',
+          })
+        : fakeResponse(200, {})
+    );
+
+    const result = await new MatterService(readOnlyDataService(), fetch, BFF).createMatter(MATTER_FORM, [], {});
+
+    expect(result.errorMessage).toBe('Failed to create matter record: Name is required.');
+  });
+});

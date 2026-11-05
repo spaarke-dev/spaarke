@@ -36,7 +36,6 @@ import type {
 import type { AuthenticatedFetchFn as ThrowingFetchFn } from '../../utils/fetchTypes';
 import { createRecordViaBffWithWarnings } from '../../utils/adapters/bffChildWriteAdapter';
 import { cleanGuid, discoverNavProps, toNavPropMap } from '../../services/PolymorphicResolverService';
-import { syncAssignedAccess } from '../../services/assignedAccessSync';
 
 // ---------------------------------------------------------------------------
 // Contact type (used by AssignCounselStep search results)
@@ -184,9 +183,10 @@ export class MatterService {
    * @param form Form state captured by the wizard.
    * @param uploadedFiles Files to upload to SPE after the matter is created.
    * @param followOnActions Optional follow-on workflow steps (assign counsel, etc.).
-   * @param cascadeDefaults Optional BU-derived defaults. Used ONLY to name the search index that the
-   *   uploaded files are indexed into (`indexUploadedFiles`); it is never written onto the matter
-   *   (the index columns are the server's, FR-38).
+   * @param _cascadeDefaults Optional BU-derived defaults. Accepted so existing hosts keep compiling, but
+   *   not read: it is never written onto the matter (the index columns are the server's, FR-38), and
+   *   the uploaded files are indexed without naming an index (the server's `FileIndexRequest` has no
+   *   `searchIndexName`; the index follows the content type, FR-40).
    * @param onUploadProgress Optional callback fired during SPE file uploads.
    * @param association Optional parent record selected via the wizard's AssociateToStep
    *   (Project/Account today; same-entity Matter parents are not precluded, ADR-024). It is sent to
@@ -198,7 +198,7 @@ export class MatterService {
     form: ICreateMatterFormState,
     uploadedFiles: IUploadedFile[],
     followOnActions: IFollowOnActions,
-    cascadeDefaults?: IUserBuCascadeDefaults,
+    _cascadeDefaults?: IUserBuCascadeDefaults,
     onUploadProgress?: (progress: IUploadProgress) => void,
     association?: AssociationResult | null
   ): Promise<ICreateMatterResult> {
@@ -291,7 +291,8 @@ export class MatterService {
     } catch (err) {
       console.error('[MatterService] createRecord error:', err);
       // #2382: a privilege refusal becomes one plain sentence; the full error is logged above.
-      const described = describeWebApiCreateError(err, 'matter');
+      // The matter is a root create (no parent): the route's uniform not-found can only be a selected value.
+      const described = describeWebApiCreateError(err, 'matter', { rootCreate: true });
       const message = described.message;
       return {
         status: 'error',
@@ -300,13 +301,9 @@ export class MatterService {
       };
     }
 
-    // -- Step 1b (task 142, owner Q5 + R3): the matter's "Assigned *" people get their access NOW --
-    // Task 021: the route's create already runs the I-12 L1 materialiser for a root (RecordCreationService), so this call
-    // is now an idempotent repeat (the work-assignment wizard dropped its call in task 046); left in place here, listed in
-    // the task 021 notes for a follow-up. The server reads the matter's own Assigned columns and grants Collaborate (or
-    // shares to a linked internal user). Never throws, never fails the wizard — a failed call is logged and the
-    // reconciliation job grants within minutes.
-    await syncAssignedAccess(this._authenticatedFetch, this._bffBaseUrl, 'matter', matterId);
+    // The matter's "Assigned *" people get their access inside the create above: on a root create the server runs
+    // AssignedAccessMaterializer.RunAfterWriteAsync (the I-12 L1 grant) in the same request, so there is no client
+    // access sync here (task 021 fix round 1; the work-assignment wizard dropped its call the same way, task 046).
 
     // -- Step 2: Upload files to SPE via BFF + create document records --
     //
@@ -361,8 +358,7 @@ export class MatterService {
             entityId: matterId,
             entityName: form.matterName.trim(),
           },
-          linkResult.createdDocumentIds,
-          cascadeDefaults?.searchIndexName
+          linkResult.createdDocumentIds
         );
         if (indexingWarnings.length > 0) {
           warnings.push(...indexingWarnings);
