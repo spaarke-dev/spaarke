@@ -271,6 +271,39 @@ public sealed record ProcedureRulesOnDate(
     IReadOnlyList<ProcedureGap> Gaps)
 {
     /// <summary>
+    /// 082c K4, ontology D-205 rule (c) (the ONE definition; the evaluator and the adjustment options both use it): the Procedures that judge the
+    /// INVOICE subject by their version on <paramref name="onLatestWorkDate"/> (the latest dated line's work date) because they have none on this
+    /// (the invoice) date. Only a Procedure with a HOLE, an END, or one NOT YET APPLICABLE here qualifies, and only when it is applied on the work date.
+    /// A <see cref="ProcedureGapKind.ConflictingParents"/> gap and any pin gap (<see cref="ProcedureGapKind.PinnedVersionRetired"/>,
+    /// <see cref="ProcedureGapKind.PinnedVersionNotInForce"/>) are real disagreements, not an empty date: they stand. Empty when
+    /// <paramref name="onLatestWorkDate"/> is <see langword="null"/> (no dated line, or the same date).
+    /// </summary>
+    internal HashSet<Guid> FallbackProcedureIds(ProcedureRulesOnDate? onLatestWorkDate)
+    {
+        if (onLatestWorkDate is null)
+        {
+            return [];
+        }
+
+        var heldHere = Procedures.Select(p => p.ProcedureId).ToHashSet();
+        var standingGaps = Gaps
+            .Where(g => g.Kind is not (ProcedureGapKind.HoleBetweenVersions or ProcedureGapKind.AfterLastVersion))
+            .Select(g => g.ProcedureId)
+            .ToHashSet();
+        return onLatestWorkDate.Procedures.Select(p => p.ProcedureId).Where(id => !heldHere.Contains(id) && !standingGaps.Contains(id)).ToHashSet();
+    }
+
+    /// <summary>The rules that judge the invoice subject on this date: <see cref="Rules"/>, plus the work-date rules of each
+    /// <see cref="FallbackProcedureIds"/> Procedure (rule (c)).</summary>
+    internal IReadOnlyList<ResolvedRule> RulesWithFallback(ProcedureRulesOnDate? onLatestWorkDate)
+    {
+        var fallback = FallbackProcedureIds(onLatestWorkDate);
+        return fallback.Count == 0
+            ? Rules
+            : Rules.Concat(onLatestWorkDate!.Rules.Where(r => fallback.Contains(r.Procedure.ProcedureId))).ToList();
+    }
+
+    /// <summary>
     /// The reader-facing projection (uac-r2 U3): built field by field from an allow-list, it carries Procedure names, version numbers,
     /// rule codes, levels and distances only. No record id, record name, override reason or row id: the chain may include a Secure parent
     /// that the reader of the invoice cannot read, and an override reason is free text typed on that parent.

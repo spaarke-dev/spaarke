@@ -251,17 +251,13 @@ public sealed class InvoiceComplianceEvaluator
         // resolved (C9's one resolution per distinct date).
         var datedLines = request.Lines.Where(l => l.Date is not null).Select(l => l.Date!.Value).ToList();
         DateOnly? latestWorkDate = datedLines.Count > 0 ? datedLines.Max() : null;
-        var invoiceFallback = new HashSet<Guid>();
-        if (latestWorkDate is { } fallbackDate && fallbackDate != invoiceDate)
-        {
-            var onInvoiceDate = onDate[invoiceDate].Procedures.Select(p => p.ProcedureId).ToHashSet();
-            invoiceFallback = onDate[fallbackDate].Procedures.Select(p => p.ProcedureId).Where(id => !onInvoiceDate.Contains(id)).ToHashSet();
-        }
+        // The fallback is narrowed to ontology's three kinds (K2): a ConflictingParents gap or a pin gap on the invoice date stands. The one
+        // definition is ProcedureRulesOnDate.FallbackProcedureIds; the adjustment options use the same.
+        var onLatestWorkDate = latestWorkDate is { } fallbackDate && fallbackDate != invoiceDate ? onDate[fallbackDate] : null;
+        var invoiceFallback = onDate[invoiceDate].FallbackProcedureIds(onLatestWorkDate);
 
         IEnumerable<ResolvedRule> ProcedureRulesOf(BillingSubject subject, DateOnly date) =>
-            subject.Kind == BillingSubjectKind.Invoice && invoiceFallback.Count > 0
-                ? onDate[date].Rules.Concat(onDate[latestWorkDate!.Value].Rules.Where(r => invoiceFallback.Contains(r.Procedure.ProcedureId)))
-                : onDate[date].Rules;
+            subject.Kind == BillingSubjectKind.Invoice ? onDate[date].RulesWithFallback(onLatestWorkDate) : onDate[date].Rules;
 
         var selectedBySubject = subjects
             .Select(s => (s.Subject, Versions: byPolicy.Select(versions => SelectVersion(versions, s.Date)).OfType<BillingRuleCandidate>()

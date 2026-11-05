@@ -57,6 +57,16 @@ internal sealed class ProcedureKit
         return this;
     }
 
+    /// <summary>A Pin of version <paramref name="versionNumber"/> of <paramref name="name"/> on <see cref="Matter"/> (distance 0), beside any Follow row
+    /// <see cref="Procedure"/> added with <c>assigned: true</c>: a Pin of another version than the Follow chooses on a date is a ConflictingParents gap.</summary>
+    internal ProcedureKit Pin(string name, int versionNumber)
+    {
+        _overrides.Add(new ProcedureOverrideRow(
+            Id("procedure-kit:pin:" + name + ":" + versionNumber.ToString(CultureInfo.InvariantCulture)), ProcedureOverrideMode.Pinned, Matter,
+            ProcedureId(name), ProcedureVersionId(name, versionNumber), null, null, null));
+        return this;
+    }
+
     /// <summary>A rule of <paramref name="procedure"/>: one Published policy version under its version (number <paramref name="versionNumber"/>), in force from its window's start.</summary>
     internal ResolvedPolicyVersion Rule(string procedure, string code, RuleType type, string? body = null, int? consequence = null, int versionNumber = 1)
     {

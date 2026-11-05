@@ -237,7 +237,21 @@ public class InvoiceComplianceEvaluatorProcedureTests
         result.Findings.Should().ContainSingle().Which.ReasonCode.Should().Be(BillingReasonCodes.ExpenseAmountOverCap);
     }
 
-    // ── C7 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    [Fact(DisplayName = "082c C6 Split (K4 depth): a refused capped higher-ranked Procedure version displaces nothing; the lower cap is kept")]
+    public void Split_ARefusedCappedHigherVersion_KeepsTheLowerCap_C6()
+    {
+        var kit = new ProcedureKit().Procedure("Assigned", ProcedureAppliesTo.AssignedRecordsOnly, assigned: true);
+        var higher = kit.Rule("Assigned", "MANUAL-EXPENSE", RuleType.ExpenseRule, """{"type":"ExpenseRule","maxAmountPerItem":1000}""");
+        var legacyDefault = Version("CD-EXPENSE", RuleType.ExpenseRule, CapOnly); // cap 500; the expense is 600
+
+        var result = Evaluator(handlers: RefusingHandlerFor("MANUAL-EXPENSE")).Evaluate(Request(BadExpense(0)), kit.Loaded(legacyDefault));
+
+        result.Findings.Should().ContainSingle().Which.Should().Match<BillingFinding>(f =>
+            f.PolicyCode == "CD-EXPENSE" && f.ReasonCode == BillingReasonCodes.ExpenseAmountOverCap);
+        result.Refusals.Should().ContainSingle().Which.PolicyVersionId.Should().Be(higher.PolicyVersionId);
+    }
+
+    // ── C7──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "082c C7 (K3): a stored non-billing rule type is a GateRefused refusal, never an exception from PrecedenceOf; the other rules run")]
     public void ANonBillingType_IsGateRefused_NotThrown_C7()
@@ -414,6 +428,89 @@ public class InvoiceComplianceEvaluatorProcedureTests
         gap.Gap.Kind.Should().Be(ProcedureGapKind.AfterLastVersion);
         gap.AppliesToInvoice.Should().BeTrue();
         gap.LineIndexes.Should().Equal(0);
+    }
+
+    // ── 082c-1 fix round 2 (K2, K4 depth): the fallback is per Procedure and only for a hole, an end or not-yet-applicable ───────────
+
+    [Fact(DisplayName = "082c K2 must-fire: a ConflictingParents gap on the invoice date is NOT lifted by the fallback, although the line's date has a version")]
+    public void AConflictingParentsGapOnTheInvoiceDate_IsNotLifted_ByTheFallback_K2()
+    {
+        // A Follow and a Pin of version 1 on the same record. On the line's date (2 March) both choose version 1 (they agree); on the invoice date
+        // (31 March) the Follow takes version 2 and the Pin version 1: a real disagreement, not an empty date. It stands for the invoice subject.
+        var kit = new ProcedureKit().Procedure("Conflict", assigned: true, to: new DateOnly(2026, 3, 10)).NextVersion("Conflict", 2, new DateOnly(2026, 3, 11)).Pin("Conflict", 1);
+        kit.Rule("Conflict", "V1-REQUIRED", RuleType.RequiredData, NeedsPeriodStart);
+        kit.Rule("Conflict", "V2-REQUIRED", RuleType.RequiredData, NeedsPeriodStart, versionNumber: 2);
+
+        var result = Evaluator().Evaluate(InvoiceMissingPeriod(Line(0)), kit.Loaded());
+
+        var gap = result.Gaps.Should().ContainSingle().Subject;
+        gap.Gap.Kind.Should().Be(ProcedureGapKind.ConflictingParents);
+        gap.Gap.WorkDate.Should().Be(InvoiceDate);
+        gap.AppliesToInvoice.Should().BeTrue("the fallback does not lift a parent conflict");
+        InvoiceLevelCodes(result).Should().BeEmpty("nothing judges the invoice subject while the conflict stands");
+    }
+
+    [Fact(DisplayName = "082c K2: a Procedure not yet applicable on the invoice date is judged for the invoice by the latest dated line's version (no gap)")]
+    public void ANotYetApplicableProcedure_IsJudgedByTheLatestLinesVersion_K2()
+    {
+        var kit = new ProcedureKit().Procedure("Later", from: new DateOnly(2026, 3, 1));
+        kit.Rule("Later", "LATER-REQUIRED", RuleType.RequiredData, NeedsPeriodStart);
+        var request = InvoiceMissingPeriod(Line(0)) with { InvoiceDate = new DateOnly(2026, 2, 15) };
+
+        var result = Evaluator().Evaluate(request, kit.Loaded());
+
+        result.Gaps.Should().BeEmpty();
+        InvoiceLevelCodes(result).Should().Equal("LATER-REQUIRED");
+    }
+
+    [Theory(DisplayName = "082c K2: FallbackProcedureIds lifts a hole and an end, and never a ConflictingParents or a pin gap")]
+    [InlineData(ProcedureGapKind.HoleBetweenVersions, true)]
+    [InlineData(ProcedureGapKind.AfterLastVersion, true)]
+    [InlineData(ProcedureGapKind.ConflictingParents, false)]
+    [InlineData(ProcedureGapKind.PinnedVersionRetired, false)]
+    [InlineData(ProcedureGapKind.PinnedVersionNotInForce, false)]
+    public void FallbackProcedureIds_LiftOnlyAHoleOrAnEnd_K2(ProcedureGapKind kind, bool lifted)
+    {
+        var procedure = ProcedureKit.ProcedureId("P");
+        var invoiceDay = new DateOnly(2026, 3, 31);
+        var workDay = new DateOnly(2026, 3, 2);
+        var applied = new AppliedProcedure(procedure, "P", Guid.NewGuid(), 1, new ProcedureRank(ProcedureLevel.AllRecords, 0, false), ProcedureSources.AllRecords, false, []);
+        var onInvoice = new ProcedureRulesOnDate(invoiceDay, [], [], [], [], [new ProcedureGap(procedure, "P", invoiceDay, kind, [])]);
+        var onWork = new ProcedureRulesOnDate(workDay, [applied], [], [], [], []);
+
+        onInvoice.FallbackProcedureIds(onWork).Contains(procedure).Should().Be(lifted);
+        onInvoice.FallbackProcedureIds(null).Should().BeEmpty("no dated line: nothing to fall back to");
+    }
+
+    [Fact(DisplayName = "082c K4 depth: with several Procedures only the one without an invoice-date version falls back; the others keep the invoice date's")]
+    public void SeveralProcedures_OnlyTheOneWithoutAnInvoiceDateVersionFallsBack_K4()
+    {
+        var kit = new ProcedureKit()
+            .Procedure("Ended", to: new DateOnly(2026, 3, 10))
+            .Procedure("Two", to: new DateOnly(2026, 3, 10)).NextVersion("Two", 2, new DateOnly(2026, 3, 11));
+        kit.Rule("Ended", "ENDED-REQUIRED", RuleType.RequiredData, NeedsPeriodStart);
+        kit.Rule("Two", "TWO-V1-REQUIRED", RuleType.RequiredData, NeedsPeriodStart);
+        kit.Rule("Two", "TWO-V2-REQUIRED", RuleType.RequiredData, NeedsPeriodStart, versionNumber: 2);
+
+        var result = Evaluator().Evaluate(InvoiceMissingPeriod(Line(0)), kit.Loaded());
+
+        result.Gaps.Should().BeEmpty();
+        InvoiceLevelCodes(result).Should().Equal(["ENDED-REQUIRED", "TWO-V2-REQUIRED"], "'Two' has a version on the invoice date, so it does not take the line's version 1");
+    }
+
+    [Fact(DisplayName = "082c K4 depth: when the latest dated line's own date is in a hole, the invoice-date gap stands")]
+    public void AFallbackDateThatIsItselfInAHole_LeavesTheInvoiceGapStanding_K4()
+    {
+        var kit = new ProcedureKit().Procedure("Holey", to: new DateOnly(2026, 3, 10)).NextVersion("Holey", 2, new DateOnly(2026, 4, 10));
+        kit.Rule("Holey", "V1-REQUIRED", RuleType.RequiredData, NeedsPeriodStart);
+        kit.Rule("Holey", "V2-REQUIRED", RuleType.RequiredData, NeedsPeriodStart, versionNumber: 2);
+
+        // The invoice date (31 March) and the line (20 March) are both in the hole between version 1 and version 2.
+        var result = Evaluator().Evaluate(InvoiceMissingPeriod(Line(0, LateLine)), kit.Loaded());
+
+        result.Gaps.Select(g => (g.Gap.WorkDate, g.Gap.Kind, g.AppliesToInvoice, string.Join(",", g.LineIndexes))).Should().Equal(
+            (LateLine, ProcedureGapKind.HoleBetweenVersions, false, "0"), (InvoiceDate, ProcedureGapKind.HoleBetweenVersions, true, string.Empty));
+        InvoiceLevelCodes(result).Should().BeEmpty();
     }
 
     [Fact(DisplayName = "082c K4 rule (c) control: a version in force on the invoice date wins over the line's date")]
