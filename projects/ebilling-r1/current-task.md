@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-04 ~23:30Z. Session ebilling-r1-c7 (authoritative; d4 is the duplicate). Work head: d5b13b49ed (095d-1b merge; filtered gate on the combined tip RUNNING, background b354j3mhd — push only after it passes). Dev BFF: **master 909754869f** (deployed by uac-r2, received 2026-11-05T04:16:30Z; healthz 200, settings 225, `StoredFileReconcileEnabled=false`; rollback target d763dc120e; uac-r2's 30-minute gate to 04:46:30Z). **None of this project's work is on master or the dev BFF.**
+> **Last Updated**: 2026-11-04 ~23:30Z. Session ebilling-r1-c7 (authoritative; d4 is the duplicate). Work head: d5b13b49ed (095d-1b merge; filtered gate on the combined tip RUNNING, background b354j3mhd — push only after it passes). Dev BFF: **master 909754869f** (deployed by uac-r2, received 2026-11-05T04:16:30Z; healthz 200, settings 225, `StoredFileReconcileEnabled=false`; uac-r2's 30-minute gate PASSED 04:16:30Z–04:46:30Z: 0 5xx, 0 OWNERSHIP-REFUSED, SignalEvaluation 0 faults, no finance traffic; uac-r2 releases its side of the `StoredFileReconcileEnabled` hold — lifting it is an OWNER item, needs the owner's go typed in this session, setting stays false until then). **None of this project's work is on master or the dev BFF.**
 
 ## Quick Recovery (READ THIS FIRST)
 
