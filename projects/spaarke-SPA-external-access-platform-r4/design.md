@@ -182,6 +182,15 @@ The prototype contract (`src/template/types.ts`) is adopted with these changes:
 - It is **not partner-readable yet**. The `ReadableColumns` entry (`ExternalAccessModule.cs:544` on `task/ebilling-082c-2`; uac-r2 re-confirmed it in its 082c-2 review) goes live only with the 082c-2 BFF deploy. Until then, blank means "normal review".
 - **Backfill (on ebilling's 082c rollout checklist):** firm holds that predate the column, i.e. open `sprk_firmhold` with statuscode In Review, are backfilled to `659490002` per environment, with the owner's go and notices to uac-r2. It runs as an `-Apply` path in `Deploy-EbillingInvoiceReviewDetailColumn.ps1`, after the 082c-2 BFF deploy and before partners are told. 8 dev rows are waiting for it. Gap and unresolved holds can't predate 082c.
 - R4's first E2E checks a held invoice once both have landed.
+
+**ebilling's partner-visible changes** (merged into `work/ebilling-r1`, not yet on master; R4 reviews the master PR):
+- **082c-3 (`08702087cb`):**
+  - The submit 202 can carry `warning` (code `ebilling.submission.procedure_gap`, R4's sentence); it is absent when there's nothing to say.
+  - The pre-check runs after the save, capped at 2 s, fails quiet, and uses only the authorized record and firm.
+  - The client shows the caption under Processing and drops it at a terminal state.
+  - A held Accepted shows one warning bar, "Received: on hold for review", with a polite live region.
+  - R4's answer on the badge: a held Accepted shows "In Review" in the warning tone; an un-held or overridden Accepted stays green "Accepted".
+- **114 (`c4b8d43e8f`):** an Override of a Procedure hold keeps the submission Accepted with `outcomeReasonCode` `ebilling.submission.overridden`, and the warning becomes null. If the SPA branches on reason codes, treat it as a released Accepted.
   - **Client gate (uac-r2 condition, binding, 2026-11-04):** render any Review detail value or explanation line only when `statuscode` = In Review: **value 1**, label "In Review", statecode 0. That is the existing value 1, relabelled from "Active" (D-41); server constant `InvoiceStatusCodes.InReview` in `Services/Finance/InvoiceLifecycleService.cs`. This applies in the grid column, the record's Invoices section, the header secondary line and the Information field. It is defence in depth: the server also blanks the value on every exit from In Review. When reasons overlap, the server picks one value, in this order: firm to be confirmed > terms could not be checked > waiting for billing terms (ontology).
   - The submission status view's 082c warning is also returned only while the linked invoice is In Review (ebilling 2026-11-05).
   - **`sprk_signal` stays internal** (checked for uac-r2's 082c-2 condition, 2026-11-05): no external surface reads `sprk_signal` data columns. For a record rule, `sprk_policycode` and `sprk_dedupekey` hold an internal `BRR-` key. R4 adds no `sprk_signal` read. If #2445's task type or assignee turns out to come from a Signal, it goes through a named external projection with uac-r2 review, never the raw table.
