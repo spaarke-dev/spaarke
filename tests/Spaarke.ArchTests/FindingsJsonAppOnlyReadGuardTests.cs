@@ -50,6 +50,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         typeof(InvoiceCorrectionReevaluation), // task 101 B2b-1: reads and patches it app-only (IGenericEntityService, row-version conditional update) after a correction
         typeof(InvoiceFirmHold), // task 095c-4: reads it app-only (the IGenericEntityService its callers pass) for the stored firm_missing hold; never writes it
         typeof(InvoiceProcedureHold), // 082c-2: reads it app-only (the IGenericEntityService its callers pass) for the stored Procedure holds; never writes it
+        typeof(InvoiceOpenHolds), // 082c-2 fix round 3: reads it app-only (the IGenericEntityService its callers pass) for the open holds the review detail derives from; never writes it
         // task 095d-1b: Set firm reads it app-only (IGenericEntityService) for the stored decision and writes it in the renumber transaction (the
         // new trackingNumber and the assignFirm member), sent by the allocator's app-only ExecuteTransactionAsync, row-version conditioned
         typeof(Sprk.Bff.Api.Services.Finance.InvoiceAssignFirmService),

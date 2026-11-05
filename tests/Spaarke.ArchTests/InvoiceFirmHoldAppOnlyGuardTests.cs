@@ -36,6 +36,7 @@ public sealed class InvoiceFirmHoldAppOnlyGuardTests
     private static readonly Type[] ReviewedTypes =
     [
         typeof(InvoiceFirmHold), // READER: HeldInvoicesAsync queries sprk_invoice for the column through the IGenericEntityService its callers pass (app-only)
+        typeof(InvoiceOpenHolds), // READER (082c-2 fix round 3): ReasonsAsync reads the invoice's own hold through the IGenericEntityService its callers pass (app-only); never writes it
         typeof(InvoiceSubmissionPersister), // WRITER: sets it in the invoice create of the held outcome, inside the app-only ExecuteTransactionAsync
         // WRITER (095d-1b): clears it in the invoice update of Set firm's one renumber transaction, sent by the allocator's app-only
         // ExecuteTransactionAsync; it reads the hold only through InvoiceFirmHold.IsHeldAsync over its own IGenericEntityService (app-only).
