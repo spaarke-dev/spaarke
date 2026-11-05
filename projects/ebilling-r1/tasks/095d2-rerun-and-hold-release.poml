@@ -127,6 +127,15 @@
       - check (g) has agreement tests;
       - the publish delta is measured against a fresh master build;
       - the PR body carries the runbook line.</criterion>
+    <criterion>uac-r2 (2026-11-05) condition 1: while the re-run is pending (the rulesRerun marker), a linked submission stays withheld from the partner view
+      (FirmMissing, or an equivalent "not yet decided" outcome), so partners only see a state decided with the firm. Test: after Set firm and before the job commits,
+      the partner view of a linked submission is withheld.</criterion>
+    <criterion>uac-r2 condition 2: a failed re-run (dead-letter, row-version retries exhausted, Procedures unresolvable) leaves the submission held (pending withhold
+      plus procedures_unresolved through InvoiceOpenHolds), never released. Test the dead-letter case.</criterion>
+    <criterion>uac-r2 condition 3 (binding): the Procedures run in the re-run. A new hold removes the override stamp in the same write; Override stays under D-142.</criterion>
+    <criterion>Placement (uac-r2 Q7): if the re-run can call AI coding (owner Q3 answer), the handler lives in Services/Ai/Jobs/ (bff-extensions section D, Path C comply);
+      if it never calls AI, Services/Jobs/Handlers/. State the reason in the Placement Justification. One IJobHandler, one DI registration, no new direct model calls.</criterion>
+    <criterion>Wording: commits, PR and notes describe the change, never a sequence of who could see what when.</criterion>
   </acceptance-criteria>
 
   <escalation>

@@ -86,6 +86,14 @@ Rejected: running it synchronously; extending the 049 handler (its "linked or te
 7. **uac-r2, placement.** **Rec:** a new handler (one DI registration) beside 049's in `Services/Jobs/Handlers`, with AI only through the processor's facade. Use `Services/Ai/Jobs` if bff-extensions:66 binds.
 8. **Owner / 095d-3.** Add the `rulesRerun` value `done`. **Rec:** accept; no new field.
 
+### 4a. Answers received
+
+- **uac-r2, 2026-11-05 (Q6, Q7).** No access objection to Q6, with three conditions:
+  1. Linked submissions stay withheld from partners while the re-run is pending (keyed on `rulesRerun`). Partners only see a state decided with the firm.
+  2. A failed re-run leaves the submission held, never released. This covers a dead-letter, exhausted row-version retries, and unresolvable Procedures.
+  3. The Procedures run in the re-run (binding). A new hold removes the stamp in the same write, and Override stays under D-142.
+- **Q7:** the handler goes in `Services/Ai/Jobs/` if the re-run can call AI coding, and in `Services/Jobs/Handlers/` if it never does. Decide after the owner answers Q3. All of these are acceptance criteria in the POML.
+
 ## 5. Files
 
 | File | Change |
