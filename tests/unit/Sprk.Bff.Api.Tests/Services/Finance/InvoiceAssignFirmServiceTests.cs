@@ -389,7 +389,7 @@ public sealed class InvoiceAssignFirmServiceTests
         var stored = new AssignFirmStoredDecision(
             Guid.NewGuid(), Firm, null, "INV-7.3", null, "INV-7.1", 1, Decider, Now,
             new InvoiceSubmissionAfterSteps.ResolvedSignalSet(Now.UtcDateTime, [new InvoiceSubmissionAfterSteps.ResolvedSignal(Guid.NewGuid(), "P")]),
-            [new AssignFirmRename("sprk_billingevent", Guid.NewGuid(), "sprk_name", "a", "b")], "pending");
+            [new AssignFirmRename("sprk_billingevent", Guid.NewGuid(), "sprk_name", "a", "b")], 3, "pending");
         var root = new JsonObject { [InvoiceAssignFirmService.StoredDecisionMember] = stored.ToJson() };
 
         var read = AssignFirmStoredDecision.Read(JsonNode.Parse(root.ToJsonString())!.AsObject())!;
@@ -691,6 +691,24 @@ public sealed class InvoiceAssignFirmServiceTests
         w.ShouldHaveWrittenNothing();
     }
 
+    [Theory(DisplayName = "095d-1b refusal order (fix round 2, K1): a caller without AppendTo on the core record gets the SAME refusal for a linked, an unlinked, an inactive and an unreadable firm, and no answer about the firm is read first (must fire)")]
+    [InlineData(true, InvoiceFirmLink.Linked)]
+    [InlineData(true, InvoiceFirmLink.NotLinked)]
+    [InlineData(true, InvoiceFirmLink.Unreadable)]
+    [InlineData(false, InvoiceFirmLink.NotLinked)]
+    [InlineData(null, InvoiceFirmLink.Linked)]
+    public async Task NoCloseRights_IsRefusedTheSame_WhateverFirmIsNamed(bool? active, InvoiceFirmLink link)
+    {
+        var w = new World { CloseRights = DecisionCallerRefusal.CoreAppendToMissing, ActiveFirm = active, Link = link };
+
+        var result = await w.Assign();
+
+        (result.Status, result.Code).Should().Be((403, AssignFirmCodes.NotAuthorized));
+        result.Detail.Should().Be("You do not have permission to record a decision on this invoice's record.");
+        w.Calls.Should().NotContain("active").And.NotContain("link", "the firm is not read for a caller who lacks the core record's rights");
+        w.ShouldHaveWrittenNothing();
+    }
+
     [Fact(DisplayName = "095d-1b refusal: a filing that is not the invoice's core record is 500 and a transient one 503 (must fire)")]
     public async Task Refused_Filing()
     {
@@ -751,6 +769,8 @@ public sealed class InvoiceAssignFirmServiceTests
     public async Task TheDecisionFacts_AreBounded_TheStoredMemberKeepsTheMapping()
     {
         var w = new World();
+        // A third line whose name does not carry the number: its firm is set, its name is not renamed.
+        w.Lines.Add(new Entity(InvoiceSubmissionPersister.LineEntity, Guid.NewGuid()) { [InvoiceSubmissionPersister.LineName] = "Disbursements" });
         await w.Assign();
         var stored = AssignFirmStoredDecision.Read(FindingsOf(w.Applied!))!;
 
@@ -761,6 +781,7 @@ public sealed class InvoiceAssignFirmServiceTests
         facts["trackingNumber"].Should().Be("INV-7.1");
         var counts = facts["renamedCounts"].Should().BeAssignableTo<IReadOnlyDictionary<string, object?>>().Subject;
         counts["lines"].Should().Be(2);
+        counts["firmSetLines"].Should().Be(3, "every line gets the firm, renamed or not; 'lines' counts only the renamed");
         counts["approval"].Should().Be(1);
         counts["storedFiles"].Should().Be(2, "INV-7.3.pdf and INV-7.3-2.docx; INV-7.30.pdf is not the old number's");
         counts["findings"].Should().Be(1);
@@ -850,7 +871,7 @@ public sealed class InvoiceAssignFirmServiceTests
 
         await w.Assign();
 
-        order.Should().Equal("active", "link", "rights", "filing");
+        order.Should().Equal("rights", "filing", "active", "link");
         w.Preflighted.Should().ContainSingle();
     }
 
@@ -876,6 +897,8 @@ public sealed class InvoiceAssignFirmServiceTests
     {
         var bug = new World { OnRenumber = _ => throw new ArgumentException("owned column") };
         (await bug.Assign()).Should().Match<AssignFirmResult>(r => r.Status == 500 && r.Code == AssignFirmCodes.DecisionInvalid);
+        bug.RenumberArgs.Should().NotBeNull("the exception came from the allocator, so the apply was reached and not refused before it");
+        bug.Preflighted.Should().ContainSingle("the Decision Record preflight ran before the allocator");
 
         var fault = new World { OnRenumber = _ => throw new TimeoutException("lost reply") };
         (await fault.Assign()).Should().Match<AssignFirmResult>(r => r.Status == 503 && r.Code == AssignFirmCodes.Unavailable);
@@ -952,7 +975,7 @@ public sealed class InvoiceAssignFirmServiceTests
         var w = new World();
         var stored = new AssignFirmStoredDecision(
             InvoiceAssignFirmService.DecisionIdFor(SubmissionId), firm, null, "INV-7.3", previousSequence, "INV-7.1", 1, Decider, Now,
-            new InvoiceSubmissionAfterSteps.ResolvedSignalSet(Now.UtcDateTime, []), [], "pending");
+            new InvoiceSubmissionAfterSteps.ResolvedSignalSet(Now.UtcDateTime, []), [], 0, "pending");
         var findings = new JsonObject { ["trackingNumber"] = "INV-7.1", [InvoiceAssignFirmService.StoredDecisionMember] = stored.ToJson() };
         Commit(w, firm, "INV-7.1", 1, findings.ToJsonString(), previousSequence);
         return w;

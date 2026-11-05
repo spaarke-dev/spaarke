@@ -18,6 +18,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 using FinAuth = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
 using World = Sprk.Bff.Api.Tests.Services.Finance.InvoiceAssignFirmServiceTests.World;
@@ -105,6 +106,38 @@ public sealed class InvoiceAssignFirmEndpointContractTests
         host.World.Applied.Should().NotBeNull("the one apply went to the allocator");
         AssignFirmStoredDecision.Read(JsonNode.Parse((string)host.World.Applied!.SubmissionFields!["sprk_findingsjson"])!.AsObject())!
             .DeciderUserId.Should().Be(Decider, "the decider is the caller's systemuserid, never the request's");
+    }
+
+    [Fact(DisplayName = "095d-1b fix round 2 (K1): a caller with Write on the invoice and no AppendTo on its core record gets the IDENTICAL status and body for a linked, an unlinked, an inactive and an unknown firm (must fire)")]
+    public async Task NoCoreRecordRights_IsRefusedIdentically_WhateverFirmIsNamed()
+    {
+        var unknown = Guid.NewGuid();
+        var cases = new (string Name, Guid FirmId, Action<Host> Arrange)[]
+        {
+            ("linked", Firm, h => h.GrantFirm(AccessRights.Read | AccessRights.AppendTo)),
+            ("unlinked", Firm, h => { h.GrantFirm(AccessRights.Read | AccessRights.AppendTo); h.World.Link = InvoiceFirmLink.NotLinked; }),
+            ("inactive", Firm, h => { h.GrantFirm(AccessRights.Read | AccessRights.AppendTo); h.World.ActiveFirm = false; }),
+            ("unknown to the caller (the firm filter refuses it)", unknown, _ => { }),
+        };
+
+        var seen = new List<(string Name, HttpStatusCode Status, string Body)>();
+        foreach (var (name, firmId, arrange) in cases)
+        {
+            await using var host = await Host.StartAsync();
+            host.GrantInvoiceWrite();
+            host.World.CloseRights = DecisionCallerRefusal.CoreAppendToMissing;
+            arrange(host);
+
+            var response = await host.SendAsync(new { firmId });
+
+            var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+            body.Remove("traceId");
+            seen.Add((name, response.StatusCode, body.ToJsonString()));
+            host.World.ShouldHaveWrittenNothing();
+        }
+
+        seen.Select(x => x.Status).Distinct().Should().ContainSingle().Which.Should().Be(HttpStatusCode.Forbidden);
+        seen.Select(x => x.Body).Distinct().Should().ContainSingle("the same body whatever the firm is: " + string.Join(" | ", seen.Select(x => x.Name + "=" + x.Body)));
     }
 
     [Theory(DisplayName = "095d-1b: a body that names no firm is 400 firm_required after the invoice check and before any firm check")]

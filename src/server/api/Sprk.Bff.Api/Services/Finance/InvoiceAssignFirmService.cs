@@ -127,7 +127,7 @@ public sealed record AssignFirmResult(
         new(AssignFirmOutcome.Refused, status, code, detail, submissionId);
 }
 
-/// <summary>One renamed row of the apply (the old-to-new mapping, ontology-r1 16.7 addition 3; kept with the stored decision and its record).</summary>
+/// <summary>One renamed row of the apply (the old-to-new mapping, ontology-r1 16.7 addition 3). It is kept ONLY in the stored <c>assignFirm</c> member of the findings; the Decision Record carries counts only (<see cref="InvoiceAssignFirmService.RenamedCounts"/>).</summary>
 internal sealed record AssignFirmRename(string Entity, Guid Id, string Column, string From, string To);
 
 /// <summary>
@@ -147,6 +147,7 @@ internal sealed record AssignFirmStoredDecision(
     DateTimeOffset DecidedOn,
     InvoiceSubmissionAfterSteps.ResolvedSignalSet FirmMissingSignals,
     IReadOnlyList<AssignFirmRename> Renamed,
+    int FirmSetLines,
     string RulesRerun)
 {
     public JsonObject ToJson() => new()
@@ -170,6 +171,7 @@ internal sealed record AssignFirmStoredDecision(
             ["from"] = r.From,
             ["to"] = r.To,
         }).ToArray()),
+        ["firmSetLines"] = FirmSetLines,
         ["rulesRerun"] = RulesRerun,
     };
 
@@ -190,6 +192,7 @@ internal sealed record AssignFirmStoredDecision(
             || Int(node, "sequence") is not { } sequence
             || !Guid.TryParse(Text(node, "deciderUserId"), out var decider)
             || !DateTimeOffset.TryParse(Text(node, "decidedOn"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var decidedOn)
+            || Int(node, "firmSetLines") is not { } firmSetLines
             || node["firmMissingSignals"] is not JsonObject signals)
         {
             throw new FormatException("The stored Set-firm decision cannot be read.");
@@ -209,7 +212,7 @@ internal sealed record AssignFirmStoredDecision(
 
         return new AssignFirmStoredDecision(
             decisionId, firmId, Text(node, "note"), previous, Int(node, "previousSequence"), tracking, sequence, decider,
-            decidedOn.ToUniversalTime(), InvoiceSubmissionAfterSteps.ResolvedSignalSet.Parse(signals), renamed,
+            decidedOn.ToUniversalTime(), InvoiceSubmissionAfterSteps.ResolvedSignalSet.Parse(signals), renamed, firmSetLines,
             Text(node, "rulesRerun") ?? InvoiceAssignFirmService.RulesRerunPending);
     }
 
@@ -234,9 +237,10 @@ internal sealed record AssignFirmStoredDecision(
 /// <para><b>Refusals, all before the apply (16.4 condition 1), in this order.</b> The two locks (the invoice-decision lock and the line lock:
 /// the apply renames the lines); the invoice (gone: 404) and its ONE submission (the row whose id derives the invoice); then, unless a stored
 /// decision makes this a repeat: Active and In Review (409); no firm on the invoice or the submission (409); held for a firm, app-only
-/// (<see cref="InvoiceFirmHold.IsHeldAsync"/>, 409); one core record (500); the firm active (400) and linked
-/// (<see cref="InvoiceSubmissionService.CheckFirmLinkAsync"/>: 403 not linked, 503 unreadable); phase P2 (503); the Signal-close rights (403);
-/// the filing (503 or 500); the stored findings readable (500); the transaction ceiling and the findings size (409); the Decision Record
+/// (<see cref="InvoiceFirmHold.IsHeldAsync"/>, 409); one core record (500); the Signal-close rights (403) and the
+/// filing (503 or 500), BEFORE any read of the firm, so a caller without the core record's rights is refused the same whichever firm it names
+/// (095d-1b fix round 2, K1); then the firm active (400) and linked (<see cref="InvoiceSubmissionService.CheckFirmLinkAsync"/>: 403 not linked,
+/// 503 unreadable); phase P2 (503); the stored findings readable (500); the transaction ceiling and the findings size (409); the Decision Record
 /// writer's <see cref="BillingDecisionRecorder.Preflight"/> (500). A refusal writes nothing.</para>
 /// <para><b>The apply (16.4 condition 2; 16.7).</b> One transaction, conditioned on the submission's and the invoice's row versions: the
 /// submission's firm, scope, sequence, number and previous sequence (the allocator's), its findings with the new <c>trackingNumber</c> and the
@@ -383,7 +387,7 @@ public sealed class InvoiceAssignFirmService
             ["policyCode"] = BillingRuleCatalogue.SystemPolicyCode,
             ["firmMissingSignals"] = InvoiceLineDecisionService.SetFact(stored.FirmMissingSignals),
             ["firmMissingCleared"] = true,
-            ["renamedCounts"] = RenamedCounts(stored.Renamed),
+            ["renamedCounts"] = RenamedCounts(stored.Renamed, stored.FirmSetLines),
             ["rulesRerun"] = stored.RulesRerun,
         };
 
@@ -404,10 +408,13 @@ public sealed class InvoiceAssignFirmService
     /// The BOUNDED summary of the rename that goes into the Decision Record's facts (095d-1b review F1): a count per renamed table, never a row
     /// per rename. The full old-to-new mapping stays in the stored <see cref="StoredDecisionMember"/> member, so the fact snapshot stays far below
     /// the writer's 100,000-character cap at the transaction ceiling. The old and new invoice numbers are the <c>previousTrackingNumber</c> and
-    /// <c>trackingNumber</c> facts. <c>findings</c> is the submission's findings member, rewritten once by every apply.
+    /// <c>trackingNumber</c> facts. <c>firmSetLines</c> is every line the apply wrote the firm on, including those whose name did not change (so the
+    /// record states every row the apply wrote); <c>lines</c> is only the lines renamed. <c>findings</c> is the submission's findings member,
+    /// rewritten once by every apply.
     /// </summary>
-    internal static Dictionary<string, object?> RenamedCounts(IReadOnlyCollection<AssignFirmRename> renamed) => new(StringComparer.Ordinal)
+    internal static Dictionary<string, object?> RenamedCounts(IReadOnlyCollection<AssignFirmRename> renamed, int firmSetLines) => new(StringComparer.Ordinal)
     {
+        ["firmSetLines"] = firmSetLines,
         ["lines"] = renamed.Count(r => r.Entity == InvoiceSubmissionPersister.LineEntity),
         ["approval"] = renamed.Count(r => r.Entity == InvoiceSubmissionPersister.ApprovalEntity),
         ["storedFiles"] = renamed.Count(r => r.Entity == StoredFileSchema.Entity),
@@ -516,6 +523,34 @@ public sealed class InvoiceAssignFirmService
             return AssignFirmResult.Refuse(StatusCodes.Status500InternalServerError, AssignFirmCodes.CoreUnresolved, "The invoice names no single core record.", submissionId);
         }
 
+        // ── As for approval: the Signal-close rights (AppendTo on the core record, Write on the Signal's subject) and the recorder's filing. ──
+        DecisionCallerRefusal refusal;
+        try
+        {
+            refusal = await _closeRights(new DecisionCoreRecord(core.Entity, core.Id), invoiceId, callerBearerToken, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unavailable(invoiceId, "signal-rights", ex);
+        }
+
+        switch (refusal)
+        {
+            case DecisionCallerRefusal.None:
+                break;
+            case DecisionCallerRefusal.Unavailable:
+                return AssignFirmResult.Refuse(StatusCodes.Status503ServiceUnavailable, AssignFirmCodes.Unavailable, "The firm could not be set; nothing was changed. Try again.", submissionId);
+            default:
+                _logger.LogWarning("Set firm on invoice {InvoiceId}: the caller may not record this decision ({Refusal}); nothing changed.", invoiceId, refusal);
+                return AssignFirmResult.Refuse(StatusCodes.Status403Forbidden, AssignFirmCodes.NotAuthorized,
+                    "You do not have permission to record a decision on this invoice's record.", submissionId);
+        }
+
+        if (await CheckFilingAsync(invoiceId, core, submissionId, ct).ConfigureAwait(false) is { } filing)
+        {
+            return filing;
+        }
+
         // ── The firm: active (the intake's rule), then one of the core record's assigned law firms (CheckFirmLinkAsync). Names no other firm. ──
         bool? active;
         try
@@ -553,34 +588,6 @@ public sealed class InvoiceAssignFirmService
         {
             return AssignFirmResult.Refuse(StatusCodes.Status503ServiceUnavailable, TrackingNumberReasons.ScopeKeyInactive,
                 "The firm cannot be set in this environment yet. Try again later.", submissionId);
-        }
-
-        // ── As for approval: the Signal-close rights (AppendTo on the core record, Write on the Signal's subject) and the recorder's filing. ──
-        DecisionCallerRefusal refusal;
-        try
-        {
-            refusal = await _closeRights(new DecisionCoreRecord(core.Entity, core.Id), invoiceId, callerBearerToken, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return Unavailable(invoiceId, "signal-rights", ex);
-        }
-
-        switch (refusal)
-        {
-            case DecisionCallerRefusal.None:
-                break;
-            case DecisionCallerRefusal.Unavailable:
-                return AssignFirmResult.Refuse(StatusCodes.Status503ServiceUnavailable, AssignFirmCodes.Unavailable, "The firm could not be set; nothing was changed. Try again.", submissionId);
-            default:
-                _logger.LogWarning("Set firm on invoice {InvoiceId}: the caller may not record this decision ({Refusal}); nothing changed.", invoiceId, refusal);
-                return AssignFirmResult.Refuse(StatusCodes.Status403Forbidden, AssignFirmCodes.NotAuthorized,
-                    "You do not have permission to record a decision on this invoice's record.", submissionId);
-        }
-
-        if (await CheckFilingAsync(invoiceId, core, submissionId, ct).ConfigureAwait(false) is { } filing)
-        {
-            return filing;
         }
 
         if (state.Findings is null)
@@ -868,7 +875,7 @@ public sealed class InvoiceAssignFirmService
 
             var stored = new AssignFirmStoredDecision(
                 DecisionIdFor(SubmissionId), FirmId, Note, PreviousTrackingNumber, PreviousSequence, number, candidate.Sequence, DeciderUserId,
-                DecidedOn, Signals, renamed, RulesRerunPending);
+                DecidedOn, Signals, renamed, Lines.Count, RulesRerunPending);
 
             // The findings: the new number, and the decision stored with the apply. Every other member is kept as it was.
             var findings = (JsonObject)Findings.DeepClone();

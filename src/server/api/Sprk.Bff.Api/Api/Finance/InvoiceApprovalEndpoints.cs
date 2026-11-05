@@ -150,6 +150,10 @@ public static class InvoiceApprovalEndpoints
                 result.Outcome == AssignFirmOutcome.Assigned ? "assigned" : "alreadyAssigned",
                 result.DecisionId, result.TrackingNumber, result.PreviousTrackingNumber, result.RulesRerun)),
             { Status: StatusCodes.Status404NotFound } => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
+            // Rights the caller lacks on the core record: the body of the route's own firm-rights refusal (the filter's 403), so a caller without
+            // those rights is told the same thing whatever firm it names - one the filter refuses (missing or unreadable) or one the service reaches.
+            { Status: StatusCodes.Status403Forbidden, Code: AssignFirmCodes.NotAuthorized } =>
+                ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.InsufficientRightsReasonCode, traceId: httpContext.TraceIdentifier),
             { Status: StatusCodes.Status403Forbidden } =>
                 ProblemDetailsHelper.Forbidden(result.Code, result.Detail ?? "Not allowed.", httpContext.TraceIdentifier),
             _ => InvoiceLineReviewEndpoints.Refused(result.Status, result.Code, result.Detail),

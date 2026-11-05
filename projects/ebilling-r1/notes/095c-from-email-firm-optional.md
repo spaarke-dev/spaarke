@@ -1358,3 +1358,25 @@ clear removed makes `RealAllocator_TheOneTransaction_ClearsTheHold_AndCarriesThe
 - The 1c seams: every `Assigned` in 1b leaves an "applied, no record" row (the apply committed, no Decision Record, firm_missing Signal still open). 1b therefore stays off any environment users touch until 1c lands.
 - 095d-2 must keep the stored `assignFirm` member (the full mapping lives only there now; the facts carry counts).
 - K3 (display only): the line Signals keep the old invoice number in `sprk_regardingrecordname`. 095d-2's re-map should refresh it, or it is recorded there as a limit.
+
+#### 095d-1b adversarial pass 2 and fix round 2 (2026-11-04)
+
+No F findings. Six known-limit items (K1-K6); K1, K3 and K4 are fixed, K2, K5 and K6 are recorded with their remedies.
+
+**K1: check order (fixed; uac-r2 ruling, binding).** The caller's rights on the core record (the Signal-close rights: AppendTo on the core record and Write on the Signal's subject) and the recorder's filing now come BEFORE any firm read whose answer can change the result (active, linked, existence) in `InvoiceAssignFirmService.SetFirmAsync`. The question sent to uac-r2 was: can Write on an invoice exist without access to its core record? Answer: yes, Write on an invoice does not imply AppendTo on its core record. A caller who fails the check gets ONE refusal (403 `ebilling.decision.not_authorized` from the service) whatever firm id it names.
+- The endpoint's firm-rights filter (Read and AppendTo on the firm, 403) runs before the service and is the same for a missing and an unreadable firm. To make the two refusals identical in status AND body, the route now renders the service's `not_authorized` refusal with the filter's body (`sdap.access.deny.insufficient_rights`, "Access denied"; `InvoiceApprovalEndpoints.AssignFirm`). Chosen over a new core-record filter ahead of the firm filter because that filter would have to read the invoice and its core record before the service's own guards, a second copy of the derivation; the body mapping is one switch arm and cannot drift from the filter.
+- Other refusal orders: only the above. Phase P2, the findings checks and every status and code are unchanged; the firm-invalid, not-linked and unverifiable refusals now follow the rights and the filing. One consequence: a caller who fails the core-record check on a not-held or not-In-Review invoice still gets those invoice-state refusals first (they depend on the invoice, not the firm).
+- Tests: service `NoCloseRights_IsRefusedTheSame_WhateverFirmIsNamed` (5 firm states, plus "the firm is never read"); contract `NoCoreRecordRights_IsRefusedIdentically_WhateverFirmIsNamed` through the real filter stack (linked, unlinked, inactive, unknown: one status, one body). Seed: order reverted, 6 of the new tests fail; endpoint mapping reverted, the contract test fails (the unknown firm's body differs). Both restored byte-identical (`cmp`).
+
+**K2: dead ends refused cleanly but with no next step (known limit; operator remedy each).**
+- (a) Findings that would exceed 1 MB at the line ceiling: 409 `too_large`. Remedy: the operator compacts or splits the invoice. R2 candidate: compact the mapping.
+- (b) `sprk_vendororg` set directly through the Web API while the invoice is held: 409 `firm_already_set` forever. Remedy: the operator clears the stored firm, or clears the hold through the 095d-2 re-run.
+- (c) A submission whose invoice lookup was unlinked or repointed: 409 `no_submission`. Remedy: the operator relinks it.
+
+**K3: fixed, and an open question.** The `AssignFirmRename` summary now says the Decision Record carries counts only and the full mapping lives in the stored `assignFirm` member. `renamedCounts` gained `firmSetLines`: every line the apply wrote the firm on, renamed or not, so the record states every row the apply wrote (`lines` stays the renamed lines). The count is stored in the `assignFirm` member (`firmSetLines`), because the decision is rebuilt from the stored member alone; a stored member without it is unreadable (`findings_unreadable`; nothing is stored yet in any environment). Open question for ontology: do counts (not the old-to-new mapping) satisfy its 16.7 addition 3, given the mapping lives only in the stored member?
+
+**K4: fixed.** The `ArgumentException` case now also asserts `RenumberArgs` is set (the allocator was reached) and `Preflighted` holds exactly one decision (the Decision Record preflight ran first).
+
+**K5: the 2-minute lock against the allocator's worst case (known limit).** The invoice-decision lock lasts 2 minutes; the allocator's worst case can run longer. The row versions still prevent a second apply; only the unconditioned name updates (the approval's and the stored files') rely on the lock.
+
+**K6: known limit, safe.** A pre-send `InvalidOperationException` from the allocator gives the "may not have been set" text; that is safe, because the repeat decides from the stored decision.
