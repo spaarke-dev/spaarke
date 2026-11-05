@@ -1120,7 +1120,7 @@ public sealed class ExternalInvoiceVisibilityTests
     // ── ebilling-098 (P2 precondition, uac-r2): a submission with NO firm (sprk_vendororg blank, as an internal from-email row may
     //    become) is withheld from every external caller, whatever its source: decided before the invoice, channel and document ──
 
-    private string NoFirmCode => $"{InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.SourceKindUnknown)}=1";
+    private string NoFirmCode => $"{InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.FirmMissing)}=1";
 
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task NoFirm_Internal_WithAReadableDocument_IsWithheld_ItWouldOtherwiseDeferToTheDocument(string caller)

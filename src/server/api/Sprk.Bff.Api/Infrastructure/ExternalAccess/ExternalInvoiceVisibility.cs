@@ -26,7 +26,8 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// Stored File whose purpose reads null (a masked row), a Stored File with a source communication or attachment identity but
 /// no source document, an Internal submission whose document link is empty when the invoice has no InvoicePdf that is
 /// sourceless or has a source document, a submission whose channel is unknown, a source that does not come back, an unreadable own value, marker, chain or communication, a root that cannot be resolved and a flag that
-/// cannot be read each hide the invoice. A failed read THROWS; the caller-aware seam
+/// cannot be read each hide the invoice. A SUBMISSION with no firm is withheld from every external caller whatever its source
+/// (<see cref="InvoiceHiddenReason.FirmMissing"/>; it hides the submission only, never its invoice). A failed read THROWS; the caller-aware seam
 /// (<see cref="ExternalDataService.HideInvoicesForAsync"/>) turns that into "every asked invoice hidden".</para>
 /// <para><b>Taint closure.</b> <see cref="HiddenFamilyRowsAsync"/> maps a row of the invoice family (lines, submissions,
 /// approvals, external identifiers, corrections, Decision Records, Signals, Stored Files) to its invoice, directly or through
@@ -273,7 +274,7 @@ internal static class ExternalInvoiceVisibility
     /// SUBMISSION id, for a caller who is NOT an internal systemuser (the caller has decided that):
     /// <list type="bullet">
     /// <item>a submission with NO firm (<c>sprk_vendororg</c> blank) is withheld from every external caller, whatever its source or
-    /// invoice (<see cref="InvoiceHiddenReason.SourceKindUnknown"/>: what it belongs to is unknown); this is decided first;</item>
+    /// invoice (<see cref="InvoiceHiddenReason.FirmMissing"/>); this is decided first;</item>
     /// <item>a submission WITH an invoice is decided by the invoice predicate (<see cref="DecideAsync"/>), as before;</item>
     /// <item>one WITHOUT an invoice (Received, Processing, or a terminal outcome that produced none) is decided by its own
     /// source, by channel (the shared <see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel"/> enum):
@@ -304,7 +305,7 @@ internal static class ExternalInvoiceVisibility
         //     No source or invoice read is spent on it.
         foreach (var firmless in page.Where(HasNoFirm).ToList())
         {
-            withheld[firmless.SubmissionId] = InvoiceHiddenReason.SourceKindUnknown;
+            withheld[firmless.SubmissionId] = InvoiceHiddenReason.FirmMissing;
             page.Remove(firmless);
         }
 
@@ -596,9 +597,10 @@ internal static class ExternalInvoiceVisibility
     }
 
     /// <summary>
-    /// Review round 5 (F1): the assistant tools' decision over submission rows. Each row's invoice link, <c>sprk_channel</c> and
-    /// <c>_sprk_document_value</c> are read BY ID app-only in one read per chunk, and the page is decided by
-    /// <see cref="DecideSubmissionsAsync"/>: with an invoice, the invoice predicate; without one, the submission's own source.
+    /// Review round 5 (F1): the assistant tools' decision over submission rows. Each row's invoice link, <c>sprk_channel</c>,
+    /// <c>_sprk_document_value</c> and firm (<c>_sprk_vendororg_value</c>) are read BY ID app-only in one read per chunk, and the
+    /// page is decided by <see cref="DecideSubmissionsAsync"/>: no firm, withheld; with an invoice, the invoice predicate; without
+    /// one, the submission's own source.
     /// A row that does not come back, or whose invoice link is not a GUID, is hidden. A failed read THROWS.
     /// </summary>
     private static async Task<IReadOnlySet<Guid>> HiddenSubmissionRowsAsync(
@@ -810,6 +812,10 @@ internal enum InvoiceHiddenReason
     RootUnresolved,
     ReadFailed,
     SourceKindUnknown,
+
+    /// <summary>A SUBMISSION with no firm (<c>sprk_vendororg</c> blank, null or not a GUID): withheld from every external caller,
+    /// whatever its source (095c P2 precondition). It hides the submission only, never its invoice.</summary>
+    FirmMissing,
 }
 
 /// <summary>What one decision read (counts only).</summary>
@@ -897,6 +903,7 @@ internal sealed class InvoiceVisibilityResult
         InvoiceHiddenReason.RootRestricted => "root_restricted",
         InvoiceHiddenReason.RootUnresolved => "root_unresolved",
         InvoiceHiddenReason.SourceKindUnknown => "source_kind_unknown",
+        InvoiceHiddenReason.FirmMissing => "firm_missing",
         _ => "read_failed",
     };
 }
