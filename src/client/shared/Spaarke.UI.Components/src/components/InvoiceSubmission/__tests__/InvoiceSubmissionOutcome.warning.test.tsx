@@ -231,3 +231,57 @@ describe('InvoiceSubmissionOutcome — a held Accepted invoice (082c-3, R4 item 
     expect(screen.queryByText(PROVISIONAL.message)).not.toBeInTheDocument();
   });
 });
+
+describe('InvoiceSubmissionOutcome — the status badge of an Accepted view (082c-3b, R4 2026-11-05)', () => {
+  const badgeOf = async () => {
+    const badge = await screen.findByTestId('status-badge');
+    return { text: badge.textContent, tone: badge.getAttribute('data-tone') };
+  };
+
+  it('a held view (Accepted + a warning) reads "In Review" in the warning tone, with one warning bar and the tracking sentence kept', async () => {
+    const getStatus = jest.fn().mockResolvedValue(view({ status: 'Accepted', warning: HELD }));
+    renderWithProviders(<InvoiceSubmissionOutcome submissionId={ID} getStatus={getStatus} pollIntervalMs={10} />);
+
+    const bar = await screen.findByTestId(HELD_ID);
+    expect(await badgeOf()).toEqual({ text: 'In Review', tone: 'warning' });
+    expect(screen.getAllByTestId('status-badge')).toHaveLength(1);
+    expect(screen.queryByText('Accepted')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('.fui-MessageBar')).toHaveLength(1);
+    expect(bar).toHaveTextContent('Quote tracking number TRK-0003 if you contact us about it.');
+  });
+
+  it('an overridden view (Accepted, ebilling.submission.overridden, no warning) keeps the green "Accepted" badge and no warning bar', async () => {
+    const getStatus = jest
+      .fn()
+      .mockResolvedValue(
+        view({ status: 'Accepted', outcomeReasonCode: 'ebilling.submission.overridden', warning: null })
+      );
+    renderWithProviders(<InvoiceSubmissionOutcome submissionId={ID} getStatus={getStatus} pollIntervalMs={10} />);
+
+    await screen.findByText(/The invoice was accepted/i);
+    expect(await badgeOf()).toEqual({ text: 'Accepted', tone: 'success' });
+    expect(screen.queryByTestId(HELD_ID)).not.toBeInTheDocument();
+  });
+
+  it('a plain Accepted view with no warning shows the green "Accepted" badge', async () => {
+    const getStatus = jest.fn().mockResolvedValue(view({ status: 'Accepted' }));
+    renderWithProviders(<InvoiceSubmissionOutcome submissionId={ID} getStatus={getStatus} pollIntervalMs={10} />);
+
+    await screen.findByText(/The invoice was accepted/i);
+    expect(await badgeOf()).toEqual({ text: 'Accepted', tone: 'success' });
+    expect(screen.queryByTestId(HELD_ID)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['a blank message', { code: 'x', message: ' ' }],
+    ['a numeric message', { code: 'x', message: 42 } as unknown as InvoiceSubmissionWarning],
+    ['a null message', { code: 'x', message: null } as unknown as InvoiceSubmissionWarning],
+  ])('an Accepted view with %s keeps the green "Accepted" badge and no warning bar', async (_label, warning) => {
+    const getStatus = jest.fn().mockResolvedValue(view({ status: 'Accepted', warning }));
+    renderWithProviders(<InvoiceSubmissionOutcome submissionId={ID} getStatus={getStatus} pollIntervalMs={10} />);
+
+    await screen.findByText(/The invoice was accepted/i);
+    expect(await badgeOf()).toEqual({ text: 'Accepted', tone: 'success' });
+    expect(screen.queryByTestId(HELD_ID)).not.toBeInTheDocument();
+  });
+});

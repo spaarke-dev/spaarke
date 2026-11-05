@@ -1271,7 +1271,7 @@ Seeds (each restored; the file `cmp`-identical afterwards):
 
 #### Accepted known limits (review of 082c-3)
 
-- **K1: tone.** A green "Accepted" badge sits above the amber held bar. Pending R4's view on the badge tone.
+- **K1: tone.** A green "Accepted" badge sits above the amber held bar. **RESOLVED by 082c-3b** (R4 2026-11-05, below): a held view's badge reads "In Review" in the warning tone.
 - **K1: "held today" is the UTC date; the hold is judged on the invoice and work dates.** After a Procedure's terms end, an invoice for EARLIER work gets a false warning; a hole between past versions (not today) gives a silent miss. The conditional wording ("If the invoice's work dates are not covered either, it will be held") and the drop of the caption on a terminal view contain both. The warning is provisional by construction.
 - **K2:** the 202 reuses `ebilling.submission.procedure_gap` (the brief's "reuse status-view constants"). No consumer branches on the 202's code today.
 - **K4:** `politeness="polite"` is applied (supported by the installed Fluent version, above).
@@ -1285,6 +1285,10 @@ Seeds (each restored; the file `cmp`-identical afterwards):
 | `Spaarke.ArchTests` (full) | 2041 passed, 0 failed |
 | Client `jest src/components/InvoiceSubmission` | 5 suites, 77 passed |
 | Client `tsc --noEmit` | 9 errors, the same pre-existing ones |
+
+#### 082c-3b (R4 2026-11-05): held badge
+
+Branch `task/ebilling-082c-3b` from `origin/work/ebilling-r1` (d120d64735). Client only, in `InvoiceSubmissionOutcome.tsx`; no BFF, Dataverse or deploy change. R4 decided that an Accepted status view that has a `warning` (the held case, which already shows the single amber "Received: on hold for review" bar) shows its status badge as "In Review" in the `warning` tone, not green "Accepted". "In Review" is the owner's existing label for the invoice's statuscode 1 as partners see it in the Invoices grid (a local `IN_REVIEW_LABEL` constant; the package had none, the add-in's `invoiceSubmissionMessages.ts` is a separate surface). The tone is `StatusBadgeTone` `'warning'`, which already exists, so no new tone. "Held" is decided once (`heldWarning !== null`, i.e. Accepted plus `nonBlank(view.warning)`) and feeds the badge label, the badge tone, the held bar and the green-bar guard, so there is no second condition. An un-held Accepted view and a released one (`outcomeReasonCode` `ebilling.submission.overridden`, where `warning` is null) keep the green "Accepted" badge; the client does not branch on the reason code. Tests (`InvoiceSubmissionOutcome.warning.test.tsx`, asserting through `StatusBadge`'s existing `data-testid="status-badge"` and `data-tone`): held gives "In Review" / warning with one bar and the tracking sentence; overridden, plain Accepted and a blank, numeric or null warning give green "Accepted" and no bar. This resolves the K1 "tone" limit above. Gates: `jest src/components/InvoiceSubmission` 5 suites, 85 passed (6 of them new); `tsc --noEmit` 9 errors, the same pre-existing ones; seed (badge ignores held) failed only the held test, restored.
 
 ### For the next slices and the peers
 
