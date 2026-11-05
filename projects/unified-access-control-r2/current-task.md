@@ -41,7 +41,7 @@
     - (d) aggregate counts in the logs are OK;
     - adjustment lines never reach the evaluator (verified); the close log now carries the assignment id, the version id and the closed Signal ids;
     - waits only on ontology's ruling about the superseding version on the Signal row (provenance; no uac objection to deferring it to 095d-2).
-  - **082c-2 CLEARED through fix round 3** (`0999003007`, no F; pending ebilling's parallel adversarial pass): the open-hold helper fails closed; U1 server-nulls the review detail outside In Review (invoices only); the P0 scope-select guard; U2/U3. K: a filter/sort oracle on `sprk_reviewdetail` (own firm's stale label only). Next: re-check the merge of work only.
+  - **082c-2 CLEARED for the merge into work at `5ec401ebaa`** (round 4 closed the filter oracle; the merge resolution is correct). Next: ebilling's master PR. Standing items: the pre-P2 table, the scope re-grep, the runbook lines, prevseq MappingProtectedColumns, C22, the full integration suites.
   - **P2 blank-firm CLEARED** at `e8450e8d22` (no F): no-firm submissions are withheld from every external caller before any other check; Guid.Empty is dropped from `firmIds`. K1 (a) accepted: the tracking number goes with the invoice. Ebilling merges it into work and sends the owner the P2 request; the destructive steps need the owner's go in ebilling's session.
   - Earlier conditions in force: 082c §3(c) pre-check conditions; 082d snapshot design; C22 (task 114 before 082c reaches master).
   - Still owed: 089b/089c, 095a, 095c; the full master PR; the NFR-05 census after deploy.
