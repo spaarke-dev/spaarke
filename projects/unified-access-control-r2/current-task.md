@@ -41,7 +41,7 @@
     - (d) aggregate counts in the logs are OK;
     - adjustment lines never reach the evaluator (verified); the close log now carries the assignment id, the version id and the closed Signal ids;
     - waits only on ontology's ruling about the superseding version on the Signal row (provenance; no uac objection to deferring it to 095d-2).
-  - **082c-2 review IN PROGRESS** on `60fecb03e7` (+`7a955cc983`, notes only): an Opus access-only agent is running. The four uac files are OK (ExternalAccessModule column, ParentLineage, RecordTableRules, `Unknown.Transient`). I owe ebilling a verdict plus the DR ruling (does any external path read DR facts or `sprk_evidencerefs`?). Ebilling merges work in after the verdict, then I re-check the merge diff only.
+  - **082c-2 access review DONE at `60fecb03e7`: no F.** DR ruling: the facts stay as they are, because no partner or contact path reads DR rows, facts or `sprk_evidencerefs`. Added to ebilling's round 3 (with ontology's F1 open-hold helper and F2 wording): the server nulls `sprk_reviewdetail` outside In Review on the external read; the C16 log type name at `SupersededSubmissionNote.cs:125`; `IsRecordRuleCode` OrdinalIgnoreCase. Next: re-check the round-3 range plus the merge of work.
   - **P2 blank-firm:** routes 1–3 fail closed (tests coming). Row 6, the assistant tools for flagged systemusers, CAN return rows through role depth (round 77), so a no-firm withhold goes in `DecideSubmissionsAsync` before the source branches, plus Guid.Empty dropped from `firmIds`; branch `task/ebilling-p2-blankfirm-tests`, 2 adversarial passes, then my review. The P2 migration itself (destructive key delete) needs the owner's go in ebilling's session.
   - Earlier conditions in force: 082c §3(c) pre-check conditions; 082d snapshot design; C22 (task 114 before 082c reaches master).
   - Still owed: 089b/089c, 095a, 095c; the full master PR; the NFR-05 census after deploy.
@@ -97,6 +97,7 @@
 
 ## Owner items outstanding
 - The person-path refusal question (above).
+- Role question (from the 082c-2 review): do flagged (`sprk_isexternal`) systemusers hold a role with Read on `sprk_signal` / `sprk_decisionrecord`? The assistant read tool scopes those rows by invoice visibility, not by column. Same class as round 77. Options: confirm no such role, or refuse the two tables to flagged callers in the read tools.
 - Email to AP diagnostics.
 - The VS Code cleanup OK.
 - The Office saves and Submit Invoice for word-add-in.
