@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.FieldMapping;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 
 namespace Sprk.Bff.Api.Api.FieldMappings;
 
@@ -803,6 +804,11 @@ public static class FieldMappingEndpoints
     /// rights from <see cref="CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync"/> under the existing <c>"read"</c> key,
     /// and the identity from <see cref="CallerRecordAccessProbe.GetCallerSystemUserIdAsync"/> (WhoAmI on the caller's
     /// own token — the one identity path that cannot be fooled). The try covers the decision only.
+    /// <para>Task 043 (owner 2026-11-04): the entity set is the mapping-source one
+    /// (<see cref="MappingSourceReadProbe.TryResolveSourceEntitySet"/>: that map, then <c>sprk_document</c> on the Document
+    /// access path's set). A document source is also put to THE external document narrowing
+    /// (<see cref="InternalPlaneDocumentNarrowing.ForCallerAsync"/>) after the caller's Read allowed it: a caller who is not an
+    /// internal systemuser pushes from it only when the narrowing shows it, and a narrowing fault shows none (the same 404).</para>
     /// </remarks>
     internal static async Task<Guid?> AuthorizePushSourceAsync(
         PushFieldMappingsRequest request,
@@ -811,7 +817,7 @@ public static class FieldMappingEndpoints
         ILogger logger,
         CancellationToken ct)
     {
-        if (!EntityAccessFilter.TryResolveEntitySet(request.SourceEntity, out var sourceEntitySet))
+        if (!MappingSourceReadProbe.TryResolveSourceEntitySet(request.SourceEntity, out var sourceEntitySet))
         {
             logger.LogWarning(
                 "[FIELD-MAPPING-PUSH] Denied: source entity '{SourceEntity}' is not in EntityAccessFilter's map, so the "
@@ -829,6 +835,20 @@ public static class FieldMappingEndpoints
                     "[FIELD-MAPPING-PUSH] Denied: caller holds {Rights} on {EntitySet}({SourceRecordId}); Read required. "
                     + "Answered 404 — nothing read or written.", rights, sourceEntitySet, request.SourceRecordId);
                 return null;
+            }
+
+            if (MappingSourceReadProbe.IsDocumentSource(request.SourceEntity))
+            {
+                var documentId = request.SourceRecordId.ToString();
+                var visibility = await InternalPlaneDocumentNarrowing.ForCallerAsync(
+                    httpContext, [documentId], PushDocumentNarrowingSurface, logger);
+                if (!visibility.IsShown(documentId))
+                {
+                    logger.LogWarning(
+                        "[FIELD-MAPPING-PUSH] Denied: the external document narrowing does not show the source document to this "
+                        + "caller. Answered 404 — nothing read or written.");
+                    return null;
+                }
             }
 
             var callerSystemUserId = await probe.GetCallerSystemUserIdAsync(token, ct);
@@ -857,6 +877,9 @@ public static class FieldMappingEndpoints
 
     /// <summary>The existing <see cref="OperationAccessPolicy"/> key for reading a record.</summary>
     private const string ReadOperation = "read";
+
+    /// <summary>Task 043: the narrowing's log label for a push from a document (no ids).</summary>
+    private const string PushDocumentNarrowingSurface = "field-mapping-push-source";
 
     /// <summary>
     /// Builds the child-record query issued AS THE CALLER (task 166). <paramref name="parentLookupAttribute"/> is the

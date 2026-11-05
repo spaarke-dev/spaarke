@@ -201,7 +201,11 @@ public static class AnalysisEndpoints
                     CorrelationId = httpContext.TraceIdentifier,
                     // FR-19 / FR-03: the mapping profile of the document the analysis is filed under, if one exists; read as
                     // the caller first (FR-04). No profile: a silent no-op. Fill-only: every value of the request wins.
-                    Mapping = Sprk.Bff.Api.Api.Events.EventEndpoints.CallerMappingOf(httpContext, logger),
+                    // Task 043 (owner 2026-11-04): a Document to Analysis profile maps when the caller can read the document. The
+                    // service asks the caller's Read on it; the external document narrowing is the route filter's decision on the
+                    // body document, reused here (MappingDocumentDecisionOf), so it is not asked twice.
+                    Mapping = Sprk.Bff.Api.Api.Events.EventEndpoints.CallerMappingOf(
+                        httpContext, logger, MappingDocumentDecisionOf(httpContext)),
                     // Task 031 fix round 1 (F1, owner 2026-11-04; UAC-r2 2026-11-04): the route filter's playbook-use decision
                     // (public, or the caller's Read on the row) authorised ONE playbook id, so the service asks no AppendTo on
                     // that record (only Spaarke AI Analysis Admin holds it). The id is the filter's, not the body's: the service
@@ -251,7 +255,12 @@ public static class AnalysisEndpoints
 
             logger.LogInformation("Created analysis {AnalysisId} for document {DocumentId}", analysisId, request.DocumentId);
 
-            return Results.Created($"/api/ai/analysis/{analysisId}", new CreateAnalysisResponse(analysisId));
+            // Task 043: the create's warnings (for example, a mapping source the caller cannot read) go back to the caller,
+            // as on the child-record create; none, no member.
+            return Results.Created($"/api/ai/analysis/{analysisId}", new CreateAnalysisResponse(analysisId)
+            {
+                Warnings = outcome.Warnings.Count == 0 ? null : outcome.Warnings,
+            });
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("scope item"))
         {
@@ -269,6 +278,16 @@ public static class AnalysisEndpoints
             return CreateAnalysisFailure();
         }
     }
+
+    /// <summary>
+    /// Task 043: the external document narrowing's answer for the analysis create's field mapping: the document the route
+    /// filter's Document check allowed for this caller (<see cref="Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizedDocumentId"/>)
+    /// is shown, and any other document is not. <c>null</c> when the filter recorded none, so a document source maps nothing.
+    /// </summary>
+    internal static Func<Guid, CancellationToken, Task<bool>>? MappingDocumentDecisionOf(HttpContext httpContext) =>
+        Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizedDocumentId(httpContext) is { } allowed
+            ? (documentId, _) => Task.FromResult(documentId == allowed)
+            : null;
 
     /// <summary>The route's existing generic failure for a create that did not complete (NFR-07).</summary>
     private static IResult CreateAnalysisFailure() =>

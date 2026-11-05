@@ -361,6 +361,31 @@ public class MappingSourceCallerMaskTests
         masked.Should().BeNull("no caller context fails closed");
     }
 
+    // ── Task 043 (owner 2026-11-04): a Document source is masked like any other ──────────────────────────────────
+
+    [Fact]
+    public async Task ApplyAsync_ADocumentSource_IsReadAsTheCallerOnTheDocumentSet_AndASecuredColumnIsNotCopied()
+    {
+        var appRead = new Entity("sprk_document", SourceId)
+        {
+            ["sprk_documentdescription"] = "From the document",
+            ["sprk_confidentialnote"] = "secured",
+            ["sprk_matter"] = new EntityReference("sprk_matter", ClientId),
+        };
+        var caller = CallerSeeing(appRead);
+        caller.Secured.Add("sprk_confidentialnote");
+
+        var masked = await MappingSourceCallerMask.ApplyAsync(
+            caller, "sprk_document", SourceId, appRead,
+            new[] { "sprk_documentdescription", "sprk_confidentialnote", "sprk_matter" }, NullLogger.Instance, CancellationToken.None);
+
+        caller.Paths.Should().ContainSingle().Which.Should().Be($"sprk_documents({SourceId:D})");
+        masked.Should().NotBeNull();
+        masked!.GetAttributeValue<string>("sprk_documentdescription").Should().Be("From the document");
+        masked.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(ClientId);
+        masked.Contains("sprk_confidentialnote").Should().BeFalse("a field-secured column the caller cannot read is never copied");
+    }
+
     [Fact]
     public async Task ApplyAsync_ForATableWithNoEntitySetMapping_TheSourceIsUnavailable()
     {

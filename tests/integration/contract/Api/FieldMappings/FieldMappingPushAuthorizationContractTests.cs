@@ -617,6 +617,9 @@ public class FieldMappingPushAuthorizationContractTests
 
         public Exception? Fault { get; set; }
 
+        /// <summary>The one source record <see cref="Rights"/> applies to (task 043: a document source sets its own).</summary>
+        public Guid RightsOn { get; set; } = MatterId;
+
         public override Task<AccessRights> GetCallerRightsAsync(
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
@@ -626,7 +629,7 @@ public class FieldMappingPushAuthorizationContractTests
                 return Task.FromException<AccessRights>(Fault);
             }
 
-            return Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && recordId == MatterId ? Rights : AccessRights.None);
+            return Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && recordId == RightsOn ? Rights : AccessRights.None);
         }
 
         public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)
@@ -668,10 +671,12 @@ public class FieldMappingPushAuthorizationContractTests
             _dataverse = dataverse;
         }
 
-        public static async Task<PushHost> StartAsync(HttpMessageHandler? dataverse = null)
+        /// <param name="dataverse">A stand-in for Dataverse behind the REAL impersonated seam (#2253 fix round 3).</param>
+        /// <param name="configure">Task 043: registrations added last (e.g. the stated caller for the external document narrowing).</param>
+        public static async Task<PushHost> StartAsync(HttpMessageHandler? dataverse = null, Action<IServiceCollection>? configure = null)
         {
             var host = new PushHost(dataverse);
-            await host.InitializeAsync();
+            await host.InitializeAsync(configure);
             return host;
         }
 
@@ -841,7 +846,7 @@ public class FieldMappingPushAuthorizationContractTests
             SourceReads.Should().BeEmpty("no source read — as the caller or app-only — before the source is authorized");
         }
 
-        private async Task InitializeAsync()
+        private async Task InitializeAsync(Action<IServiceCollection>? configure)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
@@ -868,6 +873,7 @@ public class FieldMappingPushAuthorizationContractTests
             // Batch-4 integration (task 158): a push that files a work assignment or project under a secure record secures
             // it; no record in these tests is secure (a module boundary here).
             builder.Services.AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
+            configure?.Invoke(builder.Services);
 
             builder.WebHost.UseTestServer();
             _app = builder.Build();
