@@ -66,7 +66,7 @@
 
 ## Open Owner Questions / Blockers
 - Review `notes/component-protocol.md` v0.2: the K/E split and the playbook set.
-- Word desktop UAT evidence still owed: the A/B import screenshots, the saved D2 file, D3–D6, and whether Word offers a saved playbook in a new chat (T-P4).
+- Word desktop UAT evidence still owed: the A/B import screenshots, the saved D2 file, D3–D6. (**T-P4 answered 2026-11-05:** `/` Review contract → saved-playbook picker; recorded in design §2.4.6.)
 - User-guide location (shipped onboarding vs attorney guide). Owner decisions H1, H2, H3.
 
 ## Standing directives (owner) — keep until revoked

@@ -245,13 +245,15 @@ There is no in-product router, so every accelerator states this in its install g
 4. Optionally, **Save playbook**. This keeps the parsed topics as the user's own playbook object `[Tested]` (L24).
 5. **Run Review**.
 
-There is no default playbook, no library setting, and no way to automate the choice `[Cited]`. A new chat doesn't remember an *attached* playbook: it re-found ours by search, and by the topic IDs in comments left in the document (S19, L18). Whether a *saved* playbook is offered in a new chat is T-P4.
+There is no default playbook, no library setting, and no way to automate the choice `[Cited]`. A new chat doesn't remember an *attached* playbook: it re-found ours by search, and by the topic IDs in comments left in the document (S19, L18).
+
+**T-P4 answered (owner, Word desktop, 2026-11-05) `[Tested]`:** **saved** playbooks *are* offered in a new chat. The attorney picks **Review contract** with `/`. Copilot asks "Which playbook do you want to use?" and shows a picker, "Choose a playbook to review this contract". It lists each saved playbook by name with its "Last updated" date, plus **New playbook**, **View all** and **Run review**. **View all** opens "Playbooks: Manage playbooks for contract reviews. Reuse them across future reviews." Our saved `NDA - Mutual (Spaarke baseline)` showed General guidelines plus all of its topics. So, in Word, the playbook is **imported once and then picked from a list**. The list is the user's own: an update means re-importing, and only the name and date reveal a stale copy (L24).
 
 Plain Word Copilot, without the Legal plugin (Word web, T-12), applied our Word playbook and quoted our `nda.*` topic IDs in every comment. Its edits were whole-clause replacements, with no summary and no copies `[Tested]`.
 
 | Surface | How the playbook gets in | Automatic? | What we ship |
 |---|---|---|---|
-| **Word, legal plugin** | Attached for each review (above) | **No** | Word playbooks with predictable names in **one** SharePoint `Legal Playbooks` library (T1) or a OneDrive folder (T0), so one search in Attach from Cloud finds them. A one-line "how to attach" card in each guide. |
+| **Word, legal plugin** | First use: import and Save playbook. After that, `/` **Review contract**, then pick from the saved-playbook list (T-P4) | **No**, but it is one click after the first import | Word playbooks with predictable names in **one** SharePoint `Legal Playbooks` library (T1) or a OneDrive folder (T0), so one search in Attach from Cloud finds them. A one-line "how to attach" card in each guide. |
 | **Cowork, our skills** | The skill reads it: our baseline in the skill's `references/`, or the customer's file found by the lookup order in §5.3 | **Yes**: no attach step; the provenance line names what was used | Skills that look the playbook up, and say which one they used |
 | **Cowork, Legal for Cowork's `review-contract`** | Attached per conversation, or `/`-referenced in the attorney's custom instructions or a Project | Partly: a `/` reference in Preferences or a Project is included in every task | A ready-made `/`-reference line for Preferences or a practice Project (onboarding step 5) |
 So **automation of playbook selection exists only in Cowork**, and it is the main reason our review skills live there. In Word, our job is to make the right Word playbook easy to find and import:

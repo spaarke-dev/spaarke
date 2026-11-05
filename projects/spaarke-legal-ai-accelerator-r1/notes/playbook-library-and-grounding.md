@@ -47,14 +47,20 @@ Each playbook ships as:
 
 ## 3. W3: how an attorney actually uses a playbook
 
-There are **two separate choices**, and Copilot makes only the first:
+**In the simplest terms, in Word** (owner screenshots, Word desktop, 2026-11-05: T-P4 answered):
+1. Open the contract.
+2. Type `/` and pick the AI for Legal skill **Review contract**.
+3. Copilot asks "Which playbook do you want to use?" and lists the attorney's **saved playbooks** (name and "Last updated" date), plus **New playbook**.
+4. Pick one, then **Run review**. Or create a new playbook (import a `.docx` or build one), and it joins the list. **View all** manages the list.
 
-1. **Which skill runs.** Copilot picks it by matching the request against skill descriptions. We influence this through our descriptions and the neighbour gate (G4).
+There are **two separate choices**:
+
+1. **Which skill runs.** In Word, the attorney picks it with `/`. In Cowork, Copilot usually picks it by matching the request against skill descriptions. We influence that through our descriptions and the neighbour gate (G4).
 2. **Which playbook it uses.** **The user picks it**, except in our own Cowork skills.
 
 | Surface | How the playbook gets in | Automatic? |
 |---|---|---|
-| **Word, Legal plugin** | The attorney asks for a playbook review. Copilot asks for the playbook. The attorney types `/` and the playbook's name, or uses Upload or Attach from Cloud. Optionally, Save playbook (desktop). | **No.** There is no default or library setting `[Cited]`. Whether a saved playbook is offered in a new chat is T-P4. |
+| **Word, Legal plugin** | **First use:** New playbook → import our `.docx` → save. **After that:** `/` Review contract, then pick it from the saved list. | **No,** but one click once saved. The list is **per user**: there is no shared or organization list, and an update means re-importing. The picker shows only the name and the last-updated date. |
 | **Cowork, Microsoft `review-contract`** | Attached or `/`-referenced in the request. Alternatively, a `/` reference to the playbook in the attorney's **Preferences** or in a practice **Project** is included in every task. | **Partly**, via Preferences or a Project. Onboarding writes that line (§8.1a step 5). |
 | **Cowork, Spaarke skills (`nda-review`)** | The skill reads the governed or personal playbook from the named locations and picks it by agreement type and side from the profile. It asks only when two apply. | **Yes.** The provenance line names the playbook used. |
 
@@ -88,6 +94,8 @@ There are **two separate choices**, and Copilot makes only the first:
 - `Acme MSA – Customer – Enterprise v2.1.docx` (customer)
 
 The document title is identical to the file name. Topic IDs are `<family>.<topic>` (unchanged).
+
+**Why the version is in the name.** Word's picker shows only the saved playbook's name and its "Last updated" date, and the saved copy belongs to the user (T-P4, L24). A visible `v1.2` lets an attorney, and a support call, spot a stale copy at a glance. Starting the name with the agreement family keeps a long list grouped. ❓ Confirm in T-P15 which part of the `.docx` Word uses as the saved name (the title, the first heading or the file name).
 
 **Scope block:** the first lines of the `.md` and the first table of the `.docx`:
 
