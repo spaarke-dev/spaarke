@@ -163,8 +163,8 @@ public partial class BillingFactLoaderTests
         Policy(RuleSet(RuleSetScope.ClientDefault), "CD", RuleType.TimeIncrement, HalfHour);
         Policy(RuleSet(RuleSetScope.Firm, FirmId), "FIRM", RuleType.TimeIncrement, HalfHour);
 
-        var rules = await Loader().LoadRulesOnAsync(FirmId, new CoreRecordReference(CoreRecordKind.Matter, MatterA), new DateOnly(2026, 3, 2), CancellationToken.None);
-        var before = await Loader().LoadRulesOnAsync(FirmId, null, new DateOnly(2025, 12, 31), CancellationToken.None);
+        var rules = await Loader().LoadRulesOnAsync(FirmId, new CoreRecordReference(CoreRecordKind.Matter, MatterA), new DateOnly(2026, 3, 2), null, CancellationToken.None);
+        var before = await Loader().LoadRulesOnAsync(FirmId, null, new DateOnly(2025, 12, 31), null, CancellationToken.None);
 
         rules.Select(r => (r.PolicyCode, r.Source)).Should().BeEquivalentTo(new[]
         {

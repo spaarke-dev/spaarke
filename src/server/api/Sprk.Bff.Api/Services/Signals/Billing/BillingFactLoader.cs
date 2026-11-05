@@ -405,25 +405,32 @@ public sealed class BillingFactLoader
     /// <paramref name="date"/>, one version per policy: the legacy version <see cref="InvoiceComplianceEvaluator.SelectVersion"/> picks, and every rule
     /// <see cref="ProcedureResolution.RulesOn"/> puts in force. No precedence (a reviewer may cite any rule in force); a gap only means fewer rules.
     /// </summary>
-    internal async Task<IReadOnlyList<BillingRuleCandidate>> LoadRulesOnAsync(Guid firmId, CoreRecordReference? core, DateOnly date, CancellationToken ct)
+    internal async Task<IReadOnlyList<BillingRuleCandidate>> LoadRulesOnAsync(
+        Guid firmId, CoreRecordReference? core, DateOnly date, DateOnly? latestWorkDate, CancellationToken ct)
     {
         var legacy = await LoadLegacyRulesAsync(firmId, ct).ConfigureAwait(false);
         var procedures = await ProcedureResolver.ReadAsync(_entities, _logger, core, firmId, ct).ConfigureAwait(false);
         RequireDisjoint(legacy, procedures);
-        return RulesInForceOn(legacy, procedures, date);
+        return RulesInForceOn(legacy, procedures, date, latestWorkDate);
     }
 
-    /// <summary>The pure half of <see cref="LoadRulesOnAsync"/> (the adjustment tests drive it over their own rows).</summary>
+    /// <summary>
+    /// The pure half of <see cref="LoadRulesOnAsync"/> (the adjustment tests drive it over their own rows). <paramref name="latestWorkDate"/> is the
+    /// latest dated line's work date (082c K4, rule (c)): a Procedure with a hole, an end or no start on <paramref name="date"/> is offered by its
+    /// version on that date, exactly as the evaluator judges the invoice subject (<see cref="ProcedureRulesOnDate.FallbackProcedureIds"/>), so a
+    /// rule that judged the invoice can be cited. Legacy selection is unchanged.
+    /// </summary>
     internal static IReadOnlyList<BillingRuleCandidate> RulesInForceOn(
-        IReadOnlyList<BillingRuleCandidate> legacy, ProcedureResolution procedures, DateOnly date)
+        IReadOnlyList<BillingRuleCandidate> legacy, ProcedureResolution procedures, DateOnly date, DateOnly? latestWorkDate = null)
     {
         ArgumentNullException.ThrowIfNull(legacy);
         ArgumentNullException.ThrowIfNull(procedures);
+        var onLatestWorkDate = latestWorkDate is { } work && work != date ? procedures.RulesOn(work) : null;
         return legacy
             .GroupBy(c => c.PolicyId)
             .Select(g => InvoiceComplianceEvaluator.SelectVersion(g.ToList(), date))
             .OfType<BillingRuleCandidate>()
-            .Concat(procedures.RulesOn(date).Rules.Select(ProcedureCandidate))
+            .Concat(procedures.RulesOn(date).RulesWithFallback(onLatestWorkDate).Select(ProcedureCandidate))
             .ToList();
     }
 

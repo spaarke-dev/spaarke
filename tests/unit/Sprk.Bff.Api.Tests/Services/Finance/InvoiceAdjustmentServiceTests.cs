@@ -79,6 +79,8 @@ public sealed class InvoiceAdjustmentServiceTests
         public readonly List<Guid> FirmsAsked = [];
         /// <summary>082c: the core record and date each rule read was asked for.</summary>
         public readonly List<(CoreRecordReference? Core, DateOnly Date)> RulesAsked = [];
+        /// <summary>082c K1: the latest dated line's work date each rule read was given (rule (c)).</summary>
+        public readonly List<DateOnly?> WorkDatesAsked = [];
         /// <summary>082c: the Procedure stream the rule read resolves (none by default).</summary>
         public ProcedureResolution Procedures = Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit.NoProcedures();
         public RecordOwnerResolution Owner = RecordOwnerResolution.Owned(Team);
@@ -254,12 +256,13 @@ public sealed class InvoiceAdjustmentServiceTests
             var totals = new InvoiceTotalsService(Records.Object, Entities.Object, NullLogger<InvoiceTotalsService>.Instance);
             return new InvoiceAdjustmentService(
                 Entities.Object, totals, Locks, Resolver ?? Ownership.Object,
-                (firm, core, date, _) =>
+                (firm, core, date, work, _) =>
                 {
                     FirmsAsked.Add(firm);
                     RulesAsked.Add((core, date));
+                    WorkDatesAsked.Add(work);
                     // The loader's own pure selection (082c): one legacy version per policy in force on the date, plus the Procedure rules.
-                    return Task.FromResult(BillingFactLoader.RulesInForceOn(Candidates.ToList(), Procedures, date));
+                    return Task.FromResult(BillingFactLoader.RulesInForceOn(Candidates.ToList(), Procedures, date, work));
                 },
                 NullLogger<InvoiceAdjustmentService>.Instance,
                 new FixedTime(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero)),
@@ -1175,6 +1178,61 @@ public sealed class InvoiceAdjustmentServiceTests
         cited.Status.Should().Be(AdjustmentStatus.Applied, "a Procedure rule in force is a rule the reviewer may cite");
     }
 
+    /// <summary>A Procedure that ended on 10 September (the invoice is dated 15 September) with one rule; the world's first line is dated <paramref name="lineDate"/>.</summary>
+    private static (World World, ResolvedPolicyVersion Rule) WorldWithAnEndedProcedure(DateTime? lineDate)
+    {
+        var w = new World();
+        var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 9, 10));
+        var rule = kit.Rule("Ended", "PROC-ENDED", RuleType.TimeIncrement);
+        w.Procedures = kit.Build();
+        if (lineDate is { } date)
+        {
+            w.Lines[0]["sprk_eventdate"] = date;
+        }
+
+        return (w, rule);
+    }
+
+    [Fact(DisplayName = "082c-1 K1 must-fire: a Procedure that ended before the invoice date is offered (and citable) through the latest dated line's work date")]
+    public async Task Options_OfAProcedureEndedBeforeTheInvoiceDate_FallBackToTheLatestLinesWorkDate_K1()
+    {
+        var (w, rule) = WorldWithAnEndedProcedure(new DateTime(2026, 9, 5, 0, 0, 0, DateTimeKind.Utc));
+
+        var result = await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+        var cited = await w.Service().AddAsync(Add(w, rule: rule.PolicyVersionId), CancellationToken.None);
+
+        result.Rules!.Select(r => r.PolicyCode).Should().Equal("PROC-ENDED");
+        w.WorkDatesAsked.Should().AllSatisfy(asked => asked.Should().Be(new DateOnly(2026, 9, 5)));
+        cited.Status.Should().Be(AdjustmentStatus.Applied, "the rule that judged the invoice subject is a rule the reviewer may cite");
+    }
+
+    [Fact(DisplayName = "082c-1 K1 control: with no dated line the ended Procedure is not offered, and citing it is refused")]
+    public async Task Options_OfAProcedureEndedBeforeTheInvoiceDate_WithNoDatedLine_AreEmpty_K1()
+    {
+        var (w, rule) = WorldWithAnEndedProcedure(lineDate: null);
+
+        var result = await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+        var cited = await w.Service().AddAsync(Add(w, rule: rule.PolicyVersionId), CancellationToken.None);
+
+        result.Rules.Should().BeEmpty();
+        w.WorkDatesAsked.Should().AllSatisfy(asked => asked.Should().BeNull());
+        cited.Code.Should().Be(AdjustmentCodes.RuleNotAllowed);
+    }
+
+    [Fact(DisplayName = "082c-1 K1: the latest of several line dates is the fallback date; an Adjustment line's date is never one")]
+    public async Task Options_UseTheLatestDatedLine_NotAnAdjustmentLine_K1()
+    {
+        var (w, _) = WorldWithAnEndedProcedure(new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc));
+        w.Lines[1]["sprk_eventdate"] = new DateTime(2026, 9, 8, 0, 0, 0, DateTimeKind.Utc);
+        var adjustment = w.Line(InvoiceLineCostType.Adjustment, 10m, InvoiceLineStatus.Accepted, approved: null, sequence: 9);
+        adjustment["sprk_eventdate"] = new DateTime(2026, 9, 12, 0, 0, 0, DateTimeKind.Utc);
+        w.Lines.Add(adjustment);
+
+        await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+
+        w.WorkDatesAsked.Should().ContainSingle().Which.Should().Be(new DateOnly(2026, 9, 8));
+    }
+
     [Fact(DisplayName = "082c: an invoice naming two core records has no single Procedure chain: the options are Unavailable and no rule is read")]
     public async Task Options_OnAnInvoiceNamingTwoCoreRecords_AreUnavailable()
     {
@@ -1322,7 +1380,7 @@ public sealed class InvoiceAdjustmentServiceTests
         var w = new World();
         var service = new InvoiceAdjustmentService(
             w.Entities.Object, Mock.Of<IInvoiceTotalsService>(), w.Locks, w.Ownership.Object,
-            (_, _, _, _) => Task.FromException<IReadOnlyList<BillingRuleCandidate>>(new TimeoutException()), NullLogger<InvoiceAdjustmentService>.Instance);
+            (_, _, _, _, _) => Task.FromException<IReadOnlyList<BillingRuleCandidate>>(new TimeoutException()), NullLogger<InvoiceAdjustmentService>.Instance);
 
         var result = await service.ListRulesAsync(w.InvoiceId, CancellationToken.None);
 

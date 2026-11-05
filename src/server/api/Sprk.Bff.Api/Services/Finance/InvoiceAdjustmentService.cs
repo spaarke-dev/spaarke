@@ -192,8 +192,10 @@ public sealed class InvoiceAdjustmentService
     /// <summary>
     /// The seam the unit tests use: the rules in force on <paramref name="date"/> for an invoice of <paramref name="firmId"/> on <paramref name="core"/>,
     /// one version per policy, legacy and Procedure alike (<see cref="BillingFactLoader.LoadRulesOnAsync"/>, ebilling-r1 082c).
+    /// <paramref name="latestWorkDate"/> is the latest dated line's work date (082c K1, rule (c)), or <see langword="null"/> when no line is dated.
     /// </summary>
-    internal delegate Task<IReadOnlyList<BillingRuleCandidate>> LoadRules(Guid firmId, CoreRecordReference? core, DateOnly date, CancellationToken ct);
+    internal delegate Task<IReadOnlyList<BillingRuleCandidate>> LoadRules(
+        Guid firmId, CoreRecordReference? core, DateOnly date, DateOnly? latestWorkDate, CancellationToken ct);
 
     private readonly IGenericEntityService _entities;
     private readonly IInvoiceTotalsService _totals;
@@ -309,7 +311,18 @@ public sealed class InvoiceAdjustmentService
         // One version per policy in force on the invoice date: legacy by the evaluator's own selection, Procedure by the resolver (082c). No
         // precedence: a reviewer may cite any rule in force. A type the catalogue does not know, a non-billing type and a system type are never
         // offered: fail closed (FR-24).
-        var chosen = (await _loadRules(firm, core, date, ct).ConfigureAwait(false))
+        // 082c K1: a Procedure with no version on the invoice date is judged (and so citable) by its version on the latest dated line's work date,
+        // as the evaluator judges the invoice subject; the line dates are the stored columns, which already hold any correction.
+        var lineRows = await InvoiceReviewReadService.ReadPagedAsync(_entities, InvoiceReviewReadService.LineQuery(invoice.Id), ct).ConfigureAwait(false);
+        var workDates = lineRows
+            .Where(r => r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value != (int)InvoiceLineCostType.Adjustment)
+            .Select(r => r.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate))
+            .OfType<DateTime>()
+            .Select(DateOnly.FromDateTime)
+            .ToList();
+        DateOnly? latestWorkDate = workDates.Count > 0 ? workDates.Max() : null;
+
+        var chosen = (await _loadRules(firm, core, date, latestWorkDate, ct).ConfigureAwait(false))
             .Where(IsCitableType)
             .ToList();
 
