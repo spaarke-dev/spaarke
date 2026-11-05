@@ -212,3 +212,12 @@ update refusals read. Ontology confirms none of their code removes these rows.
   (`WriterOnlyTablesDeleteGuardTests`): the delete refusal equals the flag table by table and agrees with the update and create
   refusals, its body reads the flag, both chat members ask it, and the controls (must fire: a delete through the entity service and
   through the Web API client without the check; must not fire: a member that asks it, or is listed).
+
+### Fix round 2 verification (code commit 611484f57c)
+
+- `verify-suites.sh`: solution build 0 warnings / 0 errors; ArchTests 1939 / 1939 passed (+3: the delete guard); filtered
+  Sprk.Bff.Api.Tests 6813 passed, 7 skipped, 0 failed (it includes `DataverseDeleteRecordHandlerTests`, 28 tests).
+- Second filter (as round 1, plus `DataverseDelete`): 4443 passed, 2 skipped, 0 failed.
+- Failing first: with the two checks in `DataverseDeleteRecordHandler` neutralised (the helper kept), 12 of the 28 delete tool tests fail
+  (the 6 validate and 6 execute must-fire rows); the must-not-fire tests pass either way.
+- Publish delta (Release zip) against fresh origin/master d9bef8e90f: +1,553 bytes, 39.21 MB total. CVE: none for Sprk.Bff.Api.
