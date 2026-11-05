@@ -602,3 +602,11 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - the 114 Override release;
     - every exit from In Review, which sets blank: reject, return to firm, cancel, and Superseded by a correction, including the 089e chain close.
   - Invariant check: non-blank ⇒ statuscode In Review, in the ArchTest-named writer list and the census or `-Verify`.
+- **082c-1 fix range re-check (2026-11-04, `a680dacf0d..6a12553fce`): PASS**, with one wording or state point.
+  - Accepted:
+    - Q1: `Displacing` requires a stated cap under Split;
+    - C8: strictly higher rank;
+    - K4 (c): the per-Procedure invoice fallback, and the invoice gap suppressed for fallback Procedures;
+    - F2: correction gaps compared per subject;
+    - record-rule codes print as "record rule".
+  - **Point:** the correction result with a new gap (`ebilling.correction.procedure_gap`) tells the user the correction "cannot be applied", but logs "saved, but … its rules were not re-run". One of the two is wrong. ebilling makes the text match the stored state and proves with a test that approval stays refused after this outcome (C12).
