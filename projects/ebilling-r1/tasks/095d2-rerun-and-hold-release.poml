@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095d-2" project="ebilling-r1">
+  <metadata>
+    <title>Set the firm, part 2: the rules re-run after Set firm, the hold release, and the shared Signal's ConditionCleared close</title>
+    <phase>3 Rules (095d split, notes/095c-from-email-firm-optional.md 16.4; follows 095d-1)</phase>
+    <gate>Open questions Q3, Q4, Q6 answered before 2a; Q1, Q2, Q5 before 2b (notes/095d2-brief.md section 4)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Releases the hold that gates approval and export (fail-open risk); rewrites field-secured findings; resets line decisions; closes a shared Signal; adds a job type.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The notes name Opus (16.2): holds across linked submissions, concurrency with Override, Set firm and line decisions, and the ontology Signal rules.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceAssignFirmService.cs and InvoiceSubmissionProcessor.cs, and may touch InvoiceSubmissionPersister.cs (082d also edits it). Keep persister hunks to visibility only.</parallel-reason>
+    <deps>095d-1 (merged), 114 and 114b (merged), 082c-2 (merged)</deps>
+    <tags>bff-api, ebilling, background-job, signals</tags>
+    <estimated-effort>2 days (2a / 2b below, one agent each)</estimated-effort>
+  </metadata>
+
+  <prompt>Binding brief, read first and not restated here: projects/ebilling-r1/notes/095d2-brief.md. Its section 2 is the closed requirement set (R1-R24, each with its source file:line). Section 3 is the design to build, section 4 holds the open questions and their answers, and sections 5-9 give the files, the justification, the ADRs, the tests and the expected limits. If the brief and a source disagree, the source wins: stop and say which. The ontology decisions it cites (ONT) are in C:\code_files\spaarke-wt-spaarke-ontology-platform-r1 (read only).</prompt>
+
+  <role>SPAARKE platform developer: the submission pipeline (049 processor, persister, after-steps, job handler), InvoiceOpenHolds, SignalEpisodeLifecycle, Set firm.</role>
+
+  <goal>After Set firm applies and records, a queued re-run evaluates the submission with its firm through the existing steps 2-5 and the supersedes lookup, from the stored rows. One conditional transaction replaces the three firm markers, resets the no-firm line decisions, drops any override stamp and re-derives the review detail. After it, the Signals are re-mapped. The shared BILL-SYSTEM-SUBMISSION Signal closes ConditionCleared with the assign-firm record id only when InvoiceOpenHolds over every linked submission is empty.</goal>
+
+  <scope>
+    <in>EvaluateFromReadAsync (extraction); the re-run service and the assignFirmRerun member; the job handler, type and DI registration; Set firm's enqueue (failedStep rerun), rulesRerun pending/done and repeat re-enqueue; ParentLineage texts; guard entries; check (g); tests; notes 16.11.</in>
+    <out>095d-3 UI; any new endpoint, column, privilege or Decision Record writer entry point; a Superseded link on sprk_signal or any SignalWriter contract change; an AI document re-read; re-judging earlier firm submissions (K2); a re-run without a stored decision; live writes.</out>
+  </scope>
+
+  <constraints>
+    <constraint source="brief R1, R3, R6; P95:68-71 (one pipeline, not a copy)">The re-run uses the processor's steps 2-5 through EvaluateFromReadAsync, which EvaluateAsync also calls. The existing processor tests pass unchanged; that is the refactor proof. The persister's builders are reused, never copied. rules.not_checked is recomputed from the new refusals. An evaluation fault writes nothing and leaves every marker in place. The re-run is never taken for a 049 resume.</constraint>
+    <constraint source="brief R2, R14, R23; N95:714; N114:63-64">
+      - The re-run is the only writer that removes the three firm markers: the reason code, the pipeline finding and the line causes.
+      - It removes them only by writing the new outcome's state, never by deleting entries in place.
+      - The rebuilt findings never carry the override stamp.
+      - It writes no firm, scope, sequence, number or previous-sequence column.
+    </constraint>
+    <constraint source="brief R11; N95:1360, :1487-1489">The assignFirm member stays byte-identical, including rulesRerun "pending". The re-run's own state goes in the new member assignFirmRerun. BuildDecision's values and facts never change.</constraint>
+    <constraint source="brief R5, R21; P95:73; N95:718">
+      - A 073 reject found by the re-run holds the invoice (the D-101 held set) and never rejects it.
+      - No automated Decision Record is written, and the invoice is never moved out of In Review.
+      - The re-run never writes Approved.
+    </constraint>
+    <constraint source="brief R8, R9, R15, R16; ONT:448-453, :467-472; N114:153">
+      - Close the shared Signal as ConditionCleared only when BOTH hold after the commit: InvoiceOpenHolds.ReasonsAsync is empty AND its re-mapped group is empty.
+      - The close carries the assign-firm record id, as Q1's answer specifies. The record is found by BillingDecisionKey (sprk_invoice, invoice, DecisionIdFor(submission)).
+      - Never close it as Acted.
+      - Otherwise the Signal stays open, as Q2's answer specifies. A reason belonging to another linked submission leaves it untouched.
+      - The lifecycle's Superseded close writes no sprk_decisionrecord.
+    </constraint>
+    <constraint source="brief R12, R13; N82:604, :610, :940; B82:180">
+      - sprk_reviewdetail is written in the commit transaction, from InvoiceOpenHolds.ReasonsAfterAsync with the re-run submission's new state substituted.
+      - It is derived before any write and only when the column probe finds the column.
+      - Add the re-run to InvoiceReviewDetailWritersGuardTests.Writers.
+      - Set firm's own derivation stays on InvoiceOpenHolds (pin it).
+    </constraint>
+    <constraint source="ADR-004, ADR-052, ADR-010; bff-extensions section 10">IJobHandler in the BFF (placement B2). Deterministic IdempotencyKey, correlation id, Completed/Failed/Poisoned. Idempotent under redelivery (the 049 processing lock, the assignFirmRerun state, row versions); the state machine's reason in the notes (ADR-052 section 7). App identity only. No package; publish delta against a fresh master build.</constraint>
+    <constraint source="concurrency (brief section 3)">
+      - Evaluate outside the locks.
+      - Commit inside the invoice-decision lock and the line lock, with IfRowVersionMatches on the submission, the invoice and every line.
+      - A version change re-evaluates once, then fails the delivery for retry.
+      - Refuse above MaxRequestsPerTransaction before anything is sent.
+    </constraint>
+    <constraint source="brief R17; CT:13-14; N95:1501">Permanent failures (unreadable findings, a foreign or missing stored decision, the ceiling) log Permanent=true and end Poisoned with admin attention; transient ones carry no marker. The PR body carries "Permanent=true = operator, not retry".</constraint>
+    <constraint source="brief R18, R19; N95:1522, :1527">
+      - The sprk_findingsjson reason text at ParentLineage.cs:1324 names the re-run as a typed writer. So do the remarks (~:1008-1011, ~:1055-1059) and the census texts that assert them.
+      - Add the re-run to FindingsJsonAppOnlyReadGuardTests' reviewed list, and add notes/122's row.
+      - Add it to InvoiceFirmHoldAppOnlyGuardTests if it names sprk_firmhold.
+    </constraint>
+    <constraint source="brief R20; N95:1080 (owner AI rule)">Before code, notes 16.11 lists every rule the re-run judges as "AI: yes/no" with the reason. The re-run never calls ReadInvoiceAsync.</constraint>
+    <constraint source="project">No live writes. Justify new surface (CLAUDE.md 11; brief section 6). Access defects: defect plus location only.</constraint>
+  </constraints>
+
+  <relevant-files>
+    <file role="create">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionRerun.cs</file>
+    <file role="create">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceSubmissionRerunJobHandler.cs (or Services/Ai/Jobs per Q7)</file>
+    <file role="modify">Services/Finance/Submission/InvoiceSubmissionProcessor.cs (extraction only); Services/Finance/InvoiceAssignFirmService.cs; Infrastructure/DI/FinanceModule.cs (~:253); Services/Dataverse/ParentLineage.cs (texts)</file>
+    <file role="modify">scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 (check (g)) and InvoiceFirmHoldFieldSecurityAgreementTests</file>
+    <file role="reference">The "Copy" list in brief section 5; also InvoiceOpenHolds.cs, InvoiceProcedureHold.IsReleased, SignalWriter.cs (CloseAsync :952, LinkConditionClearedRecordAsync :1149)</file>
+    <file role="modify">tests/Spaarke.ArchTests: InvoiceReviewDetailWritersGuardTests, FindingsJsonAppOnlyReadGuardTests, AccessTableReaderScanTests; tests/unit/Sprk.Bff.Api.Tests: AccessTableAppOnlyWriterTests text, new InvoiceSubmissionRerunTests, InvoiceAssignFirmServiceTests.Record.cs</file>
+  </relevant-files>
+
+  <steps mode="directional">
+    <step id="2a-0">Confirm Q3, Q4 and Q6 are answered. Write the per-rule AI table (notes 16.11). Check that every fact steps 2-5 need can be rebuilt from the stored rows; if not, STOP.</step>
+    <step id="2a">EvaluateFromReadAsync; the re-run gate, state, evaluate and commit (brief section 3, steps 0-3). T1-T13, T15-T16, T18, T21-T22. Seeds: stamp removal, markers cleared without an evaluation, assignFirm dropped, row-version condition dropped. code-review, adr-check, two adversarial passes.</step>
+    <step id="2b-0">Confirm Q1, Q2 and Q5 are answered.</step>
+    <step id="2b">After-commit steps (brief step 4), the job and its DI, the Set firm enqueue and rulesRerun, check (g). T14, T17, T19-T20. Seed: the close condition. code-review, adr-check, one adversarial pass, publish size.</step>
+    <step>Notes 16.11: what landed, deviations, known limits (brief section 9), the AI table, the ADR-052 section 7 reason. Then uac-r2's full review and ontology K-3 before the master PR.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>After Set firm and the re-run on a clean firm invoice:
+      - the three firm markers are gone and InvoiceFirmHold.IsHeld is false;
+      - the review detail is blank;
+      - the shared Signal is ConditionCleared and carries the assign-firm record id (Q1);
+      - assignFirmRerun.state is done and Set firm answers rulesRerun "done".
+      Before the re-run, the invoice is held and approval refuses it.</criterion>
+    <criterion>A note that remains, or a firm hold on another linked submission, leaves the shared Signal open (T2, T18). A ConditionCleared close never happens while InvoiceOpenHolds.ReasonsAsync is non-empty (T19).</criterion>
+    <criterion>A Procedure gap or unresolved hold that appears once the firm is known holds the invoice:
+      - Internal Blocked, detail 659490000 or 659490001;
+      - approval refused;
+      - the Signal open.
+      An unresolved fault before the final delivery writes nothing.</criterion>
+    <criterion>A 073 reject found by the re-run holds the invoice. There is no Rejected invoice and no automated Decision Record.</criterion>
+    <criterion>RE-HOLD: a submission seeded with the code "overridden" and a valid override stamp, re-held by the re-run, has no stamp after the same write. InvoiceProcedureHold.IsReleased is false and approval refuses it. Must-not-fire: another linked submission's stamp is untouched. Seed-proven.</criterion>
+    <criterion>Line decisions made with no firm are reset and value corrections are kept (per Q4). rules.not_checked carries the new cause where a rule still did not check the line. A Duplicate prior and a supersede are found for this firm only.</criterion>
+    <criterion>assignFirm is byte-identical after the re-run. A Set firm repeat still answers alreadyAssigned with the same record id and hash.</criterion>
+    <criterion>Idempotency and order:
+      - a 049 redelivery is a no-op;
+      - a repeat after "committed" runs only the Signal steps, with no second transaction;
+      - a repeat after "done" is a no-op;
+      - a 503 followed by a Set firm repeat gives exactly one re-run.</criterion>
+    <criterion>Concurrency: an Override, Set firm or correction write between the evaluation and the commit makes the commit apply nothing. The re-run re-evaluates once, then retries; no partial state.</criterion>
+    <criterion>Fail closed:
+      - a missing or foreign stored decision is Poisoned with nothing written (unauthorised path);
+      - unreadable findings write nothing and log Permanent=true;
+      - an enqueue failure is 503 incomplete with failedStep rerun, and the repeat enqueues;
+      - the ceiling is refused before anything is sent.</criterion>
+    <criterion>No Superseded close writes sprk_decisionrecord. No ReadInvoiceAsync call. AI coding runs only per Q3 (must-fire and must-not-fire).</criterion>
+    <criterion>The review detail is written in the commit transaction (Writers guard). The ParentLineage reason text names the re-run. The FindingsJson and FirmHold guard lists and the census texts pass with the new entries.</criterion>
+    <criterion>Test scope: exactly brief section 8 (T1-T22 and the five seeds). Anything beyond needs a one-line justification in notes 16.11.</criterion>
+    <criterion>Gate:
+      - the 5 test projects build;
+      - ArchTests, the broad filter (Finance, Signals, ExternalInvoice, InvoiceSubmission) and the integration suites pass;
+      - check (g) has agreement tests;
+      - the publish delta is measured against a fresh master build;
+      - the PR body carries the runbook line.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A requirement conflicts with an ADR, for example the job placement under ADR-052 or bff-extensions:66. Stop and use root CLAUDE.md 6.5.</trigger>
+    <trigger>The re-run would need a new endpoint, a new column, a new privilege, a new Decision Record writer entry point, or a change to SignalWriter's contract (including a "close facts" write that LinkConditionClearedRecordAsync cannot make). STOP.</trigger>
+    <trigger>A fact steps 2-5 need (resolution, coding or rules) cannot be rebuilt from the stored rows without an AI read. STOP and list it.</trigger>
+    <trigger>Discarding K5 line decisions would need an append-only record to be deleted or edited. STOP.</trigger>
+    <trigger>An open question in brief section 4 is unanswered when its part starts. STOP.</trigger>
+    <trigger>Releasing the hold would need any path other than the full re-run's write: a partial evaluation, a native firm write, or a marker deleted in place. STOP.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/095d2-brief.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+</task>
