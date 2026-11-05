@@ -656,3 +656,10 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - A base finding closes only when every line's date, as the evaluator determines it, is on or after the new record-rule version's `sprk_inforcefrom`. A line dated earlier, or with no determinable date, keeps the finding open.
     - It is ontology's rule applied to dates and matches D-203(4).
     - The re-check covers four points. The filter must use the evaluator's own per-line date and the same comparison as `RecordRuleVersionOn` (no one-day mismatch). It must say whether line-level findings are judged by the invoice or by their own line (either is acceptable). The "record rule's date window" known limit is retired.
+  - **C19 fix round 1 re-check (`d4e755317f..7c5b2c1739`): PASS.**
+    - **Dates.** A line's date is taken exactly as `BillingFactLoader` takes it; a Fee or Expense line with no date uses the invoice date, and adjustment lines are skipped.
+    - **Comparison.** `ProcedureResolution.InForceOn` is the one comparison, shared by the resolver and the close, and `sprk_inforcefrom` is one clock instant dated by its UTC day. Tests and seeds cover the in-force day.
+    - **Invoice-level filter.** The invoice's own date is part of the test, so a zero-line invoice is never closed by default.
+    - **Faults.** A fault on the record's own invoices closes nothing. A fault on the side of the records directly under it drops only their invoices; the answer is `closeComplete=false`, and the bound is logged at Warning.
+    - **Audit of each close: known limit, agreed.** A rule change is a configuration change, not a human resolution, so no Decision Record is owed under D-2. The closed Signal must name the superseding record-rule version (`recordRuleVersionId`); if it does not, that is a defect. The explicit link is filed alongside 095d-2's ConditionCleared link work.
+    - Dev census: at most 4 direct children per parent.
