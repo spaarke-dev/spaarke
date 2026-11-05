@@ -184,8 +184,14 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (string.IsNullOrWhiteSpace(context.TenantId))
             return ToolValidationResult.Failure("TenantId is required.");
 
-        if (!TryParseArgs(context.ToolArgumentsJson, out _, out _, out _, out var error))
+        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out _, out var error))
             return ToolValidationResult.Failure(error!);
+
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers. Refused here too, as the create tool refuses them, so the gate shows the refusal and
+        // never a confirm dialog; ExecuteChatAsync asks again.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(tablename) is { } writerOnly)
+            return ToolValidationResult.Failure(writerOnly.Reason!);
 
         return ToolValidationResult.Success();
     }
@@ -213,6 +219,15 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 Error(tool, $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).",
                     fixedRefusal.RefusalCode!, startedAt),
                 stopwatch);
+        }
+
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter, the list the create tool refuses). Refused whole,
+        // for any item and record, before any read, re-file, index step or write; ValidateChat already refuses it. Nothing is written.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(tablename) is { } writerOnly)
+        {
+            return LogOutcome(context, tablename, recordId,
+                Error(tool, writerOnly.Reason!, writerOnly.RefusalCode!, startedAt), stopwatch);
         }
 
         try

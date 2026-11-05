@@ -487,6 +487,39 @@ internal static partial class RecordTableRules
     }
 
     /// <summary>
+    /// The reason code when a generic BFF update path is asked to change a row of a table only its writer changes
+    /// (<see cref="RefuseWriterOnlyTableUpdate"/>). Nothing is written.
+    /// </summary>
+    internal const string ChangedOnlyByItsWriterReasonCode = "record_update.changed_only_by_its_writer";
+
+    /// <summary>
+    /// The ONE update-side check of <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> (field-mapping-server-write-path-r1 task
+    /// 048; owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are changed
+    /// only by their writers, so a generic update of one is refused whole, or <c>null</c> when the table's update may proceed.
+    /// It reads the same flag the create refusals read (<see cref="RecordCreationService"/>, the chat create tool), so create
+    /// and update refuse one list. The generic update paths ask it after their shape-only refusals and before any row is read
+    /// or written: the chat update tool (<c>DataverseUpdateRecordHandler</c>, validate and execute), the Update Record node and
+    /// the action seam (<c>UpdateRecordActionCore</c>), a playbook's output mapping (<c>DataverseUpdateHandler</c>), the
+    /// field-mapping push (its request check) and the work-product persister. Each maps the answer to its own refusal, with
+    /// <see cref="RecordOwnerResolution.Reason"/> as the message. Table only: it reads nothing, so it answers the same for any
+    /// record, payload, identity and write mode (update or upsert). The writers never reach these paths
+    /// (<c>WriterOnlyTablesWritersGuardTests</c>). The table is matched trimmed and in any case.
+    /// </summary>
+    /// <param name="table">The table the update names.</param>
+    internal static RecordOwnerResolution? RefuseWriterOnlyTableUpdate(string? table) =>
+        Find(table) is { CreatedOnlyByItsWriter: true } rule
+            ? RecordOwnerResolution.Refused(ChangedOnlyByItsWriterReasonCode, ChangedOnlyByItsWriterMessage(rule.Table))
+            : null;
+
+    /// <summary>The single refusal message for an update of a <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> table (user-,
+    /// model- and log-facing), modelled on the chat create tool's message for the same tables.</summary>
+    internal static string ChangedOnlyByItsWriterMessage(string table) =>
+        $"'{table}' records can't be changed by this update — it was REJECTED and nothing was written. They are changed only " +
+        "by Spaarke itself: a signal by its evaluation and its lifecycle, a decision record or a budget revision when a decision " +
+        $"is committed. Do NOT retry this update — {table} is blocked on every general update unconditionally and no argument " +
+        $"change makes it valid; work from the signal or its decision instead ({ChangedOnlyByItsWriterReasonCode}).";
+
+    /// <summary>
     /// Task 037 (FR-36): what <paramref name="rule"/>'s copied defaults (<see cref="ServerDefault.CopiedFrom"/>) come to on
     /// the create row <paramref name="item"/> — one entry per copied default whose column the row leaves UNSET (absent: no
     /// value, no bind and no clear; an explicit null is a value the caller chose and wins), with the lookup the row binds
@@ -1070,6 +1103,9 @@ internal sealed record RecordTableRule
     /// such a create at the start of its pipeline, before any read, mapping, check or write, for the caller and the system
     /// principal alike, exactly as it refuses a table it does not create (<see cref="RecordCreationRefusal.TableUnsupportedCode"/>).
     /// The entry stays registered for what the registry declares beyond the create (its mapping exclusion).
+    /// Task 048 (owner decision 2026-11-04, D-204 extended to updates): the same flag says the rows are CHANGED only by the
+    /// writer too; every generic update path refuses such a table through <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/>,
+    /// so create and update read one list.
     /// </summary>
     public bool CreatedOnlyByItsWriter { get; init; }
 }

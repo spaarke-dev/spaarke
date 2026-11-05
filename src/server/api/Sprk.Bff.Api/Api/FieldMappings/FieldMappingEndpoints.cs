@@ -695,6 +695,13 @@ public static class FieldMappingEndpoints
         {
             errors["targetEntity"] = ["Target entity must be a Dataverse logical name (letters, digits and underscores)."];
         }
+        else if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate(request.TargetEntity) is { } writerOnly)
+        {
+            // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision
+            // are changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter). A push aimed at one is refused on the
+            // request, before the source is authorized and before any profile, row or child is read or written.
+            errors["targetEntity"] = [writerOnly.Reason!];
+        }
 
         return errors;
     }
