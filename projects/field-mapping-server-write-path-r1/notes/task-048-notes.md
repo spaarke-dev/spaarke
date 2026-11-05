@@ -164,3 +164,15 @@ still in the writer but no registered table that carries the pair can reach it n
    validation errors occurred." The 400 for a writer-only target (`errors.targetEntity`) is therefore not readable in that button.
 
 rework: none task 048
+
+### Fix round 1 verification (code commit cfb7e0cfab)
+
+- `verify-suites.sh`: solution build 0 warnings / 0 errors; ArchTests 1936 / 1936 passed (one fewer: the refile-tables test is gone);
+  filtered Sprk.Bff.Api.Tests 6813 passed, 7 skipped, 0 failed.
+- Second filter (Signals, Update Record node and core, `DataverseUpdate`, `ActionSeam`, decision commit and actions, Signal and
+  Decision Record writers, `WriterOnly`, work-product envelope, field-mapping push): 4415 passed, 2 skipped, 0 failed. It caught the
+  fourth inverted #2568 test (see above), which the script's filter does not reach.
+- Failing first: with `ChildRecordEndpoints`, `OwnedChildWrite` and `FieldMappingEndpoints` at their previous content, 18 tests fail
+  (12 new `048 fix 1` must-fire tests and the 6 push-pair tests); the must-not-fire tests pass either way.
+- Publish delta (Release zip) against fresh origin/master d9bef8e90f: 41,108,226 -> 41,109,003 bytes, +777 bytes, 191 files both
+  sides, 39.2 MB. CVE: `dotnet list package --vulnerable --include-transitive` reports none for Sprk.Bff.Api.
