@@ -48,7 +48,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         var outcome = await RunAsync(path, PlainTable, MissingRow, NoLookups, RenameOnly, app: NoReads(), playbookActsAs: actsAs);
 
         outcome.Message.Should().NotBeNull("the unknown id is refused, not written");
-        outcome.Message.Should().Contain(RecordOwnerRefusal.RecordMissing).And.Contain("not found");
+        outcome.Message.Should().Contain(RecordOwnerRefusal.RecordMissing);
+        AssertNotFoundWording(path, actsAs, outcome.Message!, refersToOtherRecord: false);
         if (path != GenericPath.FieldMappingPush)
             outcome.Code.Should().Be(RecordOwnerRefusal.RecordMissing);
         NoGuid(outcome);
@@ -56,6 +57,66 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             .Which.Method.Should().Be(nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync));
         Sent().Should().NotContain(w => w.Method == nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync),
             "the create-if-missing write would have created a row with this id");
+    }
+
+    /// <summary>
+    /// The exact words of the not-found answer. App-only: "was not found;". A person's playbook run: "was not found or could not
+    /// be read". The push always writes as its caller, so it keeps the app-only words. A payload with an <c>@odata.bind</c> names
+    /// "the record, or a record this update refers to" (Dataverse also answers 404 for a bind to a row that does not exist).
+    /// </summary>
+    private static void AssertNotFoundWording(GenericPath path, Guid? actsAs, string message, bool refersToOtherRecord)
+    {
+        var subject = refersToOtherRecord ? "record, or a record this update refers to, was not found" : "record was not found";
+        var personWording = path != GenericPath.FieldMappingPush && actsAs is not null;
+        if (personWording)
+        {
+            message.Should().Contain($"{subject} or could not be read; nothing was");
+        }
+        else
+        {
+            message.Should().Contain($"{subject}; nothing was").And.NotContain("could not be read");
+        }
+
+        if (!refersToOtherRecord)
+            message.Should().NotContain("refers to");
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryPathAndIdentity))]
+    public async Task AnUnknownId_WithALookupBind_SaysTheRecordOrARecordItRefersToWasNotFound(GenericPath path, Guid? actsAs)
+    {
+        NoRowHasThisId();
+
+        // The core and the push turn this lookup into an "@odata.bind" key; the orchestrator is given the key itself.
+        var lookups = Lookups(("sprk_matter", MatterRef(Matter)));
+        PathOutcome outcome;
+        if (path == GenericPath.OutputOrchestrator)
+        {
+            try
+            {
+                await Handler(NoReads()).UpdateAsync(
+                    PlainTable, MissingRow,
+                    new Dictionary<string, object?> { ["sprk_name"] = "Renamed", ["sprk_matter@odata.bind"] = $"/sprk_matters({Matter:D})" },
+                    Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, actsAs);
+                outcome = new PathOutcome(null, null);
+            }
+            catch (RecordOwnerUnresolvedException refused)
+            {
+                outcome = new PathOutcome(refused.RefusalCode, refused.Message);
+            }
+        }
+        else
+        {
+            outcome = await RunAsync(path, PlainTable, MissingRow, lookups, RenameOnly, app: NoReads(), playbookActsAs: actsAs);
+        }
+
+        outcome.Message.Should().NotBeNull("the unknown id is refused, not written");
+        outcome.Message.Should().Contain(RecordOwnerRefusal.RecordMissing);
+        AssertNotFoundWording(path, actsAs, outcome.Message!, refersToOtherRecord: true);
+        if (path != GenericPath.FieldMappingPush)
+            outcome.Code.Should().Be(RecordOwnerRefusal.RecordMissing);
+        NoGuid(outcome);
+        Sent().Should().ContainSingle().Which.Method.Should().Be(nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync));
     }
 
     [Theory]

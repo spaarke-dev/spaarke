@@ -251,7 +251,8 @@ internal sealed class UpdateRecordActionCore
             }
             catch (KeyNotFoundException)
             {
-                throw DataverseUpdateHandler.RecordNotFoundRefusal(input.EntityLogicalName, input.ImpersonateSystemUserId);
+                throw DataverseUpdateHandler.RecordNotFoundRefusal(
+                    input.EntityLogicalName, input.ImpersonateSystemUserId, DataverseUpdateHandler.CarriesLookupBind(updatePayload.Keys));
             }
         }
 

@@ -150,6 +150,7 @@ public class CoreRecordPairUpdateCheckGuardTests
             typeof(CoreRecordPairUpdateControlFieldsWithoutCheck), typeof(CoreRecordPairUpdateControlPatchInLambdaWithoutCheck),
             typeof(CoreRecordPairUpdateControlCheckInAnotherMember), typeof(CoreRecordPairUpdateControlCheckThenLocalFunctionWrite),
             typeof(CoreRecordPairUpdateControlNameOnly), typeof(CoreRecordPairUpdateControlOtherPatchApi),
+            typeof(CoreRecordPairUpdateControlUpdateExistingWithoutCheck),
         };
         var methods = Classify(fixtures.SelectMany(IlCallScan.WithNested));
 
@@ -160,6 +161,7 @@ public class CoreRecordPairUpdateCheckGuardTests
                 $"{nameof(CoreRecordPairUpdateControlCheckInAnotherMember)}.Write",
                 $"{nameof(CoreRecordPairUpdateControlFieldsWithoutCheck)}.Write",
                 $"{nameof(CoreRecordPairUpdateControlPatchInLambdaWithoutCheck)}.Write",
+                $"{nameof(CoreRecordPairUpdateControlUpdateExistingWithoutCheck)}.Write",
             },
             methods.Where(m => !m.Value).Select(m => $"{m.Key.Type.Name}.{m.Key.Method}").Order(StringComparer.Ordinal).ToArray());
 
@@ -248,6 +250,13 @@ internal static class CoreRecordPairUpdateControlFieldsWithoutCheck
 {
     internal static Task Write(IFieldMappingDataverseService writes, string table, Guid id, Dictionary<string, object?> fields) =>
         writes.UpdateRecordFieldsAsync(table, id, fields);
+}
+
+/// <summary>MUST FIRE: the update-only field-dictionary update (UpdateExistingRecordFieldsAsync) with no check.</summary>
+internal static class CoreRecordPairUpdateControlUpdateExistingWithoutCheck
+{
+    internal static Task Write(IFieldMappingDataverseService writes, string table, Guid id, Dictionary<string, object?> fields) =>
+        writes.UpdateExistingRecordFieldsAsync(table, id, fields);
 }
 
 /// <summary>MUST FIRE: the caller's PATCH inside a lambda, with no check.</summary>

@@ -40,7 +40,20 @@ public class UpdateRecordFieldsCallerGuardTests
         typeof(Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints),
     };
 
-    private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
+    /// <summary>
+    /// Every type that can call the method: the BFF and the two shared libraries it uses. The implementing types of the method
+    /// itself (<c>DataverseWebApiService</c>, <c>DataverseServiceClientImpl</c>) are the API and are left out by
+    /// <see cref="IsTheApiItself"/>.
+    /// </summary>
+    private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => new[]
+        {
+            typeof(Program).Assembly,
+            typeof(Spaarke.Core.Auth.AuthorizationService).Assembly,
+            typeof(IFieldMappingDataverseService).Assembly,
+        }
+        .Distinct()
+        .SelectMany(a => a.GetTypes())
+        .ToList());
 
     [Fact(DisplayName = "UpdateRecordFieldsAsync (create-if-missing): only the listed types call it")]
     public void OnlyListedTypes_CallUpdateRecordFieldsAsync()

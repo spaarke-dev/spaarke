@@ -1273,12 +1273,16 @@ public static class FieldMappingEndpoints
                     }
                     catch (KeyNotFoundException) when (recordNotFound)
                     {
-                        // The record is gone (or never existed); nothing was written or re-owned.
+                        // The record is gone (or never existed), or a row a lookup in this write names does not exist (both answer
+                        // 404); nothing was written or re-owned.
                         failed++;
+                        var notFound = Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler.RecordNotFoundPhrase(
+                            personWording: false,
+                            refersToOtherRecord: Sprk.Bff.Api.Services.Dataverse.DataverseUpdateHandler.CarriesLookupBind(updatePayload.Keys));
                         errors.Add(new PushFieldMappingsError
                         {
                             RecordId = childRecordId,
-                            Error = $"Not written: the record was not found; nothing was written for it ({Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.RecordMissing})."
+                            Error = $"Not written: the {notFound}; nothing was written for it ({Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.RecordMissing})."
                         });
                         continue;
                     }
