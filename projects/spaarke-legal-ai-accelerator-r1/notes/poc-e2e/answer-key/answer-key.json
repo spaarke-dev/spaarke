@@ -1,0 +1,2385 @@
+{
+  "generated": "2026-11-05",
+  "policy": "Acme NDA Approval and Signature Authority Policy v1.0",
+  "documents": {
+    "Acme - Halcyon Grid Technologies Mutual NDA (executed 2025-03-12)": {
+      "role": "precedent (executed, Acme paper)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": [],
+      "approval": "NDA-4.1 Director or above may sign"
+    },
+    "Acme - Rookwood Instruments Mutual NDA (executed 2025-06-02)": {
+      "role": "precedent (executed, Acme paper)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": [],
+      "approval": "NDA-4.1 Director or above may sign"
+    },
+    "Acme - Silverpine Data Mutual NDA (executed 2025-09-18)": {
+      "role": "precedent (executed, Acme paper)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": [],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "Acme - Thornbury Labs Mutual NDA (executed 2026-01-27)": {
+      "role": "precedent (executed, Acme paper)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": ["NDA-3.3"],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "Fernhill negotiated example": {
+      "role": "precedent (Acme's requested positions as tracked changes)",
+      "base": {
+        "topics": {
+          "nda.definition-unmarked": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.oral-disclosure": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.exclusion-prior-possession": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.exclusion-third-party": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.exclusion-independent-development": {
+            "variant": "R",
+            "rating": "RED"
+          },
+          "nda.one-sided-carveouts": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.purpose-limited-use": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.representatives": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.copying-and-breach-notice": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.reverse-engineering": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.data-use-licence-back": {
+            "variant": "R",
+            "rating": "RED"
+          },
+          "nda.compelled-disclosure": {
+            "variant": "R",
+            "rating": "RED"
+          },
+          "nda.no-licence-no-warranty": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.return-destruction": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.residuals": {
+            "variant": "R",
+            "rating": "RED"
+          },
+          "nda.term": {
+            "variant": "R",
+            "rating": "RED"
+          },
+          "nda.non-solicit": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.remedies": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.whistleblower-dtsa": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.trade-secret-preservation": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.confidentiality-of-agreement": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.assignment": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.governing-law-venue": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.housekeeping": {
+            "variant": "G",
+            "rating": "GREEN"
+          }
+        },
+        "policy_findings": ["NDA-3.2", "NDA-3.4", "NDA-3.5"],
+        "approval": "NDA-4.3 General Counsel approval"
+      },
+      "after_acme_changes": {
+        "topics": {
+          "nda.definition-unmarked": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.oral-disclosure": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.exclusion-prior-possession": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.exclusion-third-party": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.exclusion-independent-development": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.one-sided-carveouts": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.purpose-limited-use": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.representatives": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.copying-and-breach-notice": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.reverse-engineering": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.data-use-licence-back": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.compelled-disclosure": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.no-licence-no-warranty": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.return-destruction": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.residuals": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.term": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.non-solicit": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.remedies": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.whistleblower-dtsa": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.trade-secret-preservation": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.confidentiality-of-agreement": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.assignment": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.governing-law-venue": {
+            "variant": "G",
+            "rating": "GREEN"
+          },
+          "nda.housekeeping": {
+            "variant": "G",
+            "rating": "GREEN"
+          }
+        },
+        "policy_findings": [],
+        "approval": "NDA-4.1 Director or above may sign"
+      }
+    },
+    "Brightwater Mutual NDA": {
+      "role": "matter NDA (Acts 2-3)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "S",
+          "rating": "RED"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.residuals": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.term": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.non-solicit": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.housekeeping": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        }
+      },
+      "policy_findings": ["NDA-3.3", "NDA-3.4", "NDA-3.5"],
+      "approval": "NDA-4.3 General Counsel approval"
+    },
+    "Brightwater response (Act 4)": {
+      "role": "counterparty tracked changes on Acme's revised draft",
+      "changes": {
+        "nda.residuals": "G -> R (RED)",
+        "nda.term": "G -> Y (YELLOW)",
+        "nda.data-use-licence-back": "G -> Y (YELLOW)",
+        "nda.governing-law-venue": "G -> Y (YELLOW)"
+      }
+    },
+    "b01 - Kestrel Mutual Non-Disclosure Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": [],
+      "approval": "NDA-4.1 Director or above may sign"
+    },
+    "b02 - Ninefold Mutual Confidentiality Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.oral-disclosure": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": [],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "b03 - Larkspur Mutual Non-Disclosure Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "S",
+          "rating": "YELLOW"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": ["NDA-3.8"],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "b04 - Tidewell Mutual Nondisclosure Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.term": {
+          "variant": "Y2",
+          "rating": "YELLOW"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": ["NDA-3.1", "NDA-3.5"],
+      "approval": "NDA-4.3 General Counsel approval"
+    },
+    "b05 - Quillon Mutual Non-Disclosure Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "S",
+          "rating": "RED"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": [],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "b06 - Marrow & Finch Mutual Confidentiality Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": ["NDA-3.3"],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "b07 - Bluefield Mutual Non-Disclosure Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "NC",
+          "rating": "RED"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": ["NDA-3.2", "NDA-3.3"],
+      "approval": "NDA-4.3 General Counsel approval"
+    },
+    "b08 - Saltmarsh Mutual Non-Disclosure Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": ["NDA-3.6", "NDA-3.7"],
+      "approval": "NDA-4.3 General Counsel approval"
+    },
+    "b09 - Cobaltline Mutual Nondisclosure Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.oral-disclosure": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": [],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "b10 - Verdant Loop Mutual Confidentiality Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": ["NDA-3.2"],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "b11 - Harborlight Mutual Non-Disclosure Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": ["NDA-3.4"],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "b12 - Ironvale Mutual Non-Disclosure Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": [],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "b13 - Petrichor Mutual Non-Disclosure Agreement": {
+      "role": "batch (Act 6)",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": ["NDA-3.3"],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "b14 - Glasswing Mutual Nondisclosure Agreement": {
+      "role": "batch (Act 6) - convert to PDF, remove .docx",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "R",
+          "rating": "RED"
+        }
+      },
+      "policy_findings": [],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "b15 - Northbeam Mutual Non-Disclosure Agreement": {
+      "role": "batch (Act 6) - convert to PDF, remove .docx",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.term": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.non-solicit": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "S",
+          "rating": "YELLOW"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.governing-law-venue": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": [],
+      "approval": "NDA-4.2 Legal approval, then signature by a Vice President or above"
+    },
+    "b16 - Oakhollow Mutual Confidentiality Agreement": {
+      "role": "batch (Act 6) - convert to PDF, remove .docx",
+      "topics": {
+        "nda.definition-unmarked": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.oral-disclosure": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-prior-possession": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-third-party": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.exclusion-independent-development": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.one-sided-carveouts": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.purpose-limited-use": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.representatives": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.copying-and-breach-notice": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.reverse-engineering": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.data-use-licence-back": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.compelled-disclosure": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.no-licence-no-warranty": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.return-destruction": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.residuals": {
+          "variant": "R",
+          "rating": "RED"
+        },
+        "nda.term": {
+          "variant": "Y2",
+          "rating": "YELLOW"
+        },
+        "nda.non-solicit": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.remedies": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.whistleblower-dtsa": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.trade-secret-preservation": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.confidentiality-of-agreement": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.assignment": {
+          "variant": "G",
+          "rating": "GREEN"
+        },
+        "nda.governing-law-venue": {
+          "variant": "Y",
+          "rating": "YELLOW"
+        },
+        "nda.housekeeping": {
+          "variant": "G",
+          "rating": "GREEN"
+        }
+      },
+      "policy_findings": ["NDA-3.1", "NDA-3.3", "NDA-3.5"],
+      "approval": "NDA-4.3 General Counsel approval"
+    }
+  }
+}
