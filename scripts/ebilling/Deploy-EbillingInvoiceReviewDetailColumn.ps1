@@ -102,6 +102,7 @@ $FirmHold = 'sprk_firmhold'
 $FirmMissingReason = 'ebilling.submission.firm_missing'
 $ProcedureReasons = @('ebilling.submission.procedures_unresolved', 'ebilling.submission.procedure_gap')
 $RulesNotChecked = 'rules.not_checked'
+$OverriddenReason = 'ebilling.submission.overridden'
 $ReadCap = 20000        # most In Review invoices with a blank detail read for the reverse invariant
 $ChunkSize = 20         # invoice ids per submission read
 
@@ -179,28 +180,54 @@ function Get-Pages([string]$Path) {
     return , $rows
 }
 
+# InvoiceProcedureHold.IsReleased: the reason code is overridden AND the findings carry a valid override stamp, the one BFF definition of a release.
+function Test-SubmissionReleased([string]$Code, [string]$Json) {
+    # -cne: the BFF compares the code ordinally (case-sensitive); -ne would read a re-cased code as a release the BFF refuses.
+    if ($Code -cne $OverriddenReason -or [string]::IsNullOrWhiteSpace($Json)) { return $false }
+    try {
+        $root = $Json | ConvertFrom-Json -ErrorAction Stop
+        if ($root -isnot [pscustomobject]) { return $false }
+        $stamp = $root.override
+        if ($stamp -isnot [pscustomobject]) { return $false }
+        $guid = [guid]::Empty
+        $on = [datetimeoffset]::MinValue
+        foreach ($member in 'recordId', 'bySystemUserId') {
+            $value = $stamp.$member
+            if ($value -isnot [string] -or -not [guid]::TryParse($value, [ref]$guid) -or $guid -eq [guid]::Empty) { return $false }
+        }
+        # The BFF stamps 'on' as an ISO-8601 string; ConvertFrom-Json may have turned it into a [datetime] already.
+        if ($stamp.on -is [datetime]) { return $true }
+        return ($stamp.on -is [string]) -and [datetimeoffset]::TryParse($stamp.on, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$on)
+    } catch { return $false }
+}
+
 # The hold reasons one stored submission names, as InvoiceProcedureHold.ReasonsOf and InvoiceFirmHold.IsHeld read them: the outcome reason code,
 # and the findings' reasonCode (procedure reasons), pipelineFindings[].reasonCode and the rules.not_checked line findings' cause. Findings that
 # cannot be parsed are held as 'procedures not checked' (fail closed, as the BFF).
 function Get-SubmissionHoldReasons($Submission) {
     $reasons = [System.Collections.Generic.HashSet[string]]::new()
     $code = [string]$Submission.sprk_outcomereasoncode
-    if ($code -eq $FirmMissingReason -or $ProcedureReasons -contains $code) { [void]$reasons.Add($code) }
     $json = [string]$Submission.sprk_findingsjson
+    # Task 114 (F1 review round, InvoiceProcedureHold.IsReleased): a submission is released by an Override only when the reason code is overridden
+    # AND the findings carry a valid override stamp (a non-empty GUID recordId and bySystemUserId, and a parseable 'on'). The code column alone is
+    # user-writable; the findings column is field-secured. A released submission holds NO Procedure reason - its findings keep the gap as evidence;
+    # the firm marker is its own hold and is still read. A code with no valid stamp is not a release: the findings decide.
+    $released = Test-SubmissionReleased $code $json
+    if ($code -eq $FirmMissingReason -or (-not $released -and $ProcedureReasons -contains $code)) { [void]$reasons.Add($code) }
     if ([string]::IsNullOrWhiteSpace($json)) { return ,$reasons }
     try {
         $root = $json | ConvertFrom-Json -ErrorAction Stop
         if ($root -isnot [pscustomobject]) { throw 'not an object' }
-        if ($ProcedureReasons -contains [string]$root.reasonCode) { [void]$reasons.Add([string]$root.reasonCode) }
+        if (-not $released -and $ProcedureReasons -contains [string]$root.reasonCode) { [void]$reasons.Add([string]$root.reasonCode) }
         foreach ($finding in @($root.pipelineFindings)) {
             if ($null -eq $finding) { continue }
             $c = [string]$finding.reasonCode
-            if ($c -eq $FirmMissingReason -or $ProcedureReasons -contains $c) { [void]$reasons.Add($c) }
+            if ($c -eq $FirmMissingReason -or (-not $released -and $ProcedureReasons -contains $c)) { [void]$reasons.Add($c) }
         }
         foreach ($line in @($root.lineFindings)) {
             if ($null -eq $line -or [string]$line.code -ne $RulesNotChecked) { continue }
             $cause = [string]$line.cause
-            if ($cause -eq $FirmMissingReason -or $ProcedureReasons -contains $cause) { [void]$reasons.Add($cause) }
+            if ($cause -eq $FirmMissingReason -or (-not $released -and $ProcedureReasons -contains $cause)) { [void]$reasons.Add($cause) }
         }
     } catch {
         [void]$reasons.Add($ProcedureReasons[0])

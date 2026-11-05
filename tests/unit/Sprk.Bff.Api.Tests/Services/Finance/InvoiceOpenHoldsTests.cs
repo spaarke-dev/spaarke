@@ -30,6 +30,18 @@ public sealed class InvoiceOpenHoldsTests
 
     private static InvoiceOpenHolds.StoredSubmission Stored(string? reason, string? findings = null) => new(reason, findings);
 
+    /// <summary>The findings as <c>SubmissionOverrideService</c> leaves them after a genuine Override: the stored findings plus the field-secured <c>override</c> stamp.</summary>
+    internal static string Stamped(string findings) => SubmissionOverrideService.WithStamp(
+        findings, SubmissionOverrideService.OverrideMember, new BlockedDecisionStamp(Guid.NewGuid(), Guid.NewGuid(), DateTimeOffset.UtcNow, "reviewed"));
+
+    /// <summary>The findings with an <c>override</c> member that is NOT a valid stamp (what a forger without the app identity could at best imitate).</summary>
+    private static string WithOverrideMember(string findings, string overrideJson)
+    {
+        var root = System.Text.Json.Nodes.JsonNode.Parse(findings)!.AsObject();
+        root["override"] = System.Text.Json.Nodes.JsonNode.Parse(overrideJson);
+        return root.ToJsonString();
+    }
+
     // ── The derivation (pure) ──
 
     [Fact(DisplayName = "082c-2 fix round 3 (F1): the firm hold united with the Procedure holds - each source holds alone, and the detail is the D-205 priority of them")]
@@ -48,6 +60,51 @@ public sealed class InvoiceOpenHoldsTests
         InvoiceReviewDetail.ReviewDetailOf(InvoiceOpenHolds.ReasonsOf(false, false, [Stored(null, FirmAndGapFindings)])).Should().Be(InvoiceReviewDetail.WaitingForFirm);
         InvoiceReviewDetail.ReviewDetailOf(InvoiceOpenHolds.ReasonsOf(false, false, [Stored(null, GapFinding)])).Should().Be(InvoiceReviewDetail.WaitingForBillingTerms);
         InvoiceReviewDetail.ReviewDetailOf(InvoiceOpenHolds.ReasonsOf(false, false, [])).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "114 (must not fire): a submission released by a genuine override (the code AND the stamp) holds no Procedure reason, even with the gap kept in its findings; the firm marker beside it still holds")]
+    public void ReasonsOf_AReleasedSubmission_HoldsNoProcedureReason_ButTheFirmStillHolds()
+    {
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, Stamped(GapFinding))]).Should().BeEmpty("released: not blank only because it is kept as evidence");
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, Stamped(FirmAndGapFindings))])
+            .Should().BeEquivalentTo([SubmissionReasonCodes.FirmMissing], "the firm hold is independent of the release");
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, "{not json")])
+            .Should().Contain(SubmissionReasonCodes.ProceduresUnresolved, "fail closed: a released submission whose findings cannot be read is not blank");
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, Stamped(GapFinding)), Stored(null, GapFinding)])
+            .Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "another, unreleased submission still holds (control)");
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(null, GapFinding)]).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "control: unreleased");
+        InvoiceProcedureHold.IsReleased(SubmissionReasonCodes.Overridden, Stamped(GapFinding)).Should().BeTrue();
+        InvoiceProcedureHold.IsReleased(null, Stamped(GapFinding)).Should().BeFalse("a stamp without the code is not a release");
+    }
+
+    [Fact(DisplayName = "114 F1 (must fire): the release code alone - no stamp - is NOT a release: the Procedure reason is still held, and the firm marker too")]
+    public void ReasonsOf_AForgedReleaseCode_WithNoStamp_StillHolds()
+    {
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, GapFinding)])
+            .Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "sprk_outcomereasoncode is not field-secured: the code is not the release");
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, FirmAndGapFindings)])
+            .Should().BeEquivalentTo([SubmissionReasonCodes.FirmMissing, SubmissionReasonCodes.ProcedureGap]);
+        InvoiceProcedureHold.ReasonsOf(SubmissionReasonCodes.Overridden, GapFinding).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap]);
+        InvoiceProcedureHold.IsReleased(SubmissionReasonCodes.Overridden, GapFinding).Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "114 F1 (must fire): a malformed or incomplete override stamp is not a release - the submission is held")]
+    [InlineData("{\"recordId\":\"not-a-guid\",\"bySystemUserId\":\"11111111-1111-1111-1111-111111111111\",\"on\":\"2026-11-01T10:00:00Z\"}")]
+    [InlineData("{\"recordId\":\"11111111-1111-1111-1111-111111111111\",\"bySystemUserId\":\"nope\",\"on\":\"2026-11-01T10:00:00Z\"}")]
+    [InlineData("{\"recordId\":\"11111111-1111-1111-1111-111111111111\",\"bySystemUserId\":\"22222222-2222-2222-2222-222222222222\",\"on\":\"never\"}")]
+    [InlineData("{\"recordId\":\"11111111-1111-1111-1111-111111111111\",\"bySystemUserId\":\"22222222-2222-2222-2222-222222222222\"}")]
+    [InlineData("{\"recordId\":\"00000000-0000-0000-0000-000000000000\",\"bySystemUserId\":\"22222222-2222-2222-2222-222222222222\",\"on\":\"2026-11-01T10:00:00Z\"}")]
+    [InlineData("{\"recordId\":5,\"bySystemUserId\":true,\"on\":1}")]
+    [InlineData("{}")]
+    [InlineData("\"stamped\"")]
+    [InlineData("null")]
+    public void ReasonsOf_AMalformedStamp_StillHolds(string overrideMember)
+    {
+        var findings = WithOverrideMember(GapFinding, overrideMember);
+
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, findings)])
+            .Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap]);
+        InvoiceProcedureHold.IsReleased(SubmissionReasonCodes.Overridden, findings).Should().BeFalse();
     }
 
     [Theory(DisplayName = "082c-2 fix round 3 (F1, fail closed, must fire): findings that cannot be read are never blank - 'Billing terms could not be checked', and the firm is not asserted from them")]
@@ -113,6 +170,14 @@ public sealed class InvoiceOpenHoldsTests
         { "no firm only", InvoiceReviewDetail.WaitingForFirm, true },
         { "unreadable findings", InvoiceReviewDetail.BillingTermsNotChecked, true },
         { "none", null, false },
+
+        // Task 114: a released (Overridden) submission holds no Procedure reason, whatever its findings keep as evidence; the firm hold is its own.
+        { "gap released by an override", null, false },
+        { "firm + gap, gap released by an override", InvoiceReviewDetail.WaitingForFirm, true },
+
+        // F1 review round: the release code without the Override's stamp (the column is user-writable) releases nothing. Approval answers procedure_held.
+        { "gap, forged release code (no stamp)", InvoiceReviewDetail.WaitingForBillingTerms, false },
+        { "firm + gap, forged release code (no stamp)", InvoiceReviewDetail.WaitingForFirm, true },
     };
 
     private static void Plant(ApprovalWorld w, string state)
@@ -141,6 +206,18 @@ public sealed class InvoiceOpenHoldsTests
                 break;
             case "unreadable findings":
                 PlantSubmission(w, null, "{not json");
+                break;
+            case "gap released by an override":
+                PlantSubmission(w, SubmissionReasonCodes.Overridden, Stamped(GapFinding));
+                break;
+            case "firm + gap, gap released by an override":
+                PlantSubmission(w, SubmissionReasonCodes.Overridden, Stamped(FirmAndGapFindings));
+                break;
+            case "gap, forged release code (no stamp)":
+                PlantSubmission(w, SubmissionReasonCodes.Overridden, GapFinding);
+                break;
+            case "firm + gap, forged release code (no stamp)":
+                PlantSubmission(w, SubmissionReasonCodes.Overridden, FirmAndGapFindings);
                 break;
             case "none":
                 PlantSubmission(w, null, "{\"pipelineFindings\":[],\"lineFindings\":[{\"line\":0,\"code\":\"rules.not_checked\",\"message\":\"The Rate rule could not be checked on this line.\"}]}");
