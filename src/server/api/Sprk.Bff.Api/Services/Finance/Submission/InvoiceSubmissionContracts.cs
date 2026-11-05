@@ -320,7 +320,9 @@ public sealed record InvoiceSubmissionView
     /// <summary>
     /// ebilling-r1 082c-2 (brief 082c section 3(c), section 7 R4 wording, owner-approved 2026-11-04): a received invoice that is on hold for its
     /// billing terms. Derived from <see cref="OutcomeReasonCode"/> only (<see cref="SubmissionHoldWarning.For"/>), with a fixed sentence: never a
-    /// stored text, a Procedure name, a date, a count or an id (C16, C18). Null, and then absent from the JSON, for every other reason.
+    /// stored text, a Procedure name, a date, a count or an id (C16, C18). Null, and then absent from the JSON, for every other reason, and
+    /// (fix round 2, F2) once the invoice is no longer In Review: the reason code outlives the hold, so the status routes keep this only while
+    /// the invoice is In Review, and drop it when its status cannot be read (<see cref="InvoiceSubmissionService.WithReplacementNoteAsync"/>).
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SubmissionHoldWarning? Warning { get; init; }

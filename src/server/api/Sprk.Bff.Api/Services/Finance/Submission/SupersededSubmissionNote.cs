@@ -94,27 +94,41 @@ internal static class SupersededSubmissionNote
     /// an answer with nothing Superseded is exactly what it was. One read for the page decides which invoices are Superseded; the lookup of the
     /// replacement runs only for those.
     /// </summary>
+    /// <remarks>
+    /// <b>The hold warning (082c-2 fix round 2, F2).</b> The same read also decides each <see cref="InvoiceSubmissionView.Warning"/>: the warning is
+    /// derived from the stored reason code, which outlives the hold (a reject, a return to the firm, a cancel or a supersede closes the invoice and
+    /// the code stays), so a view keeps its warning only while its invoice is In Review (<see cref="InvoiceStatusCodes.InReview"/>). A view with a
+    /// warning and no invoice, or whose invoice is in any other status, loses it. If the status cannot be read the warning is dropped too (fail toward
+    /// no stale text; the outcome itself is unchanged). This is the one place a status route's warning is decided.
+    /// </remarks>
     internal static async Task<IReadOnlyList<InvoiceSubmissionView>> ApplyAsync(
         IGenericEntityService entities, ILogger logger, IReadOnlyList<InvoiceSubmissionView> views, ReplacementReadGate mayRead, CancellationToken ct)
     {
         var accepted = views
             .Where(v => v.Status == nameof(InvoiceSubmissionStatus.Accepted) && v.InvoiceId is { } id && id != Guid.Empty)
             .ToList();
-        if (accepted.Count == 0)
+        var warned = views.Where(v => v.Warning is not null && v.InvoiceId is { } id && id != Guid.Empty).ToList();
+        if (accepted.Count == 0 && warned.Count == 0)
         {
-            return views;
+            return WithoutWarnings(views);
         }
 
         HashSet<Guid> superseded;
+        HashSet<Guid> inReview;
         try
         {
-            superseded = await SupersededInvoicesAsync(entities, accepted.Select(v => v.InvoiceId!.Value).Distinct().ToList(), ct);
+            (superseded, inReview) = await InvoiceStatusesAsync(
+                entities, accepted.Concat(warned).Select(v => v.InvoiceId!.Value).Distinct().ToList(), ct);
         }
         catch (Exception ex) when (IsFault(ex, ct))
         {
-            logger.LogWarning(ex, "Which invoices are superseded could not be read for {Count} submission(s); their answers carry no replacement note", accepted.Count);
-            return views;
+            logger.LogWarning(ex, "Which invoices are superseded or In Review could not be read for {Count} submission(s); their answers carry no replacement note and no hold warning",
+                accepted.Concat(warned).Select(v => v.SubmissionId).Distinct().Count());
+            return WithoutWarnings(views);
         }
+
+        // The warning outlives the hold in the stored reason code; a status route shows it only while the invoice is In Review.
+        views = KeepWarningsWhileInReview(views, inReview);
 
         var noted = accepted.Where(v => superseded.Contains(v.InvoiceId!.Value)).ToList();
         if (noted.Count == 0)
@@ -165,24 +179,47 @@ internal static class SupersededSubmissionNote
             .ToList();
     }
 
-    /// <summary>Of <paramref name="invoiceIds"/>, those whose status is Superseded. Throws on a read fault.</summary>
-    private static async Task<HashSet<Guid>> SupersededInvoicesAsync(
+    /// <summary>
+    /// Of <paramref name="invoiceIds"/>, those whose status is Superseded and those whose status is In Review (one read per chunk, narrowed to
+    /// the two statuses). Throws on a read fault.
+    /// </summary>
+    private static async Task<(HashSet<Guid> Superseded, HashSet<Guid> InReview)> InvoiceStatusesAsync(
         IGenericEntityService entities, IReadOnlyList<Guid> invoiceIds, CancellationToken ct)
     {
-        var found = new HashSet<Guid>();
+        var superseded = new HashSet<Guid>();
+        var inReview = new HashSet<Guid>();
         foreach (var chunk in invoiceIds.Chunk(InvoiceSubmissionService.MaxInValues))
         {
             var query = new QueryExpression(FinanceBaseValues.InvoiceEntity) { ColumnSet = new ColumnSet("statuscode") };
             query.Criteria.AddCondition(FinanceBaseValues.InvoiceKeyColumn, ConditionOperator.In, chunk.Cast<object>().ToArray());
-            query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, InvoiceStatusCodes.Superseded);
+            query.Criteria.AddCondition("statuscode", ConditionOperator.In, InvoiceStatusCodes.Superseded, InvoiceStatusCodes.InReview);
             foreach (var row in (await entities.RetrieveMultipleAsync(query, ct)).Entities)
             {
-                found.Add(row.Id);
+                switch (row.GetAttributeValue<OptionSetValue>("statuscode")?.Value)
+                {
+                    case InvoiceStatusCodes.Superseded:
+                        superseded.Add(row.Id);
+                        break;
+                    case InvoiceStatusCodes.InReview:
+                        inReview.Add(row.Id);
+                        break;
+                }
             }
         }
 
-        return found;
+        return (superseded, inReview);
     }
+
+    /// <summary><paramref name="views"/> with every <see cref="InvoiceSubmissionView.Warning"/> dropped unless its invoice is in <paramref name="inReview"/>; a view that keeps its warning, or has none, is the same instance.</summary>
+    private static IReadOnlyList<InvoiceSubmissionView> KeepWarningsWhileInReview(IReadOnlyList<InvoiceSubmissionView> views, HashSet<Guid> inReview)
+    {
+        static bool Keeps(InvoiceSubmissionView v, HashSet<Guid> inReview) => v.Warning is null || (v.InvoiceId is { } id && inReview.Contains(id));
+        return views.All(v => Keeps(v, inReview)) ? views : views.Select(v => Keeps(v, inReview) ? v : v with { Warning = null }).ToList();
+    }
+
+    /// <summary><paramref name="views"/> with no <see cref="InvoiceSubmissionView.Warning"/>; the same list when none had one.</summary>
+    private static IReadOnlyList<InvoiceSubmissionView> WithoutWarnings(IReadOnlyList<InvoiceSubmissionView> views) =>
+        views.All(v => v.Warning is null) ? views : views.Select(v => v.Warning is null ? v : v with { Warning = null }).ToList();
 
     private static bool IsFault(Exception ex, CancellationToken ct) => ex is not OperationCanceledException || !ct.IsCancellationRequested;
 }
