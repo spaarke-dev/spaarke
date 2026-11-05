@@ -144,3 +144,18 @@ One adversarial pass per slice (tenant isolation and fail-open; C16 and C18 the 
    - Two codes: fine with uac-r2's condition.
 6. **Filed (pre-existing, not 082c):** #2566 (a Rejected outcome shows the raw reason code), #2567 (the firm hold shows the green Accepted bar).
 7. R4 is copied on the 082c-2 and 082c-3 PRs; R4 records this in its design.md §7.
+
+### Owner decision (2026-11-04): held stays "In Review", with a description of which kind of review
+
+Owner, verbatim: "keep 'In Review' there should be some explanation description that provides details of the diffrent types of 'In Review' ; but "On Hold' is a status when it is not being actively worked".
+
+- **No new status reason.** A held invoice stays statuscode In Review. "On Hold" is reserved for a status meaning *not being actively worked*. It is not this hold and is not added by 082c.
+- **New 082c-2 item: a partner-readable review detail on the invoice.** Proposed: a choice column `sprk_reviewdetail` ("Review Detail") on `sprk_invoice`, closed options:
+  - (blank) = normal review;
+  - "Waiting for billing terms" = the Procedure gap;
+  - "Billing terms could not be checked" = procedures_unresolved;
+  - "Waiting for the firm to be confirmed" = firm_missing.
+  It is added to `ExternalAccessModule` `ReadableColumns` for `sprk_invoice` (the SPA shows its formatted label beside the status), and internal views show it too.
+  - **Ownership (one writer per invariant):** the submission persister sets it when it creates a held invoice. Whatever clears the hold clears it, in the same transaction: a re-check that clears the gap, the 114 Override release, and the 095d Set firm apply. No other writer; an ArchTest names the writers.
+  - **§11.** Existing: `statuscode` (the owner keeps it In Review); `sprk_firmhold` (field-secured, internal, firm case only). Extension: `statuscode` cannot carry it by the owner's decision, and `sprk_firmhold` is not partner-readable by design (095c-5). Cost of doing nothing: the partner's grid and record say "In Review" with no explanation, which is what the owner asked to fix.
+  - **Needs:** uac-r2 review of the `ReadableColumns` addition; R4 for the render (grid column or record field); ontology on the lifecycle writers; the owner's go for the dev column apply (entity-scoped publish).
