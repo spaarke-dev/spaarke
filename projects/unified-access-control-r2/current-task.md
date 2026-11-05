@@ -97,7 +97,7 @@
 
 ## Owner items outstanding
 - The person-path refusal question (above).
-- Role question (from the 082c-2 review): do flagged (`sprk_isexternal`) systemusers hold a role with Read on `sprk_signal` / `sprk_decisionrecord`? The assistant read tool scopes those rows by invoice visibility, not by column. Same class as round 77. Also covers `GET /api/v1/records/{table}/{id}/family`, which reads as the caller with no external narrowing (ebilling K4). Options: confirm no such role, or refuse the two tables to flagged callers in the read tools.
+- ~~Role question~~ DECIDED 2026-11-05: flagged licensed users read Decision Records and Signals per their roles; no change (`notes/decisions.md`).
 - Email to AP diagnostics.
 - The VS Code cleanup OK.
 - The Office saves and Submit Invoice for word-add-in.
