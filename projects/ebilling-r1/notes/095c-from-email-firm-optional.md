@@ -1255,3 +1255,140 @@ Branch `task/ebilling-095d-1a`. Files: `TrackingNumberAllocator.cs`, `ITrackingN
 - **Ceiling and reporting:**
   - the ceiling is a refusal before the apply, using `MaxRequestsPerTransaction` = 1000;
   - "applied, no record yet" rows are reported by `Set-EbillingInvoiceFirmHoldColumn.ps1 -Verify`.
+
+### 16.8 095d-1b (2026-11-04): the Set-firm service and route
+
+**What landed.** `POST /api/finance/invoices/{invoiceId}/firm` (in `InvoiceApprovalEndpoints.cs`, no new file) and
+`Services/Finance/InvoiceAssignFirmService.cs`. Body `{ firmId, note? }`; 200 `{ outcome: assigned | alreadyAssigned, decisionId,
+trackingNumber, previousTrackingNumber, rulesRerun: "pending" }`.
+
+**Authorization (no new privilege or role).** Step 0 (group), then two filters as the caller, fail closed: Write on the invoice under the
+new key `ebilling.invoice.assign_firm` (= `AccessRights.Write`, the uniform 404), then Read (`read`) and AppendTo (`finance.attach_invoice`)
+on the body's firm (403; a body with no firm is 400 `ebilling.assign_firm.firm_required` before any firm query); then the kill switch.
+The decider is the caller's `systemuserid` (403 `ebilling.decider.unresolved` when unproven). The service asks, as the caller,
+`HumanDecisionSignalClose.AuthorizeAsync` (AppendTo on the core record, Write on the invoice as the firm_missing Signal's subject) and the
+recorder's filing. Interpretation: 16.7 removed the close from 095d-1, but the POML's refusal list keeps the rights check, and AppendTo on
+the core record is what the record in the decider's name needs, so it stays. 403 codes render as `reasonCode` (`ProblemDetailsHelper.Forbidden`,
+as approve); every other refusal as `errorCode`.
+
+**Refusals, all before the apply (condition 1), in order.** The decision lock and the line lock (409 busy, 503 on a lock fault); the invoice
+(404 uniform) and its ONE submission (the row whose id derives the invoice; else 409 `no_submission`). Then, unless a stored decision makes
+the call a repeat: Active and In Review (409 `not_in_review`); no firm on the invoice or the submission (409 `firm_already_set`); held,
+app-only (`InvoiceFirmHold.IsHeldAsync`; 409 `not_held`, 503 on a read fault); one core record (500 `core_unresolved`); the firm active
+(400 `ebilling.submission.firm_invalid`, 503 `firm_unverifiable`) and linked (`CheckFirmLinkAsync`: 403 `firm_not_linked`, 503); P2
+(503 `ebilling.tracking.scope_key_inactive`); the Signal-close rights (403 `ebilling.decision.not_authorized`, 503); the filing (500, 503);
+the stored findings an object (500 `findings_unreadable`); the ceiling, `FitsRenumberTransaction(1 + lines + renamed approvals + renamed
+files)`, and the findings size for the longest number the allocator can hand out (409 `too_large`); `BillingDecisionRecorder.Preflight`
+of the decision rebuilt from that longest candidate (500). A refusal writes nothing (each test asserts no renumber and no Dataverse write).
+
+**The apply (condition 2).** One call to `RenumberSubmissionAsync(submission, its versionnumber, firm, its own firm invoice number, build)`.
+The builder is pure and runs once per attempt with that attempt's number. It returns: `SubmissionFields` = the findings with
+`trackingNumber` replaced and the stored decision under `assignFirm` (every other member kept); requests: the invoice (firm,
+`sprk_trackingnumber`, `sprk_firmhold` = null; `IfRowVersionMatches` on the invoice's version read), each line (firm; name when it is
+`LineNameFor(old, i)`), the approval (name when it is `Approval {old}`), each Stored File whose name starts with the old number's name
+segment followed by `.`, `-` or nothing (name only, cut to 400; `INV-7.30.pdf` is not `INV-7.3`'s). The submission markers (reason code,
+findings) are NOT cleared: the invoice stays held until 095d-2's re-run (095d-1 acceptance).
+
+**The stored decision** (`assignFirm`, schema 1): `decisionId` (`IdOf("ebilling-assign-firm-{submissionId:D}")`), `firmId`, `note`,
+`previousTrackingNumber`, `previousSequence` (null for a legacy no-sequence row), `trackingNumber`, `sequence`, `deciderUserId`,
+`decidedOn` (to the second), `firmMissingSignals` (`ResolvedSignalSet` JSON: the invoice's open `BILL-SYSTEM-SUBMISSION` Signals and the
+read time), `renamed[]` (`entity, id, column, from, to`), `rulesRerun` "pending". No new column (escalation trigger not fired).
+
+**Outcomes.** `Renumbered` gives 200 assigned. `Conflict` re-reads: a stored decision now present is judged as a repeat, else 409
+`changed`. `Refused`: `unavailable`, `scope_key_inactive`, `schema_missing` give 503 with that code; `too_many_requests` gives 409
+`too_large`; `not_unnumbered` gives 409 `not_renumberable`. `ArgumentException` gives 500; any other fault 503 `unavailable` (the outcome
+is unknown; the repeat reads the stored decision and never applies twice).
+
+**Repeats (1a K3; 16.6.1).** The stored decision is written only by the apply. A request that finds one skips the refusals the apply itself
+ended (firm set, hold cleared) and: another firm is 409 `assigned_other_firm` (names no firm; the allocator is not asked); the same firm
+asks the allocator at the current version with a builder that throws: `AlreadyRenumbered` naming the stored number is 200
+`alreadyAssigned`; another number is 409 `changed`; the legacy edge (`not_unnumbered`, stored `previousSequence` null, the row in the
+stored firm's scope with the stored number) is 200 `alreadyAssigned`; `not_unnumbered` otherwise is 409 `changed`; other refusals keep
+their code.
+
+**Catalog.** `assign-firm` ("Set firm"), Judgement, declared `Tier3, Reversible false, ExternallyVisible true, RecordOfTruthImpact true`
+(the POML); `DecisionGateTier.Resolve` gives **Tier4** (not reversible and externally visible), pinned in `DecisionActionCatalogTests`.
+Values `firm` (Lookup, required) and `note` (TextArea). Subject: the invoice (`BillingSubjectEntityOf`).
+
+**Guards.** `InvoiceFirmHoldAppOnlyGuardTests` and `FindingsJsonAppOnlyReadGuardTests` reviewed lists (and row 10 in
+`122-findings-json-field-secure.md`): the service reads both app-only and writes both through the allocator's transaction. `SubmissionTrackingScopeNotAccessGuardTests`: it reads `sprk_trackingscope` app-only only to confirm a legacy repeat (no access input). The method is `SetFirmAsync`, not `AssignAsync`, so the ontology Assign census (`RecordOwnerAssignmentCensusTests`) does not read it as a record re-own.
+`InvoicePdfWriterGuardTests.ApprovedWriters`: `InvoiceAssignFirmService::StoredFileRename`, name only, with
+`AssignFirmsStoredFileRename_WritesTheNameOnly` (its IL loads only `sprk_storedfile` and `sprk_name`; the built update has one attribute;
+the scan sees no other Set-firm writer). `RouteAuthorizationGuardTests` ledger text, `OperationAccessPolicyCompletenessTests` rows,
+`DecisionRecordWriterTests.Billing` C2 rows, `DecisionCommitServiceTests` (the commit route refuses the code).
+
+**AccessColumns (uac-r2, binding).** `sprk_firminvoicenumber` is listed for `sprk_invoicesubmission` ("allocator-owned; SubmissionCommitGate
+undo clears it (095d-1a)"); its refusal says "it decides no access; only the tracking number allocator sets it".
+`AccessTableAppOnlyWriterTests` (output mapping and Update Record node refused; must-not-fire on another table, a neighbouring name and the
+caller's write) and `InvoiceSubmissionPersisterTests.Gate_Undo_StillClearsTheFirmInvoiceNumber_AfterItIsListedInAccessColumns`.
+
+**Tests.** `InvoiceAssignFirmServiceTests` (61) and `InvoiceAssignFirmEndpointContractTests` (route: 401; no Write 404 before the firm is
+asked; Read and AppendTo on the firm each needed; no firm 400; kill switch 503; step 0; decider unresolved; service codes). Two tests run the
+REAL allocator: the one transaction (submission first, `sprk_firmhold` cleared, stored decision) and a repeat after the commit that sends
+nothing. Fail-before: with the old `ParentLineage`, catalog and policy restored, 27 of the new tests fail.
+Seed proofs (2026-11-04, restored byte-identical, `cmp`): the not-held check disabled makes `Refused_NotHeld` fail; the `sprk_firmhold`
+clear removed makes `RealAllocator_TheOneTransaction_ClearsTheHold_AndCarriesTheStoredDecision` and the apply test fail.
+
+**Seams for 095d-1c.**
+- `InvoiceAssignFirmService.BuildDecision(invoiceId, submissionId, stored)` rebuilds the Decision Record from the stored decision alone
+  (same id and hash on a repeat); 1c calls `BillingDecisionRecorder.RecordAsync` with it after `Assigned` and on `AlreadyAssigned`.
+- `AssignFirmStoredDecision.Read(findings)` is the repeat's source; `ResolvedSignalIds` stays null (16.7); the firm_missing Signal set is in
+  the facts (`firmMissingSignals`, `firmMissingCleared`, `policyCode`).
+- `AssignFirmResult` has no `Incomplete` outcome yet: 1c adds 503 `incomplete` with `failedStep` (record, link) and the repeat that finishes
+  from the stored decision. The repeat path today answers `alreadyAssigned` without recording.
+- The link and the `-Verify` INFO/FAIL window for "applied, no record yet" rows.
+
+**Known limits (K-class, none on a real path).**
+- K1: only the invoice update is row-version conditioned (with the submission's, by the allocator). Line, approval and file updates are not:
+  their names have no other writer, and the line lock is held across the apply.
+- K2: a stored decision present makes the call a repeat without re-asking the Signal-close rights or the filing; the route filters (Write on
+  the invoice, Read and AppendTo on the firm) still run. 1c must re-ask what its record write needs.
+- K3: `RenamedFile` cuts a renamed name to 400 characters; the stored mapping keeps the cut name.
+
+**095d-1b adversarial pass 1 and fix round 1 (2026-11-04).** One full adversarial pass; three findings, all fixed in this round.
+
+| # | Finding | Fix | Proof |
+|---|---|---|---|
+| F1 | Large invoices could never get a firm. `BuildDecision` put the full `renamed` list into the Decision Record facts; above about 450 renamed rows the facts passed the writer's 100,000-character cap, the preflight refused, and the route answered 500 `decision_invalid` with the enum name as its detail. The tests used a no-op preflight, and `Refused_AboveTheCeiling(998, assigned: true)` proved nothing. | The facts hold a bounded `renamedCounts` (lines, approval, storedFiles, findings) beside the existing `previousTrackingNumber` and `trackingNumber`. The full old-to-new mapping stays in the stored `assignFirm` member only. A preflight refusal is a stated sentence (no enum name, no exception message). | `World` now preflights through the REAL `BillingDecisionRecorder` by default. `Refused_AboveTheCeiling(998, true)` passes the real preflight at the transaction ceiling. Seed: the full list put back in the facts makes it fail (Refused, not Assigned); restored byte-identical (`cmp`). |
+| F1 (repeat) | `JudgeRepeatAsync` mapped every exception from the allocator's precondition read to 409 `changed` ("The invoice changed... Reload."), so a timeout on a repeat sent the reviewer to reload a row that had not changed. | 409 `changed` only for the builder's trip (`RepeatMustNotApplyException`, a private `InvalidOperationException` subtype, so the allocator's own `InvalidOperationException`s are not mistaken for it). Any other fault is 503 `unavailable`, logged at Warning with the type name only. | `Repeat_AllocatorFault_IsUnavailable_ExceptTheBuildersTrip` (timeout and allocator fault: 503; builder trip: 409). Both 503 cases fail on the old service. |
+| F3 | The findings-size refusal (409 `too_large` above 1,048,576 characters, measured with the longest number the allocator can hand out) had no test. | Tests only. | `Refused_FindingsAboveTheSize_JustOver` (must fire: refused, nothing written, no preflight) and `..._AtTheLimit_IsAssigned` (must not fire). Seed: the check disabled makes the must-fire test fail; restored (`cmp`). |
+
+**Known limits recorded by this pass.**
+- K2 (CORRECTED in fix round 3: this line missed the core-record rights; see the uac-r2 review below): a repeat by a different caller is confirmed safe in 1b (the stored decision names the firm and the number; a different firm is 409). 095d-1c MUST ask the Signal-close rights (and the filing) again before it records on a repeat; 1b answers `alreadyAssigned` without them.
+- The 1c seams: every `Assigned` in 1b leaves an "applied, no record" row (the apply committed, no Decision Record, firm_missing Signal still open). 1b therefore stays off any environment users touch until 1c lands.
+- 095d-2 must keep the stored `assignFirm` member (the full mapping lives only there now; the facts carry counts).
+- K3 (display only): the line Signals keep the old invoice number in `sprk_regardingrecordname`. 095d-2's re-map should refresh it, or it is recorded there as a limit.
+
+#### 095d-1b adversarial pass 2 and fix round 2 (2026-11-04)
+
+No F findings. Six known-limit items (K1-K6); K1, K3 and K4 are fixed, K2, K5 and K6 are recorded with their remedies.
+
+**K1: check order (fixed; uac-r2 ruling, binding).** The caller's rights on the core record (the Signal-close rights: AppendTo on the core record and Write on the Signal's subject) and the recorder's filing now come BEFORE any firm read whose answer can change the result (active, linked, existence) in `InvoiceAssignFirmService.SetFirmAsync`. The question sent to uac-r2 was: can Write on an invoice exist without access to its core record? Answer: yes, Write on an invoice does not imply AppendTo on its core record. A caller who fails the check gets ONE refusal (403 `ebilling.decision.not_authorized` from the service) whatever firm id it names.
+- The endpoint's firm-rights filter (Read and AppendTo on the firm, 403) runs before the service and is the same for a missing and an unreadable firm. To make the two refusals identical in status AND body, the route now renders the service's `not_authorized` refusal with the filter's body (`sdap.access.deny.insufficient_rights`, "Access denied"; `InvoiceApprovalEndpoints.AssignFirm`). Chosen over a new core-record filter ahead of the firm filter because that filter would have to read the invoice and its core record before the service's own guards, a second copy of the derivation; the body mapping is one switch arm and cannot drift from the filter.
+- Other refusal orders: only the above. Phase P2, the findings checks and every status and code are unchanged; the firm-invalid, not-linked and unverifiable refusals now follow the rights and the filing. One consequence: a caller who fails the core-record check on a not-held or not-In-Review invoice still gets those invoice-state refusals first (they depend on the invoice, not the firm).
+- Tests: service `NoCloseRights_IsRefusedTheSame_WhateverFirmIsNamed` (5 firm states, plus "the firm is never read"); contract `NoCoreRecordRights_IsRefusedIdentically_WhateverFirmIsNamed` through the real filter stack (linked, unlinked, inactive, unknown: one status, one body). Seed: order reverted, 6 of the new tests fail; endpoint mapping reverted, the contract test fails (the unknown firm's body differs). Both restored byte-identical (`cmp`).
+
+**K2: dead ends refused cleanly but with no next step (known limit; operator remedy each).**
+- (a) Findings that would exceed 1 MB at the line ceiling: 409 `too_large`. Remedy: the operator compacts or splits the invoice. R2 candidate: compact the mapping.
+- (b) `sprk_vendororg` set directly through the Web API while the invoice is held: 409 `firm_already_set` forever. Remedy: the operator clears the stored firm, or clears the hold through the 095d-2 re-run.
+- (c) A submission whose invoice lookup was unlinked or repointed: 409 `no_submission`. Remedy: the operator relinks it.
+
+**K3: fixed, and an open question.** The `AssignFirmRename` summary now says the Decision Record carries counts only and the full mapping lives in the stored `assignFirm` member. `renamedCounts` gained `firmSetLines`: every line the apply wrote the firm on, renamed or not, so the record states every row the apply wrote (`lines` stays the renamed lines). The count is stored in the `assignFirm` member (`firmSetLines`), because the decision is rebuilt from the stored member alone; a stored member without it is unreadable (`findings_unreadable`; nothing is stored yet in any environment). Open question for ontology: do counts (not the old-to-new mapping) satisfy its 16.7 addition 3, given the mapping lives only in the stored member?
+
+**K4: fixed.** The `ArgumentException` case now also asserts `RenumberArgs` is set (the allocator was reached) and `Preflighted` holds exactly one decision (the Decision Record preflight ran first).
+
+**K5: the 2-minute lock against the allocator's worst case (known limit).** The invoice-decision lock lasts 2 minutes; the allocator's worst case can run longer. The row versions still prevent a second apply; only the unconditioned name updates (the approval's and the stored files') rely on the lock.
+
+**K6: known limit, safe.** A pre-send `InvalidOperationException` from the allocator gives the "may not have been set" text; that is safe, because the repeat decides from the stored decision.
+
+#### 095d-1b uac-r2 review and fix round 3 (2026-11-04)
+
+uac-r2 approved everything else: the rights order, the route body, the kept order, the firm filter, `ParentLineage` and the policy key.
+
+**F1 (binding): the stored-decision branch ran before the core-record rights.** `AssignHeldAsync` sent a stored decision to `JudgeRepeatAsync` before `_closeRights`. For an invoice whose firm was already set, a caller with Write on the invoice and no AppendTo or close rights on the core record got an answer that depended on the firm named: the same firm gave 200 `alreadyAssigned` with the DecisionId and the tracking numbers, and another firm gave 409 `assigned_other_firm`.
+
+**Fix.** The single-core check and `_closeRights` moved into one helper (`CheckCoreRightsAsync`) that both paths call. A repeat now runs it BEFORE `JudgeRepeatAsync`; a failing caller gets the same `not_authorized` result as a first apply, so the route renders the same `sdap.access.deny.insufficient_rights` body. The filing is not asked for a repeat. The first-apply order is unchanged (the helper sits where the inline check was). `AfterConflictAsync` is reached only after that check and is left as it was, with a comment saying so.
+
+**Correction of the earlier K2 line.** "A repeat by a different caller is confirmed safe in 1b" (adversarial pass 1) was wrong: it looked at the stored decision's content and missed the core-record rights, so a caller without them could read the DecisionId and tracking numbers, and could tell which firm was stored. The 1c requirement stands (1c still asks the close rights and the filing before it records on a repeat); the rights part now also holds for the 1b answer.
+
+**Tests.** Service `Repeat_WithoutCoreRights_IsRefusedTheSame_WhateverFirmIsNamed` (the stored firm and another firm: one `not_authorized` result, no DecisionId or tracking numbers, nothing written, no filing call). Contract `RepeatWithoutCoreRecordRights_IsRefusedIdentically_AsTheFirstApply` through the real filter stack (assigned with the stored firm, assigned with another firm, not yet assigned: one status and one body less `traceId`). The existing repeat tests for a caller with rights are unchanged. Seed: the check moved back below `JudgeRepeatAsync`; all three new cases failed; the fix was restored byte-identical (`cmp`).

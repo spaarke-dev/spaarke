@@ -222,6 +222,12 @@ public static class OperationAccessPolicy
         // attaches it TO the record (AppendTo, the "finance.submit_invoice" reasoning). Task 089c's change-rule and remove routes reuse it.
         // A separate key so deny logs name the act.
         ["ebilling.record.override"] = AccessRights.Write | AccessRights.AppendTo,
+        // "ebilling.invoice.assign_firm" — Write on the INVOICE (sprk_invoices, route invoiceId) of POST /api/finance/invoices/{invoiceId}/firm
+        // (ebilling-r1 task 095d-1b, notes/095c-from-email-firm-optional.md 16.4): Set firm on a held no-firm invoice. The application then
+        // writes the invoice's firm, tracking number and hold, and renames its lines, approval and files, so the caller must be able to
+        // change the invoice (the "ebilling.invoice.decide" reasoning). The firm in the body is asked separately ("read" and
+        // "finance.attach_invoice"). Write is an existing right: no new privilege or role. A separate key so deny logs name the act.
+        ["ebilling.invoice.assign_firm"] = AccessRights.Write,
 
         // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
         // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the

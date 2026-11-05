@@ -326,7 +326,7 @@ public class DecisionActionCatalogTests
     // =================================================================================================
 
     private static readonly string[] BillingCodes =
-        ["accept-line", "reduce-line", "disallow-line", "approve-invoice", "reject-invoice", "return-to-firm", "override-submission"];
+        ["accept-line", "reduce-line", "disallow-line", "approve-invoice", "reject-invoice", "return-to-firm", "override-submission", "assign-firm"];
 
     [Fact]
     public void BillingActions_AreExactlyTheStatedSet_EachWithAPlanLaneARecordClassAndAGate()
@@ -353,6 +353,7 @@ public class DecisionActionCatalogTests
     [InlineData("reject-invoice", DecisionRecordClass.Judgement, GateRiskTier.Tier4)]
     [InlineData("return-to-firm", DecisionRecordClass.Judgement, GateRiskTier.Tier4)]
     [InlineData("override-submission", DecisionRecordClass.Judgement, GateRiskTier.Tier3)]
+    [InlineData("assign-firm", DecisionRecordClass.Judgement, GateRiskTier.Tier4)] // 095d-1b: declared Tier3; not reversible and visible to the firm, it resolves to Tier4
     public void EachBillingAction_HasItsRecordClassAndGateTier(string code, DecisionRecordClass recordClass, GateRiskTier tier)
     {
         DecisionActionCatalog.TryGetBilling(code, out var action).Should().BeTrue();
@@ -367,6 +368,7 @@ public class DecisionActionCatalogTests
     [InlineData("reject-invoice", "reason")]
     [InlineData("return-to-firm", "reason")]
     [InlineData("override-submission", "reason")]
+    [InlineData("assign-firm", "firm")] // 095d-1b: the firm is required, the note is not
     [InlineData("accept-line")]
     [InlineData("approve-invoice")]
     public void BillingActions_RequireExactlyTheStatedParameters_AReasonForEveryAdverseDecisionAndOverride(string code, params string[] required)

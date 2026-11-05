@@ -36,6 +36,9 @@ public sealed class SubmissionTrackingScopeNotAccessGuardTests
         typeof(TrackingNumberAllocator), // WRITER: counts and writes the scope at create (app-only, IGenericEntityService)
         typeof(TrackingScopePhaseProbe), // METADATA: reads whether the column exists (entity metadata, no row)
         typeof(InheritedAccessPermission), // REFUSAL: lists it in AccessColumns, so an app-only generic writer cannot set it
+        // READER (095d-1b): Set firm reads it app-only only to confirm a legacy repeat holds the stored firm's scope; it decides no access
+        // (the route's rights are the caller's Write on the invoice and Read and AppendTo on the firm). The allocator writes it.
+        typeof(Sprk.Bff.Api.Services.Finance.InvoiceAssignFirmService),
     ];
 
     /// <summary>The external submission gates: their types must never name the scope.</summary>

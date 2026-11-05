@@ -432,6 +432,20 @@ public static class DecisionActionCatalog
             Excludes: [],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: true, RecordOfTruthImpact: true) },
+
+        // ---- Set firm (task 095d-1b, notes 095c 16.4; subject: the invoice submitted without a firm) ----------------
+        // Not reversible: the no-firm tracking number is given up and never reused (095d-1a). Externally visible: the firm then sees the
+        // invoice under its own number. Applied by InvoiceAssignFirmService before it is recorded (owner option 1, apply then record).
+        new("assign-firm", "Set firm", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [
+                new("firm", "Firm", DecisionParameterKind.Lookup, Required: true, LookupEntity: "sprk_organization"),
+                new("note", "Note", DecisionParameterKind.TextArea, Required: false),
+            ],
+            ["Sets the firm on the invoice, its lines and its submission", "Gives the invoice a new tracking number in the firm's numbering",
+                "Releases the hold for a missing firm"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true) },
     ];
 
     /// <summary>The billing set with every exclusion made mutual. Its codes never overlap <see cref="Definitions"/> (checked at static
