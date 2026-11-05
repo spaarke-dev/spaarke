@@ -32,6 +32,22 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Procedures;
 /// </remarks>
 public sealed class ProcedureAssignmentServiceTests
 {
+    // C19 (ontology): the close's completion log names the closed Signals in a bounded list.
+    [Theory]
+    [InlineData(0, 0, false)]
+    [InlineData(50, 50, false)]
+    [InlineData(51, 50, true)]
+    [InlineData(300, 50, true)]
+    public void ClosedSignalIdsForLog_IsBounded(int closed, int named, bool counted)
+    {
+        var ids = Enumerable.Range(0, closed).Select(_ => Guid.NewGuid()).ToHashSet();
+
+        var text = ProcedureAssignmentService.ClosedSignalIdsForLog(ids);
+
+        ids.Count(id => text.Contains(id.ToString(), StringComparison.Ordinal)).Should().Be(named);
+        text.Contains($"(+{closed - ProcedureAssignmentService.MaxClosedSignalIdsLogged} more)", StringComparison.Ordinal).Should().Be(counted);
+    }
+
     private static readonly Guid TeamId = Guid.NewGuid();
     private static readonly Guid CallerOid = Guid.NewGuid();
     private static readonly Guid CallerUserId = Guid.NewGuid();

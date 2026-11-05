@@ -773,6 +773,16 @@ public class ProcedureAssignmentService
     /// resolution type and timestamps. It never reopens, creates, edits a finding's content or deletes, and it shows the caller nothing of a
     /// record the caller cannot read.</para>
     /// </remarks>
+    /// <summary>The most closed Signal ids one completion log line names (ontology, C19: a bounded line); the rest are counted.</summary>
+    internal const int MaxClosedSignalIdsLogged = 50;
+
+    /// <summary>The closed Signal ids for the completion log line: ordered, at most <see cref="MaxClosedSignalIdsLogged"/>, then "+N more".</summary>
+    internal static string ClosedSignalIdsForLog(IReadOnlyCollection<Guid> closedIds)
+    {
+        var shown = string.Join(",", closedIds.Order().Take(MaxClosedSignalIdsLogged));
+        return closedIds.Count > MaxClosedSignalIdsLogged ? $"{shown} (+{closedIds.Count - MaxClosedSignalIdsLogged} more)" : shown;
+    }
+
     private async Task<SupersedeResult> SupersedeBaseFindingsAsync(
         string coreTable, Guid recordId, Guid? firmId, Guid basePolicyId, string baseCode, Guid recordRuleVersionId, Guid assignmentId, DateOnly inForceFrom)
     {
@@ -838,7 +848,7 @@ public class ProcedureAssignmentService
             _logger.LogInformation(
                 "Override {AssignmentId}: {Closed} of {Targeted} finding(s) of base rule {BaseCode} on {CoreTable} {RecordId}'s In Review invoices ({ChildInvoices} of records directly under it) closed Superseded by record rule version {RecordRuleVersionId}; {HeldBack} invoice(s) left open for work dated before the change; complete={Complete}; closed Signals {ClosedSignalIds}",
                 assignmentId, outcome.Closed, targets.Count, baseCode, coreTable, recordId, children.Invoices.Count, recordRuleVersionId, heldBack, outcome.IsComplete && childrenRead,
-                string.Join(",", closedIds.Order()));
+                ClosedSignalIdsForLog(closedIds));
             var message = !outcome.IsComplete ? ChangeCloseIncompleteMessage : childrenRead ? ChangeCloseCompleteMessage : ChangeCloseChildrenOpenMessage;
             return new SupersedeResult(
                 childrenRead ? outcome : outcome with { PolicyFailures = outcome.PolicyFailures + 1 },
