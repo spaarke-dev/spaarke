@@ -25,7 +25,8 @@ internal sealed class ProcedureKit
 
     internal static Guid ProcedureId(string name) => Id("procedure-kit:procedure:" + name);
 
-    internal static Guid ProcedureVersionId(string name) => Id("procedure-kit:procedure-version:" + name);
+    internal static Guid ProcedureVersionId(string name, int number = 1) =>
+        Id("procedure-kit:procedure-version:" + name + (number == 1 ? string.Empty : ":" + number.ToString(CultureInfo.InvariantCulture)));
 
     /// <summary>
     /// A Procedure. Its rank: <see cref="ProcedureAppliesTo.AllRecords"/> with no firm is (AllRecords, 0, false), the legacy client default's;
@@ -49,8 +50,15 @@ internal sealed class ProcedureKit
         return this;
     }
 
-    /// <summary>A rule of <paramref name="procedure"/>: one Published policy version under its version, in force from its window's start.</summary>
-    internal ResolvedPolicyVersion Rule(string procedure, string code, RuleType type, string? body = null, int? consequence = null)
+    /// <summary>A further Active version of <paramref name="name"/> (number 2 or more) over its own window: a gap between two windows is a hole.</summary>
+    internal ProcedureKit NextVersion(string name, int number, DateOnly from, DateOnly? to = null)
+    {
+        _versions.Add(new ProcedureVersionRow(ProcedureVersionId(name, number), ProcedureId(name), number, ProcedureEntity.VersionStatusActive, from, to));
+        return this;
+    }
+
+    /// <summary>A rule of <paramref name="procedure"/>: one Published policy version under its version (number <paramref name="versionNumber"/>), in force from its window's start.</summary>
+    internal ResolvedPolicyVersion Rule(string procedure, string code, RuleType type, string? body = null, int? consequence = null, int versionNumber = 1)
     {
         var policyId = Id("procedure-kit:policy:" + code);
         var setId = Id("procedure-kit:set:" + procedure);
@@ -66,9 +74,9 @@ internal sealed class ProcedureKit
             RuleBody = body ?? Bodies[type],
             ClauseReference = $"Clause of {code}",
             ClauseLocation = $"Procedure {procedure}",
-            InForceFrom = _versions.Single(v => v.Id == ProcedureVersionId(procedure)).From,
+            InForceFrom = _versions.Single(v => v.Id == ProcedureVersionId(procedure, versionNumber)).From,
             Consequence = consequence,
-            ProcedureVersionId = ProcedureVersionId(procedure),
+            ProcedureVersionId = ProcedureVersionId(procedure, versionNumber),
         };
         _policyVersions.Add(version);
         return version;

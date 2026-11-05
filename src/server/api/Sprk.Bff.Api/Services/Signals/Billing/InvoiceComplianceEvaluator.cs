@@ -244,9 +244,28 @@ public sealed class InvoiceComplianceEvaluator
             return mapped;
         }
 
+        // 082c K4, ontology D-205 rule (c): the invoice subject keeps the invoice date for a Procedure's version whenever that Procedure has a
+        // version on it (the 072 rule). A Procedure with NO version on the invoice date (a hole, after its end, or not yet applicable) is judged,
+        // for the invoice subject only, by its version on the LATEST dated line's work date; the invoice-date gap stands only when that date has
+        // none either, or when no line is dated. Legacy selection and line subjects are unchanged. No new RulesOn call: the line date is already
+        // resolved (C9's one resolution per distinct date).
+        var datedLines = request.Lines.Where(l => l.Date is not null).Select(l => l.Date!.Value).ToList();
+        DateOnly? latestWorkDate = datedLines.Count > 0 ? datedLines.Max() : null;
+        var invoiceFallback = new HashSet<Guid>();
+        if (latestWorkDate is { } fallbackDate && fallbackDate != invoiceDate)
+        {
+            var onInvoiceDate = onDate[invoiceDate].Procedures.Select(p => p.ProcedureId).ToHashSet();
+            invoiceFallback = onDate[fallbackDate].Procedures.Select(p => p.ProcedureId).Where(id => !onInvoiceDate.Contains(id)).ToHashSet();
+        }
+
+        IEnumerable<ResolvedRule> ProcedureRulesOf(BillingSubject subject, DateOnly date) =>
+            subject.Kind == BillingSubjectKind.Invoice && invoiceFallback.Count > 0
+                ? onDate[date].Rules.Concat(onDate[latestWorkDate!.Value].Rules.Where(r => invoiceFallback.Contains(r.Procedure.ProcedureId)))
+                : onDate[date].Rules;
+
         var selectedBySubject = subjects
             .Select(s => (s.Subject, Versions: byPolicy.Select(versions => SelectVersion(versions, s.Date)).OfType<BillingRuleCandidate>()
-                .Concat(onDate[s.Date].Rules.Select(ProcedureCandidateOf).Where(c => !IsSystemRule(c)))
+                .Concat(ProcedureRulesOf(s.Subject, s.Date).Select(ProcedureCandidateOf).Where(c => !IsSystemRule(c)))
                 .ToList()))
             .ToList();
 
@@ -273,8 +292,9 @@ public sealed class InvoiceComplianceEvaluator
             .ThenBy(g => g.ProcedureId)
             .Select(g => new BillingProcedureGap(
                 g,
-                subjects.Any(s => s.Subject.Kind == BillingSubjectKind.Invoice && s.Date == g.WorkDate),
+                !invoiceFallback.Contains(g.ProcedureId) && subjects.Any(s => s.Subject.Kind == BillingSubjectKind.Invoice && s.Date == g.WorkDate),
                 subjects.Where(s => s.Subject.LineIndex is not null && s.Date == g.WorkDate).Select(s => s.Subject.LineIndex!.Value).Order().ToList()))
+            .Where(g => g.AppliesToInvoice || g.LineIndexes.Count > 0)
             .ToList();
 
         // 2. The gate, once per distinct selected version, in a stable order (FR-24).

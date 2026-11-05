@@ -334,10 +334,12 @@ public class InvoiceComplianceEvaluatorProcedureTests
         result.Findings.Should().HaveCount(150, "every line is off the 0.5 increment, undated ones on the invoice date too");
     }
 
-    [Fact(DisplayName = "082c: a gap on the invoice date only is exposed with the invoice and the undated line, not the dated ones")]
+    [Fact(DisplayName = "082c: a gap on the invoice date is exposed with the undated line, not the dated ones; the invoice subject falls back to the dated lines' version (K4 rule (c))")]
     public void AGapOnTheInvoiceDateOnly_IsExposedWithTheSubjectsOnThatDate()
     {
         // The Procedure's only version ends on 10 March: the lines of 2 March are judged, the invoice date (31 March) is after its last version.
+        // K4 rule (c): the invoice subject is judged by the version in force on the latest dated line (2 March), so only the undated line,
+        // which takes the invoice date, holds the gap.
         var kit = new ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 3, 10));
         kit.Rule("Ended", "ENDED-INCREMENT", RuleType.TimeIncrement, HalfHour);
 
@@ -347,9 +349,96 @@ public class InvoiceComplianceEvaluatorProcedureTests
         gap.Gap.ProcedureName.Should().Be("Ended");
         gap.Gap.WorkDate.Should().Be(InvoiceDate);
         gap.Gap.Kind.Should().Be(ProcedureGapKind.AfterLastVersion);
-        gap.AppliesToInvoice.Should().BeTrue();
+        gap.AppliesToInvoice.Should().BeFalse("K4 rule (c): the invoice subject takes the version in force on the latest dated line");
         gap.LineIndexes.Should().Equal(1);
         result.Findings.Select(f => f.Subject.LineIndex).Should().Equal([0, 2], "the dated lines were judged by the version in force on their date");
+    }
+
+    // ── K4, ontology D-205 rule (c): the invoice subject falls back, per Procedure, to the latest dated line's version ─────────────────
+
+    private const string NeedsPeriodStart = """{"type":"RequiredData","fields":["billingPeriodStart"]}""";
+
+    /// <summary>An invoice with no billing period start: any RequiredData rule that lists it raises an INVOICE-subject finding.</summary>
+    private static BillingEvaluationRequest InvoiceMissingPeriod(params BillingLineFacts[] lines) => Request(lines) with { BillingPeriodStart = null };
+
+    private static IEnumerable<string> InvoiceLevelCodes(BillingEvaluationResult result) =>
+        result.Findings.Where(f => f.Subject.Kind == BillingSubjectKind.Invoice).Select(f => f.PolicyCode);
+
+    [Fact(DisplayName = "082c K4 rule (c) must-fire: an invoice dated after the last version's end, every line inside the window, has no gap; the window's version judges the invoice")]
+    public void AnInvoiceAfterTheLastVersion_WithEveryLineInsideTheWindow_FallsBackToTheLatestLinesVersion_K4()
+    {
+        var kit = new ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 3, 10));
+        kit.Rule("Ended", "ENDED-REQUIRED", RuleType.RequiredData, NeedsPeriodStart);
+
+        var result = Evaluator().Evaluate(InvoiceMissingPeriod(Line(0)), kit.Loaded());
+
+        result.Gaps.Should().BeEmpty("the latest line's work date has a version, so the invoice-date gap does not stand");
+        InvoiceLevelCodes(result).Should().Equal("ENDED-REQUIRED");
+    }
+
+    [Fact(DisplayName = "082c K4 rule (c): with one line dated after the end, that line's gap holds and so does the invoice-date gap")]
+    public void ALineAfterTheEnd_KeepsItsGap_AndTheInvoiceDateGapStands_K4()
+    {
+        var kit = new ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 3, 10));
+        kit.Rule("Ended", "ENDED-REQUIRED", RuleType.RequiredData, NeedsPeriodStart);
+
+        var result = Evaluator().Evaluate(InvoiceMissingPeriod(Line(0), Line(1, LateLine)), kit.Loaded());
+
+        result.Gaps.Select(g => (g.Gap.WorkDate, g.AppliesToInvoice, string.Join(",", g.LineIndexes))).Should().Equal(
+            (LateLine, false, "1"), (InvoiceDate, true, string.Empty));
+        InvoiceLevelCodes(result).Should().BeEmpty("the latest line's date has no version either: nothing judges the invoice subject");
+    }
+
+    [Fact(DisplayName = "082c K4 rule (c): an invoice date in a hole between versions is judged by the version in force on the latest dated line")]
+    public void AnInvoiceDateInAHole_IsJudgedByTheLatestLinesVersion_K4()
+    {
+        var kit = new ProcedureKit().Procedure("Holey", to: new DateOnly(2026, 3, 10)).NextVersion("Holey", 2, new DateOnly(2026, 4, 10));
+        kit.Rule("Holey", "V1-REQUIRED", RuleType.RequiredData, NeedsPeriodStart);
+        kit.Rule("Holey", "V2-REQUIRED", RuleType.RequiredData, NeedsPeriodStart, versionNumber: 2);
+
+        var result = Evaluator().Evaluate(InvoiceMissingPeriod(Line(0)), kit.Loaded());
+
+        result.Gaps.Should().BeEmpty();
+        InvoiceLevelCodes(result).Should().Equal("V1-REQUIRED");
+    }
+
+    [Fact(DisplayName = "082c K4 rule (c): no dated line and an invoice date after the end leaves the gap standing")]
+    public void NoDatedLines_AnInvoiceDateAfterTheEnd_KeepsTheGap_K4()
+    {
+        var kit = new ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 3, 10));
+        kit.Rule("Ended", "ENDED-REQUIRED", RuleType.RequiredData, NeedsPeriodStart);
+
+        var result = Evaluator().Evaluate(InvoiceMissingPeriod(Line(0) with { Date = null }), kit.Loaded());
+
+        var gap = result.Gaps.Should().ContainSingle().Subject;
+        gap.Gap.Kind.Should().Be(ProcedureGapKind.AfterLastVersion);
+        gap.AppliesToInvoice.Should().BeTrue();
+        gap.LineIndexes.Should().Equal(0);
+    }
+
+    [Fact(DisplayName = "082c K4 rule (c) control: a version in force on the invoice date wins over the line's date")]
+    public void AVersionInForceOnTheInvoiceDate_WinsOverTheLineDate_K4()
+    {
+        var kit = new ProcedureKit().Procedure("Two", to: new DateOnly(2026, 3, 10)).NextVersion("Two", 2, new DateOnly(2026, 3, 11));
+        kit.Rule("Two", "V1-REQUIRED", RuleType.RequiredData, NeedsPeriodStart);
+        kit.Rule("Two", "V2-REQUIRED", RuleType.RequiredData, NeedsPeriodStart, versionNumber: 2);
+
+        var result = Evaluator().Evaluate(InvoiceMissingPeriod(Line(0)), kit.Loaded());
+
+        result.Gaps.Should().BeEmpty();
+        InvoiceLevelCodes(result).Should().Equal("V2-REQUIRED");
+    }
+
+    [Fact(DisplayName = "082c K4 rule (c), C9: the fallback adds no resolution (one RulesOn per distinct subject date)")]
+    public void TheInvoiceFallback_AddsNoResolution_K4()
+    {
+        var kit = new ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 3, 10));
+        kit.Rule("Ended", "ENDED-REQUIRED", RuleType.RequiredData, NeedsPeriodStart);
+        var procedures = kit.Build();
+
+        Evaluator().Evaluate(InvoiceMissingPeriod(Line(0), Line(1)), Loaded() with { Procedures = procedures });
+
+        procedures.DatesResolved.Should().Be(2, "the invoice date and the one line date");
     }
 
     [Fact(DisplayName = "082c: no gap, no Gaps entry (must-not-fire control)")]
