@@ -193,8 +193,11 @@ public class RecordTableRulesTests
     {
         // Task 014 (ebilling-r1's review of 013, item 3): InvoiceFamilyCoreRecordGuard.CoreRecordLookups on work/ebilling-r1
         // (TypedMatterProjectPlusRegardingWorkAssignment) — a row names exactly ONE core record, the caller's.
-        RecordTableRules.Get(table).MappingProtectedColumns
-            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_regardingworkassignment");
+        // ebilling-r1 082c-2 (uac-r2 2026-11-04): sprk_invoice also protects its review detail, which only typed BFF writers derive.
+        string[] expected = table == "sprk_invoice"
+            ? ["sprk_matter", "sprk_project", "sprk_regardingworkassignment", "sprk_reviewdetail"]
+            : ["sprk_matter", "sprk_project", "sprk_regardingworkassignment"];
+        RecordTableRules.Get(table).MappingProtectedColumns.Should().BeEquivalentTo(expected);
         RecordTableRules.Get(table).MappingProtectedColumns.Contains("SPRK_Matter").Should().BeTrue("case-insensitive, as every list");
     }
 

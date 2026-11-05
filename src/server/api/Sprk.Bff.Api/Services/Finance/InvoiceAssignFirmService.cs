@@ -304,6 +304,9 @@ public sealed class InvoiceAssignFirmService
     private readonly Func<DecisionCoreRecord, Guid, string?, CancellationToken, Task<DecisionCallerRefusal>> _closeRights;
     private readonly Func<Guid, CancellationToken, Task<CoreAncestorResult>> _filing;
     private readonly ILogger<InvoiceAssignFirmService> _logger;
+
+    /// <summary>082c-2: whether <see cref="InvoiceReviewDetail.Column"/> exists (the process-wide probe; a test sets its own).</summary>
+    internal ReviewDetailColumnProbe ReviewDetailProbe { get; init; } = ReviewDetailColumnProbe.Shared;
     private readonly TimeProvider _time;
 
     public InvoiceAssignFirmService(
@@ -609,7 +612,10 @@ public sealed class InvoiceAssignFirmService
         var plan = new ApplyPlan(
             invoiceId, submissionId, firmId, note, deciderUserId, Seconds(_time.GetUtcNow()), previous,
             state.Submission.GetAttributeValue<int?>(TrackingNumberAllocator.SequenceColumn), state.InvoiceVersion, state.Findings, signals,
-            lines, approvals, files);
+            lines, approvals, files)
+        {
+            WriteReviewDetail = await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false),
+        };
 
         // ── The ceiling (16.7): one transaction or none. Asked before anything is built for the allocator. ──
         var requestCount = plan.RequestCount(previous);
@@ -829,6 +835,9 @@ public sealed class InvoiceAssignFirmService
         IReadOnlyList<Entity> Approvals,
         IReadOnlyList<Entity> Files)
     {
+        /// <summary>082c-2: whether <see cref="InvoiceReviewDetail.Column"/> exists (read by the service before it builds the plan).</summary>
+        public bool WriteReviewDetail { get; init; }
+
         /// <summary>The caller requests of one attempt: the invoice, every line, and each approval and file whose name carries the number.</summary>
         public int RequestCount(string newNumberShape) =>
             1 + Lines.Count
@@ -849,6 +858,15 @@ public sealed class InvoiceAssignFirmService
                 [InvoiceReviewService.InvTrackingNumber] = number,
                 [InvoiceFirmHold.InvoiceHoldColumn] = null,
             };
+
+            // 082c-2 (ontology D-205 writer 3): firm_missing lifts, so the review detail is recomputed from the reasons that remain (a Procedure
+            // hold the findings still name; blank when none), in this same write. Left out where the column does not exist yet.
+            if (WriteReviewDetail)
+            {
+                invoice[InvoiceReviewDetail.Column] = InvoiceReviewDetail.ValueOf(
+                    InvoiceReviewDetail.ReviewDetailOf(InvoiceProcedureHold.ReasonsOf(null, Findings.ToJsonString())));
+            }
+
             if (InvoiceVersion is not null)
             {
                 invoice.RowVersion = InvoiceVersion;

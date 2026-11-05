@@ -78,13 +78,21 @@ public static class InvoiceProcedureHold
     public static IReadOnlySet<string> ReasonsOf(Entity submission)
     {
         ArgumentNullException.ThrowIfNull(submission);
+        return ReasonsOf(
+            submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode),
+            submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson));
+    }
+
+    /// <summary>The Procedure hold codes of a submission's reason code and stored findings (pure; the findings' own <c>reasonCode</c> counts
+    /// too). The 095d-1 Set firm apply reads the remaining reasons through this, from the findings it already holds.</summary>
+    public static IReadOnlySet<string> ReasonsOf(string? reasonCode, string? json)
+    {
         var reasons = new HashSet<string>(StringComparer.Ordinal);
-        if (submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode) is { } reason && IsHoldCode(reason))
+        if (reasonCode is { } reason && IsHoldCode(reason))
         {
             reasons.Add(reason);
         }
 
-        var json = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
         if (string.IsNullOrWhiteSpace(json))
         {
             return reasons;
@@ -98,6 +106,11 @@ public static class InvoiceProcedureHold
             {
                 reasons.Add(SubmissionReasonCodes.ProceduresUnresolved);
                 return reasons;
+            }
+
+            if (Text(root, "reasonCode") is { } stored && IsHoldCode(stored))
+            {
+                reasons.Add(stored);
             }
 
             foreach (var pipeline in (root["pipelineFindings"] as JsonArray ?? []).OfType<JsonObject>())

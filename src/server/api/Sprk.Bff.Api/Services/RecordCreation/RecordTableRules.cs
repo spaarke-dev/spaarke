@@ -282,7 +282,9 @@ internal static partial class RecordTableRules
             SearchIndexed = true,
             // Task 014 (ebilling-r1's review of 013, item 3): a fill-only mapping that filled a second core lookup would fail
             // a valid create with multiple_core_records. The core record is the caller's to name.
-            MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_invoice"),
+            // ebilling-r1 082c-2 (uac-r2 2026-11-04): plus the review detail, which only its typed BFF writers derive (InvoiceReviewDetail), so a
+            // field-mapping rule may not set it.
+            MappingProtectedColumns = Columns([.. InvoiceFamilyCoreLookupsOf("sprk_invoice"), Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column]),
             PreWriteRules = [InvoiceFamilyRule],
         },
         new RecordTableRule { Table = "sprk_reportcard", Kind = RecordTableKind.Child },

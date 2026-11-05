@@ -151,7 +151,13 @@ public sealed class InvoiceAssignFirmServiceTests
             (_, _, _, _) => { Calls.Add("rights"); return Task.FromResult(CloseRights); },
             (_, _) => { Calls.Add("filing"); return Task.FromResult(Filing); },
             NullLogger<InvoiceAssignFirmService>.Instance,
-            new FixedTime(Now));
+            new FixedTime(Now))
+        {
+            ReviewDetailProbe = ReviewDetailProbe,
+        };
+
+        /// <summary>082c-2: whether the review detail column exists (fixed per test; never the process-wide probe).</summary>
+        public ReviewDetailColumnProbe ReviewDetailProbe = ReviewDetailColumnProbe.Fixed(present: true);
 
         public Task<AssignFirmResult> Assign(Guid? firm = null, string? note = "Firm confirmed by phone", ITrackingNumberAllocator? allocator = null) =>
             Service(allocator).SetFirmAsync(InvoiceId, firm ?? Firm, note, Decider, "caller-token", CancellationToken.None);
@@ -270,6 +276,39 @@ public sealed class InvoiceAssignFirmServiceTests
         (JsonObject)JsonNode.Parse((string)apply.SubmissionFields![InvoiceSubmissionPersister.SubmissionFindingsJson])!;
 
     // ── The apply (16.4 condition 2; 16.7 "renumber everything") ──
+
+    [Fact(DisplayName = "082c-2 (D-205 writer 3): Set firm lifts firm_missing; with no other hold the review detail goes blank in the same invoice update")]
+    public async Task ReviewDetail_SetFirm_NoOtherHold_IsBlank()
+    {
+        var w = new World();
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        Update(w.Applied!, "sprk_invoice", InvoiceId).Target.Attributes.Should().ContainKey(InvoiceReviewDetail.Column).WhoseValue.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "082c-2 (D-205 writer 3): with a Procedure gap still open, Set firm moves the detail to the next reason, not blank")]
+    public async Task ReviewDetail_SetFirm_GapStillOpen_MovesToWaitingForBillingTerms()
+    {
+        var w = new World();
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] =
+            $$"""{"trackingNumber":"INV-7.3","pipelineFindings":[{"code":"firm_missing"}],"{{InvoiceSubmissionPersister.LineFindingsMember}}":[{"code":"{{InvoiceSubmissionPersister.LineFindingRulesNotChecked}}","{{InvoiceFirmHold.LineFindingCauseMember}}":"{{SubmissionReasonCodes.ProcedureGap}}"}]}""";
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        Update(w.Applied!, "sprk_invoice", InvoiceId).Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value
+            .Should().Be(InvoiceReviewDetail.WaitingForBillingTerms);
+    }
+
+    [Fact(DisplayName = "082c-2 (mismatch): where the column does not exist yet, Set firm still applies and leaves the column out")]
+    public async Task ReviewDetail_SetFirm_ColumnMissing_LeavesItOut()
+    {
+        var w = new World { ReviewDetailProbe = ReviewDetailColumnProbe.Fixed(present: false) };
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        Update(w.Applied!, "sprk_invoice", InvoiceId).Target.Attributes.Should().NotContainKey(InvoiceReviewDetail.Column);
+    }
 
     [Fact(DisplayName = "095d-1b: a linked firm on a held no-firm invoice is assigned in ONE apply - the firm and the new number everywhere, the hold cleared, the decision stored")]
     public async Task Assigned_TheOneApply_CarriesTheFirmTheNumberTheHoldClearAndTheStoredDecision()

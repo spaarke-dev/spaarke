@@ -536,6 +536,11 @@ public static class ExternalAccessModule
                 "statuscode",
                 // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 3ff4102c.
                 "sprk_totalamount_base",
+                // ebilling-r1 082c-2 (owner 2026-11-04 "In Review with a description"; uac-r2 APPROVED with conditions 2026-11-04): NOT
+                // grid-derived. The review detail: a local choice naming which kind of review a held invoice is in (blank = normal review).
+                // Partner-safe closed labels, derived server-side from the holds; never an access-deciding column (not in ParentLineage
+                // AccessColumns). External Access R4 renders it only while statuscode is In Review.
+                "sprk_reviewdetail",
             },
         });
 

@@ -3183,6 +3183,9 @@ public partial class InvoiceSubmissionPersisterTests
 
     private sealed class Store
     {
+        /// <summary>082c-2: whether the review detail column exists (fixed per test; never the process-wide probe).</summary>
+        public ReviewDetailColumnProbe ReviewDetailProbe { get; set; } = ReviewDetailColumnProbe.Fixed(present: true);
+
         public Entity Submission { get; } = new("sprk_invoicesubmission", InvoiceSubmissionPersisterTests.Submission)
         {
             ["sprk_trackingnumber"] = "INV-100.2",
@@ -3569,13 +3572,19 @@ public partial class InvoiceSubmissionPersisterTests
                 entities.Object,
                 recordTypes.Object,
                 ownership.Object,
-                new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance),
+                new InvoiceLifecycleService(new Mock<IFieldMappingDataverseService>().Object, NullLogger<InvoiceLifecycleService>.Instance)
+                {
+                    ReviewDetailProbe = ReviewDetailProbe,
+                },
                 totals.Object,
                 InvoiceSubmissionServiceTests.IsolationOver(() => Isolation),
                 Files.Service,
                 Gate,
                 Logger,
-                Index.Submitter);
+                Index.Submitter)
+            {
+                ReviewDetailProbe = ReviewDetailProbe,
+            };
         }
 
         /// <summary>

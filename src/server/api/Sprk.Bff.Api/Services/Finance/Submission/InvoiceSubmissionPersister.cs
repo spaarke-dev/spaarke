@@ -185,6 +185,9 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     private readonly StoredFileService _files;
     private readonly SubmissionCommitGate _gate;
     private readonly ILogger<InvoiceSubmissionPersister> _logger;
+
+    /// <summary>082c-2: whether <see cref="InvoiceReviewDetail.Column"/> exists (the process-wide probe; a test sets its own).</summary>
+    internal ReviewDetailColumnProbe ReviewDetailProbe { get; init; } = ReviewDetailColumnProbe.Shared;
     private readonly JobSubmissionService? _jobs;
 
     /// <summary>
@@ -561,6 +564,9 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         SupersedeTarget? supersede = null;
         if (outcome.Kind != SubmissionEvaluationKind.AutoRejected && outcome.Submission!.ResubmissionOfSubmissionId is not null)
         {
+            // 082c-2: the close below blanks the old invoice's review detail where the column exists; the lifecycle's builder reads the
+            // probe's cached answer, so the probe is read here first.
+            await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false);
             var (targetRefusal, target) = await CheckCorrectionTargetAsync(outcome, core, ct).ConfigureAwait(false);
             if (targetRefusal is not null)
             {
@@ -595,6 +601,15 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         }
 
         var initial = outcome.Kind == SubmissionEvaluationKind.AutoRejected ? InvoiceLifecycleStatus.Rejected : InvoiceLifecycleStatus.InReview;
+
+        // 082c-2 (ontology D-205 writer 1; uac-r2 (b)): the review detail, derived from the holds this outcome stores, in this same create. Only
+        // an In Review invoice carries one. Left out where the column does not exist yet (ReviewDetailColumnProbe): the holds hold without it.
+        if (initial == InvoiceLifecycleStatus.InReview && InvoiceReviewDetail.ReviewDetailOf(HoldReasonsOf(outcome)) is { } reviewDetail
+            && await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false))
+        {
+            invoice[InvoiceReviewDetail.Column] = InvoiceReviewDetail.ValueOf(reviewDetail);
+        }
+
         var create = _lifecycle.BuildInvoiceCreateRequest(invoice, initial);
         if (!create.Succeeded)
         {
@@ -1434,6 +1449,38 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     }
 
     // ── Row builders (internal for tests) ──
+
+    /// <summary>
+    /// 082c-2: the hold reasons <paramref name="outcome"/> stores, as reason codes: <see cref="SubmissionReasonCodes.FirmMissing"/> for a
+    /// submission with no firm (the invoice's own firm hold, <see cref="FillInvoice"/>), the terminal reason code, and the two Procedure
+    /// holds of either channel (an Internal hold's terminal reason is <c>Blocked</c>). The same reasons the stored-state readers
+    /// (<see cref="InvoiceFirmHold"/>, <see cref="InvoiceProcedureHold"/>) find in what this outcome persists.
+    /// </summary>
+    internal static IReadOnlySet<string> HoldReasonsOf(SubmissionEvaluationOutcome outcome)
+    {
+        var reasons = new HashSet<string>(StringComparer.Ordinal);
+        if (outcome.Submission is { FirmId: null })
+        {
+            reasons.Add(SubmissionReasonCodes.FirmMissing);
+        }
+
+        if (TerminalFor(outcome).ReasonCode is { } reason)
+        {
+            reasons.Add(reason);
+        }
+
+        if (outcome.HasProcedureGap)
+        {
+            reasons.Add(SubmissionReasonCodes.ProcedureGap);
+        }
+
+        if (outcome.RulesSkippedForUnresolvedProcedures)
+        {
+            reasons.Add(SubmissionReasonCodes.ProceduresUnresolved);
+        }
+
+        return reasons;
+    }
 
     internal static void FillInvoice(
         Entity invoice, SubmissionEvaluationOutcome outcome, IReadOnlyDictionary<string, object> resolverFields, RecordOwnerResolution owner,
