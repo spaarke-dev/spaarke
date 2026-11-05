@@ -384,13 +384,17 @@ public sealed class InvoiceComplianceEvaluator
                 var precedence = BillingRuleCatalogue.PrecedenceOf(key.Key.RuleType);
 
                 // The highest rank holding a valid version. Ranks are tried from the top, so a version below it is never run when it is
-                // displaced outright (Replace).
+                // displaced outright (Replace). Under Split only a version that STATES a cap (MaxAmountPerItem) can displace a lower
+                // version's cap (D-205 ruling): a capless higher version leaves the lower cap in force. A deliberate "no cap on this record"
+                // is a rule-level Exclude, or a record rule in the base's slot, never precedence.
                 ProcedureRank? top = null;
                 if (precedence != BillingRulePrecedence.Additive)
                 {
+                    bool Displacing(BillingRuleCandidate v) =>
+                        (precedence != BillingRulePrecedence.Split || accepted[v.PolicyVersionId].MaxAmountPerItem is not null) && Valid(v);
                     foreach (var atRank in key.GroupBy(v => v.Rank).OrderByDescending(g => g.Key))
                     {
-                        if (atRank.Any(Valid))
+                        if (atRank.Any(Displacing))
                         {
                             top = atRank.Key;
                             break;
@@ -468,8 +472,10 @@ public sealed class InvoiceComplianceEvaluator
             var kept = judged.Where(f => applies.Contains(f.Subject));
             if (capDisplaced.TryGetValue(candidate.PolicyVersionId, out var capped))
             {
-                // C6 Split (ExpenseRule, ontology F3-c, D-205 item 3): on a subject where a higher-ranked valid version of its key applies, a
-                // displaced version keeps its code check (the non-reimbursable codes add) and loses its cap (the cap replaces). "Per category" has
+                // C6 Split (ExpenseRule, ontology F3-c, D-205 item 3): on a subject where a higher-ranked valid version of its key that states a
+                // cap applies, a displaced version keeps its code check (the non-reimbursable codes add) and loses its cap (the cap replaces). A
+                // capless higher version displaces nothing (D-205 ruling): a deliberate "no cap on this record" is a rule-level Exclude or a
+                // record rule in the base's slot, not precedence. "Per category" has
                 // no key today: maxAmountPerItem caps every expense line, whatever its code. It becomes per category only if the owner's six-gap
                 // triage adds a per-code cap (D-205 item 3).
                 kept = kept.Where(f => !(f.ReasonCode == BillingReasonCodes.ExpenseAmountOverCap && capped.Contains(f.Subject)));
@@ -478,7 +484,8 @@ public sealed class InvoiceComplianceEvaluator
             {
                 // D-20: the cap is a USD amount; the code check does not depend on the currency.
                 kept = kept.Where(f => f.ReasonCode != BillingReasonCodes.ExpenseAmountOverCap);
-                if (definition.MaxAmountPerItem is not null)
+                // A cap displaced on every subject it applies to (C6 Split) is not in force, so it was not skipped either.
+                if (definition.MaxAmountPerItem is not null && !(capDisplaced.TryGetValue(candidate.PolicyVersionId, out var allDisplaced) && applies.All(allDisplaced.Contains)))
                 {
                     Skip(candidate, definition.RuleType, currencySkip, skips);
                 }

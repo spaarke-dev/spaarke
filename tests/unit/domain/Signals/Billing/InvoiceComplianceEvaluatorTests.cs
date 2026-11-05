@@ -406,6 +406,7 @@ public class InvoiceComplianceEvaluatorTests
     }
 
     private const string ExpenseCodesOnly = """{"type":"ExpenseRule","nonReimbursableCodes":["E109"]}""";
+    private const string ExpenseCodesAndCap1000 = """{"type":"ExpenseRule","nonReimbursableCodes":["E109"],"maxAmountPerItem":1000}""";
 
     private static BillingLineFacts BadExpense(int index) =>
         Expense(index) with { ExpenseCode = "E109", BilledExpenseCode = "E109", Amount = 600m };
@@ -432,13 +433,14 @@ public class InvoiceComplianceEvaluatorTests
         result.RulesByVersion[firm.PolicyVersionId].Consequence.Should().Be((int)BillingConsequence.Flag, "the downgraded version can never reject");
     }
 
-    [Fact(DisplayName = "082c C6 Split (D-205 item 3): a valid firm ExpenseRule displaces the client default's CAP only; the default's code check still runs")]
+    [Fact(DisplayName = "082c C6 Split (D-205 item 3): a valid firm ExpenseRule that states a cap displaces the client default's CAP only; the default's code check still runs")]
     public void AValidFirmVersion_DisplacesTheClientDefaultsCap_ButItsCodeCheckAdds_Control_C6Split()
     {
-        // Control for the test above: a firm version with an allowed consequence displaces the client default's cap. Before 082c (D-39 all
-        // replace) it displaced the whole version; the codes now add (ontology F3-c, D-205 item 3).
+        // Control for the test above: a firm version with an allowed consequence and a cap displaces the client default's cap. Before 082c
+        // (D-39 all replace) it displaced the whole version; the codes now add (ontology F3-c, D-205 item 3). The firm cap is 1000: the line
+        // (600) is under it, so the cap raises nothing.
         var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject };
-        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm)
+        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesAndCap1000, RuleSetScope.Firm)
             with { Consequence = (int)BillingConsequence.Flag };
 
         var result = Evaluate(Request(BadExpense(0)), Loaded(clientDefault, firm));
@@ -447,16 +449,16 @@ public class InvoiceComplianceEvaluatorTests
         {
             ("CD-EXPENSE", BillingReasonCodes.ExpenseCodeNotReimbursable),
             ("FIRM-EXPENSE", BillingReasonCodes.ExpenseCodeNotReimbursable),
-        }, "the default's cap (500, the line is 600) is displaced; its code check is not");
+        }, "the default's cap (500, the line is 600) is displaced by the firm's cap (1000); its code check is not");
     }
 
-    [Fact(DisplayName = "082c C6 Split: a null-consequence firm ExpenseRule is valid, so it displaces the default's cap; the default's code check (Reject) still runs")]
+    [Fact(DisplayName = "082c C6 Split: a null-consequence firm ExpenseRule that states a cap is valid, so it displaces the default's cap; the default's code check (Reject) still runs")]
     public void ANullConsequenceFirmVersion_DisplacesTheClientDefaultsCap_TheDefaultsCodeCheckStillRuns_C6Split()
     {
         // Null means "the type default" and is a valid authored row, so the firm version counts and displaces the client default's cap. 073's
         // known limit (072 notes, section 13) now covers the cap only: under Split the default's code check, with its Reject, runs beside it.
         var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject };
-        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm) with { Consequence = null };
+        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesAndCap1000, RuleSetScope.Firm) with { Consequence = null };
 
         var result = Evaluate(Request(BadExpense(0)), Loaded(clientDefault, firm));
 
@@ -464,6 +466,53 @@ public class InvoiceComplianceEvaluatorTests
         result.Findings.Where(f => f.PolicyVersionId == clientDefault.PolicyVersionId).Should().ContainSingle()
             .Which.ReasonCode.Should().Be(BillingReasonCodes.ExpenseCodeNotReimbursable);
         result.RulesByVersion[clientDefault.PolicyVersionId].Consequence.Should().Be((int)BillingConsequence.Reject);
+    }
+
+    [Fact(DisplayName = "082c C6 Split must-fire (D-205 ruling): a CAPLESS higher-ranked ExpenseRule displaces nothing; the lower version's cap still fires")]
+    public void ACaplessFirmVersion_DoesNotDisplaceTheClientDefaultsCap_C6Split()
+    {
+        var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject };
+        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm);
+
+        var result = Evaluate(Request(BadExpense(0)), Loaded(clientDefault, firm));
+
+        result.Findings.Select(f => (f.PolicyCode, f.ReasonCode)).Should().BeEquivalentTo(new[]
+        {
+            ("CD-EXPENSE", BillingReasonCodes.ExpenseCodeNotReimbursable),
+            ("CD-EXPENSE", BillingReasonCodes.ExpenseAmountOverCap),
+            ("FIRM-EXPENSE", BillingReasonCodes.ExpenseCodeNotReimbursable),
+        }, "the firm version states no cap, so the default's cap (500, the line is 600) still holds the line");
+    }
+
+    [Fact(DisplayName = "082c C6 Split: a capless higher version at a TIE with a capped one displaces nothing; both apply")]
+    public void ACaplessVersionAtATie_BothApply_C6Split()
+    {
+        var capped = Version("CD-EXPENSE", RuleType.ExpenseRule);
+        var capless = Version("CD-EXPENSE-CODES", RuleType.ExpenseRule, ExpenseCodesOnly);
+
+        var result = Evaluate(Request(BadExpense(0)), Loaded(capped, capless));
+
+        result.Findings.Select(f => (f.PolicyCode, f.ReasonCode)).Should().BeEquivalentTo(new[]
+        {
+            ("CD-EXPENSE", BillingReasonCodes.ExpenseCodeNotReimbursable),
+            ("CD-EXPENSE", BillingReasonCodes.ExpenseAmountOverCap),
+            ("CD-EXPENSE-CODES", BillingReasonCodes.ExpenseCodeNotReimbursable),
+        });
+    }
+
+    [Fact(DisplayName = "082c C6 Split, currency skip: a cap displaced by a higher cap is not listed as skipped; an in-force cap is")]
+    public void ADisplacedCap_IsNotListedAsSkipped_OnANonUsdInvoice_C6Split()
+    {
+        var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule);
+        var firmCapped = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesAndCap1000, RuleSetScope.Firm);
+        var firmCapless = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm);
+        var request = Request(BadExpense(0)) with { Currency = "EUR" };
+
+        var displaced = Evaluate(request, Loaded(clientDefault, firmCapped));
+        var inForce = Evaluate(request, Loaded(clientDefault, firmCapless));
+
+        displaced.Skips.Select(s => s.PolicyCode).Should().Equal("FIRM-EXPENSE");
+        inForce.Skips.Select(s => s.PolicyCode).Should().Equal("CD-EXPENSE");
     }
 
     [Fact]
