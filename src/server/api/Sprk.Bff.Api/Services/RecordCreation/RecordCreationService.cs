@@ -634,10 +634,16 @@ internal sealed partial class RecordCreationService
         }
         else
         {
+            // Task 049 (NFR-02 Part C): a mapped row's step 5 checks the caller's own values, then the merged row (and on a
+            // failure each value, then the row as written): every pass re-read the same table metadata. Within this step each
+            // such read is asked once; access answers are never kept (CallerMetadataReadMemo). Scoped to step 5 only: the
+            // other steps' reads, and the pre-write rules, keep the caller's own client.
+            var checking = new CallerMetadataReadMemo(user);
+
             // The K-2 guard (a server-set FILING lookup) ran before step 3. Task 031 fix round 1 (F1): a route-authorised
             // lookup is asked Read as the caller here, and only its AppendTo is skipped below (appendToSkip).
             var routeAuthorized = await CheckRouteAuthorizedLookupsAsync(
-                user, callerSystemUserId!.Value, table, callerItem, item, request, ct).ConfigureAwait(false);
+                checking, callerSystemUserId!.Value, table, callerItem, item, request, ct).ConfigureAwait(false);
             if (routeAuthorized.Refusal is { } routeRefusal)
                 return Decision.Refuse(CallerCheckRefused(routeRefusal, noun));
             var appendToSkip = routeAuthorized.SkipAppendTo;
@@ -645,7 +651,7 @@ internal sealed partial class RecordCreationService
             if (mappedValues.Count == 0)
             {
                 var check = await CallerWriteAuthorization.CheckCallerMayCreateAsync(
-                    user, callerSystemUserId!.Value, table, item, appendToSkip, ct).ConfigureAwait(false);
+                    checking, callerSystemUserId!.Value, table, item, appendToSkip, ct).ConfigureAwait(false);
                 if (!check.Succeeded)
                     return Decision.Refuse(CallerCheckRefused(check, noun));
 
@@ -655,7 +661,7 @@ internal sealed partial class RecordCreationService
             else
             {
                 var checkedMerge = await CheckMergedPayloadAsync(
-                    table, user, callerSystemUserId!.Value, callerItem, item, mappedValues, appendToSkip, noun,
+                    table, checking, callerSystemUserId!.Value, callerItem, item, mappedValues, appendToSkip, noun,
                     mappingWarnings, ct, defaultColumns).ConfigureAwait(false);
                 if (checkedMerge.Refusal is { } mergedRefusal)
                     return Decision.Refuse(mergedRefusal);
