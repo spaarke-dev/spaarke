@@ -588,3 +588,17 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - Rejected: (a), which holds those invoices; and (b), which moves every invoice-level version choice to the latest work date, a wider semantic change that would need the owner.
     - Legacy selection is unchanged.
   - The D-205 Additive list is completed with AiObservation (D-172 round 3).
+- **082c-2 `sprk_reviewdetail` lifecycle (ontology view, 2026-11-04, brief `cf3589b286`).** The schema needs the owner's go, which ebilling has asked for.
+  - **One writer, by derivation, not set/clear.** The value is a pure function of the invoice's open hold reasons, in a fixed priority:
+    - firm_missing first (Procedures cannot resolve without the firm);
+    - then procedures_unresolved;
+    - then ProcedureGap.
+  - Every path that changes a hold reason, or moves the invoice out of In Review, recomputes the value in its own transaction. Clearing one reason must never blank the value while another remains. The D-201 amendment makes this concrete: after Set firm the hold lifts only when the 095d-2 re-run clears every marker.
+  - **Writers:**
+    - the submission persister;
+    - the re-check that clears a gap or unresolved (082c-2, 101 correction re-evaluation, ebilling-r2's explicit re-check);
+    - the 095d-1 Set firm apply;
+    - the 095d-2 re-run (the SubmissionIntegrity group re-map);
+    - the 114 Override release;
+    - every exit from In Review, which sets blank: reject, return to firm, cancel, and Superseded by a correction, including the 089e chain close.
+  - Invariant check: non-blank ⇒ statuscode In Review, in the ArchTest-named writer list and the census or `-Verify`.
