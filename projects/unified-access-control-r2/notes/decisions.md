@@ -203,3 +203,27 @@ The owner accepted every recommendation ("yes follow your recommendation for the
   - **Consequence, accepted.** Records that account creates unfiled are owned by the root team (the creator's unit), so its own test data does not take the customer shape.
 - **Move closed (2026-11-02).** All 11 interactive humans except the administrator, and both dev BFF app users, are in BU1. The customer families are owned by the BU1 team. The 156 other app users stay in the root (Q3, Q4).
   - Rollback source: `rbu1s0_snapshot_*` in the session scratch.
+
+## 2026-11-05: Decision Records and Signals for flagged licensed users (owner, from the ebilling 082c-2 review)
+
+**Question.** A system user flagged `sprk_isexternal` is a licensed user (for example, licensed outside counsel). The question was whether such a user should read Decision Records (`sprk_decisionrecord`) and Signals (`sprk_signal`), through the model-driven app or through the BFF's caller-scoped reads (the assistant `dataverse.*` tools and `GET /api/v1/records/{table}/{id}/family`).
+
+**Facts checked on dev (2026-11-05, read-only).**
+- These roles grant Read on both tables:
+  - Spaarke Basic User (user depth);
+  - Spaarke Console User (deep);
+  - Spaarke Ontology Administrator;
+  - Secure Record Owner;
+  - the service and admin roles.
+- **Every member of a business unit gets Spaarke Basic User through the unit's default team.** Records are team-owned (D-11), so a member reads team-owned Decision Records and Signals through that role alone.
+- The one enabled flagged user on dev is the owner's guest account, and it holds Spaarke Console User. Removing that role would take away the Console and would not stop reads through Basic User.
+- **No partner or contact path reads these tables.** The external modules don't list them, the external SPA doesn't read them, and the notifier sends fixed text. The only external touch is an existence check that returns true or false.
+
+**Decision.** Owner, 2026-11-05: option "same as licensed users".
+- A flagged licensed user reads Decision Records and Signals as their Dataverse roles allow, like any licensed user and the same as in the model-driven app.
+- No role change and no code change; Console access is unchanged.
+- This matches the solution approach: Decision Records are for licensed Power Apps users only; contacts and partners have none.
+- It is the same class as round 77 (role depth for flagged users).
+- The BFF's invoice-family hiding for flagged callers stays as it is: it narrows rows by invoice visibility and does not narrow columns.
+
+**Rejected.** Option "exclude flagged users": refusing the two tables to flagged callers in the BFF read tools and the family route. Roles can't express it, because Basic User comes with unit membership. It would also limit expected functionality for licensed outside counsel, and the model-driven app would still show the rows through their roles.
