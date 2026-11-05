@@ -58,6 +58,55 @@ public class InvoiceSubmissionProcessorTests
         h.Evaluated!.CoreRecord.Should().Be(new CoreRecordReference(CoreRecordKind.Matter, Matter));
     }
 
+    // ── 082c-1 interim: a gap or a resolver fault is never a pass ──
+
+    /// <summary>A Procedure whose only version ended before the invoice date (1 June): the invoice date and the lines are in a gap.</summary>
+    private static ProcedureResolution GappedProcedures()
+    {
+        var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 3, 10));
+        kit.Rule("Ended", "ENDED-INCREMENT", RuleType.TimeIncrement);
+        return kit.Build();
+    }
+
+    [Fact(DisplayName = "082c-1 interim: an evaluation with a Procedure gap throws; the invoice is not decided, so it can never be Accepted")]
+    public async Task AProcedureGap_Throws_NeverAPass()
+    {
+        var h = new Harness { Procedures = GappedProcedures() };
+
+        var run = () => h.RunAsync();
+
+        (await run.Should().ThrowAsync<ProcedureGapNotYetHeldException>()).Which.Gaps.Should().BeGreaterThan(0);
+        h.Evaluated.Should().NotBeNull("the gap is found by the evaluation, then refused before the decision");
+    }
+
+    [Fact(DisplayName = "082c-1 interim control: a Procedure in force on every date (no gap) is evaluated and Accepted as before")]
+    public async Task AProcedureWithNoGap_IsAccepted_Control()
+    {
+        var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Open");
+        kit.Rule("Open", "OPEN-HOURS", RuleType.DailyHoursCap);
+        var h = new Harness { Procedures = kit.Build() };
+
+        var outcome = await h.RunAsync();
+
+        outcome.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        outcome.Evaluation!.Gaps.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "082c-1 interim: a resolver fault from the evaluation propagates as it is (never caught into a pass)")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AResolverFault_Propagates(bool rowsInconsistent)
+    {
+        Exception fault = rowsInconsistent
+            ? new ProcedureResolutionFaultException("two versions in force")
+            : new CoreRecordChainUnreadableException("chain unreadable");
+        var h = new Harness { EvaluationFault = fault };
+
+        var run = () => h.RunAsync();
+
+        (await run.Should().ThrowAsync<InvalidOperationException>()).Which.Should().BeSameAs(fault);
+    }
+
     [Fact(DisplayName = "097b: a Correction is judged with its replaced invoice derived on the server from sprk_resubmissionof; a New submission names none and reads nothing")]
     public async Task ACorrection_CarriesItsReplacedInvoice_DerivedFromItsResubmissionOf()
     {
@@ -787,6 +836,13 @@ public class InvoiceSubmissionProcessorTests
     internal sealed class Harness
     {
         public IReadOnlyList<BillingRuleCandidate> Rules { get; init; } = [];
+
+        /// <summary>082c: the Procedure stream the evaluation sees (none by default).</summary>
+        public ProcedureResolution? Procedures { get; init; }
+
+        /// <summary>082c: what the evaluation throws instead of evaluating (a resolver fault), or null.</summary>
+        public Exception? EvaluationFault { get; init; }
+
         public InvoiceSubmissionChannel Channel
         {
             get => (InvoiceSubmissionChannel)Row.GetAttributeValue<OptionSetValue>("sprk_channel").Value;
@@ -855,7 +911,12 @@ public class InvoiceSubmissionProcessorTests
                 (request, _) =>
                 {
                     Evaluated = request;
-                    var result = Evaluator().Evaluate(request, Loaded([.. Rules]));
+                    if (EvaluationFault is { } fault)
+                    {
+                        throw fault;
+                    }
+
+                    var result = Evaluator().Evaluate(request, Loaded([.. Rules]) with { Procedures = Procedures ?? NoProcedures() });
 
                     // A row written outside the publish path: the evaluation gate would downgrade the consequence, so the decider's
                     // own guard is proved by restoring Reject after the gate (defence in depth, as 073's DecideAsync warns about).

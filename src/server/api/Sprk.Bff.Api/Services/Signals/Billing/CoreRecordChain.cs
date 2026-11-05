@@ -24,8 +24,16 @@ using Sprk.Bff.Api.Services.Finance.Resolution;
 
 namespace Sprk.Bff.Api.Services.Signals.Billing;
 
-/// <summary>One record of a <see cref="CoreRecordChain"/>: the invoice's core record at distance 0, a direct parent at distance 1.</summary>
-public sealed record CoreRecordLink(string Table, Guid Id, int Distance);
+/// <summary>One record of a <see cref="CoreRecordChain"/>: the invoice's core record at distance 0, a direct parent at distance 1.
+/// <see cref="object.ToString"/> prints the table and distance only (082c C17): a chain may hold a Secure parent, so never its id.</summary>
+public sealed record CoreRecordLink(string Table, Guid Id, int Distance)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Table = ").Append(Table).Append(", Distance = ").Append(Distance);
+        return true;
+    }
+}
 
 /// <summary>
 /// The core-record chain of an invoice (D-172, direct association only): its core record (distance 0) and the core records that record

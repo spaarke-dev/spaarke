@@ -91,7 +91,8 @@ public sealed record ProcedureOverrideRow(
     }
 }
 
-/// <summary>One Published policy version as read: what the gate, the handlers and the Signal mapping need (082c maps it to a candidate).</summary>
+/// <summary>One Published policy version as read: what the gate, the handlers and the Signal mapping need (082c maps it to a candidate).
+/// <see cref="object.ToString"/> prints the code, version number, rule type and from-date only (082c C17): no id, rule body or text.</summary>
 public sealed record ResolvedPolicyVersion
 {
     public required Guid PolicyId { get; init; }
@@ -134,6 +135,20 @@ public sealed record ResolvedPolicyVersion
 
     /// <summary><c>createdon</c> (UTC): which episode of a change a record rule's version belongs to. Internal: it is not part of the snapshot.</summary>
     internal DateTime? CreatedOn { get; init; }
+
+    /// <summary>
+    /// The code as <see cref="object.ToString"/> prints it. A record rule's code is <see cref="ProcedureAssignmentService.RecordRuleCodePrefix"/> plus
+    /// its policy id (<see cref="ProcedureAssignmentService.RecordRuleCode"/>), so it prints the token <c>record rule</c> instead (082c C17, K2).
+    /// </summary>
+    internal static string Printable(string policyCode) =>
+        policyCode.StartsWith(ProcedureAssignmentService.RecordRuleCodePrefix, StringComparison.Ordinal) ? "record rule" : policyCode;
+
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("PolicyCode = ").Append(Printable(PolicyCode)).Append(", VersionNumber = ").Append(VersionNumber)
+            .Append(", RuleType = ").Append(RuleType).Append(", InForceFrom = ").Append(InForceFrom);
+        return true;
+    }
 }
 
 /// <summary>
@@ -170,19 +185,47 @@ public sealed record RecordRuleSlot(
 
 /// <summary>
 /// A rule in force for one work date. <see cref="Procedure"/> is the Procedure whose slot it takes (a record rule's is its base rule's), so
-/// its rank is that Procedure's. <see cref="RecordRule"/> is set on a record rule.
+/// its rank is that Procedure's. <see cref="RecordRule"/> is set on a record rule. <see cref="object.ToString"/> prints the code, the version
+/// numbers, the Procedure name, the rank and the record-rule flag only (082c C17): no id, rule body or override reason.
 /// </summary>
-public sealed record ResolvedRule(ResolvedPolicyVersion Version, AppliedProcedure Procedure, RecordRuleSlot? RecordRule);
+public sealed record ResolvedRule(ResolvedPolicyVersion Version, AppliedProcedure Procedure, RecordRuleSlot? RecordRule)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("PolicyCode = ").Append(ResolvedPolicyVersion.Printable(Version.PolicyCode)).Append(", VersionNumber = ").Append(Version.VersionNumber)
+            .Append(", ProcedureName = ").Append(Procedure.ProcedureName).Append(", ProcedureVersionNumber = ").Append(Procedure.ProcedureVersionNumber)
+            .Append(", Rank = ").Append(Procedure.Rank).Append(", RecordRule = ").Append(RecordRule is not null);
+        return true;
+    }
+}
 
 /// <summary>
 /// A rule of an applied Procedure that a rule-level override removed for this date: the rows that decided it, the distance of the deciding
-/// override, and whether a record rule took its slot.
+/// override, and whether a record rule took its slot. <see cref="object.ToString"/> prints the code, the Procedure name, the distance, the
+/// replaced flag and the row count only (082c C17): no id, rule body or override reason.
 /// </summary>
 public sealed record ExcludedRule(
-    ResolvedPolicyVersion Version, AppliedProcedure Procedure, IReadOnlyList<ProcedureOverrideRow> Overrides, int Distance, bool ReplacedByRecordRule);
+    ResolvedPolicyVersion Version, AppliedProcedure Procedure, IReadOnlyList<ProcedureOverrideRow> Overrides, int Distance, bool ReplacedByRecordRule)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("PolicyCode = ").Append(ResolvedPolicyVersion.Printable(Version.PolicyCode)).Append(", ProcedureName = ").Append(Procedure.ProcedureName)
+            .Append(", Distance = ").Append(Distance).Append(", ReplacedByRecordRule = ").Append(ReplacedByRecordRule)
+            .Append(", Overrides = ").Append(Overrides.Count);
+        return true;
+    }
+}
 
-/// <summary>A Procedure that would apply but a Procedure-level Exclude removed (nearer row wins; between two d1 parents Exclude wins).</summary>
-public sealed record ExcludedProcedure(Guid ProcedureId, string ProcedureName, IReadOnlyList<ProcedureOverrideRow> Overrides);
+/// <summary>A Procedure that would apply but a Procedure-level Exclude removed (nearer row wins; between two d1 parents Exclude wins).
+/// <see cref="object.ToString"/> prints the name and the row count only (082c C17): no Procedure id and no deciding row.</summary>
+public sealed record ExcludedProcedure(Guid ProcedureId, string ProcedureName, IReadOnlyList<ProcedureOverrideRow> Overrides)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("ProcedureName = ").Append(ProcedureName).Append(", Overrides = ").Append(Overrides.Count);
+        return true;
+    }
+}
 
 /// <summary>Why an applicable Procedure has no version for a work date (model 7.1 gap reading, owner F2-d; D-177 (3)).</summary>
 public enum ProcedureGapKind
@@ -227,6 +270,39 @@ public sealed record ProcedureRulesOnDate(
     IReadOnlyList<ExcludedProcedure> ExcludedProcedures,
     IReadOnlyList<ProcedureGap> Gaps)
 {
+    /// <summary>
+    /// 082c K4, ontology D-205 rule (c) (the ONE definition; the evaluator and the adjustment options both use it): the Procedures that judge the
+    /// INVOICE subject by their version on <paramref name="onLatestWorkDate"/> (the latest dated line's work date) because they have none on this
+    /// (the invoice) date. Only a Procedure with a HOLE, an END, or one NOT YET APPLICABLE here qualifies, and only when it is applied on the work date.
+    /// A <see cref="ProcedureGapKind.ConflictingParents"/> gap and any pin gap (<see cref="ProcedureGapKind.PinnedVersionRetired"/>,
+    /// <see cref="ProcedureGapKind.PinnedVersionNotInForce"/>) are real disagreements, not an empty date: they stand. Empty when
+    /// <paramref name="onLatestWorkDate"/> is <see langword="null"/> (no dated line, or the same date).
+    /// </summary>
+    internal HashSet<Guid> FallbackProcedureIds(ProcedureRulesOnDate? onLatestWorkDate)
+    {
+        if (onLatestWorkDate is null)
+        {
+            return [];
+        }
+
+        var heldHere = Procedures.Select(p => p.ProcedureId).ToHashSet();
+        var standingGaps = Gaps
+            .Where(g => g.Kind is not (ProcedureGapKind.HoleBetweenVersions or ProcedureGapKind.AfterLastVersion))
+            .Select(g => g.ProcedureId)
+            .ToHashSet();
+        return onLatestWorkDate.Procedures.Select(p => p.ProcedureId).Where(id => !heldHere.Contains(id) && !standingGaps.Contains(id)).ToHashSet();
+    }
+
+    /// <summary>The rules that judge the invoice subject on this date: <see cref="Rules"/>, plus the work-date rules of each
+    /// <see cref="FallbackProcedureIds"/> Procedure (rule (c)).</summary>
+    internal IReadOnlyList<ResolvedRule> RulesWithFallback(ProcedureRulesOnDate? onLatestWorkDate)
+    {
+        var fallback = FallbackProcedureIds(onLatestWorkDate);
+        return fallback.Count == 0
+            ? Rules
+            : Rules.Concat(onLatestWorkDate!.Rules.Where(r => fallback.Contains(r.Procedure.ProcedureId))).ToList();
+    }
+
     /// <summary>
     /// The reader-facing projection (uac-r2 U3): built field by field from an allow-list, it carries Procedure names, version numbers,
     /// rule codes, levels and distances only. No record id, record name, override reason or row id: the chain may include a Secure parent
@@ -307,12 +383,26 @@ public sealed class ProcedureResolution
     /// <summary>The invoice's core-record chain (distance 0, then its direct parents); empty when the invoice has no core record.</summary>
     public IReadOnlyList<CoreRecordLink> Chain => _rows.Chain;
 
+    /// <summary>
+    /// ebilling-r1 082c (C4, C10): every Published policy version this resolution read, whatever date or Procedure Version it belongs to. A
+    /// superset of the rules any <see cref="RulesOn"/> returns, for the loader's Duplicate gate (is a prior read worth it) and its check that
+    /// the legacy and Procedure streams never share a version. Never a selection of what judges a date.
+    /// </summary>
+    internal IReadOnlyList<ResolvedPolicyVersion> PolicyVersions => _rows.PolicyVersions;
+
+    private int _datesResolved;
+
+    /// <summary>ebilling-r1 082c (C9): how many times <see cref="RulesOn"/> ran on this resolution (the evaluator resolves each distinct
+    /// subject date once). Read by the tests that pin that bound; it decides nothing.</summary>
+    internal int DatesResolved => Volatile.Read(ref _datesResolved);
+
     /// <summary>The Procedures, rules, exclusions and gaps for <paramref name="workDate"/>. Pure; reads nothing.</summary>
     /// <exception cref="ProcedureResolutionFaultException">Two versions of one Procedure are in force on the date (I-P1), a record rule
     /// does not name a version of its base rule, an enabled record rule has no Exclude row, or its known episode has no version. The message
     /// is for operators: never show <c>ex.Message</c> to a reader.</exception>
     public ProcedureRulesOnDate RulesOn(DateOnly workDate)
     {
+        Interlocked.Increment(ref _datesResolved);
         var applied = new List<AppliedProcedure>();
         var gaps = new List<ProcedureGap>();
         var baseRules = new List<(ResolvedPolicyVersion Version, AppliedProcedure Procedure)>();

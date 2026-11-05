@@ -77,9 +77,9 @@ public static class FinanceModule
         services.AddScoped<IInvoiceResolutionService, InvoiceResolutionService>();
 
         // Billing compliance evaluation (ebilling-r1 task 072, FR-25, D-23 in-memory strategy): BillingFactLoader reads the published
-        // billing rules for the client default and the firm, the core record, the firm's priors and their secure roots (D-112) once
-        // per submission; InvoiceComplianceEvaluator selects the versions in force per line (firm over client default, D-39), gates
-        // them (FR-24) and runs the 071 handlers. Writes nothing. Concrete (ADR-010: no interface, one implementation each). Scoped:
+        // billing rules (the legacy client-default and firm sets, and the Procedure stream through the static ProcedureResolver, 082c: no
+        // registration), the core record, the firm's priors and their secure roots (D-112) once per submission; InvoiceComplianceEvaluator
+        // selects the versions in force per line (rank and PrecedenceOf, 082c), gates them (FR-24) and runs the 071 handlers. Writes nothing. Concrete (ADR-010: no interface, one implementation each). Scoped:
         // the loader holds the scoped SecureChildShareSynchronizer (ExternalAccessModule, unconditional); the gate PolicyVersionValidator
         // is a singleton (SignalsModule). Unconditional (flag rule above). Caller: task 049 (pipeline orchestration).
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Billing.BillingFactLoader>();

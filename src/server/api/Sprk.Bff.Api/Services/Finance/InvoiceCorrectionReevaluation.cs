@@ -38,6 +38,12 @@ internal sealed class CorrectionTotalsRefusedException(string refusalCode)
 internal sealed class CorrectionFirmMissingException()
     : Exception("The invoice names no firm, so its billing rules cannot be re-run.");
 
+/// <summary>082c C12 (F1-low): the corrected invoice has a Procedure gap its stored findings do not (a correction moved work onto a date with no
+/// terms in force on the record). The correction service answers 409 <see cref="CorrectionCodes.ProcedureGap"/> with a fixed sentence, not the 503
+/// Incomplete whose advice (repeat the same request) can never clear a gap. Carries no id and no message to show: the text is fixed.</summary>
+internal sealed class CorrectionProcedureGapException()
+    : Exception("The corrected invoice has a Procedure gap its stored findings do not; the findings are not patched.");
+
 /// <summary>
 /// The follow-through of a saved correction (ebilling-r1 task 101 part B2b-1; FR-25, FR-31, D-126): re-runs 072's billing rules in memory on the
 /// invoice before and after the correction, patches the stored findings (<c>sprk_invoicesubmission.sprk_findingsjson</c>) with the difference, and
@@ -262,7 +268,7 @@ public sealed class InvoiceCorrectionReevaluation
             {
                 patched = await PatchFindingsAsync(applied, ct).ConfigureAwait(false);
             }
-            catch (CorrectionFirmMissingException)
+            catch (Exception ex) when (ex is CorrectionFirmMissingException or CorrectionProcedureGapException)
             {
                 throw; // a refusal, not a failed step (409, not 503)
             }
@@ -440,6 +446,13 @@ public sealed class InvoiceCorrectionReevaluation
 
     private sealed record Patched(JsonObject Root, IReadOnlyDictionary<int, StoredLine> Lines, IReadOnlySet<int> Touched, IReadOnlyList<Guid> Followed);
 
+    /// <summary>The gaps of an evaluation as (Procedure, kind, subject) triples: a subject is a line index, or -1 for the invoice itself.</summary>
+    private static HashSet<(Guid ProcedureId, ProcedureGapKind Kind, int Subject)> GapSubjects(BillingEvaluationResult result) =>
+        result.Gaps
+            .SelectMany(g => g.LineIndexes.Select(line => (g.Gap.ProcedureId, g.Gap.Kind, line))
+                .Concat(g.AppliesToInvoice ? [(g.Gap.ProcedureId, g.Gap.Kind, -1)] : []))
+            .ToHashSet();
+
     private async Task<Patched> PatchFindingsAsync(CorrectionApplied applied, CancellationToken ct)
     {
         // The submission and its version are read FIRST. A concurrent correction whose findings patch lands after this read bumps the version, so our
@@ -509,6 +522,17 @@ public sealed class InvoiceCorrectionReevaluation
         var loaded = await _load(after, ct).ConfigureAwait(false);
         var beforeResult = _evaluate(before, loaded);
         var afterResult = _evaluate(after, loaded);
+
+        // 082c C12 (interim; a new gap hold through a correction is 082d / 101). A resolution fault on either side has already thrown (the load,
+        // or RulesOn for a date only one side has). A Procedure gap the corrected value brings in (a date moved into a gap) means some of the
+        // corrected invoice's rules judged nothing: the patch is refused, so the correction stays unapplied, which already holds approval.
+        // Compared PER SUBJECT (F2): a line moved onto a date that already has a gap for another subject brings in no new (Procedure, date, kind)
+        // key, but its own rules judged nothing. The refusal is a fixed 409, never the generic Incomplete (F1-low): repeating never clears a gap.
+        var gapsBefore = GapSubjects(beforeResult);
+        if (GapSubjects(afterResult).Any(gap => !gapsBefore.Contains(gap)))
+        {
+            throw new CorrectionProcedureGapException();
+        }
 
         var original = root.ToJsonString();
         var touched = new HashSet<int>();

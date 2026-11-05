@@ -1148,15 +1148,17 @@ public partial class InvoiceSubmissionPersisterTests
         }
     }
 
-    [Fact(DisplayName = "101 B2a F2 review (must-not-fire): a refusal whose client default of the same key judged the lines flags nothing; an emptied scope is not an untied refusal")]
-    public async Task ARefusal_WhoseClientDefaultJudgedTheLines_FlagsNothing_AnEmptiedScopeIsNotUntied()
+    [Fact(DisplayName = "101 B2a F2 review (must-not-fire): a refusal whose higher-ranked version of the same key judged the lines flags nothing; an emptied scope is not an untied refusal (082c C8)")]
+    public async Task ARefusal_WhoseHigherRankedVersionJudgedTheLines_FlagsNothing_AnEmptiedScopeIsNotUntied()
     {
+        // 082c C8: coverage follows the rank. A refused client default is covered by the firm version of its key (which outranks it); the
+        // reverse (a refused firm version beside a judged client default) is no longer covered: the evaluator tests pin that half.
         var outcome = await TwoLineHarness(
-            Version("CD-RATE", RuleType.ApprovedRate),
-            Version("FIRM-RATE", RuleType.ApprovedRate, body: "{\"type\":\"ApprovedRate\",\"unknownMember\":1}", scope: RuleSetScope.Firm)).RunAsync();
-        outcome.Evaluation!.Refusals.Should().ContainSingle("the setup: the firm version is refused");
+            Version("CD-RATE", RuleType.ApprovedRate, body: "{\"type\":\"ApprovedRate\",\"unknownMember\":1}"),
+            Version("FIRM-RATE", RuleType.ApprovedRate, scope: RuleSetScope.Firm)).RunAsync();
+        outcome.Evaluation!.Refusals.Should().ContainSingle("the setup: the client-default version is refused");
         var scope = outcome.Evaluation.RefusalScopes.Should().ContainSingle().Which;
-        scope.AppliesToInvoice.Should().BeFalse("the setup: the client default judged every subject, so the scope is emptied");
+        scope.AppliesToInvoice.Should().BeFalse("the setup: the firm version judged every subject, so the scope is emptied");
         scope.LineIndexes.Should().BeEmpty();
         outcome.Evaluation.Findings.Should().BeEmpty("the setup: the lines are otherwise clean");
 

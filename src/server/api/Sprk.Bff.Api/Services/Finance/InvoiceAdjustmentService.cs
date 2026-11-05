@@ -7,6 +7,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -188,8 +189,13 @@ public sealed class InvoiceAdjustmentService
         InvoiceReviewReadService.LineReason, LineRule, InvoiceReviewReadService.LineReviewedOn, InvoiceTotalsService.VersionNumber,
     ];
 
-    /// <summary>The seam the unit tests use: the rules of an invoice's firm, as the evaluator loads them (<see cref="BillingFactLoader.LoadRulesAsync"/>).</summary>
-    internal delegate Task<IReadOnlyList<BillingRuleCandidate>> LoadRules(Guid firmId, CancellationToken ct);
+    /// <summary>
+    /// The seam the unit tests use: the rules in force on <paramref name="date"/> for an invoice of <paramref name="firmId"/> on <paramref name="core"/>,
+    /// one version per policy, legacy and Procedure alike (<see cref="BillingFactLoader.LoadRulesOnAsync"/>, ebilling-r1 082c).
+    /// <paramref name="latestWorkDate"/> is the latest dated line's work date (082c K1, rule (c)), or <see langword="null"/> when no line is dated.
+    /// </summary>
+    internal delegate Task<IReadOnlyList<BillingRuleCandidate>> LoadRules(
+        Guid firmId, CoreRecordReference? core, DateOnly date, DateOnly? latestWorkDate, CancellationToken ct);
 
     private readonly IGenericEntityService _entities;
     private readonly IInvoiceTotalsService _totals;
@@ -208,7 +214,7 @@ public sealed class InvoiceAdjustmentService
         BillingFactLoader rules,
         ILogger<InvoiceAdjustmentService> logger,
         JobSubmissionService? jobs = null)
-        : this(entities, totals, locks, ownership, (rules ?? throw new ArgumentNullException(nameof(rules))).LoadRulesAsync, logger, time: null, jobs)
+        : this(entities, totals, locks, ownership, (rules ?? throw new ArgumentNullException(nameof(rules))).LoadRulesOnAsync, logger, time: null, jobs)
     {
     }
 
@@ -285,23 +291,46 @@ public sealed class InvoiceAdjustmentService
             throw new InvalidOperationException("The invoice names no firm; its rule options cannot be read.");
         }
 
-        var candidates = await _loadRules(firm, ct).ConfigureAwait(false);
+        // ebilling-r1 082c: the Procedures that apply are those of the invoice's core record, so it must name exactly one (013); none or several
+        // is a read failure (Unavailable), never a guess at one.
+        if (InvoiceLineDecisionService.SingleCoreOf(invoice) is not { } single)
+        {
+            throw new InvalidOperationException("The invoice names no single core record; its rule options cannot be read.");
+        }
 
-        // One version per policy, the one in force on the invoice date (the evaluator's own selection). A type the catalogue does not know, a
-        // non-billing type and a system type are never offered: fail closed (FR-24).
-        var chosen = candidates
+        var core = new CoreRecordReference(
+            single.Entity switch
+            {
+                "sprk_matter" => CoreRecordKind.Matter,
+                "sprk_project" => CoreRecordKind.Project,
+                "sprk_workassignment" => CoreRecordKind.WorkAssignment,
+                _ => throw new InvalidOperationException("The invoice's core record is of an unknown table."),
+            },
+            single.Id);
+
+        // One version per policy in force on the invoice date: legacy by the evaluator's own selection, Procedure by the resolver (082c). No
+        // precedence: a reviewer may cite any rule in force. A type the catalogue does not know, a non-billing type and a system type are never
+        // offered: fail closed (FR-24).
+        // 082c K1: a Procedure with no version on the invoice date is judged (and so citable) by its version on the latest dated line's work date,
+        // as the evaluator judges the invoice subject; the line dates are the stored columns, which already hold any correction.
+        var lineRows = await InvoiceReviewReadService.ReadPagedAsync(_entities, InvoiceReviewReadService.LineQuery(invoice.Id), ct).ConfigureAwait(false);
+        var workDates = lineRows
+            .Where(r => r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value != (int)InvoiceLineCostType.Adjustment)
+            .Select(r => r.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate))
+            .OfType<DateTime>()
+            .Select(DateOnly.FromDateTime)
+            .ToList();
+        DateOnly? latestWorkDate = workDates.Count > 0 ? workDates.Max() : null;
+
+        var chosen = (await _loadRules(firm, core, date, latestWorkDate, ct).ConfigureAwait(false))
             .Where(IsCitableType)
-            .GroupBy(c => c.PolicyId)
-            .Select(g => InvoiceComplianceEvaluator.SelectVersion(g.ToList(), date))
-            .Where(v => v is not null)
-            .Select(v => v!)
             .ToList();
 
         var names = await ReadRuleSetNamesAsync(chosen.Select(c => c.RuleSetId).Distinct().ToList(), ct).ConfigureAwait(false);
         var options = chosen
             .Select(c => new AdjustmentRuleOptionDto(
                 c.PolicyVersionId, c.PolicyCode, c.ShortHeadline, c.RuleSetId, names.GetValueOrDefault(c.RuleSetId),
-                c.Scope.ToString(), c.VersionNumber, c.ClauseReference, c.ClauseLocation))
+                c.Source == BillingRuleSource.Procedure ? "Procedure" : c.Scope?.ToString() ?? "Procedure", c.VersionNumber, c.ClauseReference, c.ClauseLocation))
             .OrderBy(o => o.RuleSetName, StringComparer.OrdinalIgnoreCase).ThenBy(o => o.PolicyCode, StringComparer.Ordinal).ThenBy(o => o.RuleId)
             .ToList();
         return (date, options);

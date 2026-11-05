@@ -554,13 +554,13 @@ public sealed class InvoiceAdjustmentEndpointsAuthorizationContractTests
             builder.Services.AddScoped(_ => new InvoiceAdjustmentService(
                 host.Entities.Object, totals.Object, locks.Object, ownership.Object,
                 // One published billing rule in force on the invoice date; the real selection and gate run over it.
-                (_, _) => Task.FromResult<IReadOnlyList<BillingRuleCandidate>>([new BillingRuleCandidate
+                (_, _, date, work, _) => Task.FromResult(BillingFactLoader.RulesInForceOn([new BillingRuleCandidate
                 {
                     PolicyId = Guid.NewGuid(), PolicyCode = "BILL-DISCOUNT", PolicyVersionId = Guid.NewGuid(), RuleSetId = RuleSetId,
                     Scope = RuleSetScope.ClientDefault, RuleType = ((int)Sprk.Bff.Api.Services.Signals.RuleType.Discount).ToString(),
                     ClauseReference = "Volume discounts: 5% above 10,000 dollars a month.", IsCurrent = true, VersionNumber = 3,
                     InForceFrom = new DateOnly(2026, 1, 1),
-                }]),
+                }], Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit.NoProcedures(), date, work)),
                 NullLogger<InvoiceAdjustmentService>.Instance));
 
             builder.WebHost.UseTestServer();

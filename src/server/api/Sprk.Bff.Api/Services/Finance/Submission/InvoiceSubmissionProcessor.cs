@@ -200,6 +200,17 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         };
         var evaluation = await _evaluate(request, ct).ConfigureAwait(false);
 
+        // 082c-1 interim: replaced by the gap hold in 082c-2.
+        // An invoice is never judged on a partial set of its rules (brief 082c section 5, item 1). Two cases end here, and both THROW, so the job
+        // retries and the submission ends Failed on the final delivery; neither is ever a pass, and nothing is persisted:
+        //  - the resolver faulted: ProcedureResolutionFaultException or CoreRecordChainUnreadableException from _evaluate above is NOT caught
+        //    here (nor anywhere on this path) and propagates as it is;
+        //  - the evaluation found a Procedure gap: a Procedure applies on a subject date with no version, so its rules judged nothing there.
+        if (evaluation.Gaps.Count > 0)
+        {
+            throw new ProcedureGapNotYetHeldException(evaluation.Gaps.Count);
+        }
+
         // Step 5: decide (073). The only source of a rejection.
         var decision = await _decider.DecideAsync(evaluation, ct).ConfigureAwait(false);
 
@@ -481,4 +492,15 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             outcome.PipelineFindings.Count);
         return outcome;
     }
+}
+
+/// <summary>
+/// 082c-1 interim: replaced by the gap hold in 082c-2. The evaluation found a Procedure gap, which 082c-1 cannot yet hold, so the processor refuses
+/// to judge the invoice: the job retries and the submission ends Failed on the final delivery, never Accepted. The message names a count only (no
+/// Procedure, record or id): the job logs the type name, never <c>ex.Message</c>, and no reader sees it.
+/// </summary>
+internal sealed class ProcedureGapNotYetHeldException(int gaps)
+    : InvalidOperationException($"The evaluation found {gaps} Procedure gap(s); 082c-1 does not judge such an invoice (the gap hold is 082c-2).")
+{
+    public int Gaps { get; } = gaps;
 }

@@ -56,6 +56,10 @@ public enum CorrectionStatus
     /// <summary>Task 095c-4: the invoice has no firm, or is held "firm needed" (<see cref="InvoiceFirmHold"/>). A correction re-runs the firm's billing
     /// rules, so it waits for the firm (095d). 409; nothing was written (or, when the re-evaluation met it, the follow-through did not run).</summary>
     FirmMissing,
+
+    /// <summary>082c C12 (F1-low): the correction moves work onto a date with no billing terms in force on the record (a Procedure gap). 409; the value is
+    /// saved but not followed through, and repeating the same request never clears it.</summary>
+    ProcedureGap,
 }
 
 /// <summary>Stable ProblemDetails codes of the correction routes (ADR-019). Callers branch on these, never on a message.</summary>
@@ -124,6 +128,13 @@ public static class CorrectionCodes
     /// <summary>095c-4 review K1: the sentence with <see cref="FirmMissing"/> when the invoice shows a firm but is held for one
     /// (<see cref="InvoiceFirmNeed.Held"/>).</summary>
     public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned. Its values can be corrected once the firm is assigned; nothing was changed.";
+
+    /// <summary>409 (082c C12): see <see cref="CorrectionStatus.ProcedureGap"/>.</summary>
+    public const string ProcedureGap = "ebilling.correction.procedure_gap";
+
+    /// <summary>The fixed sentence with <see cref="ProcedureGap"/>: no id, no date, no Procedure name. It says what happened: the value IS saved
+    /// (the client shows this verbatim); only the billing rules were not re-run, so the correction stays unapplied and holds approval.</summary>
+    public const string ProcedureGapDetail = "Saved, but its billing terms were not re-checked because the new dates have no terms in force; the invoice stays on hold until terms are set up or the dates are corrected.";
 
     /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
     public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
@@ -941,6 +952,13 @@ public sealed class InvoiceCorrectionService
             _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: saved, but the invoice has no firm, so its rules were not re-run.", spec.Name, command.InvoiceId);
             return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing,
                 "This invoice has no firm, so the correction was saved but its rules were not re-run. Add the firm, then repeat the correction.");
+        }
+        catch (CorrectionProcedureGapException)
+        {
+            // 082c C12: the corrected value saves, but moves work onto a date no Procedure Version covers. 409 with a fixed sentence (no id): the generic
+            // Incomplete would tell the reviewer to repeat the request, which never clears a gap. The correction stays unapplied, which holds approval.
+            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: saved, but it brings in a Procedure gap, so its rules were not re-run; the correction stays unapplied and holds approval.", spec.Name, command.InvoiceId);
+            return new CorrectionResult(CorrectionStatus.ProcedureGap, CorrectionCodes.ProcedureGap, CorrectionCodes.ProcedureGapDetail);
         }
         catch (CorrectionTotalsRefusedException refused)
         {
