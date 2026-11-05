@@ -57,7 +57,7 @@ Nothing for G3 or G9 and nothing from Part D went into a role file.
 
 ### The gap list (for UAC-r2, one owner decision; nothing applied)
 
-38 gaps, each in `KnownGaps` with its held depth. Evidence paths are under `src/server/api/Sprk.Bff.Api/` unless stated.
+39 gaps (38 at first write, D39 added in fix round 1), each in `KnownGaps` with its held depth. Evidence paths are under `src/server/api/Sprk.Bff.Api/` unless stated.
 
 | # | Role (alone) | Privilege | Depth needed | Held | Feature | Evidence |
 |---|---|---|---|---|---|---|
@@ -83,6 +83,7 @@ Nothing for G3 or G9 and nothing from Part D went into a role file.
 | D35 | Console User | `prvAppendTosprk_EventType_Ref` | Global | none | Assign task: the Task event type | `Services/Signals/Actions/DecisionActionExecutors.cs:1462-1463` |
 | D36-D37 | Console User | `prvCreatesprk_ServiceRequest`, `prvAppendsprk_ServiceRequest` | Basic | none | Budget inquiry | `Services/Signals/Actions/BudgetInquiryExecutor.cs:146,181,276-282` |
 | D38 | Console User | `prvAppendTosprk_Organization` | Deep | none | Budget inquiry: the outside firm | `Services/Signals/Actions/BudgetInquiryExecutor.cs:181,352` |
+| D39 | Office Add In User | `prvReadsprk_Document` | Deep | none | Office version save: the "Save as version" offer on a name collision | `Api/Office/OfficeEndpoints.cs:547-605` |
 
 Also open for the same batch: **G9** (Basic User + AI Analysis User, Write on `sprk_document` at Deep, held none; D10 is the same privilege for the add-on alone).
 
@@ -159,3 +160,29 @@ G5 is not pending: dev already holds it. Every privilege name resolved from tabl
 | `Sprk.Bff.Api.Tests` | not run (no `src/server` change) |
 | PowerShell parse of both scripts | 0 errors. PSScriptAnalyzer reports only `PSAvoidUsingWriteHost`, which is the reference script's idiom |
 | Quality gates | Self-review against code-review Steps 3, 5, 6, 6.6 and ADR-038: KEEP path only (`tests/Spaarke.ArchTests/**`), no test deleted, every new check has must-fire, must-not-fire and seeded-drift proof, ratchet entries carry their held depth, no `src/server` file, no secret, no token written to disk, no Dataverse write. ADR-002: no plugin. The main session runs the adversarial pass. |
+
+## Fix round 1 (role rulings, apply script, role guards)
+
+Branch `task/fm-046b`. No Dataverse write was made and `-Apply` was not run; the script was run in its default dry-run mode with no token, and its apply path was exercised against stubbed calls only (below).
+
+| Item | Outcome |
+|---|---|
+| F1 settle wait on `-Apply`'s read-back | Done. `scripts/Set-FeatureRolePrivileges.ps1` has `Wait-Settled` (the shape of `scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1`). For the root role and each business-unit copy it re-reads until every declared privilege reads back at its declared depth, up to 8 tries, 4 seconds apart, before recording a failure. A failure after the retries still throws (exit non-zero) and names the role, the copy and the privilege. |
+| F3 AppUsers classification pinned | Done. `ExpectedAppUsersRoles` is `{"Spaarke Ontology Service"}`; `AppUsersProblems` reports any other role with the kind and the expected role without it. Test `TheAppUsersSetIsPinned`: must-not-fire on the real set; must-fire on Console User marked AppUsers; must-fire on the expected role marked otherwise. |
+| K1 `MustNotHold` scanned one folder | Done. `PersonRoles` now takes the solutions root and uses `ProcedureRolePrivilegeGuardTests.RoleFiles` (every `Roles` folder under `src/dataverse/solutions`), skips the AppUsers role, and fails on a role named by two files. The seeded-file test adds a role file under another solution's `Roles` folder (must fire) and one outside any `Roles` folder (must not). Results on the repo's role files are unchanged. |
+| K2 partial apply gave no summary | Done. Each AddPrivilegesRole POST is in try/catch. On failure the script prints the failing role, the changes applied in this run, the changes not applied, and "Re-run -Apply to converge (the script only adds or raises)", then rethrows (exit non-zero). The error is not swallowed. |
+| UAC-r2 note (a) | Done. In the plan, a privilege whose live depth differs from the config's `from` is printed (role, privilege, config `from`, live depth) under its own heading. Informational: the plan still uses the live depth, and `-Verify` does not fail on it. |
+| K4 Office version-save Read | The version save's own row read is app-only (`OfficeService.cs:714` calls `OfficeDocumentPersistence.ResolveVersionTargetAsync`, `OfficeDocumentPersistence.cs:633-646`, which uses the singleton Dataverse service client without impersonation, `DataverseServiceClientImpl.cs:379`). But the "Save as version" offer on a name collision reads the colliding document's rights as the caller and offers the version retry only to a caller who holds Read on it (`OfficeEndpoints.cs:547-605`, `GetCallerAccessAsync`). So rows were added: "Office version save" (Core User) and "Office version save (Basic User + Office Add In User)", Read on `sprk_document` at Deep. Office Add In User alone holds none: gap D39, in `KnownGaps` with held depth none, and in the doc (gap summary 39; the Office save row). No role file changed. |
+
+### Proofs
+
+- **K1, failing first.** `PersonRoles` put back to the top `SpaarkeMaster/Roles` folder only: `MustNotHoldFiresOnSeededRoleFiles` failed (19 passed). With the fix: 20 / 20.
+- **F3.** The pin test did not exist, so the proof is a seed: Console User marked AppUsers in `RoleClasses` fails `TheAppUsersSetIsPinned` (and six other checks); the real set passes.
+- **K4 row.** With the Read rows and no `KnownGaps` entry: `FeatureRequirementsAreHeldByTheirRoles` failed naming the gap. With the Read added to the Office role file and the entry kept: it failed naming the stale entry.
+- **Script F1/K2.** The apply section was run against stubbed `Get-HeldMap` and `Invoke-RestMethod` (no network, no token): a copy that settles on the 4th read passes with the new script and fails with the previous one; a copy that never settles exits 1 naming the role, the copy and the privilege; a failing POST on the second role prints the applied and not-applied lists and exits 1 (the previous script printed only the raw error).
+- **Fail closed.** A dry run with an empty `AZURE_CONFIG_DIR`: `FAIL: a read failed: No Dataverse token ... Nothing was changed.`, exit 1.
+- **Lint.** `[System.Management.Automation.Language.Parser]::ParseFile` on the script: 0 errors.
+
+### Verification (fix round 1)
+
+`dotnet build tests/Spaarke.ArchTests --no-incremental`: 0 Warning(s), 0 Error(s). `FeatureRolePrivilegeGuardTests`: 20 / 20 (19 before). Whole `Spaarke.ArchTests`: 1960 / 1960 passed (1959 before; the one added test is `TheAppUsersSetIsPinned`). `Sprk.Bff.Api.Tests` not run (no `src/server` change).

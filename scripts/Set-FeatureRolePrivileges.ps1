@@ -18,7 +18,9 @@
       (default)  Dry run. Prints every change as role, privilege, old depth -> new depth, and the number of
                  business-unit copies that take it. Zero writes.
       -Apply     Makes the changes on each ROOT role (AddPrivilegesRole), then reads back the root role and every
-                 business-unit copy and confirms each change. Names anything the platform added that was not asked for.
+                 business-unit copy and confirms each change. Each read-back re-reads (up to 8 tries, 4 seconds apart)
+                 until every declared privilege shows, before it records a failure. A failed AddPrivilegesRole prints
+                 the changes already applied in this run and exits non-zero; re-run -Apply to converge. Names anything the platform added that was not asked for.
       -Verify    Read-only. Exits 1 when any change is still pending, a live depth is above the declared one, or a
                  business-unit copy differs from its root role on a declared privilege; 0 when the live roles match.
 
@@ -197,9 +199,15 @@ function Get-Depth($Held, $Privilege) {
 $plan = [System.Collections.Generic.List[object]]::new()
 $aboveDeclared = [System.Collections.Generic.List[string]]::new()
 $copyDrift = [System.Collections.Generic.List[string]]::new()
+$fromDrift = [System.Collections.Generic.List[string]]::new()
 foreach ($c in $changes) {
     $role = $roleCache[$c.role]
     $live = Get-Depth $role.Held $c.PrivilegeRef
+    # Informational: the plan always uses the live depth; a live depth other than the config's 'from' means the role
+    # changed since the config was written (or since the last dry run).
+    if ($live -ne [string]$c.from) {
+        $fromDrift.Add(("{0,-36} {1,-34} config from {2,-6} live {3}" -f $role.Name, $c.PrivilegeRef.Name, $c.from, $live))
+    }
     if ((Get-Rank $live) -lt (Get-Rank $c.depth)) {
         $plan.Add([pscustomobject]@{ Role = $role; Privilege = $c.PrivilegeRef; Old = $live; New = [string]$c.depth; Gap = [string]$c.gap })
     }
@@ -232,6 +240,9 @@ Write-Host ''
 Write-Host 'Live depth above the declared one (never lowered here):'
 if ($aboveDeclared.Count -eq 0) { Write-Host '  none' }
 foreach ($d in $aboveDeclared) { Write-Host "  $d" -ForegroundColor DarkYellow }
+Write-Host "Live depth differs from the config's 'from' (informational: drift since the config or the last dry run; the plan uses the live depth):"
+if ($fromDrift.Count -eq 0) { Write-Host '  none' }
+foreach ($d in $fromDrift) { Write-Host "  $d" -ForegroundColor DarkYellow }
 Write-Host 'Business-unit copies that differ from their root role on a declared privilege:'
 if ($copyDrift.Count -eq 0) { Write-Host '  none' }
 foreach ($d in $copyDrift) { Write-Host "  $d" -ForegroundColor DarkYellow }
@@ -250,6 +261,19 @@ if ($plan.Count -eq 0) { Write-Host "`nNothing to change." -ForegroundColor Gree
 if ($IsDryRun) { Write-Host "`nDRY RUN: no writes. Re-run with -Apply to make the $($plan.Count) change(s) above." -ForegroundColor Cyan; exit 0 }
 
 # ── Apply on each root role, then read back the root role and every business-unit copy ───────────────────────
+# Re-read until the test passes (role edits settle after a few seconds), at most $Tries times
+# (the settle approach of scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1).
+function Wait-Settled([scriptblock]$Read, [scriptblock]$Test, [int]$Tries = 8, [int]$Seconds = 4) {
+    $v = $null
+    for ($i = 0; $i -lt $Tries; $i++) {
+        $v = & $Read
+        if (& $Test $v) { return $v }
+        Start-Sleep -Seconds $Seconds
+    }
+    return $v
+}
+
+$applied = [System.Collections.Generic.List[string]]::new()
 foreach ($group in $plan | Group-Object { $_.Role.Id }) {
     $role = $group.Group[0].Role
     $body = @{
@@ -258,16 +282,33 @@ foreach ($group in $plan | Group-Object { $_.Role.Id }) {
             })
     }
     $json = $body | ConvertTo-Json -Depth 6
-    Invoke-RestMethod -Method Post -Uri "$Api/roles($($role.Id))/Microsoft.Dynamics.CRM.AddPrivilegesRole" -Headers $headers -Body ([Text.Encoding]::UTF8.GetBytes($json)) | Out-Null
+    try {
+        Invoke-RestMethod -Method Post -Uri "$Api/roles($($role.Id))/Microsoft.Dynamics.CRM.AddPrivilegesRole" -Headers $headers -Body ([Text.Encoding]::UTF8.GetBytes($json)) | Out-Null
+    }
+    catch {
+        Write-Host "`nFAIL: AddPrivilegesRole on '$($role.Name)' failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Applied in this run before the failure ($($applied.Count)):" -ForegroundColor Red
+        if ($applied.Count -eq 0) { Write-Host '  none' -ForegroundColor Red }
+        foreach ($a in $applied) { Write-Host "  $a" -ForegroundColor Red }
+        $notApplied = @($plan | Where-Object { $applied -notcontains "$($_.Role.Name) $($_.Privilege.Name) $($_.Old) -> $($_.New)" })
+        Write-Host "Not applied ($($notApplied.Count)):" -ForegroundColor Red
+        foreach ($n in $notApplied) { Write-Host "  $($n.Role.Name) $($n.Privilege.Name) $($n.Old) -> $($n.New)" -ForegroundColor Red }
+        Write-Host 'Re-run -Apply to converge (the script only adds or raises). Re-run -Verify to see what is still pending.' -ForegroundColor Red
+        throw
+    }
+    foreach ($p in $group.Group) { $applied.Add("$($role.Name) $($p.Privilege.Name) $($p.Old) -> $($p.New)") }
 }
 
 $failed = @()
 foreach ($group in $plan | Group-Object { $_.Role.Id }) {
     $role = $group.Group[0].Role
+    $declared = @($group.Group)
     $targets = @([pscustomobject]@{ Label = 'root'; Id = $role.Id }) + @($role.Copies | ForEach-Object { [pscustomobject]@{ Label = "copy $($_.Id)"; Id = $_.Id } })
     foreach ($t in $targets) {
-        $after = Get-HeldMap $t.Id
-        foreach ($p in $group.Group) {
+        $tid = $t.Id
+        $read = { Get-HeldMap $tid }   # dynamic scope: $tid is read when Wait-Settled runs it
+        $after = Wait-Settled $read { param($m) @($declared | Where-Object { (Get-Depth $m $_.Privilege) -ne $_.New }).Count -eq 0 }
+        foreach ($p in $declared) {
             $now = Get-Depth $after $p.Privilege
             if ($now -ne $p.New) { $failed += "$($role.Name) ($($t.Label)) $($p.Privilege.Name): expected $($p.New), read back $now" }
         }
@@ -279,7 +320,7 @@ foreach ($group in $plan | Group-Object { $_.Role.Id }) {
         }
     }
 }
-if ($failed.Count -gt 0) { throw "Read-back did not match:`n  $($failed -join "`n  ")" }
+if ($failed.Count -gt 0) { throw "Read-back did not match after 8 tries of 4 seconds:`n  $($failed -join "`n  ")" }
 Write-Host "`nAPPLIED and read back on every business-unit copy: $($plan.Count) change(s)." -ForegroundColor Green
 Write-Host 'Dataverse caches principal privileges; a probe straight after this can show the old result. Re-check until stable.'
 exit 0

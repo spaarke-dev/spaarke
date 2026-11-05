@@ -88,6 +88,9 @@ public class FeatureRolePrivilegeGuardTests
     private const string QuickCreateFiledUnder = Bff + "Services/Office/OfficeService.cs:2402-2419,2633-2638; "
         + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:115-131";
 
+    /// <summary>The Office "Save as version" offer needs Read on the colliding document, asked of the caller.</summary>
+    private const string VersionOfferRead = Bff + "Api/Office/OfficeEndpoints.cs:547-605";
+
     private static readonly string[] EntityAccessTablesRead =
         ["prvReadsprk_Matter", "prvReadsprk_Project", "prvReadsprk_Invoice", "prvReadsprk_WorkAssignment", "prvReadsprk_Event", "prvReadsprk_Todo", "prvReadContact"];
 
@@ -183,6 +186,12 @@ public class FeatureRolePrivilegeGuardTests
             Bff + "Api/Office/OfficeEndpoints.cs:194; " + Bff + "Api/Filters/OfficeVersionSaveAuthorizationFilter.cs:53,89", "prvWritesprk_Document"),
         .. For("Office version save (Basic User + Office Add In User)", [Basic, Office], "Deep",
             Bff + "Api/Office/OfficeEndpoints.cs:194; " + Bff + "Api/Filters/OfficeVersionSaveAuthorizationFilter.cs:53,89", "prvWritesprk_Document"),
+        // K4 (fix round 1): the version save itself reads the row app-only (OfficeDocumentPersistence.cs:633-646), but the "Save as
+        // version" offer on a name collision is made only to a caller who holds Read on the colliding document, asked as the caller
+        // (OfficeEndpoints.cs:547-605, GetCallerAccessAsync). After G6 the Write is on Office Add In User and the Read is not, so the
+        // add-on alone shows the gap below.
+        .. For("Office version save", [Core], "Deep", VersionOfferRead, "prvReadsprk_Document"),
+        .. For("Office version save (Basic User + Office Add In User)", [Basic, Office], "Deep", VersionOfferRead, "prvReadsprk_Document"),
 
         // Office quick create (POST /api/office/quickcreate/{entityType}): Create in the filter; Matter and Project through the service.
         .. For("Office quick create", [Core], "Basic", Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:100-117; " + Bff + "Api/Filters/FinanceAuthorizationFilter.cs:335",
@@ -339,6 +348,22 @@ public class FeatureRolePrivilegeGuardTests
 
     private const string NoBffFeature = "No feature in this matrix is its own: ";
 
+    /// <summary>The roles classified <see cref="RoleKind.AppUsers"/>: exactly these, and no more. <see cref="PersonRoles"/> leaves
+    /// every AppUsers role out of the person-role set, so what has that kind decides which roles the writer-only rules cover.</summary>
+    internal static readonly string[] ExpectedAppUsersRoles = [Writer];
+
+    /// <summary>What is wrong with the AppUsers classification: a role with the kind that is not expected, or an expected role without it.</summary>
+    internal static List<string> AppUsersProblems(IReadOnlyList<RoleClass> classes, IReadOnlyCollection<string> expected)
+    {
+        var actual = classes.Where(c => c.Kind == RoleKind.AppUsers).Select(c => c.Role).ToList();
+        var problems = new List<string>();
+        problems.AddRange(actual.Where(r => !expected.Contains(r, StringComparer.Ordinal))
+            .Select(r => $"{r}: classified AppUsers, which leaves it out of the person-role set; only {string.Join(", ", expected)} may have that kind"));
+        problems.AddRange(expected.Where(r => !actual.Contains(r, StringComparer.Ordinal))
+            .Select(r => $"{r}: expected to be classified AppUsers, but is not"));
+        return problems;
+    }
+
     /// <summary>Every role file under the Roles folder (task 046b). A role file not listed here fails
     /// <see cref="EveryRoleFileIsClassifiedAndEachAddOnIsCheckedAlone"/>, so a new role is classified before it ships.</summary>
     internal static readonly IReadOnlyList<RoleClass> RoleClasses =
@@ -425,6 +450,7 @@ public class FeatureRolePrivilegeGuardTests
         // Part D (task 046b): each add-on alone (owner 2026-11-05: add-ons are standalone). Every entry waits on the owner's one
         // decision through unified-access-control-r2; no role file changes for them until then.
         new("Office save [Spaarke Office Add In User alone]", "prvAppendTosprk_Todo", "none", PartD),
+        new("Office version save [Spaarke Office Add In User alone]", "prvReadsprk_Document", "none", PartD),
         new("Office quick create (Office Add In User) [Spaarke Office Add In User alone]", "prvReadContact", "Basic", PartD),
         new("Office quick create (Office Add In User) [Spaarke Office Add In User alone]", "prvAppendTosprk_RecordType_Ref", "none", PartD),
         new("Office quick create (Office Add In User) [Spaarke Office Add In User alone]", "prvReadsprk_Todo", "none", PartD),
@@ -465,6 +491,9 @@ public class FeatureRolePrivilegeGuardTests
     ];
 
     private static readonly string[] DepthOrder = ["Basic", "Local", "Deep", "Global"];
+
+    /// <summary>Every <c>Roles</c> folder under here is scanned for the person-role set, as <see cref="ProcedureRolePrivilegeGuardTests"/> does.</summary>
+    private static string SolutionsDirectory => Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions");
 
     private static string RolesDirectory => Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions", "SpaarkeMaster", "Roles");
 
@@ -725,6 +754,23 @@ public class FeatureRolePrivilegeGuardTests
             + "this matrix is its own:\n  " + string.Join("\n  ", problems));
     }
 
+    [Fact(DisplayName = "046b fix round 1: the AppUsers role set is exactly {Spaarke Ontology Service}; any other role marked AppUsers, or that role marked otherwise, fails")]
+    public void TheAppUsersSetIsPinned()
+    {
+        Assert.Equal(new[] { "Spaarke Ontology Service" }, ExpectedAppUsersRoles); // the pin itself is literal
+        Assert.Empty(AppUsersProblems(RoleClasses, ExpectedAppUsersRoles)); // must-not-fire: the real set
+
+        // must-fire: another role marked AppUsers (it would drop out of every must-not-hold rule)
+        var seeded = RoleClasses.Select(c => c.Role == Console ? c with { Kind = RoleKind.AppUsers } : c).ToList();
+        Assert.Equal(
+            new[] { $"{Console}: classified AppUsers, which leaves it out of the person-role set; only {Writer} may have that kind" },
+            AppUsersProblems(seeded, ExpectedAppUsersRoles));
+
+        // must-fire: the expected role no longer has the kind
+        var dropped = RoleClasses.Select(c => c.Role == Writer ? c with { Kind = RoleKind.AddOn } : c).ToList();
+        Assert.Equal(new[] { $"{Writer}: expected to be classified AppUsers, but is not" }, AppUsersProblems(dropped, ExpectedAppUsersRoles));
+    }
+
     [Fact(DisplayName = "046b classification controls: an unclassified role file, a classified role with no file, an add-on with no row alone and no reason, a stale feature or exception are reported; the real set is not")]
     public void ClassificationCheckFires()
     {
@@ -803,7 +849,7 @@ public class FeatureRolePrivilegeGuardTests
     [Fact(DisplayName = "046b: no person role holds a privilege it must not (writer-only tables, except the Ontology Administrator cleanup role; invoice line Create)")]
     public void PersonRolesHoldNothingTheyMustNot()
     {
-        var personRoles = PersonRoles(RolesDirectory);
+        var personRoles = PersonRoles(SolutionsDirectory);
         Assert.All(MustNotHold, rule =>
         {
             Assert.NotEmpty(rule.Privileges);
@@ -837,7 +883,7 @@ public class FeatureRolePrivilegeGuardTests
     [Fact(DisplayName = "046b must-not-hold seeded drift: each forbidden privilege given to any person role but the excepted one is reported")]
     public void MustNotHoldFiresForEverySeededPersonRole()
     {
-        var real = PersonRoles(RolesDirectory);
+        var real = PersonRoles(SolutionsDirectory);
         var misses = new List<string>();
         var seededCount = 0;
         foreach (var rule in MustNotHold)
@@ -868,32 +914,60 @@ public class FeatureRolePrivilegeGuardTests
     [Fact(DisplayName = "046b must-not-hold seeded drift through the role files: seeded copies of Console User and Basic User are reported; the Ontology Administrator and the app users' role are not")]
     public void MustNotHoldFiresOnSeededRoleFiles()
     {
-        var dir = Path.Combine(Path.GetTempPath(), "sprk-feature-roles-" + Guid.NewGuid().ToString("N"));
+        var root = Path.Combine(Path.GetTempPath(), "sprk-feature-roles-" + Guid.NewGuid().ToString("N"));
         try
         {
+            var dir = Path.Combine(root, "SpaarkeMaster", "Roles");
             Directory.CreateDirectory(dir);
             foreach (var file in Directory.EnumerateFiles(RolesDirectory, "*.xml"))
                 File.Copy(file, Path.Combine(dir, Path.GetFileName(file)));
+            // must-not-fire: the copy is the real set
+            Assert.Equal(PersonRoles(SolutionsDirectory).Keys.Order(StringComparer.Ordinal), PersonRoles(root).Keys.Order(StringComparer.Ordinal));
+            Assert.Empty(ForbiddenHeld(PersonRoles(root), MustNotHold));
+
             AddPrivilege(dir, Console, "prvwritesprk_signal", "Deep");
             AddPrivilege(dir, Basic, "prvCreatesprk_BillingEvent", "Basic");
             AddPrivilege(dir, OntologyAdmin, "prvCreatesprk_Signal", "Global"); // excepted: the cleanup role
             AddPrivilege(dir, Writer, "prvDeletesprk_Signal", "Global");         // the app users' role is not a person role
 
-            var found = ForbiddenHeld(PersonRoles(dir), MustNotHold).Order(StringComparer.Ordinal).ToList();
+            // K1 (fix round 1): a role file in ANY other solution's Roles folder is a person role too.
+            var other = Path.Combine(root, "SomeOtherSolution", "src", "Roles");
+            Directory.CreateDirectory(other);
+            File.WriteAllText(Path.Combine(other, "Spaarke Added Elsewhere.xml"),
+                "<Role name=\"Spaarke Added Elsewhere\"><RolePrivileges><RolePrivilege name=\"prvDeletesprk_DecisionRecord\" level=\"Basic\" /></RolePrivileges></Role>");
+            File.WriteAllText(Path.Combine(root, "SomeOtherSolution", "Not A Role.xml"),                  // must-not-fire: not in a Roles folder
+                "<Role name=\"Not A Role\"><RolePrivileges><RolePrivilege name=\"prvDeletesprk_DecisionRecord\" level=\"Basic\" /></RolePrivileges></Role>");
 
-            Assert.Equal(2, found.Count);
-            Assert.StartsWith("Spaarke Basic User: prvCreatesprk_BillingEvent at Basic", found[0], StringComparison.Ordinal);
-            Assert.StartsWith("Spaarke Console User: prvWritesprk_Signal at Deep", found[1], StringComparison.Ordinal);
+            var found = ForbiddenHeld(PersonRoles(root), MustNotHold).Order(StringComparer.Ordinal).ToList();
+
+            Assert.Equal(3, found.Count);
+            Assert.StartsWith("Spaarke Added Elsewhere: prvDeletesprk_DecisionRecord at Basic", found[0], StringComparison.Ordinal);
+            Assert.StartsWith("Spaarke Basic User: prvCreatesprk_BillingEvent at Basic", found[1], StringComparison.Ordinal);
+            Assert.StartsWith("Spaarke Console User: prvWritesprk_Signal at Deep", found[2], StringComparison.Ordinal);
         }
         finally
         {
-            Directory.Delete(dir, recursive: true);
+            Directory.Delete(root, recursive: true);
         }
     }
 
-    /// <summary>Every role file but the app users' role (an unclassified file counts as a person role).</summary>
-    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> PersonRoles(string directory) =>
-        LoadRoles(directory, RoleFileNames(directory).Where(n => !RoleClasses.Any(c => c.Role == n && c.Kind == RoleKind.AppUsers)));
+    /// <summary>Every role file in any <c>Roles</c> folder under <paramref name="root"/> (<see cref="ProcedureRolePrivilegeGuardTests.RoleFiles"/>)
+    /// but the app users' role (an unclassified file counts as a person role). A role named by two files fails.</summary>
+    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> PersonRoles(string root)
+    {
+        var result = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal);
+        foreach (var file in ProcedureRolePrivilegeGuardTests.RoleFiles(root).Order(StringComparer.Ordinal))
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            if (RoleClasses.Any(c => c.Role == name && c.Kind == RoleKind.AppUsers))
+                continue;
+            if (result.ContainsKey(name))
+                throw new InvalidOperationException($"Two role files define '{name}': {file}");
+            result[name] = LoadRoles(Path.GetDirectoryName(file)!, [name])[name];
+        }
+
+        return result;
+    }
 
     /// <summary>Each person role's held privilege that a rule forbids, unless the rule excepts the role.</summary>
     internal static List<string> ForbiddenHeld(IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> personRoles, IReadOnlyList<MustNotHoldRule> rules) =>
