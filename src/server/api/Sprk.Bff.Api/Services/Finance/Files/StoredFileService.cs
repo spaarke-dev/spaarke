@@ -66,7 +66,8 @@ public sealed class StoredFileService
 
     /// <summary>
     /// Stages the bytes of <paramref name="spec"/> (9.1 step 2): a refused spec, a length outside 0..int.MaxValue and different bytes
-    /// under an existing id are refusals with nothing written; the same bytes under an existing id are reused (a retry).
+    /// under an existing id are refusals with nothing written; the same bytes under an existing id are reused (a retry): write-once per
+    /// content, the same verified bytes are rewritten on reuse (DEF-044, owner 2026-11-05), see <see cref="StoredFileBlobs.StageAsync"/>.
     /// </summary>
     /// <exception cref="RequestFailedException">A storage fault.</exception>
     public Task<StageResult> StageAsync(StoredFileRowSpec spec, Stream content, CancellationToken ct) => StageAsync(spec, content, manifest: null, ct);
@@ -547,13 +548,33 @@ public sealed class StoredFileService
             : StoredFileCreateResult.Refused(flip.RefusalCode ?? StoredFileRefusal.RowNotFlippable);
     }
 
+    /// <summary>
+    /// The clean-up of a blob THIS attempt wrote (<c>!blob.Reused</c>) whose row write failed. DEF-044 (owner option B): the delete is pinned
+    /// to <see cref="StagedBlob.ETag"/>, the version this attempt wrote, so a concurrent retry that reused the blob since (its rewrite
+    /// moved the ETag) makes the delete fail 412, and the blob is KEPT for that retry (its row is still coming). Without an ETag there is
+    /// nothing to pin to, so the blob is kept for the reconcile job.
+    /// </summary>
     private async Task DeleteStagedBlobAsync(StagedBlob blob, Guid fileId)
     {
+        if (blob.ETag is not { } staged)
+        {
+            _logger.LogWarning("Stored file {FileId}: the row write failed; the blob {BlobName} has no recorded ETag to pin a delete to and is kept for the reconcile job",
+                fileId, blob.BlobPath);
+            return;
+        }
+
         try
         {
             // Not the request's token: the blob must go even when the caller went away (otherwise the reconcile job removes it).
-            await _blobs.DeleteAsync(blob.Container, blob.BlobPath, CancellationToken.None).ConfigureAwait(false);
+            await _blobs.DeleteAsync(blob.Container, blob.BlobPath, staged, CancellationToken.None).ConfigureAwait(false);
             _logger.LogWarning("Stored file {FileId}: the row write failed, so the staged blob {BlobName} was deleted", fileId, blob.BlobPath);
+        }
+        catch (RequestFailedException ex) when (ex.Status == 412)
+        {
+            // The blob is no longer the version this attempt wrote: another attempt reused (rewrote) it. Theirs now; kept.
+            _logger.LogWarning(
+                "Stored file {FileId}: the row write failed; the staged blob {BlobName} was reused by another attempt since (412) and is kept ({Fault})",
+                fileId, blob.BlobPath, ex.GetType().Name);
         }
         catch (Exception ex)
         {
@@ -712,15 +733,29 @@ public sealed class StoredFileService
     /// The compensation of a stage whose caller then failed before any row could reference it (ebilling-r1 task 092: the intake's
     /// submission create or job enqueue failed). Deletes the blob of <paramref name="spec"/>, found by its name, only when Dataverse
     /// answers that no row with the file id exists; a row (or a row read that faulted) keeps the blob. False when nothing was deleted.
+    /// <para>DEF-044 (owner option B): the blob's properties (its ETag) are read BEFORE the row-absence question, and the delete is pinned
+    /// to that ETag (<c>If-Match</c>). A retry that reuses the blob after that read rewrites it (new ETag), so the delete fails 412 and
+    /// the blob is KEPT (false) for the retry whose row is still coming. A blob that was not there at the read is not deleted.</para>
+    /// <para>Adversarial pass F1: a read-time pin alone closes almost nothing when the caller's own stage is long past (a run whose submission
+    /// lock expired fails after a newer run reused the blob: the read sees the newer run's ETag and the delete would match it). A caller
+    /// that staged the blob passes <paramref name="stagedETag"/>, the ETag its own stage left (<see cref="StagedBlob.ETag"/>); the delete is
+    /// then pinned to THAT, so any later rewrite makes it fail 412 and the blob is kept. The properties read and the row-absence check
+    /// are unchanged. Null keeps the read-time pin (a caller with no <see cref="StagedBlob"/>).</para>
     /// </summary>
     /// <exception cref="RequestFailedException">A storage fault.</exception>
-    public async Task<bool> DeleteStagedAsync(StoredFileRowSpec spec, CancellationToken ct)
+    public async Task<bool> DeleteStagedAsync(StoredFileRowSpec spec, CancellationToken ct, ETag? stagedETag = null)
     {
         ArgumentNullException.ThrowIfNull(spec);
         if (spec.Invalid() is not null || !_blobs.IsConfigured)
         {
             return false;
         }
+
+        var container = StoredFileSchema.ContainerOf(spec.Purpose);
+        var name = StoredFileBlobName.Build(_blobs.TenantId, spec.Parent, spec.FileId);
+
+        // The version judged: read first, so whatever is written after this read changes the ETag the delete is pinned to.
+        var properties = await _blobs.GetPropertiesAsync(container, name, ct).ConfigureAwait(false);
 
         var (known, row) = await TryReadRowAsync(spec.FileId, ct).ConfigureAwait(false);
         if (!known || row is not null)
@@ -729,10 +764,25 @@ public sealed class StoredFileService
             return false;
         }
 
-        var name = StoredFileBlobName.Build(_blobs.TenantId, spec.Parent, spec.FileId);
-        var deleted = await _blobs.DeleteAsync(StoredFileSchema.ContainerOf(spec.Purpose), name, ct).ConfigureAwait(false);
-        _logger.LogInformation("Stored file {FileId}: staged blob {BlobName} removed by compensation (deleted={Deleted})", spec.FileId, name, deleted);
-        return deleted;
+        if (properties is null)
+        {
+            _logger.LogInformation("Stored file {FileId}: no staged blob {BlobName} at the read; nothing to remove", spec.FileId, name);
+            return false;
+        }
+
+        try
+        {
+            var deleted = await _blobs.DeleteAsync(container, name, stagedETag ?? properties.ETag, ct).ConfigureAwait(false);
+            _logger.LogInformation("Stored file {FileId}: staged blob {BlobName} removed by compensation (deleted={Deleted})", spec.FileId, name, deleted);
+            return deleted;
+        }
+        catch (RequestFailedException ex) when (ex.Status == 412)
+        {
+            _logger.LogWarning(
+                "Stored file {FileId}: the staged blob {BlobName} changed after it was read (a retry reused it, 412) and is kept ({Fault})",
+                spec.FileId, name, ex.GetType().Name);
+            return false;
+        }
     }
 
     /// <summary>
@@ -772,6 +822,11 @@ public sealed class StoredFileService
     /// is not cannot name this file's blob, so nothing is touched). The row stays: the undo deletes it in ONE transaction with its invoice
     /// (<see cref="Submission.SubmissionCommitGate.CompensateAsync"/>), so the invoice is never left without its file rows. A blob that is
     /// already gone is not a fault; a storage fault throws (the undo is then held and retried).
+    /// <para>DEF-044: deliberately NOT pinned to an ETag. The undo's judgment is the ROW (read, then withdrawn to Removed under its row
+    /// version, by every caller, before this runs), not a read of the blob, and a row carries no ETag. A properties read taken here and
+    /// followed at once by the delete would pin to whatever the blob is by then, a reuse included, and refuse nothing. Nor is this the
+    /// DEF-044 race: the row already exists under the deterministic id (withdrawn to Removed above), so a retry that reuses the blob
+    /// meets that row, writes no second one and cannot flip it back to Servable.</para>
     /// </summary>
     internal async Task DeleteBlobForUndoAsync(StoredFileRow row, CancellationToken ct)
     {

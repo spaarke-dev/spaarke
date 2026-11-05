@@ -1287,12 +1287,14 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 | Field | Value |
 |---|---|
-| **Status** | Open: known limit (uac-r2 090 round-2 K2); fix before StoredFileReconcileJob is enabled anywhere |
+| **Status** | Fixed on branch, pending review (`task/ebilling-def044-b`, owner option B 2026-11-05; not Closed until reviewed and merged). It must be Closed before StoredFileReconcileJob is enabled anywhere |
 | **Urgency** | medium |
 | **Filed** | 2026-10-23 |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2296 |
 
 **Description**: Staging that reuses an existing blob doesn't write it, so its ETag is unchanged (StoredFileReconcileJob.cs:446-453, StoredFileService.cs:342). If a deterministic-id create is retried more than 24 h after staging, reconcile deletes the orphan, the retry reuses it, and the flip answers BlobMissing: the row stays not servable, with a refusal and an alert. DeleteStagedBlobAsync (null ifMatch) has the same gap. Fix: touch metadata on reuse; carry the ETag in StagedBlob and pin DeleteStagedBlobAsync.
+
+**Fix on branch (option B, owner 2026-11-05)**: the prescribed "touch metadata" was rejected: any ETag-changing metadata call moves Last-Modified, Defender does not rescan metadata-only changes, so the scan rule (`StoredFileBlobs.ClassifyScan`: scan time >= Last-Modified) would hold the blob Pending for good. Instead, on reuse `StoredFileBlobs.StageAsync` rewrites the same verified bytes under `If-Match` on the existing blob's ETag (new `BlobGateway.OverwriteIfMatchAsync`): the ETag and Last-Modified move and Defender scans again, so a delete judged on the old ETag gets 412. `StagedBlob` carries the ETag; `DeleteStagedBlobAsync` and `DeleteStagedAsync` are pinned (412 = kept). `DeleteBlobForUndoAsync` is not pinned (its judgment is the row, not the blob). Details, evidence and live items: `notes/090-file-store-service.md` section 14.
 
 ---
 ### DEF-045 — Stored file: parent-gone pass doesn't check the blob path's parent

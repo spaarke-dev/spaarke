@@ -286,7 +286,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         {
             try
             {
-                await _files.DeleteStagedAsync(copy.Spec, ct).ConfigureAwait(false);
+                // Pinned to the ETag this run's stage left (adversarial pass F1), so a newer run's reuse of the blob is kept.
+                await _files.DeleteStagedAsync(copy.Spec, ct, copy.Blob.ETag).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {

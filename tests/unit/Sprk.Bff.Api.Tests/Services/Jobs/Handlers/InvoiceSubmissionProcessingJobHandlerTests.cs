@@ -1238,6 +1238,26 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         rig.Persister.Calls.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "DEF-044 F1 must-fire (handler discard path): a run that fails after a NEWER run reused its staged copy (lock expiry, new ETag) keeps the blob: the discard is pinned to the ETag this run staged")]
+    public async Task Source_NoCommit_NewerRunReusedTheCopy_DiscardKeepsIt()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Processor.Script = async (row, load) =>
+        {
+            await load(DocumentSnapshot(row), CancellationToken.None);
+            // The newer run's reuse: the same bytes rewritten, so the blob has a new ETag (no row yet).
+            var name = StoredFileBlobName.Build(
+                rig.Files.TenantId, new StoredFileParent(StoredFileParentKind.Invoice, InvoiceId), StoredFileIds.ForSourceVersion(SubmissionId, rig.DocumentVersion));
+            rig.Files.Gateway.Overwrite(StoredFileSchema.ContainerOf(StoredFilePurpose.InvoicePdf), name, rig.Bytes, rig.Files.Gateway.Now.AddMinutes(1));
+            return Outcome(SubmissionEvaluationKind.Failed, "ebilling.submission.processing_failed") with { Submission = DocumentSnapshot(row) };
+        };
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        StagedCopy(rig, rig.DocumentVersion).Should().Equal(rig.Bytes, "the newer run's blob is not this run's to delete");
+        rig.Persister.Calls.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "094 (9.1 step 4): SourceChanged with the SAME bytes at a new version: the new version is staged and the commit is tried once more with it")]
     public async Task SourceChanged_SameBytes_RestagesAndPersistsOnce()
     {

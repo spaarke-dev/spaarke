@@ -81,7 +81,7 @@ public sealed class InvoiceSubmissionServiceTests
         public readonly List<RecordOwnershipContext> OwnerContexts = new();
         public readonly List<CancellationToken> WriteTokens = new();
 
-        /// <summary>Every stage the intake asked the file store for (one write-once blob create each), as "container/name".</summary>
+        /// <summary>Every stage the intake asked the file store for (one blob create each, write-once per content: a reuse rewrites the same bytes, DEF-044), as "container/name".</summary>
         public IReadOnlyList<string> Stages => BlobCalls("create");
 
         /// <summary>Every staged-blob delete (compensation), as "container/name".</summary>
