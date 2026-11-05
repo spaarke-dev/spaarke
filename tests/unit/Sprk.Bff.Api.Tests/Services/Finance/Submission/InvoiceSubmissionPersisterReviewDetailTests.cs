@@ -200,6 +200,42 @@ public partial class InvoiceSubmissionPersisterTests
         notHeld.OldInvoiceWrites.Should().ContainSingle().Which.Target.Attributes.Keys.Should().NotContain(InvoiceReviewDetail.Column, "no hold is open: blank is a normal review");
     }
 
+    [Fact(DisplayName = "082c-2 fix round 3 (F1, fail closed, must fire): the undo of an invoice whose stored findings cannot be read reopens it with 'Billing terms could not be checked', never blank")]
+    public async Task SupersedeUndo_UnreadableFindings_ReopensWithBillingTermsNotChecked()
+    {
+        // The findings turn unreadable AFTER the commit (the commit itself refuses an unreadable one: it reads as a firm hold, fail closed), so the
+        // undo's read is the first to meet them.
+        var store = CorrectionStore(afterCommit: s =>
+        {
+            TamperTheStagedBlob(s);
+            s.OldInvoiceSubmissions.Add(new Entity("sprk_invoicesubmission", Guid.NewGuid())
+            {
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", OldInvoiceId),
+                ["sprk_findingsjson"] = "{not json",
+            });
+        });
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        store.OldInvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
+        store.OldInvoiceWrites.Should().ContainSingle().Which.Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value
+            .Should().Be(InvoiceReviewDetail.BillingTermsNotChecked).And.Be(659490001);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (F1, must fire): the undo of an invoice with NO firm and no stored firm hold reopens it 'Waiting for the firm', as approval refuses it (needs a firm)")]
+    public async Task SupersedeUndo_NoFirmOnTheInvoice_ReopensWaitingForTheFirm()
+    {
+        var store = NoFirmStore(CorrectionStore(afterCommit: TamperTheStagedBlob));
+        store.OldInvoice!.Attributes.Remove("sprk_vendororg"); // no own hold, no stored firm marker: only the missing firm
+
+        var result = await store.Build().PersistAsync(await CorrectionOutcomeAsync(InvoiceSubmissionProcessorTests.NoFirm()), null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Undone);
+        store.OldInvoiceWrites.Should().ContainSingle().Which.Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value
+            .Should().Be(InvoiceReviewDetail.WaitingForFirm);
+    }
+
     [Theory(DisplayName = "082c-2: HoldReasonsOf names the same Procedure holds the stored-state reader finds in what the outcome persists")]
     [InlineData("gap")]
     [InlineData("unresolved")]

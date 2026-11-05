@@ -519,7 +519,7 @@ public class SubmissionCommitGate
         try
         {
             old = await _entities.RetrieveAsync(
-                InvoiceReviewService.InvoiceEntity, oldId, ["statuscode", InvoiceReviewService.VersionNumber], ct).ConfigureAwait(false);
+                InvoiceReviewService.InvoiceEntity, oldId, ["statuscode", InvoiceReviewService.VersionNumber, InvoiceSubmissionPersister.InvoiceVendorOrg], ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsNotFound(ex))
         {
@@ -547,14 +547,10 @@ public class SubmissionCommitGate
         var version = old.GetAttributeValue<long?>(InvoiceReviewService.VersionNumber)
             ?? throw new InvalidOperationException($"The versionnumber of invoice {oldId} could not be read; its reopen is held.");
         // 082c-2 fix round 1 (F2, D-205 writer 7's undo): the close blanked the review detail; the reopened invoice is In Review again with
-        // whatever holds it still has, so its detail is derived from them (the Procedure reasons the stored submissions name, plus the firm hold),
-        // in the same request as the status. A read fault propagates: the undo is held and retried, as for every other read here.
-        var remaining = new HashSet<string>(
-            await InvoiceProcedureHold.ReasonsAsync(_entities, oldId, ct).ConfigureAwait(false), StringComparer.Ordinal);
-        if (await InvoiceFirmHold.IsHeldAsync(_entities, oldId, ct).ConfigureAwait(false))
-        {
-            remaining.Add(SubmissionReasonCodes.FirmMissing);
-        }
+        // whatever holds it still has, so its detail is derived from them, in the same request as the status. Fix round 3 (ontology F1): through
+        // the one derivation (InvoiceOpenHolds: the firm hold united with the Procedure holds, as approval reads them; the inline union that was
+        // here moved there). A read fault propagates: the undo is held and retried, as for every other read here.
+        var remaining = await InvoiceOpenHolds.ReasonsAsync(_entities, old, ct).ConfigureAwait(false);
 
         // Fix round 2 (F2): the lifecycle's builder reads only the probe's cached answer, so the column is probed (one read, then cached) before the
         // request is built; where it does not exist yet the detail is not asked for, and the undo succeeds without naming the column.

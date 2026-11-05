@@ -314,27 +314,117 @@ public sealed partial class InvoiceAssignFirmServiceTests
 
     // ── The apply (16.4 condition 2; 16.7 "renumber everything") ──
 
-    [Fact(DisplayName = "082c-2 (D-205 writer 3): Set firm lifts firm_missing; with no other hold the review detail goes blank in the same invoice update")]
-    public async Task ReviewDetail_SetFirm_NoOtherHold_IsBlank()
+    // 082c-2 fix round 3 (ontology F1): the review detail after Set firm is derived from the holds that REMAIN, through InvoiceOpenHolds (the
+    // firm hold as approval reads it, united with the Procedure holds). The apply keeps every findings member and the stored outcome reason, so a
+    // firm_missing marker survives it and the detail stays "Waiting for the firm" until 095d-2's re-run clears the markers. The fixtures use the
+    // production shape (pipelineFindings[].reasonCode; a lineFindings[] rules.not_checked cause), not a member nothing reads.
+
+    private const string FirmMarkerPipeline = "{\"reasonCode\":\"" + SubmissionReasonCodes.FirmMissing + "\",\"values\":{}}";
+
+    private static string LineCause(string cause) =>
+        $$"""{"code":"{{InvoiceSubmissionPersister.LineFindingRulesNotChecked}}","{{InvoiceFirmHold.LineFindingCauseMember}}":"{{cause}}"}""";
+
+    private static string Findings(string? pipeline = null, string? lines = null) =>
+        $$"""{"trackingNumber":"INV-7.3","pipelineFindings":[{{pipeline}}],"{{InvoiceSubmissionPersister.LineFindingsMember}}":[{{lines}}],"keep":1}""";
+
+    /// <summary>A world whose firm markers are cleared from the stored submission (no outcome reason, no firm finding), the invoice's own
+    /// hold still set (so Set firm is allowed), and the findings as given.</summary>
+    private static World WithFirmMarkersCleared(string findingsJson)
     {
         var w = new World();
+        w.Submission.Attributes.Remove(InvoiceSubmissionPersister.SubmissionReasonCode);
+        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = findingsJson;
+        return w;
+    }
+
+    private static int? DetailOf(World w) =>
+        Update(w.Applied!, "sprk_invoice", InvoiceId).Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column)?.Value;
+
+    [Theory(DisplayName = "082c-2 fix round 3 (F1, must fire): Set firm with a firm_missing marker still stored keeps 'Waiting for the firm', and approval, over the state the apply leaves, still refuses on the firm hold")]
+    [InlineData("reason", true, false, false)]
+    [InlineData("pipeline", false, true, false)]
+    [InlineData("line", false, false, true)]
+    [InlineData("all", true, true, true)]
+    public async Task ReviewDetail_SetFirm_FirmMarkerStillStored_StaysWaitingForTheFirm_AndApprovalRefuses(string marker, bool reason, bool pipeline, bool line)
+    {
+        var w = WithFirmMarkersCleared(Findings(
+            pipeline: pipeline ? FirmMarkerPipeline : null,
+            lines: line ? LineCause(SubmissionReasonCodes.FirmMissing) : null));
+        if (reason)
+        {
+            w.Submission[InvoiceSubmissionPersister.SubmissionReasonCode] = SubmissionReasonCodes.FirmMissing;
+        }
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned, marker);
+
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForFirm).And.Be(659490002, marker);
+
+        // Approval over the stored state the apply leaves: the firm set, the invoice's own hold cleared, the stored findings the apply wrote and the
+        // outcome reason it did not touch. The real approval service, the real firm hold: refused as held for the firm.
+        var approval = new ApprovalWorld();
+        approval.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var left = approval.HoldForFirm(reasonOnly: false, findingsJson: (string)w.Applied!.SubmissionFields![InvoiceSubmissionPersister.SubmissionFindingsJson]);
+        approval.Rows[("sprk_invoicesubmission", left)]["sprk_outcomereasoncode"] = reason ? SubmissionReasonCodes.FirmMissing : null;
+        var result = await approval.ApproveAs(ApprovalWorld.AliceUser);
+        result.Outcome.Should().Be(ApprovalOutcome.Held, marker);
+        result.Code.Should().Be(InvoiceApprovalCodes.FirmMissing, marker);
+        approval.Writes.Should().Be(0, "a refused approve writes nothing");
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (F1, must fire): the firm comes before a Procedure gap that is also stored (D-205 priority)")]
+    public async Task ReviewDetail_SetFirm_FirmMarkerAndGapStored_IsWaitingForTheFirm()
+    {
+        var w = WithFirmMarkersCleared(Findings(pipeline: FirmMarkerPipeline, lines: LineCause(SubmissionReasonCodes.ProcedureGap)));
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForFirm);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (F1, must not fire): with the firm markers cleared and no other hold, Set firm blanks the review detail in the same invoice update")]
+    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_NoOtherHold_IsBlank()
+    {
+        var w = WithFirmMarkersCleared(Findings());
 
         (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
 
         Update(w.Applied!, "sprk_invoice", InvoiceId).Target.Attributes.Should().ContainKey(InvoiceReviewDetail.Column).WhoseValue.Should().BeNull();
     }
 
-    [Fact(DisplayName = "082c-2 (D-205 writer 3): with a Procedure gap still open, Set firm moves the detail to the next reason, not blank")]
-    public async Task ReviewDetail_SetFirm_GapStillOpen_MovesToWaitingForBillingTerms()
+    [Fact(DisplayName = "082c-2 fix round 3 (F1, must not fire): with the firm markers cleared and a Procedure gap open, the detail is 'Waiting for billing terms', not blank")]
+    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_GapStillOpen_IsWaitingForBillingTerms()
     {
-        var w = new World();
-        w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] =
-            $$"""{"trackingNumber":"INV-7.3","pipelineFindings":[{"code":"firm_missing"}],"{{InvoiceSubmissionPersister.LineFindingsMember}}":[{"code":"{{InvoiceSubmissionPersister.LineFindingRulesNotChecked}}","{{InvoiceFirmHold.LineFindingCauseMember}}":"{{SubmissionReasonCodes.ProcedureGap}}"}]}""";
+        var w = WithFirmMarkersCleared(Findings(lines: LineCause(SubmissionReasonCodes.ProcedureGap)));
 
         (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
 
-        Update(w.Applied!, "sprk_invoice", InvoiceId).Target.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value
-            .Should().Be(InvoiceReviewDetail.WaitingForBillingTerms);
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForBillingTerms);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (F1, must not fire): with the firm markers cleared and the terms unresolved, the detail is 'Billing terms could not be checked'")]
+    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_Unresolved_IsBillingTermsNotChecked()
+    {
+        var w = WithFirmMarkersCleared(Findings(pipeline: "{\"reasonCode\":\"" + SubmissionReasonCodes.ProceduresUnresolved + "\",\"values\":{}}"));
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        DetailOf(w).Should().Be(InvoiceReviewDetail.BillingTermsNotChecked);
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 3 (F1): a Procedure hold stored on another submission linked to the invoice is read too, as approval reads it")]
+    public async Task ReviewDetail_SetFirm_AnotherLinkedSubmissionHoldsAGap_IsWaitingForBillingTerms()
+    {
+        var w = WithFirmMarkersCleared(Findings());
+        w.Submissions.Add(new Entity(TrackingNumberAllocator.SubmissionEntity, Guid.Parse("095d1b00-0000-4000-8000-000000000002"))
+        {
+            ["versionnumber"] = 3L,
+            [InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference(InvoiceReviewReadService.InvoiceEntity, InvoiceId),
+            [InvoiceSubmissionPersister.SubmissionReasonCode] = SubmissionReasonCodes.ProcedureGap,
+        });
+
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForBillingTerms);
     }
 
     [Fact(DisplayName = "082c-2 (mismatch): where the column does not exist yet, Set firm still applies and leaves the column out")]

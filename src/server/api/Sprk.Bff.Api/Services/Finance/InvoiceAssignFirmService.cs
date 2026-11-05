@@ -313,6 +313,8 @@ public sealed class InvoiceAssignFirmService
         "versionnumber", InvoiceSubmissionPersister.SubmissionInvoice, TrackingNumberAllocator.FirmColumn, TrackingNumberAllocator.ScopeColumn,
         TrackingNumberAllocator.SequenceColumn, TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn,
         InvoiceSubmissionPersister.SubmissionFindingsJson,
+        // 082c-2 fix round 3 (ontology F1): the stored outcome reason, which the apply leaves as it is and approval's firm hold still reads.
+        InvoiceSubmissionPersister.SubmissionReasonCode,
     ];
 
     private readonly IGenericEntityService _entities;
@@ -498,7 +500,11 @@ public sealed class InvoiceAssignFirmService
         }
     }
 
-    private sealed record State(Entity Invoice, Entity Submission, string SubmissionVersion, string? InvoiceVersion, JsonObject? Findings, AssignFirmStoredDecision? Stored);
+    /// <param name="OtherSubmissions">Fix round 3 (ontology F1): the invoice's other linked submissions (not the one that derives it), read with the state;
+    /// approval's holds read every linked submission, so the review detail the apply derives must too.</param>
+    private sealed record State(
+        Entity Invoice, Entity Submission, string SubmissionVersion, string? InvoiceVersion, JsonObject? Findings, AssignFirmStoredDecision? Stored,
+        IReadOnlyList<Entity> OtherSubmissions);
 
     private async Task<AssignFirmResult> AssignHeldAsync(
         Guid invoiceId, Guid firmId, string? note, Guid deciderUserId, string? callerBearerToken, CancellationToken ct)
@@ -641,6 +647,12 @@ public sealed class InvoiceAssignFirmService
             lines, approvals, files)
         {
             WriteReviewDetail = await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false),
+            SubmissionReasonCode = state.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode),
+            OtherSubmissions = state.OtherSubmissions
+                .Select(s => new InvoiceOpenHolds.StoredSubmission(
+                    s.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode),
+                    s.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson)))
+                .ToList(),
         };
 
         // ── The ceiling (16.7): one transaction or none. Asked before anything is built for the allocator. ──
@@ -954,6 +966,12 @@ public sealed class InvoiceAssignFirmService
         /// <summary>082c-2: whether <see cref="InvoiceReviewDetail.Column"/> exists (read by the service before it builds the plan).</summary>
         public bool WriteReviewDetail { get; init; }
 
+        /// <summary>Fix round 3 (ontology F1): the derived submission's stored outcome reason, which the apply does not write (so it is what remains).</summary>
+        public string? SubmissionReasonCode { get; init; }
+
+        /// <summary>Fix round 3 (ontology F1): the invoice's other linked submissions as stored (the apply writes none of them).</summary>
+        public IReadOnlyList<InvoiceOpenHolds.StoredSubmission> OtherSubmissions { get; init; } = [];
+
         /// <summary>The caller requests of one attempt: the invoice, every line, and each approval and file whose name carries the number.</summary>
         public int RequestCount(string newNumberShape) =>
             1 + Lines.Count
@@ -975,14 +993,7 @@ public sealed class InvoiceAssignFirmService
                 [InvoiceFirmHold.InvoiceHoldColumn] = null,
             };
 
-            // 082c-2 (ontology D-205 writer 3): firm_missing lifts, so the review detail is recomputed from the reasons that remain (a Procedure
-            // hold the findings still name; blank when none), in this same write. Left out where the column does not exist yet.
-            if (WriteReviewDetail)
-            {
-                invoice[InvoiceReviewDetail.Column] = InvoiceReviewDetail.ValueOf(
-                    InvoiceReviewDetail.ReviewDetailOf(InvoiceProcedureHold.ReasonsOf(null, Findings.ToJsonString())));
-            }
-
+            // (The review detail, 082c-2 ontology D-205 writer 3, is set below, once the findings this apply stores are built.)
             if (InvoiceVersion is not null)
             {
                 invoice.RowVersion = InvoiceVersion;
@@ -1043,6 +1054,21 @@ public sealed class InvoiceAssignFirmService
             findings[StoredDecisionMember] = stored.ToJson();
             var json = findings.ToJsonString();
 
+            // 082c-2 (ontology D-205 writer 3), fix round 3 (ontology F1): the review detail is recomputed from the holds that REMAIN after this
+            // write, in this same write, through the one derivation approval's holds agree with (InvoiceOpenHolds). The apply sets the firm and
+            // clears the invoice's own hold, but it keeps every findings member except the number and the decision, and leaves the stored outcome
+            // reason: so a firm_missing marker the findings or the reason still carry still holds the invoice (approval refuses it until 095d-2's
+            // re-run clears the markers), and the detail stays "Waiting for the firm". It is blank only when nothing is held. Left out where the
+            // column does not exist yet. (An In Review invoice only: the service refuses any other status above.)
+            if (WriteReviewDetail)
+            {
+                invoice[InvoiceReviewDetail.Column] = InvoiceReviewDetail.ValueOf(InvoiceReviewDetail.ReviewDetailOf(
+                    InvoiceOpenHolds.ReasonsOf(
+                        invoiceHasNoFirm: false, // the firm is set in this write
+                        invoiceHoldSet: false, // its own hold is cleared in this write
+                        [new InvoiceOpenHolds.StoredSubmission(SubmissionReasonCode, json), .. OtherSubmissions])));
+            }
+
             return new BuiltApply(
                 new RenumberApply(new Dictionary<string, object> { [InvoiceSubmissionPersister.SubmissionFindingsJson] = json }, requests),
                 stored,
@@ -1093,7 +1119,7 @@ public sealed class InvoiceAssignFirmService
     private async Task<StateRead> ReadStateAsync(Guid invoiceId, CancellationToken ct)
     {
         Entity? invoice;
-        List<Entity> submissions;
+        List<Entity> submissions, others;
         try
         {
             var query = new QueryExpression(InvoiceReviewReadService.InvoiceEntity) { ColumnSet = new ColumnSet(InvoiceColumns), TopCount = 1 };
@@ -1106,9 +1132,9 @@ public sealed class InvoiceAssignFirmService
 
             var subs = new QueryExpression(TrackingNumberAllocator.SubmissionEntity) { ColumnSet = new ColumnSet(SubmissionColumns) };
             subs.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
-            submissions = (await _entities.RetrieveMultipleAsync(subs, ct).ConfigureAwait(false)).Entities
-                .Where(s => InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoiceId)
-                .ToList();
+            var linked = (await _entities.RetrieveMultipleAsync(subs, ct).ConfigureAwait(false)).Entities;
+            submissions = linked.Where(s => InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoiceId).ToList();
+            others = linked.Where(s => InvoiceSubmissionPersister.InvoiceIdFor(s.Id) != invoiceId).ToList();
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1144,7 +1170,7 @@ public sealed class InvoiceAssignFirmService
                 "The submission's findings could not be read, so the firm was not set.", submission.Id));
         }
 
-        return new StateRead(new State(invoice, submission, version, VersionOf(invoice), findings, stored), null);
+        return new StateRead(new State(invoice, submission, version, VersionOf(invoice), findings, stored, others), null);
     }
 
     /// <summary>The open firm_missing Signal set on the invoice: the system policy's invoice-level Signals (16.7: stored, never closed here).</summary>
