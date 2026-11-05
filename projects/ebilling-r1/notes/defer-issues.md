@@ -10,6 +10,26 @@
 
 ## Open (in priority order)
 
+### DEF-053 — FR-20 held-submission test is not anchored in a field-secured column
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (before any release beyond dev) |
+| **Filed** | 2026-11-05 |
+| **Source** | 114 adversarial review pass 1 (pre-existing; not introduced by 114) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2571 |
+
+**Description**: `HeldSubmissionConditions` decides "held" from `sprk_processingstatus` + `sprk_outcomereasoncode` only. Neither is field-secured. The firm hold and the Procedure hold (114, after its F1 fix) are anchored in the field-secured findings column instead.
+
+**Entry-points**: `Services/Finance/FinanceBaseValues.cs:179` and its approval / counted-spend consumers.
+
+**Fix direction**: anchor the FR-20 release on the findings `override` stamp (as 114 does), or field-secure both columns (live FLS step, owner go).
+
+**Fails without it**: the FR-20 hold can be lifted outside the Override path, with no Decision Record.
+
+---
+
 ### DEF-052 — The job's document copy and from-email parts skip the per-file size limit
 
 | Field | Value |
