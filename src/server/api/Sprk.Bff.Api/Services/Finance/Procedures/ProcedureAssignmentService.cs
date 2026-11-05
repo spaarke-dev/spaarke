@@ -833,9 +833,12 @@ public class ProcedureAssignmentService
             var (after, outcome, _) = await _closure.SupersedeInPassAsync(
                 baseCode, recordRuleVersionId, targets.Select(t => t.Signal).ToList(), CancellationToken.None, outsideScope: static _ => true);
             var closedIds = after.Where(s => s.Resolution == SignalWriter.ResolutionSuperseded).Select(s => s.Id).ToHashSet();
+            // uac-r2 K5 (c): the close is system-attributed; this line joins the triggering rule-change row ({AssignmentId}, whose createdby and
+            // time are the audit) with the Signals it closed. Operator log only; the caller's response carries caller-scoped counts.
             _logger.LogInformation(
-                "Override {AssignmentId}: {Closed} of {Targeted} finding(s) of base rule {BaseCode} on {CoreTable} {RecordId}'s In Review invoices ({ChildInvoices} of records directly under it) closed Superseded; {HeldBack} invoice(s) left open for work dated before the change; complete={Complete}",
-                assignmentId, outcome.Closed, targets.Count, baseCode, coreTable, recordId, children.Invoices.Count, heldBack, outcome.IsComplete && childrenRead);
+                "Override {AssignmentId}: {Closed} of {Targeted} finding(s) of base rule {BaseCode} on {CoreTable} {RecordId}'s In Review invoices ({ChildInvoices} of records directly under it) closed Superseded by record rule version {RecordRuleVersionId}; {HeldBack} invoice(s) left open for work dated before the change; complete={Complete}; closed Signals {ClosedSignalIds}",
+                assignmentId, outcome.Closed, targets.Count, baseCode, coreTable, recordId, children.Invoices.Count, recordRuleVersionId, heldBack, outcome.IsComplete && childrenRead,
+                string.Join(",", closedIds.Order()));
             var message = !outcome.IsComplete ? ChangeCloseIncompleteMessage : childrenRead ? ChangeCloseCompleteMessage : ChangeCloseChildrenOpenMessage;
             return new SupersedeResult(
                 childrenRead ? outcome : outcome with { PolicyFailures = outcome.PolicyFailures + 1 },
