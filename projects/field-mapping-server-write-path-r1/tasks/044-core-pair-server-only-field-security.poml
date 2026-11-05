@@ -8,7 +8,7 @@
     <rigor>FULL</rigor>
     <rigor-reason>Field security on four columns (solution XML), a change to CallerWriteAuthorization's field-security step (.cs, bff-api), a deploy and a live check (tags security, dataverse, deploy).</rigor-reason>
     <model-tier>opus</model-tier>
-    <model-tier-reason>Security-sensitive column security across two owning projects (UAC-r2 owns profiles, ontology-r1 owns the tables and writers); must stay consistent with 042c's fill-or-clear.</model-tier-reason>
+    <model-tier-reason>Security-sensitive column security across two owning projects (UAC-r2 owns profiles, ontology-r1 owns the tables and writers); must stay consistent with the owner's D-204 decision (the general create refuses these tables).</model-tier-reason>
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
@@ -23,7 +23,7 @@
   <goal>On dev, the four columns are field-secured; the server create path and both ledger writers write the pair; every reader who reads the pair today still reads it; a guard keeps the solution XML, the profiles and the code in agreement.</goal>
 
   <context>
-    <background>Owner decision 3 of 2026-11-04 (notes/decisions.md): a half core pair must never be written on any path; the server fills the id from the derived root or clears the stray type with a warning (042c). This task covers the paths outside the server. UAC-r2 conditions of 2026-11-04 (coordinator relay): the profile design and a Grep proof go to UAC-r2 before any import; the dev apply needs the owner's go given in UAC-r2's session. Escalation owners: UAC-r2 owns roles and field security profiles; spaarke-ontology-platform-r1 owns both tables and their writers (decisions.md 2026-11-02, "Ontology-r1 research").</background>
+    <background>RE-SCOPED 2026-11-04 (owner decision, notes/decisions.md "created only by their writers", ontology D-204): the general create (RecordCreationService, chat create_record) refuses sprk_signal and sprk_decisionrecord as whole tables (042c fix round 4). So no service create of the core pair remains to keep working: the BFF-managed exemption in CallerWriteAuthorization step 3, AC4 and the fill-or-clear interplay are dropped; this task secures the columns for the writers' identities only. Re-confirm with UAC-r2 whether CallerWriteAuthorization needs any change at all. Original background: owner decision 3 of 2026-11-04 (notes/decisions.md): a half core pair must never be written on any path; the server fills the id from the derived root or clears the stray type with a warning (042c). This task covers the paths outside the server. UAC-r2 conditions of 2026-11-04 (coordinator relay): the profile design and a Grep proof go to UAC-r2 before any import; the dev apply needs the owner's go given in UAC-r2's session. Escalation owners: UAC-r2 owns roles and field security profiles; spaarke-ontology-platform-r1 owns both tables and their writers (decisions.md 2026-11-02, "Ontology-r1 research").</background>
     <relevant-files>
       <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Signal/Entity.xml (sprk_CoreRecordId ~:491, sprk_CoreRecordType ~:531: IsSecured 0 to 1)</file>
       <file role="modify">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_DecisionRecord/Entity.xml (sprk_CoreRecordId ~:717, sprk_CoreRecordType ~:757)</file>
@@ -36,7 +36,7 @@
       <file role="canonical-reference">Server writers of the pair (read only): Services/Signals/SignalWriter.cs, DecisionRecordWriter.cs, DecisionCommitService.cs, SignalSuppressionService.cs, Services/Ontology/OntologyAdminAuthoringService.cs; RecordCreationService (042c)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="042c" status="required">The service's fill-or-clear of the core pair, the caller's AppendTo on the core, and the server-writer ArchTest (any server writer of the type also writes the id).</dependency>
+      <dependency task="042c" status="required">The general-create refusal of these tables (D-204) and the server-writer ArchTest (any server writer of the type also writes the id).</dependency>
     </dependencies>
   </context>
 
@@ -44,7 +44,7 @@
     <constraint source="project CLAUDE.md §6 gotcha 2026-10-20">Brief line 1: `git switch -c task/fm-044 &lt;tip of work/field-mapping-server-write-path-r1&gt;` (must contain 042c's merge), then confirm this POML exists on the branch.</constraint>
     <constraint source="UAC-r2 2026-11-04">Profile design (closed): Create and Update on the four columns for the BFF application identities and the ontology writer application identity (through the writer profiles above) and System Administrator; Read for everyone who reads today (the readers profile is associated with every business unit default team). No other principal gains or loses a column grant. The design and the Grep proof (AC2) go to UAC-r2 for review BEFORE any import.</constraint>
     <constraint source="UAC-r2 2026-11-04 (gate)">The dev import runs only after the owner's go, given in unified-access-control-r2's session, is recorded in the notes with its date. Without it the task stops at "ready to import". No other environment in this task.</constraint>
-    <constraint source="owner 2026-11-04 / 042c">A chat or route create of a Signal or Decision Record that sends a core pair keeps 042c's outcome after the columns are secured: step 3 treats the two core columns of these two tables as BFF-managed (the server asks the caller's AppendTo on the core before writing it), exactly as #1616 treats a project's pair. No refusal kind, code or word changes (NFR-07).</constraint>
+    <constraint source="owner 2026-11-04 / 042c (SUPERSEDED by D-204: the general create refuses these tables, so this exemption is not needed; kept for history)">A chat or route create of a Signal or Decision Record that sends a core pair keeps 042c's outcome after the columns are secured: step 3 treats the two core columns of these two tables as BFF-managed (the server asks the caller's AppendTo on the core before writing it), exactly as #1616 treats a project's pair. No refusal kind, code or word changes (NFR-07).</constraint>
     <constraint source="ontology-r1">SignalWriter, DecisionRecordWriter and the other ontology writers are not changed. Adding the four columns to "Spaarke Ontology Writer Field Writers" needs ontology-r1's written agreement in the notes before the import.</constraint>
     <constraint source="confidentiality (repo is public)">Notes, PR text and commits state the goal positively ("the core pair is written only by the server"). If the Grep finds a client writer, report it to UAC-r2 in its session; do not describe it in the repo.</constraint>
     <constraint source="ADR-002">No plugin, business rule or flow. Deploy via the dataverse-deploy skill only.</constraint>
@@ -84,13 +84,13 @@
     <trigger>If UAC-r2 or ontology-r1 does not agree to the profile design, or wants a different profile or membership, STOP and escalate to the owner with both positions.</trigger>
     <trigger>If any reader of the pair (BFF read path, Worklist, form, view, the external SPA) would lose Read under the design, STOP and escalate.</trigger>
     <trigger>If a server writer of the pair runs under an identity in neither writer profile, STOP: membership is UAC-r2's to change.</trigger>
-    <trigger>If keeping 042c's outcome would need a new refusal or a change to any existing refusal, STOP and escalate (NFR-07).</trigger>
+    <trigger>If securing the columns would change any existing refusal on a path that still creates these tables, STOP and escalate (NFR-07).</trigger>
   </escalation>
 
   <justification>
     <existing>The #1616 BFF-managed pair (SecureRootInheritance.cs:484, OwnedChildWrite.cs:365, CallerWriteAuthorization.cs:92-97) and its agreement test (RegardingPairFieldSecurityScriptAgreementTests.cs) do this for a project's regarding pair.</existing>
     <extension>Yes: the exemption set is extended with the core pair of two tables, and the profiles gain rows; the new agreement test copies the #1616 test for different columns, because that test is keyed to the regarding pair.</extension>
-    <cost-of-doing-nothing>The owner decision "the core pair is never half-written, on any path" needs an owner for the paths outside the server, and column security is that owner; without the exemption, securing the columns would refuse the chat create that 042c keeps working.</cost-of-doing-nothing>
+    <cost-of-doing-nothing>The owner decision "the core pair is never half-written, on any path" needs an owner for the paths outside the server, and column security is that owner; after D-204 only the writers create these rows, and column security keeps any other path from setting the pair.</cost-of-doing-nothing>
   </justification>
 
   <outputs>
@@ -104,7 +104,7 @@
     <criterion testable="true">AC1: the profile design is in the notes as a table: the four columns; Create and Update only for the BFF application identities, the ontology writer application identity and System Administrator; Read for everyone who reads today; UAC-r2's review verdict and ontology-r1's agreement are recorded before any import.</criterion>
     <criterion testable="true">AC2: the Grep proof is in the notes (commands and results) and shows no client screen, wizard or form script writes sprk_corerecordtype or sprk_corerecordid through Xrm.WebApi or the Web API; it went to UAC-r2 with AC1.</criterion>
     <criterion testable="true">AC3: the agreement test fails when either column on either table is not IsSecured=1, when a writer profile lacks Create or Update on one of them, when the readers profile lacks Read on one of them, or when the code's exemption set and the secured columns differ (each a seeded drift); it passes on the committed files.</criterion>
-    <criterion testable="true">AC4: a chat create of a Signal and of a Decision Record that sends a whole core pair, the caller holding AppendTo on the core, gives 042c's outcome (created, or 042c's refusals) with the columns secured; one that sends a type without an id gets 042c's fill-or-clear with its warning; step 3 still refuses every other field-secured column with its existing words.</criterion>
+    <criterion testable="true">AC4 (DROPPED by D-204; the general create refuses these tables, 042c fix round 4): a chat create of a Signal and of a Decision Record that sends a whole core pair, the caller holding AppendTo on the core, gives 042c's outcome (created, or 042c's refusals) with the columns secured; one that sends a type without an id gets 042c's fill-or-clear with its warning; step 3 still refuses every other field-secured column with its existing words.</criterion>
     <criterion testable="true">AC5 (must-not-fire): every other table's step-3 answer is unchanged (existing suites green with unchanged assertions); a project's #1616 pair is unchanged.</criterion>
     <criterion testable="true">AC6 (live, after the gate): on dev, the four columns read back IsSecured; a Signal and a Decision Record written by their writers carry both columns; a chat create with a core pair succeeds; a user holding only Spaarke roles cannot set either column through the Web API (Dataverse's field-security answer); an ordinary user still reads both columns on an existing row.</criterion>
     <criterion testable="true">AC7: 052's background carries the 044(d) line; BFF build 0 errors, 0 warnings; verify-suites.sh and ArchTests pass; publish delta and CVE recorded; UAC-r2's verdict line is in the PR.</criterion>

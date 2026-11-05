@@ -289,6 +289,23 @@ public class RecordTableRulesTests
     }
 
     [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    [InlineData("sprk_budgetrevision")]
+    public void CreatedOnlyByItsWriter_OntologyWriterTables_AreFlagged(string table)
+    {
+        // Task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): created only by their writers; the service refuses them.
+        RecordTableRules.Get(table).CreatedOnlyByItsWriter.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CreatedOnlyByItsWriter_IsTheThreeOntologyWriterTablesOnly()
+    {
+        RecordTableRules.All.Where(r => r.CreatedOnlyByItsWriter).Select(r => r.Table)
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision");
+    }
+
+    [Theory]
     [InlineData("task")]
     [InlineData("contact")]
     [InlineData("account")]

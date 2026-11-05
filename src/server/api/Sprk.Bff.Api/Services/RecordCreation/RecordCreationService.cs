@@ -175,8 +175,11 @@ internal sealed partial class RecordCreationService
         var trace = new StepTrace(table, correlationId, _logger);
         var noun = NounOf(table);
 
+        // Task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): a table whose rows are created only by its own writer
+        // is refused here, with the words of a table this service does not create, before anything is read, mapped, checked or
+        // written, whoever asks (the caller or the system principal).
         var rule = TableRules(table);
-        if (rule is null)
+        if (rule is null or { CreatedOnlyByItsWriter: true })
         {
             return trace.Refused(new RecordCreationRefusal(RecordCreationRefusalKind.Invalid,
                 RecordCreationRefusal.TableUnsupportedCode, $"'{request.Table}' records are not created here."));

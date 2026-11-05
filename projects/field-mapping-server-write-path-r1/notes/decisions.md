@@ -788,3 +788,15 @@ Also agreed with UAC-r2: Signal / Decision Record under a team-owned intermediat
 4. **Regarding pair:** where a regarding is set, every related row that should carry the regarding value gets it. Make the opposite impossible. This becomes task 045: an inventory first, then the design for the owner.
 
 Numbering note (2026-11-04): the "task 043" planned on 2026-11-02 for the `sprk_Project_Matter_nn` link (#2524) was never written. 043 is now the Document mapping-source task. #2524 gets the next free number (047) when its POML is written.
+
+## 2026-11-04 — Signal, Decision Record and Budget Revision rows are created only by their writers (owner; ontology D-204)
+
+**Decision (owner, this session):** the general create path (`RecordCreationService` and the chat `dataverse.create_record` tool) refuses `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision` as whole tables, for the caller and for the system principal, before anything is written. Only the dedicated writers create these rows (`SignalWriter`, `DecisionRecordWriter`, the decision action executors); they do not use the general create and are unchanged. Chat keeps creating every other table.
+
+**Why:** these rows are append-only evidence with one server-side owner each (ontology D-204), and the writers keep the lineage columns that downstream readers rely on consistent. Ontology confirmed on master `7c7d24a3b7` that no BFF code creates these tables through `RecordCreationService`, and that ordinary roles hold no Create on them, so no first-party user flow changes.
+
+**Effect on 042c:** this replaces the fill-or-clear choice of 2026-11-04 (decision 3) for these tables: with the tables refused, step 6¾ is not reachable for them. 042c is reworked to the refusal; UAC-r2 and ontology review the diff. Task 044 is re-scoped to the writers' paths (no service create of the pair to keep working).
+
+## 2026-11-04 — The generic update tools do not change Signal, Decision Record or Budget Revision rows (owner; D-204 extended)
+
+**Decision (owner, this session):** chat's update-record tool, the playbook Update Record node and (subject to ontology's answer) playbook output mapping refuse to change `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision`. These rows are changed only by their own processes (the Signal lifecycle and evaluation, the decision commit, the budget revision executor), which are unchanged. Requested by ontology; UAC-r2 classifies it as an integrity rule. Read-only census on dev: none of the 93 configured playbook nodes targets these tables. Task 048.

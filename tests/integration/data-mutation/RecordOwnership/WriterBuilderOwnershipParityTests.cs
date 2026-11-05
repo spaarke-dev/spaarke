@@ -194,16 +194,18 @@ public class WriterBuilderOwnershipParityTests
     // thread also takes its thread's filing, as SecureChildReconciler.ContextFor does). A create the service refuses writes
     // nothing, so it can never disagree with the reconciler; the refusal is pinned with its code.
 
-    /// <summary>The tables the theory covers: every registry table that carries the I-1 stamp, asserted complete below.</summary>
+    /// <summary>The tables the theory covers: every registry table the service creates that carries the I-1 stamp, asserted
+    /// complete below. Task 042c fix round 4 (owner decision D-204): a Signal and a Decision Record are created only by their
+    /// writers (<see cref="RecordTableRule.CreatedOnlyByItsWriter"/>), so the service creates neither and they are not here.</summary>
     public static readonly TheoryData<string> StampedRegistryTables = new()
     {
-        "sprk_todo", "sprk_event", "sprk_memo", "sprk_analysis", "sprk_communication", "sprk_signal", "sprk_decisionrecord",
+        "sprk_todo", "sprk_event", "sprk_memo", "sprk_analysis", "sprk_communication",
     };
 
-    [Fact(DisplayName = "042b parity: the theory covers every RecordTableRules table that carries the I-1 stamp")]
+    [Fact(DisplayName = "042b parity: the theory covers every RecordTableRules table the service creates that carries the I-1 stamp")]
     public void TheParityTheory_CoversEveryStampedRegistryTable()
     {
-        var registered = RecordTableRules.All.Select(r => r.Table)
+        var registered = RecordTableRules.All.Where(r => !r.CreatedOnlyByItsWriter).Select(r => r.Table)
             .Where(CoreAncestorResolver.IsStampedChildEntity)
             .Order(StringComparer.Ordinal);
 
@@ -222,18 +224,6 @@ public class WriterBuilderOwnershipParityTests
             ("sprk_regardinginvoice", "sprk_invoice", CreateParityWorld.Invoice), ("sprk_regardingmatter", "sprk_matter", world.SecureMatter)));
 
         reconciler.OwningTeamId.Should().Be(Directory.SecureNamedTeam, "the reconciler's question includes the stamp's root");
-        if (CoreAncestorResolver.IsStampedOutsideAccessTaxonomy(table))
-        {
-            // A Signal or Decision Record is not a reparentable child: the service refuses a Secure owner for it with the
-            // existing words (OwnerDecided; its own writer owns it into isolation). Nothing is written, so the reconciler
-            // never sees an ordinary row (before FR-41 the create wrote ChildTeam: the #2483 window on these tables too).
-            outcome.Refusal.Should().NotBeNull();
-            outcome.Refusal!.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
-            outcome.Refusal.OwnerDecision!.IsSecureOwner.Should().BeTrue();
-            world.Creates.Should().BeEmpty();
-            return;
-        }
-
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         written.Should().NotBeNull();
         written!.GetAttributeValue<EntityReference>("sprk_regardingmatter")?.Id.Should().Be(world.SecureMatter, "the stamp is bound");

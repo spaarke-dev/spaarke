@@ -32,11 +32,12 @@
 | 041 | [Index routing follows the content type (#2502)](041-content-type-index-routing.poml) | FR-40 (FR-10, FR-38) | opus / high | FULL | none | 019, 039 | ✅ (#2541, 249809ce0b) |
 | 042a | [#2483 window characterization (tests only; lands alone)](042a-stamp-before-owner-characterization.poml) | FR-41 | sonnet / high | STANDARD | none | none | ✅ (#2521) |
 | 042b | [Derive the stamp before the owner (#2483, DI-009)](042b-stamp-before-owner-fix.poml) | FR-41 | opus / high | FULL | none | 042a, 019 | ✅ (#2562, 0d4aa87ee0) |
-| 042c | [Signal / DR core record: caller AppendTo + core first in the owner question (#2561, DI-019)](042c-core-record-owner-and-appendto.poml) | FR-41 | opus / high | FULL | none | 042b | 🔄 fix round 1 6d87258cd3; B' fill-or-clear in progress |
+| 042c | [Signal / DR core record: caller AppendTo + core first in the owner question (#2561, DI-019)](042c-core-record-owner-and-appendto.poml) | FR-41 | opus / high | FULL | none | 042b | 🔄 PR #2569 (auto-merge): general create refuses Signal / DR / budget revision (D-204); UAC-r2 approved, ontology pass |
 | 043 | [A Document is a field-mapping source (owner 2026-11-04)](043-document-as-mapping-source.poml) | FR-03, FR-04, FR-19 | opus / high | FULL | none | 031 | 🔲 [open] |
 | 044 | [Core pair written whole, only by the server and the ledger writers: field security (owner 2026-11-04)](044-core-pair-server-only-field-security.poml) | FR-41 | opus / high | FULL | none | 042c; dev import gated on the owner's go in UAC-r2's session | 🔲 [open] |
 | 045 | [Regarding pair always complete and propagated: inventory + design first (owner 2026-11-04)](045-regarding-pair-complete-and-propagated.poml) | FR-23, FR-41 | opus / high | FULL | none | 042c, 044; part B after owner approval | 🔲 [open] |
 | 046 | [Feature permission matrix, proposed role changes (UAC-r2), role guard (owner 2026-11-04)](046-feature-permission-matrix-and-role-guard.poml) | FR-08, FR-26 | opus / high | FULL | none | 031, 042c | 🔲 [open] |
+| 048 | [Signal, Decision Record and Budget Revision changed only by their writers: generic update tools refuse them (owner 2026-11-04, D-204 extended)](048-writer-only-tables-refused-by-generic-updates.poml) | FR-41 | opus / high | FULL | none | 042c | 🔲 [open] |
 
 ## Phase 3 — W3 Product creators onto the service
 

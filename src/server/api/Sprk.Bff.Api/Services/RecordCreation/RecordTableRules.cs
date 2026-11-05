@@ -407,12 +407,17 @@ internal static partial class RecordTableRules
         new RecordTableRule { Table = "account", Kind = RecordTableKind.Child, MappingExclusion = ChatPlatformTableIsNotMapped },
 
         // ── Ontology writers' tables: never mapped (spaarke-ontology-platform-r1 §0.3) ──────────────────────────────
+        // Field-mapping-server-write-path-r1 task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): created only by
+        // their writers (SignalWriter, DecisionRecordWriter, the decision action executors), never by this service. A create of
+        // any of the three is refused at the start of the pipeline (CreatedOnlyByItsWriter), for the caller and the system
+        // principal alike; the chat create tool refuses them before it is asked (DataverseCreateRecordHandler).
 
         new RecordTableRule
         {
             Table = "sprk_signal",
             Kind = RecordTableKind.Child,
             MappingExclusion = OntologyContentIsNotMapped,
+            CreatedOnlyByItsWriter = true,
             // The core record pair is fixed after create on BFF update paths (update only: the create still takes it).
             FixedAfterCreateColumns = CoreRecordPairColumns,
         },
@@ -421,6 +426,7 @@ internal static partial class RecordTableRules
             Table = "sprk_decisionrecord",
             Kind = RecordTableKind.Child,
             MappingExclusion = OntologyContentIsNotMapped,
+            CreatedOnlyByItsWriter = true,
             // The core record pair is fixed after create on BFF update paths (update only: the create still takes it).
             FixedAfterCreateColumns = CoreRecordPairColumns,
         },
@@ -429,6 +435,7 @@ internal static partial class RecordTableRules
             Table = "sprk_budgetrevision",
             Kind = RecordTableKind.Child,
             MappingExclusion = OntologyContentIsNotMapped,
+            CreatedOnlyByItsWriter = true,
         },
     ];
 
@@ -1056,4 +1063,13 @@ internal sealed record RecordTableRule
 
     /// <summary>Table-keyed rules on the row as it will be written (see <see cref="PreWriteRule"/>). Empty when none.</summary>
     public IReadOnlyList<PreWriteRule> PreWriteRules { get; init; } = [];
+
+    /// <summary>
+    /// Whether the table's rows are created only by the table's own writer, never by <see cref="RecordCreationService"/>
+    /// (field-mapping-server-write-path-r1 task 042c fix round 4; owner decision 2026-11-04, ontology D-204). The service refuses
+    /// such a create at the start of its pipeline, before any read, mapping, check or write, for the caller and the system
+    /// principal alike, exactly as it refuses a table it does not create (<see cref="RecordCreationRefusal.TableUnsupportedCode"/>).
+    /// The entry stays registered for what the registry declares beyond the create (its mapping exclusion).
+    /// </summary>
+    public bool CreatedOnlyByItsWriter { get; init; }
 }

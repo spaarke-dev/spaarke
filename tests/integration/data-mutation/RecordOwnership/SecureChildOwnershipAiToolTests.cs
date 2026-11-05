@@ -723,6 +723,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["team"] = "teams", ["businessunit"] = "businessunits",
             // #2084 round 2: a Signal and the rule it cites.
             ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
+            // Task 042c fix round 4: a Create Budget decision binds the budget's currency.
+            ["transactioncurrency"] = "transactioncurrencies",
             // The core record pair is fixed after create on BFF update paths: a Decision Record is driven through the chat update.
             ["sprk_decisionrecord"] = "sprk_decisionrecords",
             // #2110: a communication's thread.
@@ -748,7 +750,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// 2026-10-07: the ADR-024 record-type catalog and the matter-type / practice-area reference tables. Dataverse
         /// refuses RetrievePrincipalAccess on these (400 0x80040800); appending to one costs the table's AppendTo PRIVILEGE.
         /// </summary>
-        private static readonly HashSet<string> OrganizationOwned = new() { "sprk_mattertype_ref", "sprk_recordtype_ref", "sprk_practicearea_ref" };
+        private static readonly HashSet<string> OrganizationOwned = new() { "sprk_mattertype_ref", "sprk_recordtype_ref", "sprk_practicearea_ref", "transactioncurrency" };
 
         /// <summary>
         /// Ontology task 126 (#1399): the tables whose metadata declares BUSINESS ownership — live, spaarkedev1 2026-10-08 and
@@ -962,6 +964,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
+                // Task 042c fix round 4: the currency a Create Budget decision binds (CreateBudgetExecutor.ExtendColumnsAsync).
+                ("transactioncurrencyid", "transactioncurrency", "transactioncurrencyid"),
             },
         };
 
@@ -978,6 +982,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             "prvCreatesprk_kpiassessment", "prvAppendsprk_kpiassessment", "prvCreatesprk_billingevent", "prvAppendsprk_billingevent",
             // The organization-owned reference tables' AppendTo privileges (what a lookup onto one of their rows costs).
             "prvAppendTosprk_recordtype_ref", "prvAppendTosprk_mattertype_ref", "prvAppendTosprk_practicearea_ref",
+            "prvAppendTotransactioncurrency", // task 042c fix round 4: a Create Budget decision's currency
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();
