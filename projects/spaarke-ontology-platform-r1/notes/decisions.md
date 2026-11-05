@@ -448,7 +448,7 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - **The Signal is shared.** `BillingFindingSignalMapper.MapGroup` writes one SubmissionIntegrity Signal per (policy, invoice) group, so firm_missing shares it with the invoice-number mismatch and the coding notes. The hold also lifts only after the 095d-2 re-run clears all three markers.
   - **So the assign-firm decision closes no Signal.** Its `ResolvedSignalIds` is empty. Its facts name the group's Signal id and say that the firm_missing reason was cleared by the decision. An append-only record must not claim to resolve a Signal that may stay open for other notes.
   - **The 095d-2 re-run re-maps the group.**
-    - If reasons remain, the same Signal stays open with its title recomputed.
+    - If reasons remain, ~~the same Signal stays open with its title recomputed~~ the Signal is Superseded and a new episode opens when the reason set changed (2026-11-05 095d-2 Q2 below).
     - If none remain, the Signal closes as `ConditionCleared`, with the record's id in the close facts for audit.
   - **The earlier "closed as Acted and linked to the record" no longer applies to the shared Signal.** Condition 4 holds: nothing closes before the record.
   - **Stored-file renames go inside the apply transaction.** `sprk_storedfile.sprk_name` is a Dataverse column, and `StoredFileBlobName.Build` uses ids only (`StoredFileContracts.cs:298-305`). This replaces ontology's earlier "rename after the record" addition, and the `files` failedStep and its census row are not needed.
@@ -470,6 +470,18 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - **Known limit:** a set stored by a pre-fix attempt is replayed verbatim on retry; dev-only, in-flight rows.
   - Requested in 114's scope before the master PR; otherwise a filed issue that blocks 114's master PR.
   - **Scope (2026-11-05, ebilling 114b asked): a Return is outside the release filter.** Returned to Firm is terminal (`InvoiceLifecycleService` ~:105); the review ends and no hold can be lifted later, so nothing would ever close a left-open Signal. As with an automatic rejection (ebilling D-122), the Return's record resolves every open Signal on the invoice, closed Acted, the shared SubmissionIntegrity Signal included. The filter applies only to decisions after which the invoice stays in review (Override). Review detail on Return follows D-205 (moving out of In Review recomputes it in the same transaction). 114b's order fix (authorise over the unfiltered set, then filter) accepted: stricter, fails closed.
+- **095d-2 rulings (2026-11-05, ebilling brief `095d2-brief.md` §4 at `ac9bcad04a`).**
+  - **Q1, the record id on the ConditionCleared close: link it with `SignalWriter.LinkConditionClearedRecordAsync` (D-145b extended to this one Decide-lane close).** Conditions:
+    - link only when the re-run started by the assign-firm decision is the run that finds no reason left, so the Set firm cleared the last one; a Signal that survives and is cleared later by another path is not linked to the assign-firm record;
+    - `resolvedBy` = the assign-firm decider (as D-145b names the person whose change satisfied the item), and `expectedPriorRecordId` = null;
+    - the record's `ResolvedSignalIds` stays empty (D-201 amendment), so the link is the Signal pointing to the record, never the record claiming the Signal;
+    - the method's doc comment changes from "Do-lane" to name both uses, and the writer test covers a Decide-lane link plus its ForeignLink and NotApplicable outcomes.
+    - Not a log line only (the closed sets would show no decision), not a new writer parameter.
+  - **Q2, "the same Signal stays open with its title recomputed" is withdrawn.** It assumed the writer could rewrite an open row's title; it refreshes only `sprk_lastevaluated` (`SignalWriter.cs` ~:340-352). A changed reason set closes the Signal Superseded (record-free, R16) and opens episode n+1, as ontology's own version change and ebilling 101's corrections re-evaluation do. Conditions:
+    - supersede only when the reason set actually changed, never on every run;
+    - the new episode starts its own first-detected date (the Worklist age restarts; accepted);
+    - a stored Override or Return set that names the superseded Signal closes it as `LeftAsIs` (resolved otherwise), not a failure (`HumanDecisionSignalClose` ~:104), so a retry does not loop on 503;
+    - the 114b filter matches on policy + subject and so carries over to the new episode.
 
 ## D-202 — Record-rule policy code: `BRR-{recordRulePolicyId:N}` (ontology position, 2026-11-03)
 
