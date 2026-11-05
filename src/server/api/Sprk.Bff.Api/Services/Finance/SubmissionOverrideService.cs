@@ -426,7 +426,19 @@ public sealed class SubmissionOverrideService
 
             if (string.Equals(code, SubmissionReasonCodes.Overridden, StringComparison.Ordinal))
             {
-                return Disposition.Overridden;
+                // F1 review round: the code alone is user-writable, so only the code WITH the Override's stamp (InvoiceProcedureHold.IsReleased,
+                // the one definition) is Overridden. Without it, findings that store a hold keep the submission held (a genuine Override can still
+                // proceed and record, and the stamp it writes is what releases it); findings that store none classify as before, below.
+                var json = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
+                if (InvoiceProcedureHold.IsReleased(code, json))
+                {
+                    return Disposition.Overridden;
+                }
+
+                if (InvoiceProcedureHold.ReasonsOf(code, json).Count > 0)
+                {
+                    return Disposition.ProcedureHeld;
+                }
             }
         }
 
@@ -831,6 +843,38 @@ public sealed class SubmissionOverrideService
                 "The decision is not valid.", invoiceId);
         }
 
+        // ── Task 114 (F4 review round): the holds that REMAIN are derived BEFORE any write (the set store, the Decision Record, the Signal closes),
+        //    so a fault reading them leaves nothing behind (503, no record, no closed Signal) while the hold stays in force. The derivation does not
+        //    depend on the record: it asks "what remains once this submission reads as released", through a provisional stamp (the decision id; the
+        //    real stamp, with the record id, is written below). ──
+        (long InvoiceVersion, int? ReviewDetail)? releaseDetail = null;
+        if (verb == Verb.Override && InvoiceProcedureHold.ReasonsOf(row).Count > 0)
+        {
+            try
+            {
+                if (await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false))
+                {
+                    var provisional = WithStamp(findingsJson!, OverrideMember, new BlockedDecisionStamp(decisionId, decider, _time.GetUtcNow(), reason));
+                    var remaining = await InvoiceOpenHolds.ReasonsAfterAsync(
+                        _entities, invoice!, submissionId, new InvoiceOpenHolds.StoredSubmission(SubmissionReasonCodes.Overridden, provisional), ct).ConfigureAwait(false);
+                    if (RowVersionOf(invoice!) is not { } invoiceVersion)
+                    {
+                        _logger.LogWarning("Invoice {InvoiceId} was read without a row version; the release of submission {SubmissionId} is not written", invoiceId, submissionId);
+                        return Unavailable(submissionId, invoiceId);
+                    }
+
+                    releaseDetail = (invoiceVersion, InvoiceReviewDetail.ReviewDetailOf(remaining));
+                }
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                // Held, not guessed: nothing is written. The type only: a message can name rows.
+                _logger.LogWarning("Submission {SubmissionId}: the holds that remain on invoice {InvoiceId} could not be read ({ExceptionType}); nothing was written",
+                    submissionId, invoiceId, ex.GetType().Name);
+                return Unavailable(submissionId, invoiceId);
+            }
+        }
+
         // ── The set is stored BEFORE the record (049's way), so a retry closes exactly it. ──
         if (storeSet)
         {
@@ -946,35 +990,11 @@ public sealed class SubmissionOverrideService
             return Unavailable(submissionId, invoiceId);
         }
 
-        // ── Task 114 (ontology D-205 writer 5): an Override that lifts a Procedure hold re-derives the invoice's review detail from the holds
-        //    that REMAIN, and writes it in the SAME transaction as the submission's state, each row conditioned on the version read here. ──
-        IReadOnlyList<OrganizationRequest>? releaseTransaction = null;
-        if (verb == Verb.Override && InvoiceProcedureHold.ReasonsOf(row).Count > 0)
-        {
-            try
-            {
-                if (await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false))
-                {
-                    var remaining = await InvoiceOpenHolds.ReasonsAfterAsync(
-                        _entities, invoice!, submissionId, new InvoiceOpenHolds.StoredSubmission(SubmissionReasonCodes.Overridden, newJson), ct).ConfigureAwait(false);
-                    if (RowVersionOf(invoice!) is not { } invoiceVersion)
-                    {
-                        _logger.LogWarning("Invoice {InvoiceId} was read without a row version; the release of submission {SubmissionId} is not written", invoiceId, submissionId);
-                        return Unavailable(submissionId, invoiceId);
-                    }
-
-                    releaseTransaction = BuildReleaseTransaction(
-                        submissionId, fields, version, invoiceId, invoiceVersion, InvoiceReviewDetail.ReviewDetailOf(remaining));
-                }
-            }
-            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
-            {
-                // Held, not guessed: nothing is written (the record stands, and the repeat finds it and finishes). The type only: a message can name rows.
-                _logger.LogWarning("Submission {SubmissionId}: the holds that remain on invoice {InvoiceId} could not be read ({ExceptionType}); the release is not written",
-                    submissionId, invoiceId, ex.GetType().Name);
-                return Unavailable(submissionId, invoiceId);
-            }
-        }
+        // ── Task 114 (ontology D-205 writer 5): an Override that lifts a Procedure hold writes the invoice's review detail, derived BEFORE the
+        //    record (above) from the holds that REMAIN, in the SAME transaction as the submission's state, each row conditioned on the version read. ──
+        IReadOnlyList<OrganizationRequest>? releaseTransaction = releaseDetail is { } release
+            ? BuildReleaseTransaction(submissionId, fields, version, invoiceId, release.InvoiceVersion, release.ReviewDetail)
+            : null;
 
         try
         {
@@ -1085,11 +1105,13 @@ public sealed class SubmissionOverrideService
     /// <summary>
     /// What the stored findings must show for <paramref name="disposition"/> to be decided (fail closed): a held internal submission is a Blocked
     /// evaluation with a deciding finding OR a stored Procedure hold (task 114, C22: a gap or unresolved hold has no deciding finding, so
-    /// requiring one refused every invoice Blocked only by it); an Accepted submission with a Procedure reason must store that hold.
+    /// requiring one refused every invoice Blocked only by it); an Accepted submission with a Procedure reason must store that hold (its findings
+    /// are Accepted, or Blocked where an Internal hold's status or code was altered outside the BFF: the F1 review round classifies it held, and a
+    /// genuine Override must still be able to record).
     /// </summary>
     internal static bool StoredHoldMatches(Disposition disposition, InvoiceSubmissionAfterSteps.StoredFindings stored) =>
         disposition == Disposition.ProcedureHeld
-            ? stored.Kind is SubmissionEvaluationKind.Accepted or SubmissionEvaluationKind.AcceptedUncoded && stored.ProcedureHolds().Count > 0
+            ? stored.Kind is SubmissionEvaluationKind.Accepted or SubmissionEvaluationKind.AcceptedUncoded or SubmissionEvaluationKind.Blocked && stored.ProcedureHolds().Count > 0
             : stored.Kind == SubmissionEvaluationKind.Blocked && (stored.DecidingIndexes.Count > 0 || stored.ProcedureHolds().Count > 0);
 
     /// <summary>
@@ -1570,7 +1592,7 @@ public sealed class SubmissionOverrideService
         return root.ToJsonString();
     }
 
-    private static BlockedDecisionStamp? ReadStamp(JsonObject? root, string member)
+    internal static BlockedDecisionStamp? ReadStamp(JsonObject? root, string member)
     {
         if (root?[member] is not JsonObject node
             || !Guid.TryParse(Text(node, "recordId"), out var recordId)

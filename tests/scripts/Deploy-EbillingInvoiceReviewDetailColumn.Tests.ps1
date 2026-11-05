@@ -16,7 +16,7 @@ BeforeAll {
     if ($errors.Count -gt 0) { throw "The script does not parse: $($errors[0].Message)" }
 
     $wantedVariables = 'Table', 'Column', 'ColumnSchemaName', 'Options', 'FirmMissingReason', 'ProcedureReasons', 'RulesNotChecked', 'OverriddenReason', 'Description', 'InReviewStatusCode', 'EntitySet'
-    $wantedFunctions = 'New-ReviewDetailDef', 'Get-ColumnGaps', 'Get-InvariantBreaks', 'Get-SubmissionHoldReasons'
+    $wantedFunctions = 'New-ReviewDetailDef', 'Get-ColumnGaps', 'Get-InvariantBreaks', 'Get-SubmissionHoldReasons', 'Test-SubmissionReleased'
 
     $pieces = [System.Collections.Generic.List[string]]::new()
     $found = [System.Collections.Generic.List[string]]::new()
@@ -112,6 +112,11 @@ Describe 'Get-ColumnGaps: the -Verify comparison of the live options' {
 }
 
 Describe 'Get-SubmissionHoldReasons: the reverse invariant read' {
+    BeforeAll {
+        # What SubmissionOverrideService.WithStamp writes beside the kept findings.
+        $script:Stamp = '"override":{"recordId":"11111111-1111-1111-1111-111111111111","bySystemUserId":"22222222-2222-2222-2222-222222222222","on":"2026-11-01T10:00:00.0000000Z","reason":"reviewed"}'
+    }
+
     It 'returns an EMPTY set (not $null) for a submission with no hold, and UnionWith accepts it' {
         foreach ($submission in @(
                 @{ sprk_outcomereasoncode = $null; sprk_findingsjson = $null }
@@ -138,17 +143,38 @@ Describe 'Get-SubmissionHoldReasons: the reverse invariant read' {
         $r.Contains('ebilling.submission.procedures_unresolved') | Should -BeTrue
     }
 
-    It 'task 114: a submission released by an Override holds no Procedure reason (the gap stays in its findings as evidence); the firm marker still holds' {
+    It 'task 114: a submission released by an Override (the code AND the stamp) holds no Procedure reason (the gap stays in its findings as evidence); the firm marker still holds' {
         $gap = '{"reasonCode":"ebilling.submission.procedure_gap","pipelineFindings":[{"reasonCode":"ebilling.submission.procedure_gap"}],' +
-               '"lineFindings":[{"code":"rules.not_checked","cause":"ebilling.submission.procedures_unresolved"}]}'
+               '"lineFindings":[{"code":"rules.not_checked","cause":"ebilling.submission.procedures_unresolved"}],' + $script:Stamp + '}'
         $released = Get-SubmissionHoldReasons ([pscustomobject]@{ sprk_outcomereasoncode = 'ebilling.submission.overridden'; sprk_findingsjson = $gap })
         $released.Count | Should -Be 0
         $held = Get-SubmissionHoldReasons ([pscustomobject]@{ sprk_outcomereasoncode = $null; sprk_findingsjson = $gap })
         $held.Contains('ebilling.submission.procedure_gap') | Should -BeTrue
-        $firm = '{"pipelineFindings":[{"reasonCode":"ebilling.submission.firm_missing"},{"reasonCode":"ebilling.submission.procedure_gap"}]}'
+        $firm = '{"pipelineFindings":[{"reasonCode":"ebilling.submission.firm_missing"},{"reasonCode":"ebilling.submission.procedure_gap"}],' + $script:Stamp + '}'
         $both = Get-SubmissionHoldReasons ([pscustomobject]@{ sprk_outcomereasoncode = 'ebilling.submission.overridden'; sprk_findingsjson = $firm })
         $both.Count | Should -Be 1
         $both.Contains('ebilling.submission.firm_missing') | Should -BeTrue
+    }
+
+    It 'task 114 F1 (must fire): the release code with NO stamp is not a release - the Procedure reasons still hold' {
+        $gap = '{"reasonCode":"ebilling.submission.procedure_gap","pipelineFindings":[{"reasonCode":"ebilling.submission.procedure_gap"}],"lineFindings":[]}'
+        $r = Get-SubmissionHoldReasons ([pscustomobject]@{ sprk_outcomereasoncode = 'ebilling.submission.overridden'; sprk_findingsjson = $gap })
+        $r.Contains('ebilling.submission.procedure_gap') | Should -BeTrue
+    }
+
+    It 'task 114 F1 (must fire): a malformed or incomplete stamp is not a release (<_>)' -ForEach @(
+        '"override":{"recordId":"not-a-guid","bySystemUserId":"22222222-2222-2222-2222-222222222222","on":"2026-11-01T10:00:00Z"}'
+        '"override":{"recordId":"11111111-1111-1111-1111-111111111111","bySystemUserId":"nope","on":"2026-11-01T10:00:00Z"}'
+        '"override":{"recordId":"11111111-1111-1111-1111-111111111111","bySystemUserId":"22222222-2222-2222-2222-222222222222","on":"never"}'
+        '"override":{"recordId":"11111111-1111-1111-1111-111111111111","bySystemUserId":"22222222-2222-2222-2222-222222222222"}'
+        '"override":{"recordId":"00000000-0000-0000-0000-000000000000","bySystemUserId":"22222222-2222-2222-2222-222222222222","on":"2026-11-01T10:00:00Z"}'
+        '"override":{"recordId":5,"bySystemUserId":true,"on":1}'
+        '"override":"stamped"'
+        '"override":null'
+    ) {
+        $json = '{"pipelineFindings":[{"reasonCode":"ebilling.submission.procedure_gap"}],"lineFindings":[],' + $_ + '}'
+        $r = Get-SubmissionHoldReasons ([pscustomobject]@{ sprk_outcomereasoncode = 'ebilling.submission.overridden'; sprk_findingsjson = $json })
+        $r.Contains('ebilling.submission.procedure_gap') | Should -BeTrue
     }
 
     It 'holds findings that cannot be parsed as procedures not checked (fail closed)' {

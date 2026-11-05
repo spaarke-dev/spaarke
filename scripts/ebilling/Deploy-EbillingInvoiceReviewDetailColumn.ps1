@@ -180,17 +180,39 @@ function Get-Pages([string]$Path) {
     return , $rows
 }
 
+# InvoiceProcedureHold.IsReleased: the reason code is overridden AND the findings carry a valid override stamp, the one BFF definition of a release.
+function Test-SubmissionReleased([string]$Code, [string]$Json) {
+    if ($Code -ne $OverriddenReason -or [string]::IsNullOrWhiteSpace($Json)) { return $false }
+    try {
+        $root = $Json | ConvertFrom-Json -ErrorAction Stop
+        if ($root -isnot [pscustomobject]) { return $false }
+        $stamp = $root.override
+        if ($stamp -isnot [pscustomobject]) { return $false }
+        $guid = [guid]::Empty
+        $on = [datetimeoffset]::MinValue
+        foreach ($member in 'recordId', 'bySystemUserId') {
+            $value = $stamp.$member
+            if ($value -isnot [string] -or -not [guid]::TryParse($value, [ref]$guid) -or $guid -eq [guid]::Empty) { return $false }
+        }
+        # The BFF stamps 'on' as an ISO-8601 string; ConvertFrom-Json may have turned it into a [datetime] already.
+        if ($stamp.on -is [datetime]) { return $true }
+        return ($stamp.on -is [string]) -and [datetimeoffset]::TryParse($stamp.on, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$on)
+    } catch { return $false }
+}
+
 # The hold reasons one stored submission names, as InvoiceProcedureHold.ReasonsOf and InvoiceFirmHold.IsHeld read them: the outcome reason code,
 # and the findings' reasonCode (procedure reasons), pipelineFindings[].reasonCode and the rules.not_checked line findings' cause. Findings that
 # cannot be parsed are held as 'procedures not checked' (fail closed, as the BFF).
 function Get-SubmissionHoldReasons($Submission) {
     $reasons = [System.Collections.Generic.HashSet[string]]::new()
     $code = [string]$Submission.sprk_outcomereasoncode
-    # Task 114: a submission released by an Override (reason code overridden) holds NO Procedure reason - its findings keep the gap as evidence
-    # (InvoiceProcedureHold.ReasonsOf); the firm marker is its own hold and is still read.
-    $released = $code -eq $OverriddenReason
-    if ($code -eq $FirmMissingReason -or (-not $released -and $ProcedureReasons -contains $code)) { [void]$reasons.Add($code) }
     $json = [string]$Submission.sprk_findingsjson
+    # Task 114 (F1 review round, InvoiceProcedureHold.IsReleased): a submission is released by an Override only when the reason code is overridden
+    # AND the findings carry a valid override stamp (a non-empty GUID recordId and bySystemUserId, and a parseable 'on'). The code column alone is
+    # user-writable; the findings column is field-secured. A released submission holds NO Procedure reason - its findings keep the gap as evidence;
+    # the firm marker is its own hold and is still read. A code with no valid stamp is not a release: the findings decide.
+    $released = Test-SubmissionReleased $code $json
+    if ($code -eq $FirmMissingReason -or (-not $released -and $ProcedureReasons -contains $code)) { [void]$reasons.Add($code) }
     if ([string]::IsNullOrWhiteSpace($json)) { return ,$reasons }
     try {
         $root = $json | ConvertFrom-Json -ErrorAction Stop

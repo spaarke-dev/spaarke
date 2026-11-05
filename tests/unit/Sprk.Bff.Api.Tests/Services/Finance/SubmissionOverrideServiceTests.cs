@@ -3144,6 +3144,7 @@ public class SubmissionOverrideServiceTests
         { "another linked submission still holds a gap", InvoiceReviewDetail.WaitingForBillingTerms },
         { "another linked submission still could not be checked", InvoiceReviewDetail.BillingTermsNotChecked },
         { "another linked submission is itself released", null },
+        { "another linked submission only carries a forged release code (no stamp)", InvoiceReviewDetail.WaitingForBillingTerms },
     };
 
     [Theory(DisplayName = "114 must-fire: the release re-derives the detail through InvoiceOpenHolds from the holds that REMAIN - never blank while another hold stays (the firm hold still open: 659490002, and approval is still refused)")]
@@ -3166,6 +3167,9 @@ public class SubmissionOverrideServiceTests
                 w.OtherSubmissions.Add(OtherSubmission(null, "{\"pipelineFindings\":[{\"reasonCode\":\"" + SubmissionReasonCodes.ProceduresUnresolved + "\",\"values\":{}}],\"lineFindings\":[]}"));
                 break;
             case "another linked submission is itself released":
+                w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.Overridden, Stamped("{\"pipelineFindings\":[{\"reasonCode\":\"" + SubmissionReasonCodes.ProcedureGap + "\",\"values\":{}}],\"lineFindings\":[]}")));
+                break;
+            case "another linked submission only carries a forged release code (no stamp)":
                 w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.Overridden, "{\"pipelineFindings\":[{\"reasonCode\":\"" + SubmissionReasonCodes.ProcedureGap + "\",\"values\":{}}],\"lineFindings\":[]}"));
                 break;
             default:
@@ -3188,7 +3192,7 @@ public class SubmissionOverrideServiceTests
                     s.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode),
                     s.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson)))]);
         InvoiceReviewDetail.ReviewDetailOf(post).Should().Be(expected, remaining);
-        post.Contains(SubmissionReasonCodes.ProcedureGap).Should().Be(remaining == "another linked submission still holds a gap",
+        post.Contains(SubmissionReasonCodes.ProcedureGap).Should().Be(remaining is "another linked submission still holds a gap" or "another linked submission only carries a forged release code (no stamp)",
             "the released gap is gone from the invoice's holds");
     }
 
@@ -3344,10 +3348,11 @@ public class SubmissionOverrideServiceTests
         InvoiceProcedureHold.ReasonsOf(w.Submission).Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "114 fail closed: a fault reading the holds that remain writes no release (503), the record stands, and the repeat finishes with no second record")]
-    public async Task Release_WhenTheRemainingHoldsCannotBeRead_IsUnavailable_AndTheRepeatFinishes()
+    [Fact(DisplayName = "114 fail closed (F4): a fault reading the holds that remain is 503 BEFORE anything is written - no Decision Record, no stored set, no Signal closed - and the repeat decides with one record")]
+    public async Task Release_WhenTheRemainingHoldsCannotBeRead_IsUnavailable_BeforeAnyWrite_AndTheRepeatFinishes()
     {
         var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa);
+        var onInvoice = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
         w.HoldReadFault = new TimeoutException("a message that names row " + Guid.NewGuid());
 
         var result = await w.OverrideAsync();
@@ -3355,12 +3360,16 @@ public class SubmissionOverrideServiceTests
         ShouldBeUnavailable(result);
         w.Code.Should().Be(SubmissionReasonCodes.ProcedureGap, "the hold is still in force");
         w.Transactions.Should().BeEmpty();
-        w.RecordCreates.Should().Be(1);
+        w.RecordCreates.Should().Be(0, "F4: the derivation precedes the Decision Record");
+        w.Closes.Should().BeEmpty("F4: no Signal is closed while the hold stays in force");
+        w.ClosedBy.Should().NotContainKey(onInvoice);
+        w.AssertNothingWritten();
         w.Log.Entries.Should().NotContain(e => e.Message.Contains("names row", StringComparison.Ordinal), "the log names the exception type, never its message (C16)");
 
         w.HoldReadFault = null;
         (await w.OverrideAsync()).Kind.Should().Be(BlockedDecisionKind.Decided);
         w.RecordCreates.Should().Be(1);
+        w.ClosedBy.Should().ContainKey(onInvoice);
     }
 
     [Fact(DisplayName = "114: a Return of an SPA submission held by a Procedure hold is refused as it always was (not_internal); a Return of an Internal one with no deciding finding is allowed (C22)")]
@@ -3411,16 +3420,19 @@ public class SubmissionOverrideServiceTests
         ordinary.Updates.Should().ContainSingle();
     }
 
-    [Theory(DisplayName = "114: Classify - an Accepted submission with a Procedure reason is held on any channel, one reading Overridden is released; anything else keeps its disposition")]
-    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.ProcedureGap, "ProcedureHeld")]
-    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.ProceduresUnresolved, "ProcedureHeld")]
-    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden, "Overridden")]
-    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Accepted, null, "NotInternal")]
-    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.ProcedureGap, "NotInternal")]
-    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Failed, SubmissionReasonCodes.ProcedureGap, "NotInternal")]
-    [InlineData(InvoiceSubmissionChannel.Internal, InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked, "Blocked")]
-    [InlineData(InvoiceSubmissionChannel.Internal, InvoiceSubmissionStatus.Accepted, null, "AcceptedByProcessing")]
-    public void Classify_ProcedureHolds(InvoiceSubmissionChannel channel, InvoiceSubmissionStatus status, string? code, string expected)
+    private const string StoredGapFindings = "{\"pipelineFindings\":[{\"reasonCode\":\"" + SubmissionReasonCodes.ProcedureGap + "\",\"values\":{}}],\"lineFindings\":[]}";
+    private const string NoHoldFindings = "{\"pipelineFindings\":[],\"lineFindings\":[]}";
+
+    private static string Stamped(string findings) => InvoiceOpenHoldsTests.Stamped(findings);
+
+    private static string WithBadStamp(string findings)
+    {
+        var root = JsonNode.Parse(findings)!.AsObject();
+        root[SubmissionOverrideService.OverrideMember] = new JsonObject { ["recordId"] = "not-a-guid", ["bySystemUserId"] = Guid.NewGuid().ToString("D"), ["on"] = "2026-11-01T10:00:00Z" };
+        return root.ToJsonString();
+    }
+
+    private static Entity ClassifyRow(InvoiceSubmissionChannel channel, InvoiceSubmissionStatus status, string? code, string? findings)
     {
         var row = new Entity(FinanceBaseValues.SubmissionEntity, Guid.NewGuid())
         {
@@ -3428,8 +3440,76 @@ public class SubmissionOverrideServiceTests
             [InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)status),
             [InvoiceSubmissionPersister.SubmissionReasonCode] = code,
         };
+        if (findings is not null)
+        {
+            row[InvoiceSubmissionPersister.SubmissionFindingsJson] = findings;
+        }
 
-        SubmissionOverrideService.Classify(row).ToString().Should().Be(expected);
+        return row;
+    }
+
+    [Theory(DisplayName = "114: Classify - an Accepted submission with a Procedure reason is held on any channel, one reading Overridden WITH the Override's stamp is released; anything else keeps its disposition")]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.ProcedureGap, "ProcedureHeld")]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.ProceduresUnresolved, "ProcedureHeld")]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Accepted, null, "NotInternal")]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.ProcedureGap, "NotInternal")]
+    [InlineData(InvoiceSubmissionChannel.Spa, InvoiceSubmissionStatus.Failed, SubmissionReasonCodes.ProcedureGap, "NotInternal")]
+    [InlineData(InvoiceSubmissionChannel.Internal, InvoiceSubmissionStatus.Rejected, SubmissionReasonCodes.Blocked, "Blocked")]
+    [InlineData(InvoiceSubmissionChannel.Internal, InvoiceSubmissionStatus.Accepted, null, "AcceptedByProcessing")]
+    public void Classify_ProcedureHolds(InvoiceSubmissionChannel channel, InvoiceSubmissionStatus status, string? code, string expected)
+    {
+        SubmissionOverrideService.Classify(ClassifyRow(channel, status, code, findings: null)).ToString().Should().Be(expected);
+    }
+
+    [Theory(DisplayName = "114 F1 (must not fire): Classify - the release code WITH a genuine stamp is Overridden, on either channel")]
+    [InlineData(InvoiceSubmissionChannel.Spa)]
+    [InlineData(InvoiceSubmissionChannel.Internal)]
+    public void Classify_ACodeWithAGenuineStamp_IsOverridden(InvoiceSubmissionChannel channel)
+    {
+        SubmissionOverrideService.Classify(ClassifyRow(channel, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden, Stamped(StoredGapFindings)))
+            .Should().Be(SubmissionOverrideService.Disposition.Overridden);
+    }
+
+    [Theory(DisplayName = "114 F1 (must fire): Classify - the release code with NO stamp, or a malformed one, and findings that store a hold is ProcedureHeld, never Overridden / AlreadyDecided")]
+    [InlineData(InvoiceSubmissionChannel.Spa, false)]
+    [InlineData(InvoiceSubmissionChannel.Internal, false)]
+    [InlineData(InvoiceSubmissionChannel.Spa, true)]
+    [InlineData(InvoiceSubmissionChannel.Internal, true)]
+    public void Classify_AForgedCode_OverStoredHoldFindings_IsProcedureHeld(InvoiceSubmissionChannel channel, bool malformedStamp)
+    {
+        var findings = malformedStamp ? WithBadStamp(StoredGapFindings) : StoredGapFindings;
+
+        var disposition = SubmissionOverrideService.Classify(ClassifyRow(channel, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden, findings));
+
+        disposition.Should().Be(SubmissionOverrideService.Disposition.ProcedureHeld);
+        disposition.Should().NotBe(SubmissionOverrideService.Disposition.Overridden);
+    }
+
+    [Theory(DisplayName = "114 F1: Classify - the release code with no stamp and findings that store NO hold keeps its pre-F1 disposition (the FR-20 single-column bypass is pre-existing and reported, not widened)")]
+    [InlineData(InvoiceSubmissionChannel.Spa, "NotInternal")]
+    [InlineData(InvoiceSubmissionChannel.Internal, "Overridden")]
+    public void Classify_AForgedCode_OverNoHoldFindings_IsUnchanged(InvoiceSubmissionChannel channel, string expected)
+    {
+        SubmissionOverrideService.Classify(ClassifyRow(channel, InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden, NoHoldFindings))
+            .ToString().Should().Be(expected);
+    }
+
+    [Theory(DisplayName = "114 F1 (must fire): an SPA / Internal submission whose reason code was forged to overridden (no stamp) still holds the invoice, and a genuine Override of it proceeds, records, and writes the stamp that releases it")]
+    [InlineData(InvoiceSubmissionChannel.Spa)]
+    [InlineData(InvoiceSubmissionChannel.Internal)]
+    public async Task Override_OfAForgedReleaseCode_Proceeds_AndWritesTheStamp(InvoiceSubmissionChannel channel)
+    {
+        var w = await World.CreateHeldAsync(channel);
+        w.SetSubmission(InvoiceSubmissionStatus.Accepted, SubmissionReasonCodes.Overridden); // the single-column write by a user with Write
+        InvoiceProcedureHold.ReasonsOf(w.Submission).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "control: still held");
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided, "not AlreadyDecided: nothing was ever decided");
+        w.RecordCreates.Should().Be(1);
+        JsonNode.Parse(w.FindingsJson)![SubmissionOverrideService.OverrideMember].Should().NotBeNull();
+        InvoiceProcedureHold.ReasonsOf(w.Submission).Should().BeEmpty("the genuine release carries the stamp");
+        InvoiceProcedureHold.IsReleased(w.Code, w.FindingsJson).Should().BeTrue();
     }
 
     private static string FindFromRepoRoot(params string[] parts)

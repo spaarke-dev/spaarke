@@ -37,8 +37,10 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// be known). A read fault throws, and every caller refuses or answers unavailable: held, never "not held".</para>
 /// <para><b>Clearing (recorded for 114, 095d-2 and the ebilling-r2 re-check).</b> A Procedure hold lasts as long as the stored state names it.
 /// <b>Task 114's Override release marks it released</b>: the submission's outcome reason code becomes
-/// <see cref="SubmissionReasonCodes.Overridden"/> (and its status Accepted), the one state only <c>SubmissionOverrideService</c> writes, and a
-/// submission in that state holds no Procedure reason, whatever its stored findings still name (an override never rewrites a finding, FR-37).
+/// <see cref="SubmissionReasonCodes.Overridden"/> (and its status Accepted) and its findings gain the <c>override</c> stamp, in one write only
+/// <c>SubmissionOverrideService</c> makes; a submission in that state (<see cref="IsReleased"/>: the code AND a valid stamp, because the code column
+/// alone is user-writable) holds no Procedure reason, whatever its stored findings still name (an override never rewrites a finding, FR-37).
+/// A re-check that re-holds a submission must remove the stamp.
 /// The release recomputes the review detail in the same transaction (<see cref="InvoiceOpenHolds"/>). A future re-check (ebilling-r2) must
 /// rewrite the stored state, or mark it released, in the transaction that recomputes the review detail.</para>
 /// </remarks>
@@ -93,15 +95,12 @@ public static class InvoiceProcedureHold
         var reasons = new HashSet<string>(StringComparer.Ordinal);
 
         // Task 114: an Override released this submission's Procedure holds. Its findings still name them (they are kept as evidence and read
-        // as Overridden), so the released state is the outcome reason, not the findings.
-        // Fail closed still: findings that cannot be read are "could not be checked", released or not (as every other reason code).
-        if (string.Equals(reasonCode, SubmissionReasonCodes.Overridden, StringComparison.Ordinal))
+        // as Overridden), so the released state is the outcome reason AND the Override's stamp in the findings (IsReleased), not the findings alone.
+        // A reason code with no valid stamp is not a release (F1 review round: sprk_outcomereasoncode is not field-secured, so any user with Write on
+        // the submission could plant it): it falls through to the findings, which hold the submission. Findings that cannot be read are never
+        // released (they hold as "could not be checked", as every other reason code).
+        if (IsReleased(reasonCode, json))
         {
-            if (!string.IsNullOrWhiteSpace(json) && !ParsesAsObject(json))
-            {
-                reasons.Add(SubmissionReasonCodes.ProceduresUnresolved);
-            }
-
             return reasons;
         }
 
@@ -155,13 +154,30 @@ public static class InvoiceProcedureHold
         return reasons;
     }
 
-    private static bool ParsesAsObject(string json)
+    /// <summary>
+    /// Task 114 (F1 review round): whether a submission's Procedure holds were released by a genuine Override. True ONLY when BOTH hold: the outcome
+    /// reason code is <see cref="SubmissionReasonCodes.Overridden"/>, and the stored findings carry a valid <c>override</c> stamp
+    /// (<see cref="SubmissionOverrideService.OverrideMember"/>: a non-empty GUID <c>recordId</c> and <c>bySystemUserId</c>, and a parseable <c>on</c>),
+    /// which <c>SubmissionOverrideService</c> writes in the same transaction as the code. The code column is user-writable; the findings column is
+    /// field-secured to the BFF app user, so the stamp is what makes the code trustworthy. Pure. The one definition of "released": the hold
+    /// reader, the override service's classification and the review-detail column script (<c>Get-SubmissionHoldReasons</c>) all follow it.
+    /// <b>A writer that re-holds a submission (a future re-check) must remove the <c>override</c> stamp.</b>
+    /// </summary>
+    public static bool IsReleased(string? reasonCode, string? json)
     {
+        if (!string.Equals(reasonCode, SubmissionReasonCodes.Overridden, StringComparison.Ordinal) || string.IsNullOrWhiteSpace(json))
+        {
+            return false;
+        }
+
         try
         {
-            return JsonNode.Parse(json) is JsonObject;
+            return JsonNode.Parse(json) is JsonObject root
+                && SubmissionOverrideService.ReadStamp(root, SubmissionOverrideService.OverrideMember) is { } stamp
+                && stamp.RecordId != Guid.Empty
+                && stamp.BySystemUserId != Guid.Empty;
         }
-        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException)
+        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException or FormatException)
         {
             return false;
         }
