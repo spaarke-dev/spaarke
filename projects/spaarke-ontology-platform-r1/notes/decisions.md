@@ -586,6 +586,12 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - Nothing of ours deletes these rows through a generic path. The writers never delete: a Signal ends by a close, and Decision Records are append-only.
     - The exposure: Ontology Administrator holds Delete on `sprk_signal` and `sprk_budgetrevision`. A deleted revision makes an incorrect Signal look right.
     - Proposed: refuse all three as delete targets, for the caller and the system principal, before any read, through the same registry flag. The same goes for any other generic delete path. No role change.
+    - **Owner decided (2026-11-05, in field-mapping's session, relayed; fm `72d30b6853`): chat delete honours D-204.** It lands in fm 048 as fix round 2:
+      - chat `delete_record` refuses the three tables in validate and execute, before any read, for the caller and the system principal;
+      - every other generic delete path is refused, or excluded with a reason in fm's notes;
+      - must-fire and must-not-fire tests;
+      - model-driven admin privileges unchanged; Service Deleter untouched.
+    - Ontology reviews the combined update + delete diff of 048 before merge.
 - **Dev deploy of the lineage fix (master `909754869f`, live 2026-11-05 04:16:30Z; uac-r2 ran it with the owner's go): ontology PASS on the 30-minute gate and the AFTER read-back.**
   - Gate results:
     - 0 5xx and 0 held-pair Warnings;
