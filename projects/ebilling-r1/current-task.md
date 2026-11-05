@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-05. Session ebilling-r1-c7 (authoritative; d4 is the duplicate). Work head: c4b8d43e8f + checkpoint (pushed). Dev BFF: **master 909754869f**; uac-r2 deploying master `0f53e053bf` (fm 042c/048; ebilling OK given, no ebilling paths). `StoredFileReconcileEnabled=false`. **None of this project's work is on master or the dev BFF.**
+> **Last Updated**: 2026-11-05. Session ebilling-r1-c7 (authoritative; d4 is the duplicate). Work head: c4b8d43e8f + checkpoint (pushed). Dev BFF: **master 909754869f**; uac-r2 deploy of master `0f53e053bf` STARTED 2026-11-05 (fm 042c/048; ebilling OK; creator-person -Verify PASS; after-notice pending). `StoredFileReconcileEnabled=false`. **None of this project's work is on master or the dev BFF.**
 
 ## Quick Recovery (READ THIS FIRST)
 
