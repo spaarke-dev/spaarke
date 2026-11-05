@@ -736,9 +736,14 @@ public sealed class StoredFileService
     /// <para>DEF-044 (owner option B): the blob's properties (its ETag) are read BEFORE the row-absence question, and the delete is pinned
     /// to that ETag (<c>If-Match</c>). A retry that reuses the blob after that read rewrites it (new ETag), so the delete fails 412 and
     /// the blob is KEPT (false) for the retry whose row is still coming. A blob that was not there at the read is not deleted.</para>
+    /// <para>Adversarial pass F1: a read-time pin alone closes almost nothing when the caller's own stage is long past (a run whose submission
+    /// lock expired fails after a newer run reused the blob: the read sees the newer run's ETag and the delete would match it). A caller
+    /// that staged the blob passes <paramref name="stagedETag"/>, the ETag its own stage left (<see cref="StagedBlob.ETag"/>); the delete is
+    /// then pinned to THAT, so any later rewrite makes it fail 412 and the blob is kept. The properties read and the row-absence check
+    /// are unchanged. Null keeps the read-time pin (a caller with no <see cref="StagedBlob"/>).</para>
     /// </summary>
     /// <exception cref="RequestFailedException">A storage fault.</exception>
-    public async Task<bool> DeleteStagedAsync(StoredFileRowSpec spec, CancellationToken ct)
+    public async Task<bool> DeleteStagedAsync(StoredFileRowSpec spec, CancellationToken ct, ETag? stagedETag = null)
     {
         ArgumentNullException.ThrowIfNull(spec);
         if (spec.Invalid() is not null || !_blobs.IsConfigured)
@@ -767,7 +772,7 @@ public sealed class StoredFileService
 
         try
         {
-            var deleted = await _blobs.DeleteAsync(container, name, properties.ETag, ct).ConfigureAwait(false);
+            var deleted = await _blobs.DeleteAsync(container, name, stagedETag ?? properties.ETag, ct).ConfigureAwait(false);
             _logger.LogInformation("Stored file {FileId}: staged blob {BlobName} removed by compensation (deleted={Deleted})", spec.FileId, name, deleted);
             return deleted;
         }

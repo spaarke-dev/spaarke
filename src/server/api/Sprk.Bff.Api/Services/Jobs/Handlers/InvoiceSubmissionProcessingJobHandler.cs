@@ -789,6 +789,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
         if (staged.RefusalCode == StoredFileRefusal.ContentConflict)
         {
             // Other bytes under this id: the file changed without a new row version. The stale stage is replaced (no row exists before the commit).
+            // No StagedBlob here (this attempt staged nothing), so no ETag of its own to pin to: it keeps the read-time pin.
             await _files.DeleteStagedAsync(spec, ct).ConfigureAwait(false);
             staged = await _files.StageAsync(spec, new MemoryStream(bytes, writable: false), ct).ConfigureAwait(false);
         }
@@ -826,7 +827,8 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
 
         try
         {
-            await _files.DeleteStagedAsync(copy.Spec, ct).ConfigureAwait(false);
+            // Pinned to the ETag THIS run's stage left (adversarial pass F1): a newer run's reuse after a submission-lock expiry is kept.
+            await _files.DeleteStagedAsync(copy.Spec, ct, copy.Blob.ETag).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

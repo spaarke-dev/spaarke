@@ -1376,6 +1376,47 @@ public sealed class StoredFileServiceTests
         rig.Gateway.Calls.Count(c => c.StartsWith("delete ", StringComparison.Ordinal)).Should().Be(callsBefore, "no delete is attempted for a blob that was not there at the read");
     }
 
+    [Fact(DisplayName = "DEF-044 F1 must-fire: DeleteStagedAsync(stagedETag: E1) after a newer run REUSED the blob (E2) and with no row yet keeps it (412): the lock-expiry case; the read-time pin alone would have deleted it")]
+    public async Task DeleteStaged_PinnedToTheStagedETag_NewerReuse_Kept()
+    {
+        var rig = new StoredFileRig();
+        var spec = UploadSpec();
+        var first = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+        first.ETag.Should().NotBeNull();
+        var newer = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+        newer.Reused.Should().BeTrue("the newer run reuses (rewrites) the blob");
+        newer.ETag.Should().NotBe(first.ETag);
+
+        var deleted = await rig.Service.DeleteStagedAsync(spec, CancellationToken.None, first.ETag);
+
+        deleted.Should().BeFalse("the blob is no longer the version this run staged");
+        var blob = rig.Gateway.Get(first.Container, first.BlobPath);
+        blob.Should().NotBeNull("the newer run's blob survives");
+        blob!.ETag.Should().Be(newer.ETag);
+        blob.Content.Should().Equal(Pdf);
+        rig.Gateway.Calls.Should().Contain("delete " + first.Container + "/" + first.BlobPath, "the delete was attempted, and refused");
+
+        // The read-time pin alone (no stagedETag) reads the newer ETag and would delete it: the gap this closes.
+        (await rig.Service.DeleteStagedAsync(spec, CancellationToken.None)).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "DEF-044 F1 must-not-fire: DeleteStagedAsync(stagedETag: E1) over a blob nobody reused deletes it; without a stagedETag the read-time pin is unchanged")]
+    public async Task DeleteStaged_PinnedToTheStagedETag_NoReuse_Deleted()
+    {
+        var rig = new StoredFileRig();
+        var staged = (await rig.Service.StageAsync(UploadSpec(), new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+
+        (await rig.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None, staged.ETag)).Should().BeTrue();
+        rig.Gateway.Get(staged.Container, staged.BlobPath).Should().BeNull();
+
+        // A row still keeps the blob whatever ETag is given.
+        var withRow = new StoredFileRig();
+        var rowStaged = (await withRow.Service.StageAsync(UploadSpec(), new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+        withRow.SeedFile(UploadSpec().FileId, Invoice, Pdf, StoredFileStatus.NotYetServable);
+        (await withRow.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None, rowStaged.ETag)).Should().BeFalse();
+        withRow.Gateway.Get(rowStaged.Container, rowStaged.BlobPath).Should().NotBeNull();
+    }
+
     // =============================================================================================================================
     // Scan verdict (091 condition 3)
     // =============================================================================================================================

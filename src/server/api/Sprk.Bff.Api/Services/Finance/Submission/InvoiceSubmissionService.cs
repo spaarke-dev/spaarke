@@ -2232,6 +2232,7 @@ public class InvoiceSubmissionService
         {
             try
             {
+                // Read-time pin only: this intake's submission id is new, so no other run can reuse the blob (nothing to pin to beyond the read).
                 await _files.DeleteStagedAsync(stagedSpec, CancellationToken.None);
             }
             catch (Exception ex)
