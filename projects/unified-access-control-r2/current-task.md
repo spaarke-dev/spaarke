@@ -69,7 +69,7 @@
   6. Gate script `$TEMP/uacmerge/uacg/gate909.sh <start> <end>`.
   7. Record in `notes/deploy-gate-<date>-<sha>.md`.
   8. Remove-WorktreeSafe.
-- **Next batch:** #2569 (fm 042c) when merged, then ebilling's master PR (pre-checks: the 095c build runs on dev's pre-P2 schema (`sprk_trackingscope` absent or optional; the phase check fails closed; from-email unchanged), and if not, the deploy and P2 go together under one owner go; P2 migration and the seam test run AFTER the deploy; sprk_firmhold on dev; the Stored Files K4 backfill; C22; `Deploy-EbillingFormsViews.ps1` after the gate, owner go in ebilling's session).
+- **Next batch:** #2569 (fm 042c, MERGED d9bef8e90f) + #2570 (fm 048, auto-merge; its PR diff equals the cleared range), then ebilling's master PR. Gate extras: 048 refusal codes count 0 from organic traffic. Ebilling's master PR (pre-checks: the 095c build runs on dev's pre-P2 schema (`sprk_trackingscope` absent or optional; the phase check fails closed; from-email unchanged), and if not, the deploy and P2 go together under one owner go; P2 migration and the seam test run AFTER the deploy; sprk_firmhold on dev; the Stored Files K4 backfill; C22; `Deploy-EbillingFormsViews.ps1` after the gate, owner go in ebilling's session).
 - **Peer live checks pending (their sessions, owner's go):**
   - word-add-in: Office save smoke (one filed and one unfiled save), plus a Submit Invoice from an email;
   - field-mapping: creates for 020/031/042b.
