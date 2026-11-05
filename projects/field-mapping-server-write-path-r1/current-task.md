@@ -2,25 +2,25 @@
 
 > **Last updated**: 2026-11-05 (main session checkpoint). Recovery: read Quick Recovery first.
 > **Done on master**: 001–006, 010–016, 017, 018, 037, 039, 038, 070, 071, 072, 073, 074. The work branch was merged to master as #2435 (6b0c1e2fed); later doc commits are on the work branch.
-> **Live on dev:** BFF 5796774091 since 2026-11-03T13:29Z (R3; carries 039, #2514, #2519, #2520; 019 live A/B ran on 3740e1a105). 017 (b083d62183, #2486) first went live 2026-10-31T19:52:25Z (UAC-r2 deploy; gate PASS: 23 req, 0 5xx, 0 OWNERSHIP-REFUSED, the reconciler wrote nothing). TrackingFieldTrio 1.0.55. SpaarkeMaster 1.2.4.0 is published but not imported. Check that the BU→Matter index map is gone after the model1-prod upgrade or the next provisioning run (H6).
+> **Live on dev:** BFF master 0f53e053bf (042c + 048) since 2026-11-05T21:39:06Z; UAC-r2 gate PASS 21:39-22:09Z (0 5xx, 0 OWNERSHIP-REFUSED, reconcile 0 writes; record `notes/deploy-gate-2026-11-05-0f53e053bf.md` on uac-r2's branch). No chat traffic in the window: fm's own live checks of the 042c/048 refusals need the owner's go in THIS session. TrackingFieldTrio 1.0.55. Check that the BU→Matter index map is gone after the model1-prod upgrade or the next provisioning run (H6).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active** | Checkpoint 2026-11-05. uac-r2 session: `spaarke-wt-unified-access-control-r2-20`; ontology: `spaarke-wt-spaarke-ontology-platform-r1-38`.
-- **Done 2026-11-04/05:** 031 (#2564), 042c (#2569, D-204: general create refuses sprk_signal / sprk_decisionrecord / sprk_budgetrevision). Dev BFF = master 909754869f since 2026-11-05T04:16:30Z (has 020/031/042b/#2568, not 042c); gate PASS.
-- **048** (generic update + chat delete refuse the 3 tables): merged into the work branch LOCALLY (3baf35815f) + master (baf3c4bea4), NOT pushed. verify running (bg; log scratchpad `verify-048-merged`). UAC-r2: "cleared 2a05764261..59d1008c9f from the access-control side, no F (2026-11-05)"; ontology: pass, no findings. PR body drafted: scratchpad `pr-048.md` (fill VERIFY_LINE). After PR: tell uac-r2 to fold into the next deploy candidate.
-- **049** (NFR-02 speed-up; owner 2026-11-05): agent fm-049 on task/fm-049 doing Parts A (bounded-concurrent caller checks, deterministic refusal) + C, then Part B (post-create L1 grant → IJobHandler job) under UAC-r2's conditions (sent to agent; copy in task-049-notes). Then adversarial pass(es), diff → uac-r2, deploy, create Project→Matter profile on dev (owner approved), re-measure (021 method, task-021-live.md).
-- **021**: review fix round 1 on task/fm-021 d6dc73e9f6. Live NFR-02 +2634 ms (task-021-live.md) → 049. Wizard deploy waits on 049's re-measure. Console (SpaarkeAi) stays old until its own deploy.
-- **043** (doc as mapping source) agent fm-043 and **046** (roles matrix; + writer-only-table Delete/Write privileges, event-type gap, Console AppendTo, ebilling Procedure Read) agent fm-046 running. 046 proposals → uac-r2; owner's go in uac-r2's session.
-- **033 must be re-scoped before it runs:** it routes SignalWriter + DecisionRecordWriter through RecordCreationService, which D-204 now refuses (and WriterOnlyTablesWritersGuardTests forbids). Keep only To Do generation + playbook create-task.
-- **Live rows to delete later (owner):** 2026-11-05 run (task-021-live.md / task-019-live-checks.md): 1 event (+eventlog), 1 analysis, 1 FMSWP matter (+assignedaccess), 42 NFR02 matters, 21 assignedaccess; plus 019's rows.
-- **Private (never public):** handled by uac-r2 (update-path upsert #2568 done). |
-| **Next Action** | 1. When verify-048-merged passes: push, `gh pr create` with pr-048.md, `gh pr merge --auto --merge`, tell uac-r2.
-2. On fm-049 / fm-043 / fm-046 reports: review, adversarial pass, diffs to uac-r2 (+ontology where D-204), merge, PR.
-3. Re-scope 033 POML (drop Signal/DR writers) before anyone runs it.
-4. Owner open: inactive playbook at analysis start; Family 1.0.56; 076; #2556. |
+| **Active** | Checkpoint 2026-11-05 ~22:30Z. uac-r2: `spaarke-wt-unified-access-control-r2-20`; ontology: `spaarke-wt-spaarke-ontology-platform-r1-38`; ebilling: `spaarke-wt-ebilling-r1-c7`.
+- **Done:** 031 (#2564), 042c (#2569), 048 (#2570, master 0f53e053bf), **046** (merged into the work branch 0b0edfbe35; matrix + guard, 181 rows / 30 features; 2 Opus passes + scoped re-check; not yet on master).
+- **043** (doc as mapping source), task/fm-043, worktree agent-a7d775a1f12d2a061: tip de96647095 + fix round 2 agent running (push from a document: disambiguate to the ownership-parent lookup for document sources only; MappingDocumentDecisionOf test). Two Opus passes done. UAC-r2: cleared de96647095, no F; send it the round-2 range. Then: publish delta (`publish-delta.ps1`, main session only; master 0f53e053bf), merge into work branch, PR.
+- **049** (NFR-02 speed-up): Parts A/B/C on task/fm-049b (worktree agent-ab6391bd0d308344f) at 0c9e3f7db8. Opus pass 1 done. Fix round 1 split: **part A** agent on task/fm-049b (maker = assignee inline via IIdentityNormalizationService, Office test, settle-after-failing-write, isolated create waits for CompleteIsolatedCreateAsync, wizard secure-project premise check); **part B** agent on task/fm-049c (isolated worktree; scan $orderby + recent window ≥3× tick, reconcile re-derive notes, record-busy shapes; notes in task-049-backstop-notes.md to fold in). Then merge 049c into 049b, verify, Opus pass 2, head SHA → uac-r2, merge, PR, dev deploy via uac-r2, Project→Matter profile on dev (owner approved), 021 re-measure. If the reconcile does not re-derive Assigned-To removals: FILE it (UAC-r2 condition c).
+- **046b** (role rulings, apply script, writer-only role guard, standalone add-on gap list incl. G9): agent on task/fm-046b (isolated worktree). Then review, WhatIf output + script → uac-r2 (it runs -Apply on dev under the owner's go for G1, G2, G4-G8); gap list → owner via uac-r2. G10 dropped (#2572, ontology).
+- **021**: wizard deploy waits on 049's re-measure (task/fm-021 d6dc73e9f6).
+- **033 must be re-scoped before it runs** (D-204: keep only To Do generation + playbook create-task).
+- **Live rows to delete later (owner):** see task-021-live.md / task-019-live-checks.md.
+- **Private (never public):** with uac-r2 by message only. |
+| **Next Action** | 1. On each agent report (043 r2, 049 A/B, 046b): check, merge/fold, re-check scope, send ranges to uac-r2.
+2. 043: publish delta, merge into work branch, then a work→master PR covering 043 + 046 (+049 when ready).
+3. 028 POML has the 043 warnings criteria (a34f2c2c03).
+4. Owner open: live checks of 042c/048 refusals on dev; inactive playbook at analysis start; Family 1.0.56; 076; #2556. |
 | **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
