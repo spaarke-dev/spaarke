@@ -575,6 +575,19 @@ public sealed partial class TrackingNumberAllocatorTests
         _store.CreateCalls.Should().Be(0);
     }
 
+    [Theory(DisplayName = "095d pre-P2 safety: ScopeColumnExistsAsync (Set firm's gate on selecting sprk_trackingscope) is false only at P0, agrees with the phase, and reads and writes no row")]
+    [InlineData(TrackingScopePhase.P0NoScopeColumn, false)]
+    [InlineData(TrackingScopePhase.P1ScopeColumn, true)]
+    [InlineData(TrackingScopePhase.P2ScopeKeyActive, true)]
+    public async Task ScopeColumnExists_IsFalseOnlyAtP0(TrackingScopePhase phase, bool expected)
+    {
+        InPhase(phase);
+
+        (await CreateService().ScopeColumnExistsAsync()).Should().Be(expected);
+        _store.SequenceReads.Should().Be(0);
+        _store.CreateCalls.Should().Be(0);
+    }
+
     [Fact]
     public async Task P1_AFirmSubmission_WritesItsFirmAsTheScope_AndStillCountsPerFirm()
     {

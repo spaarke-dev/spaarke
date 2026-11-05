@@ -223,6 +223,15 @@ public interface ITrackingNumberAllocator
     Task<bool> NumbersSubmissionsWithoutFirmAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// 095d pre-P2 safety (uac-r2): whether <c>sprk_invoicesubmission.sprk_trackingscope</c> exists in this environment, that is, whether the phase is
+    /// <see cref="TrackingScopePhase.P1ScopeColumn"/> or later. A reader that selects the column must ask first: at
+    /// <see cref="TrackingScopePhase.P0NoScopeColumn"/> a query that names it faults whole. The same process-wide, forward-only phase cache as
+    /// <see cref="NumbersSubmissionsWithoutFirmAsync"/> (so the two answers always agree); never throws for an unreadable phase (that reads as the
+    /// cached one, and P0 is "no column").
+    /// </summary>
+    Task<bool> ScopeColumnExistsAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Task 095d-1a (D-37): moves the existing submission <paramref name="submissionId"/>, numbered with no firm, into <paramref name="firmId"/>'s
     /// scope with that firm's next <c>{firm invoice number}.{n}</c>, in ONE transaction that also carries the caller's apply
     /// (<paramref name="buildApply"/>). The submission update is the transaction's first request, conditioned on <paramref name="rowVersion"/>

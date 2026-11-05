@@ -308,14 +308,23 @@ public sealed class InvoiceAssignFirmService
         .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity),
     ];
 
+    /// <summary>
+    /// The submission columns every phase has. <see cref="TrackingNumberAllocator.ScopeColumn"/> is NOT here: at P0 it does not exist and a query
+    /// that names it faults whole (every Set firm answered 503 unavailable before it reached its own scope_key_inactive refusal; uac-r2 pre-P2
+    /// safety). <see cref="SubmissionColumnsFor"/> adds it once the allocator says the column exists.
+    /// </summary>
     private static readonly string[] SubmissionColumns =
     [
-        "versionnumber", InvoiceSubmissionPersister.SubmissionInvoice, TrackingNumberAllocator.FirmColumn, TrackingNumberAllocator.ScopeColumn,
+        "versionnumber", InvoiceSubmissionPersister.SubmissionInvoice, TrackingNumberAllocator.FirmColumn,
         TrackingNumberAllocator.SequenceColumn, TrackingNumberAllocator.TrackingNumberColumn, TrackingNumberAllocator.FirmInvoiceNumberColumn,
         InvoiceSubmissionPersister.SubmissionFindingsJson,
         // 082c-2 fix round 3 (ontology F1): the stored outcome reason, which the apply leaves as it is and approval's firm hold still reads.
         InvoiceSubmissionPersister.SubmissionReasonCode,
     ];
+
+    /// <summary>The submission read's columns: <see cref="SubmissionColumns"/>, and the tracking scope only where it exists (P1 and later).</summary>
+    private static string[] SubmissionColumnsFor(bool scopeColumnExists) =>
+        scopeColumnExists ? [.. SubmissionColumns, TrackingNumberAllocator.ScopeColumn] : SubmissionColumns;
 
     private readonly IGenericEntityService _entities;
     private readonly ITrackingNumberAllocator _allocator;
@@ -935,7 +944,11 @@ public sealed class InvoiceAssignFirmService
     private sealed class RepeatMustNotApplyException()
         : InvalidOperationException("A repeat of an applied Set-firm decision must never apply again.");
 
-    /// <summary>The submission is in the stored firm's scope with the stored number (the legacy repeat's check).</summary>
+    /// <summary>
+    /// The submission is in the stored firm's scope with the stored number (the legacy repeat's check). P0: the scope column is not read (it does not
+    /// exist), so the scope is null and the check is false (fail closed: an unconfirmed legacy repeat is a 409 "reload", never a completed record).
+    /// The allocator refuses a renumber before P2 first, so this is not reached there.
+    /// </summary>
     private static bool HoldsStoredNumber(Entity submission, AssignFirmStoredDecision stored) =>
         submission.GetAttributeValue<EntityReference>(TrackingNumberAllocator.FirmColumn)?.Id == stored.FirmId
         && string.Equals(submission.GetAttributeValue<string>(TrackingNumberAllocator.ScopeColumn), TrackingNumberAllocator.ScopeOf(stored.FirmId), StringComparison.OrdinalIgnoreCase)
@@ -1130,7 +1143,9 @@ public sealed class InvoiceAssignFirmService
                 return new StateRead(null, AssignFirmResult.Refuse(StatusCodes.Status404NotFound, "ebilling.invoice.not_found", "Not found."));
             }
 
-            var subs = new QueryExpression(TrackingNumberAllocator.SubmissionEntity) { ColumnSet = new ColumnSet(SubmissionColumns) };
+            // The allocator's own phase source (the same cache its numbering reads): the scope column is selected only once it exists (not at P0).
+            var scopeColumnExists = await _allocator.ScopeColumnExistsAsync(ct).ConfigureAwait(false);
+            var subs = new QueryExpression(TrackingNumberAllocator.SubmissionEntity) { ColumnSet = new ColumnSet(SubmissionColumnsFor(scopeColumnExists)) };
             subs.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
             var linked = (await _entities.RetrieveMultipleAsync(subs, ct).ConfigureAwait(false)).Entities;
             submissions = linked.Where(s => InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoiceId).ToList();
