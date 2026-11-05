@@ -77,6 +77,20 @@ public static class InvoiceApprovalCodes
 
     /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
     public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
+
+    /// <summary>409 (ebilling-r1 082c-2, brief C11, C14): the invoice is held for its Procedures (<see cref="InvoiceProcedureHold"/>): a work date has
+    /// no billing terms in force, or the terms could not be checked. Refused until a re-check clears it. Checked after the FR-20 and firm holds.</summary>
+    public const string ProcedureHeld = "ebilling.approve.procedure_held";
+
+    /// <summary>The sentence a reviewer reads with <see cref="ProcedureHeld"/> for a gap.</summary>
+    public const string ProcedureGapDetail = "This invoice is on hold because no billing terms are in force for some of its work dates. It can be approved once the terms are set up and the invoice is re-checked.";
+
+    /// <summary>The sentence a reviewer reads with <see cref="ProcedureHeld"/> when the terms could not be checked.</summary>
+    public const string ProceduresUnresolvedDetail = "This invoice is on hold because its billing terms could not be checked. It can be approved once they are re-checked.";
+
+    /// <summary>The <see cref="ProcedureHeld"/> sentence for the open hold codes (unresolved first, as the review detail).</summary>
+    public static string ProcedureDetailFor(IReadOnlySet<string> reasons) =>
+        reasons.Contains(SubmissionReasonCodes.ProceduresUnresolved) ? ProceduresUnresolvedDetail : ProcedureGapDetail;
     public const string NotInReview = LineDecisionCodes.NotInReview;
     public const string PortionMissing = "ebilling.approval.missing";
     public const string PortionAmbiguous = "ebilling.approval.ambiguous";
@@ -322,7 +336,9 @@ public sealed class InvoiceApprovalService
         var portions = await _resolver.ReadPortionsAsync(invoiceId, ct).ConfigureAwait(false);
         var portion = portions.Count == 1 ? portions[0] : null;
         var lines = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);
-        var held = await IsHeldAsync(invoiceId, ct).ConfigureAwait(false);
+        // 082c-2: a Procedure hold refuses approve, so the state shows it as held (canApprove false).
+        var held = await IsHeldAsync(invoiceId, ct).ConfigureAwait(false)
+            || (await InvoiceProcedureHold.ReasonsAsync(_entities, invoiceId, ct).ConfigureAwait(false)).Count > 0;
         var firmNeeded = await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) != InvoiceFirmNeed.None;
         var correctionsPending = (await InvoiceCorrectionReevaluation.ReadUnappliedAsync(_entities, invoiceId, lines, ct).ConfigureAwait(false)).Count > 0;
 
@@ -535,6 +551,16 @@ public sealed class InvoiceApprovalService
             {
                 _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice needs a firm ({Need}); nothing changed.", invoiceId, need);
                 return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.FirmMissing, InvoiceApprovalCodes.FirmDetailFor(need));
+            }
+
+            // ── 082c-2 (brief C11, C14): a Procedure hold, both channels (the stored submission state, never sprk_reviewdetail). After the FR-20 and
+            //    firm holds (the review-detail priority: the firm first), before I-2. An Internal gap is Blocked, so the FR-20 hold answers first;
+            //    this one still refuses once 114's Override releases that submission, until a re-check clears the gap. ──
+            if (await InvoiceProcedureHold.ReasonsAsync(_entities, invoiceId, ct).ConfigureAwait(false) is { Count: > 0 } procedureHolds)
+            {
+                _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice is held for its Procedures ({Reasons}); nothing changed.",
+                    invoiceId, string.Join(",", procedureHolds.Order(StringComparer.Ordinal)));
+                return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.ProcedureHeld, InvoiceApprovalCodes.ProcedureDetailFor(procedureHolds));
             }
 
             lineRows = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);

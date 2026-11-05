@@ -1661,8 +1661,39 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             return Enumerable.Range(0, lineCount).ToDictionary(i => i, _ => RulesNotCheckedNoFirmMessage);
         }
 
-        return RulesNotChecked(outcome.Evaluation, lineCount);
+        // 082c-2 (brief C14): the Procedures could not be resolved, so no rule ran on any line (as the firm case).
+        if (outcome.RulesSkippedForUnresolvedProcedures)
+        {
+            return Enumerable.Range(0, lineCount).ToDictionary(i => i, _ => RulesNotCheckedUnresolvedMessage);
+        }
+
+        // 082c-2 (brief C11): a line dated in a Procedure gap was not checked by that Procedure's rules. A line a refusal already flags keeps
+        // its message; RulesNotCheckedCause names the gap either way.
+        var result = new Dictionary<int, string>(RulesNotChecked(outcome.Evaluation, lineCount));
+        foreach (var line in outcome.ProcedureGapLines.Where(i => i >= 0 && i < lineCount))
+        {
+            result.TryAdd(line, RulesNotCheckedProcedureGapMessage);
+        }
+
+        return result;
     }
+
+    /// <summary>The <see cref="LineFindingRulesNotChecked"/> message of every line of an invoice whose Procedures could not be resolved (082c-2).</summary>
+    internal const string RulesNotCheckedUnresolvedMessage = "The billing rules were not checked on this line because the invoice's billing terms could not be checked.";
+
+    /// <summary>The <see cref="LineFindingRulesNotChecked"/> message of a line dated in a Procedure gap (082c-2).</summary>
+    internal const string RulesNotCheckedProcedureGapMessage = "Some billing rules were not checked on this line because no billing terms are in force on its date.";
+
+    /// <summary>
+    /// The <see cref="InvoiceFirmHold.LineFindingCauseMember"/> of a <see cref="LineFindingRulesNotChecked"/> entry, or null when a refusal alone
+    /// left the line unchecked: the firm hold (095c-4), the unresolved hold, or a Procedure gap on the line (082c-2). A hold reads the line by
+    /// this code, never by its message.
+    /// </summary>
+    internal static string? RulesNotCheckedCause(SubmissionEvaluationOutcome outcome, int lineIndex) =>
+        outcome.RulesSkippedForNoFirm ? SubmissionReasonCodes.FirmMissing
+        : outcome.RulesSkippedForUnresolvedProcedures ? SubmissionReasonCodes.ProceduresUnresolved
+        : outcome.ProcedureGapLines.Contains(lineIndex) ? SubmissionReasonCodes.ProcedureGap
+        : null;
 
     /// <summary>The <see cref="LineFindingRulesNotChecked"/> message of every line of an invoice submitted without a firm (task 095c-3).</summary>
     internal const string RulesNotCheckedNoFirmMessage = "The billing rules were not checked on this line because the invoice has no firm.";
@@ -1807,6 +1838,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         // Task 095c-3: an Accepted invoice with no firm is held, and the submission says so (contract section 9). Only that code passes: any
         // other Accepted outcome keeps no reason code, as before.
         SubmissionEvaluationKind.Accepted when reasonCode == SubmissionReasonCodes.FirmMissing => (InvoiceSubmissionStatus.Accepted, reasonCode),
+
+        // 082c-2 (brief C11, C14): an SPA invoice held for its Procedures says so, as the firm hold does.
+        SubmissionEvaluationKind.Accepted when reasonCode is SubmissionReasonCodes.ProcedureGap or SubmissionReasonCodes.ProceduresUnresolved
+            => (InvoiceSubmissionStatus.Accepted, reasonCode),
         _ => (InvoiceSubmissionStatus.Accepted, null),
     };
 
@@ -2003,10 +2038,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             if (notChecked.TryGetValue(index, out var notCheckedMessage))
             {
                 var entry = LineFindingEntryJson(index, LineFindingRulesNotChecked, notCheckedMessage);
-                if (outcome.RulesSkippedForNoFirm)
+                if (RulesNotCheckedCause(outcome, index) is { } cause)
                 {
-                    // Task 095c-4: the cause, so the firm hold reads the line by a code, never by its message (InvoiceFirmHold).
-                    entry[InvoiceFirmHold.LineFindingCauseMember] = SubmissionReasonCodes.FirmMissing;
+                    // Task 095c-4: the cause, so the firm hold reads the line by a code, never by its message (InvoiceFirmHold). 082c-2: the
+                    // Procedure holds the same way (InvoiceProcedureHold).
+                    entry[InvoiceFirmHold.LineFindingCauseMember] = cause;
                 }
 
                 lineFindings.Add(entry);
@@ -2091,7 +2127,12 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             return plan;
         }
 
-        var mappings = BillingFindingSignalMapper.MapAll(evaluation, SignalSubjectsFor(outcome, invoiceId), outcome.Decision?.Findings, outcome.Kind);
+        // 082c-2 (brief C11): an SPA invoice held for a Procedure gap over a 073 rejection is Accepted, not rejected, so its deciding group is
+        // presented as held for review (as under Blocked), never as a rejection the firm did not receive.
+        var presentAs = outcome.HasProcedureGap && outcome.Decision is { Outcome: SubmissionOutcome.Rejected }
+            ? SubmissionEvaluationKind.Blocked
+            : outcome.Kind;
+        var mappings = BillingFindingSignalMapper.MapAll(evaluation, SignalSubjectsFor(outcome, invoiceId), outcome.Decision?.Findings, presentAs);
         foreach (var mapping in mappings)
         {
             var request = mapping.Request;
@@ -2238,6 +2279,32 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             }
 
             return;
+        }
+
+        // 082c-2 (brief C14): the Procedures could not be resolved on the final delivery, so no rule ran: held (SPA Accepted / AcceptedUncoded
+        // with the unresolved reason; Internal Blocked), with no evaluation and no decision. Anything else is a builder defect, never persisted.
+        if (outcome.RulesSkippedForUnresolvedProcedures)
+        {
+            var held = outcome.Submission?.Channel == InvoiceSubmissionChannel.Spa
+                ? outcome.Kind is SubmissionEvaluationKind.Accepted or SubmissionEvaluationKind.AcceptedUncoded
+                    && outcome.ReasonCode == SubmissionReasonCodes.ProceduresUnresolved
+                : outcome.Kind == SubmissionEvaluationKind.Blocked && outcome.ReasonCode == SubmissionReasonCodes.Blocked;
+            if (!held || outcome.Submission is null || outcome.Read is null || outcome.Resolution is null
+                || outcome.Evaluation is not null || outcome.Decision is not null
+                || (outcome.Kind == SubmissionEvaluationKind.Accepted && outcome.Coding is null))
+            {
+                throw new ArgumentException($"A {outcome.Kind} outcome whose Procedures could not be resolved must be held, with no rule result.", nameof(outcome));
+            }
+
+            return;
+        }
+
+        // 082c-2 (brief C11): a Procedure gap holds; it never rejects. SPA Accepted / AcceptedUncoded with the gap reason, Internal Blocked.
+        if (outcome.HasProcedureGap && (outcome.Kind == SubmissionEvaluationKind.AutoRejected
+            || (outcome.Submission?.Channel == InvoiceSubmissionChannel.Spa && outcome.ReasonCode != SubmissionReasonCodes.ProcedureGap)
+            || (outcome.Submission?.Channel != InvoiceSubmissionChannel.Spa && outcome.Kind != SubmissionEvaluationKind.Blocked)))
+        {
+            throw new ArgumentException($"A {outcome.Kind} outcome with a Procedure gap must be held for it.", nameof(outcome));
         }
 
         // D-130 (1): the rules run on uncoded submissions too, so every persistable kind carries its evaluation and decision. Only Accepted

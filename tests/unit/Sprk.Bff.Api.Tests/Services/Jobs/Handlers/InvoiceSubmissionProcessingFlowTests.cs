@@ -65,7 +65,8 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         public int Calls { get; private set; }
 
         public async Task<SubmissionEvaluationOutcome> EvaluateAsync(
-            Entity submission, Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>> loadDocument, CancellationToken ct = default)
+            Entity submission, Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>> loadDocument, bool finalDelivery,
+            CancellationToken ct = default)
         {
             Calls++;
             flow.Entered.TrySetResult();
@@ -74,7 +75,7 @@ public sealed class InvoiceSubmissionProcessingFlowTests
                 await gate.Task;
             }
 
-            return flow.LastOutcome = await inner.EvaluateAsync(submission, loadDocument, ct);
+            return flow.LastOutcome = await inner.EvaluateAsync(submission, loadDocument, finalDelivery, ct);
         }
     }
 
@@ -635,27 +636,100 @@ public sealed class InvoiceSubmissionProcessingFlowTests
         flow.StatusHistory.Should().Equal([(int)InvoiceSubmissionStatus.Processing, (int)InvoiceSubmissionStatus.Failed]);
     }
 
-    [Fact(DisplayName = "082c-1 interim, end to end: an invoice with a Procedure gap retries, then ends Failed on the final delivery; never Accepted, no invoice")]
-    public async Task AProcedureGap_RetriesThenFailed_NeverAccepted_NoInvoice()
+    private static ProcessorHarness GappedHarness(InvoiceSubmissionChannel channel = InvoiceSubmissionChannel.Spa)
     {
         var kit = new ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 3, 10));
         kit.Rule("Ended", "ENDED-INCREMENT", RuleType.TimeIncrement);
-        var flow = new Flow(new ProcessorHarness { Procedures = kit.Build() });
-
-        var first = await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
-        var second = await flow.BuildHandler().ProcessAsync(Job(attempt: 2), CancellationToken.None);
-        var final = await flow.BuildHandler().ProcessAsync(FinalJob(), CancellationToken.None);
-
-        first.Status.Should().Be(JobStatus.Failed);
-        second.Status.Should().Be(JobStatus.Failed);
-        final.Status.Should().Be(JobStatus.Poisoned);
-        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Failed);
-        flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(SubmissionReasonCodes.ProcessingFailed);
-        flow.Created.Should().BeEmpty();
-        flow.StatusHistory.Should().NotContain((int)InvoiceSubmissionStatus.Accepted);
-        flow.StatusHistory.Should().Equal([(int)InvoiceSubmissionStatus.Processing, (int)InvoiceSubmissionStatus.Failed]);
+        return new ProcessorHarness { Procedures = kit.Build(), Channel = channel };
     }
 
+    [Fact(DisplayName = "082c-2 C11, end to end (SPA): a Procedure gap is persisted Accepted + procedure_gap, the invoice In Review, its lines rules.not_checked with the gap cause; the system policy missing still holds")]
+    public async Task AProcedureGap_Spa_IsAcceptedAndHeld_EndToEnd()
+    {
+        var flow = new Flow(GappedHarness());
+
+        var outcome = await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Accepted);
+        flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(SubmissionReasonCodes.ProcedureGap);
+        flow.CreatedOf("sprk_invoice").Single().GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+        var json = flow.Row.GetAttributeValue<string>("sprk_findingsjson");
+        var root = JsonNode.Parse(json)!.AsObject();
+        root["kind"]!.GetValue<string>().Should().Be(nameof(SubmissionEvaluationKind.Accepted));
+        root["pipelineFindings"]!.AsArray().Select(p => p!["reasonCode"]!.GetValue<string>()).Should().Contain(SubmissionReasonCodes.ProcedureGap);
+        var lineFindings = root[InvoiceSubmissionPersister.LineFindingsMember]!.AsArray().OfType<JsonObject>()
+            .Where(e => e["code"]!.GetValue<string>() == InvoiceSubmissionPersister.LineFindingRulesNotChecked).ToList();
+        lineFindings.Should().NotBeEmpty().And.OnlyContain(e => e[InvoiceFirmHold.LineFindingCauseMember]!.GetValue<string>() == SubmissionReasonCodes.ProcedureGap);
+        InvoiceProcedureHold.ReasonsOf(flow.Row).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "the approval hold reads exactly this stored state");
+    }
+
+    [Fact(DisplayName = "082c-2 C11, end to end (Internal): a Procedure gap is Blocked: the submission Rejected + blocked, the invoice In Review")]
+    public async Task AProcedureGap_Internal_IsBlocked_EndToEnd()
+    {
+        var flow = new Flow(GappedHarness(InvoiceSubmissionChannel.Internal));
+        flow.Row["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Internal);
+
+        var outcome = await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        flow.LastOutcome!.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Rejected);
+        flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(SubmissionReasonCodes.Blocked);
+        flow.CreatedOf("sprk_invoice").Single().GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+        InvoiceProcedureHold.ReasonsOf(flow.Row).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap]);
+    }
+
+    [Fact(DisplayName = "082c-2 C14 (1), end to end: the first delivery's resolver fault persists nothing; the retry succeeds Accepted with no hold and no unresolved finding")]
+    public async Task AResolverFault_FirstDelivery_ThenRetrySucceeds_NoHold()
+    {
+        var harness = new ProcessorHarness { EvaluationFault = new ProcedureResolutionFaultException("two versions in force") };
+        var flow = new Flow(harness);
+
+        var first = await flow.BuildHandler().ProcessAsync(Job(), CancellationToken.None);
+
+        first.Status.Should().Be(JobStatus.Failed, "retry");
+        flow.Created.Should().BeEmpty("no persist on a delivery that is not the final one");
+        flow.Transactions.Should().BeEmpty();
+        flow.StatusHistory.Should().Equal([(int)InvoiceSubmissionStatus.Processing]);
+
+        harness.EvaluationFault = null;
+        var second = await flow.BuildHandler().ProcessAsync(Job(attempt: 2), CancellationToken.None);
+
+        second.Status.Should().Be(JobStatus.Completed);
+        flow.Status.Should().Be((int)InvoiceSubmissionStatus.Accepted);
+        flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().BeNull();
+        flow.Row.GetAttributeValue<string>("sprk_findingsjson").Should().NotContain(SubmissionReasonCodes.ProceduresUnresolved);
+    }
+
+    [Theory(DisplayName = "082c-2 C14 (2), end to end: a resolver fault on the final delivery is held with its cause, both channels; every line rules.not_checked; no rule finding")]
+    [InlineData(InvoiceSubmissionChannel.Spa)]
+    [InlineData(InvoiceSubmissionChannel.Internal)]
+    public async Task AResolverFault_FinalDelivery_IsHeld_EndToEnd(InvoiceSubmissionChannel channel)
+    {
+        var flow = new Flow(new ProcessorHarness { EvaluationFault = new CoreRecordChainUnreadableException("chain unreadable"), Channel = channel });
+        flow.Row["sprk_channel"] = new OptionSetValue((int)channel);
+
+        var outcome = await flow.BuildHandler().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        flow.Status.Should().Be(channel == InvoiceSubmissionChannel.Spa ? (int)InvoiceSubmissionStatus.Accepted : (int)InvoiceSubmissionStatus.Rejected);
+        flow.Row.GetAttributeValue<string>("sprk_outcomereasoncode").Should().Be(
+            channel == InvoiceSubmissionChannel.Spa ? SubmissionReasonCodes.ProceduresUnresolved : SubmissionReasonCodes.Blocked);
+        flow.CreatedOf("sprk_invoice").Single().GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+        var root = JsonNode.Parse(flow.Row.GetAttributeValue<string>("sprk_findingsjson"))!.AsObject();
+        root["findings"]!.AsArray().Should().BeEmpty("no rule finding at all");
+        root["signalPlan"]!.AsArray().Should().BeEmpty();
+        var unresolved = root["pipelineFindings"]!.AsArray().OfType<JsonObject>()
+            .Single(p => p["reasonCode"]!.GetValue<string>() == SubmissionReasonCodes.ProceduresUnresolved);
+        unresolved["values"]![SubmissionReasonCodes.ProcedureCauseValue]!.GetValue<string>().Should().Be(SubmissionReasonCodes.CauseChainUnreadable);
+        var lines = flow.LastOutcome!.Read!.Lines.Count;
+        root[InvoiceSubmissionPersister.LineFindingsMember]!.AsArray().OfType<JsonObject>()
+            .Where(e => e["code"]!.GetValue<string>() == InvoiceSubmissionPersister.LineFindingRulesNotChecked
+                && e[InvoiceFirmHold.LineFindingCauseMember]!.GetValue<string>() == SubmissionReasonCodes.ProceduresUnresolved)
+            .Should().HaveCount(lines);
+        InvoiceProcedureHold.ReasonsOf(flow.Row).Should().BeEquivalentTo([SubmissionReasonCodes.ProceduresUnresolved]);
+    }
     [Fact(DisplayName = "049 E criterion (reason codes): Ebilling:Enabled false is Failed ebilling.disabled and Poisoned; nothing is read")]
     public async Task FlagOff_IsFailed_EbillingDisabled()
     {

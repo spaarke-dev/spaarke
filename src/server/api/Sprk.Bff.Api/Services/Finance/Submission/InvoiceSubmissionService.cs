@@ -2383,6 +2383,9 @@ public class InvoiceSubmissionService
             },
             ReceivedOn = row.GetAttributeValue<DateTime?>("sprk_receivedon"),
             OutcomeReasonCode = row.GetAttributeValue<string>("sprk_outcomereasoncode"),
+
+            // 082c-2 (brief 3(c)): derived from the reason code with fixed text; no stored text is read.
+            Warning = SubmissionHoldWarning.For(row.GetAttributeValue<string>("sprk_outcomereasoncode")),
             DocumentId = row.GetAttributeValue<EntityReference>("sprk_document")?.Id,
             ChannelValue = channel,
             FirmId = row.GetAttributeValue<EntityReference>(TrackingNumberAllocator.FirmColumn)?.Id,

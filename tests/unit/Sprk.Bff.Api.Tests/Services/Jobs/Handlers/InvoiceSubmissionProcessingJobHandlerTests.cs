@@ -124,10 +124,15 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         public Func<Entity, Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>>, Task<SubmissionEvaluationOutcome>>? Script { get; set; }
         public List<Entity> Calls { get; } = [];
 
+        /// <summary>082c-2: the <c>finalDelivery</c> each call was given (the handler threads <c>job.IsFinalDelivery</c>).</summary>
+        public List<bool> FinalDeliveries { get; } = [];
+
         public Task<SubmissionEvaluationOutcome> EvaluateAsync(
-            Entity submission, Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>> loadDocument, CancellationToken ct = default)
+            Entity submission, Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>> loadDocument, bool finalDelivery,
+            CancellationToken ct = default)
         {
             Calls.Add(submission);
+            FinalDeliveries.Add(finalDelivery);
             return (Script ?? throw new InvalidOperationException("EvaluateAsync was not scripted")).Invoke(submission, loadDocument);
         }
     }
@@ -571,6 +576,18 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
         outcome.Status.Should().Be(JobStatus.Failed);
         rig.Locks.Held.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "082c-2 C14: the handler threads job.IsFinalDelivery to the processor (false on an earlier delivery, true on the final one)")]
+    public async Task FinalDelivery_IsThreadedToTheProcessor()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Processor.Script = (_, _) => throw new InvalidOperationException("boom");
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+        await rig.Build().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        rig.Processor.FinalDeliveries.Should().Equal(false, true);
     }
 
     [Fact(DisplayName = "049 E 0b: a delivery that cannot take the lock returns Failure and touches nothing (not even a Failed status)")]

@@ -316,6 +316,38 @@ public sealed record InvoiceSubmissionView
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SubmissionReplacement? ReplacedBy { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 082c-2 (brief 082c section 3(c), section 7 R4 wording, owner-approved 2026-11-04): a received invoice that is on hold for its
+    /// billing terms. Derived from <see cref="OutcomeReasonCode"/> only (<see cref="SubmissionHoldWarning.For"/>), with a fixed sentence: never a
+    /// stored text, a Procedure name, a date, a count or an id (C16, C18). Null, and then absent from the JSON, for every other reason.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SubmissionHoldWarning? Warning { get; init; }
+}
+
+/// <summary>
+/// ebilling-r1 082c-2: the warning of a received invoice held for its billing terms (<see cref="InvoiceSubmissionView.Warning"/>). <see cref="Code"/>
+/// is the outcome reason code; <see cref="Message"/> is the owner-approved partner text for it. Clients branch on <see cref="Code"/> only in tests
+/// (R4: one copy of the wording, the server's).
+/// </summary>
+public sealed record SubmissionHoldWarning(string Code, string Message)
+{
+    /// <summary>The gap text (R4 edit, owner-approved 2026-11-04; brief section 7, verbatim).</summary>
+    public const string ProcedureGapMessage =
+        "We received this invoice. It has not been rejected, but it is on hold for review: no billing terms are set up for some of its work dates on the record you chose. Check that you chose the right record and that the work dates are correct. If both are right, you don't need to do anything; the client will follow up.";
+
+    /// <summary>The unresolved text (R4 edit, owner-approved 2026-11-04; brief section 7, verbatim).</summary>
+    public const string ProceduresUnresolvedMessage =
+        "We received this invoice. It has not been rejected, but it is on hold for review because its billing terms could not be checked. You don't need to do anything; the client will follow up.";
+
+    /// <summary>The warning for a stored outcome reason code, or null when the code is not a Procedure hold.</summary>
+    public static SubmissionHoldWarning? For(string? outcomeReasonCode) => outcomeReasonCode switch
+    {
+        SubmissionReasonCodes.ProcedureGap => new(SubmissionReasonCodes.ProcedureGap, ProcedureGapMessage),
+        SubmissionReasonCodes.ProceduresUnresolved => new(SubmissionReasonCodes.ProceduresUnresolved, ProceduresUnresolvedMessage),
+        _ => null,
+    };
 }
 
 /// <summary>The correcting submission a Superseded invoice's submission names (<see cref="InvoiceSubmissionView.ReplacedBy"/>): its id and tracking number.</summary>

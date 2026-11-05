@@ -327,7 +327,7 @@ public sealed class InvoiceSubmissionProcessingJobHandler : IJobHandler
                     var (read, copy) = await LoadDocumentAsync(snapshot, token).ConfigureAwait(false);
                     staged = copy;
                     return read;
-                }, ct).ConfigureAwait(false);
+                }, job.IsFinalDelivery, ct).ConfigureAwait(false);
                 switch (outcome.Kind)
                 {
                     case SubmissionEvaluationKind.Failed:

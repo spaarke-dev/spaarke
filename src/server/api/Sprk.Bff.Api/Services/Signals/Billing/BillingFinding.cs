@@ -196,6 +196,14 @@ public static class BillingReasonCodes
     /// <summary>ebilling-r1 task 095c-3 (ontology-r1 D-201): the invoice was submitted without a firm (the internal from-email route, mode New),
     /// so no firm-scoped step and no billing rule ran; it is held until a reviewer adds the firm. Invoice level, names no value.</summary>
     public const string SubmissionFirmMissing = "submission.firm_missing";
+
+    /// <summary>ebilling-r1 082c-2 (brief C11): an applicable Procedure has no version in force on a work date of the invoice, so its rules were
+    /// not checked there; the invoice is held. Invoice level; cites the Procedure name, the first date and the gap kind (a closed text). Flag only.</summary>
+    public const string SubmissionProcedureGap = "submission.procedure_gap";
+
+    /// <summary>ebilling-r1 082c-2 (brief C14): the invoice's Procedures could not be resolved, so no billing rule was checked; the invoice is
+    /// held. Invoice level; cites the cause (a closed text). Flag only.</summary>
+    public const string SubmissionProceduresUnresolved = "submission.procedures_unresolved";
     public const string CodingRefusedCode = "coding.refused_code";
 
     /// <summary>A code outside the line's code set that is not a code identifier, so its text is not cited (049 part D, D-125 review (b)).</summary>

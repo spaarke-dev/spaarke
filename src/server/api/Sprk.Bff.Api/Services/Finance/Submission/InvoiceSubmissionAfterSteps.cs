@@ -1572,7 +1572,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         /// <summary>True when any stored finding maps to a SubmissionIntegrity Signal.</summary>
         public bool HasSystemFindings =>
             PipelineFindings.OfType<JsonObject>().Any(p => Text(p, "reasonCode") is SubmissionReasonCodes.InvoiceNumberMismatch
-                or SubmissionReasonCodes.CodingNoCodeSetHold or SubmissionReasonCodes.CodingUnavailableHold or SubmissionReasonCodes.FirmMissing)
+                or SubmissionReasonCodes.CodingNoCodeSetHold or SubmissionReasonCodes.CodingUnavailableHold or SubmissionReasonCodes.FirmMissing
+                or SubmissionReasonCodes.ProcedureGap or SubmissionReasonCodes.ProceduresUnresolved)
             || CodingFindings.Count > 0
             || CodeSet?["needsReview"]?.GetValue<bool>() == true;
 
@@ -1599,6 +1600,21 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                     case SubmissionReasonCodes.FirmMissing:
                         // Task 095c-3 (ontology-r1 D-201): the invoice was submitted without a firm; held until a reviewer adds one.
                         findings.Add(BillingSystemFindings.FirmMissing(policy));
+                        break;
+                    case SubmissionReasonCodes.ProcedureGap when pipeline["values"] is JsonObject gap
+                        && Text(gap, SubmissionReasonCodes.ProcedureNameValue) is { } procedureName && !string.IsNullOrWhiteSpace(procedureName)
+                        && DateOnly.TryParseExact(Text(gap, SubmissionReasonCodes.ProcedureWorkDateValue), "yyyy-MM-dd",
+                            System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var workDate)
+                        && Enum.TryParse<ProcedureGapKind>(Text(gap, SubmissionReasonCodes.ProcedureGapKindValue), out var gapKind)
+                        && Enum.IsDefined(gapKind):
+                        // 082c-2 (brief C11; ontology-r1 D-205 item 6): joins the shared SubmissionIntegrity Signal of (policy, invoice).
+                        findings.Add(BillingSystemFindings.ProcedureGap(policy, procedureName, workDate, gapKind));
+                        break;
+                    case SubmissionReasonCodes.ProceduresUnresolved when pipeline["values"] is JsonObject unresolved
+                        && Text(unresolved, SubmissionReasonCodes.ProcedureCauseValue) is SubmissionReasonCodes.CauseChainUnreadable
+                            or SubmissionReasonCodes.CauseRowsInconsistent:
+                        // 082c-2 (brief C14, C15): the cause is one of the two closed codes; never a message.
+                        findings.Add(BillingSystemFindings.ProceduresUnresolved(policy, Text(unresolved, SubmissionReasonCodes.ProcedureCauseValue)!));
                         break;
                 }
             }
