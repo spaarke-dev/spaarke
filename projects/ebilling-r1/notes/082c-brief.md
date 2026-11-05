@@ -170,3 +170,17 @@ Owner, verbatim: "keep 'In Review' there should be some explanation description 
   - Waiting for billing terms: "This invoice has not been rejected. It is on hold for review because no billing terms are set up for some of its work dates on this record. If the record and the work dates are right, you don't need to do anything; the client will follow up."
   - Billing terms could not be checked: "This invoice has not been rejected. It is on hold for review because its billing terms could not be checked. You don't need to do anything; the client will follow up."
   - Waiting for the firm to be confirmed: "This invoice has not been rejected. It is on hold for review until the client confirms which firm sent it. You don't need to do anything; the client will follow up."
+
+**ontology D-205 on the `sprk_reviewdetail` lifecycle (binding; supersedes "set, then clear" above).**
+- **Derive, never set or clear on one writer's say-so.** An invoice can hold several reasons at once. One pure function `ReviewDetailOf(openHoldReasons)` with a fixed priority: (1) "Waiting for the firm to be confirmed" (without the firm, Procedures cannot resolve); (2) "Billing terms could not be checked"; (3) "Waiting for billing terms"; blank = none. Every writer recomputes from the invoice's REMAINING reasons in its own transaction.
+- **Writers (all named in the ArchTest):**
+  1. the submission persister (held create);
+  2. the re-check that clears a gap or unresolved (082c-2, the 101 correction re-evaluation, later the ebilling-r2 explicit re-check);
+  3. the 095d-1 Set firm apply (removes firm_missing; with a gap still open the value moves to the next reason, not blank);
+  4. the 095d-2 re-run (re-maps the SubmissionIntegrity group; where the firm hold really lifts);
+  5. the 114 Override release;
+  6. every exit from In Review sets blank (reject, return to firm, cancel): a partner never reads a hold reason on a closed invoice;
+  7. Superseded by a correction (097, the old invoice closes in the new one's commit);
+  8. the 089e chain close (C19). *ebilling to confirm in C19 whether that path changes an invoice's status or only closes Signals; it is a writer only if it ends In Review.*
+- **Invariant:** non-blank ⇒ statuscode In Review. Checked in the census or a `-Verify`, plus a unit test on the derivation (every reason combination maps to its priority value).
+- Writers 3 and 4 make 095d a consumer: 095d-1b (Set firm) is not yet merged; the recompute lands with 082c-2 or with 095d, whichever adds the column second.
