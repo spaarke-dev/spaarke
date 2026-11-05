@@ -35,11 +35,12 @@
     - one place;
     - external surfaces drop the flag;
     - sentinel scan with must-fire.
-  - **082c C19 CLEARED at 7c5b2c1739** (2026-11-05), pending one answer:
+  - **082c C19 CLEARED at c704a9f2dc** (2026-11-05):
     - the re-check confirms close only, the effective-date scope with mixed-date tests, the children-side failure dropping only the children, and the notes;
     - K5 (c) option (iii) is a K: the close stays system-attributed, logs carry the assignment id, and option (i) is filed for 095d-2;
     - (d) aggregate counts in the logs are OK;
-    - open question: do adjustment lines ever reach the evaluator's `request.Lines`? If yes, the close must count their dates.
+    - adjustment lines never reach the evaluator (verified); the close log now carries the assignment id, the version id and the closed Signal ids;
+    - waits only on ontology's ruling about the superseding version on the Signal row (provenance; no uac objection to deferring it to 095d-2).
   - Earlier conditions in force: 082c §3(c) pre-check conditions; 082d snapshot design; C22 (task 114 before 082c reaches master).
   - Still owed: 089b/089c, 095a, 095c; the full master PR; the NFR-05 census after deploy.
 - **field-mapping** (`-69`):
