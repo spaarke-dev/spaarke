@@ -74,3 +74,17 @@ Prepared by this task and handed to the main session to send in UAC-r2's session
 
 - K4: depths are declared from the ownership rule (team-owned rows need Deep; organization-owned any depth); a row owned by a user in another business unit is outside this static check (the live caller checks still decide).
 - The guard reads source role files only; dev drift is this task's one-off read, not a recurring check.
+
+## Component justification (CLAUDE.md §11), placement (§10)
+
+One new test file, as the POML's justification: Existing - `PolicyReadRoleGuardTests`, `ProcedureRolePrivilegeGuardTests`, `CoreUserWizardLinkingGuardTests` guard fixed privilege lists for one purpose each; none ties a feature to its roles. Extension - a sibling that reuses their scan shape (`SourceScan.RepoRoot`, fail on a missing file) and defers to the Core User wizard-linking guard for bind-target AppendTo rather than repeating it. Cost of doing nothing - a role missing what its feature asks fails the feature for its users (G1 shipped unseen because the wizard-linking guard never requires Create). No `src/` change, no BFF change, no publish delta.
+
+## Verification (tip = the commit holding this section)
+
+| Check | Result |
+|---|---|
+| `dotnet build Spaarke.sln` | 0 Warning(s), 0 Error(s) |
+| `FeatureRolePrivilegeGuardTests` | 7 / 7 passed (seeding proof above: 1 failed with the entry removed, restored) |
+| `Spaarke.ArchTests` (whole project) | 1938 / 1938 passed |
+| `verify-suites.sh` Sprk.Bff.Api.Tests filter | 6789 passed, 7 skipped (Office contract, pre-existing), 0 failed |
+| Quality gates | Self-review against code-review Steps 3, 5, 6, 6.55, 6.6 and ADR-038: KEEP path (`tests/Spaarke.ArchTests/**`), must-fire and must-not-fire controls, ratchet with reasons, no file under `tests/unit/Sprk.Bff.Api.Tests/**`, no secret, no grant beyond a feature described in the repo. The adversarial pass is the main session's. |
