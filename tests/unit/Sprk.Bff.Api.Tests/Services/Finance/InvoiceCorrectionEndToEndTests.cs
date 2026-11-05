@@ -38,10 +38,11 @@ public sealed class InvoiceCorrectionEndToEndTests
         BillingRuleCandidate[] rules,
         Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>>? writeSignal = null,
         Func<Guid, string, int, string, CancellationToken, Task<SignalCloseOutcome>>? closeSignal = null,
-        Func<Guid, CancellationToken, Task<InvoiceTotalsCalculation>>? recalculate = null)
+        Func<Guid, CancellationToken, Task<InvoiceTotalsCalculation>>? recalculate = null,
+        ProcedureResolution? procedures = null)
     {
         var resolver = new CodeSetResolver(w.Entities.Object, w.Settings.Object, new Mock<ICodeSetSuggestionProvider>().Object, NullLogger<CodeSetResolver>.Instance);
-        var loaded = Kit.Loaded(rules);
+        var loaded = procedures is null ? Kit.Loaded(rules) : Kit.Loaded(rules) with { Procedures = procedures };
         var reevaluation = new InvoiceCorrectionReevaluation(
             w.Entities.Object, (_, _) => Task.FromResult(loaded), Kit.Evaluator().Evaluate,
             writeSignal ?? ((request, _) => Task.FromException<SignalWriteResult>(new InvalidOperationException("no Signal is raised on this path"))),
@@ -318,6 +319,37 @@ public sealed class InvoiceCorrectionEndToEndTests
 
         (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
         w.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved);
+    }
+
+    [Fact(DisplayName = "082c-1 C12 item 1: after the procedure_gap outcome the value is saved, the message says so, approval is still refused (corrections_pending) and the stored findings are unchanged")]
+    public async Task AfterTheProcedureGapOutcome_TheValueIsSaved_ApprovalIsStillRefused_AndTheFindingsAreUnchanged_C12()
+    {
+        var w = new ApprovalWorld();
+        // An expense line: a fee line's date correction re-resolves its timekeeper and rate first (a different path), which this world does not model.
+        Prepare(w);
+        var line = w.AddLine(InvoiceLineStatus.Clean, type: InvoiceLineCostType.Expense, extraction: W.ExtractionJson());
+        var submission = Submission(w, Root(nameof(SubmissionEvaluationKind.Accepted)), InvoiceSubmissionStatus.Accepted, "accepted");
+        var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 9, 15));
+        kit.Rule("Ended", "ENDED-CAP", RuleType.DailyHoursCap);
+        var corrections = Corrections(w, [], procedures: kit.Build());
+        var storedFindings = submission.GetAttributeValue<string>("sprk_findingsjson");
+
+        // The line (1 September) is inside the Procedure's window; 20 September is after its last version's end.
+        var result = await corrections.CorrectAsync(new CorrectionCommand(w.InvoiceId, line.Id, "Date", "2026-09-20", false, AliceUser), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.ProcedureGap);
+        result.Code.Should().Be("ebilling.correction.procedure_gap");
+        result.Detail.Should().Be(
+            "Saved, but its billing terms were not re-checked because the new dates have no terms in force; the invoice stays on hold until terms are set up or the dates are corrected.");
+        w.Row("sprk_billingevent", line.Id).GetAttributeValue<DateTime?>("sprk_eventdate").Should().Be(new DateTime(2026, 9, 20), "the value IS saved");
+        w.Row("sprk_invoicesubmission", submission.Id).GetAttributeValue<string>("sprk_findingsjson").Should().Be(storedFindings, "the stored findings are not patched");
+        var writes = w.Writes;
+
+        var refused = await w.ApproveAs(AliceUser);
+
+        refused.Outcome.Should().Be(ApprovalOutcome.Conflict);
+        refused.Code.Should().Be(InvoiceApprovalCodes.CorrectionsPending, "the correction stays unapplied, which holds approval (C12)");
+        AssertApproveWroteNothing(w, writes, line);
     }
 
     [Fact(DisplayName = "104 pin: a reject succeeds while a correction is unfinished - only approve and line decisions check for unfinished corrections")]

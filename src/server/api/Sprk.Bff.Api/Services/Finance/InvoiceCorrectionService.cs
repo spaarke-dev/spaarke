@@ -132,8 +132,9 @@ public static class CorrectionCodes
     /// <summary>409 (082c C12): see <see cref="CorrectionStatus.ProcedureGap"/>.</summary>
     public const string ProcedureGap = "ebilling.correction.procedure_gap";
 
-    /// <summary>The fixed sentence with <see cref="ProcedureGap"/>: no id, no date, no Procedure name.</summary>
-    public const string ProcedureGapDetail = "This correction moves work onto dates with no billing terms in force on this record, so it cannot be applied. Set up the terms, or correct the dates.";
+    /// <summary>The fixed sentence with <see cref="ProcedureGap"/>: no id, no date, no Procedure name. It says what happened: the value IS saved
+    /// (the client shows this verbatim); only the billing rules were not re-run, so the correction stays unapplied and holds approval.</summary>
+    public const string ProcedureGapDetail = "Saved, but its billing terms were not re-checked because the new dates have no terms in force; the invoice stays on hold until terms are set up or the dates are corrected.";
 
     /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
     public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
@@ -956,7 +957,7 @@ public sealed class InvoiceCorrectionService
         {
             // 082c C12: the corrected value saves, but moves work onto a date no Procedure Version covers. 409 with a fixed sentence (no id): the generic
             // Incomplete would tell the reviewer to repeat the request, which never clears a gap. The correction stays unapplied, which holds approval.
-            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: saved, but it brings in a Procedure gap, so its rules were not re-run.", spec.Name, command.InvoiceId);
+            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: saved, but it brings in a Procedure gap, so its rules were not re-run; the correction stays unapplied and holds approval.", spec.Name, command.InvoiceId);
             return new CorrectionResult(CorrectionStatus.ProcedureGap, CorrectionCodes.ProcedureGap, CorrectionCodes.ProcedureGapDetail);
         }
         catch (CorrectionTotalsRefusedException refused)

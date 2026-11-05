@@ -375,6 +375,7 @@ public sealed class InvoiceCorrectionReevaluationTests
         result.Status.Should().Be(CorrectionStatus.ProcedureGap);
         result.Code.Should().Be(CorrectionCodes.ProcedureGap).And.Be("ebilling.correction.procedure_gap");
         result.Detail.Should().Be(CorrectionCodes.ProcedureGapDetail, "a fixed sentence: no id, no exception message");
+        result.Detail.Should().StartWith("Saved, but its billing terms were not re-checked", "the value IS saved; only the rules were not re-run");
         result.FailedStep.Should().BeNull("a gap is not a failed step; repeating never clears it");
         var http = Sprk.Bff.Api.Api.Finance.InvoiceCorrectionEndpoints.ToResult(result, new Microsoft.AspNetCore.Http.DefaultHttpContext())
             .Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
