@@ -56,6 +56,8 @@ public sealed class InvoiceOpenHoldsTests
         InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, GapFinding)]).Should().BeEmpty("released: not blank only because it is kept as evidence");
         InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, FirmAndGapFindings)])
             .Should().BeEquivalentTo([SubmissionReasonCodes.FirmMissing], "the firm hold is independent of the release");
+        InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, "{not json")])
+            .Should().Contain(SubmissionReasonCodes.ProceduresUnresolved, "fail closed: a released submission whose findings cannot be read is not blank");
         InvoiceOpenHolds.ReasonsOf(false, false, [Stored(SubmissionReasonCodes.Overridden, GapFinding), Stored(null, GapFinding)])
             .Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "another, unreleased submission still holds (control)");
         InvoiceOpenHolds.ReasonsOf(false, false, [Stored(null, GapFinding)]).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "control: unreleased");

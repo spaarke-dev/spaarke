@@ -94,8 +94,14 @@ public static class InvoiceProcedureHold
 
         // Task 114: an Override released this submission's Procedure holds. Its findings still name them (they are kept as evidence and read
         // as Overridden), so the released state is the outcome reason, not the findings.
+        // Fail closed still: findings that cannot be read are "could not be checked", released or not (as every other reason code).
         if (string.Equals(reasonCode, SubmissionReasonCodes.Overridden, StringComparison.Ordinal))
         {
+            if (!string.IsNullOrWhiteSpace(json) && !ParsesAsObject(json))
+            {
+                reasons.Add(SubmissionReasonCodes.ProceduresUnresolved);
+            }
+
             return reasons;
         }
 
@@ -147,6 +153,18 @@ public static class InvoiceProcedureHold
         }
 
         return reasons;
+    }
+
+    private static bool ParsesAsObject(string json)
+    {
+        try
+        {
+            return JsonNode.Parse(json) is JsonObject;
+        }
+        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private static bool IsHoldCode(string code) =>

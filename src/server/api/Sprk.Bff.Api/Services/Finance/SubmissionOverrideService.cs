@@ -1266,9 +1266,11 @@ public sealed class SubmissionOverrideService
         if (verb == Verb.Override && stored.ProcedureHolds() is { Count: > 0 } holds)
         {
             values[ReleasedHoldsValue] = string.Join(",", holds.Select(h => h.Code).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
-            values[ReleasedHoldDetailValue] = string.Join("; ", holds.Select(h => h.Code == SubmissionReasonCodes.ProcedureGap
-                ? $"{h.ProcedureName} ({h.WorkDate})"
-                : h.Cause ?? string.Empty));
+            values[ReleasedHoldDetailValue] = string.Join("; ", holds
+                .Select(h => h.Code == SubmissionReasonCodes.ProcedureGap
+                    ? string.Join(" ", new[] { h.ProcedureName, h.WorkDate is { Length: > 0 } date ? $"({date})" : null }.Where(p => !string.IsNullOrWhiteSpace(p)))
+                    : h.Cause ?? string.Empty)
+                .Where(d => d.Length > 0));
         }
 
         return new BillingDecision(
