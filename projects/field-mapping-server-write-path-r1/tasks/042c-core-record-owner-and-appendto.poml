@@ -4,7 +4,7 @@
     <title>A Signal or Decision Record create asks the owner about its core record and checks the caller's AppendTo on it (#2561, DI-019)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
     <gate>042b (#2562) merged to master</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api (RecordCreationService create path and CallerWriteAuthorization's use); adds a caller AppendTo check on a Secure family (tags security, bff-api); UAC-r2 ruled #2561 F-class 2026-11-04.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -94,7 +94,9 @@
     <criterion testable="true">AC5 (must-not-fire): a core and subject that agree give the same owner as before this task; a Signal or DR without a core pair keeps today's probes, owner and refusals (a must-not-fire test for each, UAC-r2 2026-11-04); every other table's AppendTo probe list and owner are unchanged (existing suites green with unchanged assertions).</criterion>
     <criterion testable="true">AC6: the chat dataverse.create_record path gives the AC2-AC4 outcomes (the reachable path), with chat's tool error codes.</criterion>
     <criterion testable="true">AC7: BFF build 0 errors, 0 warnings; verify-suites.sh and ArchTests pass; publish delta against a fresh master build and the CVE result are recorded; UAC-r2's verdict line is in the PR; DI-019 and #2561 close on merge.</criterion>
-    <criterion testable="true">Test scope: AC1-AC6 only; anything beyond needs a one-line reason in the notes. One seeding proof: remove the core from the AppendTo set once and show AC3 fails (recorded, reverted).</criterion>
+    <criterion testable="true">AC2 amended (owner + UAC-r2, 2026-11-04; notes/decisions.md): a Secure core with the caller holding AppendTo gets the existing row-8 409 NoOwnerSource byte-identical (OwnerDecided unchanged); an ordinary core in BU Y with the subject in BU X is owned by Y's team = the reconciler's.</criterion>
+    <criterion testable="true">AC8 (owner 2026-11-04, never a half pair, never a refusal; UAC-r2 conditions a-g): a core TYPE with a missing/blank core ID is filled from 042b's step-6&#189; plan (never probed as the caller); a sent type that disagrees with the planned root is replaced by the planned pair; no derivable root clears the type; each with a warning naming neither the root id nor its Secure state; a planning FAULT is the existing 503 stamp_unavailable and nothing is cleared or written; a filled Secure root gives the row-8 409. A source-scan ArchTest (type written implies id written) with must-fire and must-not-fire controls. An ID with no type stays refused with core-specific words.</criterion>
+    <criterion testable="true">Test scope: AC1-AC8 only; anything beyond needs a one-line reason in the notes. One seeding proof: remove the core from the AppendTo set once and show AC3 fails (recorded, reverted).</criterion>
   </acceptance-criteria>
 
   <notes>Placement Justification (CLAUDE.md §10, bff-extensions.md): a modification inside RecordCreationService (and its use of CallerWriteAuthorization) in the BFF, where the synchronous write path that owns I-6 lives; no new endpoint, service, package or background work; expected publish delta ≈ 0, measured against a fresh master build; CVE check run.

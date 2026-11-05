@@ -3,10 +3,12 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events.Dtos;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.RecordCreation;
 using Sprk.Bff.Api.Services.Workspace;
 // Type aliases to resolve ambiguity between API DTOs and Dataverse models
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
@@ -685,23 +687,35 @@ public static class EventEndpoints
 
     /// <summary>
     /// Creates a new event. The filters have validated the shape and established, AS THE CALLER, the Create privilege
-    /// on sprk_event and AppendTo on the regarding record; the write is app-only (the G5 pattern).
+    /// on sprk_event and AppendTo on the regarding record (route-level authorization, ADR-008, unchanged); the row create
+    /// is the ONE server create, <see cref="RecordCreationService"/>, as the caller (field-mapping-server-write-path-r1
+    /// task 031, FR-19).
     /// </summary>
     /// <remarks>
-    /// Internal (not private) so the test assembly (InternalsVisibleTo) runs the real handler: the S1 Assigned-To
-    /// default and the owner-event publish are pinned by executing this site, not by reading its source (task 152
-    /// verifier round 1, items 2 and 7).
+    /// <para>Internal (not private) so the test assembly (InternalsVisibleTo) runs the real handler.</para>
+    /// <para><b>What the service now owns</b> (ADR-008 path A): the caller checks on the merged payload, field mapping
+    /// (when the table's profile applies), the record-first owner (the regarding record's team — the named Secure team
+    /// for a secure record — else the caller's own business-unit team), the I-1 core stamps and I-16 Access Permission
+    /// derived from what the event is filed under (task 042b), the creator person, the one app-only create, and the owner
+    /// membership event (ADR-034 A3). The endpoint no longer resolves the owner, derives the core stamps or publishes.</para>
+    /// <para><b>What stays here</b>: the request's own values; the ADR-024 regarding denormalised fields (the record-type
+    /// row, the target's name, number and URL — read from the catalog and the target, which the service does not read);
+    /// the acting user's linked contact for <c>sprk_assignedto</c> (owner S1; a server-set lookup naming the caller's own
+    /// contact, so it costs no AppendTo — as the chat create's "for" person); and the <c>sprk_eventlog</c> audit row after
+    /// a successful create.</para>
+    /// <para><b>Refusals (NFR-07).</b> The owner refusal keeps its 409 and body; a stamp that cannot be derived keeps its
+    /// 500 <see cref="RegardingStampFailedErrorCode"/> (both rendered by <see cref="RefusalResult"/>). A create that
+    /// refuses writes nothing and logs no audit row.</para>
     /// </remarks>
     internal static async Task<IResult> CreateEventAsync(
         [FromBody] ApiCreateEventRequest request,
+        [FromServices] RecordCreationService recordCreation,
+        [FromServices] IDataverseUserClient user,
         IEventDataverseService dataverseService,
-        IMembershipEventPublisher membershipEventPublisher,
-        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Spaarke.Dataverse.IGenericEntityService genericEntityService,
         ICallerSystemUserResolver callerResolver,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         ICommunicationDataverseService recordTypes,
-        CoreAncestorResolver coreAncestors,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -712,86 +726,245 @@ public static class EventEndpoints
 
         try
         {
-            // The ADR-024 regarding write set, resolved here (Spaarke.Dataverse cannot reach the resolver or the
-            // record-type catalog). FR-26: a stamp that cannot be derived refuses the write (nothing is created).
-            RegardingWrite? regarding = null;
+            // The ADR-024 denormalised regarding fields, read here (the catalog and the target are not the service's reads).
+            // Runs only after the filters authorized the caller (AppendTo on the regarding record), so the server-side name
+            // read is not a disclosure path. The I-1 core stamps and the owner are the service's, from the lookups below.
+            RegardingFields? regarding = null;
             if (CarriesRegarding(request.RegardingRecordType, request.RegardingRecordId))
             {
-                regarding = await ResolveRegardingWriteAsync(
+                regarding = await ResolveRegardingFieldsAsync(
                     request.RegardingRecordType!.Value, request.RegardingRecordId!.Value, request.RegardingRecordName,
-                    genericEntityService, recordTypes, coreAncestors, logger, ct);
-                if (regarding is null)
-                {
-                    return RegardingStampRefused(httpContext);
-                }
-            }
-
-            // Task 146 (C10 part 2): the create is app-only, so the event is owned by the team the ONE resolver names —
-            // the regarding record's team (the named Secure team for a secure record), else the caller's own business
-            // unit team for an event regarding nothing. A refusal writes nothing and is a 409 with a stable reason
-            // code; a Dataverse fault during resolution falls to the catch below as a 500 (a fault is not a refusal).
-            // UAC task 194b R3b-2: asked AFTER the regarding write set is known, over every parent the row will hold (the
-            // regarding and its FR-26 core stamps), in sprk_event's primary order — what the reconciler asks the written row.
-            var owner = await ownership.ResolveOwnerAsync(
-                OwnershipContextFor(request.RegardingRecordType, request.RegardingRecordId, regarding?.CoreStamps, httpContext), ct);
-            if (!owner.IsOwned)
-            {
-                logger.LogWarning(
-                    "Refused event create: no owner resolved ({Code}: {Reason})", owner.RefusalCode, owner.Reason);
-                return OwnerRefusalProblem(owner, "event");
+                    genericEntityService, recordTypes, logger, ct);
             }
 
             // UAC-r2 task 152 / owner decision S1: the create is app-only, so Created By is the BFF application user
             // and cannot say who the event is FOR. The acting user's LINKED contact (task 141) is written to
             // sprk_assignedto — never an email match; no link → blank + todo_unassigned.
+            var callerSystemUserId = await ResolveCallerSystemUserIdAsync(callerResolver, httpContext, logger, ct);
             var assignedToContactId = await ResolveActingUserContactAsync(
                 callerResolver, identity, httpContext, logger, ct);
 
-            var (eventId, createdOn) = await CreateEventInDataverseAsync(
-                dataverseService,
-                request,
-                owner.OwningTeamId!.Value,
-                assignedToContactId,
-                owner.CreatedByPerson, // task 146 c1-r1 — the caller, recorded as the app-created event's creator person
-                regarding,
-                logger,
+            var outcome = await recordCreation.CreateAsync(
+                new RecordCreationRequest(
+                    EventTable,
+                    new RecordCreationPayload.WebApi(
+                        System.Text.Json.JsonSerializer.SerializeToElement(
+                            BuildCreatePayload(request, regarding, assignedToContactId))))
+                {
+                    CorrelationId = httpContext.TraceIdentifier,
+                    // FR-19 / FR-03: the mapping profile of what the event is filed under (Matter to Event, ...), the source
+                    // inferred from the regarding record and read as the caller first (FR-04). An event regarding nothing has
+                    // no source: a silent no-op. Fill-only: every value of the request wins.
+                    Mapping = regarding is null ? null : CallerMappingOf(httpContext, logger),
+                    // The linked contact names the caller themselves: a server-set lookup, no AppendTo (see remarks).
+                    ServerSetLookupColumns = assignedToContactId is null ? null : new HashSet<string>(StringComparer.OrdinalIgnoreCase) { AssignedToColumn },
+                },
+                RecordCreationPrincipal.ForCaller(user, CallerObjectId(httpContext)),
                 ct);
 
+            if (outcome.Refusal is { } refusal)
+            {
+                logger.LogWarning(
+                    "Refused event create: {Kind} {Code} (clientStatus={ClientStatus}, correlationId={CorrelationId})",
+                    refusal.Kind, refusal.Code, refusal.ClientFailure?.StatusCode, outcome.CorrelationId);
+                return RefusalResult(refusal, outcome.Steps, httpContext);
+            }
+
+            if (outcome.CreatedId is not { } eventId)
+            {
+                // Neither a row nor a refusal: never a 201 (fail closed, NFR-01).
+                logger.LogError("Event create ended without a decision (correlationId={CorrelationId})", outcome.CorrelationId);
+                return GenericCreateFailure();
+            }
+
+            var createdOn = DateTime.UtcNow;
             var response = new CreateEventResponse(eventId, request.Subject, createdOn);
 
             logger.LogInformation(
-                "Event created successfully. EventId={EventId}, Subject={Subject}",
-                eventId, request.Subject);
+                "Event created successfully. EventId={EventId}, Subject={Subject}, Warnings={Warnings}",
+                eventId, request.Subject, outcome.Warnings.Count);
 
-            // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event, describing the row's REAL owner
-            // (UAC-r2 task 152, ADR-034 A3). The create is app-only; the owner it wrote is the TEAM the resolver named
-            // above (task 146), which the path already holds — so it is passed rather than read back, and the event
-            // names that team. (Before task 152 this published the caller's AAD oid under a comment claiming
-            // Dataverse defaulted the owner to the OBO caller; it never did.) When
-            // MembershipEventPublisherOptions.Enabled=false (default), the Null peer logs + returns.
-            _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
-                membershipEventPublisher,
-                genericEntityService,
-                "sprk_event",
-                eventId,
-                knownOwner: new Microsoft.Xrm.Sdk.EntityReference("team", owner.OwningTeamId!.Value),
-                httpContext.TraceIdentifier,
-                logger,
-                ct);
+            // Event Log entry for the creation. Task 097 review F1: the event row is already committed, so an audit
+            // failure must never become a 500 (a client retry would create a SECOND event) — it is an Error with a stable
+            // event id and a counter (AuditLogWriteFailed), never swallowed silently. Written only after a successful create.
+            await WriteCreatedAuditLogAsync(dataverseService, eventId, outcome.OwningTeamId, callerSystemUserId, logger, ct);
 
+            // The owner membership event (R3 task 082, ADR-034 A3, fire-and-forget) is published by the service
+            // (RecordCreationService step 12, with the owner team it wrote): none here.
             return TypedResults.Created($"/api/v1/events/{eventId}", response);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error creating event. Subject={Subject}", request.Subject);
 
-            return Results.Problem(
-                detail: "An error occurred while creating the event",
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Internal Server Error",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+            return GenericCreateFailure();
         }
     }
+
+    /// <summary>
+    /// The caller's field mapping for a create (FR-03, FR-04): the source is inferred from what the row is filed under and
+    /// the caller's own Read on it is probed before it is read. <c>null</c> (no mapping, logged) when the probe is not
+    /// registered: a mapping that cannot be made as the caller is never made another way, and never refuses the create.
+    /// </summary>
+    internal static RecordCreationMapping? CallerMappingOf(HttpContext httpContext, ILogger logger)
+    {
+        var probe = httpContext.RequestServices?.GetService<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
+        if (probe is null)
+        {
+            logger.LogError("Field mapping was not asked for: no caller-access probe is registered (the create proceeds unmapped)");
+            return null;
+        }
+
+        return RecordCreationMapping.ForCaller(probe, Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext));
+    }
+
+    /// <summary>The route's existing generic failure: a 500 that says nothing about why.</summary>
+    private static IResult GenericCreateFailure() =>
+        Results.Problem(
+            detail: "An error occurred while creating the event",
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: "Internal Server Error",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+
+    /// <summary>
+    /// A <see cref="RecordCreationService"/> refusal in THIS route's contract (NFR-07, ADR-019). Every refusal the route gave
+    /// before it moved onto the service keeps its status, its words and its <c>errorCode</c> / <c>reasonCode</c>:
+    /// <list type="bullet">
+    /// <item>no owner: the 409 <see cref="ProblemDetailsHelper.RecordOwnerRefused(RecordOwnerResolution, string, string?)"/>
+    /// ("The event was not saved: …", the resolver's <c>reasonCode</c>), body unchanged;</item>
+    /// <item>an I-1 stamp that cannot be derived (a data condition or a fault): the 500 <see cref="RegardingStampRefused"/>
+    /// with <see cref="RegardingStampFailedErrorCode"/>, nothing written. That includes a derived stamp the table's metadata
+    /// cannot bind (task 031 fix round 1, F1-low): the service refuses it as the generic non-retryable
+    /// <see cref="RecordCreationRefusal.NoDecisionCode"/>, told apart only by the step that refused it — the last step record
+    /// is <see cref="RecordCreationStep.StampAndInheritance"/>, <see cref="RecordCreationStepState.Refused"/>
+    /// (<paramref name="steps"/>). The same code at any other step stays the generic failure.</item>
+    /// </list>
+    /// Any other refusal is one the route never gave before (a caller check that raced the route filter, a faulted check):
+    /// it fails closed to the route's existing generic failure — a 500 that names no record and writes nothing — with the
+    /// service's kind and code in the log only.
+    /// </summary>
+    internal static IResult RefusalResult(
+        RecordCreationRefusal refusal, IReadOnlyList<RecordCreationStepRecord> steps, HttpContext httpContext)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        ArgumentNullException.ThrowIfNull(steps);
+        return refusal switch
+        {
+            { Kind: RecordCreationRefusalKind.OwnerUnresolved, OwnerDecision: { } decision } =>
+                OwnerRefusalProblem(decision, "event"),
+            { Kind: RecordCreationRefusalKind.OwnerUnresolved } =>
+                ProblemDetailsHelper.RecordOwnerRefused(refusal.Code, refusal.Detail, "event"),
+            { Code: RecordCreationRefusal.StampUnderivableCode or RecordCreationRefusal.StampUnavailableCode } =>
+                RegardingStampRefused(httpContext),
+            { Kind: RecordCreationRefusalKind.Undecided, Code: RecordCreationRefusal.NoDecisionCode } when RefusedAtTheStamp(steps) =>
+                RegardingStampRefused(httpContext),
+            _ => GenericCreateFailure(),
+        };
+    }
+
+    /// <summary>Whether the create was refused at step 10, the I-1 stamp bind (the service's own step record).</summary>
+    private static bool RefusedAtTheStamp(IReadOnlyList<RecordCreationStepRecord> steps) =>
+        steps.Count > 0 && steps[^1] is { Step: RecordCreationStep.StampAndInheritance, State: RecordCreationStepState.Refused };
+
+    private static Guid? CallerObjectId(HttpContext httpContext) =>
+        Guid.TryParse(CallerResolution.ResolveObjectId(httpContext.User), out var oid) && oid != Guid.Empty ? oid : null;
+
+    /// <summary>
+    /// The caller's systemuserid (the person the audit row records), or null when it does not resolve. Never throws but a
+    /// cancellation: the audit row's person is best-effort, as it was when it came from the owner resolution.
+    /// </summary>
+    private static async Task<Guid?> ResolveCallerSystemUserIdAsync(
+        ICallerSystemUserResolver callerResolver, HttpContext httpContext, ILogger logger, CancellationToken ct)
+    {
+        try
+        {
+            var resolution = await callerResolver.ResolveAsync(httpContext.User, ct);
+            return resolution.IsResolved && Guid.TryParse(resolution.SystemUserId, out var id) && id != Guid.Empty ? id : null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Event create: the caller's system user could not be resolved for the audit row");
+            return null;
+        }
+    }
+
+    /// <summary>The <c>sprk_event</c> table.</summary>
+    internal const string EventTable = "sprk_event";
+
+    /// <summary><c>sprk_event.sprk_assignedto</c>: the person the event is FOR (a contact lookup).</summary>
+    internal const string AssignedToColumn = "sprk_assignedto";
+
+    /// <summary>A lookup value in the service's Web API payload: the target table and the record (no entity set to guess).</summary>
+    private static Dictionary<string, object?> LookupValue(string relatedTable, Guid recordId) => new(StringComparer.Ordinal)
+    {
+        ["relatedTable"] = relatedTable,
+        ["recordId"] = recordId.ToString("D"),
+    };
+
+    /// <summary>
+    /// The Web API payload of the new event, in column logical names (what <c>DataverseWebApiService.BuildCreateEventPayload</c>
+    /// wrote, minus the columns the service owns: the owner, the creator person, the I-1 stamps and the Access Permission).
+    /// Open / Active and Source = User are the route's, as before: the platform default for a new row is Draft.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildCreatePayload(
+        ApiCreateEventRequest request, RegardingFields? regarding, Guid? assignedToContactId)
+    {
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["sprk_eventname"] = request.Subject,
+            // Live sprk_event option set (task 159, notes §0.2 (e)): Open = 659490001, statecode 0 (Active).
+            ["statuscode"] = EventStatusCode.Open,
+            ["statecode"] = EventStatusCode.GetStateCode(EventStatusCode.Open),
+            ["sprk_source"] = 0, // User
+        };
+
+        if (request.Description is not null)
+            payload["sprk_description"] = request.Description;
+        if (request.EventTypeId is { } eventTypeId)
+            payload["sprk_eventtype_ref"] = LookupValue("sprk_eventtype_ref", eventTypeId);
+        if (request.ScheduledStart is { } baseDate)
+            payload["sprk_basedate"] = DataverseDateOnly.Format(baseDate);
+        if (request.DueDate is { } dueDate)
+            payload["sprk_duedate"] = DataverseDateOnly.Format(dueDate);
+        if (request.Priority is { } priority)
+            payload["sprk_priority"] = priority;
+        if (assignedToContactId is { } assignedTo && assignedTo != Guid.Empty)
+            payload[AssignedToColumn] = LookupValue("contact", assignedTo);
+
+        if (regarding is not null)
+        {
+            var logicalName = DataverseRegardingRecordType.GetEntityLogicalName(regarding.RegardingType)
+                ?? throw new InvalidOperationException($"Unknown regarding record type {regarding.RegardingType}.");
+            var lookup = DataverseRegardingRecordType.GetLookupFieldName(regarding.RegardingType)
+                ?? throw new InvalidOperationException($"No regarding lookup is known for record type {regarding.RegardingType}.");
+
+            // (i) the target's own typed lookup; (ii) the record type, a lookup to the environment's sprk_recordtype_ref row
+            // (left out when it has none); (iii) the denormalised resolver fields.
+            payload[lookup] = LookupValue(logicalName, regarding.RegardingId);
+            if (regarding.RecordTypeRefId is { } refId && refId != Guid.Empty)
+                payload["sprk_regardingrecordtype"] = LookupValue("sprk_recordtype_ref", refId);
+            payload["sprk_regardingrecordid"] = regarding.RegardingId.ToString("D");
+            payload["sprk_regardingrecordname"] = Truncate(regarding.Name, EventRegardingRecordNameMaxLength);
+            payload["sprk_regardingrecordurl"] = regarding.Url;
+            if (!string.IsNullOrEmpty(regarding.Number))
+                payload["sprk_regardingrecordnumber"] = Truncate(regarding.Number, EventRegardingRecordNumberMaxLength);
+        }
+
+        return payload;
+    }
+
+    /// <summary><c>sprk_event.sprk_regardingrecordname</c> length (live metadata, 2026-10-03).</summary>
+    internal const int EventRegardingRecordNameMaxLength = 1000;
+
+    /// <summary><c>sprk_event.sprk_regardingrecordnumber</c> length (live metadata, 2026-10-03).</summary>
+    internal const int EventRegardingRecordNumberMaxLength = 100;
+
+    private static string? Truncate(string? value, int maxLength) =>
+        value is { Length: > 0 } && value.Length > maxLength ? value[..maxLength] : value;
 
     /// <summary>
     /// Gets a single event by ID from Dataverse.
@@ -890,17 +1063,17 @@ public static class EventEndpoints
     // The ADR-024 regarding write set (task 159, #1098)
     // =============================================================================================================
 
-    /// <summary>The resolved regarding values a create passes to the Dataverse request model.</summary>
-    private sealed record RegardingWrite(
+    /// <summary>
+    /// The ADR-024 denormalised regarding values the create writes beside the typed lookup (the record-type row, the target's
+    /// name, its number and its URL). The I-1 core stamps and the Access Permission are NOT here: the service derives them.
+    /// </summary>
+    internal sealed record RegardingFields(
         int RegardingType,
         Guid RegardingId,
-        string EntitySet,
         Guid? RecordTypeRefId,
         string? Name,
         string Url,
-        string? Number,
-        IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)> CoreStamps,
-        int? AccessPermission = null);
+        string? Number);
 
     /// <summary>Pause before the one catalog retry: long enough for a throttle window to pass, short for a request.</summary>
     internal static readonly TimeSpan CatalogRetryDelay = TimeSpan.FromMilliseconds(500);
@@ -958,36 +1131,32 @@ public static class EventEndpoints
     }
 
     /// <summary>
-    /// Resolves the regarding write set for <paramref name="regardingType"/>/<paramref name="regardingId"/>, or returns
-    /// null when the FR-26 core-ancestor stamp cannot be derived — the caller then writes NOTHING (fail closed).
+    /// Resolves the ADR-024 denormalised regarding fields for <paramref name="regardingType"/>/<paramref name="regardingId"/>:
+    /// the record-type row, the target's own name and number, and its URL. The owner, the I-1 core stamps and the Access
+    /// Permission are no longer resolved here: <see cref="RecordCreationService"/> derives them from the lookups the create binds
+    /// (task 031), and a stamp that cannot be derived refuses there (<see cref="RefusalResult"/>).
     /// </summary>
     /// <remarks>
     /// Runs only after the filters authorized the caller (AppendTo on the regarding record), so the server-side name
     /// read is not a disclosure path. The pieces and their posture, after TodoRegardingBuilder:
     /// <list type="bullet">
-    ///   <item>entity set — <see cref="IGenericEntityService.GetEntitySetNameAsync"/>, the SAME call the filter made;</item>
     ///   <item>record-type row — <see cref="ICommunicationDataverseService.QueryRecordTypeRefAsync"/>; absent or faulted →
     ///   the record-type lookup is left unset with a warning (non-fatal, as TodoRegardingBuilder);</item>
-    ///   <item>name/number — the target's own columns: the name from the one display-name map, the number from the column the</item>
-    ///   <item>record-type row names (non-fatal; the request's name otherwise, no number);</item>
-    ///   <item>core stamps — <see cref="CoreAncestorResolver.DeriveForHostAsync"/>; an Error outcome, or a stamp whose
-    ///   entity set cannot be read, refuses the write.</item>
+    ///   <item>name/number — the target's own columns: the name from the one display-name map, the number from the column the
+    ///   record-type row names (non-fatal; the request's name otherwise, no number).</item>
     /// </list>
     /// </remarks>
-    private static async Task<RegardingWrite?> ResolveRegardingWriteAsync(
+    private static async Task<RegardingFields> ResolveRegardingFieldsAsync(
         int regardingType,
         Guid regardingId,
         string? requestName,
         IGenericEntityService entities,
         ICommunicationDataverseService recordTypes,
-        CoreAncestorResolver coreAncestors,
         ILogger logger,
         CancellationToken ct)
     {
         var logicalName = DataverseRegardingRecordType.GetEntityLogicalName(regardingType)
             ?? throw new InvalidOperationException($"Unknown regarding record type {regardingType}.");
-
-        var entitySet = await entities.GetEntitySetNameAsync(logicalName, ct);
 
         Guid? recordTypeRefId = null;
         string? numberField = null;
@@ -1059,46 +1228,13 @@ public static class EventEndpoints
             }
         }
 
-        var stamps = new List<(string LookupAttribute, string EntitySetName, Guid RecordId)>();
-        int? accessPermission;
-        try
-        {
-            var outcome = await coreAncestors.DeriveForHostAsync("sprk_event", logicalName, regardingId, ct);
-            if (!outcome.Succeeded)
-            {
-                logger.LogWarning(
-                    "Core-ancestor derivation failed for regarding target '{Entity}'; refusing to write an unstamped "
-                    + "sprk_event (FR-26 / NFR-01). {Error}", logicalName, outcome.Error);
-                return null;
-            }
-
-            foreach (var stamp in outcome.Stamps)
-            {
-                var stampSet = await entities.GetEntitySetNameAsync(stamp.EntityType, ct);
-                stamps.Add((stamp.LookupAttribute, stampSet, stamp.RecordId));
-            }
-
-            // Task 173 (owner round 81): the Access Permission the event takes from what it is filed under, in the same body.
-            accessPermission = outcome.InheritedAccessPermission;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            logger.LogWarning(ex,
-                "Core-ancestor stamp for regarding target '{Entity}' could not be resolved; refusing to write.",
-                logicalName);
-            return null;
-        }
-
-        return new RegardingWrite(
+        return new RegardingFields(
             regardingType,
             regardingId,
-            entitySet,
             recordTypeRefId,
             name,
             TodoRegardingBuilder.BuildRecordUrl(logicalName, regardingId.ToString("D")),
-            number,
-            stamps,
-            accessPermission);
+            number);
     }
 
     /// <summary>The refusal when a create cannot be stamped: a 500 that names no record and writes nothing.</summary>
@@ -1115,58 +1251,18 @@ public static class EventEndpoints
             });
 
     /// <summary>
-    /// Creates a new event in Dataverse.
+    /// The Event Log entry for a successful create. Task 097 review F1: the event row is already committed, so an audit
+    /// failure must never become a 500 (a client retry would create a SECOND event) — it is an Error with a stable event id
+    /// and a counter (AuditLogWriteFailed), never swallowed silently.
     /// </summary>
-    /// <remarks>
-    /// Creates the event record and an Event Log entry for the creation.
-    /// </remarks>
-    private static async Task<(Guid Id, DateTime CreatedOn)> CreateEventInDataverseAsync(
-        IEventDataverseService dataverseService,
-        ApiCreateEventRequest request,
-        Guid owningTeamId,
-        Guid? assignedToContactId,
-        Guid? createdByPersonId,
-        RegardingWrite? regarding,
-        ILogger logger,
+    private static async Task WriteCreatedAuditLogAsync(
+        IEventDataverseService dataverseService, Guid eventId, Guid? owningTeamId, Guid? createdByPersonId, ILogger logger,
         CancellationToken ct)
     {
-        // Map API request to Dataverse request
-        var dataverseRequest = new DataverseCreateEventRequest
-        {
-            Name = request.Subject,
-            Description = request.Description,
-            EventTypeId = request.EventTypeId,
-            BaseDate = request.ScheduledStart,
-            DueDate = request.DueDate,
-            Priority = request.Priority,
-            OwningTeamId = owningTeamId, // task 146 — resolved above; the seam refuses without it
-            AssignedToContactId = assignedToContactId,
-            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 (owner round 13 item 9)
-        };
-
-        if (regarding is not null)
-        {
-            dataverseRequest.RegardingRecordType = regarding.RegardingType;
-            dataverseRequest.RegardingRecordId = regarding.RegardingId;
-            dataverseRequest.RegardingRecordName = regarding.Name;
-            dataverseRequest.RegardingEntitySetName = regarding.EntitySet;
-            dataverseRequest.RegardingRecordTypeRefId = regarding.RecordTypeRefId;
-            dataverseRequest.RegardingRecordUrl = regarding.Url;
-            dataverseRequest.RegardingRecordNumber = regarding.Number;
-            dataverseRequest.RegardingCoreStamps = regarding.CoreStamps;
-            dataverseRequest.AccessPermission = regarding.AccessPermission; // task 173 (owner round 81)
-        }
-
-        // Create the event record
-        var (id, createdOn) = await dataverseService.CreateEventAsync(dataverseRequest, ct);
-
-        // Create Event Log entry for the creation. Task 097 review F1: the event row is already committed, so an audit
-        // failure must never become a 500 (a client retry would create a SECOND event) — it is an Error with a stable
-        // event id and a counter (AuditLogWriteFailed), never swallowed silently.
         try
         {
             await dataverseService.CreateEventLogAsync(
-                id,
+                eventId,
                 Spaarke.Dataverse.EventLogAction.Created,
                 "Event created via API",
                 owningTeamId, // task 146 — owned like the event it logs
@@ -1175,10 +1271,8 @@ public static class EventEndpoints
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            ReportAuditLogFailure(logger, ex, id, Spaarke.Dataverse.EventLogAction.Created);
+            ReportAuditLogFailure(logger, ex, eventId, Spaarke.Dataverse.EventLogAction.Created);
         }
-
-        return (id, createdOn);
     }
 
     /// <summary>
@@ -1202,47 +1296,6 @@ public static class EventEndpoints
         if (owner.IsRefused)
             throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_eventlog", owner);
         return (owner.IsOwned ? owner.OwningTeamId : null, owner.CreatedByPerson);
-    }
-
-    /// <summary>
-    /// The ownership question for an event filed (or not) to a regarding record (task 146): the regarding record is
-    /// the parent when it is an ownership parent (a contact or an account is a relationship, not a parent); with no
-    /// parent, the caller's own business unit (I-6).
-    /// </summary>
-    /// <remarks>UAC task 194b fix round R (R3b-2): through the one builder (<c>ForRow</c>), keyed by the sprk_event columns the
-    /// create writes — the regarding's typed lookup and each FR-26 core stamp in <paramref name="coreStamps"/> — so the
-    /// primary is sprk_event's, as the reconciler asks the written row, never the regarding named first.</remarks>
-    internal static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipContextFor(
-        int? regardingRecordType, Guid? regardingRecordId,
-        IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)>? coreStamps, HttpContext httpContext)
-    {
-        var oid = CallerResolution.ResolveObjectId(httpContext.User);
-        var lookups = new List<KeyValuePair<string, Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?>>();
-        if (regardingRecordType is { } type
-            && Spaarke.Dataverse.RegardingRecordType.GetEntityLogicalName(type) is { } entity
-            && Spaarke.Dataverse.RegardingRecordType.GetLookupFieldName(type) is { } column
-            && regardingRecordId is { } recordId && recordId != Guid.Empty)
-        {
-            lookups.Add(KeyValuePair.Create(column,
-                (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(entity, recordId)));
-        }
-
-        foreach (var stamp in coreStamps ?? [])
-        {
-            var root = CoreAncestorResolver.CoreAncestorLookups
-                .FirstOrDefault(l => string.Equals(l.LookupAttribute, stamp.LookupAttribute, StringComparison.OrdinalIgnoreCase))
-                .EntityType;
-            if (root is not null)
-                lookups.Add(KeyValuePair.Create(stamp.LookupAttribute,
-                    (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent?)new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(root, stamp.RecordId)));
-        }
-
-        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForRow(
-            "sprk_event", lookups, callerObjectId: Guid.TryParse(oid, out var callerOid) ? callerOid : null) with
-        {
-            // Task 146 c1-r1 (owner round 13 item 9): the caller asked for the event the application creates.
-            RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(oid),
-        };
     }
 
     /// <summary>A 409 ProblemDetails for an owner refusal, carrying the stable reason code (task 146).</summary>

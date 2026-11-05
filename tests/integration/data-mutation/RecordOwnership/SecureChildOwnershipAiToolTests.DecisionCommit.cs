@@ -127,4 +127,117 @@ public sealed partial class SecureChildOwnershipAiToolTests
         outcome.Written.Should().BeEmpty();
         _appCreates.Should().BeEmpty();
     }
+
+    // -- field-mapping-server-write-path-r1 task 042c fix round 4 (owner decision 2026-11-04, ontology D-204), must not fire --
+    // The general create refuses sprk_signal, sprk_decisionrecord and sprk_budgetrevision. The decision executors closest to
+    // those tables still commit: Create Budget and Assign Task create through the general create (sprk_budget, sprk_event),
+    // and Revise Budget's revision is created by the writer identity, never through the general create.
+
+    [Fact(DisplayName = "042c fix round 4 (D-204, must not fire): a Create Budget decision still creates its budget through the general create")]
+    public async Task DecisionCreateBudget_StillCreatesTheBudget_ThroughTheGeneralCreate()
+    {
+        var executor = new CreateBudgetExecutor(GrantingProbe(), new DecisionRouteCores(), EntitySets(),
+            TimeProvider.System, CurrencyOnlySources());
+
+        var outcome = await executor.ExecuteAsync(DecisionRequest(OrdinaryMatter, new()
+        {
+            ["amount"] = "250000.50",
+            ["reason"] = "No budget was ever set",
+        }), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done, outcome.Detail);
+        var (table, id, fields) = _appCreates.Should().ContainSingle().Subject;
+        table.Should().Be("sprk_budget");
+        outcome.Written.Should().Equal(new DecisionRecordRef("sprk_budget", id));
+        Bind(fields, "sprk_Matter@odata.bind").Should().Be($"/sprk_matters({OrdinaryMatter:D})");
+        Owner(fields).Should().Be(Directory.ChildTeam);
+    }
+
+    [Fact(DisplayName = "042c fix round 4 (D-204, must not fire): an Assign Task decision still creates its task event through the general create")]
+    public async Task DecisionAssignTask_StillCreatesTheTaskEvent_ThroughTheGeneralCreate()
+    {
+        var executor = new AssignTaskExecutor(GrantingProbe(), new DecisionRouteCores(), EntitySets());
+
+        var outcome = await executor.ExecuteAsync(DecisionRequest(OrdinaryMatter, new()
+        {
+            ["assignee"] = DcAssignee.ToString("D"),
+            ["description"] = "Chase the revised budget with the firm",
+        }), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done, outcome.Detail);
+        var (table, id, fields) = _appCreates.Should().ContainSingle().Subject;
+        table.Should().Be("sprk_event");
+        outcome.Written.Should().Equal(new DecisionRecordRef("sprk_event", id));
+        Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({OrdinaryMatter:D})");
+        Owner(fields).Should().Be(Directory.ChildTeam);
+    }
+
+    [Fact(DisplayName = "042c fix round 4 (D-204, must not fire): a Revise Budget decision still records its revision through the writer, with the general create in reach")]
+    public async Task DecisionReviseBudget_StillRecordsTheRevision_ThroughTheWriter_NotTheGeneralCreate()
+    {
+        var budget = Guid.Parse("a0430000-0000-4000-8000-0000000000b1");
+        var request = DecisionRequest(OrdinaryMatter, new()
+        {
+            ["budget"] = budget.ToString("D"),
+            ["amount"] = "125000",
+            ["reason"] = "Scope grew",
+        });
+        // The general create is registered in the request's services (DecisionRequest), as the commit route has it: a revise
+        // that reached it would be refused (sprk_budgetrevision is created only by its writer), so a Done proves it did not.
+        _user.GetOverride = path => path.StartsWith($"sprk_budgets({budget:D})", StringComparison.Ordinal)
+            ? DataverseUserResponse.Ok(200, System.Text.Json.JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                ["sprk_totalbudget"] = 100000m,
+                ["_sprk_matter_value"] = OrdinaryMatter.ToString("D"),
+            }))
+            : null;
+        var writerCreates = new List<Microsoft.Xrm.Sdk.Entity>();
+        var org = new Mock<Microsoft.PowerPlatform.Dataverse.Client.IOrganizationServiceAsync2>();
+        org.Setup(o => o.CreateAsync(It.IsAny<Microsoft.Xrm.Sdk.Entity>(), It.IsAny<CancellationToken>()))
+            .Returns<Microsoft.Xrm.Sdk.Entity, CancellationToken>((e, _) =>
+            {
+                writerCreates.Add(e);
+                return Task.FromResult(e.Id);
+            });
+        var probe = Mock.Get(GrantingProbe());
+        probe.Setup(p => p.GetCallerSystemUserIdAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(DcRevisedBy);
+        var executor = new ReviseBudgetExecutor(probe.Object, _user,
+            new Sprk.Bff.Api.Services.Signals.OntologyWriterDataverseClient(() => org.Object,
+                NullLogger<Sprk.Bff.Api.Services.Signals.OntologyWriterDataverseClient>.Instance),
+            OrdinaryOwner(), TimeProvider.System, NullLogger<ReviseBudgetExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(request, CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done, outcome.Detail);
+        var revision = writerCreates.Should().ContainSingle().Subject;
+        revision.LogicalName.Should().Be("sprk_budgetrevision");
+        outcome.Written.Should().Equal(
+            new DecisionRecordRef("sprk_budgetrevision", revision.Id), new DecisionRecordRef("sprk_budget", budget));
+        _appCreates.Should().BeEmpty("the general create was never asked to create anything");
+    }
+
+    private static readonly Guid DcRevisedBy = Guid.Parse("a0430000-0000-4000-8000-0000000000d1");
+
+    /// <summary>Create Budget's parameter sources: no option chosen, the matter's currency resolved.</summary>
+    private static DecisionParameterSources CurrencyOnlySources()
+    {
+        var sources = new Mock<DecisionParameterSources>(
+            new Mock<IDataverseUserClient>().Object, new Mock<IGenericEntityService>().Object,
+            new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>().Object, new ConfigurationBuilder().Build(),
+            new Mock<Microsoft.Extensions.Options.IOptionsMonitor<ExternalAccessOptions>>().Object,
+            NullLogger<DecisionParameterSources>.Instance)
+        { CallBase = false };
+        sources.Setup(s => s.ResolveBudgetCurrencyAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BudgetCurrency(Guid.Parse("a0430000-0000-4000-8000-0000000000c1"), "EUR", null));
+        return sources.Object;
+    }
+
+    /// <summary>The revision's owner as the resolver names it for a child of an ordinary matter's budget.</summary>
+    private static IRecordOwnershipResolver OrdinaryOwner()
+    {
+        var owner = new Mock<IRecordOwnershipResolver>();
+        owner.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RecordOwnerResolution(RecordOwnerOutcome.Owned, Directory.ChildTeam, null, null));
+        return owner.Object;
+    }
 }

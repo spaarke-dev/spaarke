@@ -8,24 +8,20 @@
 
 | Field | Value |
 |---|---|
-| **Active** | **042b ✅** PR #2562 merged 0d4aa87ee0 (2026-11-04T07:03Z); #2483 and DI-009 are closed.
-- UAC-r2 AC15: OK with notes (K3 rows 11 and 12; Q3 named as a create behaviour change).
-- The merged branch passed: verify-suites 6670/0/7, ArchTests 1911.
-- 042b is not on dev. It goes to uac-r2's next deploy batch with #2551.
-- **042c POML written** (#2561 / DI-019, which UAC-r2 ruled F): the caller's AppendTo on the core record, plus the core first in the owner question. Reuse `CallerWriteAuthorization.PairTargetAsync`. It waits on the owner's OK.
-- **020 ✅** (#2551). It is not on dev. The live route check needs the uac-r2 deploy and the owner's OK on test rows.
-- **041 ✅** (#2541), live on dev since d763dc120e. FR-40 is unproven live: there has been no activity.
-- 042b worktree `agent-ac26f071a1fb351e7` can be removed later, through Remove-WorktreeSafe.
-- **Open questions:** Q1 / #2556 (the report-card regarding) needs an owner decision. |
-| **Next Action** | 1. With the owner's OK: run 042c through task-execute. Use an Opus implementer, brief line 1 `git switch -c task/fm-042c <work tip>`. Two adversarial passes (security), then UAC-r2.
-2. Tell uac-r2 that #2562 is on master, for the deploy batch. After the deploy: read-only checks on the route and the new owner behaviour, sent to uac-r2. Then ask the owner HERE for an OK on Matter/Project test rows.
-3. After a real dev upload: re-run the 041 read-only checks and send them to uac-r2.
-4. Then W3, starting with 021 (fix item #2, ReferenceLookupColumns / PostMappingDefaults, before cutover). |
+| **Active** | Checkpoint 2026-11-04 (late). uac-r2 session is now **`spaarke-wt-unified-access-control-r2-20`** (-38 and -09 gone).
+- **031** (FR-19): merged into the work branch as **603ae09027**, pushed; **PR #2564 open, auto-merge**. UAC-r2 verdict for the PR: "UAC-r2: OK with notes (route-authorised exemption pinned to (column, id); closed allow-list + ArchTest; uniform 403; event route adds checks, removes none). No F findings." K items: K-2 resolved by (column,id); K-3 ArchTest name pin; K-4 doubles → 046; K-5 BuildCreateEventPayload → 063 (noted in 063 POML). Event type stays K1 (Basic + Office lack AppendTo on sprk_eventtype_ref → 046). Release notes in notes/task-031-notes.md.
+- **042c** (#2561): **PR #2569 open, auto-merge** (work branch 297c4f8602: 042c 4b45ba3cc5 merged + master with #2568; ArchTests 1931/1931, suites 6789/0/7). Owner D-204: general create refuses sprk_signal / sprk_decisionrecord / sprk_budgetrevision. UAC-r2: "uac-r2 reviewed 042c 4b45ba3cc5 (D-204 refusal): approved, no F (2026-11-04)"; ontology pass. Owner extended D-204 to updates: **task 048** (written, not started). Dev deploy of master 909754869f (no 042c) OK'd from this project to uac-r2; after live → read-only App Insights checks.
+- **021**: code done on task/fm-021 c2b3c327ec (not merged). Live p95 + deploy wait on #2551 on dev + owner OK (~40 test matters + code-page deploy).
+- **New tasks 043–046** written (5450e1a5af): 043 doc as mapping source; 044 core pair field security (UAC-r2 gate); 045 regarding pair complete+propagated (inventory first); 046 roles matrix (+ ebilling Procedure Read entry, d70346386b). #2524 task becomes 047 when written.
+- **Private (do NOT write publicly):** core-pair re-point on update — UAC-r2 owns (F), fixing on fix/uac-core-pair-update. |
+| **Next Action** | 1. TASK-INDEX 031 ✅ once PR #2564 merges.
+2. After #2569 merges: TASK-INDEX 042c ✅, close #2561 + DI-019. Then 048 (ontology answer on output mapping first).
+3. Owner questions open: inactive playbook refused at analysis start? (pre-existing, not 031). 021 live OK. Family 1.0.56, 076, #2556.
+4. After uac-r2 deploys #2551/#2562: read-only checks → uac-r2. |
 | **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
 | **Open PRs** | #2387 (075, HOLD, ships with 040). |
 | **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
-| **Waiting on** | - The owner: an OK for 042c.
-- Owner: the Family 1.0.56 look (the four #2513 items on dev) and the 076 narrower-user pass. **Done 2026-11-03:** 005 `-Apply` on dev (36 migrated, VERIFY PASS, idempotent); pid 53128 (the pre-crash session) stopped on the owner's "kill it".
+| **Waiting on** | - Owner: the Family 1.0.56 look (the four #2513 items on dev) and the 076 narrower-user pass. **Done 2026-11-03:** 005 `-Apply` on dev (36 migrated, VERIFY PASS, idempotent); pid 53128 (the pre-crash session) stopped on the owner's "kill it".
 - 041 live proof: dev BFF d763dc120e (carries #2541) is live since 2026-11-03T22:26:31Z. The post-deploy check passed on what existed (0 5xx; no index or child-records traffic; no rows since the deploy). The startup logger exception is pre-existing (#2549, DI-016). After the next real upload or create on dev, re-run the read-only checks (document `sprk_searchindexname` = spaarke-files-index; no `sprk_ai_search_index` on new rows). Send the results to **uac-r2** (it now runs dev deploys), and copy R3 (`spa-external-access-platform-f2`) only for its rollout record §17.
 - Rows to delete later: see `notes/task-019-notes.md` (the check-C event is the owner's and stays).
 - #2518 (ontology writer identity not provisioned): ontology's to own. |

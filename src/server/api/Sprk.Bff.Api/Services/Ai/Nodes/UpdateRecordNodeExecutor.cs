@@ -326,6 +326,24 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
                 NodeErrorCodes.ValidationFailed,
                 NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
         }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException ex)
+            when (ex.RefusalCode == Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.FixedAfterCreateReasonCode)
+        {
+            // The core record pair is fixed after create on BFF update paths: the payload's shape was refused before anything
+            // was read or written — a validation failure of the configured payload, not a server fault. Matched on this code
+            // only; every other refusal of this type (the access-column refusal included) keeps the mapping below.
+            _logger.LogWarning(
+                "UpdateRecord node {NodeId} refused: the payload names a column fixed after create ({Code})",
+                context.Node.Id,
+                ex.RefusalCode);
+
+            return NodeOutput.Error(
+                context.Node.Id,
+                context.Node.OutputVariable,
+                ex.Message,
+                NodeErrorCodes.ValidationFailed,
+                NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+        }
         catch (Exception ex) when (PlaybookRunWriteIdentity.IsAccessDenied(ex, impersonateSystemUserId))
         {
             // #2257: Dataverse refused the write made AS the run's user — no Write on the record, or no AppendTo on a lookup

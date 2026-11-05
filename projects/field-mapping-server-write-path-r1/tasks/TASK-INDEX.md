@@ -32,14 +32,19 @@
 | 041 | [Index routing follows the content type (#2502)](041-content-type-index-routing.poml) | FR-40 (FR-10, FR-38) | opus / high | FULL | none | 019, 039 | ✅ (#2541, 249809ce0b) |
 | 042a | [#2483 window characterization (tests only; lands alone)](042a-stamp-before-owner-characterization.poml) | FR-41 | sonnet / high | STANDARD | none | none | ✅ (#2521) |
 | 042b | [Derive the stamp before the owner (#2483, DI-009)](042b-stamp-before-owner-fix.poml) | FR-41 | opus / high | FULL | none | 042a, 019 | ✅ (#2562, 0d4aa87ee0) |
-| 042c | [Signal / DR core record: caller AppendTo + core first in the owner question (#2561, DI-019)](042c-core-record-owner-and-appendto.poml) | FR-41 | opus / high | FULL | none | 042b | 🔲 UAC-r2 ruled F 2026-11-04; awaiting owner OK |
+| 042c | [Signal / DR core record: caller AppendTo + core first in the owner question (#2561, DI-019)](042c-core-record-owner-and-appendto.poml) | FR-41 | opus / high | FULL | none | 042b | ✅ [done] PR #2569 merged 2026-11-05 (D-204 refusal) |
+| 043 | [A Document is a field-mapping source (owner 2026-11-04)](043-document-as-mapping-source.poml) | FR-03, FR-04, FR-19 | opus / high | FULL | none | 031 | 🔲 [open] |
+| 044 | [Core pair written whole, only by the server and the ledger writers: field security (owner 2026-11-04)](044-core-pair-server-only-field-security.poml) | FR-41 | opus / high | FULL | none | 042c; dev import gated on the owner's go in UAC-r2's session | 🔲 [open] |
+| 045 | [Regarding pair always complete and propagated: inventory + design first (owner 2026-11-04)](045-regarding-pair-complete-and-propagated.poml) | FR-23, FR-41 | opus / high | FULL | none | 042c, 044; part B after owner approval | 🔲 [open] |
+| 046 | [Feature permission matrix, proposed role changes (UAC-r2), role guard (owner 2026-11-04)](046-feature-permission-matrix-and-role-guard.poml) | FR-08, FR-26 | opus / high | FULL | none | 031, 042c | 🔲 [open] |
+| 048 | [Signal, Decision Record and Budget Revision changed only by their writers: generic update tools refuse them (owner 2026-11-04, D-204 extended)](048-writer-only-tables-refused-by-generic-updates.poml) | FR-41 | opus / high | FULL | none | 042c | 🔲 [open] |
 
 ## Phase 3 — W3 Product creators onto the service
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 020 | [Child-records route: Matter, Project, `mappingSource`](020-child-records-route-matter-project.poml) | FR-15 | opus / high | FULL | none | 019 | ✅ (#2551, aef86b89f7) |
-| 021 | [Matter wizard (reference) + latency before/after](021-matter-wizard-migration.poml) | FR-16, NFR-02 | sonnet / high | FULL | W3-wizards | 020, 041 | 🔲 |
+| 021 | [Matter wizard (reference) + latency before/after](021-matter-wizard-migration.poml) | FR-16, NFR-02 | sonnet / high | FULL | W3-wizards | 020, 041 | 🔄 code done (task/fm-021 c2b3c327ec, not merged); live p95 + deploy wait on #2551 on dev + owner OK |
 | 022 | [Project wizard (incl. secure Project)](022-project-wizard-migration.poml) | FR-16, FR-15 | opus / high | FULL | W3-wizards | 021, 041 | 🔲 |
 | 023 | [Event wizard](023-event-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 022, 041 | 🔲 |
 | 024 | [To Do wizard](024-todo-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 023, 041 | 🔲 |
@@ -49,7 +54,7 @@
 | 028 | [Analysis wizard + email mapping at send](028-analysis-wizard-and-email-send-mapping.poml) | FR-16, FR-17 | sonnet / xhigh | FULL | W3-wizards | 027, 041 | 🔲 |
 | 029 | [Document Upload + Summarize Files wizards](029-document-upload-and-summarize-wizards.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 028, 041 | 🔲 |
 | 030 | [Office To Do + document save](030-office-todo-and-document-save.poml) | FR-18 | opus / high | FULL | W3-server | 019 | 🔲 |
-| 031 | [Typed routes: events, analysis create](031-typed-routes-events-analysis.poml) | FR-19 | sonnet / high | FULL | W3-server | 019 | 🔲 |
+| 031 | [Typed routes: events, analysis create](031-typed-routes-events-analysis.poml) | FR-19 | sonnet / high | FULL | W3-server | 019 | ✅ [done] PR #2564 merged 2026-11-04; live on dev 909754869f |
 | 032 | [Invoice extraction](032-invoice-extraction.poml) | FR-20 | sonnet / high | FULL | W3-server | 019 | 🔲 |
 | 033 | [System creators: generation, playbook, Signal, Decision](033-system-creators-generation-playbook-signal-decision.poml) | FR-21 | opus / high | FULL | W3-server | 019 | 🔲 |
 | 034 | [System creators: inbound ingestion](034-system-creators-inbound-ingestion.poml) | FR-21 | opus / high | FULL | W3-server | 019 | 🔲 |
@@ -111,6 +116,7 @@
 | W2 core (sequential) | 013 → 014 → 015 → 016 → {017, 018} → 019 | 011, 012 (+002, 003 for 014) | One core file; no parallelism |
 | W3-server | 030, 031, 032, 033, 034 | 019 | Separate callers; run `/conflict-check` for ontology/UAC files |
 | W2 follow-ups | 041; 042a → 042b → 042c | 019 (+039 for 041) | 041 and 042b both edit `RecordCreationService*.cs`: not parallel; whichever lands second rebases and reconciles design §15.5. 042a (tests only) may run beside 041 and lands alone |
+| W2 follow-ups (2026-11-04) | 043; 042c → 044 → 045; 046 | 031 (043, 046), 042c (044, 046) | 044 and 045 both edit `CallerWriteAuthorization.cs`: sequential. 046 writes no `src/` file and may run beside any of them. 045 stops after its inventory for the owner |
 | W3-wizards (sequential) | 020 → 021 → … → 029 | 019, 041 | FR-16: one wizard at a time, live-verified. 041 first: W3 cannot verify "the wizard sends no index" against a server that still copies the BU value |
 | W4 | 040 | 001, 005, 019 | Parallel with Phase 3 |
 | W5-A | 050 | 019 | Read-only investigation |

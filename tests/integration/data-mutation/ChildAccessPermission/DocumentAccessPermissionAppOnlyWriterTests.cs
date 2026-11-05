@@ -64,8 +64,8 @@ public class DocumentAccessPermissionAppOnlyWriterTests
                 Lookups: null),
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), It.IsAny<CancellationToken>(), null),
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), null, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -79,9 +79,9 @@ public class DocumentAccessPermissionAppOnlyWriterTests
                 LegacyFields: new Dictionary<string, string?> { ["sprk_documentdescription"] = "x" }, Lookups: null),
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_document", Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_documentdescription")),
-            It.IsAny<CancellationToken>(), null), Times.Once);
+            null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -96,9 +96,9 @@ public class DocumentAccessPermissionAppOnlyWriterTests
                 ImpersonateSystemUserId: User, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_document", Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_accesspermission")),
-            It.IsAny<CancellationToken>(), User), Times.Once);
+            User, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -166,9 +166,9 @@ public class DocumentAccessPermissionAppOnlyWriterTests
             CancellationToken.None);
 
         result.Success.Should().BeTrue(result.Error);
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_document", Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_accesspermission")),
-            It.IsAny<CancellationToken>(), User), Times.Once);
+            User, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -226,9 +226,9 @@ public class DocumentAccessPermissionAppOnlyWriterTests
             table, Row, new Dictionary<string, object?> { ["sprk_accesspermission"] = InheritedAccessPermission.Restricted },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_accesspermission")),
-            It.IsAny<CancellationToken>(), null), Times.Once);
+            null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private UpdateRecordActionCore Core() => new(

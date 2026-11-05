@@ -1017,10 +1017,11 @@ internal static class InheritedAccessPermission
     /// mapping, a Duplicate would be judged against another invoice. All six are the Signal's typed-writer-only columns: they are
     /// written once, at create, by the Signal writer (<c>SignalWriter.WriteAsync</c>; the subject lookup and the pair through
     /// <c>TodoRegardingBuilder.ApplySubjectLookupAndPairAsync</c>) through the ontology writer's dedicated client
-    /// (<c>OntologyWriterDataverseClient</c>), and never updated; the closure and commit updates write neither, the core-ancestor
-    /// restamper moves only the stamp lookups, and no generic path writes a Signal (it is never mapped:
-    /// <c>RecordTableRules</c>, <c>OntologyContentIsNotMapped</c>). Its lane and its other subject lookups are not listed yet
-    /// (<c>AccessTableReaderScanTests</c>).</item>
+    /// (<c>OntologyWriterDataverseClient</c>), and never updated; the closure and commit updates write neither, and the core-ancestor
+    /// restamper moves only the stamp lookups. Generic BFF update paths can write a Signal's other columns; the core record
+    /// pair is fixed after create on them (<see cref="RecordCreation.RecordTableRules.RefuseFixedAfterCreateColumns"/>). A
+    /// Signal is excluded from field mapping (<c>RecordTableRules</c>, <c>OntologyContentIsNotMapped</c>). Its lane and its
+    /// other subject lookups are not listed yet (<c>AccessTableReaderScanTests</c>).</item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>

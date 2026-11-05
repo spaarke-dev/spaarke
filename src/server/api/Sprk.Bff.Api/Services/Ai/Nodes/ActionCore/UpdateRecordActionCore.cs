@@ -211,6 +211,16 @@ internal sealed class UpdateRecordActionCore
             throw new RecordOwnerUnresolvedException(input.EntityLogicalName, documentRefusal);
         }
 
+        // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths
+        // (RecordTableRule.FixedAfterCreateColumns): asked of every payload, a confirmed proposal included, on its shape alone,
+        // before any row is read or written. On a Signal the refusal above answers first for the app-only payloads.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(input.EntityLogicalName, updatePayload.Keys) is { } fixedRefusal)
+        {
+            // Not the owner constructor: its message is about a create's owner. The update's own words, the same as the chat tool's.
+            throw new RecordOwnerUnresolvedException(input.EntityLogicalName, fixedRefusal.RefusalCode!,
+                $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).");
+        }
+
         async Task Patch(CancellationToken ct)
         {
             // ebilling-r1 #2081: an invoice or line is written UPDATE-ONLY (If-Match: *, impersonation kept). The guard below
@@ -228,12 +238,22 @@ internal sealed class UpdateRecordActionCore
                 return;
             }
 
-            await _fieldMappingService.UpdateRecordFieldsAsync(
-                input.EntityLogicalName,
-                input.RecordId,
-                updatePayload,
-                ct,
-                input.ImpersonateSystemUserId).ConfigureAwait(false);
+            // Every other table is written UPDATE-ONLY too: this node updates an existing record and never creates one. An id
+            // that names no row writes nothing and is refused, as the generic update handler refuses it.
+            try
+            {
+                await _fieldMappingService.UpdateExistingRecordFieldsAsync(
+                    input.EntityLogicalName,
+                    input.RecordId,
+                    updatePayload,
+                    input.ImpersonateSystemUserId,
+                    ct).ConfigureAwait(false);
+            }
+            catch (KeyNotFoundException)
+            {
+                throw DataverseUpdateHandler.RecordNotFoundRefusal(
+                    input.EntityLogicalName, input.ImpersonateSystemUserId, DataverseUpdateHandler.CarriesLookupBind(updatePayload.Keys));
+            }
         }
 
         // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
