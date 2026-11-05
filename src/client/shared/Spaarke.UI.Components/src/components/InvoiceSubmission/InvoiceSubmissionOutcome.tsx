@@ -5,7 +5,8 @@
  * Reads one submission's status through the host's `getStatus` callback, polls while the server says Received or
  * Processing, and renders the terminal answer:
  *   - Accepted: the tracking number. An Accepted invoice held for its billing terms (`view.warning`, 082c) shows ONE
- *     warning bar with the server's sentence in place of the green bar.
+ *     warning bar with the server's sentence in place of the green bar, and its badge reads "In Review" in the warning tone
+ *     (082c-3b, R4 2026-11-05) instead of green "Accepted".
  *   - While Processing, the 202's provisional warning (`submittedWarning`) is a quiet caption; the terminal view drops it.
  *   - Rejected: the reason code and a report slot the host renders (`renderReport`); a placeholder until task 134.
  *   - Failed: retry guidance.
@@ -30,6 +31,9 @@ import { InvoiceSubmissionError, isTerminalStatus } from './types';
 import type { InvoiceSubmissionStatusView, InvoiceSubmissionWarning } from './types';
 
 const DEFAULT_POLL_INTERVAL_MS = 2000;
+
+/** The badge for a held Accepted view: the owner's existing label for the invoice's statuscode 1, as partners see it in the Invoices grid. */
+const IN_REVIEW_LABEL = 'In Review';
 
 const useStyles = makeStyles({
   root: {
@@ -206,11 +210,16 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
   // held and the 202's provisional note is dropped with the Processing state it sat under. A blank message renders nothing.
   const heldWarning = status === 'Accepted' ? nonBlank(view?.warning) : null;
   const provisionalWarning = terminal ? null : nonBlank(submittedWarning);
+  // 082c-3b (R4 2026-11-05): held is decided once, here, for both the badge and the held bar below. A held Accepted view reads "In Review"
+  // in the warning tone; an un-held or released (overridden: no warning) Accepted view keeps the green "Accepted" badge.
+  const held = heldWarning !== null;
+  const badgeLabel = held ? IN_REVIEW_LABEL : labelFor(status);
+  const badgeTone: StatusBadgeTone = held ? 'warning' : toneFor(status);
 
   return (
     <div className={styles.root} data-testid="invoice-submission-outcome">
       <div className={styles.header}>
-        <StatusBadge label={labelFor(status)} tone={toneFor(status)} />
+        <StatusBadge label={badgeLabel} tone={badgeTone} />
         {view?.firmInvoiceNumber && (
           <Text size={200} className={styles.caption}>
             Invoice {view.firmInvoiceNumber}
@@ -262,7 +271,7 @@ export const InvoiceSubmissionOutcome: React.FC<InvoiceSubmissionOutcomeProps> =
           </MessageBarBody>
         </MessageBar>
       )}
-      {status === 'Accepted' && !heldWarning && (
+      {status === 'Accepted' && !held && (
         <MessageBar intent="success">
           <MessageBarBody>
             <MessageBarTitle>Accepted</MessageBarTitle>
