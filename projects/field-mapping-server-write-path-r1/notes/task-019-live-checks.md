@@ -220,3 +220,62 @@ The `FaultException<OrganizationServiceFault>` on `sprk_userentityassociation` i
 - **Shape of the burst:** `MembershipJunctionUpdaterHost` logs 10 per first-time membership event, which is how the 19:00:52Z burst from check A looks.
 - **Why the baseline missed it:** that query ran with the `az monitor app-insights query` default of `--offset 1h`.
 - **Cause:** the junction updater does not recognise the wrapped "does not exist" message, so the junction stays empty. That fails closed and has no bearing on checks A or B.
+
+
+## 2026-11-05 live checks for 020 / 031 / 042b
+
+> Run 2026-11-05 14:03-14:07Z against `spaarke-bff-dev` (master 909754869f, live since 04:16:30Z) and `spaarkedev1`. The caller was the owner's admin account (delegated user token, same as above). The owner approved these creates in the main session on 2026-11-05. Creates only, every read-back a GET, no metadata change, no update or delete. No token is recorded here.
+> **042b (FR-41, stamp before owner): partial live evidence only.**
+> - What it shows: on the event, the create's owner is the team of the stamped root (MAT-000032's team). `StampAndInheritance` ran before `Create`, and no `stamp_unavailable` or `stamp_underivable` appeared. That is the ordinary-world case.
+> - What it does not reach: these three creates never *derive* a missing stamp. The event route sends `sprk_regardingmatter` itself, the analysis has no stamp source, and a matter is a root. They also never touch a secure parent.
+> - What would prove it: a child filed under an intermediate with no stamp (for example a to-do under the event above), and the A1/A3 secure-world case. Neither is in this approval.
+
+### Result summary
+
+| # | Check | Event (`POST /api/v1/events`, 031) | Analysis (`POST /api/ai/analysis/create`, 031) | Matter (`POST /api/v1/child-records/sprk_matter`, 020) |
+|---|---|---|---|---|
+| 1 | Response shape | **PASS**: 201, `Location: /api/v1/events/{id}`, `{id, subject, createdOn}` (the route has no `warnings` member) | **PASS**: 201, `Location: /api/ai/analysis/{id}`, `{analysisId}` | **PASS**: 201, `Location: /api/v1/child-records/sprk_matter/{id}`, `{id}` with no `warnings` |
+| 2 | Owner (team) | **PASS**: team "Spaarke Business Unit 1" `cf15f587-…`, the matter's team | **PASS**: the same team, which is the document's owner (record-first) | **PASS**: team "Spaarke" `09fbf21c-…` (`teamtype` 0, `isdefault` true). It is the default team of the caller's BU `06fbf21c-…`, as expected for an unfiled root. |
+| 3 | Core-ancestor stamp | **PASS**: `sprk_regardingmatter` = MAT-000032, plus the full ADR-024 pair (type Matter, id, name, URL, number MAT-000032) | **N/A by design**: the body binds only `sprk_documentid`, the analysis's input, which `CoreAncestorResolver.StampSourceColumns` does not treat as a filing. Trace: "no I-1 stamp missing". Every earlier analysis on dev is the same. | **N/A**: a matter is a root. Trace: `StampAndInheritance: Skipped (the table carries no I-1 stamp…)`. |
+| 4 | Mapped fields | **PASS**: "Matter to Event" mapped 6 of 8 columns (attorney1/2, paralegal1/2, assigned-to internal/external), each equal to the matter's value. Law firm 1/2 are empty at the source. Trace: `6 column(s) mapped (fill-only), 0 warning(s)`. | **N/A**: there is no profile onto `sprk_analysis` (0 mapped, 0 warnings) | **NOT EXERCISED**: dev has **no field-mapping profile with target `sprk_matter`**. I read all 7 profiles, and BFF `GET field-mappings/profiles/{sprk_project,sprk_matter,account,sprk_organization}/sprk_matter` returns 404 for each. `mappingSource` named PRJ-000044. Trace: `0 column(s) mapped, 0 warning(s)`, the designed silent no-op. |
+| 5 | Sent values kept | **PASS**: subject and description as sent. `sprk_assignedto` = the caller's linked contact (route-set, owner S1). | **PASS**: name, document and playbook (Risk Scan) as sent | **PASS**: name, description, Matter Type (Litigation), Practice Area (Appellate) and attorney1 (Test User 1) as sent |
+| 6 | Number | **PASS**: `EVT-000007` | N/A (no autonumber) | **PASS**: `MAT-000034` from the platform autonumber (`MAT-{SEQNUM:6}`), not a placeholder, so no STOP |
+| 7 | `sprk_createdbyperson` | **PASS**: Ralph Schroeder | **PASS**: Ralph Schroeder | **PASS**: Ralph Schroeder |
+| 8 | Warnings | none (0 / 0 mapping) | none | none |
+
+`createdby` is `# mi-bff-api-dev` on all three (the app-only create, as designed).
+
+The search index is **not** written on any of the three. The trace says `SearchIndexDefault: NoOp the index follows the content type (#2502)`. This is a change since check A on 2026-11-02, when the event received the BU index; it is by design under #2502.
+
+**Analysis, first attempt (no row).** I sent `playbookId` `fe3e5acc-4aea-f011-8406-7ced8d1dc988`. That was my typo: the real Risk Scan id is `…-7c1e520aa4df`. The route answered `403 sdap.access.deny.insufficient_rights`: `RetrievePrincipalAccess` returned 404 for a nonexistent playbook and the filter denied. No row was created (GET by name returned 0 rows). The retry with the right id gave 201. Creating an analysis starts no AI run: the route creates the row and associates scopes (none were sent), and App Insights shows no execute request.
+
+**Matter, side effect.** PostCreate (the I-12 L1 "Assigned *" grant) wrote one `sprk_assignedaccess` row for attorney1 (listed below). PostCreate took 5.8 s of the 8.2 s request.
+
+### App Insights (14:03-14:14Z, explicit `timestamp between`, `--offset 2h`; this window also covers the task 021 run)
+
+| Query | Result |
+|---|---|
+| `requests` with resultCode >= 500 | **0 rows** |
+| `requests` by name, resultCode | events 201 ×1; analysis/create 403 ×1 (my typo, above) and 201 ×1; child-records 201 ×12; field-mappings/profiles 404 ×11 |
+| `exceptions` by type, message | `FaultException` / `InvalidOperationException` "sprk_userentityassociation … does not exist" ×230 each: the known #2292, 10 per membership event, 23 creates. `InvalidOperationException` "readability-proof read did not answer (403 …not a member of the organization)" ×2: the known acme-environment noise. **Nothing new.** |
+| `traces` has `stamp_unavailable` or `stamp_underivable` | **0 rows** |
+
+- Request telemetry is sampled. Only 12 of the 22 child-records POSTs and 11 of the 21 profile GETs have a `requests` row. Part 1's child-records request is present this time; check A's was missing on 2026-11-02.
+- There is no host-start trace in the window, so there was no restart. App Service `lastModifiedTimeUtc` was unchanged before and after the run.
+
+### Rows created on 2026-11-05 (part 1) — the owner's cleanup list
+
+| Table | Id | Name / number |
+|---|---|---|
+| `sprk_event` | `5ed2abdc-8055-48df-ab40-371ecac9cfff` | FMSWP-019 031 event (EVT-000007) |
+| `sprk_eventlog` (side effect of the event route) | `2fc1d8b4-21d9-f111-84e8-7ced8dda31f8` | the event's "Created" log row |
+| `sprk_analysis` | `0cd0ebfe-8584-4007-8bbb-13fd8785be51` | FMSWP-019 031 analysis |
+| `sprk_matter` | `8edd1803-adc6-486a-8993-7685b50dd7f8` | FMSWP-019 020 matter (MAT-000034) |
+| `sprk_assignedaccess` (side effect of the matter) | `93c91fb6-21d9-f111-84e8-00224829aef9` | sprk_assignedattorney1 → contact Test User 1 |
+
+The task 021 timing run's 42 matters and 21 `sprk_assignedaccess` rows are listed in `task-021-live.md`.
+
+### Needs the owner
+
+1. **020's mapping clause cannot be proven live until a profile onto `sprk_matter` exists.** Dev has none, and creating one is a write not yet approved. The coordinator has put option (B) to the owner.
+2. The analysis I-1 stamp stays empty by design (the document is the input, not a filing). Confirm that this is the intended reading for 031's "core-ancestor stamp" criterion.

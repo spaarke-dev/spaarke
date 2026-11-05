@@ -4,7 +4,7 @@
     <title>POST /api/v1/events and POST /api/ai/analysis/create create through RecordCreationService (FR-19)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>019 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api; both routes carry route-level authorization filters that must stay intact; adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>sonnet</model-tier>
