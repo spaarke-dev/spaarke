@@ -363,8 +363,8 @@ public sealed class InvoiceCorrectionReevaluationTests
         return world.Service();
     }
 
-    [Fact(DisplayName = "082c C12 interim: a correction that moves a line into a Procedure gap is Incomplete at the findings step; the stored findings are not patched")]
-    public async Task ACorrectionIntoAProcedureGap_IsIncomplete_AndTheFindingsAreNotPatched_C12()
+    [Fact(DisplayName = "082c C12: a correction that moves a line into a Procedure gap is a fixed 409 procedure_gap; the stored findings are not patched")]
+    public async Task ACorrectionIntoAProcedureGap_Is409ProcedureGap_AndTheFindingsAreNotPatched_C12()
     {
         var world = new CorrectionWorld();
         Store(world);
@@ -372,10 +372,44 @@ public sealed class InvoiceCorrectionReevaluationTests
 
         var result = await ServiceWithEndedProcedure(world).CorrectAsync(Line("Date", "2026-09-20", W.ExpenseLineId), CancellationToken.None);
 
-        result.Status.Should().Be(CorrectionStatus.Incomplete);
-        result.FailedStep.Should().Be(CorrectionCodes.FindingsStep);
+        result.Status.Should().Be(CorrectionStatus.ProcedureGap);
+        result.Code.Should().Be(CorrectionCodes.ProcedureGap).And.Be("ebilling.correction.procedure_gap");
+        result.Detail.Should().Be(CorrectionCodes.ProcedureGapDetail, "a fixed sentence: no id, no exception message");
+        result.FailedStep.Should().BeNull("a gap is not a failed step; repeating never clears it");
+        var http = Sprk.Bff.Api.Api.Finance.InvoiceCorrectionEndpoints.ToResult(result, new Microsoft.AspNetCore.Http.DefaultHttpContext())
+            .Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        http.StatusCode.Should().Be(409);
+        http.ProblemDetails.Extensions["errorCode"].Should().Be(CorrectionCodes.ProcedureGap);
+        http.ProblemDetails.Detail.Should().Be(CorrectionCodes.ProcedureGapDetail);
         world.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(stored);
         world.ValueWrites.Should().NotContain(w => w.Entity == "sprk_invoicesubmission" && w.Fields.ContainsKey("sprk_findingsjson"));
+    }
+
+    [Fact(DisplayName = "082c C12 per subject (F2) must-fire: a line moved onto a date that ALREADY has another subject's gap is refused")]
+    public async Task ALineMovedOntoADateThatAlreadyHasAGap_IsRefused_C12PerSubject()
+    {
+        // Before: the expense line is undated, so it takes the received date (1 October), which is after the Procedure's last version: that
+        // subject already holds a gap on that date. The fee line (12 September) is inside the window. Moving the FEE line onto 1 October
+        // adds no (Procedure, date, kind) key, but the fee line's own rules would judge nothing.
+        var world = new CorrectionWorld();
+        Store(world);
+        var stored = world.Submission!.GetAttributeValue<string>("sprk_findingsjson");
+
+        var result = await ServiceWithEndedProcedure(world).CorrectAsync(Line("Date", "2026-10-01"), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.ProcedureGap);
+        world.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(stored);
+    }
+
+    [Fact(DisplayName = "082c C12 control: a correction that changes nothing gap-related is applied although the invoice already has a gap")]
+    public async Task ACorrectionThatChangesNoGap_IsApplied_C12Control()
+    {
+        var world = new CorrectionWorld();
+        Store(world);
+
+        var result = await ServiceWithEndedProcedure(world).CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+
+        result.IsApplied.Should().BeTrue();
     }
 
     [Fact(DisplayName = "082c C12 control: a correction that keeps the line inside the version's window (the gaps on both sides are the same) is applied")]
