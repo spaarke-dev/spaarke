@@ -182,7 +182,8 @@ function Get-Pages([string]$Path) {
 
 # InvoiceProcedureHold.IsReleased: the reason code is overridden AND the findings carry a valid override stamp, the one BFF definition of a release.
 function Test-SubmissionReleased([string]$Code, [string]$Json) {
-    if ($Code -ne $OverriddenReason -or [string]::IsNullOrWhiteSpace($Json)) { return $false }
+    # -cne: the BFF compares the code ordinally (case-sensitive); -ne would read a re-cased code as a release the BFF refuses.
+    if ($Code -cne $OverriddenReason -or [string]::IsNullOrWhiteSpace($Json)) { return $false }
     try {
         $root = $Json | ConvertFrom-Json -ErrorAction Stop
         if ($root -isnot [pscustomobject]) { return $false }

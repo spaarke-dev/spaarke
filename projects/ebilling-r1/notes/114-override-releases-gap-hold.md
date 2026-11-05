@@ -68,10 +68,13 @@ record id; it asks "what remains once this submission reads as released" through
 row-version fault returns 503 before anything is written: no record, no stored set, no closed Signal. The real stamp (with the record id) is still
 written with the state, and the transaction is built from the derived detail. Test: `Release_WhenTheRemainingHoldsCannotBeRead_IsUnavailable_BeforeAnyWrite_AndTheRepeatFinishes`.
 
+**Pass 2 F4 (fixed): PS release check case.** `Test-SubmissionReleased` now uses `-cne`, because the BFF compares the code ordinally; a Pester case
+covers a re-cased code with a valid stamp (seed `-ne` → that case red). The stale approval comment (`InvoiceApprovalService`) now names the stamp.
+Pass 2 K2: the re-hold obligation above is prose only; it is an acceptance criterion on 095d-2 (TASK-INDEX row).
+
 Known limits (not fixed, reported):
-- **FR-20 single-column bypass (pre-existing, reported to uac-r2).** Status and reason code are unsecured on the submission, so an Internal Blocked
-  submission with no stored Procedure hold can still be moved out of the FR-20 hold by a direct column write. Not widened by 114 (a forged code over
-  findings with no stored hold keeps its pre-F1 classification); the hardening belongs to uac-r2.
+- **FR-20 held-submission test (pre-existing; DEF-053, #2571).** It reads two unsecured columns only (`FinanceBaseValues.HeldSubmissionConditions`).
+  Not widened by 114. Fix direction in DEF-053 (ebilling-owned code).
 - The D-122 close marks the shared SubmissionIntegrity Signal Acted while a firm hold remains. 114 widens this to Internal gap + firm-missing.
   Goes to ontology-r1.
 - `GET .../blocked` lists no entry for a Procedure hold. On SPA it shows Blocked/Accepted with zero findings and `Channel` "Other". UI follow-up.

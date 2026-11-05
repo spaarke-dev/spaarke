@@ -162,6 +162,12 @@ Describe 'Get-SubmissionHoldReasons: the reverse invariant read' {
         $r.Contains('ebilling.submission.procedure_gap') | Should -BeTrue
     }
 
+    It 'task 114 F1 (must fire): a re-cased release code with a valid stamp is not a release (the BFF compares ordinally)' {
+        $gap = '{"pipelineFindings":[{"reasonCode":"ebilling.submission.procedure_gap"}],"lineFindings":[],' + $script:Stamp + '}'
+        $r = Get-SubmissionHoldReasons ([pscustomobject]@{ sprk_outcomereasoncode = 'EBILLING.SUBMISSION.OVERRIDDEN'; sprk_findingsjson = $gap })
+        $r.Contains('ebilling.submission.procedure_gap') | Should -BeTrue
+    }
+
     It 'task 114 F1 (must fire): a malformed or incomplete stamp is not a release (<_>)' -ForEach @(
         '"override":{"recordId":"not-a-guid","bySystemUserId":"22222222-2222-2222-2222-222222222222","on":"2026-11-01T10:00:00Z"}'
         '"override":{"recordId":"11111111-1111-1111-1111-111111111111","bySystemUserId":"nope","on":"2026-11-01T10:00:00Z"}'
