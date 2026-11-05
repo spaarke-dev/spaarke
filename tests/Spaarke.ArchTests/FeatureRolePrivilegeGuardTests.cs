@@ -135,6 +135,10 @@ public class FeatureRolePrivilegeGuardTests
             "prvAppendTosprk_EventType_Ref"),
         .. For("Event (typed route)", [Core], "Basic", Bff + "Api/Events/EventEndpoints.cs:949; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:390-409",
             "prvAppendTosprk_RecordType_Ref"),
+        // A created budget binds its currency (transactioncurrencyid@odata.bind), so AppendTo on the currency is asked as the
+        // caller. transactioncurrency is organization-owned: any depth reaches it.
+        .. For("Decision actions (Console)", [Core, Console], "Basic",
+            Bff + "Services/Signals/Actions/DecisionActionExecutors.cs:700", "prvAppendToTransactionCurrency"),
         .. For("Event (typed route, Office Add In User)", [Basic, Office], "Basic", Bff + "Api/Events/EventEndpoints.cs:66,131",
             "prvCreatesprk_Event", "prvAppendsprk_Event"),
         .. For("Event (typed route, Office Add In User)", [Basic, Office], "Global",
@@ -210,7 +214,7 @@ public class FeatureRolePrivilegeGuardTests
             EntityAccessTablesAppendTo),
 
         // Analysis run (POST /api/ai/analysis/execute, fix round 2 F1-1): when the run can write (the document-profile playbook, or
-        // a playbook with a node that writes documents), Write is asked on every document instead of Read. Documents are team-owned
+        // a playbook with a node that writes documents), Write is asked on every document in addition to Read (AddAnalysisExecuteAuthorizationFilter asks Read first, then AddAnalysisRunAuthorizationFilter adds Write). Documents are team-owned
         // (I-6): Deep.
         .. For("Analysis run (writing playbook)", [Core], "Deep",
             Bff + "Api/Ai/AnalysisEndpoints.cs:118-120; " + Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:922-952,970", "prvWritesprk_Document"),
