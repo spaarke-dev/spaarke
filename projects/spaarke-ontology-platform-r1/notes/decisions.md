@@ -469,6 +469,7 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - **Fix shape:** filter the set before `BuildDecision` and before the set is stored. Today `ReasonsAfterAsync` (`SubmissionOverrideService.cs` ~:858) runs after `BuildDecision` (~:834), so the order must change. The record's facts may name the left-open Signal and why. No firm hold left → the shared Signal closes Acted as before (must-not-fire).
   - **Known limit:** a set stored by a pre-fix attempt is replayed verbatim on retry; dev-only, in-flight rows.
   - Requested in 114's scope before the master PR; otherwise a filed issue that blocks 114's master PR.
+  - **Scope (2026-11-05, ebilling 114b asked): a Return is outside the release filter.** Returned to Firm is terminal (`InvoiceLifecycleService` ~:105); the review ends and no hold can be lifted later, so nothing would ever close a left-open Signal. As with an automatic rejection (ebilling D-122), the Return's record resolves every open Signal on the invoice, closed Acted, the shared SubmissionIntegrity Signal included. The filter applies only to decisions after which the invoice stays in review (Override). Review detail on Return follows D-205 (moving out of In Review recomputes it in the same transaction). 114b's order fix (authorise over the unfiltered set, then filter) accepted: stricter, fails closed.
 
 ## D-202 — Record-rule policy code: `BRR-{recordRulePolicyId:N}` (ontology position, 2026-11-03)
 
