@@ -240,6 +240,41 @@ describe('InvoiceSubmissionWizard — submit and result', () => {
     expect(utils.submit.mock.calls[0][0].poNumber).toBeUndefined();
   });
 
+  it('082c-3: the 202 warning reaches the result screen as a caption under Processing and is dropped at the terminal answer; a 202 without one shows none', async () => {
+    const warning = { code: 'ebilling.submission.procedure_gap', message: 'PROVISIONAL SERVER SENTENCE.' };
+    const getStatus = jest
+      .fn()
+      .mockResolvedValueOnce(view({ status: 'Processing' }))
+      .mockResolvedValue(view({ status: 'Accepted' }));
+    const warned = mount(
+      { pollIntervalMs: 150 },
+      {
+        getStatus,
+        submit: jest.fn().mockResolvedValue({ submissionId: SUBMISSION_ID, trackingNumber: 'TRK-0001', warning }),
+      }
+    );
+    await toDetails(warned);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    expect(await screen.findByTestId('invoice-submission-provisional-warning')).toHaveTextContent(
+      'PROVISIONAL SERVER SENTENCE.'
+    );
+    expect(await screen.findByText(/The invoice was accepted/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('invoice-submission-provisional-warning')).not.toBeInTheDocument();
+    warned.unmount();
+
+    const plain = mount(
+      { pollIntervalMs: 150 },
+      { getStatus: jest.fn().mockResolvedValue(view({ status: 'Processing' })) }
+    );
+    await toDetails(plain);
+    fireEvent.change(screen.getByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+    fireEvent.click(submitButton());
+    await screen.findByText('Invoice received');
+    expect((await screen.findAllByText('Processing')).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('invoice-submission-provisional-warning')).not.toBeInTheDocument();
+  });
+
   it('Rejected shows the reason code and the report placeholder', async () => {
     const utils = mount(
       {},

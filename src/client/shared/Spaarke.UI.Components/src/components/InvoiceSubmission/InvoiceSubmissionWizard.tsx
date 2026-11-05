@@ -364,6 +364,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
         <InvoiceSubmissionOutcome
           submissionId={accepted.submissionId}
           trackingNumber={accepted.trackingNumber}
+          submittedWarning={accepted.warning}
           getStatus={getStatus}
           pollIntervalMs={pollIntervalMs}
           renderReport={renderReport}
