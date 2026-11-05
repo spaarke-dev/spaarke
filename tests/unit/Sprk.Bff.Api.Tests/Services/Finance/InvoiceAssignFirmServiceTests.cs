@@ -101,7 +101,10 @@ public sealed class InvoiceAssignFirmServiceTests
         public InvoiceFirmLink Link = InvoiceFirmLink.Linked;
         public DecisionCallerRefusal CloseRights = DecisionCallerRefusal.None;
         public CoreAncestorResult Filing = new(CoreAncestorStatus.Derived, [new CoreAncestorStamp("sprk_matter", "sprk_matter", Matter)], null);
-        public Action<BillingDecision> Preflight = _ => { };
+        /// <summary>Null (the default): the REAL <see cref="BillingDecisionRecorder.Preflight"/> over the real writer (095d-1b review F1: a no-op
+        /// stub let a decision the writer refuses pass). A test that needs a refusal sets its own.</summary>
+        public Action<BillingDecision>? Preflight;
+        private BillingDecisionRecorder? _recorder;
         public Func<QueryExpression, bool> ReadFault = _ => false;
         public readonly List<BillingDecision> Preflighted = [];
         public readonly List<string> Calls = [];
@@ -142,7 +145,7 @@ public sealed class InvoiceAssignFirmServiceTests
             Entities.Object,
             allocator ?? Allocator.Object,
             Locks,
-            d => { Preflighted.Add(d); Preflight(d); },
+            d => { Preflighted.Add(d); (Preflight ?? RealPreflight)(d); },
             (_, _) => { Calls.Add("active"); return Task.FromResult(ActiveFirm); },
             (_, _, _) => { Calls.Add("link"); return Task.FromResult(Link); },
             (_, _, _, _) => { Calls.Add("rights"); return Task.FromResult(CloseRights); },
@@ -154,6 +157,12 @@ public sealed class InvoiceAssignFirmServiceTests
             Service(allocator).SetFirmAsync(InvoiceId, firm ?? Firm, note, Decider, "caller-token", CancellationToken.None);
 
         public Entity Submission => Submissions[0];
+
+        private void RealPreflight(BillingDecision decision) =>
+            (_recorder ??= new BillingDecisionRecorder(
+                DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness()).Writer,
+                new Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>().Object,
+                NullLogger<BillingDecisionRecorder>.Instance)).Preflight(decision);
 
         public Guid AddFirmMissingSignal(string policy = BillingRuleCatalogue.SystemPolicyCode)
         {
@@ -710,7 +719,7 @@ public sealed class InvoiceAssignFirmServiceTests
         w.ShouldHaveWrittenNothing();
     }
 
-    [Theory(DisplayName = "095d-1b refusal: an apply above the transaction ceiling is 409 too_large (must fire); one at the ceiling is assigned (must not fire)")]
+    [Theory(DisplayName = "095d-1b refusal: an apply above the transaction ceiling is 409 too_large (must fire); one at the ceiling is assigned through the REAL Decision Record preflight (must not fire)")]
     [InlineData(999, false)]
     [InlineData(998, true)]
     public async Task Refused_AboveTheCeiling(int lines, bool assigned)
@@ -725,7 +734,11 @@ public sealed class InvoiceAssignFirmServiceTests
         var result = await w.Assign();
         if (assigned)
         {
+            // 095d-1b review F1: the Preflight here is the real writer's (World's default), not a no-op. The decision's facts carry counts, not
+            // one row per rename, so the largest invoice the service accepts still fits the writer's 100,000-character fact cap.
             result.Outcome.Should().Be(AssignFirmOutcome.Assigned, "1 invoice + 998 lines = 999 caller requests, the most that fits");
+            w.Preflight.Should().BeNull("the real recorder preflighted it");
+            w.Preflighted.Should().ContainSingle();
             w.Applied!.Requests.Should().HaveCount(TrackingNumberAllocator.MaxRenumberCallerRequests);
             return;
         }
@@ -734,12 +747,92 @@ public sealed class InvoiceAssignFirmServiceTests
         w.ShouldHaveWrittenNothing();
     }
 
+    [Fact(DisplayName = "095d-1b: the Decision Record's facts hold a BOUNDED summary of the rename (counts per table, the old and new number) - never a row per rename; the stored member keeps the full mapping")]
+    public async Task TheDecisionFacts_AreBounded_TheStoredMemberKeepsTheMapping()
+    {
+        var w = new World();
+        await w.Assign();
+        var stored = AssignFirmStoredDecision.Read(FindingsOf(w.Applied!))!;
+
+        var facts = InvoiceAssignFirmService.BuildDecision(InvoiceId, SubmissionId, stored).Facts;
+
+        facts.Should().NotContainKey("renamed");
+        facts["previousTrackingNumber"].Should().Be("INV-7.3");
+        facts["trackingNumber"].Should().Be("INV-7.1");
+        var counts = facts["renamedCounts"].Should().BeAssignableTo<IReadOnlyDictionary<string, object?>>().Subject;
+        counts["lines"].Should().Be(2);
+        counts["approval"].Should().Be(1);
+        counts["storedFiles"].Should().Be(2, "INV-7.3.pdf and INV-7.3-2.docx; INV-7.30.pdf is not the old number's");
+        counts["findings"].Should().Be(1);
+        stored.Renamed.Should().HaveCount(5, "the stored member keeps every old-to-new name");
+    }
+
+    [Fact(DisplayName = "095d-1b refusal: a findings member that would pass 1,048,576 characters with the new number is 409 too_large and nothing is written (must fire)")]
+    public async Task Refused_FindingsAboveTheSize_JustOver()
+    {
+        var w = await WorldWithFindingsAtTheLimit(extra: 1);
+        var result = await w.Assign();
+        (result.Status, result.Code).Should().Be((409, AssignFirmCodes.TooLarge));
+        w.ShouldHaveWrittenNothing();
+        w.Preflighted.Should().BeEmpty("refused before the Decision Record preflight");
+    }
+
+    [Fact(DisplayName = "095d-1b refusal: a findings member of exactly 1,048,576 characters with the new number is assigned (must not fire)")]
+    public async Task Refused_FindingsAboveTheSize_AtTheLimit_IsAssigned()
+    {
+        var w = await WorldWithFindingsAtTheLimit(extra: 0);
+        var result = await w.Assign();
+        result.Outcome.Should().Be(AssignFirmOutcome.Assigned);
+        w.Applied.Should().NotBeNull();
+    }
+
+    private static World FindingsWorld(int pad)
+    {
+        var world = new World();
+        world.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] =
+            new JsonObject
+            {
+                ["trackingNumber"] = "INV-7.3",
+                ["pipelineFindings"] = new JsonArray(new JsonObject { ["code"] = "firm_missing" }),
+                ["pad"] = new string('x', pad),
+            }.ToJsonString();
+        return world;
+    }
+
+    /// <summary>The length of the apply's findings JSON built with the longest number the allocator can hand out: what the service's size check measures.</summary>
+    private static async Task<int> ProbeLengthAsync(World world)
+    {
+        var length = 0;
+        world.OnRenumber = build =>
+        {
+            length = FindingsOf(build(new RenumberCandidate($"INV-7.{int.MaxValue}", int.MaxValue))).ToJsonString().Length;
+            return RenumberResult.Refused(TrackingNumberReasons.Unavailable);
+        };
+        await world.Assign();
+        return length;
+    }
+
+    /// <summary>
+    /// A world whose probe findings JSON is exactly <see cref="InvoiceSubmissionPersister.FindingsJsonMaxLength"/> + <paramref name="extra"/>
+    /// characters. The padding member is ASCII, so length is linear in it: measured with no padding and with 1,000 characters (a world padded to
+    /// the limit is refused by the very check under test, so it cannot be measured through the service).
+    /// </summary>
+    private static async Task<World> WorldWithFindingsAtTheLimit(int extra)
+    {
+        var baseLength = await ProbeLengthAsync(FindingsWorld(0));
+        baseLength.Should().BeGreaterThan(0, "the measuring run reached the allocator");
+        var pad = InvoiceSubmissionPersister.FindingsJsonMaxLength + extra - baseLength;
+        (await ProbeLengthAsync(FindingsWorld(1000))).Should().Be(baseLength + 1000, "one padding character is one character of the probe: the length is exact");
+        return FindingsWorld(pad);
+    }
+
     [Fact(DisplayName = "095d-1b refusal: a decision the Decision Record writer would refuse is 500 and nothing is applied (must fire)")]
     public async Task Refused_Preflight()
     {
         var w = new World { Preflight = _ => throw new DecisionRecordRefusedException(DecisionRecordRefusalReason.ReviewInvalid, "no") };
         var result = await w.Assign();
         (result.Status, result.Code).Should().Be((500, AssignFirmCodes.DecisionInvalid));
+        result.Detail.Should().Be("The firm could not be set because its decision cannot be recorded; nothing was changed.", "a stated sentence: no enum name, no exception message");
         w.ShouldHaveWrittenNothing();
     }
 
@@ -929,6 +1022,33 @@ public sealed class InvoiceAssignFirmServiceTests
         var result = await w.Assign();
 
         (result.Status, result.Code).Should().Be((409, AssignFirmCodes.Changed));
+    }
+
+    [Theory(DisplayName = "095d-1b repeat: a transient fault asking the allocator is 503 unavailable (must fire); the builder's never-apply-twice trip stays 409 changed (must not fire)")]
+    [InlineData("timeout", 503, AssignFirmCodes.Unavailable)]
+    [InlineData("allocator-bug", 503, AssignFirmCodes.Unavailable)]
+    [InlineData("builder-trip", 409, AssignFirmCodes.Changed)]
+    public async Task Repeat_AllocatorFault_IsUnavailable_ExceptTheBuildersTrip(string fault, int status, string code)
+    {
+        var w = Applied(Firm);
+        w.OnRenumber = build =>
+        {
+            switch (fault)
+            {
+                case "timeout": throw new TimeoutException("read fault");
+                case "allocator-bug": throw new InvalidOperationException("the allocator's own");
+                default:
+                    build(new RenumberCandidate("INV-7.2", 2)); // the repeat's builder throws: a repeat never applies
+                    return RenumberResult.AlreadyRenumbered("INV-7.1", 1);
+            }
+        };
+
+        var result = await w.Assign();
+
+        (result.Status, result.Code).Should().Be((status, code));
+        result.Detail.Should().NotContain("TimeoutException").And.NotContain("read fault");
+        w.Transactions.Should().BeEmpty();
+        w.Entities.Invocations.Where(i => i.Method.Name != nameof(IGenericEntityService.RetrieveMultipleAsync)).Should().BeEmpty("a repeat writes nothing");
     }
 
     [Fact(DisplayName = "095d-1b repeat: an allocator refusal other than not_unnumbered keeps its code")]

@@ -1344,3 +1344,17 @@ clear removed makes `RealAllocator_TheOneTransaction_ClearsTheHold_AndCarriesThe
 - K2: a stored decision present makes the call a repeat without re-asking the Signal-close rights or the filing; the route filters (Write on
   the invoice, Read and AppendTo on the firm) still run. 1c must re-ask what its record write needs.
 - K3: `RenamedFile` cuts a renamed name to 400 characters; the stored mapping keeps the cut name.
+
+**095d-1b adversarial pass 1 and fix round 1 (2026-11-04).** One full adversarial pass; three findings, all fixed in this round.
+
+| # | Finding | Fix | Proof |
+|---|---|---|---|
+| F1 | Large invoices could never get a firm. `BuildDecision` put the full `renamed` list into the Decision Record facts; above about 450 renamed rows the facts passed the writer's 100,000-character cap, the preflight refused, and the route answered 500 `decision_invalid` with the enum name as its detail. The tests used a no-op preflight, and `Refused_AboveTheCeiling(998, assigned: true)` proved nothing. | The facts hold a bounded `renamedCounts` (lines, approval, storedFiles, findings) beside the existing `previousTrackingNumber` and `trackingNumber`. The full old-to-new mapping stays in the stored `assignFirm` member only. A preflight refusal is a stated sentence (no enum name, no exception message). | `World` now preflights through the REAL `BillingDecisionRecorder` by default. `Refused_AboveTheCeiling(998, true)` passes the real preflight at the transaction ceiling. Seed: the full list put back in the facts makes it fail (Refused, not Assigned); restored byte-identical (`cmp`). |
+| F1 (repeat) | `JudgeRepeatAsync` mapped every exception from the allocator's precondition read to 409 `changed` ("The invoice changed... Reload."), so a timeout on a repeat sent the reviewer to reload a row that had not changed. | 409 `changed` only for the builder's trip (`RepeatMustNotApplyException`, a private `InvalidOperationException` subtype, so the allocator's own `InvalidOperationException`s are not mistaken for it). Any other fault is 503 `unavailable`, logged at Warning with the type name only. | `Repeat_AllocatorFault_IsUnavailable_ExceptTheBuildersTrip` (timeout and allocator fault: 503; builder trip: 409). Both 503 cases fail on the old service. |
+| F3 | The findings-size refusal (409 `too_large` above 1,048,576 characters, measured with the longest number the allocator can hand out) had no test. | Tests only. | `Refused_FindingsAboveTheSize_JustOver` (must fire: refused, nothing written, no preflight) and `..._AtTheLimit_IsAssigned` (must not fire). Seed: the check disabled makes the must-fire test fail; restored (`cmp`). |
+
+**Known limits recorded by this pass.**
+- K2: a repeat by a different caller is confirmed safe in 1b (the stored decision names the firm and the number; a different firm is 409). 095d-1c MUST ask the Signal-close rights (and the filing) again before it records on a repeat; 1b answers `alreadyAssigned` without them.
+- The 1c seams: every `Assigned` in 1b leaves an "applied, no record" row (the apply committed, no Decision Record, firm_missing Signal still open). 1b therefore stays off any environment users touch until 1c lands.
+- 095d-2 must keep the stored `assignFirm` member (the full mapping lives only there now; the facts carry counts).
+- K3 (display only): the line Signals keep the old invoice number in `sprk_regardingrecordname`. 095d-2's re-map should refresh it, or it is recorded there as a limit.

@@ -383,16 +383,7 @@ public sealed class InvoiceAssignFirmService
             ["policyCode"] = BillingRuleCatalogue.SystemPolicyCode,
             ["firmMissingSignals"] = InvoiceLineDecisionService.SetFact(stored.FirmMissingSignals),
             ["firmMissingCleared"] = true,
-            ["renamed"] = stored.Renamed
-                .Select(r => new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["entity"] = r.Entity,
-                    ["id"] = r.Id.ToString("D"),
-                    ["column"] = r.Column,
-                    ["from"] = r.From,
-                    ["to"] = r.To,
-                })
-                .ToList(),
+            ["renamedCounts"] = RenamedCounts(stored.Renamed),
             ["rulesRerun"] = stored.RulesRerun,
         };
 
@@ -408,6 +399,20 @@ public sealed class InvoiceAssignFirmService
             Written: [new DecisionRecordRef(InvoiceReviewReadService.InvoiceEntity, invoiceId)],
             DecidedOn: stored.DecidedOn);
     }
+
+    /// <summary>
+    /// The BOUNDED summary of the rename that goes into the Decision Record's facts (095d-1b review F1): a count per renamed table, never a row
+    /// per rename. The full old-to-new mapping stays in the stored <see cref="StoredDecisionMember"/> member, so the fact snapshot stays far below
+    /// the writer's 100,000-character cap at the transaction ceiling. The old and new invoice numbers are the <c>previousTrackingNumber</c> and
+    /// <c>trackingNumber</c> facts. <c>findings</c> is the submission's findings member, rewritten once by every apply.
+    /// </summary>
+    internal static Dictionary<string, object?> RenamedCounts(IReadOnlyCollection<AssignFirmRename> renamed) => new(StringComparer.Ordinal)
+    {
+        ["lines"] = renamed.Count(r => r.Entity == InvoiceSubmissionPersister.LineEntity),
+        ["approval"] = renamed.Count(r => r.Entity == InvoiceSubmissionPersister.ApprovalEntity),
+        ["storedFiles"] = renamed.Count(r => r.Entity == StoredFileSchema.Entity),
+        ["findings"] = 1,
+    };
 
     /// <summary>Sets <paramref name="firmId"/> on <paramref name="invoiceId"/> as <paramref name="deciderUserId"/>. See the class remarks.</summary>
     public async Task<AssignFirmResult> SetFirmAsync(
@@ -640,7 +645,8 @@ public sealed class InvoiceAssignFirmService
         catch (DecisionRecordRefusedException ex)
         {
             _logger.LogError("Set firm on invoice {InvoiceId}: the Decision Record would be refused ({Reason}); nothing changed.", invoiceId, ex.Reason);
-            return AssignFirmResult.Refuse(StatusCodes.Status500InternalServerError, AssignFirmCodes.DecisionInvalid, ex.Reason.ToString(), submissionId);
+            return AssignFirmResult.Refuse(StatusCodes.Status500InternalServerError, AssignFirmCodes.DecisionInvalid,
+                "The firm could not be set because its decision cannot be recorded; nothing was changed.", submissionId);
         }
 
         // ── The apply: ONE transaction through the allocator (095d-1a). ──
@@ -718,12 +724,20 @@ public sealed class InvoiceAssignFirmService
         {
             result = await _allocator.RenumberSubmissionAsync(
                 submissionId, state.SubmissionVersion, firmId, firmInvoiceNumber,
-                _ => throw new InvalidOperationException("A repeat of an applied Set-firm decision must never apply again."), ct).ConfigureAwait(false);
+                _ => throw new RepeatMustNotApplyException(), ct).ConfigureAwait(false);
+        }
+        catch (RepeatMustNotApplyException ex)
+        {
+            // The builder's trip (a repeat must never apply): the allocator reached for an apply, so the row is not as the stored decision says.
+            _logger.LogError("Set firm on invoice {InvoiceId}: the repeat reached the apply builder ({ExceptionType}); nothing changed.", state.Invoice.Id, ex.GetType().Name);
+            return AssignFirmResult.Refuse(StatusCodes.Status409Conflict, AssignFirmCodes.Changed, "The invoice changed after its firm was set. Reload.", submissionId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogError("Set firm on invoice {InvoiceId}: the repeat could not be confirmed ({ExceptionType}); nothing changed.", state.Invoice.Id, ex.GetType().Name);
-            return AssignFirmResult.Refuse(StatusCodes.Status409Conflict, AssignFirmCodes.Changed, "The invoice changed after its firm was set. Reload.", submissionId);
+            // Any other fault (a timeout, a read fault) says nothing about the row: the repeat can be tried again.
+            _logger.LogWarning("Set firm on invoice {InvoiceId}: the repeat could not be confirmed ({ExceptionType}); nothing changed.", state.Invoice.Id, ex.GetType().Name);
+            return AssignFirmResult.Refuse(StatusCodes.Status503ServiceUnavailable, AssignFirmCodes.Unavailable,
+                "The firm could not be confirmed right now. Try again shortly.", submissionId);
         }
 
         switch (result.Outcome)
@@ -746,6 +760,13 @@ public sealed class InvoiceAssignFirmService
                 return AssignFirmResult.Refuse(StatusCodes.Status409Conflict, AssignFirmCodes.Changed, "The invoice changed after its firm was set. Reload.", submissionId);
         }
     }
+
+    /// <summary>
+    /// The repeat's apply builder throws this: the allocator reached for an apply, so the row is not as the stored decision says. It is its own
+    /// type so that only this trip is 409 changed; the allocator's own <see cref="InvalidOperationException"/>s and any other fault are 503.
+    /// </summary>
+    private sealed class RepeatMustNotApplyException()
+        : InvalidOperationException("A repeat of an applied Set-firm decision must never apply again.");
 
     /// <summary>The submission is in the stored firm's scope with the stored number (the legacy repeat's check).</summary>
     private static bool HoldsStoredNumber(Entity submission, AssignFirmStoredDecision stored) =>
