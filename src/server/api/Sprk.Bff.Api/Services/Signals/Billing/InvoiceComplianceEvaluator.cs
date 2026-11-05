@@ -425,8 +425,9 @@ public sealed class InvoiceComplianceEvaluator
         refusals.AddRange(candidates.Where(c => handlerRefusals.ContainsKey(c.PolicyVersionId)).Select(c => handlerRefusals[c.PolicyVersionId]));
 
         // C8 (101 B2a): the Replace keys judged on each subject, at the highest rank that judged them (step 4's survivors). A refused version's
-        // subject counts as covered, and is not reported as unchecked, only when a version of the SAME Replace key judged it at an equal or higher
-        // rank: a limit judged by the rule that would have won anyway. For an Additive or Split key its own items were not checked, so its subjects
+        // subject counts as covered, and is not reported as unchecked, only when a version of the SAME Replace key judged it at a strictly HIGHER
+        // rank: a limit judged by the rule that would have won anyway. A tie does not cover (ontology D-205: ties all apply, so the refused
+        // version's own limit was a second limit that nobody checked). For an Additive or Split key its own items were not checked, so its subjects
         // stay unchecked. A rate comparison skipped for the currency (step 5) judged nothing, so it covers nothing.
         var judgedReplace = new Dictionary<BillingSubject, Dictionary<(RuleType, string?, string), ProcedureRank>>();
         foreach (var (versionId, appliesTo) in subjectsByVersion)
@@ -560,7 +561,8 @@ public sealed class InvoiceComplianceEvaluator
 
     /// <summary>
     /// Where a refused version's check did not run (101 B2a, F2; 082c C8). A subject is dropped only when a version of the same Replace
-    /// <see cref="BillingRuleDefinition.PrecedenceKey"/> judged it at an equal or higher rank (the limit that would have won anyway was checked);
+    /// <see cref="BillingRuleDefinition.PrecedenceKey"/> judged it at a strictly higher rank (the limit that would have won anyway was checked; a
+    /// tie does not cover, ties all apply);
     /// a refused Additive or Split version keeps every subject, since its own items were not checked. The key of a handler-refused version is
     /// read from its accepted definition. A gate-refused version has no definition: a non-AddedFee type keys on the type alone, but an AddedFee
     /// one's fee kind and fee codes are in the body the gate refused, so its key is unreadable and the scope stays whole (fail closed), as it does
@@ -583,7 +585,7 @@ public sealed class InvoiceComplianceEvaluator
         var subjects = selectedBySubject
             .Where(s => s.Versions.Contains(candidate)
                         && !(key is { } k && judgedReplace.TryGetValue(s.Subject, out var judged)
-                             && judged.TryGetValue(k, out var judgedRank) && judgedRank.CompareTo(candidate.Rank) >= 0))
+                             && judged.TryGetValue(k, out var judgedRank) && judgedRank.CompareTo(candidate.Rank) > 0))
             .Select(s => s.Subject)
             .ToList();
         return new BillingRuleRefusalScope(

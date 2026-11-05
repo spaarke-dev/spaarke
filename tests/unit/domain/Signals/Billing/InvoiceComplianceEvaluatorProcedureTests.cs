@@ -288,6 +288,21 @@ public class InvoiceComplianceEvaluatorProcedureTests
         scope.LineIndexes.Should().Equal(new[] { 0 }, "its code check was not made anywhere");
     }
 
+    [Fact(DisplayName = "082c C8 (D-205 tie): a refused Replace version is NOT covered by a tie-mate that judged the line; its lines are rules.not_checked")]
+    public void ARefusedReplaceVersion_IsNotCoveredByATieMate_C8()
+    {
+        // Two Firm-level TimeIncrement versions tie (ties all apply): 0.1 holds on the 0.3 line, the 0.5 one is refused. Its 0.5 limit was not checked.
+        var tenth = Version("FIRM-INCREMENT-A", RuleType.TimeIncrement, TenthHour, RuleSetScope.Firm);
+        var half = Version("FIRM-INCREMENT-B", RuleType.TimeIncrement, HalfHour, RuleSetScope.Firm);
+
+        var result = Evaluator(handlers: RefusingHandlerFor("FIRM-INCREMENT-B")).Evaluate(Request(Line(0)), new ProcedureKit().Loaded(tenth, half));
+
+        var scope = result.RefusalScopes.Should().ContainSingle().Which;
+        scope.PolicyVersionId.Should().Be(half.PolicyVersionId);
+        scope.LineIndexes.Should().Equal(new[] { 0 }, "a tie does not cover the refused version's limit");
+        Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.RulesNotChecked(result, 1).Should().ContainKey(0);
+    }
+
     [Fact(DisplayName = "082c C8: a refused lower-ranked Replace version is covered where a higher-ranked Procedure version of its key judged the line")]
     public void ARefusedLowerReplaceVersion_IsCoveredByAHigherProcedureVersion_C8()
     {
