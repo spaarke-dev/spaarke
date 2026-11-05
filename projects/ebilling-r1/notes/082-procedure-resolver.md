@@ -596,19 +596,18 @@ Branch `task/ebilling-082c-2` from `work/ebilling-r1` at 871751240a. Contract: `
 
 Priority: firm, then could not be checked, then waiting for terms, then blank. In Review is `statuscode` 1 / `statecode` 0.
 
-Writers:
+Writers, by the ontology D-205 numbering (fix round 1 renumbered this list; the earlier text numbered them 1 to 4 in a different order):
 
-1. The persister's held create (In Review only, in the persist transaction).
-2. The 095d-1 Set firm apply, recomputed from the Procedure reasons the findings still name.
-3. `InvoiceLifecycleService.TransitionAsync` on every move, writing blank in the same write as the status.
-4. `BuildConditionalTransition` on the Superseded close, writing blank. The undo writes nothing.
+1. The persister's held create (In Review only, in the persist transaction). **Built.**
+2. The re-check that clears a gap or unresolved (082d / 101, ebilling-r2). Pending; no 082c-2 path clears one.
+3. The 095d-1 Set firm apply, recomputed from the Procedure reasons the findings still name (`InvoiceAssignFirmService`, `ApplyPlan.Build`). **Built.**
+4. The 095d-2 re-run. Pending.
+5. The 114 Override release. Pending.
+6. Every exit from In Review: `InvoiceLifecycleService.TransitionAsync` on every move, writing blank in the same write as the status. **Built.**
+7. The correction's Superseded close, writing blank in the same request (`BuildConditionalTransition`), and, as of fix round 1, its undo: `SubmissionCommitGate.ReopenSupersededAsync` derives the detail from the old invoice's remaining holds and passes it to `BuildSupersedeUndoRequest`. **Built.**
+8. The 089e chain close. **Not a writer.** C19 found that the close writes `sprk_signal` only; it never sets or clears an invoice's detail, so it is not on the pending list.
 
-Pending writers, listed in the guard:
-
-- the gap or unresolved re-check (082d / 101, ebilling-r2);
-- 095d-2;
-- the 114 Override release;
-- 089e, if it ends In Review.
+Pending writers, listed in the guard: 2, 4 and 5. Each recomputes the detail from the invoice's remaining reasons in its own transaction and is added to `InvoiceReviewDetailWritersGuardTests.Writers` with it.
 
 ### Decisions and deviations
 
@@ -632,7 +631,7 @@ Pending writers, listed in the guard:
 
 ### Known limits
 
-- The Superseded undo reopens the old invoice with a blank detail until its next writer runs. The hold still holds.
+- ~~The Superseded undo reopens the old invoice with a blank detail~~ Fixed in fix round 1 (writer 7, the undo): the reopened invoice carries the detail its remaining holds derive.
 - Invoices held before the column exists read blank. There is no backfill.
 - If the column is deleted after it was found present, writes fail until a restart, because the present answer is cached for good.
 
@@ -694,3 +693,80 @@ Each seed was restored from its backup, and the restored file checked `cmp`-iden
   - `sprk_reviewdetail` is readable on `sprk_invoice`.
   - Render the label only while the invoice is In Review (uac-r2 (b)).
   - The two warning texts are the approved ones. The firm explanation line still needs the owner's OK (brief section 7).
+
+## 082c-2 fix round 1 (2026-11-05)
+
+Branch `task/ebilling-082c-2`, after adversarial pass 1 of 2. Merged `origin/work/ebilling-r1` first, then one commit per fix. Main-checkout and `spaarke-wt-ebilling-r1` working trees untouched; no live Dataverse writes.
+
+### The merge
+
+`origin/work/ebilling-r1` (c61f510080: 095d-1c, the Set firm Decision Record, `sprk_findingsjson` in `ParentLineage` AccessColumns for `sprk_invoicesubmission`, the `RecordTableRules.MappingProtectedColumns` entry, `FindingsJsonAppOnlyReadGuardTests` with `RefusalOnlyTypes`, `FindingsJsonFieldSecurityAgreementTests`) merged into the branch with `git merge` (no rebase).
+
+| File | Result |
+|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceAssignFirmServiceTests.cs` | The only conflict: `World.Service()`. 095d-1c passes its `Log` (a `CapturingLogger`); 082c-2 sets `ReviewDetailProbe` in an object initialiser. Both kept: `Log, new FixedTime(Now)) { ReviewDetailProbe = ReviewDetailProbe }`, with both fields. |
+| `ParentLineage.cs`, `RecordTableRules.cs`, `FindingsJsonAppOnlyReadGuardTests.cs`, `InvoiceAssignFirmService.cs`, the AccessTable census tests | Auto-merged; every entry of both sides is present (checked: `sprk_findingsjson` and `sprk_reviewdetail` in `MappingProtectedColumns`, the Set firm apply with its Decision Record and the detail line). |
+
+Gate after the merge: BFF build 0 warnings and 0 errors; filtered unit 3218 passed, 0 failed (5 skipped: live seam tests); ArchTests filtered 20 passed.
+
+### Fixes
+
+| # | Class | What | Where |
+|---|---|---|---|
+| 1 | F4 | `sprk_reviewdetail` is refused for app-only generic writes. It is in `AccessColumns["sprk_invoice"]` with the reason "it decides no access; it says why the invoice is held for review, and only its typed writers derive it", and stays in `RecordTableRules.MappingProtectedColumns`. The writers guard lists the two new naming sites (`InheritedAccessPermission` `.cctor` and `RefuseAppOnlyWrite`) as non-writers. No read-guard change was needed: the column is not field-secured. | `ParentLineage.cs` (AccessColumns entry, reason branch, doc item); tests `AccessTableAppOnlyWriterTests` (census row, new must-fire for the output mapping and the Update Record node, must-not-fire controls), `AccessTableReaderScanTests` (reason), `InvoiceReviewDetailWritersGuardTests` |
+| 2 | F3 | The C16 reader-redaction guard also flags an exception's `ToString()`, string interpolation of an exception or a resolver record (with a format specifier or an alignment too), the string operator `+` (the compiler lowers `"x" + ex` to a null-guarded `object.ToString`), `string.Format` / `Concat` / `Join` of one. New must-fire controls for each shape (13) and must-not-fire controls (6: `ex.GetType().Name` bare, concatenated, interpolated and formatted, a count). **No new real hit** in the 16 scanned reader-surface types (a source grep agrees: the only `ex.` use is `ex.GetType().Name` at `InvoiceAdjustmentService.cs:622`). | `ProcedureReaderRedactionGuardTests.cs` |
+| 3 | F2 | The supersede undo reopens the old invoice with the detail its remaining holds derive, in the same request as the status. `ReopenSupersededAsync` reads `InvoiceProcedureHold.ReasonsAsync` and `InvoiceFirmHold.IsHeldAsync` of the old invoice, calls `ReviewDetailOf`, and passes the result to `BuildSupersedeUndoRequest(..., int? reviewDetail = null)`. A read fault propagates (the undo is held and retried, as for the reads before it). The writers guard cannot list the gate (it names no column literal), so a new guard test pins that `SubmissionCommitGate.ReopenSupersededAsync` calls `ReviewDetailOf`, with a must-fire and a must-not-fire control. | `InvoiceLifecycleService.cs` (interface, `BuildSupersedeUndoRequest`, `BuildConditionalTransition`), `SubmissionCommitGate.cs` (`ReopenSupersededAsync`), `InvoiceReviewDetail.cs` (doc), `ApExportWorld.cs` (the fake) |
+| 4 | F3 | A no-firm Internal held create writes 659490002 on the invoice create (`PersistAsync` test; the same create has no `sprk_vendororg`). | `InvoiceSubmissionPersisterReviewDetailTests.cs` |
+| 5 | F4 | This file: the writers list is renumbered by D-205 (see "What changed" above), and writer 8 (the 089e chain close) is recorded as not a writer. | here |
+| 6 | K2 | `Deploy-EbillingInvoiceReviewDetailColumn.ps1 -Verify` also counts the reverse invariant: In Review invoices whose detail is blank while an open Procedure or firm hold exists, read the way the BFF reads them (the invoice's own `sprk_firmhold`; the stored submissions' outcome reason, `reasonCode`, `pipelineFindings[].reasonCode` and the `rules.not_checked` line causes; unparsable findings count as held, fail closed). It is a WARN, never a FAIL: an invoice held before the column existed reads blank until its next writer (no backfill), so only a count that grows after the 082c-2 build is deployed is a defect. Read-only GETs; it follows `@odata.nextLink` to 20,000 rows and says when it stopped at the cap. Parse-checked; the hold-reason helper was run offline over five stored shapes. Not run against Dev (no live call this round). | the script |
+| 7 | K1 | See "K1 outcome" below. | `SecureRootInheritance.cs`, `CoreRecordChain.cs`, `InvoiceSubmissionProcessor.cs` |
+| 8 | K4 (c) | See "K4 (b)/(c) outcome" below. | `ProcedureResolver.cs`, `InvoiceSubmissionProcessor.cs`, `InvoiceReviewReadService.cs` |
+
+### K1 outcome (uac-r2 authorised the additive edit in `SecureRootInheritance.cs`)
+
+`PairParentAnswer.Unknown` gains `Transient` (default false), set true on the two fault paths only: the `faultedTypes` repeat and the type read's catch. Every existing caller is unchanged (they match on the type and read `Reason`). `CoreRecordChain` passes it to a new `CoreRecordChainUnreadableException.Transient`; `InvoiceSubmissionProcessor.UnresolvedCauseOf` maps a transient chain to `rows_inconsistent` and every other chain to `chain_unreadable`, as before. `rows_inconsistent` is the only existing cause whose reader text says it may clear ("this may clear once a change in progress completes"); no reader text was added.
+
+Not done: `SecureParentsAnswer.UnknownIsTransient`. The only consumer of the flag is `CoreRecordChain`, which calls `NamePairParentAsync` directly and never sees a `SecureParentsAnswer`; threading the flag through `NamedParents` and the climb touches five sites in a 4,000-line file for no caller. Add it when a caller needs it.
+
+Test: `CoreRecordChainTests` pins that a pair type READ fault and a pair with no type both fail closed the same way (the same exception, the same message prefix) while `Transient` differs; `InvoiceSubmissionProcessorTests` pins the cause mapping (both ways). Seed: the flag removed from the two fault paths, one test fails (the chain pin).
+
+Wording to raise with the owner: `rows_inconsistent` reads "the procedure settings are inconsistent" for what is an outage. It is the best of the two existing texts but not a good one. A dedicated transient cause with its own R4 text is the clean fix.
+
+### K4 (b)/(c) outcome: contained part done, one point stopped
+
+Every writer of resolver-derived content into the three surfaces, by trace:
+
+| Surface | Writer | Resolver content | Through `ForReaders()`? |
+|---|---|---|---|
+| Stored findings `pipelineFindings`, then the system Signal and the status warning | `InvoiceSubmissionProcessor.ProcedureGapFindings` | the gapped Procedure's name, date, kind | **Now yes.** It reads `ProcedureGap.ForReaders()`, the one mapping that `ProcedureRulesOnDate.ForReaders()` also uses, instead of the internal record's members. |
+| `pipelineFindings` (unresolved) | `InvoiceSubmissionProcessor.EvaluateAsync` / `UnresolvedCauseOf` | the cause code only | Nothing resolver-derived is written (a fixed code); `ex.Message` is guarded by C16. |
+| Status view `warning` | `SubmissionHoldWarning.For(reasonCode)` | none (a code and fixed text) | Nothing resolver-derived is written. |
+| `lineFindings` | `RulesNotChecked*` | the cause code | Same. |
+| **`findings[].policyCode`, `signalPlan[].policyCode`, `signalPlanRefusals[].policyCode`, the Signal dedupe key** | `InvoiceSubmissionPersister.FindingEntryJson` (`:2254`), `SignalPlanEntryJson`, `BillingFindingSignalMapper` (`:231`, `:379`), from `BillingFactLoader.ProcedureCandidate` (`PolicyCode = version.PolicyCode`) | **a record rule's own `BRR-` code (and `policyId`)** | **No, and not changed.** |
+
+The last row is the open point. A rule judged in force through a record rule carries `PolicyCode = BRR- + policy id` into the stored findings, the plan and the Signal. These three are the join keys: the plan is the source the Signal is written from (part D writes it on every run), `InvoiceReviewReadService.PlanFor` matches a finding to its plan entry by `(subject, policyCode)`, and `InvoiceCorrectionReevaluation` keys its plan patches the same way. Writing the base code there would make the Signal reference the base rule (a different policy and version than the one that judged), break the finding-to-plan join for a record rule, and make a base rule and the record rule that replaces it collide on one dedupe key. So it needs a decision, not a mapping: (A) keep the internal key and add reader members (`recordRule` and the base `policyCode` through `ReaderCodeOf`) beside it, with every reader-facing consumer reading the reader members; or (B) store the base code plus the flag and key the plan by `policyVersionId`. Either is a change to the stored findings contract (schema 1) and to Signal identity. Not started; to uac-r2 and ontology. Until then the internal review route carries `ReviewFindingDto.PolicyCode` (a one-line comment now says any external or SPA mapping of it must go through `ForReaders()` first).
+
+Sentinel: `InvoiceSubmissionProcedureHoldTests.Sentinel_PlantedResolverOutput_ReachesNoStoredFindingsPlanOrView` plants a Procedure id, an override row id, a chain record id, a policy id, a typed reason and a `BRR-` code in the resolver's gap, runs the real gap writer, `BuildFindingsJson` and part D's mapper, and asserts none of them (in D, N or B form) appears in the stored JSON, the plan, the reader text or the status warning, and that the gap finding holds exactly the three reader members. Seed: the writer made to read the internal record (`g.ProcedureName + " " + g.Overrides[0].Reason`), the sentinel and two neighbours failed; restored `cmp`-identical. The test does not plant a `BRR-` rule finding in `findings[]`, because that is the open point above, not a defect this round can close.
+
+### Out of scope, as briefed
+
+`ForReaders()` consumers other than the gap writer (K4: uac-r2); the writers guard's run-time column names (K3); solution export of the column (before the master PR).
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 errors, 0 warnings |
+| Filtered unit (the brief's filter plus `CoreRecordChain` and `SupersedeUndo`) | 3256 passed, 0 failed, 5 skipped (live seam tests) |
+| ArchTests (`InvoiceReviewDetail\|ProcedureReader\|FindingsJson\|AccessTable\|Redaction`, plus `CoreRecordChain` and `InvoiceFirmHold`) | 45 passed, 0 failed |
+
+### Seeding proofs (each restored `cmp`-identical from a backup)
+
+| Seed | Result |
+|---|---|
+| 1. The `InvoiceReviewDetail.Column` entry removed from `AccessColumns["sprk_invoice"]` | 6 failed: the new must-fire, the census equality, four column-form rows of the existing access-column theory |
+| 2. The new detector rules downgraded to the old ones (records only, no Concat scan) | the control test failed, naming 10 shapes it missed |
+| 3. The gate's undo made to pass no detail | 2 failed (the held-for-gap reopen and the firm / none test) |
+| 4. The persister's held create made to write no detail | 3 failed (the new no-firm test and the two existing gap / unresolved tests) |
+| 7. `Transient` removed from the type-read fault | 1 failed (the chain pin) |
+| 8. The gap writer made to read the internal record | 3 failed (the end-to-end sentinel and two neighbours) |
