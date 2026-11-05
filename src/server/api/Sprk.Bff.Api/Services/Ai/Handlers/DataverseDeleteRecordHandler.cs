@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -109,11 +110,29 @@ public sealed partial class DataverseDeleteRecordHandler : IToolHandler
         if (string.IsNullOrWhiteSpace(context.TenantId))
             return ToolValidationResult.Failure("TenantId is required.");
 
-        if (!TryParseArgs(context.ToolArgumentsJson, out _, out _, out _, out var error))
+        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out _, out var error))
             return ToolValidationResult.Failure(error!);
+
+        // Task 048 fix round 2 (owner decision 2026-11-05, D-204 extended to the general delete path): a Signal, a Decision Record
+        // and a Budget Revision are changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter). Refused here, so the
+        // gate shows the refusal and never a confirm dialog; ExecuteChatAsync asks again.
+        if (RecordTableRules.RefuseWriterOnlyTableDelete(tablename) is not null)
+            return ToolValidationResult.Failure(ChangedOnlyByItsWriterChatMessage(tablename));
 
         return ToolValidationResult.Success();
     }
+
+    /// <summary>The chat tool's wording of <see cref="RecordTableRules.RefuseWriterOnlyTableDelete"/> (model-facing, as the update
+    /// tool's <c>ChangedOnlyByItsWriterChatMessage</c>); any other path answers
+    /// <see cref="RecordTableRules.ChangedOnlyByItsWriterDeleteMessage"/>, a plain sentence.</summary>
+    internal static string ChangedOnlyByItsWriterChatMessage(string tablename) =>
+        ChatMessageFor(RecordTableRules.Find(tablename)?.Table ?? tablename);
+
+    private static string ChatMessageFor(string tablename) =>
+        $"'{tablename}' records can't be removed from chat — this request was REJECTED and nothing was removed. They are changed " +
+        "only by Spaarke itself: a signal by its evaluation and its lifecycle, a decision record or a budget revision when a " +
+        $"decision is committed. Do NOT retry this request — {tablename} is blocked on this tool unconditionally, with or without " +
+        $"user approval, and no argument change makes it valid; work from the signal or its decision instead ({RecordTableRules.RemovedOnlyByItsWriterReasonCode}).";
 
     /// <inheritdoc />
     public async Task<ToolResult> ExecuteChatAsync(
@@ -127,6 +146,14 @@ public sealed partial class DataverseDeleteRecordHandler : IToolHandler
         if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out var recordId, out var hasUserApproved, out var parseError))
         {
             return Error(tool, parseError!, ToolErrorCodes.ValidationFailed, startedAt);
+        }
+
+        // Task 048 fix round 2 (owner decision 2026-11-05, D-204 extended to the general delete path): refused whole, for any
+        // record and with or without approval, before any read or Dataverse call; ValidateChat already refuses it. Nothing is removed.
+        if (RecordTableRules.RefuseWriterOnlyTableDelete(tablename) is { } writerOnly)
+        {
+            return LogOutcome(context, tablename, recordId,
+                Error(tool, ChangedOnlyByItsWriterChatMessage(tablename), writerOnly.RefusalCode!, startedAt), stopwatch);
         }
 
         // GA-contract argument semantics (frozen): delete proceeds solely on explicit user

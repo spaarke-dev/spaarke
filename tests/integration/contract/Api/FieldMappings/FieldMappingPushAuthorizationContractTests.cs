@@ -397,6 +397,31 @@ public class FieldMappingPushAuthorizationContractTests
         host.MetadataQueries.Should().BeEmpty();
     }
 
+    // field-mapping-server-write-path-r1 task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision
+    // Record and a Budget Revision are changed only by their writers. A push aimed at one is refused on the request, with the one
+    // message of RecordTableRules.RefuseWriterOnlyTableUpdate, before the source is authorized or anything is read or written.
+
+    [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    [InlineData("sprk_budgetrevision")]
+    public async Task Push_ToATableOnlyItsWriterChanges_Is400_AndNothingIsAsked(string targetEntity)
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData();
+
+        var response = await host.SendAsync(Authenticated(PushBody(targetEntity: targetEntity)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var problem = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        problem["errors"]!["targetEntity"]![0]!.GetValue<string>()
+            .Should().Be(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterMessage(targetEntity));
+        host.ProbedSources.Should().BeEmpty();
+        host.VerifyNothingReadOrWritten();
+        host.MetadataQueries.Should().BeEmpty();
+    }
+
     // =========================================================================================
     // 2026-10-06 (dev, class (a)): LOOKUP rules -- read as `_x_value`, written as `{nav}@odata.bind`
     // =========================================================================================
