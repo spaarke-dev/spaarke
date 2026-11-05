@@ -194,6 +194,20 @@ public class InvoiceSubmissionProcessorTests
         string.Join("|", outcome.PipelineFindings.SelectMany(p => p.Values.Values)).Should().NotContain("SENTINEL");
     }
 
+    [Theory(DisplayName = "082c-2 fix round 1 (K1): a chain a failed READ could not complete is held as rows_inconsistent (it may clear); one that stored data could not complete stays chain_unreadable")]
+    [InlineData(true, SubmissionReasonCodes.CauseRowsInconsistent)]
+    [InlineData(false, SubmissionReasonCodes.CauseChainUnreadable)]
+    public async Task AChainThatAFailedReadCouldNotComplete_IsHeldAsTransient(bool transient, string cause)
+    {
+        var h = new Harness { EvaluationFault = new CoreRecordChainUnreadableException("chain unreadable", transient), FinalDelivery = true };
+
+        var outcome = await h.RunAsync();
+
+        outcome.PipelineFindings.Should().ContainSingle(p => p.ReasonCode == SubmissionReasonCodes.ProceduresUnresolved).Subject
+            .Values[SubmissionReasonCodes.ProcedureCauseValue].Should().Be(cause);
+        InvoiceSubmissionProcessor.UnresolvedCauseOf(new CoreRecordChainUnreadableException("x", transient)).Should().Be(cause);
+    }
+
     [Fact(DisplayName = "082c-2 C14: a raw read fault on the final delivery keeps today's path (it propagates; the job marks the submission Failed); never held or passed")]
     public async Task ARawFault_OnTheFinalDelivery_Propagates()
     {

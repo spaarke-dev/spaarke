@@ -310,6 +310,9 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
     /// </summary>
     internal static string? UnresolvedCauseOf(Exception ex) => ex switch
     {
+        // K1 (fix round 1): a chain a failed READ could not complete is an outage, not stored data that is wrong, so it reads as the cause whose
+        // text says it may clear (a retry will not help applies to chain_unreadable only).
+        CoreRecordChainUnreadableException { Transient: true } => SubmissionReasonCodes.CauseRowsInconsistent,
         CoreRecordChainUnreadableException => SubmissionReasonCodes.CauseChainUnreadable,
         ProcedureResolutionFaultException => SubmissionReasonCodes.CauseRowsInconsistent,
         _ => null,
