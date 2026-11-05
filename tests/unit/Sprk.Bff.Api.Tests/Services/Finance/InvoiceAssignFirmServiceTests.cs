@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
@@ -32,7 +33,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// <c>Refused_NotHeld</c> fail (the apply is sent); removing the <c>sprk_firmhold</c> clear from the apply makes
 /// <c>RealAllocator_TheOneTransaction_ClearsTheHold_AndCarriesTheStoredDecision</c> fail.</para>
 /// </remarks>
-public sealed class InvoiceAssignFirmServiceTests
+public sealed partial class InvoiceAssignFirmServiceTests
 {
     internal static readonly Guid SubmissionId = Guid.Parse("095d1b00-0000-4000-8000-000000000001");
     internal static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
@@ -40,6 +41,8 @@ public sealed class InvoiceAssignFirmServiceTests
     internal static readonly Guid OtherFirm = Guid.Parse("095d1b00-0000-4000-8000-0000000000f2");
     internal static readonly Guid Matter = Guid.Parse("095d1b00-0000-4000-8000-0000000000a1");
     internal static readonly Guid Decider = Guid.Parse("095d1b00-0000-4000-8000-0000000000d1");
+    /// <summary>095d-1c fix round 1: a second reviewer, for the repeat that must record the FIRST reviewer's stored decision.</summary>
+    internal static readonly Guid OtherCaller = Guid.Parse("095d1b00-0000-4000-8000-0000000000d2");
     internal static readonly DateTimeOffset Now = new(2026, 11, 4, 12, 30, 15, 500, TimeSpan.Zero);
 
     // ── The world ──
@@ -109,6 +112,17 @@ public sealed class InvoiceAssignFirmServiceTests
         public readonly List<BillingDecision> Preflighted = [];
         public readonly List<string> Calls = [];
 
+        /// <summary>095d-1c: the Decision Record id the fake recorder answers.</summary>
+        public static readonly Guid RecordId = Guid.Parse("095d1c00-0000-4000-8000-0000000000dd");
+
+        /// <summary>095d-1c: every decision handed to the recorder, in order (a failed attempt included).</summary>
+        public readonly List<BillingDecision> Recorded = [];
+
+        /// <summary>095d-1c: what the recorder does; null (the default) writes the record once per decision id and answers AlreadyRecorded after,
+        /// as the writer does. A test that needs a failure throws from it.</summary>
+        public Func<BillingDecision, BillingDecisionRecordResult>? OnRecord;
+        private readonly HashSet<Guid> _written = [];
+
         /// <summary>What the mocked allocator answers; by default it builds the apply for INV-7.1 and answers Renumbered.</summary>
         public Func<Func<RenumberCandidate, RenumberApply>, RenumberResult>? OnRenumber;
         public RenumberApply? Applied;
@@ -146,17 +160,27 @@ public sealed class InvoiceAssignFirmServiceTests
             allocator ?? Allocator.Object,
             Locks,
             d => { Preflighted.Add(d); (Preflight ?? RealPreflight)(d); },
+            (d, _) => { Calls.Add("record"); Recorded.Add(d); return Task.FromResult((OnRecord ?? WriteOnce)(d)); },
             (_, _) => { Calls.Add("active"); return Task.FromResult(ActiveFirm); },
             (_, _, _) => { Calls.Add("link"); return Task.FromResult(Link); },
             (_, _, _, _) => { Calls.Add("rights"); return Task.FromResult(CloseRights); },
             (_, _) => { Calls.Add("filing"); return Task.FromResult(Filing); },
-            NullLogger<InvoiceAssignFirmService>.Instance,
+            Log,
             new FixedTime(Now));
 
-        public Task<AssignFirmResult> Assign(Guid? firm = null, string? note = "Firm confirmed by phone", ITrackingNumberAllocator? allocator = null) =>
-            Service(allocator).SetFirmAsync(InvoiceId, firm ?? Firm, note, Decider, "caller-token", CancellationToken.None);
+        /// <summary>095d-1c fix round 1: what the service logged (level, formatted text, structured parameters).</summary>
+        public readonly CapturingLogger Log = new();
+
+        public Task<AssignFirmResult> Assign(
+            Guid? firm = null, string? note = "Firm confirmed by phone", ITrackingNumberAllocator? allocator = null,
+            Guid? deciderUserId = null, CancellationToken ct = default) =>
+            Service(allocator).SetFirmAsync(InvoiceId, firm ?? Firm, note, deciderUserId ?? Decider, "caller-token", ct);
 
         public Entity Submission => Submissions[0];
+
+        /// <summary>The writer's exactly-once answer (per decision id): written the first time, already recorded after.</summary>
+        private BillingDecisionRecordResult WriteOnce(BillingDecision decision) =>
+            new(RecordId, !_written.Add(decision.DecisionId), RecordedDecisionClass.Judgement);
 
         private void RealPreflight(BillingDecision decision) =>
             (_recorder ??= new BillingDecisionRecorder(
@@ -256,6 +280,19 @@ public sealed class InvoiceAssignFirmServiceTests
 
         public Task ReleaseProcessingLockAsync(string eventId, string ownerId, CancellationToken cancellationToken = default) =>
             ReleaseProcessingLockAsync(eventId, cancellationToken);
+    }
+
+    internal sealed class CapturingLogger : ILogger<InvoiceAssignFirmService>
+    {
+        public readonly List<(LogLevel Level, string Message, Dictionary<string, object?> State)> Entries = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception),
+                (state as IEnumerable<KeyValuePair<string, object?>>)?.ToDictionary(p => p.Key, p => p.Value) ?? []));
     }
 
     internal sealed class FixedTime(DateTimeOffset now) : TimeProvider
@@ -1004,8 +1041,9 @@ public sealed class InvoiceAssignFirmServiceTests
         result.Outcome.Should().Be(AssignFirmOutcome.AlreadyAssigned);
         (result.Status, result.TrackingNumber, result.PreviousTrackingNumber).Should().Be((200, "INV-7.1", "INV-7.3"));
         w.RenumberArgs!.Value.Version.Should().Be("12", "asked at the current version");
-        w.Preflighted.Should().BeEmpty("a repeat applies nothing (1c records)");
+        w.Preflighted.Should().BeEmpty("a repeat applies nothing");
         w.Transactions.Should().BeEmpty();
+        w.Recorded.Should().ContainSingle("095d-1c: the repeat completes the record from the stored decision");
     }
 
     [Fact(DisplayName = "095d-1b repeat: another firm after the commit is 409 assigned_other_firm and the allocator is not asked")]
@@ -1030,7 +1068,7 @@ public sealed class InvoiceAssignFirmServiceTests
         result.Should().Be(AssignFirmResult.Refuse(403, AssignFirmCodes.NotAuthorized,
             "You do not have permission to record a decision on this invoice's record.", SubmissionId));
         (result.DecisionId, result.TrackingNumber, result.PreviousTrackingNumber).Should().Be((null, null, null), "no stored decision content is returned");
-        w.Calls.Should().Contain("rights").And.NotContain("filing", "a repeat needs no filing");
+        w.Calls.Should().Contain("rights").And.NotContain("filing", "refused before the filing").And.NotContain("record", "and before the record (095d-1c)");
         w.ShouldHaveWrittenNothing();
     }
 
@@ -1054,6 +1092,26 @@ public sealed class InvoiceAssignFirmServiceTests
 
         result.Outcome.Should().Be(AssignFirmOutcome.AlreadyAssigned);
         result.TrackingNumber.Should().Be("INV-7.1");
+        // 095d-1c uac-r2 F3-1: the legacy branch completes the record like the native repeat (filing, then one record), not the 1b answer alone.
+        w.Recorded.Should().ContainSingle("the legacy repeat records the stored decision");
+        w.Calls.TakeLast(2).Should().Equal("filing", "record");
+        w.Transactions.Should().BeEmpty("a repeat applies nothing");
+    }
+
+    [Fact(DisplayName = "095d-1c uac-r2 F3-1: on the 16.6.1 legacy branch, a filing that cannot be confirmed is 503 incomplete at failedStep filing and records nothing (must fire)")]
+    public async Task Repeat_LegacyNoSequence_FilingNotConfirmed_IsIncomplete_AndRecordsNothing()
+    {
+        var w = Applied(Firm, previousSequence: null);
+        w.Submission[TrackingNumberAllocator.PreviousSequenceColumn] = null;
+        w.OnRenumber = _ => RenumberResult.Refused(TrackingNumberReasons.NotUnnumbered);
+        w.Filing = new CoreAncestorResult(CoreAncestorStatus.Error, [], "fault") { IsPermanent = false };
+
+        var result = await w.Assign();
+
+        (result.Outcome, result.Status, result.Code, result.FailedStep).Should().Be((AssignFirmOutcome.Incomplete, 503, AssignFirmCodes.Incomplete, "filing"));
+        w.Recorded.Should().BeEmpty("no record without the filing");
+        w.Calls.Should().NotContain("record");
+        w.Transactions.Should().BeEmpty();
     }
 
     [Theory(DisplayName = "095d-1b repeat (16.6.1, must not fire): not_unnumbered is not taken as already assigned when the stored decision had a previous sequence, or the row holds another number")]

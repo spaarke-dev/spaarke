@@ -82,8 +82,9 @@ public static class InvoiceApprovalEndpoints
             .WithDescription(
                 "The reviewer names a firm linked to the invoice's core record. Refused unless the invoice is In Review, has no firm and is held " +
                 "for one. In one transaction: the submission is renumbered into the firm's scope, the firm and the new number are set on the " +
-                "invoice, its lines, its approval and its files, the hold is cleared and the decision is stored. Repeating with the same firm is " +
-                "a no-op; with another firm it is refused.")
+                "invoice, its lines, its approval and its files, the hold is cleared and the decision is stored; then the Decision Record is " +
+                "written. If the record is not written, 503 ebilling.assign_firm.incomplete names the failedStep; repeating with the same firm " +
+                "finishes it without applying again (and is otherwise a no-op); with another firm it is refused.")
             .Produces<AssignFirmResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -149,6 +150,11 @@ public static class InvoiceApprovalEndpoints
             { Outcome: AssignFirmOutcome.Assigned or AssignFirmOutcome.AlreadyAssigned } => TypedResults.Ok(new AssignFirmResponse(
                 result.Outcome == AssignFirmOutcome.Assigned ? "assigned" : "alreadyAssigned",
                 result.DecisionId, result.TrackingNumber, result.PreviousTrackingNumber, result.RulesRerun)),
+            // 095d-1c: the firm is set, its Decision Record is not. The step and the fixed sentence only: no id, no exception text.
+            { Outcome: AssignFirmOutcome.Incomplete } => Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                detail: result.Detail,
+                extensions: new Dictionary<string, object?> { ["errorCode"] = result.Code, ["failedStep"] = result.FailedStep }),
             { Status: StatusCodes.Status404NotFound } => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
             // Rights the caller lacks on the core record: the body of the route's own firm-rights refusal (the filter's 403), so a caller without
             // those rights is told the same thing whatever firm it names - one the filter refuses (missing or unreadable) or one the service reaches.
@@ -254,6 +260,7 @@ public sealed record InvoiceApprovalResponse(string Outcome, Guid? DecisionId, G
 /// <summary>Body of Set firm (task 095d-1b): the firm (required) and an optional note (at most 2000 characters).</summary>
 public sealed record AssignFirmRequest(Guid? FirmId, string? Note);
 
-/// <summary>200 body of Set firm: <c>assigned</c> (this call applied it) or <c>alreadyAssigned</c> (a repeat, a no-op), the decision id, the new
-/// and the previous tracking number, and <c>rulesRerun</c> (<c>pending</c>: the re-run is 095d-2).</summary>
+/// <summary>200 body of Set firm: <c>assigned</c> (this call applied it) or <c>alreadyAssigned</c> (a repeat: nothing applied), the decision id,
+/// the new and the previous tracking number, and <c>rulesRerun</c> (<c>pending</c>: the re-run is 095d-2). Since 095d-1c a 200 means the
+/// Decision Record exists (written now or found).</summary>
 public sealed record AssignFirmResponse(string Outcome, Guid? DecisionId, string? TrackingNumber, string? PreviousTrackingNumber, string? RulesRerun);

@@ -67,6 +67,14 @@
     ("-Apply sets it"), NOT as a failure (pass-2 review): a user can still write the firm column after deploy, so an ordinary invoice whose
     firm was cleared later has none, and the BFF already refuses it as no firm. -Apply backfills it (idempotent).
 
+    (f) APPLIED, NO RECORD (task 095d-1c; ontology-r1 16.7, 16.4 condition 5). Read only, in every mode. Set firm (095d-1b) stores its
+    decision under the "assignFirm" member of the submission's findings IN the apply transaction, then writes the Decision Record (option 1,
+    apply then record). A submission that carries the member but whose invoice has no assign-firm Decision Record with that decision's key
+    (BillingDecisionKey: the first 16 bytes of the SHA-256 of "billing-dr-sprk_invoice-<invoice id>-<decision id>", in sprk_steps) is
+    "applied, no record": the BFF answered 503 ebilling.assign_firm.incomplete and a repeat of the Set firm finishes it. Inside
+    -AppliedNoRecordWindowMinutes of its decidedOn it is INFO; older, -Verify reports it as FAIL (exit 1); -WhatIf and -Apply only report it.
+    A stored member that cannot be read is FAIL in -Verify (what was applied cannot be known).
+
     WHAT IT IS NOT. Not an access column: it decides no visibility. It is refused to the BFF's app-only generic writers
     (InheritedAccessPermission.AccessColumns, sprk_invoice) together with sprk_invoice.sprk_vendororg. Rollback: un-secure the column by
     hand (make.powerapps.com) and revert the SpaarkeMaster source (Entity.xml, FieldSecurityProfiles.xml) by a commit; the column is not
@@ -89,6 +97,10 @@
 .PARAMETER Verify
     Read-only check with a pass/fail exit code (1 names each gap). Cannot be combined with -WhatIf or -Apply.
 
+.PARAMETER AppliedNoRecordWindowMinutes
+    Task 095d-1c, check (f): how long an applied Set firm may stay without its Decision Record before -Verify fails (default 60 minutes, 1 to
+    10080). Inside it the row is INFO: the reviewer's repeat, which the BFF's 503 incomplete asks for, normally finishes it within minutes.
+
 .EXAMPLE
     pwsh scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -WhatIf
     pwsh scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply
@@ -108,7 +120,8 @@ param(
     [Parameter(Mandatory)][string[]]$BffApplicationIds,
     [string]$SolutionUniqueName = 'SpaarkeMaster',
     [switch]$Apply,
-    [switch]$Verify
+    [switch]$Verify,
+    [ValidateRange(1, 10080)][int]$AppliedNoRecordWindowMinutes = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -134,6 +147,11 @@ $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 # The platform's own System Administrator field security profile: a fixed id in every environment, and Dataverse gives it a row on
 # every secured column. The one profile besides the writer and the reader allowed a row; matched by id, never by name.
 $SystemAdministratorProfileId = '572329c1-a042-4e22-be47-367c6374ea45'
+# Task 095d-1c, check (f) (pinned by InvoiceFirmHoldFieldSecurityAgreementTests against InvoiceAssignFirmService and the Decision Record writer)
+$AssignFirmMember = 'assignFirm'
+$AssignFirmActionCode = 'assign-firm'
+$DecisionRecordSet = 'sprk_decisionrecords'
+$DecisionRecordInvoiceLookup = '_sprk_regardinginvoice_value'
 
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
 if (-not $token) { throw "No Dataverse token for $EnvironmentUrl. Run 'az login' and retry." }
@@ -534,6 +552,105 @@ else {
     }
 }
 
+# ── (f) APPLIED, NO RECORD (task 095d-1c): a stored Set-firm decision whose Decision Record does not exist. Read only. ─────────
+Write-Host "`n(f) Set firm applied, no Decision Record (window $AppliedNoRecordWindowMinutes min)"
+# DecisionRecordWriter's BillingDecisionKey.IdOf in C#: the first 16 bytes of the SHA-256 of the UTF-8 text
+# "billing-dr-<subject table>-<subject id D>-<decision id D>", read as a Guid (the same layout as Get-InvoiceIdFor). The writer stores it as
+# the record's review id in sprk_steps ("reviewId":"<key>"), which is how it finds an already-written record.
+function Get-BillingDecisionKey([Guid]$InvoiceId, [Guid]$DecisionId) {
+    $bytes = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes("billing-dr-$Table-$($InvoiceId.ToString('D'))-$($DecisionId.ToString('D'))"))
+    return [Guid]::new([byte[]]$bytes[0..15])
+}
+# The stored member, as InvoiceAssignFirmService's AssignFirmStoredDecision.Read needs it. A member is readable only with every key Read
+# requires: decisionId, firmId, deciderUserId (Guids), previousTrackingNumber and trackingNumber (non-empty text), sequence and firmSetLines
+# (integers), decidedOn (a date), firmMissingSignals (setReadAtUtc and a signals array of {id, policyCode}), and, when renamed is an array,
+# each entry's entity, id, column, from and to. Returns $null when the submission holds no member; Kind 'findings' when its findings JSON
+# does not parse (whether a Set firm was applied cannot be known); Kind 'member' when the member is present but unreadable.
+function Test-AssignFirmGuid($Node, [string]$Key) { $g = [Guid]::Empty; return ($Node -is [System.Collections.IDictionary]) -and [Guid]::TryParse("$($Node[$Key])", [ref]$g) -and $g -ne [Guid]::Empty }
+function Test-AssignFirmText($Node, [string]$Key) { return ($Node -is [System.Collections.IDictionary]) -and ($Node[$Key] -is [string]) -and ($Node[$Key].Length -gt 0) }
+function Test-AssignFirmInt($Node, [string]$Key) { return ($Node -is [System.Collections.IDictionary]) -and (($Node[$Key] -is [int]) -or (($Node[$Key] -is [long]) -and $Node[$Key] -ge [int]::MinValue -and $Node[$Key] -le [int]::MaxValue)) }
+function Test-AssignFirmMemberReadable($Member) {
+    if ($Member -isnot [System.Collections.IDictionary]) { return $false }
+    foreach ($k in 'decisionId', 'firmId', 'deciderUserId') { if (-not (Test-AssignFirmGuid $Member $k)) { return $false } }
+    foreach ($k in 'previousTrackingNumber', 'trackingNumber') { if (-not (Test-AssignFirmText $Member $k)) { return $false } }
+    foreach ($k in 'sequence', 'firmSetLines') { if (-not (Test-AssignFirmInt $Member $k)) { return $false } }
+    # firmMissingSignals: ResolvedSignalSet.Parse needs a readable setReadAtUtc and a signals array of {id (non-empty Guid), policyCode (text)}.
+    $set = $Member['firmMissingSignals']
+    if ($set -isnot [System.Collections.IDictionary] -or $set['signals'] -isnot [System.Collections.IList]) { return $false }
+    $readAt = $set['setReadAtUtc']
+    $parsed = [DateTimeOffset]::MinValue
+    if (-not (($readAt -is [DateTime]) -or ($readAt -is [DateTimeOffset]) -or
+            ($readAt -is [string] -and [DateTimeOffset]::TryParse($readAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsed)))) { return $false }
+    foreach ($signal in $set['signals']) { if (-not (Test-AssignFirmGuid $signal 'id') -or -not (Test-AssignFirmText $signal 'policyCode')) { return $false } }
+    if ($Member['renamed'] -is [System.Collections.IList]) {
+        foreach ($r in $Member['renamed']) {
+            if (-not (Test-AssignFirmText $r 'entity') -or -not (Test-AssignFirmGuid $r 'id') -or -not (Test-AssignFirmText $r 'column')) { return $false }
+            foreach ($k in 'from', 'to') { if ($r -isnot [System.Collections.IDictionary] -or $r[$k] -isnot [string]) { return $false } }
+        }
+    }
+    return $true
+}
+function Get-AssignFirmStored($Submission) {
+    $json = $Submission.sprk_findingsjson
+    if ([string]::IsNullOrWhiteSpace($json)) { return $null }
+    try { $root = $json | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
+    catch { return [pscustomobject]@{ Readable = $false; Kind = 'findings'; DecisionId = [Guid]::Empty; DecidedOn = [DateTimeOffset]::MinValue } }
+    if ($root -isnot [System.Collections.IDictionary] -or -not $root.ContainsKey($AssignFirmMember)) { return $null }
+    $member = $root[$AssignFirmMember]
+    $decisionId = [Guid]::Empty
+    $decidedOn = [DateTimeOffset]::MinValue
+    $readable = $false
+    if ((Test-AssignFirmMemberReadable $member) -and [Guid]::TryParse("$($member['decisionId'])", [ref]$decisionId)) {
+        $raw = $member['decidedOn']
+        # ConvertFrom-Json turns an ISO date into a DateTime (its Kind depends on the PowerShell version); the BFF writes it in UTC ("O").
+        if ($raw -is [DateTime]) {
+            $utc = if ($raw.Kind -eq [DateTimeKind]::Local) { $raw.ToUniversalTime() } else { [DateTime]::SpecifyKind($raw, [DateTimeKind]::Utc) }
+            $decidedOn = [DateTimeOffset]::new($utc); $readable = $true
+        }
+        elseif ($raw -is [DateTimeOffset]) { $decidedOn = $raw; $readable = $true }
+        else {
+            $readable = [DateTimeOffset]::TryParse("$raw", [System.Globalization.CultureInfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$decidedOn)
+        }
+    }
+    return [pscustomobject]@{ Readable = [bool]$readable; Kind = 'member'; DecisionId = $decisionId; DecidedOn = $decidedOn }
+}
+$nowUtc = [DateTimeOffset]::UtcNow
+$applied = 0; $recorded = 0; $insideWindow = 0; $overdue = 0; $unreadable = 0
+foreach ($s in $submissions) {
+    $stored = Get-AssignFirmStored $s
+    if ($null -eq $stored) { continue }
+    $submissionId = [Guid]$s.sprk_invoicesubmissionid
+    if ($stored.Kind -eq 'findings') {
+        # Findings that do not parse: a Set-firm decision may or may not be stored in them, so nothing can be said of this submission.
+        $unreadable++
+        $what = "(f) submission $submissionId has findings that cannot be read - whether a Set firm was applied cannot be known"
+        if ($Verify) { Report 'FAIL' $what } else { Report 'INFO' "$what (-Verify fails on it)" }
+        continue
+    }
+    $applied++
+    # The decision's subject is the invoice the submission's id derives (InvoiceAssignFirmService reads only that one), whatever the link says.
+    $invoiceId = Get-InvoiceIdFor $submissionId
+    if (-not $stored.Readable) {
+        $unreadable++
+        if ($Verify) { Report 'FAIL' "(f) submission $submissionId carries a Set-firm decision that cannot be read - what was applied cannot be known" }
+        else { Report 'INFO' "(f) submission $submissionId carries a Set-firm decision that cannot be read (-Verify fails on it)" }
+        continue
+    }
+    $key = (Get-BillingDecisionKey $invoiceId $stored.DecisionId).ToString('D')
+    $records = @((Invoke-DvGet "$DecisionRecordSet`?`$select=sprk_decisionrecordid,sprk_steps&`$filter=$DecisionRecordInvoiceLookup eq $invoiceId and sprk_actioncode eq '$AssignFirmActionCode'&`$top=10").value)
+    if (@($records | Where-Object { "$($_.sprk_steps)" -like "*`"reviewId`":`"$key`"*" }).Count -gt 0) { $recorded++; continue }
+    $ageMinutes = [Math]::Floor(($nowUtc - $stored.DecidedOn).TotalMinutes)
+    $what = "(f) invoice $invoiceId (submission $submissionId): Set firm applied $ageMinutes min ago, no Decision Record - a repeat of the Set firm finishes it"
+    if ($ageMinutes -gt $AppliedNoRecordWindowMinutes) {
+        $overdue++
+        if ($Verify) { Report 'FAIL' "$what (older than the $AppliedNoRecordWindowMinutes-minute window)" } else { Report 'INFO' "$what (older than the window; -Verify fails on it)" }
+    }
+    else { $insideWindow++; Report 'INFO' "$what (inside the $AppliedNoRecordWindowMinutes-minute window)" }
+}
+Report 'INFO' "(f) $applied submission(s) carry a Set-firm decision: $recorded recorded, $insideWindow without a record inside the window, $overdue older than it"
+if ($overdue -eq 0 -and $unreadable -eq 0) { Report 'OK' "(f) no Set firm is applied without its Decision Record beyond the $AppliedNoRecordWindowMinutes-minute window" }
+
 if ($IsDryRun) {
     if ($gaps.Count -gt 0) {
         Write-Host "`nDRY RUN complete - nothing was written. -Apply would be REFUSED ($($gaps.Count) gap(s)):" -ForegroundColor Yellow
@@ -542,7 +659,7 @@ if ($IsDryRun) {
     else { Write-Host "`nDRY RUN complete - nothing was written." -ForegroundColor Cyan }
     exit 0
 }
-if ($gaps.Count -eq 0) { Write-Host "`nPASS: $Table.$Column exists and is field-secured, the BFF writer profile holds read/create/update, the reader profile holds read, no other profile (the System Administrator profile excepted) can create or update it, and every invoice a submission holds for a firm carries its hold." -ForegroundColor Green; exit 0 }
+if ($gaps.Count -eq 0) { Write-Host "`nPASS: $Table.$Column exists and is field-secured, the BFF writer profile holds read/create/update, the reader profile holds read, no other profile (the System Administrator profile excepted) can create or update it, every invoice a submission holds for a firm carries its hold, and no Set firm is applied without its Decision Record beyond the window." -ForegroundColor Green; exit 0 }
 Write-Host "`nFAIL ($($gaps.Count)):" -ForegroundColor Red
 $gaps | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
 exit 1
