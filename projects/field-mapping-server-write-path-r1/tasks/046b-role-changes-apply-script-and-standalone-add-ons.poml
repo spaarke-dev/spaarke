@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046b" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Apply the owner's role rulings on 046's gaps (role files + apply script), pin the writer-only rule at role level, and check each add-on role alone (owner 2026-11-05)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>046's second adversarial pass has no open F finding. The live apply is UAC-r2's, in its session, under the owner's go; this task never writes to Dataverse.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security roles (role XML + an apply script that writes roles through the Web API), the ArchTest guard, and a new role-model rule (standalone add-ons).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Privilege depth reasoning per table ownership across six roles, a fail-closed apply script, and a public-repo confidentiality line.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes role XML, one script, the ArchTest guard, the architecture doc §5.1 and notes; no src/server file. Runs beside 043 and 049.</parallel-reason>
+    <deps>046</deps>
+    <tags>security, roles, dataverse, testing, docs</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the owner's 2026-11-05 role rulings on task 046's gaps (notes/decisions.md, "Role rulings on task 046's gaps"). Part A: change the role files under src/dataverse/solutions/SpaarkeMaster/Roles for G1, G2, G4, G5, G6, G7 and G8 exactly as ruled, and remove each one's KnownGaps entry from FeatureRolePrivilegeGuardTests in the same commit. Record G3 as accepted and not applied. Document Office To Do and the Console Do lane as Core-only. Part B: write an apply script (copy scripts/Set-WizardLinkingAndMembershipPrivileges.ps1's shape) with a dry run by default, -Apply and -Verify. It resolves each role by name to exactly one root role, adds or raises only the ruled privileges (AddPrivilegesRole), and reads back every business-unit copy. It fails closed on any failed read. Part C: a guard that no person role holds Create, Write or Delete on sprk_signal, sprk_decisionrecord or sprk_budgetrevision, except Spaarke Ontology Administrator (the designated cleanup role, ontology D-160), with must-fire and must-not-fire controls. Part D: the owner chose standalone add-on roles. Extend the matrix and guard so each add-on role ALONE (Office Add In User, Console User, AI Analysis User, Billing Administrator, and any other add-on in the Roles folder) is checked against the features it exists for. Put every resulting gap in the ratchet baseline and produce the gap list (role, privilege, depth, feature, evidence). Do NOT change the role files for Part D's gaps: those wait for the owner's approval via UAC-r2.</prompt>
+  <role>SPAARKE platform developer, Dataverse security roles and ArchTest guards. Security fails closed. Follow ADRs strictly.</role>
+  <goal>The role files carry the owner's rulings; the guard has no stale entries; a reviewed script can apply and verify the rulings on any environment; the writer-only rule holds at role level; and the owner has one list of what standalone add-ons still lack.</goal>
+
+  <context>
+    <background>Task 046 (task/fm-046) built the feature-to-role matrix (docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md §5.1) and FeatureRolePrivilegeGuardTests, with gaps G1–G8 in a held-depth ratchet. The owner ruled on them in UAC-r2's session on 2026-11-05. UAC-r2 reviews the script and runs -Apply on dev under the owner's go. Ebilling task 089e also adds G5 (Billing Administrator Read on sprk_procedure) to the role file: whichever of 046b and 089e merges second drops the G5 entry and keeps one copy of the privilege.</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Roles/*.xml (Core User, Office Add In User, Billing Administrator)</file>
+      <file role="modify">tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs</file>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md §5.1</file>
+      <file role="new">scripts/Set-FeatureRolePrivileges.ps1 and a declared set under config/ (copy the reference script's declared-set pattern)</file>
+      <file role="canonical-reference">scripts/Set-WizardLinkingAndMembershipPrivileges.ps1 (modes, root-role resolution, business-unit copies, fail-closed reads, XML/live drift report)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/task-046-notes.md (Fix round 1)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §6 gotcha 2026-10-20">Brief line 1: `git switch -c task/fm-046b task/fm-046` (046's fixes included), merge the work branch tip, then confirm this POML exists on the branch.</constraint>
+    <constraint source="owner 2026-11-05">Apply exactly the ruled privileges and depths: G6, G7 and G8 go on Office Add In User, not Basic User. G3 is not applied. Nothing from Part D goes into a role file.</constraint>
+    <constraint source="no live writes">This task never writes to Dataverse. The dry run (GETs only) may run against dev with a delegated token held in memory; never write a token to a file. -Apply is UAC-r2's, in its session.</constraint>
+    <constraint source="confidentiality (repo is public)">Files may record gaps (privileges a role lacks, so a feature is refused) and the rules (writer-only tables; Ontology Administrator as the single cleanup role). They must not list any other grant beyond need or describe any access hole; put those in the final report only.</constraint>
+    <constraint source="CLAUDE.md §16">Every new guard check ships with must-fire and must-not-fire controls and a seeded-drift proof; a check that finds existing violations gets a ratchet baseline.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification for the script and the declared set (existing role scripts; why not extend one).</constraint>
+    <constraint source="ADR-038">KEEP paths only (tests/Spaarke.ArchTests/**).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch (constraint 1); FULL rigor.</step>
+    <step order="1">Part A: role files and guard baseline; doc rows (G3 accepted; To Do and Do lane Core-only).</step>
+    <step order="2">Part C: the writer-only role guard and its controls.</step>
+    <step order="3">Part D: standalone add-on rows; baseline every gap; write the gap list into the notes (gaps only).</step>
+    <step order="4">Part B: the apply script; run the dry run and -Verify against dev (GETs only) and record the planned changes.</step>
+    <step order="5">ArchTests build (0 warnings) and full run. Report to the main session: commit SHA, the dry-run plan, and the Part D gap list.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: the role files hold G1, G2, G4, G5, G6, G7 and G8 as ruled; their KnownGaps entries are gone; the guard passes; restoring any one file's old level fails it (seeded proof).</criterion>
+    <criterion testable="true">AC2: the writer-only guard fails when a seeded copy gives any other person role Create, Write or Delete on one of the three tables, and passes on the repo's files (Ontology Administrator allowed).</criterion>
+    <criterion testable="true">AC3: each add-on alone is checked against its features; every gap is baselined with its held depth; the notes list them (role, privilege, depth, feature, evidence).</criterion>
+    <criterion testable="true">AC4: the script's dry run against dev makes zero writes and prints each planned change (role, privilege, old → new depth, number of business-unit copies). -Verify exits 1 while a change is pending. Any failed read exits 1 before a write.</criterion>
+    <criterion testable="true">AC5: ArchTests build 0 warnings and pass in full; Sprk.Bff.Api.Tests not run (no src/server change).</criterion>
+  </acceptance-criteria>
+
+  <notes>Added 2026-11-05 from the owner's rulings relayed by UAC-r2.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
