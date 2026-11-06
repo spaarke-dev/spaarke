@@ -42,6 +42,7 @@
   - 049: notes passage removed, and the branch history rewritten (squash + force-with-lease).
   - 046c (Basic User read-only): conditions 1–7 in its POML; inventory and dry run come to me privately before the owner.
 - **ebilling (`-c7`):**
+  - **165a:** the owner accepted the branch history; it lands fast. The external-visibility reader ruling went privately: a small class (c) change separate from 165a, pending a dev count of mismatches first. 164a: external-exposure facts sent; whether partners see In Review family rows is a product decision for the owner, via ebilling.
   - **096b (EB-D-201, after 164a):** `sprk_invoice` and `sprk_billingevent` leave `ChildRecordEndpoints.CreateTables`; the ribbon "New billing event" and `SecureChildNewCommandAgreementTests` change in the same change; `RefileTables` is untouched. Scope ACCEPTED. Pending from ebilling: the diff, then file:line proof that the 052 wizard and the 095 paths create app-only, BEFORE the role -WhatIf to drop user Create on `sprk_invoice` goes to the owner. The BFF and ribbon deploy in one window via me; #1973 closes once the build is on dev.
   - 095d-2b-1 `4f113d72e2` APPROVED 2026-11-06: the withhold is keyed on the app-only `sprk_firmhold`, the invoice is withheld while the re-run is pending, and I verified every external path myself. An outcome reply by email must respect the withhold if one is ever added.
   - 095d-2a-2 (`7316036f5c`, `741a4fccaf`, `0bd7d49f89`) APPROVED 2026-11-06 with no F findings. K1 (line attach between the re-check and the transaction) waits on their invoice row-version answer. K2: a refused-count in the job result in 2b. K3: the result's RerunState stays non-partner-visible.
@@ -69,6 +70,9 @@
 - Core pair, lineage and update paths: merged in #2568 and deployed.
 - The push runs as the caller (#2253 K2); round-77 class Ks.
 - 049: secure-from-creation reasoning, the stale-add/removal race wording, and the Basic team-grant over-count stay in peer channels only.
+
+## Gate method
+- #2158: BFF telemetry drops whole requests (default OTel sampling), so gate counts are lower bounds; pair them with the peer's client logs and a Dataverse read-back. fm's 2026-11-06 20:44-21:12Z windows: 33 creates confirmed by read-back; no failure in the observed telemetry.
 
 ## My own backlog
 #2585 (re-file whole-row read; hardening), #2576 (probe fault shown as denial), #2524, gate null-column hardening, SharePoint census, #2543, #2292, K-P1 for task 191; parked: 193 (C:/wt193), 197, #2427, 196a/196b; TASK-INDEX reconcile at 090.
