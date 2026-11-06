@@ -44,6 +44,7 @@
   - #2582 audit flags merged; H6 covers org auditing; audit history stays SysAdmin only.
 
 ## Owner items outstanding
+- ebilling: approval accepts a fee or expense line of unknown origin. ebilling fixes it in 164a-4a; I review the 164 diff. Condition: a user cannot forge the add-line Decision Record. Does the owner want tracking beyond 164? (Private; do not describe the mechanism in public text.)
 - Should customer environments turn on revoke-on-change (G-8) through provisioning?
 - #2590: a project created app-only with no person lands in the root BU. Choose the rule (refuse vs route) and whether to move the dev row.
 - Column auditing on the writer-only tables' lookups (covered by ontology's flags? verify), 044 field-security profile, the person-path refusal uniformity question (private), the AP diagnostics batch, the VS Code agent-dir cleanup, word-add-in Office saves, 095a, click-test 195, Q1/Q4 (private), older: #2343, #2245, #2250, #2260, #2270, #2262, #2396, 191 F1/S4, 190 Apply, #2382, #2505; tasks 140/165/153.
