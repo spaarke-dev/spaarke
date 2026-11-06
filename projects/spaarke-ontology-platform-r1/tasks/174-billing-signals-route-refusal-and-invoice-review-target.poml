@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="174" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>BFF: the Console decision route refuses billing Signals; the worklist route names each billing item's invoice (D-207)</title>
+    <phase>11 UAT</phase>
+    <gate>startable now (D-207, owner 2026-11-06)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes .cs on the decision commit path and the worklist read route; refusal before any write.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two narrow, fully specified changes with named files and contracts.</model-tier-reason>
+    <effort>high</effort>
+    <deps>none</deps>
+    <tags>bff-api,signals,testing</tags>
+    <estimated-effort>3 hours</estimated-effort>
+    <parallel-group>P-207</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner ruling D-207 (EB-D-194): invoice review and approval decisions are made ONLY in eBilling's Invoice Review page; billing Work Items stay in the Console Worklist and open that page as a pop-up. Today a Console user activating a billing Work Item reaches `POST /api/v1/signals/{id}/decision`, which asks Write on the Signal's subject (`DecisionCallerRights`) and refuses an invoice-line subject with a 403 `SubjectWriteMissing`, because person roles hold only Read on `sprk_billingevent` (ebilling D-90, by design). The Worklist item also carries no subject type or invoice id, so the Console cannot open the right invoice. On dev: 35 open invoice-line and 5 invoice Signals, all Decide lane.</prompt>
+  <role>SPAARKE BFF engineer (Signals).</role>
+  <goal>(1) The commit route refuses a Signal whose subject table is `sprk_invoice` or `sprk_billingevent` with ONE distinct refusal before any caller-rights probe, read-for-write or write, telling the client to decide it in Invoice Review. (2) `GET /api/v1/signals/worklist` adds an `invoiceReview` member to each billing item: `{ "invoiceId": guid, "lineId": guid | null }`; for a line subject `lineId` is the subject id and `invoiceId` its parent invoice (`sprk_billingevent.sprk_invoice`, `_sprk_invoice_value`), read in ONE batched query per response; for an invoice subject `invoiceId` is the subject id and `lineId` null. Every other item omits the member (null, not present in JSON when the serializer omits nulls; match the route's existing convention). Nothing else in either route changes.</goal>
+
+  <constraints>
+    <constraint source="D-207">Refusal code: `ontology.decision.decided_in_invoice_review` (HTTP 409, ProblemDetails, the route's existing refusal shape), raised AFTER step (1a) (every Signal's readability asked as the caller: a caller who cannot read an item still gets the uniform 404 and learns nothing) and after (1c) (the app-only row read that yields the subject), and BEFORE `PrepareAsync`, `CallerMayDecideAsync` / `DecisionCallerRights.CheckAsync`, any lock, executor preflight or write. It applies to the primary Signal and every `AlsoResolve` Signal (any billing Signal in the set refuses the whole review). No new caller-token privilege ask. Detect billing Signals by the subject table derived the way the commit route already derives it (the regarding pair / subject lookup), not by policy code text. A Signal whose subject cannot be derived keeps today's behaviour.</constraint>
+    <constraint source="D-207">The line → invoice read is one query for all line items in the response (`$filter` on the line ids, `$select` `_sprk_invoice_value` only), run as the route already reads with its identity. Never emit `invoiceReview` with a null `invoiceId`: for a line whose parent cannot be read (missing, no invoice) omit the member for that item and log once at Warning with the ids only. A read fault omits the member for all line items and logs once; it never fails the worklist response.</constraint>
+    <constraint source="CLAUDE.md §11">No new endpoint, service or DI registration. Extend the existing route handlers / read service. Add the refusal code beside the route's existing codes.</constraint>
+    <constraint source="D-204">Do not touch the writers (`SignalWriter`, `DecisionRecordWriter`) or `DecisionCallerRights`.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no git stash. No Dataverse writes, no deploys. Never run the unfiltered Sprk.Bff.Api.Tests (filter on Signal/Worklist/DecisionCommit). Run the full ArchTests and measure the publish-size delta against a fresh master build (bff-hygiene).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A commit for a Signal with subject `sprk_billingevent` returns 409 `ontology.decision.decided_in_invoice_review`; the caller-rights probe, every Dataverse write and the Decision Record writer are never called (strict mocks). Same for subject `sprk_invoice`. Mutation: move the check after `DecisionCallerRights.CheckAsync` and a test fails.</criterion>
+    <criterion testable="true">(uac-r2 condition) The PR lists every entry point that commits a decision on a Signal or closes one as a human decision (commit route, chat/assistant decide tools, playbook decision action executors, batch paths). Each refuses billing Signals the same way before any write, with a test per path, or carries a one-line reason with file:line why it cannot reach one. ebilling's own routes (`HumanDecisionSignalClose`, finance endpoints) are listed as the intended owner.</criterion>
+    <criterion testable="true">A non-reader asking for a billing Signal gets the uniform 404, not 409; an AlsoResolve set containing a billing Signal gets 409 with nothing written.</criterion>
+    <criterion testable="true">A commit for a matter-subject Signal is unchanged (existing tests green); a Signal with an underivable subject keeps its current refusal.</criterion>
+    <criterion testable="true">The worklist response for a line item carries `invoiceReview` with the parent invoice id and the line id; an invoice item carries the invoice id and `lineId` null; a matter, To Do or event item has no `invoiceReview`. Assert the serialized JSON.</criterion>
+    <criterion testable="true">Two line items on two invoices plus one invoice item cost exactly ONE extra Dataverse read (count the reads). Negative: a line with no parent invoice omits the member; a fault on the batched read omits it for all lines and the route still returns 200.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-207, D-204)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Signals/SignalReadEndpoints.cs (the worklist route) and the read service it calls</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs (~:1547 CallerMayDecideAsync; the pre-write validation stage and existing refusal codes)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceTotalsService.cs (`LineInvoiceLookup` = `sprk_invoice`)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Worklist/types.ts (WorklistItem; task 175 adds `invoiceReview` there with the same shape)</file>
+    </files>
+  </knowledge>
+  <completion date="2026-11-06">
+    Delivered (PR #2580, branch task/174-billing-refusal): (1) `POST /api/v1/signals/{id}/decision` refuses a review in which any Signal (primary or AlsoResolve) has an `sprk_invoice` or `sprk_billingevent` subject: 409 `ontology.decision.decided_in_invoice_review` (`DecisionCommitService`, step 1c-billing, skipped when the review is already RECORDED (its Decision Record found by caller + review id at step 1b, or a ledger replay, which never reaches it: a decision made before D-207 still finishes its closes; nothing in the request body decides "recorded"), after the caller readability check (1a, uniform 404 kept) and the app-only row read (1c), before PrepareAsync, `DecisionCallerRights.CheckAsync`, any executor preflight and any write; no new privilege ask; an underivable subject keeps its current refusal). (2) `GET /api/v1/signals/worklist` adds `invoiceReview { invoiceId, lineId }` to billing items (invoice subject: lineId null; line subject: its parent invoice from `sprk_billingevent.sprk_invoice`; every other item null). The parent read is ONE batched caller read per response, shared with the D-176 Duplicate rule (it needed the same read of the same lines), so a response never reads it twice. A line with no readable parent omits the member and is named once by id at Warning; a read fault omits it for every line, logs ONE accurate warning (the read helper now takes a label and consequence), and the route still returns 200. No new endpoint, service or DI registration; writers and DecisionCallerRights untouched.
+    Entry points (uac-r2 condition): the commit route is the only human-decision path outside eBilling; decision action executors are built only by DecisionCommitService (`DecisionCommitService.cs:320`); no chat, assistant, MCP or playbook decide tool and no bulk path exists (AlsoResolve is covered); system closers (`SignalClosureService.cs:394`, `SignalReevaluationJob.cs:613`, `InvoiceSubmissionAfterSteps.cs:131`) are automated, not human; eBilling's `HumanDecisionSignalClose` and finance endpoints are the intended owner and are left alone. Replay of a recorded review is a listed entry point that is NOT refused. Full table in the PR body.
+    Tests: 13 commit-route cases (invoice and line subject 409, dismissal, AlsoResolve 409, non-reader 404 for primary and AlsoResolve, matter unchanged; must-not-fire: a ledger replay and a finishing replay of a pre-D-207 review still close a billing Signal; must-fire: a replay-shaped request with nothing recorded and a record for another review are refused; a 409 AlsoResolve then the same review id without it is Recorded; a billing Signal under Retry gets 409 and the resumed failure is restored) with the rights probe, every write and the record writer asserted never called; 8 worklist cases asserting the serialized JSON and counting reads (2 lines + 1 invoice item = exactly one read). Signal|Worklist|DecisionCommit|Billing|Finance 8033 passed / 1 failed (D134_NoSingleEnabledAssignee todo-pair-only, fails identically on the base, unrelated), SignalReadRouteTests 118/118, ArchTests 1882/1882. Mutations: check moved after CallerMayDecideAsync: 4 commit tests fail; `existingRecord is null` guard removed: the finishing-replay test fails. One existing assertion updated (D176 invoice-id Duplicate: the line now has its one shared parent read). Publish (framework-dependent linux-x64, Release, Optimal, incl. PDBs): -246,046 B vs a fresh master (40,121,507 -> 39,875,461; 191 files each), +2,567 B vs the docs base; no packages.
+    Note: the refusal sits inside the lease region (locks and the in-progress marker are taken before step 1c); moving it before the locks would add an app-only read of every Signal to every commit. Nothing is written before it.
+    Do not merge or deploy until task 175 and ebilling 112 are ready (ships as a pair; the current client shows a 409 as "already being recorded").
+    rework: review round (code renamed to ontology.decision.*, K1 replay not refused, K3 one warning, K4 tests) task 174
+  </completion>
+</task>

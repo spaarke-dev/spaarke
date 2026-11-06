@@ -16,6 +16,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Services.Signals.Actions;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -236,6 +237,12 @@ public static class DecisionCommitReasons
     /// (Forbidden, fail closed, no new allow path); only the code and message say what is wrong. A Replay's warning for the
     /// same case is the bare <see cref="ReplaySubjectMissingWarning"/>, as the replay's other warnings are bare.</summary>
     public const string SignalSubjectMissing = "ontology.decision.signal_subject_missing";
+
+    /// <summary>Task 174 (D-207, ebilling EB-D-194): a Signal whose subject is an invoice or an invoice line is decided only in
+    /// Invoice Review, never through this route (409). Raised after the readability check and the app-only read of the Signals,
+    /// before the caller-rights probe, any executor, any write and the Decision Record. Never raised for a review that is already
+    /// RECORDED (a decision made before D-207): see the step (1c-billing) comment.</summary>
+    public const string DecidedInInvoiceReview = "ontology.decision.decided_in_invoice_review";
 
     /// <summary>The replay-repair warning for <see cref="SignalSubjectMissing"/> (the sibling of <c>signal_close_not_authorized</c>).</summary>
     public const string ReplaySubjectMissingWarning = "signal_subject_missing";
@@ -964,6 +971,27 @@ public sealed class DecisionCommitService
             rows.Add(row);
         }
 
+        // ---- (1c-billing) Task 174 (D-207): invoice and invoice-line decisions are made only in Invoice Review. The whole review is
+        // refused when ANY Signal in it (the primary or an Also resolve) has an invoice or invoice-line subject. Placed after (1a)
+        // (an item the caller cannot read already got the uniform 404, so nothing about it shows here) and after (1c) (the subject
+        // comes from the rows just read, no new read and no new caller-token ask), and before PrepareAsync, the caller-rights probe
+        // (FR-51: a person role holds only Read on sprk_billingevent, D-90, so that probe would answer a misleading 403), any
+        // executor and every write. A Signal whose subject cannot be derived is not billing here and keeps its current refusal.
+        // A review that is already RECORDED is not refused: it is a decision made before D-207, and finishing its closes (this branch
+        // when the ledger forgot but the record stays; a ledger replay never reaches this step, CommitLeasedAsync) must still complete.
+        // "Recorded" is decided only from what the server stored: the review's Decision Record found by (caller, review id) in (1b),
+        // already checked to cover exactly these Signals and this content (F1), never anything in the request body.
+        if (existingRecord is null && rows.Any(r => IsBillingSubject(r.SubjectEntity)))
+        {
+            return new DecisionCommitResult
+            {
+                Status = DecisionCommitStatus.Conflict,
+                ReviewId = reviewId,
+                ReasonCode = DecisionCommitReasons.DecidedInInvoiceReview,
+                Detail = "Invoice and invoice-line items are decided in Invoice Review. Open the invoice there; nothing was done.",
+            };
+        }
+
         var finishing = existingRecord is not null && resume is null;
         var createBudgetLanded = (resume?.Steps ?? []).Any(s => s.Key == $"action:{ResolvedDecisionPlan.CreateBudgetCode}" && s.Status == nameof(DecisionActionStatus.Done));
         var prepared = await PrepareAsync(review, rows, lanes, reviewStart, finishing ? existingRecord!.Id : null, createBudgetLanded, resume is not null, ct).ConfigureAwait(false);
@@ -1650,6 +1678,12 @@ public sealed class DecisionCommitService
     /// <summary>Fixed text for a no-core item whose Decision Record owner cannot be resolved (nothing about the row or the resolver's
     /// reason is echoed: F4-b).</summary>
     private const string ItemOwnerUnsupportedDetail = "The item's decision cannot be filed under an owning team, so it cannot be recorded; nothing was done.";
+
+    /// <summary>Task 174 (D-207): whether a Signal's subject table is an invoice or an invoice line, the two subjects that are decided
+    /// only in Invoice Review. Shared with the worklist route (<c>invoiceReview</c> is offered for exactly these subjects).</summary>
+    internal static bool IsBillingSubject(string? subjectEntity) =>
+        string.Equals(subjectEntity, BillingFactLoader.InvoiceEntity, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(subjectEntity, BillingFactLoader.LineEntity, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>A no-core Signal's subject record (the subject lookup that carries the pair id <c>sprk_regardingrecordid</c>, task 141), server-written;
     /// null when it names none. D-39 / D-129: the Decision Record's owner is uac-r2's answer for THIS record as the parent, resolved

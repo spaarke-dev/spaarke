@@ -1,17 +1,20 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-29 (main session, context-handoff at 85%). State only: history is in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-11-06 ~03:25Z (main session, checkpoint). State only: history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md)
-> (D-1..D-199). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
-> `notes/defer-issues.md` (next free: **DI-138**). Sub-agents never edit this file.
+> (D-1..D-207). Deferred work: one self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of
+> `notes/defer-issues.md` (next free: **DI-141**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | No lane is running. 168, 171, 172 and 173 are DONE and ON MASTER (#2463 → `c8bb55d0cd`; docs fast-forwarded to it). |
-| **Status** | No owner question is open. ebilling #1911 is merged (`eaa0d44f7f`). Their next PR (104, 101) brings our two asks: the principal-change known limit in 105-override-server.md and the double RecordRefusal log; review it when it arrives. The main checkout `C:\code_files\spaarke` refuses fast-forwards because of another session's uncommitted `.claude/agent-memory/researcher/MEMORY.md`; leave it alone. |
-| **Next Action** | 1) Dev BFF is `9f4afe82ac` (R3 readback 14:40:39Z 2026-10-30). Run the 168/173 live proof per `notes/168-173-live-proof.md`: the owner does runs A (internal), B (external) and C (unticked) in the Console; the main session runs the read-only checks and fills section 6; then the task-170 latency check and the `BUD-` number. 2) Owner re-checks for 114, 158-163 and 166 (163's live role change is already done: verified 2026-10-30), then close them. 3) Review ebilling 097b (BillingFactLoader replaced-invoice exclusion: the id must be derived on the server; same firm and number only) and their next PR into master. 4) Remaining: 111 (row 4 waits for the external SPA dev deploy), 105 (v4 UAT), 090 wrap-up (held by the owner until UAT is done). |
+| **Task** | **D-207: 174 (BFF, PR #2580) fixes in progress; 175 (Console, PR #2579) fix re-check PASS + CI 4/4 green at `ab04492ab7`. Both HELD unmerged until ebilling 112 has Invoice Review on dev. D-206 dev audit pass DONE (03:00-03:43Z: 89 tables, 569 columns, 129 entities published, 0 failures; read-back: only `sprk_aichatmessage`/`sprk_aichatsummary` off); SpaarkeMaster Entity.xml PR (branch `chore/spaarkemaster-audit-flags` to master) being built by an agent. #2581 MERGED to docs `a48979f7c7`.** Orchestration + peer reviews otherwise. Hold 090 until owner UAT. |
+| **Uncommitted** | None in this worktree. Dev audit state exported to scratchpad `audit-state-dev-2026-11-06.json`. Agent worktrees: task175 (`C:\code_files\spaarke\.claude\worktrees\agent-a777451e4b29b5686`, done), task174 (`...agent-a87a71b050eceafb1`, running), auditxml (running). d134fix removed. |
+| **Open owner questions** | None open. Settled 2026-11-05/06: D-206 auditing on every table and substantive column incl. the 59 field-secured (excl. 2 Assistant chat tables); findingsjson stays audited, no purge (owner via uac-r2; audit history SysAdmin-only, masking test before any non-admin role gets it). D-207 (EB-D-194): billing decisions only in Invoice Review, pop-up from the Worklist, Invoice decisions card. EB-D-185/190 firm first (Reject gated too); EB-D-186 reopened (owner A or C, ebilling's). |
+| **Next Action** | **(1) PR #2580 (174) fixes** from the adversarial review: rename code to `ontology.decision.decided_in_invoice_review` (D-207 amendment); K1 replay row in the PR table + D-207 note (replay of a pre-D-207 recorded review still closes; don't refuse); K3 log wording (one warning, "caller cannot read the line"); K4 tests (409 then resend without billing AlsoResolve → Recorded; billing Signal under Retry/replay). F1 (client 409 text "already being recorded") is fixed in 175 (`decisionDisplay.ts` case + heading) and **174 may not deploy to dev until 175's Console deploy** (both after ebilling 112 puts the page on dev). Plus uac-r2's replay tests (replay-shaped but unrecorded → 409, nothing written; real pre-D-207 replay finishes; file:line of the server-side "recorded" lookup). Re-check fix diffs and CI, then **HOLD #2580 and #2579 unmerged (not even to docs; option (a) agreed with uac-r2)** until ebilling 112 has Invoice Review on dev; then merge both and send both SHAs to uac-r2. **(2) PR #2579 (175)**: fixes done and re-checked (LegalWorkspace passes `openInvoiceReview`; Also-resolve excludes billing; `decisionDisplay` maps the 409 code); CI green. Held with #2580. **(3)** done. **(4) Audit:** dev done; review the agent's SpaarkeMaster `Entity.xml` PR mirroring dev (exceptions: `sprk_aichatmessage`, `sprk_aichatsummary`; note uac-r2's audit-history rule); send PR to uac-r2 + customer-provisioning, FYI ebilling. **(5)** Later reviews: ebilling master PR (082c-3, 114, 114b, 095d-2 Q1/Q2 conditions, 164 Add line Q3/Q7); next dev BFF candidate = 0f6618094b + fm 049 combined (fresh diff check). Owner UAT order unchanged (168/173 runs, Tony Howe Assign Task, BUD-, re-checks, 114, 111 row 4; then 105, 090). |
+
+**Decisions this session (2026-11-04):** D-203 (082b resolver rulings 1-11), D-204 (generic creates of Signal/DR/BudgetRevision refused, owner-accepted; 042c r4 `4b45ba3cc5` PASS; core-pair lineage census + uac-r2 fix #2568 PASS; new core type needs a code change for secure lineage, project CLAUDE.md amended), D-205 (082c brief + 082c-1 owner review PASS with Q1 change; C8; K4 (c); review-detail derivation). Master `909754869f` touches our SignalSuppressionService/tests: **merge master into docs before the next docs→master.**
 
 ## Task 168 decisions: D-199 (owner, 2026-10-29)
 
@@ -19,6 +22,7 @@ Q1 = A (an eligible internal user, or an onboarded external contact with a grant
 
 ## Lane facts to carry
 
+- **Dev BFF deploys (2026-11-03):** R3 asked to deploy `d763dc120e` (live `5796774091`; delta #2541 field-mapping 041 index follows content type, #2546 R3 invite refusal). Ontology replied OK with conditions: Router green, the owner's go naming the SHA, before/after notices because the owner is in UAT, smoke afterwards. **Live since 22:26:31Z** (readback: ProductVersion +d763dc120e, healthz 200, healthz/dataverse 200, anonymous /api/me 401; settings unchanged at 225; rollback target 5796774091). No ontology code in the delta. Passed uac-r2's 30-minute gate (0 5xx, ownership and secure state steady); rollback = R3 worktree snapshot `deploy/rollback/wwwroot-20261103T220358Z` or redeploy 5796774091. **R3 has stopped running deploys. uac-r2 (see "Peers") now runs every dev BFF deploy:** send deploy requests, peer OKs and post-deploy results there; the owner gives the go per SHA in uac-r2's session (procedure `docs/procedures/dev-bff-deploy-coordination.md` on master; record: rollout record section 17, PR #2554).
 - **Docs now contains master through 194b** (`2cd0f62e2c`, merge `4470c95b86`). 194b moved `ResolveSecureBusinessUnitAsync` to `SecureRecordOwnerTeam`; our call was repointed in `f1133d951b` (uac-r2 approved). ArchTests 1665/1665 on that state.
 - **Dev BFF** `136568cf70` (R3, live 02:23:53Z). Smoke PASS (deploy-log `83e3e409cb`). **Pending:** the task-170 commit-path check (before: 28 WhoAmI, 22.4 s per commit) and the `BUD-` number need the owner's next real decision commit. Then query App Insights `spe-insights-dev-67e2xz` (rg `spe-infrastructure-westus2`) for `POST /api/v1/signals/{id}/decision` after 02:23:53Z.
 - **SpaarkeMaster 1.2.4.0 stamp check:** customer-provisioning built `Test-RolePrivilegeExpectations.ps1` + `spaarkemaster-1.2.4.0.json` (`b6e94f4499`). Stamps run 1.2.3.1, so the upgrade REMOVES Basic User `prvReadsprk_Policy` (D-189 note `53c01465dc`). They will send ACME's result after its upgrade.
@@ -30,7 +34,7 @@ Q1 = A (an eligible internal user, or an onboarded external contact with a grant
 
 ## Next docs→master
 
-The last was PR #2463, merged as master `c8bb55d0cd` (2026-10-29): 168 and 173. Before the next: notices to R3, uac-r2 and word-add-in (current name `spaarke-wt-spaarkeai-word-add-in-r1-8a`); merge master in; build, the filtered Signals tests and the full ArchTests (1858 now).
+The last was PR #2463, merged as master `c8bb55d0cd` (2026-10-29): 168 and 173. Before the next: notices to R3, uac-r2 and word-add-in (name under "Peers"); merge master in; build, the filtered Signals tests and the full ArchTests (1858 now).
 
 ## Blocked follow-ups (ours)
 
@@ -39,13 +43,14 @@ The last was PR #2463, merged as master `c8bb55d0cd` (2026-10-29): 168 and 173. 
 
 ## Dev state (spaarkedev1 / spaarke-bff-dev)
 
-- **BFF:** `136568cf70` (R3, 2026-10-29). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
+- **BFF:** `0f53e053bf` (uac-r2, live 2026-11-05 21:39:06Z; fm 042c + 048; healthz/dataverse 200, settings 225; rollback `909754869f`). Gate **PASS** 21:39:06Z-22:09:06Z (uac-r2 `cdbe819f82`): 048 codes 0, table_unsupported 0 (baseline 0), 5xx 0, writer refusals 0, Undetermined 0, census unchanged (9). Organic Worklist **200 PASS**: owner load `GET /api/v1/signals/worklist` 200 at 2026-11-06 01:31:37Z (584 ms), no 5xx; only unrelated DI-140 #2578 (R3 readability proof, every 5 min, pre-existing). Nightly: 909754869f never ran one; the last ran 2026-11-05 02:30Z on d763dc120e (NOBUDGET 6 Acted held un-raised, 1 DUESOON create, no suppression/Undetermined lines, no exceptions). **Nightly 2026-11-06 02:30Z on 0f53e053bf PASS** (uac-r2): run `4d66b89c` 48.9 s success; hits 162, written 5, closed 4, suppressed 0, Undetermined 0, 5xx 0, job exceptions 0; the 4 DUESOON ConditionCleared closes pair 1:1 with 4 Routine `condition-cleared` DRs (verified on dev). Census 9→5 from the owner's team change. **0f53e053bf read CLOSED.** **Next candidate** master `0f6618094b` (#2573 fm 043 + 046; 8 server files, no Signals/DR/writer; RecordCreationService pass-through only): ontology OK sent; **owner held it to ship with fm 049 in one later deploy**: the combined SHA needs a fresh ontology diff check (049 not yet seen). Nightly 2026-11-06 02:30Z read stays on `0f53e053bf`. Previous: `909754869f` (live 2026-11-05 04:16:30Z; healthz/dataverse 200, anon /api/me 401, settings 225 unchanged; rollback `d763dc120e`, uac-r2 snapshot). Gate + AFTER read-back **PASS** (D-204 note). Open: Worklist 200 from organic/UAT traffic; suppression + Undetermined counts after first nightly SignalReevaluationJob (non-zero Undetermined or 5xx reopens). **Console:** `a8314c2e0e`. **SpaarkeMaster:** 1.2.4.0. **POL-MATTER-NOBUDGET:** v3 `…6313`.
 - **Worktrees:** none for lanes. Remove only with `Remove-WorktreeSafe.ps1`, one path per call.
 - **Stash:** two old `lint-staged automatic backup` entries (20 and 30 h old) are not ours. Leave them.
 
 ## Peers (current session names)
 
-ebilling `spaarke-wt-ebilling-r1-5b` · R3 `spaarke-wt-spa-external-access-platform-08` · uac-r2 `spaarke-wt-unified-access-control-r2-ac` ·
-word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-c4` · field-mapping `spaarke-wt-field-mapping-server-write-pa-be` ·
-customer-provisioning `spaarke-wt-customer-provisioning-orchest-2f`. Send before and after notices to word-add-in, R3 and uac-r2 for any dev BFF,
+As of 2026-11-04 (after the VS Code restart; this session is `spaarke-wt-spaarke-ontology-platform-r1-38`, duplicate `-c8` closed by the owner):
+ebilling `spaarke-wt-ebilling-r1-c7` · R3 `spaarke-wt-spa-external-access-platform-1f` (no longer deploys) · uac-r2 `spaarke-wt-unified-access-control-r2-20` (dev BFF deploy owner) ·
+word-add-in `spaarke-wt-spaarkeai-word-add-in-r1-7b` · field-mapping `spaarke-wt-field-mapping-server-write-pa-69` ·
+customer-provisioning `spaarke-wt-customer-provisioning-orchest-b8` · project-coordination `spaarke-wt-spaarke-project-coordination-75`. Names change on restart: re-check with ListAgents. Send before and after notices to word-add-in, R3 and uac-r2 for any dev BFF,
 Console or landing change. word-add-in needs no after-notice for a Console-only change.

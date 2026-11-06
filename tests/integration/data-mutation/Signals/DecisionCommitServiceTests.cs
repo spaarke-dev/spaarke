@@ -264,8 +264,13 @@ public sealed partial class DecisionCommitServiceTests
                     }
 
                     var createdBy = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal);
+                    // Task 174: like Dataverse, honour the review-id condition (sprk_steps LIKE %"reviewId":"{id}"%), so a record stored for
+                    // ANOTHER review is not found by this one.
+                    var reviewIdLike = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_steps" && c.Operator == ConditionOperator.Like);
                     return new EntityCollection(ExistingRecords
                         .Where(r => createdBy is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, createdBy.Values.Single()))
+                        .Where(r => reviewIdLike is null
+                            || (r.GetAttributeValue<string>("sprk_steps") ?? string.Empty).Contains(((string)reviewIdLike.Values.Single()).Trim('%'), StringComparison.Ordinal))
                         .ToList());
                 });
             Entities.Setup(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
