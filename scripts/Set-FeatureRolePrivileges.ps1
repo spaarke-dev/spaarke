@@ -586,8 +586,8 @@ if ($Verify) {
 }
 
 # -Remove refuses while any add is pending (dry run and apply alike): a declared change not yet held, or a business-unit copy of a "changes"
-# role that differs from its root role (the same two counts Get-Reasons gives the adds). The additions come first, and pass
-# -Verify -ChangesOnly, before a removal.
+# role that differs from its root role (two of the three counts Get-Reasons gives the adds; a live depth above the declared one fails
+# -Verify -ChangesOnly but does not block a removal). The additions come first, and pass -Verify -ChangesOnly, before a removal.
 if ($gateAdds -and ($state.AddPlan.Count + $state.CopyDrift.Count) -gt 0) {
     $scriptCmd = "pwsh scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl $EnvironmentUrl"
     $pendingParts = @()
