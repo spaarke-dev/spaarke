@@ -1845,7 +1845,12 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
 - the named, memberless `Secure Record Owners` team;
 - the `Secure Record Owner` role, created inside that unit, with the Read-at-Basic set in
   `config/secure-record-owner-role.json`, on that team only;
-- the BFF-managed field-security memberships;
+- the BFF-managed field-security memberships: `Spaarke BFF-Managed Field Writers` holds the stamp's BFF application
+  users only, and `Spaarke BFF-Managed Field Readers` holds the default team of every business unit that exists when
+  H7b runs (ACME, 2026-11-06: 2 BFF users; 3 of 3 default teams). **When the customer adds a business unit later**, its
+  default team is not a Reader until H7b runs again or an operator runs
+  `scripts/Deploy-ExternalRecordAccessContactGrantor.ps1` (dry run, then `-Apply`); until then that unit's users cannot
+  read the BFF-managed fields;
 - the contact identity-link memberships;
 - the BFF's two application users as members of the `Standing Grant Administrators` field-security profile (without
   it the platform hides `contact.sprk_standinggrant` from the BFF and every standing grant reads as not held; ISS-020 /
