@@ -31,7 +31,7 @@
 | O-13 | **The server-side lookups the wizard needs are in scope**, including any BFF extension. |
 | O-14 | No model-callable "complete decision" tool in v1. |
 | O-15 | **The April 2026 Copilot surface stays** unless it interferes with this project. |
-| O-16 | Widget HTML is embedded in the BFF, within a 3 MB budget. |
+| O-16 | Widget HTML is embedded in the BFF. Aim under 1 MB (the `widget-design` skill rule); 3 MB is the hard ceiling (refined 2026-11-06). |
 | O-17 | **This project creates and configures the connector** (and the plugin package) in the dev tenant. |
 | O-18 | **Entry points (Q-8):** v1 starts with the **`/` skill**, and users can also **ask directly** in a normal prompt. Organisational prompts are not v1. |
 | O-19 | **Brand for a family, not one connector (Q-9), approved as proposed in §5.5:** one Copilot connector per product area, named "Spaarke" + area. The core member is **"Spaarke"** (v1); routes are `/mcp/{area}`. |
@@ -39,6 +39,8 @@
 | O-21 | **Backlog issues (Q-11):** filed. See §19. |
 | O-22 | **Terms:** a Signal produces a **Work Item**; resolving it writes a **Decision Record**. The Decide grid lists Work Items (§4.1). |
 | O-23 | **§5.2 registration approved:** federated connector primary, plugin package also built, the Spaarke AI agent only as the T1 fallback. |
+| O-25 | **Naming conventions approved (2026-11-06)**, after a sweep of master and 15 other projects: v1 route `/mcp/legal-operations` ("core" already means *core record*); functions are tool groups and skills, not routes; skills `spaarke-{area}-{capability}` (area dropped for core); widget `ui://spaarke/decisions.html` in `src/client/widgets/spaarke-decisions/`; capability layer in `Services/Signals/`; "Spaarke AI" stays the agent name; "Spaarke Copilot" retired. Full table: `notes/coordination/2026-11-06-copilot-naming-and-ownership.md` §1. |
+| O-26 | **Cross-project coordination is binding** (owner: "very important"): agreements with legal-ai-accelerator-r1, ontology-platform-r1, ebilling-r1 and unified-access-control-r2 are recorded in `notes/coordination/2026-11-06-copilot-naming-and-ownership.md` §2 and in §20. |
 | O-24 | **§6.2 auth approved:** OAuth at the Spaarke-tenant authority, and the ADR-028 amendment by path B, now written as **ADR-028 A10**. |
 
 ---
@@ -154,7 +156,7 @@ So the v1 grid is the **Decide lane: the Work Items waiting on the user's decisi
 
 ### 5.2 Decision (approved, O-23)
 
-1. **Primary: a federated connector**, admin-created in the tenant and pointing at the BFF's `/mcp/core` (§5.5). It meets O-3: no agent picker, tools available in normal Chat and Cowork beside Work IQ, a documented write-approval card. It is also the route the legal ISVs use (Harvey, iManage, Litera), and it becomes the Partner Center package later.
+1. **Primary: a federated connector**, admin-created in the tenant and pointing at the BFF's `/mcp/legal-operations` (§5.5). It meets O-3: no agent picker, tools available in normal Chat and Cowork beside Work IQ, a documented write-approval card. It is also the route the legal ISVs use (Harvey, iManage, Litera), and it becomes the Partner Center package later.
 2. **Also built: a plugin package (`agentConnectors`)** with one or two Cowork skills that name our tools. This is the **documented widget route in Cowork**, and per Microsoft's ISV guide it converges with the connector into one Microsoft 365 app package. It costs little: same server, same registration.
 3. **Fallback, only if the Phase 0 tests show no widget in Copilot Chat through the connector:** the **Spaarke AI** declarative agent (O-6), rebuilt on DA v1.9 / plugin v2.4 / app manifest v1.30 with **one MCP runtime action and no OpenAPI action**. This is the one case where a declarative agent is technically required: Microsoft documents widgets in Copilot Chat only for agents. The user would then see the decision UI in Chat only inside the Spaarke AI agent, while plain Chat and Cowork still get the tools and text answers.
 
@@ -219,10 +221,16 @@ The decisions capability is the first of several. Patent, Trademark and other ca
   - **Spaarke Patents** and **Spaarke Trademarks** later, as add-ons that match their SKUs.
   - The alternative "Spaarke Legal Operations" for the core reads more clearly in a list of sources, but "…in Spaarke" then matches less well.
 - **Family name** in docs and marketing: "Spaarke for Microsoft 365 Copilot". It needs a check against Microsoft's trademark and marketplace naming rules before any public listing; that isn't needed for v1.
-- **Skills:** `spaarke-<capability>`, for example `spaarke-decisions` (v1) and later `spaarke-invoice-review` and `spaarke-patent-docket`.
+- **Plugins and skills** (agreed with `spaarke-legal-ai-accelerator-r1`, 2026-11-06):
+  - one plugin per area, slug `spaarke-{area}` (core: `spaarke`) with an explicit display name;
+  - a legal practice accelerator is an area (`spaarke-nda` "Spaarke NDA");
+  - skills are `spaarke-{area}-{capability}`, with the area dropped only in the core plugin (`spaarke-decisions`), so two practice plugins never collide on a shared skill such as setup;
+  - whichever project starts patents first owns `spaarke-patents`, and the other adds skills to it.
+- **Route name:** `legal-operations`, not `core`, because "core" already means a *core record*. Functions inside an area (decisions now; invoice review and matters later) are tool groups and skills, not separate routes. Each route is a separate connector to create and Connect, so splitting by function would multiply admin and user steps.
+- **Words to avoid in Copilot text:** an unqualified "playbook" (legal playbook vs JPS playbook; ontology is reconciling it) and "Finding" for a billing Work Item (ebilling's internal term, not in ontology §3).
 - **Tools:** `spaarke_<verb>_<object>` as in §7.1; later areas add their noun (`spaarke_show_patent_deadlines`).
-- **Engineering:** one BFF MCP module, one OAuth registration and one widget pipeline. Each member gets its own route, `/mcp/{area}`; v1 is `/mcp/core` (B-6). Every tool is tagged with its area, and an area's route lists only its tools.
-- **Terminology:** the family and member names go into `ontology-component-model.md` §3 and the CLAUDE.md §1.1 product-name table in Phase A (§13).
+- **Engineering:** one BFF MCP module, one OAuth registration and one widget pipeline. Each member gets its own route, `/mcp/{area}`; v1 is `/mcp/legal-operations` (B-6). Every tool is tagged with its area, and an area's route lists only its tools.
+- **Terminology:** the ontology project has already written the product names into `ontology-component-model.md` **§1.1** (commit `1e9d16bdba`, docs branch; product names sit in §1.1, terms in §3). This project adds the matching CLAUDE.md §1.1 row, citing it. Full naming table: `notes/coordination/2026-11-06-copilot-naming-and-ownership.md`.
 
 Phase 0 adds:
 - **T13:** can SDK 2.3.1 serve different tool sets on two routes in one host? If not, the fallback is one route that filters the tool list by the request path.
@@ -281,13 +289,13 @@ Copilot Chat / Cowork  (user's normal flow; Work IQ in the same turn)
    │  federated connector  (or plugin package / Spaarke AI agent; same server)
    │  OAuth token, Spaarke-tenant authority, aud = BFF
    ▼
-BFF  POST /mcp/core   stateless · RequireAuthorization · rate-limit "mcp" · size limit · kill switch Mcp:Enabled
+BFF  POST /mcp/legal-operations   stateless · RequireAuthorization · rate-limit "mcp" · size limit · kill switch Mcp:Enabled
    ├─ spaarke_show_decisions        model-visible · readOnly   → DecisionCapability.ListDecideAsync(caller, category?)
    │       content: short text summary (+ Console deep links) · structuredContent: slim Decide-lane rows · _meta.ui → widget
    ├─ spaarke_get_decision_plan     app-only · readOnly         → plan + suppression + full row; writes the plan-read stamp
    ├─ spaarke_search_decision_lookup app-only · readOnly        → NEW server-side lookup search (people, budgets, firms), as caller
    ├─ spaarke_complete_decision     app-only · write            → DecisionCommitService (unchanged invariant owner)
-   └─ resource ui://spaarke/decisions  (text/html;profile=mcp-app, embedded in the BFF)
+   └─ resource ui://spaarke/decisions.html  (text/html;profile=mcp-app, embedded in the BFF)
             │
             ▼  rendered by the host in a sandboxed frame; talks only via callServerTool
    widget: single-file React + Fluent v9
@@ -323,12 +331,12 @@ The review found the decision services well shaped, but coupled to `HttpContext`
 
 | # | Change | Problem it fixes (in code today) | v1? |
 |---|---|---|---|
-| **B-1** | **Decision capability layer:** `Services/Decisions/` (or extend `Services/Signals/`), self-authorising, transport-free: list, plan, lookup, commit. REST endpoints and MCP tools both call it. | `DecisionCommitService.CommitAsync(…, HttpContext, …)` (L432), `DecisionPlanReadStamp.StampAsync(HttpContext, …)` (L42) and `DecisionParameterSources.ForPlanAsync(httpContext, …)` (L109) take `HttpContext`. A tool would either pass `HttpContext` around or re-derive the caller. | v1 |
+| **B-1** | **Decision capability layer:** in `Services/Signals/` (no new folder; ontology-platform owns this area and reviews every PR), self-authorising, transport-free: list, plan, lookup, commit. REST endpoints and MCP tools both call it. | `DecisionCommitService.CommitAsync(…, HttpContext, …)` (L432), `DecisionPlanReadStamp.StampAsync(HttpContext, …)` (L42) and `DecisionParameterSources.ForPlanAsync(httpContext, …)` (L109) take `HttpContext`. A tool would either pass `HttpContext` around or re-derive the caller. | v1 |
 | **B-2** | **One result mapper:** `SignalReadResult` / `DecisionCommitResult` → ProblemDetails (REST) **or** an MCP tool error result, with a single `reasonCode` vocabulary | Mapping lives in endpoint statics (`DecisionCommitEndpoints.cs:60-118`, `SignalReadEndpoints.cs:46-83`); Signals say `reasonCode` and Finance says `errorCode` | v1 |
 | **B-3** | **Server-side lookup search for workforce callers** (`IDecisionLookupSearch`), in scope per O-13. It searches contacts, budgets filtered to the matter, and organisations, read as the caller. **The decision plan drives it:** each parameter's `LookupEntity` and its scoping rule come from the plan, so the client can't widen a search. Exposed as a REST route **and** a tool; the Console can switch to it later. **Precedent:** the external SPA's scoped read (`ExternalModuleDataEndpoints.cs` → `POST /api/v1/external/api/dataverse/fetch`) already does server-side lookups. It runs on the **external collaboration plane** (dual-scheme policy, external access guard), which must not serve workforce or Copilot callers. So B-3 follows its pattern (server-built query, scoped, fail-closed) on the workforce plane rather than reusing that route. | The rule "a budget belongs to the matter" (D-18) is enforced only by the Console's browser-side picker (`worklistLookup.ts:54-74`; `DecisionActionExecutors.cs:380-381`). No workforce-plane equivalent exists, so any other host can't search at all: revise-budget, reassign, add-todo, assign-work, assign-task and the inquiry's outside firm can't be completed. | v1 |
-| **B-4** | **Caller context:** a scoped `ICallerContext { Principal, BearerToken, CorrelationId }`, populated once per request. `DataverseUserClient`, `CallerWhoAmIMemo` and the probes read it instead of `IHttpContextAccessor`. | 85 `IHttpContextAccessor` uses in 46 files and 82 `HttpContext` parameters in 43 service files. MCP works only because a tool happens to run inside the HTTP request; a non-HTTP continuation fails silently (`UserContextRequired`). `CallerResolution.cs:63-66` already forbids `HttpContext` overloads. | v1 for the decision slice; repo-wide later |
+| **B-4** | **Caller context:** a scoped `ICallerContext { Caller (Spaarke.Core.Auth.CallerIdentity), Principal, BearerToken, CorrelationId }`, populated once per request. `DataverseUserClient`, `CallerWhoAmIMemo` and the probes read it instead of `IHttpContextAccessor`. | 85 `IHttpContextAccessor` uses in 46 files and 82 `HttpContext` parameters in 43 service files. MCP works only because a tool happens to run inside the HTTP request; a non-HTTP continuation fails silently (`UserContextRequired`). `CallerResolution.cs:63-66` already forbids `HttpContext` overloads. | v1 for the decision slice; repo-wide later |
 | **B-5** | **Slim list projection:** `WorklistItemSummary` without `EvidenceRefs` or `Steps`; the full row arrives with the plan on open | Rows are about 1–2 KB each, so 30–50 rows exceed Cowork's 64 KiB inline cap | v1 |
-| **B-6** | **MCP placement:** `Api/Mcp/` + `AddMcpModule` + `MapMcpEndpoints` in `EndpointMappingExtensions` (ADR-010). An ADR-032 null-object kill switch `Mcp:Enabled`. Explicit `.RequireAuthorization()`, a dedicated rate-limit policy (partitioned per caller), and a request-size limit on `/mcp/*`. **Routes are per product area, `/mcp/{area}`, and v1 maps only `/mcp/core`** (§5.5). Each tool is tagged with its area. | The connector URL is set in each customer's tenant. A flat `/mcp` would force every customer to re-create the connector when the Patents or Trademarks area arrives. | v1 |
+| **B-6** | **MCP placement:** `Api/Mcp/` + `AddMcpModule` + `MapMcpEndpoints` in `EndpointMappingExtensions` (ADR-010). An ADR-032 null-object kill switch `Mcp:Enabled`. Explicit `.RequireAuthorization()`, a dedicated rate-limit policy (partitioned per caller), and a request-size limit on `/mcp/*`. **Routes are per product area, `/mcp/{area}`, and v1 maps only `/mcp/legal-operations`** (§5.5). Each tool is tagged with its area. | The connector URL is set in each customer's tenant. A flat `/mcp` would force every customer to re-create the connector when the Patents or Trademarks area arrives. | v1 |
 | **B-7** | **Tool authorization as policies:** `AddAuthorizationFilters()` plus per-tool `[Authorize(Policy = …)]`, reusing existing policies. Never `ExternalCollaboration`. | Checks held in endpoint filters (Finance, AI) don't reach tools | v1 |
 | **B-8** | **Guard coverage:** extend `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` (it recognises only `Map{Verb}`, `MapMethods` and `MapHealthChecks`) to cover `MapMcp` and assert every tool carries an explicit `ReadOnly` annotation | New auth surface invisible to the ratchet | v1 |
 | **B-9** | **The April 2026 Copilot surface stays (O-15).** That means the "Spaarke AI" agent package (`src/solutions/CopilotAgent/`, 28-function OpenAPI action), `/api/agent/*`, and the unused `AgentTokenService`, `SpaarkeAgentHandler`, `AdaptiveCardFormatterService` and `Microsoft.Agents.Hosting.AspNetCore` package. **One point of interference:** if the declarative-agent fallback (§5.2) is adopted, the Spaarke AI package is rebuilt on the MCP action, and its OpenAPI action must go, because the two would compete for the same prompts (April's routing problem). The unused code is filed as #2575 (and #1523). | The code is unused but harmless, so leave it | Only with the fallback |
@@ -342,7 +350,7 @@ Not changed: `SignalReadService`'s read rules, `DecisionCommitService`'s validat
 
 ### 9.1 Build
 
-- A new code-page-style folder (proposed `src/solutions/SpaarkeMcpWidgets/`) with a Vite + `vite-plugin-singlefile` build, following the pattern ten Spaarke code pages already use.
+- A new code-page-style folder (proposed `src/client/widgets/spaarke-decisions/`) with a Vite + `vite-plugin-singlefile` build, following the pattern ten Spaarke code pages already use.
 - It deep-imports `@spaarke/ui-components` **source** (not the barrel), so `pdfjs-dist`, `mammoth` and App Insights stay out of the bundle (`sideEffects: false`).
 - **Patterns to adopt (all MIT):**
   - Microsoft's Copilot Studio Kit `mcp-apps/copilot-agent-kit`: Fluent v9, single-file build, tests;
@@ -413,7 +421,7 @@ The user can still ask questions in Chat and finish in Spaarke. Completing a dec
 | Level | What |
 |---|---|
 | Unit | The capability layer: as-caller pass-through, reason-code mapping, lookup scoping (budget belongs to the matter), slim projection under 64 KiB at the cap |
-| Protocol | `/mcp/core` against an in-process test host: `server/discover`, tool list and annotations, `resources/read` MIME type, auth challenge (401 with `WWW-Authenticate`). Run the `modelcontextprotocol/conformance` suite (`--spec-version 2026-07-28`) in dev and CI with a test-token injector. |
+| Protocol | `/mcp/legal-operations` against an in-process test host: `server/discover`, tool list and annotations, `resources/read` MIME type, auth challenge (401 with `WWW-Authenticate`). Run the `modelcontextprotocol/conformance` suite (`--spec-version 2026-07-28`) in dev and CI with a test-token injector. |
 | Arch | B-8 guard: `MapMcp` requires auth; every tool has an explicit `ReadOnly` annotation; tools inject no AI-internal types (ADR-013) |
 | Widget | Adapter tests (shim ↔ tool result), wizard flow with a mocked `callServerTool`, bundle-size budget test |
 | Live (tenant) | Phase 0 tests T1–T12 (§13). After the build: an end-to-end complete-decision run per route, and a 20-prompt routing eval |
@@ -427,7 +435,7 @@ The user can still ask questions in Chat and finish in Spaarke. Completing a dec
 | # | Test | Gate |
 |---|---|---|
 | T5 | OAuth (Spaarke-tenant authority) through a federated connector: decode the token (`aud`, `scp`, `tid`, `oid`); OBO → Dataverse WhoAmI returns the right `systemuser` | **Gates everything** |
-| T0 | A hello-world `/mcp/core` on the dev BFF, called by the connector: `Accept` / 406, stateless calls | Gates Phase A |
+| T0 | A hello-world `/mcp/legal-operations` on the dev BFF, called by the connector: `Accept` / 406, stateless calls | Gates Phase A |
 | T1 | The same server as a federated connector: in plain Chat and in Cowork, does a `ui://` widget render? Also try Word and Outlook. | **Decides the Spaarke AI fallback** |
 | T2 | As a plugin package in Cowork and in Chat: does the widget render? | Packaging |
 | T3 | A widget calls the write tool (app-only, not readOnly): is there a confirmation card, and is it per call? | Write UX |
@@ -493,7 +501,7 @@ The unused `Microsoft.Agents.Hosting.AspNetCore` package stays (O-15; removal tr
 | Decision capability layer (B-1) | `SignalReadService`, `DecisionCommitService`, the plan endpoints | Extends them by moving the `HttpContext`-free core out of the endpoints; no new rules | A second host forks the caller resolution and result mapping, giving the invariant a second owner |
 | `IDecisionLookupSearch` + route (B-3) | Console's `worklistLookup.ts` (browser-side, `Xrm.WebApi`) | Cannot extend a browser-side `Xrm` helper to a server; this moves the rule server-side | Six action types cannot be completed outside the Console, and D-18 stays enforced only in the browser |
 | `ICallerContext` (B-4) | `CallerResolution`, `CallerWhoAmIMemo`, `IHttpContextAccessor` | Extends: wraps what `CallerResolution` already resolves | MCP works only by running inside an HTTP request; a later non-HTTP path fails silently (`UserContextRequired`) |
-| Widget build (`SpaarkeMcpWidgets`) | Code-page Vite builds; `knowledge/mcp-apps` samples | Same toolchain, new entry point; no fork of components | No UI to complete a decision in Copilot or Cowork |
+| Widget build (`src/client/widgets/spaarke-decisions/`) | Code-page Vite builds; `knowledge/mcp-apps` samples | Same toolchain, new entry point; no fork of components | No UI to complete a decision in Copilot or Cowork |
 
 ## 16. Hot-path declaration (CLAUDE.md §10)
 
@@ -510,6 +518,8 @@ The unused `Microsoft.Agents.Hosting.AspNetCore` package stays (O-15; removal tr
 Register in `projects/INDEX.md` at pipeline start. Run `/conflict-check` before each BFF PR. `AuthorizationModule.cs` and `Services/Signals/**` are shared with active projects.
 
 ## 17. Next slice: billing review and approval
+
+> ⚠️ **Conflicts with ebilling EB-D-194 / ontology D-207 (found 2026-11-06):** invoice review and approval decisions happen **only in the Invoice Review app**. Billing review inside Copilot therefore needs an owner decision before this slice is planned. In v1, billing Work Items appear in the Copilot Decide lane only as a link out to `sprk_invoicereviewpage`.
 
 The pattern fits directly:
 - **Routes exist:**
@@ -568,7 +578,9 @@ The third round settled:
 | Hosts ask for write consent inconsistently, or not at all | The server never relies on host consent (§10) |
 | The `Microsoft.Extensions.AI` bump regresses the AI pipeline | Run the AI suites; pin; measure |
 | First of its kind: no public .NET + Entra + widget + connector sample | Phase 0 tests; adopt the PnP `mcp-cs-customers-secure-server` auth pattern (SDK 1.2.0 → 2.3.1) |
-| Contention on `AuthorizationModule.cs` and `Services/Signals/**` | `/conflict-check`, small PRs |
+| Contention on `AuthorizationModule.cs` and `Services/Signals/**` | `/conflict-check`, small PRs. **Agreed with ontology-platform (2026-11-06):** B-1, B-2 and B-5 start only after its PR #2580 (D-207 billing refusal, held until ebilling task 112) reaches master; B-3 and B-4 can start now. Every PR touching `Services/Signals/**`, `Api/Signals/**` or the worklist route goes to ontology for review. Auth diffs go to unified-access-control-r2. |
+| #2580 is held on ebilling's Invoice Review deployment | Phase A starts with B-3, B-4 and the MCP foundation. Until #2580 lands, billing Work Items are omitted from the Copilot list or shown without a link. |
+| A second MCP server is proposed elsewhere (`Sprk.Insights.Mcp`, agent-framework-fit-assessment) | Any further MCP surface is a new `/mcp/{area}` on this host, not a second server. Raise it if that project starts. |
 
 ## 21. References
 
