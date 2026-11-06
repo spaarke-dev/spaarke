@@ -109,6 +109,14 @@ Rejected: running it synchronously; extending the 049 handler (its "linked or te
   - Q8: `completed`, not `done`.
   - EB-D-185: no line decision, Override or approval without a firm, or while the re-run is pending. Slice 095d-0 builds that gate.
 
+- **095d-2a BLOCKED (2026-11-05).** The stored rows lack four AI facts: the section totals and their confidences, the timekeeper summary names, whether a line had no date, and the observation quotes. The EB-D-186 condition fails. The owner chooses A (store them at intake; older submissions refuse the re-run fail-closed) or C (re-read on Set firm).
+- **uac-r2 conditions if A is chosen:**
+  1. Names and quotes go ONLY in `sprk_findingsjson`. `sprk_extractionconfidence` keeps numbers and flags only. Per-line free text requires that column to be field-secured first; tell uac-r2.
+  2. Never on external routes. `sprk_findingsjson` stays in `EvaluateFetchXmlGuard` `UnfilterableColumns`, with a pinning test.
+  3. Not indexed and not logged (counts only).
+  4. The field-mapping push item gets CLOSED before A ships. Either the push honours `MappingProtectedColumns` for `sprk_findingsjson`, or a cited code path shows every push read and write runs impersonated. Otherwise fix it in the same slice.
+  5. Older submissions fail closed.
+
 ## 5. Files
 
 | File | Change |
