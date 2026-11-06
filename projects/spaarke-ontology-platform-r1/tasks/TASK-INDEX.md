@@ -39,7 +39,7 @@
 
 ## Parallel work streams (owner: speed) — updated 2026-10-07
 
-Status from the POMLs today: ✅ done includes 001-012, 020-024, 030, 065, 007, 008, 009, 080-097, 099; 🔄 079, 098.
+Status from the POMLs today: ✅ done includes 001-012, 020-024, 030, 065, 007, 008, 009, 080-097, 099; 🔄 079, 098. *(Historical planning snapshot. The status markers in this table are as of 2026-10-07; the task table above is current. 079 and 098 are completed per their POMLs, checked 2026-11-06.)*
 **Startable now** = every dep done. **Gate** = the one thing still blocking. **PR** = *own PR to master* when it changes
 shared UI / modal code other projects consume (or another domain's surface); otherwise it lands on this branch.
 Streams do not share files, with one exception noted: every new BFF route edits the #1312 route ledger
@@ -47,7 +47,7 @@ Streams do not share files, with one exception noted: every new BFF route edits 
 
 | Stream | Task | Deps (POML) | Deps met today? | Gate | PR |
 |---|---|---|---|---|---|
-| **1 Evaluator critical path** (`Services/Signals`, compiler, writer) | 079 🔄 | — | yes (in progress) | uac-r2 review of the two entries | branch |
+| **1 Evaluator critical path** (`Services/Signals`, compiler, writer) | 079 ✅ | — | done | uac-r2 review of the two entries | branch |
 | | 039 | 007, 008, 079 | no | **079** + uac-r2 batch 4 in dev | branch (uac-r2 files reviewed by uac-r2) |
 | | 037 | 007, 008, 024, 039 | no | 039 (same file: `SignalWriter.cs`) | branch |
 | | 106 | 098 | no | **098 merged** (PR #1359); **PR #1429 open** (awaiting owner merge) | own PR |
