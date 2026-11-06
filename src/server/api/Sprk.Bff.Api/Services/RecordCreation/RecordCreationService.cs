@@ -177,9 +177,10 @@ internal sealed partial class RecordCreationService
 
         // Task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): a table whose rows are created only by its own writer
         // is refused here, with the words of a table this service does not create, before anything is read, mapped, checked or
-        // written, whoever asks (the caller or the system principal).
+        // written, whoever asks (the caller or the system principal). ebilling-r1 task 164a-1: and a table whose generic create
+        // alone is refused (GenericCreateRefused covers both; an invoice line's update and delete are not refused).
         var rule = TableRules(table);
-        if (rule is null or { CreatedOnlyByItsWriter: true })
+        if (rule is null or { GenericCreateRefused: true })
         {
             return trace.Refused(new RecordCreationRefusal(RecordCreationRefusalKind.Invalid,
                 RecordCreationRefusal.TableUnsupportedCode, $"'{request.Table}' records are not created here."));

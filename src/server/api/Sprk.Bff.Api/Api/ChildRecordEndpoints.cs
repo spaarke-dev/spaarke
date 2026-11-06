@@ -60,17 +60,18 @@ namespace Sprk.Bff.Api.Api;
 public static class ChildRecordEndpoints
 {
     /// <summary>
-    /// The tables a browser writer creates through this route (task 147's census, note §2a). <c>sprk_budget</c>,
-    /// <c>sprk_kpiassessment</c> and <c>sprk_billingevent</c> are the secure-record ribbon's "New Budget" / "New KPI
-    /// Assessment" / "New Billing Event" (owner round 28 item 2, E2; the r1c live inventory of every main form found the
-    /// last two on the matter, project, report card and invoice forms): the native subgrid "+ New" under a secure record is
-    /// replaced by a command that creates the row here and then opens it — these tables have no product create surface of
-    /// their own.
+    /// The tables a browser writer creates through this route (task 147's census, note §2a). <c>sprk_budget</c> and
+    /// <c>sprk_kpiassessment</c> are the secure-record ribbon's "New Budget" / "New KPI Assessment" (owner round 28 item 2,
+    /// E2; the r1c live inventory of every main form found the KPI assessment on the matter, project and report card forms):
+    /// the native subgrid "+ New" under a secure record is replaced by a command that creates the row here and then opens
+    /// it — these tables have no product create surface of their own. ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line
+    /// (<c>sprk_billingevent</c>) is no longer created here; its new rows have one server-side owner (extraction, a line
+    /// decision, Add line), and the general create refuses it (<see cref="RecordTableRule.GenericCreateRefused"/>).
     /// </summary>
     internal static readonly IReadOnlySet<string> CreateTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "sprk_todo", "sprk_event", "sprk_memo", "sprk_invoice", "sprk_reportcard", "sprk_analysis", "sprk_document",
-        "sprk_budget", "sprk_kpiassessment", "sprk_billingevent",
+        "sprk_budget", "sprk_kpiassessment",
         // spaarke-ontology-platform-r1 task 046 (D-21; uac-r2's answer D-113 on #1355): the Create Work Assignment wizard's
         // create and a decision's Assign Work follow-on — ONE server create path for the table, this one. A work assignment is
         // a ROOT, not a child: the secure-create plan decides how it is made (filed under a secure matter or project → INTO
@@ -196,7 +197,7 @@ public static class ChildRecordEndpoints
         // the resolver's team. Authorization is decided in the handler, as the caller, on every record the body binds.
         group.MapPost("/{table}", CreateAsync)
             .WithName("CreateChildRecord")
-            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment, billing event), a work assignment, a matter or a project")
+            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment), a work assignment, a matter or a project")
             .WithDescription("Takes the Dataverse Web API payload a browser writer would have sent. Checks AS THE CALLER " +
                 "that they could create it (table privilege, AppendTo on every record it binds, no owner or field-secured " +
                 "column), then the application creates it owned by the team the ownership rule names (the Secure Record " +

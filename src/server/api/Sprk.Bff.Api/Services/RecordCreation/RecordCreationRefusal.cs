@@ -67,7 +67,8 @@ internal sealed record RecordCreationRefusal
     internal const string InvalidPayloadCode = "record_creation.invalid_payload";
 
     /// <summary>The table has no entry in <see cref="RecordTableRules"/>, or its entry is
-    /// <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> (task 042c fix round 4): this service does not create it.</summary>
+    /// <see cref="RecordTableRule.GenericCreateRefused"/> (task 042c fix round 4; ebilling-r1 task 164a-1): this service does not
+    /// create it.</summary>
     internal const string TableUnsupportedCode = "record_creation.table_unsupported";
 
     /// <summary>A check before the create faulted (an exception or timeout): nothing was created (NFR-01).</summary>

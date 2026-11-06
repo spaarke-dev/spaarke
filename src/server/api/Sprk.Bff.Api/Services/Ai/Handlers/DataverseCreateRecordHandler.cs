@@ -152,18 +152,27 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// Record and a Budget Revision are created only by their writers, so this tool refuses them outright, with the
     /// <c>sprk_document</c> block's mechanism and shape (<see cref="ToolErrorCodes.ValidationFailed"/>, before any Dataverse call,
     /// in both <see cref="ValidateChat"/> and <see cref="ExecuteChatAsync"/>). The set is the registry's own flag
-    /// (<see cref="RecordTableRule.CreatedOnlyByItsWriter"/>), which <see cref="RecordCreationService"/> also refuses, so the two
-    /// cannot drift apart.
+    /// (<see cref="RecordTableRule.GenericCreateRefused"/>), which <see cref="RecordCreationService"/> also refuses, so the two
+    /// cannot drift apart. ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line too — its generic create alone is refused
+    /// (<see cref="RecordTableRule.GenericCreateOnlyRefused"/>); its update and delete are as before.
     /// </summary>
     internal static bool IsCreatedOnlyByItsWriter(string tablename) =>
-        RecordTableRules.Find(tablename) is { CreatedOnlyByItsWriter: true };
+        RecordTableRules.Find(tablename) is { GenericCreateRefused: true };
+
+    /// <summary>ebilling-r1 task 164a-1: the invoice line, whose generic create alone is refused (its own refusal words).</summary>
+    internal const string InvoiceLineTable = "sprk_billingevent";
 
     /// <summary>The single rejection message for an <see cref="IsCreatedOnlyByItsWriter"/> create (user- and model-facing).</summary>
     internal static string CreatedOnlyByItsWriterCreateBlockedMessage(string tablename) =>
-        $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
-        "created only by Spaarke itself: a signal when its rule is evaluated, a decision record or a budget revision when a " +
-        $"decision is committed. Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument " +
-        "change makes it valid; work from the signal or its decision instead.";
+        string.Equals(tablename, InvoiceLineTable, StringComparison.Ordinal)
+            ? $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. Invoice " +
+              "lines are created only by Spaarke's e-billing services, when an invoice is read or a line is added in its review. " +
+              $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
+              "valid; add the line from the invoice's review instead."
+            : $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. They are " +
+              "created only by Spaarke itself: a signal when its rule is evaluated, a decision record or a budget revision when a " +
+              $"decision is committed. Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument " +
+              "change makes it valid; work from the signal or its decision instead.";
 
     /// <summary>The single rejection message for a <see cref="ServerWrittenInvoiceFamilyTables"/> create (user- and model-facing).</summary>
     internal static string ServerWrittenInvoiceFamilyCreateBlockedMessage(string tablename) =>
@@ -305,7 +314,8 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (ServerWrittenInvoiceFamilyTables.Contains(tablename))
             return ToolValidationResult.Failure(ServerWrittenInvoiceFamilyCreateBlockedMessage(tablename));
 
-        // Task 042c fix round 4 (owner decision D-204): created only by their writers, the same hard block.
+        // Task 042c fix round 4 (owner decision D-204): created only by their writers, the same hard block (and, task 164a-1, an
+        // invoice line, whose generic create alone is refused).
         if (IsCreatedOnlyByItsWriter(tablename))
             return ToolValidationResult.Failure(CreatedOnlyByItsWriterCreateBlockedMessage(tablename));
 
@@ -388,7 +398,8 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
                 stopwatch);
         }
 
-        // Task 042c fix round 4 (defense in depth — ValidateChat already rejects): created only by their writers.
+        // Task 042c fix round 4 (defense in depth — ValidateChat already rejects): created only by their writers (and, task
+        // 164a-1, an invoice line).
         if (IsCreatedOnlyByItsWriter(tablename))
         {
             return LogOutcome(context, tablename,
