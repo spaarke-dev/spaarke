@@ -77,6 +77,14 @@
     -AppliedNoRecordWindowMinutes of its decidedOn it is INFO; older, -Verify reports it as FAIL (exit 1); -WhatIf and -Apply only report it.
     A stored member that cannot be read is FAIL in -Verify (what was applied cannot be known).
 
+    (g) RECORDED, RE-RUN NOT DONE (task 095d-2b-1; EB-D-185..187). Read only, in every mode. After its Decision Record, Set firm queues the
+    rules re-run; the re-run's one commit sets the stored member's "rulesRerun" to "completed" (and clears the rerun-pending marker). A
+    submission whose Set firm is recorded (check (f) found its record) but whose "rulesRerun" is not "completed" is "recorded, re-run not
+    done": the invoice stays held and its submission withheld from partners. A lost enqueue (the BFF answered 503 incomplete, failedStep
+    rerun) is finished by a repeat of the Set firm; a dead-lettered or refused re-run job needs an operator (Permanent=true = operator, not
+    retry). Inside -RecordedNoRerunWindowMinutes of its decidedOn it is INFO; older, -Verify reports it as FAIL (exit 1); -WhatIf and -Apply
+    only report it.
+
     WHAT IT IS NOT. Not an access column: it decides no visibility. It is refused to the BFF's app-only generic writers
     (InheritedAccessPermission.AccessColumns, sprk_invoice) together with sprk_invoice.sprk_vendororg. Rollback: un-secure the column by
     hand (make.powerapps.com) and revert the SpaarkeMaster source (Entity.xml, FieldSecurityProfiles.xml) by a commit; the column is not
@@ -103,6 +111,10 @@
     Task 095d-1c, check (f): how long an applied Set firm may stay without its Decision Record before -Verify fails (default 60 minutes, 1 to
     10080). Inside it the row is INFO: the reviewer's repeat, which the BFF's 503 incomplete asks for, normally finishes it within minutes.
 
+.PARAMETER RecordedNoRerunWindowMinutes
+    Task 095d-2b-1, check (g): how long a recorded Set firm may wait for its rules re-run to complete before -Verify fails (default 60 minutes,
+    1 to 10080). Inside it the row is INFO: the queued job retries for minutes before it dead-letters.
+
 .EXAMPLE
     pwsh scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -WhatIf
     pwsh scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply
@@ -123,7 +135,8 @@ param(
     [string]$SolutionUniqueName = 'SpaarkeMaster',
     [switch]$Apply,
     [switch]$Verify,
-    [ValidateRange(1, 10080)][int]$AppliedNoRecordWindowMinutes = 60
+    [ValidateRange(1, 10080)][int]$AppliedNoRecordWindowMinutes = 60,
+    [ValidateRange(1, 10080)][int]$RecordedNoRerunWindowMinutes = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -154,6 +167,9 @@ $AssignFirmMember = 'assignFirm'
 $AssignFirmActionCode = 'assign-firm'
 $DecisionRecordSet = 'sprk_decisionrecords'
 $DecisionRecordInvoiceLookup = '_sprk_regardinginvoice_value'
+# Task 095d-2b-1, check (g) (pinned by InvoiceFirmHoldFieldSecurityAgreementTests against InvoiceAssignFirmService)
+$RulesRerunMember = 'rulesRerun'
+$RulesRerunCompleted = 'completed'
 
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
 if (-not $token) { throw "No Dataverse token for $EnvironmentUrl. Run 'az login' and retry." }
@@ -596,7 +612,7 @@ function Get-AssignFirmStored($Submission) {
     $json = $Submission.sprk_findingsjson
     if ([string]::IsNullOrWhiteSpace($json)) { return $null }
     try { $root = $json | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
-    catch { return [pscustomobject]@{ Readable = $false; Kind = 'findings'; DecisionId = [Guid]::Empty; DecidedOn = [DateTimeOffset]::MinValue } }
+    catch { return [pscustomobject]@{ Readable = $false; Kind = 'findings'; DecisionId = [Guid]::Empty; DecidedOn = [DateTimeOffset]::MinValue; RulesRerun = $null } }
     if ($root -isnot [System.Collections.IDictionary] -or -not $root.ContainsKey($AssignFirmMember)) { return $null }
     $member = $root[$AssignFirmMember]
     $decisionId = [Guid]::Empty
@@ -615,10 +631,14 @@ function Get-AssignFirmStored($Submission) {
                 [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref]$decidedOn)
         }
     }
-    return [pscustomobject]@{ Readable = [bool]$readable; Kind = 'member'; DecisionId = $decisionId; DecidedOn = $decidedOn }
+    # (g): the BFF reads an absent rulesRerun as pending (AssignFirmStoredDecision.Read); only "completed" is done.
+    $rulesRerun = if ($member -is [System.Collections.IDictionary] -and $member[$RulesRerunMember] -is [string]) { $member[$RulesRerunMember] } else { $null }
+    return [pscustomobject]@{ Readable = [bool]$readable; Kind = 'member'; DecisionId = $decisionId; DecidedOn = $decidedOn; RulesRerun = $rulesRerun }
 }
 $nowUtc = [DateTimeOffset]::UtcNow
 $applied = 0; $recorded = 0; $insideWindow = 0; $overdue = 0; $unreadable = 0
+$rerunDone = 0; $rerunInsideWindow = 0; $rerunOverdue = 0
+$rerunRows = [System.Collections.Generic.List[object]]::new()
 foreach ($s in $submissions) {
     $stored = Get-AssignFirmStored $s
     if ($null -eq $stored) { continue }
@@ -641,7 +661,12 @@ foreach ($s in $submissions) {
     }
     $key = (Get-BillingDecisionKey $invoiceId $stored.DecisionId).ToString('D')
     $records = @((Invoke-DvGet "$DecisionRecordSet`?`$select=sprk_decisionrecordid,sprk_steps&`$filter=$DecisionRecordInvoiceLookup eq $invoiceId and sprk_actioncode eq '$AssignFirmActionCode'&`$top=10").value)
-    if (@($records | Where-Object { "$($_.sprk_steps)" -like "*`"reviewId`":`"$key`"*" }).Count -gt 0) { $recorded++; continue }
+    if (@($records | Where-Object { "$($_.sprk_steps)" -like "*`"reviewId`":`"$key`"*" }).Count -gt 0) {
+        $recorded++
+        # (g) is judged only for a recorded Set firm (an unrecorded one is (f)'s); reported below, after (f)'s summary.
+        $rerunRows.Add([pscustomobject]@{ SubmissionId = $submissionId; InvoiceId = $invoiceId; Stored = $stored })
+        continue
+    }
     $ageMinutes = [Math]::Floor(($nowUtc - $stored.DecidedOn).TotalMinutes)
     $what = "(f) invoice $invoiceId (submission $submissionId): Set firm applied $ageMinutes min ago, no Decision Record - a repeat of the Set firm finishes it"
     if ($ageMinutes -gt $AppliedNoRecordWindowMinutes) {
@@ -652,6 +677,21 @@ foreach ($s in $submissions) {
 }
 Report 'INFO' "(f) $applied submission(s) carry a Set-firm decision: $recorded recorded, $insideWindow without a record inside the window, $overdue older than it"
 if ($overdue -eq 0 -and $unreadable -eq 0) { Report 'OK' "(f) no Set firm is applied without its Decision Record beyond the $AppliedNoRecordWindowMinutes-minute window" }
+
+# ── (g) RECORDED, RE-RUN NOT DONE: a recorded Set firm whose rules re-run has not committed (read only) ─────────────
+Write-Host "`n(g) Set firm recorded, re-run not done (window $RecordedNoRerunWindowMinutes min)"
+foreach ($row in $rerunRows) {
+    if ($row.Stored.RulesRerun -eq $RulesRerunCompleted) { $rerunDone++; continue }
+    $ageMinutes = [Math]::Floor(($nowUtc - $row.Stored.DecidedOn).TotalMinutes)
+    $what = "(g) invoice $($row.InvoiceId) (submission $($row.SubmissionId)): Set firm recorded $ageMinutes min ago, rules re-run not done - the invoice stays held; a repeat of the Set firm re-queues it, a dead-lettered or refused re-run needs an operator"
+    if ($ageMinutes -gt $RecordedNoRerunWindowMinutes) {
+        $rerunOverdue++
+        if ($Verify) { Report 'FAIL' "$what (older than the $RecordedNoRerunWindowMinutes-minute window)" } else { Report 'INFO' "$what (older than the window; -Verify fails on it)" }
+    }
+    else { $rerunInsideWindow++; Report 'INFO' "$what (inside the $RecordedNoRerunWindowMinutes-minute window)" }
+}
+Report 'INFO' "(g) $($rerunRows.Count) recorded Set firm(s): $rerunDone re-run done, $rerunInsideWindow not done inside the window, $rerunOverdue older than it"
+if ($rerunOverdue -eq 0) { Report 'OK' "(g) no recorded Set firm waits for its rules re-run beyond the $RecordedNoRerunWindowMinutes-minute window" }
 
 if ($IsDryRun) {
     if ($gaps.Count -gt 0) {

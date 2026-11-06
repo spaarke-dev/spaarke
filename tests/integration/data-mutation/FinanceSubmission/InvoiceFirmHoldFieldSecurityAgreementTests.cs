@@ -101,6 +101,51 @@ public class InvoiceFirmHoldFieldSecurityAgreementTests
         Regex.IsMatch(script.Replace(from, to), pattern).Should().BeFalse("a seeded drift of it must fail the pin");
     }
 
+    // ── 095d-2b-1: check (g), "Set firm recorded, re-run not done" ──
+
+    [Fact(DisplayName = "095d-2b-1: check (g) names the stored member's rulesRerun and the BFF's completed value")]
+    public void CheckG_NamesWhatTheRerunWrites()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "ebilling", "Set-EbillingInvoiceFirmHoldColumn.ps1"));
+        static string? Value(string text, string name) =>
+            Regex.Match(text, $@"^\s*\${name}\s*=\s*'([^']+)'", RegexOptions.Multiline) is { Success: true } m ? m.Groups[1].Value : null;
+
+        Value(script, "RulesRerunCompleted").Should().Be(InvoiceAssignFirmService.RulesRerunCompleted);
+        var member = Value(script, "RulesRerunMember");
+        member.Should().NotBeNull();
+        new AssignFirmStoredDecision(
+                Guid.NewGuid(), Guid.NewGuid(), null, "A.2", 2, "A.1", 1, Guid.NewGuid(), DateTimeOffset.UnixEpoch,
+                new InvoiceSubmissionAfterSteps.ResolvedSignalSet(DateTime.UnixEpoch, []), [], 0, InvoiceAssignFirmService.RulesRerunPending)
+            .ToJson().ContainsKey(member!).Should().BeTrue("the script reads the member the BFF stores");
+    }
+
+    // Behaviours of check (g) that no host runs in a unit test, pinned as source facts (each against the shipped script and a seeded drift).
+    [Theory(DisplayName = "095d-2b-1: check (g) keeps its done test, its window FAIL in -Verify and its recorded-only scope")]
+    [InlineData(@"if \(\$row\.Stored\.RulesRerun -eq \$RulesRerunCompleted\) \{ \$rerunDone\+\+; continue \}", "-eq $RulesRerunCompleted", "-ne $RulesRerunCompleted")]
+    [InlineData(@"if \(\$ageMinutes -gt \$RecordedNoRerunWindowMinutes\) \{", "-gt $RecordedNoRerunWindowMinutes", "-lt $RecordedNoRerunWindowMinutes")]
+    [InlineData(@"if \(\$Verify\) \{ Report 'FAIL' ""\$what \(older than the \$RecordedNoRerunWindowMinutes", "if ($Verify) { Report 'FAIL' \"$what (older than the $RecordedNoRerunWindowMinutes", "if ($Verify) { Report 'INFO' \"$what (older than the $RecordedNoRerunWindowMinutes")]
+    [InlineData(@"\$recorded\+\+\n\s+# \(g\)[^\n]*\n\s+\$rerunRows\.Add\(", "$rerunRows.Add(", "$rerunRowsX.Add(")]
+    public void CheckG_KeepsItsBehaviours(string pattern, string from, string to)
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "ebilling", "Set-EbillingInvoiceFirmHoldColumn.ps1")).ReplaceLineEndings("\n");
+
+        Regex.IsMatch(script, pattern).Should().BeTrue("the shipped script has this behaviour");
+        script.Should().Contain(from);
+        Regex.IsMatch(script.Replace(from, to), pattern).Should().BeFalse("a seeded drift of it must fail the pin");
+    }
+
+    [Fact(DisplayName = "095d-2b-1: check (g) writes nothing (no write between its heading and its OK line)")]
+    public void CheckG_IsReadOnly()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "ebilling", "Set-EbillingInvoiceFirmHoldColumn.ps1")).ReplaceLineEndings("\n");
+        var start = script.IndexOf("# ── (g) RECORDED, RE-RUN NOT DONE", StringComparison.Ordinal);
+        var end = script.IndexOf("Report 'OK' \"(g) no recorded Set firm", start, StringComparison.Ordinal);
+
+        start.Should().BePositive();
+        end.Should().BeGreaterThan(start);
+        script[start..end].Should().NotContain("Invoke-DvWrite").And.NotContain("Invoke-RestMethod");
+    }
+
     [Fact(DisplayName = "095c-5: the solution source has sprk_invoice.sprk_firmhold as a secured text column, only the writer may write it, the reader reads it")]
     public void TheSolution_SecuresTheColumn_OnlyTheWriterWritesIt_AndTheReaderReadsIt()
     {
