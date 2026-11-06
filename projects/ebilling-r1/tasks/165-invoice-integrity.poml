@@ -81,6 +81,6 @@
 
   <escalation>
     <trigger>A hold source cannot be made (a), (b) or (c) without changing D-101 behaviour visible to reviewers or firms: STOP and report.</trigger>
-    <trigger>OPEN OWNER QUESTION (165a K6): 165a holds an invoice whose own submission is not linked, which also holds invoices created outside a submission (Outlook add-in quick-create, the generic child-record create route, older records; 11 In Review on dev, 2026-11-06). Nothing server-written marks an invoice as manual. Until the owner decides, keep the hold and do not build an exemption.</trigger>
+    <!-- 165a K6 resolved by EB-D-201 (owner 2026-11-06): the hold stands; task 096b closes the direct-create paths and cleans up the dev records. -->
   </escalation>
 </task>

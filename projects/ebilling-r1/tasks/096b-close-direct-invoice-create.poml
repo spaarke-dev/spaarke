@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="096b" project="ebilling-r1">
+  <metadata>
+    <title>Close the remaining direct invoice-create paths (EB-D-201)</title>
+    <phase>4 Review</phase>
+    <gate>Source and scripts: none. Each live step (role privilege, form, data cleanup) needs the owner's go typed in the ebilling session, with uac-r2 told before and after. Task 096 (Office legs) keeps its own gate.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Removes a create path from a shared BFF route (uac-r2 owns it), changes a security role, and cleans up dev data.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scoped removals at named places, with existing role and form scripts to copy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ChildRecordEndpoints.CreateTables, where 164a/049b also land; run after the 164a merge.</parallel-reason>
+    <deps>EB-D-201; 052 deployed by 112 (the internal wizard on the submission operation)</deps>
+    <tags>bff-api, api, dataverse, ebilling, security-role</tags>
+  </metadata>
+
+  <prompt>Binding: EB-D-201 and FR-17 in projects/ebilling-r1/notes/decisions-log.md and spec.md. Invoices exist only through the submission operation; lines exist only through submission and the Add line service (EB-D-198). Internal users submit through the Create Invoice wizard (task 052) and the Outlook add-in Submit Invoice (095).
+    Task 165a already holds an invoice whose own submission is not linked, so these paths can no longer produce an approvable invoice. This task removes the paths themselves.
+    Wording in commits, notes and the PR stays neutral ("invoices are created only by submission").</prompt>
+
+  <goal>No user-reachable path creates `sprk_invoice` or `sprk_billingevent` outside the submission operation and the Add line service; the dev invoices created outside a submission are cleaned up.</goal>
+
+  <scope>
+    1. BFF generic route: remove `sprk_invoice` and `sprk_billingevent` from `ChildRecordEndpoints.CreateTables` (`Api/ChildRecordEndpoints.cs` ~:70-73). A create for either is refused before any write with the route's existing unsupported-table answer. uac-r2 owns the route: send them the diff before merge. Check every client that posts to `/api/v1/child-records/sprk_invoice` or `/sprk_billingevent` (grep src/client, src/solutions, external-spa); if any is a live caller, STOP and report.
+    2. Model-driven app: the New invoice command and the invoice quick-create form. Inventory them (forms, ribbon/command bar, sitemap "New"), and remove or hide the create entry points in the SpaarkeMaster source, copying the pattern of the existing ebilling form and ribbon scripts. The main form stays for reading.
+    3. Role privilege: user Create on `sprk_invoice`. Live 2026-11-06: Spaarke Core User (Deep) and Spaarke Office Add In User (Deep) hold prvCreate. Before proposing removal, list every reason a user might need it (a caller-privilege check that asks Create on `sprk_invoice`, Office paths that run as the caller, append rules). If none, change the role source and the role script (-WhatIf, apply, -Verify) to drop prvCreate on `sprk_invoice` for both roles; the submission persister and Add line write app-only. Do the same check for `sprk_billingevent` Create.
+    4. Dev data: list the invoices with no linked submission (11 In Review on 2026-11-06, plus any Inactive ones), with their dependents (lines, documents, emails or To Dos regarding them, Decision Records, Signals). Propose per record: Cancel through the lifecycle service where allowed, or delete. Run nothing until the owner chooses, in this session.
+  </scope>
+
+  <acceptance-criteria>
+    <criterion>The generic create route refuses `sprk_invoice` and `sprk_billingevent` (must-fire per table, with a must-not-fire control on another child table); one seed: put the table back, see the test fail.</criterion>
+    <criterion>The notes list every direct invoice-create path found (file:line or form/command id) and its disposition; no path is left open without a reason the owner accepted.</criterion>
+    <criterion>Role change: source, script with -WhatIf/apply/-Verify, and agreement tests; only -WhatIf runs against dev in this task unless the owner gives the go in the session.</criterion>
+    <criterion>The dev cleanup list with dependents is in the notes; nothing is changed on dev without the owner's go, and uac-r2 is told before and after.</criterion>
+    <criterion>Filtered unit tests (ChildRecord, RecordCreation, Finance, Office) and ArchTests pass; the BFF builds; publish-size delta measured against a fresh master build.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A live client still creates invoices or lines through a path in scope: STOP and report.</trigger>
+    <trigger>Removing user Create on `sprk_invoice` breaks a path that runs as the caller: STOP and report.</trigger>
+  </escalation>
+</task>
