@@ -206,7 +206,7 @@ Proofs for items 10-13: the same seeded fail-before method as above (role files 
 - `-Apply`: exit 0, and every business-unit copy read back.
 - `-Verify`: exit 0, PASS.
 - Observed: AddPrivilegesRole raises an existing lower-depth row to the requested depth in place (Basic -> Deep), with no separate removal.
-- The removals (items 11-13) are not yet applied. UAC-r2 runs `-Remove` after the re-check; after fix round 3 the block lists one removal (R1).
+- The removals (items 11-13) were not applied in that run; after fix round 3 the block lists one removal (R1). R1 is applied below.
 
 ## Fix round 3 (R2 withdrawn, communication rows, apply script exit codes, Pester 5)
 
@@ -237,7 +237,7 @@ Core User meets every new row. Basic User, with the report card AppendTo back, l
 | G12 | Communication re-file | AppendTo `sprk_servicerequest`, `sprk_budget` | none |
 | G12 | Communication re-file | AppendTo `account`, `contact` | Basic |
 
-No role file changed for G11 and G12. The baseline also still holds G3. The decision: give Basic User these depths, or rule that a Basic User does not send, reply to or re-file communications.
+No role file changed for G11 and G12. The baseline also still holds G3. **Ruled 2026-11-06 (owner; `decisions.md`, "Communication send, reply and re-file need Core User"): not granted. Basic User is not raised; these features need Core User.** G11 and G12 are no longer open owner questions; the baseline entries stay, with that reason. The final round adds one Append row to G12 and a new G13 (below).
 
 ### Proofs (fix round 3)
 
@@ -264,3 +264,40 @@ No role file changed for G11 and G12. The baseline also still holds G3. The deci
 | `Parser::ParseFile` on the script, test file and harness | 0 errors |
 | Dry run, empty `AZURE_CONFIG_DIR`, real script | exit 1, `FAIL: a read failed` ... `Nothing was changed` |
 | `Sprk.Bff.Api.Tests` | not run (no `src/server` change) |
+
+## Applied on dev: removal R1
+
+- 2026-11-06 02:35Z, spaarkedev1, run by UAC-r2 under the owner's go, from `e6c0c94fa3`.
+- `-Remove` dry run: 1 removal (R1), no depth mismatch, no copy drift.
+- `-Remove -Apply`: exit 0, read back absent on the root role and every business-unit copy.
+- `-Remove -Verify`: exit 0, PASS.
+- `-Verify` (additions): exit 0, PASS. Its informational list of "live differs from config `from`" shows the already-applied additions, which is expected.
+
+## Fix round 4 (final)
+
+Branch `task/fm-046b`. No Dataverse write was made; `-Apply` and `-Remove -Apply` were not run (the script is shown against the test double only). `Sprk.Bff.Api.Tests` was not run; no `src/server` change beyond what master brought.
+
+| Item | Outcome |
+|---|---|
+| 1. Merge master | `origin/master` (`f34993dc78`, #2577) merged into the branch with no conflicts (merge commit `b5f243e0ab`). Ebilling's `ProcedureRolePrivilegeGuardTests.cs` and `scripts/ebilling/*` were not taken from anywhere else (their 089e is not on master; the merge-second rule applies later). |
+| 2. Summarize Files row | Done. `Summarize Files (unfiled document)`, `[Core]`, Deep, `prvCreatesprk_document`, evidence `DataverseDocumentsEndpoints.cs:1074` (the `accessProbe.CallerHoldsPrivilegeAsync` call in `AuthorizeDocumentCreateAsync` after the merge). Deep because the new row is owned by the caller's business-unit team and Core User holds Create at Deep. The create binds no record, so there is no AppendTo row. The row comment and doc §5.1 note that the probe accepts the privilege at any depth (a known limit). Seeded proof: `RemovingDocumentCreateFromCoreUserFailsTheSummarizeFilesRow` takes Create off a copy of Core User and the guard reports the row (the copy passes first). |
+| 3. K2: re-file needs Append on the communication | Done. `prvAppendsprk_Communication` (Deep) on both re-file rows (Core User, Basic User); evidence `CommunicationEndpoints.cs:63-95`, `ChildRecordEndpoints.cs:685-687` (the PATCH runs as the caller, so Dataverse asks Append on the row that carries the lookup as well as AppendTo on the target). Core User holds Deep: no gap. Basic User holds Basic: G12 gains a `KnownGaps` entry (held Basic), and the doc's G12 row and this table name it. Seeded proof: `RemovingCommunicationAppendFromCoreUserFailsTheRefileRow`. |
+| 4. K2: thread read | Done. The solution's `sprk_CommunicationThread` entity is **UserOwned** (`OwnershipTypeMask`; a per-user thread is the user's own, a record thread is team-owned, I-6), so the case is the user- or team-owned one: `prvReadsprk_CommunicationThread` at Deep on the send / reply rows (Core User and Basic User), evidence `CommunicationRecordAuthorizationFilter.cs:647,672,767`, `CommunicationThreadReadService.cs:1260-1275`. **Both roles hold Read on the thread at Basic, so both have a gap: G13**, two `KnownGaps` entries (held Basic), owner decision pending. Not asked of the re-file (the re-file does not read the thread in the filter). |
+| 5. K4: doc wording | Done. Removals paragraph: "the role file keeps the privilege; the config's removals block no longer lists it". |
+| 6. K4: re-read phase label | Done. `$phase = 're-read'` before the post-write re-read loop; the catch prints "The writes were confirmed by the read-back; the final re-read of the written roles failed." instead of the read-back message. New Pester case "the post-write re-read itself throws" (harness option `failReadAfter`, a read of the root role that fails from its second read after the first POST): exit 1, `FAIL: re-read on`, not `FAIL: read-back on`, applied 2 / not applied 0. Fails on the previous script (1 of 39), passes now. |
+| 7. G11 / G12 ruling (coordinator, owner 2026-11-06) | Done. Basic User is not raised. Every G11 / G12 `KnownGaps` entry (and the new Append one) carries the reason "Owner ruled: not granted (Core User required), 2026-11-06"; doc §5.1 marks them "Ruled: not granted, needs Core User"; no role file changed. G13 is not covered by that ruling for Core User, whose gap stays open. |
+
+### Existing tests on the not-held path (coordinator question: a Basic-User-only caller is refused with the normal 403, not a 500)
+
+All in `tests/integration/contract/Api/Communication/CommunicationRecordAuthorizationContractTests.cs` unless named. **Send:** covered. AppendTo not held on an association `Send_AnAssociationWithoutAppendTo_Is403_...` (`:820`), on the regarding of an email replied to `Send_AVisibleInheritFromCommunicationWhoseRegardingTheCallerCannotAttachTo_Is403` (`:837`), on a thread's record `Send_AMessageIntoARecordThreadWithoutAppendToOnItsRecord_Is403_...` (`:867`) and `..._WithAnEmptyAssociationsArray_..._Is403WithoutAppendTo` (`:952`), `SendBulk_AnAssociationWithoutAppendTo_Is403_...` (`:1070`); Read not held on the inherit-from email `Send_AnInheritFromCommunicationTheCallerCannotSee_Is403_...` (`:806`); thread not readable `Send_AThreadTheCallerCannotSee_Is403ForAMessage_...` (`:790`). **Re-file, filter stage:** Write not held `Filing_ByAReadOnlyCaller_Is403_InTheFamilysOwnShape_...` (`:748`). **Re-file, handler stage:** AppendTo not held on the target is the uniform 404 (`ChildRecordEndpoints.NotFoundCode`) by design, not a 403: `CommunicationFiling_UnderARecordTheCallerCannotAppendTo_IsTheUniformNotFound_AndNothingIsWritten` (`tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.ChildRecordRoutes.cs:927`) and `...CommunicationFilingSignal.cs:140`. **Gap, not added (the brief said to stop on this point and report):** the re-file with Append (or Write) denied by Dataverse on the caller's own PATCH is tested only as "not 204" (`SecureChildOwnershipAiToolTests.CommunicationFilingSignal.cs:156`, `PatchStatus = 403`); no test pins its status to the route's 403 ProblemDetails rather than a 500. A Basic-User-only caller's re-file is also refused with the 404 (not the 403) when AppendTo on the target is the missing right.
+
+### Verification (fix round 4)
+
+| Check | Result |
+|---|---|
+| `dotnet build Spaarke.sln` | 0 Warning(s), 0 Error(s) |
+| `FeatureRolePrivilegeGuardTests` | 29 / 29 (27 before; added the Summarize Files and the re-file Append seeded proofs); with the two new rows removed, the two new tests and four others fail |
+| Whole `Spaarke.ArchTests` | 1970 / 1970 passed |
+| Pester 5.7.1, `tests/scripts/Set-FeatureRolePrivileges.Tests.ps1` | 39 / 39 (38 before); the new case is the one that fails on the previous script |
+| `Parser::ParseFile` on the script, test file and harness | 0 errors |
+| `Sprk.Bff.Api.Tests` | not run (no `src/server` change beyond master's) |

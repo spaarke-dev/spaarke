@@ -497,6 +497,8 @@ try {
 
     # Every write is confirmed. Re-read the roles that were written and rebuild the state: what still keeps the live roles from the declared
     # set (a depth above the declared one, a copy that differs, a removal's copy) is reported below and fails the run, as -Verify does.
+    # The phase changes first, so a failure in this re-read says the writes were confirmed and the re-read failed.
+    $phase = 're-read'
     foreach ($group in $plan | Group-Object { $_.Role.Id }) {
         $role = $group.Group[0].Role
         $failedRole = $role.Name
@@ -516,6 +518,7 @@ catch {
     if ($notApplied.Count -eq 0) { Write-Host '  none' -ForegroundColor Red }
     foreach ($n in $notApplied) { Write-Host "  $($n.Role.Name) $($n.Privilege.Name) $($n.Old) -> $($n.New)" -ForegroundColor Red }
     if ($phase -eq 'read-back') { Write-Host 'Every write was sent; the read-back did not confirm all of them. Re-run -Verify to see what the live roles hold.' -ForegroundColor Red }
+    elseif ($phase -eq 're-read') { Write-Host 'The writes were confirmed by the read-back; the final re-read of the written roles failed. Re-run -Verify to see what the live roles hold.' -ForegroundColor Red }
     elseif ($Remove) { Write-Host 'Re-run -Remove -Apply to converge (the script only removes the privileges the removals block lists). Re-run -Remove -Verify to see what is still pending.' -ForegroundColor Red }
     else { Write-Host 'Re-run -Apply to converge (the script only adds or raises). Re-run -Verify to see what is still pending.' -ForegroundColor Red }
     throw

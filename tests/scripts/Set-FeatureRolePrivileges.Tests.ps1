@@ -226,6 +226,17 @@ Describe 'Set-FeatureRolePrivileges.ps1 (stubbed Dataverse)' {
             $r.Out | Should -Match 'Not applied \(0\)'
             $r.Out | Should -Match 'Every write was sent'
         }
+        It 'the post-write re-read itself throws: exit 1, the writes are reported as confirmed and the re-read as failed' {
+            # Role A's root is read once by the read-back (the write is confirmed) and a second time by the final re-read, which fails.
+            $r = Invoke-Frp (New-Scenario @{ failReadAfter = @{ ra = 1 } }) @('-Apply')
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'FAIL: re-read on'
+            $r.Out | Should -Not -Match 'FAIL: read-back on'
+            $r.Out | Should -Match 'Applied in this run before the failure \(2\)'
+            $r.Out | Should -Match 'Not applied \(0\)'
+            $r.Out | Should -Match 'The writes were confirmed by the read-back; the final re-read of the written roles failed'
+            $r.Out | Should -Not -Match 'Every write was sent'
+        }
         It 'a copy that never matches: the summary is printed too, naming the copy' {
             $r = Invoke-Frp (New-Scenario @{ noPropagate = @('rb1') }) @('-Apply')
             $r.Exit | Should -Be 1

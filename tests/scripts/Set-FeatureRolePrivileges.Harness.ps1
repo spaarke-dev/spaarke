@@ -12,6 +12,8 @@
 #   failPostOn  roleId         the AddPrivilegesRole POST on that role fails
 #   noPropagate [roleId]       copies that never receive the root role's change (the read-back never settles)
 #   failReadOf  roleId         a privilege read of that role fails once any POST was made (the read-back cannot be completed)
+#   failReadAfter {roleId:n}   a privilege read of that role fails from its (n+1)th read after the first POST (n = 1 lets the read-back
+#                              read it once, so the later re-read of the written roles is what throws)
 #   failRemoveOn roleId        the RemovePrivilegeRole POST on that role fails
 #   removeAlsoDrops [privId]   RemovePrivilegeRole also drops these privileges from the root role (a platform that removes more than asked)
 #   removeAlsoSets {privId:depth}   RemovePrivilegeRole also adds, or sets the depth of, these privileges on the root role
@@ -20,6 +22,7 @@
 
 $global:Scn = Get-Content -LiteralPath $env:FRP_SCENARIO -Raw | ConvertFrom-Json -AsHashtable
 $global:PostMade = $false
+$global:ReadsAfterPost = @{}
 $global:Held = @{}
 foreach ($rid in $global:Scn.held.Keys) { $global:Held[$rid] = @{} + $global:Scn.held[$rid] }
 
@@ -80,6 +83,10 @@ function Invoke-RestMethod {
     if ($decoded -match '^RetrieveRolePrivilegesRole\(RoleId=@p\)\?@p=(.+)$') {
         $rid = $Matches[1]
         if ($global:PostMade -and $s.failReadOf -eq $rid) { throw 'Unable to connect to the remote server' }
+        if ($global:PostMade -and $s.failReadAfter -and $s.failReadAfter.ContainsKey($rid)) {
+            $global:ReadsAfterPost[$rid] = 1 + [int]$global:ReadsAfterPost[$rid]
+            if ($global:ReadsAfterPost[$rid] -gt [int]$s.failReadAfter[$rid]) { throw 'Unable to connect to the remote server' }
+        }
         # PrivilegeId is a [guid] in the real response; the fake ids are plain strings, so return them as-is.
         $rows = @($global:Held[$rid].Keys | ForEach-Object { [pscustomobject]@{ PrivilegeId = $_; Depth = $global:Held[$rid][$_]; PrivilegeName = $_ } })
         return @{ RolePrivileges = $rows }
