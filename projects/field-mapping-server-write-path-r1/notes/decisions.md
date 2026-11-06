@@ -879,3 +879,10 @@ The send/reply thread read needs Basic. Record threads are owned by their record
 - **033:** re-scoped under this rule before it runs; likely dropped.
 - **046c:** before Basic User loses them, Core User gains AppendTo on `sprk_agreementtype`, `sprk_organizationtype_ref` and `sprk_documenttype_ref` (Global). The add-on gaps are "requires Core User" (as 046b ruled). Before the live apply, dev users holding Basic plus an add-on without Core User are counted and either given Core User or listed for the owner.
 - **Reviewed by:** UAC-r2 (independent read, 2026-11-06).
+
+## 2026-11-06 — Owner rulings: 044 scope, 032 mapping, Office To Do assignee order, live checks (owner, in fm's session)
+
+- **044: no field security on the core pair** (revises 042c's "task 044 covers the paths outside the server: field security plus a repair-pass backstop"). The pair is written whole by the server writers only. Outside the server, an edit is detected and traced, not blocked: column auditing on both pair columns (confirmed on dev), a guard that no non-admin role gains Write on `sprk_signal` or `sprk_decisionrecord`, and task 052's report flags a half pair and a pair that changed after create. The Signals access check keeps a fail-closed re-read when the caller's read of the pair returns neither half. Ontology-r1 and UAC-r2 agreed.
+- **032: extracted invoices get Matter field mapping in R1.** `InvoiceSubmissionPersister` stays the single creator; a fill-only mapping step inside it, before its transaction, calls the same mapping engine (W3 direction, option 2). No change to `RecordCreationService`. Ebilling-r1 and UAC-r2 review.
+- **Office To Do assignee order:** the user's explicit choice; else the field-mapped value; else the user's own contact (the order 030a implements).
+- **Live checks on dev approved:** the Project→Matter profile check and the 021 re-measure, test rows prefixed FMSWP-.
