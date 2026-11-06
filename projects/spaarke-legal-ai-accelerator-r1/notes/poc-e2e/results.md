@@ -174,3 +174,42 @@ Prompt names the skill: "Use the Legal for Cowork review-contract skill: review 
 - **Output** `evidence/act6/6b - review-contract batch report.docx`: one Word report, with a summary table (overall status, escalations, other findings) and a section per NDA with clause, quote, classification and action.
 - **Score: overall status 16 of 16** against the key (all-GREEN = Compliant, any YELLOW = Fallback, any RED = Escalate). Before signing, it also flagged that every NDA names Jordan Ellis as signatory, that 11 effective dates are in the future, and that none has a notices clause.
 - **What it lacks against 6c:** no topic-by-document grid, no machine-readable result, no visuals. It is a narrative report.
+
+### 6c: our `nda-library-review` (185 credits; about 13 minutes including approvals)
+The prompt asked for "the library view: a grid of NDAs by topic with a dashboard" and named no skill. Cowork routed it to **`nda-library-review`** (our personal skill folder).
+- **Plan card first:** 16 NDAs (13 Word, 3 PDF); mutual side, balanced posture; "Spaarke NDA – Mutual v1.0" from the team site (validated, all 24 topics, marked as test positions); the three outputs; and a warning that PDF quotes can't be checked by script. We chose Start.
+- **Approvals: 5 cards.** Create `Test` (which already existed), create `POC-Act6`, create the data folder ("this and the rest"), then 2 upload cards. The second upload card came up again for the data files even after "Upload this and the rest" (gap #24).
+- **Outputs**, in `evidence/act6/6c/`:
+  - **`NDA Library Review.xlsx`**, five sheets:
+    - **Grid:** 16 × 24 topics. Each cell shows the rating and the clause, and the document names link to the team site.
+    - **Detail:** 384 rows: quote, quote check, note and playbook basis.
+    - **By topic:** with a chart.
+    - **Documents:** counts and quote checks.
+    - **About.**
+  - **`NDA Library Review - Dashboard.html`:** tiles, a heatmap and the top issues. There is no `<script>` and no `on*=` handler, and it has a dark-mode block. Its only URLs are the 16 links to the source documents.
+  - **`NDA Library Review - data/`:** one `review.json` per NDA.
+- **Chat summary:** 25 RED, 21 YELLOW, 338 GREEN; 14 of 16 NDAs have a RED. It gives a table by NDA, the topics most often RED, and the quote checks. The verbatim text is in `evidence/act6/6c-chat.md`.
+- **Score (`poc_check.py score`): 375 of 384 topic cells (97.7%).** Five of the nine misses are **errors in the kit**, not the model (gap #26):
+  - **4 × housekeeping YELLOW where the key says GREEN** (b07, b09, b10, b15). The kit writes "a Ohio / a Arizona / a Oregon / a Illinois corporation". The model rightly flagged these as typos, and 6a and 6b noticed them too.
+  - **b14 housekeeping RED expected, GREEN given.** `make_kit.py` never planted the wrong signatory (`col == 1` is always Acme in the batch), so the PDF has the right party and GREEN is correct.
+  - **Corrected for the kit: 380 of 384 (99.0%).**
+- **The four real misses:**
+  - **b16 `nda.representatives`: RED for YELLOW.** The same wording problem as Act 3 and Act 4 (gap #16).
+  - **b15 `nda.whistleblower-dtsa`: RED for YELLOW**, on a missing clause. The key treats a missing notice as a fallback; the model treated it as the Prohibited bar on reporting, while saying "[verify applicability per party type]".
+  - **b10 `nda.trade-secret-preservation`: RED for GREEN.** The term clause ends *all* obligations after 1 year, and the model counted that again under trade secrets. It is a fair reading, but it counts one clause twice.
+  - **b11 `nda.data-use-licence-back`: YELLOW for GREEN.** The feedback carve-out (3.2) was counted again under data use.
+- **Citations: all 356 quotes are found word for word** in the source documents. That covers 289 from Word, which the skill also checked by script, and 67 from PDF, which we checked here with `pypdf`. A sample of 10 non-GREEN citations all point at the right clause.
+- **Small defect:** the standards text reads "Spaarke NDA – Mutual v1.0 **v1.0**". The playbook title already carries the version, and the skill appends it again. It also reports skill `v0.1.2-poc`: the personal skill folder was not rebuilt for 0.1.3, and nothing changed in it.
+
+### 6a, 6b and 6c compared
+| | 6a `compare-key-terms` | 6b `review-contract` | 6c `nda-library-review` |
+|---|---|---|---|
+| What it gives | Extracted terms, no positions | Rated narrative report | Rated grid, dashboard and data files |
+| Accuracy | n/a (not rated) | Overall status 16/16 | Topic level 375/384 (99.0% corrected); overall status 16/16 |
+| Citations | 225, URLs as text | Quoted in the report | 356, all found word for word; script-checked for Word |
+| Machine-readable | Excel cells | No | `review.json` per NDA |
+| Visuals | No | No | Heatmap, tiles, chart |
+| Questions before running | None | Playbook confirmation plus 4 questions | Plan card, then Start |
+| Credits | 259 | 449 | **185** |
+
+6c is the cheapest of the three and the only one rated at topic level. 6b's playbook audit (gap #25) is the one thing it does that 6c doesn't.
