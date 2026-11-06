@@ -28,7 +28,7 @@
 ## Next action
 
 No agents running (all merged). Work head is the 095d-0 merge.
-1. **Dispatch 095d-2a-2** (opus, worktree, off origin/work/ebilling-r1): the commit transaction per `tasks/095d2-rerun-and-hold-release.poml` + `notes/095d2-brief.md` §4a, with the 2a-1 obligations above (concrete processor + `Result.Verified`; Rebuild args; keep the stored `invoiceName`; clear the `sprk_firmhold` marker ONLY in the re-run commit with `rulesRerun = completed`; a failed or partial re-run leaves it; EB-D-187 outcomes; EB-D-195; uac-r2 B containment tests cited). Then 2 adversarial passes → merge → 2b (job + Signals + partner withhold).
+1. **095d-2a-2 DISPATCHED** (opus, worktree, branch `task/ebilling-095d2a2`, off `6b77743f96`): the commit transaction per `tasks/095d2-rerun-and-hold-release.poml` + `notes/095d2-brief.md` §4a, with the 2a-1 obligations above (concrete processor + `Result.Verified`; Rebuild args; keep the stored `invoiceName`; clear the `sprk_firmhold` marker ONLY in the re-run commit with `rulesRerun = completed`; a failed or partial re-run leaves it; EB-D-187 outcomes; EB-D-195; uac-r2 B containment tests cited). Then 2 adversarial passes → merge → 2b (job + Signals + partner withhold).
 2. **Dispatch 164a Add line BFF** (opus) once origin/master is merged into work (D-204 is needed; take our role files over fm #2592; keep one G5). Then 164b client, 164c ribbon.
 3. Small: `lineId` in InvoiceReview `launch.ts` before the master PR.
 4. Then the master PR (checklist above), then tell ontology when task 112 has the page on dev.
