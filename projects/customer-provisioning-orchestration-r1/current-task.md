@@ -4,6 +4,13 @@
 
 > **Last Updated**: 2026-10-27 (branch merged to master, PR #2345). Earlier: 2026-10-20 SESSION 50. T186 ACME run `b6941254-ac1b-42a6-8b12-dec7587090fc` **Completed** 16:24:26 UTC (all H13 gates). Post-run Steps 6a/6b/6e/7 done; 6f (Copilot agent) waits on the owner. HEAD `1a3743843`+, pushed.
 
+## ▶ NOW (checkpoint 2026-11-06, session b8)
+
+- **Active: H7b S23** ("Spaarke Ontology Service" role → BFF runtime app user `InterStepState.SystemUserId`, customer-BU copy by user's own BU, holder sweep before write, read-back). Commit `923990a791` LOCAL (not pushed). Adversarial review done → **F1a (fix now):** bump `H7bSecureRecordSetupHandler.cs:83` `ProcedureVersion` to `secure-setup-procedure=6` + remark `6 = S23 …` + a test that a run completed under v5 does not short-circuit (copy the existing v1 test ~line 276); else S23 silently skipped on re-runs. **F1b (raise with ontology/owner, verified):** the role's real consumer is the Signal/Decision Record WRITER, a separate least-privileged UAMI (`OntologyWriterCredentialFactory`, key `Ontology:Writer:ManagedIdentityClientId`); NO stamp provisions it (no manifest/Bicep/Worker entry) → SignalWriter fails closed on every stamp. S23 on the System-Admin UAMI is decorative today (ontology knew: "masked"). Guide S23 wording must say "would need without System Administrator", and "chosen by H10's systemuserid (resolved by application id)". K1: use `VerifyFailed` when problems>1. Then push, send ontology the commit + the writer-UAMI gap.
+- **SpaarkeMaster 1.3.0.0** merged (#2595 → `5d3c0abac2`), NOT published. Owner OK needed: dev version → publish (dry run, real) → ACME 1.2.3.1→1.3.0.0 → role check (`spaarkemaster-1.3.0.0.json`). Option: wait for ebilling's next master merge (095a `sprk_sourceemaildocument` lock) and publish 1.3.0.0 from it.
+- **Owner questions open:** (1) 1.3.0.0 steps; (2) add `isuseraccessauditenabled` to H6 contract (ACME off, dev on; recommend yes); (3) #2443 read-only check of prod workforce + CIAM clients.
+- Uncommitted: this file only.
+
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
