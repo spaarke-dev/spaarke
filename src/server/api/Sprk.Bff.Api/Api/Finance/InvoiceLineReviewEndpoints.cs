@@ -253,6 +253,18 @@ public static class InvoiceLineReviewEndpoints
             or AddLineStatus.ProcedureGap or AddLineStatus.TotalsRefused or AddLineStatus.IdReused or AddLineStatus.Busy
             or AddLineStatus.Changed => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
         AddLineStatus.OwnerUnresolved => Refused(StatusCodes.Status500InternalServerError, result.Code, result.Detail),
+        // The line was committed but totals, record or Signals did not finish: the repeat of the same request completes it (164a-4b, N10).
+        AddLineStatus.Incomplete => Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            detail: result.Detail,
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = result.Code,
+                ["requestId"] = requestId,
+                ["lineId"] = result.LineId,
+                ["decisionId"] = result.DecisionId,
+                ["failedStep"] = result.FailedStep,
+            }),
         _ => Refused(StatusCodes.Status503ServiceUnavailable, result.Code, result.Detail),
     };
 

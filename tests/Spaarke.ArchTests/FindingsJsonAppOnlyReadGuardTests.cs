@@ -59,7 +59,8 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         // re-evaluated findings (assignFirm.rulesRerun = completed) in its one app-only ExecuteTransactionAsync, row-version conditioned
         typeof(InvoiceSubmissionRerun),
         // task 164a-4a (EB-D-188): Add line reads it app-only (IGenericEntityService, through InvoiceCorrectionReevaluation.ReadSubmissionAsync) and
-        // writes the patched findings and the addLine member in its one app-only ExecuteTransactionAsync, row-version conditioned
+        // writes the patched findings and the addLine member in its one app-only ExecuteTransactionAsync, row-version conditioned; 164a-4b: its
+        // Signals step (step 9) re-reads it the same way and clears the reconciled changes in one app-only, row-version-conditioned write
         typeof(InvoiceLineAddService),
     ];
 

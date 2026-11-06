@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
 using static Sprk.Bff.Api.Services.Finance.InvoiceFindingsDiff;
@@ -73,6 +74,10 @@ public enum AddLineStatus
 
     /// <summary>A read, the lock or the commit failed and NOTHING is known to have changed (or a repeat of the same request is safe).</summary>
     Unavailable,
+
+    /// <summary>The line was committed but a later step (totals, record or Signals) did not finish: 503 with <see cref="AddLineResult.FailedStep"/>.
+    /// A repeat of the same request completes it (one line, one record).</summary>
+    Incomplete,
 }
 
 /// <summary>Stable ProblemDetails codes of Add line (ADR-019). New codes are <c>ebilling.line_add.*</c>; the rest reuse the line decision codes.</summary>
@@ -97,6 +102,7 @@ public static class AddLineCodes
     public const string Unavailable = LineDecisionCodes.Unavailable;
     public const string DecisionInvalid = LineDecisionCodes.DecisionInvalid;
     public const string DeciderUnresolved = LineDecisionCodes.DeciderUnresolved;
+    public const string Incomplete = LineDecisionCodes.Incomplete;
 
     /// <summary>The sentence with <see cref="FirmMissing"/> for <paramref name="gate"/>.</summary>
     public static string FirmDetailFor(InvoiceFirmGateResult gate) => gate switch
@@ -107,7 +113,8 @@ public static class AddLineCodes
     };
 }
 
-/// <summary>The outcome of an Add line attempt. <see cref="Totals"/> is null until task 164a-4b adds the totals step.</summary>
+/// <summary>The outcome of an Add line attempt. <see cref="FailedStep"/> names the step of an <see cref="AddLineStatus.Incomplete"/> add
+/// (<c>totals</c>, <c>record</c> or <c>signals</c>).</summary>
 public sealed record AddLineResult(
     AddLineStatus Status,
     string Code,
@@ -116,16 +123,17 @@ public sealed record AddLineResult(
     Guid? DecisionId = null,
     string? LineStatus = null,
     bool AlreadyApplied = false,
-    ReviewTotalsDto? Totals = null)
+    ReviewTotalsDto? Totals = null,
+    string? FailedStep = null)
 {
     public bool IsApplied => Status == AddLineStatus.Applied;
 }
 
 /// <summary>
 /// Add line (ebilling-r1 task 164, EB-D-188; brief <c>notes/add-line-brief.md</c> section 3): a reviewer adds one Fee or Expense line to an invoice that is
-/// In Review and has a firm. This piece (164a-4a) is steps 0 to 6: the shape checks, the lock and the reads, the resolution of the codes and the timekeeper,
-/// the evaluation through the shared before/after diff, the totals dry run and the Decision Record preflight, then ONE commit. Steps 7 to 9 (the totals,
-/// the Decision Record and the Signals) are task 164a-4b.
+/// In Review and has a firm. Steps 0 to 6 (164a-4a): the shape checks, the lock and the reads, the resolution of the codes and the timekeeper,
+/// the evaluation through the shared before/after diff, the totals dry run and the Decision Record preflight, then ONE commit. Steps 7 to 9 (164a-4b):
+/// the stored totals (EB-D-199) and the re-index, the <c>add-line</c> Decision Record, and the Signals.
 /// </summary>
 /// <remarks>
 /// <para><b>Rights.</b> The route asks the caller's Write on the invoice as the caller (<c>ebilling.invoice.decide</c>, D-77) before this runs; the line is
@@ -146,9 +154,21 @@ public sealed record AddLineResult(
 /// are patched with the difference. Decided lines and Blocked plan entries are kept as stored; no 073 runs; a new Procedure gap is 409. The added row is
 /// built so that every later rebuild reads it the same way: its as-billed codes are the typed codes (D-117), and its extraction JSON holds the field
 /// confidence (1.0, reviewer-typed), the code set and the timekeeper's unmatched and rate reasons (<c>resolutionChange.after</c>).</para>
-/// <para><b>The Signal changes (seam for 164a-4b).</b> <see cref="InvoiceFindingsDiff.PatchPlan"/> records the plan changes in
-/// <see cref="InvoiceCorrectionReevaluation.PendingSignalChangesMember"/> (<c>rule</c>). This piece leaves them there and writes
-/// <see cref="AddLineMember"/> with state <see cref="StateCommitted"/>; 164a-4b's Signals step decides where they are reconciled.</para>
+/// <para><b>After the commit (164a-4b), with the request's cancellation no longer applying.</b> Step 7: the totals through 016
+/// (<see cref="IInvoiceTotalsService.RecalculateAsync"/>, EB-D-199), then the re-index (best effort). Step 8: ONE <c>add-line</c> record through
+/// <see cref="BillingDecisionRecorder.RecordAsync"/>, idempotent on the decision id. Step 9: the plan changes the commit recorded in
+/// <see cref="InvoiceCorrectionReevaluation.PendingSignalChangesMember"/> (<c>rule</c>, as a correction records them) are reconciled through
+/// <see cref="InvoiceRuleSignalReconciler"/>, the correction's own reconcile (a new group: episode 1; the same fingerprint: a refresh; another:
+/// Superseded, record-free, then n+1; a group that is gone: ConditionCleared, record-free), then ONE row-version-conditional write removes them and
+/// moves <see cref="AddLineMember"/> to <see cref="StateDone"/>. The member stays where the correction's Signals step reads it, so whichever runs first
+/// reconciles an entry and removes it; the other finds it gone (every close and write is idempotent, so a race converges). No hold link is written
+/// (EB-D-198 Q7): Add line never clears a hold reason, and a stored Blocked entry is kept by the diff. A failure at step 7, 8 or 9 is
+/// <see cref="AddLineStatus.Incomplete"/> naming the step.</para>
+/// <para><b>The resume.</b> A repeat finds its row (the derived id) with the same content and answers <c>alreadyApplied</c>. Unless
+/// <see cref="AddLineMember"/> names this decision at <see cref="StateDone"/>, steps 7 to 9 run again (each is idempotent), so a repeat after an
+/// Incomplete add finishes it with one record. <see cref="AddLineMember"/> is a single member: a later add overwrites it, and then a repeat of the
+/// earlier add cannot tell whether it finished, so it runs the steps again. Step 8 runs on EVERY repeat: the recorder's hash refuses the same decision
+/// id with another reason or decider, which is answered <c>id_reused</c> (the row compare cannot see the reason, which the row does not store).</para>
 /// <para><b>Logging</b> carries ids, counts and codes only (ADR-015): never a description, a name, an amount or the reason.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceAdjustmentService"/> (creates Adjustment lines),
 /// <see cref="InvoiceLineDecisionService"/> (decides lines), <see cref="InvoiceCorrectionReevaluation"/> (re-runs the rules after a correction), the
@@ -189,6 +209,14 @@ public sealed class InvoiceLineAddService
 
     public const string StateCommitted = "committed";
 
+    /// <summary>Steps 7 to 9 finished for the add named in <see cref="AddLineMember"/>.</summary>
+    public const string StateDone = "done";
+
+    /// <summary>The <see cref="AddLineResult.FailedStep"/> values.</summary>
+    public const string TotalsStep = "totals";
+    public const string RecordStep = "record";
+    public const string SignalsStep = "signals";
+
     private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(2);
 
     private static readonly string[] InvoiceColumns =
@@ -207,7 +235,7 @@ public sealed class InvoiceLineAddService
         InvoiceSubmissionPersister.LineQuantity, InvoiceSubmissionPersister.LineRate, InvoiceSubmissionPersister.LineEventDate,
         InvoiceSubmissionPersister.LineTimekeeper, InvoiceSubmissionPersister.LineDescription, InvoiceSubmissionPersister.LineTaskCodeAsBilled,
         InvoiceSubmissionPersister.LineActivityCodeAsBilled, InvoiceSubmissionPersister.LineExpenseCodeAsBilled,
-        InvoiceSubmissionPersister.LineExtractionConfidence,
+        InvoiceSubmissionPersister.LineExtractionConfidence, InvoiceSubmissionPersister.LineSequence, InvoiceSubmissionPersister.LineResolvedTimekeeper,
     ];
 
     private readonly IGenericEntityService _entities;
@@ -218,6 +246,10 @@ public sealed class InvoiceLineAddService
     private readonly BillingDecisionRecorder _recorder;
     private readonly IIdempotencyService _locks;
     private readonly IRecordOwnershipResolver _ownership;
+    private readonly Func<Guid, CancellationToken, Task<InvoiceTotalsCalculation>> _recalculate;
+    private readonly SignalEpisodeLifecycle _lifecycle;
+    private readonly Func<Guid, string, int, string, CancellationToken, Task<SignalCloseOutcome>> _closeSignal;
+    private readonly JobSubmissionService? _jobs;
     private readonly ILogger<InvoiceLineAddService> _logger;
     private readonly TimeProvider _time;
 
@@ -230,17 +262,25 @@ public sealed class InvoiceLineAddService
         BillingDecisionRecorder recorder,
         IIdempotencyService locks,
         IRecordOwnershipResolver ownership,
-        ILogger<InvoiceLineAddService> logger)
+        IInvoiceTotalsService totals,
+        SignalWriter signals,
+        ILogger<InvoiceLineAddService> logger,
+        JobSubmissionService? jobs = null)
         : this(
             entities, codeSets,
             (resolution ?? throw new ArgumentNullException(nameof(resolution))).ResolveAsync,
             (loader ?? throw new ArgumentNullException(nameof(loader))).LoadAsync,
             (evaluator ?? throw new ArgumentNullException(nameof(evaluator))).Evaluate,
-            recorder, locks, ownership, logger, time: null)
+            recorder, locks, ownership,
+            (totals ?? throw new ArgumentNullException(nameof(totals))).RecalculateAsync,
+            (signals ?? throw new ArgumentNullException(nameof(signals))).WriteAsync,
+            (id, rowVersion, resolution, policyCode, ct) => signals.CloseAsync(id, rowVersion, resolution, policyCode, ct),
+            logger, time: null, jobs: jobs)
     {
     }
 
-    /// <summary>The unit-test seam: the resolution, the fact load and the pure evaluation are passed as calls (the correction re-evaluation's pattern).</summary>
+    /// <summary>The unit-test seam: the resolution, the fact load, the pure evaluation, the totals and the Signal writer's write and close are passed as
+    /// calls (the correction re-evaluation's pattern).</summary>
     internal InvoiceLineAddService(
         IGenericEntityService entities,
         CodeSetResolver codeSets,
@@ -250,8 +290,12 @@ public sealed class InvoiceLineAddService
         BillingDecisionRecorder recorder,
         IIdempotencyService locks,
         IRecordOwnershipResolver ownership,
+        Func<Guid, CancellationToken, Task<InvoiceTotalsCalculation>> recalculate,
+        Func<SignalWriteRequest, CancellationToken, Task<SignalWriteResult>> writeSignal,
+        Func<Guid, string, int, string, CancellationToken, Task<SignalCloseOutcome>> closeSignal,
         ILogger<InvoiceLineAddService> logger,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        JobSubmissionService? jobs = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _codeSets = codeSets ?? throw new ArgumentNullException(nameof(codeSets));
@@ -261,7 +305,13 @@ public sealed class InvoiceLineAddService
         _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _recalculate = recalculate ?? throw new ArgumentNullException(nameof(recalculate));
+        _closeSignal = closeSignal ?? throw new ArgumentNullException(nameof(closeSignal));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(writeSignal);
+        _lifecycle = new SignalEpisodeLifecycle(
+            entities, writeSignal, (id, rowVersion, policyCode, ct) => closeSignal(id, rowVersion, SignalWriter.ResolutionSuperseded, policyCode, ct), logger);
+        _jobs = jobs; // null when no queue is configured: no re-index is queued
         _time = time ?? TimeProvider.System;
     }
 
@@ -483,6 +533,7 @@ public sealed class InvoiceLineAddService
 
         // ── Step 1: the reads, app-only. Each refusal writes nothing. ──
         Reads reads;
+        Entity? repeat = null;
         try
         {
             var invoice = await ReadInvoiceAsync(command.InvoiceId, ct).ConfigureAwait(false);
@@ -518,17 +569,16 @@ public sealed class InvoiceLineAddService
                     InvoiceCorrectionReevaluation.UnappliedText(unapplied, allRows, "add the line again"));
             }
 
-            // A repeat of the same request: the row exists. Same content answers alreadyApplied (164a-4b finishes the later steps); other content is refused.
+            // A repeat of the same request: the row exists. Same content answers alreadyApplied and finishes steps 7 to 9 (the resume); other content
+            // is refused.
             if (await ReadExistingAsync(lineId, ct).ConfigureAwait(false) is { } existing)
             {
                 if (!IsSameLine(existing, command.InvoiceId, shape))
                 {
-                    return new AddLineResult(AddLineStatus.IdReused, AddLineCodes.IdReused, "This request id was used for a different line. Use a new request id.");
+                    return IdReused();
                 }
 
-                return new AddLineResult(
-                    AddLineStatus.Applied, "ok", LineId: lineId, DecisionId: decisionId,
-                    LineStatus: StatusText(existing.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value), AlreadyApplied: true);
+                repeat = existing;
             }
 
             var submission = await InvoiceCorrectionReevaluation.ReadSubmissionAsync(_entities, command.InvoiceId, ct).ConfigureAwait(false);
@@ -551,6 +601,11 @@ public sealed class InvoiceLineAddService
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             return ReadFailed(command.InvoiceId, ex);
+        }
+
+        if (repeat is not null)
+        {
+            return await ResumeAsync(command, shape, decisionId, lineId, repeat, reads).ConfigureAwait(false);
         }
 
         // ── Step 2: the codes (FR-22: only from the invoice's resolved set) and the timekeeper. ──
@@ -720,7 +775,11 @@ public sealed class InvoiceLineAddService
             return new AddLineResult(AddLineStatus.TotalsRefused, AddLineCodes.TotalsRefused, dryRun.Refusal.Code);
         }
 
-        var decision = BuildDecision(command.InvoiceId, decisionId, lineId, sequence, shape, codes, resolved, afterResult, index, command.DeciderSystemUserId, _time.GetUtcNow());
+        var decision = BuildDecision(
+            command.InvoiceId, decisionId, lineId, sequence, shape, codes,
+            resolved?.Timekeeper is { IsMatched: true, TimekeeperId: { } matched } ? matched : null,
+            afterResult.Findings.Where(f => f.Subject.Kind == BillingSubjectKind.Line && f.Subject.LineIndex == index).Select(f => f.ReasonCode),
+            command.DeciderSystemUserId, _time.GetUtcNow());
         try
         {
             _recorder.Preflight(decision);
@@ -771,8 +830,190 @@ public sealed class InvoiceLineAddService
             "Add line on invoice {InvoiceId}: line {LineId} committed (decision {DecisionId}; {Before} findings before, {After} after; {Touched} stored lines touched, {Statuses} statuses changed).",
             command.InvoiceId, lineId, decisionId, beforeResult.Findings.Count, afterResult.Findings.Count, touched.Count(i => i != index), statusUpdates.Count);
 
-        // Steps 7 to 9 (totals, record, Signals) are task 164a-4b.
-        return new AddLineResult(AddLineStatus.Applied, "ok", LineId: lineId, DecisionId: decisionId, LineStatus: nameof(InvoiceLineStatus.Flagged));
+        return await FinishAsync(command, decisionId, lineId, decision, reads, nameof(InvoiceLineStatus.Flagged), alreadyApplied: false, finished: false)
+            .ConfigureAwait(false);
+    }
+
+    // ── The resume (a repeat) and steps 7 to 9 ──
+
+    /// <summary>
+    /// A repeat whose row has the same content: the decision is rebuilt from the row (its hashed members, the code, subject, decider, role, outcome,
+    /// reason and the empty resolved set, are what they were; the facts are ids and codes read back from the row and the stored findings), and steps 7
+    /// to 9 run unless <see cref="AddLineMember"/> names this decision at <see cref="StateDone"/>. Step 8 runs always (the recorder's hash catches a
+    /// repeat with another reason).
+    /// </summary>
+    private Task<AddLineResult> ResumeAsync(AddLineCommand command, Shape shape, Guid decisionId, Guid lineId, Entity existing, Reads reads)
+    {
+        var sequence = existing.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0;
+        var index = sequence - 1;
+        var codes = new Dictionary<BillingCodeKind, string?>
+        {
+            [BillingCodeKind.Task] = Stored(existing, InvoiceSubmissionPersister.LineTaskCodeAsBilled),
+            [BillingCodeKind.Activity] = Stored(existing, InvoiceSubmissionPersister.LineActivityCodeAsBilled),
+            [BillingCodeKind.Expense] = Stored(existing, InvoiceSubmissionPersister.LineExpenseCodeAsBilled),
+        };
+        var reasonCodes = (reads.Root["findings"] as JsonArray ?? []).OfType<JsonObject>()
+            .Where(f => IntOf(f["line"]) == index && Text(f, "reasonCode") is { Length: > 0 })
+            .Select(f => Text(f, "reasonCode")!);
+        var decision = BuildDecision(
+            command.InvoiceId, decisionId, lineId, sequence, shape, codes,
+            existing.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineResolvedTimekeeper)?.Id, reasonCodes,
+            command.DeciderSystemUserId, _time.GetUtcNow());
+        var finished = reads.Root[AddLineMember] is JsonObject member
+            && string.Equals(Text(member, "decisionId"), decisionId.ToString("D"), StringComparison.OrdinalIgnoreCase)
+            && Text(member, "state") == StateDone;
+
+        return FinishAsync(
+            command, decisionId, lineId, decision, reads, StatusText(existing.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value),
+            alreadyApplied: true, finished);
+
+        static string? Stored(Entity row, string column) => row.GetAttributeValue<string>(column) is { Length: > 0 } code ? code : null;
+    }
+
+    /// <summary>
+    /// Steps 7 to 9 after the commit (or on a repeat), with <see cref="CancellationToken.None"/>. <paramref name="finished"/>: this add's later steps are
+    /// known done, so the totals are only computed from the rows read (no write) and the Signals step is skipped; the record step still runs.
+    /// </summary>
+    private async Task<AddLineResult> FinishAsync(
+        AddLineCommand command, Guid decisionId, Guid lineId, BillingDecision decision, Reads reads, string? lineStatus, bool alreadyApplied, bool finished)
+    {
+        var billed = reads.Invoice.GetAttributeValue<Money>(InvoiceTotalsService.InvoiceBilledTotal)?.Value;
+
+        // ── Step 7: the stored totals (016, EB-D-199), then the re-index (task 152, best effort). ──
+        InvoiceTotalsCalculation calculation;
+        if (finished)
+        {
+            calculation = InvoiceTotalsCalculator.Calculate(billed, reads.AllRows.Select(InvoiceAdjustmentService.ToInput).ToList());
+        }
+        else
+        {
+            try
+            {
+                calculation = await _recalculate(command.InvoiceId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                return Incomplete(command.InvoiceId, decisionId, lineId, TotalsStep, ex.GetType().Name);
+            }
+
+            if (calculation.IsRefused)
+            {
+                return Incomplete(command.InvoiceId, decisionId, lineId, TotalsStep, calculation.Refusal!.Code);
+            }
+
+            await InvoiceIndexingJobHandler.TryEnqueueAsync(
+                _jobs, _logger, command.InvoiceId, $"a{decisionId.ToString("N", CultureInfo.InvariantCulture)}").ConfigureAwait(false);
+        }
+
+        // ── Step 8: ONE add-line record (R8), only through the recorder and after the line write; idempotent on the decision id. ──
+        try
+        {
+            await _recorder.RecordAsync(decision, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (DecisionRecordRefusedException ex) when (alreadyApplied && ex.Reason == DecisionRecordRefusalReason.ReviewInvalid)
+        {
+            // The decision id is recorded with other content: the repeat carries another reason (or decider) than the add it repeats.
+            _logger.LogInformation("Add line on invoice {InvoiceId}: decision {DecisionId} is recorded with other content; the repeat is refused.", command.InvoiceId, decisionId);
+            return IdReused();
+        }
+        catch (Exception ex)
+        {
+            return Incomplete(command.InvoiceId, decisionId, lineId, RecordStep, (ex as DecisionRecordRefusedException)?.Reason ?? ex.GetType().Name);
+        }
+
+        // ── Step 9: the Signals of the plan changes (none on a repeat whose steps finished). ──
+        if (!finished)
+        {
+            try
+            {
+                await ReconcileSignalsAsync(command.InvoiceId, decisionId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                return Incomplete(command.InvoiceId, decisionId, lineId, SignalsStep, ex.GetType().Name);
+            }
+        }
+
+        return new AddLineResult(
+            AddLineStatus.Applied, "ok", LineId: lineId, DecisionId: decisionId, LineStatus: lineStatus, AlreadyApplied: alreadyApplied,
+            Totals: new ReviewTotalsDto(
+                billed, calculation.FeesTotal, calculation.ExpensesTotal, calculation.LineAdjustmentsTotal, calculation.InvoiceAdjustmentsTotal,
+                calculation.ApprovedTotal));
+    }
+
+    /// <summary>
+    /// Step 9: reconciles the <c>rule</c> entries of <see cref="InvoiceCorrectionReevaluation.PendingSignalChangesMember"/> through the correction's own
+    /// reconcile, then removes them and moves <see cref="AddLineMember"/> (when it names this decision) to <see cref="StateDone"/>, in ONE
+    /// row-version-conditional write of the latest submission. A <c>system</c> entry is left for the correction's Signals step (only a correction writes
+    /// one, and an add is refused while a correction is unapplied). Nothing is written when nothing changes.
+    /// </summary>
+    private async Task ReconcileSignalsAsync(Guid invoiceId, Guid decisionId, CancellationToken ct)
+    {
+        var submission = await InvoiceCorrectionReevaluation.ReadSubmissionAsync(_entities, invoiceId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("The invoice has no submission.");
+        if (!submission.TryGetAttributeValue<long>(InvoiceTotalsService.VersionNumber, out var version) || version <= 0)
+        {
+            throw new InvalidOperationException("The submission version could not be read.");
+        }
+
+        var json = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
+        if (string.IsNullOrWhiteSpace(json) || JsonNode.Parse(json) is not JsonObject root)
+        {
+            throw new InvalidOperationException("The submission has no stored findings.");
+        }
+
+        var original = root.ToJsonString();
+        var pending = root[InvoiceCorrectionReevaluation.PendingSignalChangesMember] as JsonObject;
+        var ruleChanges = (pending?["rule"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+        var signals = new InvoiceRuleSignalReconciler(_lifecycle, _closeSignal, _logger, SignalLogContext.AddLine, invoiceId, "Add line");
+        foreach (var change in ruleChanges)
+        {
+            await signals.ReconcileRuleAsync(root, change, ct).ConfigureAwait(false);
+        }
+
+        if (pending is not null)
+        {
+            if (pending["system"] is JsonArray { Count: > 0 })
+            {
+                pending.Remove("rule");
+            }
+            else
+            {
+                root.Remove(InvoiceCorrectionReevaluation.PendingSignalChangesMember);
+            }
+        }
+
+        InvoiceRuleSignalReconciler.RecordWriteRefusals(root, signals.Refused);
+        if (root[AddLineMember] is JsonObject member && string.Equals(Text(member, "decisionId"), decisionId.ToString("D"), StringComparison.OrdinalIgnoreCase))
+        {
+            member["state"] = StateDone;
+        }
+
+        if (string.Equals(original, root.ToJsonString(), StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var update = VersionedTarget(InvoiceReviewReadService.SubmissionEntity, submission.Id, version);
+        update[InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString();
+        InvoiceCorrectionReevaluation.SetAdminAttention(update, submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention), root);
+        await _entities.ExecuteTransactionAsync(
+            [new UpdateRequest { Target = update, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches }], ct).ConfigureAwait(false);
+        _logger.LogInformation("Add line on invoice {InvoiceId}: Signals reconciled ({Rule} rule changes, {Refused} refused).", invoiceId, ruleChanges.Count, signals.Refused.Count);
+    }
+
+    private static AddLineResult IdReused() =>
+        new(AddLineStatus.IdReused, AddLineCodes.IdReused, "This request id was used for a different line or reason. Use a new request id.");
+
+    private AddLineResult Incomplete(Guid invoiceId, Guid decisionId, Guid lineId, string step, string detail)
+    {
+        _logger.LogError(
+            "Add line {DecisionId} on invoice {InvoiceId}: line {LineId} was committed but the {Step} step failed ({Detail}); the caller repeats the request to finish it.",
+            decisionId, invoiceId, lineId, step, detail);
+        return new AddLineResult(
+            AddLineStatus.Incomplete, AddLineCodes.Incomplete,
+            "The line was added but a later step did not finish. Repeat the same request (same request id) to complete it.",
+            LineId: lineId, DecisionId: decisionId, FailedStep: step);
     }
 
     // ── The row, its extraction JSON and its findings ──
@@ -968,11 +1209,12 @@ public sealed class InvoiceLineAddService
     /// <summary>
     /// The Add line Decision Record (R8; ontology O3): code <see cref="ActionCode"/>, subject the new line, the caller as decider, the reason, no resolved
     /// Signals. Facts are ids and codes only: the invoice and line ids, the sequence, the cost type, the codes, the matched timekeeper's id and the reason
-    /// codes of the rules that found something on the line. Built the same way on every attempt, so 164a-4b's record of a repeat is the same record.
+    /// codes of the rules that found something on the line. Its hashed members (code, subject, decider, role, outcome, reason, empty resolved set) are the
+    /// same on every attempt, so a repeat's record is the same record (<see cref="ResumeAsync"/> rebuilds the facts from the row).
     /// </summary>
     internal static BillingDecision BuildDecision(
         Guid invoiceId, Guid decisionId, Guid lineId, int sequence, Shape shape, IReadOnlyDictionary<BillingCodeKind, string?> codes,
-        ResolvedInvoiceLine? resolved, BillingEvaluationResult after, int index, Guid decider, DateTimeOffset decidedOn)
+        Guid? timekeeperId, IEnumerable<string> ruleReasonCodes, Guid decider, DateTimeOffset decidedOn)
     {
         var facts = new Dictionary<string, object?>
         {
@@ -983,10 +1225,8 @@ public sealed class InvoiceLineAddService
             ["taskCode"] = codes[BillingCodeKind.Task],
             ["activityCode"] = codes[BillingCodeKind.Activity],
             ["expenseCode"] = codes[BillingCodeKind.Expense],
-            ["timekeeperId"] = resolved?.Timekeeper is { IsMatched: true, TimekeeperId: { } id } ? id : null,
-            ["ruleReasonCodes"] = after.Findings
-                .Where(f => f.Subject.Kind == BillingSubjectKind.Line && f.Subject.LineIndex == index)
-                .Select(f => f.ReasonCode).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList(),
+            ["timekeeperId"] = timekeeperId is { } id && id != Guid.Empty ? id : null,
+            ["ruleReasonCodes"] = ruleReasonCodes.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList(),
         };
 
         return new BillingDecision(

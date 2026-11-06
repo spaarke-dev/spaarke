@@ -545,7 +545,11 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
                 (_, _) => throw new InvalidOperationException("The resolution is not reached by a route test."),
                 (_, _) => throw new InvalidOperationException("The fact load is not reached by a route test."),
                 (_, _) => throw new InvalidOperationException("The evaluation is not reached by a route test."),
-                recorder, locks.Object, Mock.Of<IRecordOwnershipResolver>(), NullLogger<InvoiceLineAddService>.Instance));
+                recorder, locks.Object, Mock.Of<IRecordOwnershipResolver>(),
+                (_, _) => throw new InvalidOperationException("The totals step is not reached by a route test."),
+                (_, _) => throw new InvalidOperationException("The Signal write is not reached by a route test."),
+                (_, _, _, _, _) => throw new InvalidOperationException("The Signal close is not reached by a route test."),
+                NullLogger<InvoiceLineAddService>.Instance));
             builder.Services.AddScoped(_ => new InvoiceLineDecisionService(
                 host.Entities.Object, Mock.Of<IInvoiceTotalsService>(), recorder, locks.Object, Mock.Of<IRecordOwnershipResolver>(),
                 host.Probe,
