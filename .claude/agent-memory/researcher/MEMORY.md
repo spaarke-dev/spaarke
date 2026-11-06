@@ -154,3 +154,5 @@
 - [Knowledge base layout](knowledge-base-layout.md) — `knowledge/` tree convention; SOURCE/NOTES/README
 - [Cascade delete privileges/Archive (2026-10-17)](dataverse-cascade-delete-privileges-archive-2026-10-17.md) — child De…
 - [Work IQ GA refresh (2026-07-14)](work-iq-ga-refresh-2026-07-14.md) — SUPERSEDED by 2026-09-21 entry
+- [Word saved playbooks / org sharing (2026-11-06)](word-saved-playbooks-org-sharing-2026-11-06.md) — docs still only per-review .docx attach; Frontier docs said saved skill; no org library/sharing documented
+- [Harvey Vault vs Legora Tabular Review (2026-11-06)](harvey-vault-legora-tabular-review-2026-11-06.md) — limits, cell features, no playbook-rating grid documented, Cowork ties

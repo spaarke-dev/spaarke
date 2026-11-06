@@ -115,13 +115,28 @@ The policy follows §7.2a of `playbook-library-and-grounding.md`:
    - whether the Compromise Positions / fallback survive;
    - what General guidelines contain.
 
-### Act 2: the attorney in Word. Proves the Word deliverable.
-Open `Matters/Brightwater Systems/Brightwater Mutual NDA.docx` via Word's open dialog on the team site.
-1. `/` **Review contract** → pick `Spaarke NDA – Mutual v1.0` → **Run review**. Keep the result.
-2. `/` **Identify regulatory gaps** → **Internal compliance policy** → attach the policy from `Legal Knowledge/Grounding/Normative`. Log whether Attach from Cloud finds the team-site file (T-P10, Word side). Deliver in chat.
-3. `/` **Check execution readiness**.
-4. Save as `Brightwater Mutual NDA – Word review.docx` (OneDrive).
-5. Score it against `answer-key.md` (Brightwater: 6 RED, 7 YELLOW; policy NDA-3.3, 3.4, 3.5; General Counsel approval).
+### Act 2: the attorney in Word: the Word test set. Proves the Word deliverable (revised 2026-11-06).
+*Revised after the owner's Act 1 review: that discussion already captured the Act 2 feedback (design v0.6 §2.4.6). Each test is short. Log a screenshot and one line per test in `results.md`. Design §12 lists what each test decides.*
+
+**Setup.**
+- Open `Matters/Brightwater Systems/Brightwater Mutual NDA.docx` from the team site, in **Word desktop**.
+- The library holds v1.1 in `Legal Knowledge/Playbooks/NDA/`, with v1.0 in `Archive/`.
+- Run R1–R3 now with the current files. Run them again once the four-column template (backlog X2) is rendered.
+
+| # | Steps | Log |
+|---|---|---|
+| **R1** | `/` **Review contract** → **New playbook** → **Attach from Cloud** → `Spaarke NDA – Mutual v1.1 (table).docx` | Is it read as a playbook (24 topics, our rules, compromise positions shown) or synthesised as a precedent ("Counsel decision")? |
+| **R2** | The same with the heading-format `Spaarke NDA – Mutual v1.1.docx` | Does Attach from Cloud find the team-site library? (T-P10, Word side.) Which format reads better? |
+| **R3** | **Run review** with the better of R1 and R2 | Is `nda.term` GREEN (v1.1)? Score against `answer-key.md` (Brightwater: 6 RED, 7 YELLOW; term GREEN under v1.1). Keep the review |
+| **R4** | **Save playbook** | The saved name (the document Title?). Is a file created, and where (`Documents/Copilot/…`)? |
+| **R5** | A **new chat** → `/` Review contract | Is the saved v1.1 offered? Does it run without attaching? |
+| **R6** | *Act 5 step 3.* The picker also holds the saved **v1.0** (from 11-05). Pick it | Does anything show it is stale? Can it be deleted or replaced, and in how many clicks? Then: is a saved playbook a snapshot or a link to the file? |
+| **R7** | A new chat. Attach only the v1.1 Word copy (no `/` skill) and type "review this NDA against this playbook" | Is it a generic chat review (no topic findings, no tracked changes) or the legal review? This decides the quick card's "skill first" line |
+| **A/B** | Create playbook with `Documents/Cowork/Test/POC-Act1/word-ab/A - title only.docx`, then `B - no ids.docx` | Which imports directly? Decides the preamble and where the topic id goes |
+| **G1** | `/` **Identify regulatory gaps** → **Internal compliance policy** → attach the policy from `Legal Knowledge/Grounding/Normative/` | Does it cite NDA-3.3, 3.4, 3.5 and General Counsel approval? (Backlog 3-2 and 4-2) |
+| **G2** | `/` **Check execution readiness** | Does it catch the blank Effective Date and the Acme signatory? (gap #29) |
+
+Save any review as `Brightwater Mutual NDA – Word review.docx` in OneDrive (not the library).
 
 ### Act 3: the attorney in Cowork, with redlining and visuals. Proves the Cowork deliverable, T-P2, T-P10, T-P13.
 1. **T-P13 visual probe first** (solution-packs note §5.6, items 1–3, 7 and 8). New task: "run the Spaarke visual probe". Record what renders: PNG/SVG inline or file-only, the static HTML, what the scripted HTML reports about itself (inline script, button, CDN, fetch), the `.xlsx`/`.pptx` charts, and the Markdown table, Mermaid and LaTeX in chat. Also record the probe's module list (`openpyxl`, `python-pptx`, `matplotlib`, `node`).
@@ -154,7 +169,7 @@ Open `Matters/Brightwater Systems/Brightwater Mutual NDA.docx` via Word's open d
 ### Act 5: change a position. Proves drift handling (L24).
 1. The owner changes one position in the master: the term goes from 3 years to 2 (prepared in `kit-held/Act 5 - playbook v1.1/`). The owner replaces the files in the library. v1.0 moves to `Playbooks/NDA/Archive/`, so it is not deleted.
 2. Cowork: re-run on the Brightwater NDA. The provenance line should say v1.1, and `nda.term` (2 years) should now be GREEN.
-3. Word: start a review. The picker still shows the saved **v1.0**. Log:
+3. Word (now runbook Act 2, R6): start a review. The picker still shows the saved **v1.0**. Log:
    - does the attorney notice it?
    - how many clicks does re-importing take?
    - can the old saved copy be deleted or replaced?

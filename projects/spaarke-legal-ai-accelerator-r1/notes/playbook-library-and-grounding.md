@@ -2,6 +2,8 @@
 
 Owner discussion points W1–W7 (2026-11-05), checked against design v0.5 and the Microsoft skill texts. Proposes OD-33 to OD-38 and edits for design v0.6.
 
+> **2026-11-06:** design v0.6 folds in this note's tree, naming and Word findings. OD-36 is superseded and OD-37 overtaken (§9). Where this note and the design differ, the design wins.
+
 Sources:
 - the Microsoft Legal for Cowork 1.0.10 skill texts in `notes/legal-for-cowork-skills/`: `review-contract`, `create-playbook`, `build-case-chronology`, `identify-regulatory-gaps`, `draft-minutes-and-resolutions`, `compare-key-terms`;
 - design §2.4.6, §5.3, §5.9, §8.1a and §8.3;
@@ -251,8 +253,8 @@ Legal Knowledge/                 (was "Legal Playbooks"; OD-35)
 | OD-33 | Playbook library design: naming convention, scope block, `Applies to:` and `Related:` lines, dimension rule (family × side by default), gates G1–G3 | Yes, v0.6 and Phase 1 |
 | OD-34 | A precedent set per playbook: model form `.docx`; ≥ 3 counterparty samples in `.docx` and `.pdf`; one negotiated redline. Synthetic or permissively licensed only. | Yes. NDA in R1. |
 | OD-35 | Grounding as a component type with three kinds; a grounding set per pack; library renamed `Legal Knowledge/` with the §7.3 tree | Yes. The rename touches design §5.3, §5.9 and T-P10. |
-| OD-36 | Playbooks for contract families only (W6) | Yes (records what was implicit) |
-| OD-37 | T-P15: Microsoft's four-column table vs our heading format. Test Word import (does the fallback survive?) and `review-contract` Phase 1. | Run it in Phase 0 with T-P4 and T-P10. If the table wins, the renderer emits it after the scope block. |
+| OD-36 | ~~Playbooks for contract families only (W6)~~ | **Superseded (owner, 2026-11-06, A1-13):** "playbook" is the canonical concept for any legal procedure or protocol, including non-contract work such as a complaint response. Microsoft's is the contract-review subtype. Ontology §3, D-209; design v0.6 §2.3 |
+| OD-37 | T-P15: Microsoft's four-column table vs our heading format. Test Word import (does the fallback survive?) and `review-contract` Phase 1. | **Overtaken by the owner's decision (2026-11-06), design OD-39:** align with Microsoft's four columns, with the Markdown master as a superset. The Word test set (runbook Act 2, R1–R7 and A/B) settles the detail |
 | OD-38 | Gate G4 against the extracted Microsoft skills | Yes |
 
 ## 10. Design v0.6 edits

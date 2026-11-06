@@ -72,6 +72,22 @@ If A imports directly and B doesn't, the preamble is the trigger.
 - The review in item 3 ran on a **blank document**, so "Not relevant" is expected (gap #12: information only).
 - The stray `nda-review` was deleted by the owner; Cowork now lists 11 added.
 
+## Act 2: Word (owner review, 2026-11-06)
+
+**Not run as originally scripted.** In the act-by-act review, the owner judged that the Word feedback was already captured by the Act 1 discussion (A1-1 to A1-15) and by Acts 3–6. The findings:
+- **Routes.** Word's saved-playbook picker exists (`/Review contract` → "Which playbook do you want to use?"), but it is per user. There is no organization-wide playbook (researcher, 2026-11-06).
+- **Our files.** Neither of our formats imported directly. Cowork's `create-playbook` file did (gap #11).
+- **Users** have to pick the skill first and then the playbook, so training is needed (quick cards).
+
+**Assimilated into design v0.6:**
+- §2.4.6 (revised Word approach);
+- §5.3 (four-column template);
+- §5.9 (`Legal Knowledge/` tree);
+- §8.1a (setup modes, quick cards);
+- §12 (Word test set).
+
+Package items X1–X6 and 5-5 are in `package-backlog.md`. The remaining Word work is the focused **test set R1–R7, A/B, G1 and G2** in the runbook's Act 2. It is owed by the owner in Word desktop, and its results go here.
+
 ## Act 3
 
 ### Step 1: T-P13 visual probe (2026-11-05, 30 seconds)
