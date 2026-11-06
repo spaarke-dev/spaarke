@@ -4,7 +4,7 @@
     <title>FR-20 — flag-gated swap: systemuser root sets from Dataverse's answer; keep the contact-grants union; canary-gated merge</title>
     <phase>1 One evaluator</phase>
     <gate>after-032-034-035; MERGE GATED on task 034 canary green (NFR-04)</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change on the row-level-security boundary; tags bff-api/auth.</rigor-reason>
     <model-tier>opus</model-tier>

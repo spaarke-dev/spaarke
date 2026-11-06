@@ -1,0 +1,27 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0326",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0326","generator_id":"gen_eval_set.py@1 F-0326","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0326.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Quimby Whitcombe PC","firm_invoice_number":"INV-2026-92819","invoice_date":"2025-06-04","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"91355-0003","po_number":"PO-4584075","fees_total":6572.0,"expenses_total":146.13,"adjustments_total":0.0,"total_due":6718.13,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Quillen","title":"Partner","rate":585.0,"billed_as":"Quillen, A."},{"name":"Beatrix Ramanathan","title":"Of Counsel","rate":440.0,"billed_as":"Ramanathan, B."},{"name":"Beatrix Yilmaz","title":"Associate","rate":285.0,"billed_as":"Yilmaz, B."},{"name":"Farah Mbeki","title":"Paralegal","rate":175.0,"billed_as":"Mbeki, F."},{"name":"Marcus Eriksen","title":"Partner","rate":530.0,"billed_as":"Eriksen, M."},{"name":"Mei Wickham","title":"Senior Associate","rate":350.0,"billed_as":"Wickham, M."},{"name":"Naomi Lindqvist","title":"Paralegal","rate":180.0,"billed_as":"Lindqvist, N."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-02","timekeeper":"Eriksen, M.","timekeeper_name":"Marcus Eriksen","timekeeper_title":"Partner","title":"Partner","hours":0.9,"rate":530.0,"amount":477.0,"narrative":"Prepare expert witness for testimony in the data incident","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-05-08","timekeeper":"Quillen, A.","timekeeper_name":"Anders Quillen","timekeeper_title":"Partner","title":"Partner","hours":2.1,"rate":585.0,"amount":1228.5,"narrative":"Prepare expert witness for testimony in the licensing dispute","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-08","timekeeper":"Ramanathan, B.","timekeeper_name":"Beatrix Ramanathan","timekeeper_title":"Of Counsel","title":"Of Counsel","hours":1.8,"rate":440.0,"amount":792.0,"narrative":"Review draft expert disclosure for the vendor agreement","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-09","timekeeper":"Mbeki, F.","timekeeper_name":"Farah Mbeki","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.4,"rate":175.0,"amount":420.0,"narrative":"Prepare examination outlines for trial in the vendor agreement","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-13","timekeeper":"Eriksen, M.","timekeeper_name":"Marcus Eriksen","timekeeper_title":"Partner","title":"Partner","hours":1.9,"rate":530.0,"amount":1007.0,"narrative":"Attend trial day in the distribution agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-13","timekeeper":"Quillen, A.","timekeeper_name":"Anders Quillen","timekeeper_title":"Partner","title":"Partner","hours":2.2,"rate":585.0,"amount":1287.0,"narrative":"Review draft expert disclosure for the regulatory inquiry","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-23","timekeeper":"Lindqvist, N.","timekeeper_name":"Naomi Lindqvist","timekeeper_title":"Paralegal","title":"Paralegal","hours":0.7,"rate":180.0,"amount":126.0,"narrative":"Draft reply brief for trial in the construction contract","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-27","timekeeper":"Yilmaz, B.","timekeeper_name":"Beatrix Yilmaz","timekeeper_title":"Associate","title":"Associate","hours":1.2,"rate":285.0,"amount":342.0,"narrative":"Prepare expert witness for testimony in the warranty claim","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-28","timekeeper":"Mbeki, F.","timekeeper_name":"Farah Mbeki","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.7,"rate":175.0,"amount":472.5,"narrative":"Attend hearing on motion to compel in the data incident","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-05-28","timekeeper":"Wickham, M.","timekeeper_name":"Mei Wickham","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":1.2,"rate":350.0,"amount":420.0,"narrative":"Attend hearing on motion for summary judgment in the regulatory inquiry","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-05-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":146.13,"amount":146.13,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["472 Congress Boulevard","Atlanta","Tax ID 23-8086563"],"template":"T06","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-07-30","matter_close":"2025-08-29","matter_budget":51872.0,"approved_timekeepers":["Marcus Eriksen","Anders Quillen","Naomi Lindqvist","Beatrix Yilmaz","Beatrix Ramanathan","Farah Whitfield","Mei Wickham","Farah Mbeki"],"invoice_received_date":"2025-06-11"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

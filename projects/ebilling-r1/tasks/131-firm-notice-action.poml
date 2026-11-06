@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="131" project="ebilling-r1">
+  <metadata>
+    <title>Firm notice Action invoice-firm-notice (INVOICE-FIRM-NOTICE@v1) with template fallback</title>
+    <phase>5 Firm feedback (WP5) — wave W5-2</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Established Action + Binding wiring behind an existing facade method (041); output is prose only and every number comes from data, so a model error cannot misstate an amount.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Pattern-following: jps-action-create, the 041 facade method, an embedded-template renderer copied from RegistrationEmailService.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>041, 130</deps>
+    <tags>bff, ai, jps</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Author the Action invoice-firm-notice (spec name INVOICE-FIRM-NOTICE@v1; consumer type invoice-firm-notice, Binding, added to ConsumerTypes.All in the same change) that writes only a subject and explanatory prose from the structured outcome, and a FirmNoticeComposer that inserts amounts, line references, clause quotes and the findings table from 130's projection, falls back to a fixed template when the Action fails, is disabled, or the settings toggle is off, and exposes the draft to reviewers before Return to Firm or whole-invoice Reject.</prompt>
+
+  <role>SPAARKE platform developer. Expert in JPS Action authoring, the IActionRunner spine through PublicContracts facades, and safe HTML email composition.</role>
+
+  <goal>Action JSON, output-schema mirror and Binding row seeded in dev, with invoice-firm-notice in ConsumerTypes.All so /healthz stays Healthy; FirmNoticeComposer returns a FirmNoticeDraft (subject, prose, rendered HTML, source Action-version or Template) for the four outcome kinds; a reviewer draft route returns it; fallback, no-numbers and data-insertion tests pass; an ADR-043 seam test runs the Action through IActionRunner.</goal>
+
+  <context>
+    <background>Spec FR-50 (acceptance: output schema has no numeric fields; a draft mentioning a line or amount not in the findings is impossible by construction; fallback template test; sent text stored with the submission / invoice), FR-39, D-60, spec section 11 row "Firm-notice Action". 041 adds IInvoiceAi.DraftFirmNoticeAsync (request: outcome kind SubmissionRejected / ReturnedToFirm / InvoiceRejected / ApprovedWithAdjustments plus a findings summary; result: subject, body prose, no numeric fields) and its Null peer. 130 supplies the projection (the ONLY data source for the notice). 025 adds the settings toggle sprk_firmnoticeaienabled. Sending, recipients and storing the sent text are 132's; the PDF is 133's. Action seeding: infra/dataverse/actions/*.action.json via scripts/Deploy-ActionMirrors.ps1, Binding rows in infra/dataverse/sprk_playbookconsumer-rows.json via scripts/dataverse/Seed-PlaybookConsumers.ps1 (Seed-JpsActions.ps1 is retired, scripts/README.md:171). Embedded HTML template precedent: Services/Registration/RegistrationEmailService.cs:33 with the EmbeddedResource glob in Sprk.Bff.Api.csproj:249.</background>
+    <relevant-files>
+      <file role="new">infra/dataverse/actions/invoice-firm-notice.action.json</file>
+      <file role="new">infra/dataverse/outputschemas/invoice-firm-notice.schema.json</file>
+      <file role="modify">infra/dataverse/sprk_playbookconsumer-rows.json (one Binding row; shared append point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs (add InvoiceFirmNotice to All, near :370)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs:251-262 (constants without Binding rows turn /healthz Unhealthy)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/FirmNoticeComposer.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/EmailTemplates/ (FirmNoticeTemplate.html, FirmNoticeFallback.html)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (one EmbeddedResource line)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/FirmNoticeEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs and the Finance endpoint-mapping call site (shared append points)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/FirmNoticeComposerTests.cs</file>
+      <file role="new">tests/integration/seam/Finance/FirmNoticeActionSeamTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="pending">IInvoiceAi.DraftFirmNoticeAsync, consumer key, Null peer</dependency>
+      <dependency task="130" status="pending">FirmFindingsProjection</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="repo convention">actionCode is lowercase kebab with no version suffix (invoice-firm-notice); v1 is stated in the description and the JPS version field; INVOICE-FIRM-NOTICE@v1 is the display name (as 042, 047, 075).</constraint>
+    <constraint source="RoutingConsumerTypeHealthCheck">Add invoice-firm-notice to ConsumerTypes.All in the SAME change that adds its Binding row to sprk_playbookconsumer-rows.json; 136 deploys the Binding seed and the BFF together, so /healthz never sees a constant without a row (or a row without a constant).</constraint>
+    <constraint source="ADR-013, ADR-043, D-52">AI only through IInvoiceAi.DraftFirmNoticeAsync to IActionRunner; no by-name playbook lookup, no C# output schema, no node-graph engine.</constraint>
+    <constraint source="FR-50, ADR-039">Output schema: subject and prose strings only, no number or integer property anywhere. The model input carries outcome kind, rule names and finding reasons, never amounts. Code inserts every amount, line reference, clause quote and the findings table from 130's projection; model prose is HTML-encoded and has any digits-with-currency or line-number patterns rejected (fall back to template, logged).</constraint>
+    <constraint source="FR-50, ADR-032">Fallback template when: the Action throws or times out, the Binding is missing, the Null peer is active, or sprk_firmnoticeaienabled is off. The result records which source produced it.</constraint>
+    <constraint source="D-66, NFR-10">Only content from 130's projection reaches the notice; no Procedure Library link; flag-off rule sets show what 130 shows.</constraint>
+    <constraint source="ADR-015, NFR-11">Logs carry ids, sizes, timings and outcome codes, never prose or findings text.</constraint>
+    <constraint source="ADR-008, ADR-019, 040">Draft route: endpoint-filter authorization with the same check 104 uses for Reject / Return on that invoice; ProblemDetails with stable codes; RequireEbillingEnabled().</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement BFF, no package, publish-size delta recorded, no new HIGH CVE.</constraint>
+    <constraint source="076 review round 2 item 5 (notes/076-ruleset-endpoints.md section 8)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct). invoiceFirmId is the firm of the INVOICE the finding belongs to: the invoice's sprk_vendororg, read server-side, and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. Guid.Empty (the invoice has no firm) returns no text. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="JPS exemplar" location=".claude/skills/jps-action-create/examples/document-profiler.json">Action shape.</pattern>
+      <pattern name="Action mirror plus Binding" location="infra/dataverse/actions/triage-email.action.json">Mirror file and its Binding row.</pattern>
+      <pattern name="Embedded HTML email template" location="src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationEmailService.cs">Template namespace, placeholder replacement with HTML encoding.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm 041's DraftFirmNoticeAsync request / result types and 130's projection DTOs; confirm 025's toggle column.</step>
+    <step order="1">Author the Action with jps-action-create: instruction (courteous, factual, explain outcome and next steps for the kind; refer to findings by rule name only; never state amounts, dates, line numbers or percentages), output schema with subject and prose only. Validate with jps-validate; mirror to infra/dataverse/actions and outputschemas.</step>
+    <step order="2">Binding row (consumer type invoice-firm-notice; tier per the jps-action-create guidance for short prose) and, in the same commit, invoice-firm-notice added to ConsumerTypes.All (041 declared the constant but not the All entry). Seed Action and Binding in dev with Deploy-ActionMirrors.ps1 and Seed-PlaybookConsumers.ps1; verify by read query; run the RoutingConsumerTypeHealthCheck tests.</step>
+    <step order="3">FirmNoticeComposer.ComposeAsync(outcome kind, invoice or submission id): build projection (130), call the facade (unless toggle off), validate prose, render the template (subject, greeting, prose, tracking number, totals, findings table with citations), else fallback template with fixed prose per kind.</step>
+    <step order="4">Draft route POST /api/finance/invoices/{invoiceId}/firm-notice/draft?kind=ReturnedToFirm|InvoiceRejected (directional) returning subject, prose and preview HTML for the reviewer; the reviewer-edited prose is accepted later by 132 through 104's request (132 owns that plumbing).</step>
+    <step order="5">Tests: output schema has no numeric property (parse the mirror); composer with a model prose containing an amount or line number uses the fallback; every amount and clause in the rendered HTML equals the projection's; each fallback trigger (throw, Null peer, missing Binding, toggle off) yields the template with source Template; HTML-encoding of prose; draft route 401 / 403 / 503 / 200; seam test through IActionRunner resolving the Binding.</step>
+    <step order="6">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (route, tier, template wording owner review) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 041's DraftFirmNotice request lets amounts or numeric fields reach the model, STOP and raise it against 041 rather than filtering here only.</trigger>
+    <trigger>If the fixed fallback wording needs owner approval (it is firm-facing legal correspondence), present the draft wording and record the owner's answer; do not invent legal language beyond outcome facts.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "Firm-notice Action INVOICE-FIRM-NOTICE@v1 + Binding" (overlap: fixed email templates via CommunicationService); embedded template precedent RegistrationEmailService; grep "invoice-firm-notice" in src finds only 041's consumer key.</existing>
+    <extension>The template remains the fallback and carries all data; the Action adds prose only. The draft route is new because no existing endpoint previews an outbound firm notice.</extension>
+    <cost-of-doing-nothing>Owner requires AI-drafted wording with reviewer edit for Return / Reject (D-60); without the composer 132 has no notice body and FR-50 fails.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="pwsh">Deploy-ActionMirrors.ps1, Seed-PlaybookConsumers.ps1</tool>
+    <tool name="dataverse-mcp">read_query verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">infra/dataverse/actions/invoice-firm-notice.action.json; infra/dataverse/outputschemas/invoice-firm-notice.schema.json; infra/dataverse/sprk_playbookconsumer-rows.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/FirmNoticeComposer.cs; Services/Finance/EmailTemplates/; Api/Finance/FirmNoticeEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/FirmNoticeComposerTests.cs; tests/integration/seam/Finance/FirmNoticeActionSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Action passes jps-validate; its output schema contains no number or integer property; the mirror matches the dev row; the Binding row exists in dev.</criterion>
+    <criterion testable="true">Every amount, line reference, clause quote and findings-table row in a rendered notice equals a value in 130's projection; model prose containing an amount or line number is not used (fallback, logged reason code).</criterion>
+    <criterion testable="true">Action failure, Binding missing, Null peer and sprk_firmnoticeaienabled off each produce the fixed template, with source Template recorded on the draft.</criterion>
+    <criterion testable="true">A flag-off rule set's clause text never appears in a rendered notice.</criterion>
+    <criterion testable="true">Draft route: 401 unauthenticated, 403 for a caller who may not Reject / Return the invoice, 503 ebilling.disabled when off, 200 with subject, prose and preview otherwise.</criterion>
+    <criterion testable="true">ConsumerTypes.All contains invoice-firm-notice and the Binding row exists; RoutingConsumerTypeHealthCheck reports no constant without a row and no row without a constant; /healthz stays Healthy after the dev deploy (136 records it).</criterion>
+    <criterion testable="true">ADR-043 seam test resolves the Action through the Binding and runs it via IActionRunner.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Storage of the sent text (sprk_invoicesubmission.sprk_firmnoticetext, task 020) is done by 132 at send time; for invoice-level outcomes 132 stores it on the invoice's originating submission. No schema change is expected here; if one is needed, write it as an idempotent script under scripts/ebilling/ and list it for 136, which syncs WP5 schema into solution source. Seam test folder tests/integration/seam/Finance/ follows 041. Shared append points: FinanceModule.cs, the Finance endpoint-mapping call site, sprk_playbookconsumer-rows.json, ConsumerTypes.cs All list — re-read before editing. P5-B: no file overlap with 133, 134, 135.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

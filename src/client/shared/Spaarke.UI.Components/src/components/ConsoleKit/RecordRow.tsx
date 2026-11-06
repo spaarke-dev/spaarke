@@ -20,13 +20,15 @@ import {
 } from '@fluentui/react-components';
 import { StatusBadge } from '../StatusBadge';
 import { CONSOLE_STATE_BADGES } from './consoleStatus';
-import type { ConsoleState, RecordClass } from './consoleStatus';
+import type { ConsoleState, ConsoleStatusOverride, RecordClass } from './consoleStatus';
 
 export interface RecordRowProps {
   recordId: string;
   /** Headline (`sprk_name`). */
   title: string;
   state: ConsoleState;
+  /** Replaces the label and tone the Console table gives `state`. Absent: output is unchanged. */
+  statusOverride?: ConsoleStatusOverride;
   recordClass?: RecordClass | null;
   decidedBy?: string | null;
   /** ISO 8601. */
@@ -70,6 +72,7 @@ export const RecordRow: React.FC<RecordRowProps> = ({
   recordId,
   title,
   state,
+  statusOverride,
   recordClass,
   decidedBy,
   decidedOn,
@@ -78,7 +81,7 @@ export const RecordRow: React.FC<RecordRowProps> = ({
   className,
 }) => {
   const styles = useStyles();
-  const badge = CONSOLE_STATE_BADGES[state];
+  const badge = statusOverride ?? CONSOLE_STATE_BADGES[state];
   const when =
     decidedOn && !Number.isNaN(new Date(decidedOn).getTime()) ? new Date(decidedOn).toLocaleDateString() : null;
   const meta = [recordId, recordClass, decidedBy, when].filter((p): p is string => !!p).join(' · ');

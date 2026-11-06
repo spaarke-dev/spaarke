@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0162",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0162","generator_id":"gen_eval_set.py@1 F-0162","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0162.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Ravenscroft & Ambrose LLP","firm_invoice_number":"INV-2026-40723","invoice_date":"2026-07-03","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"70347-0017","po_number":"PO-4590714","fees_total":2670.0,"expenses_total":97.08,"adjustments_total":0.0,"total_due":2767.08,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Ramanathan","title":"Associate","rate":235.0,"billed_as":"Anders Ramanathan"},{"name":"Farah Lockhart","title":"Associate","rate":240.0,"billed_as":"Farah Lockhart"},{"name":"Ivan Lockhart","title":"Senior Associate","rate":285.0,"billed_as":"Ivan Lockhart"},{"name":"Nadia Quillen","title":"Associate","rate":180.0,"billed_as":"Nadia Quillen"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-03","timekeeper":"Anders Ramanathan","timekeeper_name":"Anders Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":235.0,"amount":70.5,"narrative":"Attend case management conference in the insurance coverage issue","codes":["L230","A109"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-04","timekeeper":"Farah Lockhart","timekeeper_name":"Farah Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":240.0,"amount":360.0,"narrative":"Review and analyze client documents concerning the distribution agreement to identify key facts","codes":["L110","A104"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-09","timekeeper":"Farah Lockhart","timekeeper_name":"Farah Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":240.0,"amount":624.0,"narrative":"Telephone conference with client representative regarding factual background of the regulatory inquiry","codes":["L110","A106"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-23","timekeeper":"Farah Lockhart","timekeeper_name":"Farah Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":315.0,"amount":346.5,"narrative":"Draft settlement term sheet for the lease dispute","codes":["L160","A103"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-25","timekeeper":"Farah Lockhart","timekeeper_name":"Farah Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":240.0,"amount":408.0,"narrative":"Research pleading standards applicable to the lease dispute","codes":["L210","A102"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-25","timekeeper":"Farah Lockhart","timekeeper_name":"Farah Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":240.0,"amount":408.0,"narrative":"Research pleading standards applicable to the lease dispute","codes":["L210","A102"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-08","timekeeper":"Ivan Lockhart","timekeeper_name":"Ivan Lockhart","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.4,"rate":285.0,"amount":399.0,"narrative":"Prepare for case management conference in the distribution agreement","codes":["L230","A101"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-10-04","timekeeper":"Nadia Quillen","timekeeper_name":"Nadia Quillen","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":180.0,"amount":54.0,"narrative":"Prepare updated litigation budget for the data incident","codes":["L150","A103"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-06-11","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":48.54,"amount":97.08,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["394 Peachtree Way","Dallas","Tax ID 97-5952570"],"template":"T10","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-06-22","matter_close":"2026-09-28","matter_budget":36068.0,"approved_timekeepers":["Nadia Quillen","Sofia Santoro","Ivan Lockhart","Hannah Ashdown","Anders Ramanathan","Farah Lockhart","Helena Hargrove","Aisha Santoro"],"invoice_received_date":"2026-07-19"},
+ "expected_findings":[
+  {"rule_id":"RS-06-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[4],"consequence":"Reduce"},
+  {"rule_id":"RS-06-R05","rule_type":"CoreRecordWindow","scope":"line","line_refs":[8],"consequence":"Flag"},
+  {"rule_id":"RS-06-R09","rule_type":"Duplicate","scope":"line","line_refs":[6],"consequence":"Disallow","related_line_refs":[5]}
+ ],
+ "seeded_violations":3
+}

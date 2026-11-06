@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="ebilling-r1">
+  <metadata>
+    <title>Procedure schema: Procedure, Procedure Version, assignments; rule-set record scope; policy-version and rate-card links</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave P3-A</phase>
+    <gate>Startable for steps 1-4 (script and -WhatIf). The real dev run (step 7) waits for ontology-r1's full schema-review PASS, both before-notices and the owner's OK for the run.</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New idempotent schema script on dev (three tables, five global choices, columns on five existing tables, field security); no file under src/ changes. Live dev write, owner-gated.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Every table, column, choice value and delete behaviour is fixed below; the script to start from and the scripts it copies already exist in scripts/ebilling/.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches no file another P3-A task touches. 088's real run must come after this task's real run (088's Stored File has a parent lookup to sprk_procedureversion).</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, schema, coordination, security</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Turn the never-run rule-set scope script into scripts/ebilling/Deploy-EbillingProcedureSchema.ps1 (items P1-P10 below); after -WhatIf, the before-notices, ontology-r1's full schema-review PASS and the owner's OK, run it on dev, run it again, verify, send the after-notices and update the docs.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Dataverse metadata Web API, field security and idempotent schema scripts.</role>
+
+  <goal>Dev has P1-P10 exactly as stated; a second run writes nothing; the gates and four notices are recorded in notes/080-procedure-schema.md; the docs describe the new columns.</goal>
+
+  <context>
+    <background>Model notes/procedure-and-file-model.md (v5.9, EB-D-148) sections 3.1-3.3, 5.2, 6.3, 7.2 and 13 (080 row); breakdown notes/replan-eb-d-148.md. Stored File and the sprk_document marker are 088's. The old script (Deploy-EbillingRuleSetScopeSchema.ps1) ran only with -WhatIf (notes/080-ruleset-scope-schema.md); its pre-flight, S1, S2, S7 and S9 carry over; S3, S4, S6 (and backfill) and S8 are dropped (O-12; model 7.2). Core-record set: InvoiceFamilyCoreRecordGuard.FilingCores (Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs:125).</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingProcedureSchema.ps1 (git mv of scripts/ebilling/Deploy-EbillingRuleSetScopeSchema.ps1, then rewritten)</file>
+      <file role="modify">scripts/README.md (the script's entry)</file>
+      <file role="modify">docs/data-model/sprk_ruleset.md, docs/data-model/sprk_ratecard.md, docs/data-model/sprk_matter-related-tables.md, docs/data-model/sprk_workassignment.md</file>
+      <file role="new">projects/ebilling-r1/notes/080-procedure-schema.md</file>
+      <file role="read">scripts/ebilling/EbillingSchema.psm1 (Add-Table :507, Add-Lookup :334 -DeleteBehavior / -Parental, Add-LocalChoice :467, New-DateOnlyDef :426, Add-AlternateKey :713); Deploy-EbillingPolicyStoreSchema.ps1:110-170 (global choice); Deploy-EbillingSettingsSchema.ps1:159 (IsAuditEnabled); Deploy-EbillingSubmissionSchema.ps1:182-183 (sprk_createdbyperson shape)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="model 3.2, 5.2, 7.2 (items)">The script creates exactly these items. P1 global choices, values from 100000000 in this order: sprk_proceduretype (Guideline, Rate card, Billing instructions, Internal Standard, Other); sprk_procedureappliesto (All records, Firm, Assigned records only); sprk_procedurestatus (Active, Retired); sprk_procedureversionstatus (Draft, Active, Superseded, Retired); sprk_publishstate (Draft, Published). P2 table sprk_procedure (user-owned, primary sprk_name): sprk_firmfacingname (text 200), sprk_area (bound to the existing global choice sprk_policydomain), sprk_proceduretype, sprk_appliesto, sprk_firm (-> sprk_organization, Restrict), sprk_issuedby (-> sprk_organization, RemoveLink), sprk_externalcontact and sprk_internalcontact (-> contact, RemoveLink), sprk_status (sprk_procedurestatus), sprk_notes (memo), sprk_createdbyperson. P3 table sprk_procedureversion (user-owned, primary sprk_name): sprk_procedure (parental, Add-Lookup -Parental), sprk_versionnumber (whole number), alternate key sprk_procedure_versionnumber on (sprk_procedure, sprk_versionnumber), sprk_previousversion (-> sprk_procedureversion, RemoveLink), sprk_effectivefrom and sprk_effectiveto (DateOnly behaviour), sprk_status (sprk_procedureversionstatus), sprk_createdbyperson. P4 table sprk_procedureassignment (user-owned, primary sprk_name): one typed lookup per FilingCores entry named after its table (Cascade), sprk_procedure (-> sprk_procedure, Restrict, optional), sprk_mode (local choice: Follow latest 100000000, Pinned 100000001, Excluded 100000002), sprk_pinnedversion (-> sprk_procedureversion, Restrict), sprk_excludedpolicy (-> sprk_policy, Cascade), sprk_firm (-> sprk_organization, Restrict), sprk_reason (memo), sprk_createdbyperson. P5 sprk_ruleset: the S1 record lookups (one per FilingCores entry, RemoveLink, relationship names as in the old script), the S2 sprk_scope options Record 100000002 and Firm record 100000003, sprk_procedure (-> sprk_procedure, Restrict), sprk_createdbyperson (S9). P6 sprk_policyversion: sprk_procedureversion (-> sprk_procedureversion, Restrict), sprk_publishstate (global sprk_publishstate, optional, no default), sprk_basedonversion (-> sprk_policyversion, RemoveLink). P7 sprk_ratecard: sprk_procedureversion (-> sprk_procedureversion, Restrict). P8 every FilingCores table: sprk_billingfirm and sprk_billingresponsible (-> sprk_organization, RemoveLink, optional). P9 field security (below). P10 IsAuditEnabled on sprk_procedure, sprk_procedureversion and sprk_procedureassignment.</constraint>
+    <constraint source="task 116 (re-plan 2026-10-21)">Also create sprk_procedureversion.sprk_notconverted (Two Options, default No, field-secured like the other version columns): per-version drafting needs its own "not converted" marker, because the existing one lives on sprk_ruleset (BillingRuleDraftJobHandler). Include it in the -WhatIf output and the ontology-r1 schema review.</constraint>
+    <constraint source="owner directive 2026-10-21, model section 13 080 row">The core-table list is read at run time from InvoiceFamilyCoreRecordGuard.cs (the FilingCores initializer, :125) with a regex; the script refuses (exit 2, nothing written) when it cannot parse a non-empty list. No core table name is hand-typed.</constraint>
+    <constraint source="model I-P2, 3.2, uac-r2 review item 8 (S7)">P9: IsSecured true, Read for every user through the reader profile, Create / Update for the BFF application user only through the writer profile, on: sprk_procedure.sprk_appliesto, sprk_firm, sprk_status; sprk_procedureversion.sprk_effectivefrom, sprk_effectiveto, sprk_status; sprk_ruleset.sprk_scope, sprk_firm, sprk_procedure and the P5 record lookups. Reuse uac-r2's Readers / Writers pair as the old script does: permission rows only, never a member change. sprk_createdbyperson is created unsecured; 081 adds the tables to Set-ChildRecordCreatorPersonSchema.ps1 and StampedChildTables (model 13).</constraint>
+    <constraint source="model 5.2 delete contract, ontology F2-a, F2-b">Delete behaviours exactly as listed; Restrict only on lookups to a Procedure, Procedure Version or firm, never to a core record. The two firm lookups' Restrict is this task's proposal (a nulled firm would widen a firm-only Procedure or override to every firm): raise it in the before-notice and review.</constraint>
+    <constraint source="model 8.2, O-12, 7.2, section 12">Never create: a banner column; sprk_isexceptions; any business-unit column or N:N (old S3, S4, S8); sprk_ratecard.sprk_scope (old S6) or its backfill; sprk_storedfile (088). Never delete or change an existing column: sprk_ruleset.sprk_sourcedocument and the sprk_ratecard core lookups stay (removing them is destructive and needs the owner's OK in another task).</constraint>
+    <constraint source="project CLAUDE.md sections 3 and 5, ADR-002">Dev only. -WhatIf first. No role privilege changes (081 and 089 own role rows). Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (079 syncs it), forms or views (079), or any file under src/. No plugins, business rules or calculated columns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/080-ruleset-scope-schema.md (the old script's dev checks, reader list, profile pre-flight)</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">git mv the old script to scripts/ebilling/Deploy-EbillingProcedureSchema.ps1. Keep its pre-flight, S1, S2, S7, S9 and their verify; delete S3, S4, S6, the backfill (-BackfillOnly, audit read) and S8; add the other items and the FilingCores parse; update the header and scripts/README.md.</step>
+    <step order="2">Read-only dev checks, recorded in the notes: every planned name and value is absent or identical; sprk_assignedlawfirm1/2 exist on each core table; whether the project and work-assignment main forms have a Billing tab (no edit).</step>
+    <step order="3">Run -WhatIf and save its output in the notes.</step>
+    <step order="4">Before-notices to ontology-r1 and uac-r2 (a message to each session): item list, delete behaviours, -WhatIf output, the profile-reuse question. Record dates and uac-r2's answer.</step>
+    <step order="5">ontology-r1 full schema review: send the final script and -WhatIf output; fix every finding and re-run -WhatIf; record the PASS and its date.</step>
+    <step order="6">Ask the owner for the dev run, showing the -WhatIf output; record the OK and its date.</step>
+    <step order="7">Run for real, then run again: the second run reports every item skipped and writes nothing.</step>
+    <step order="8">Verify by metadata read every acceptance criterion below; record the output.</step>
+    <step order="9">After-notices to ontology-r1 and uac-r2 with the run result.</step>
+    <step order="10">Update the four docs: sprk_ruleset (record lookups, four scope values, "a Record / Firm record set with no record lookup applies to nothing", sprk_procedure, BFF-only scope columns); sprk_ratecard (sprk_procedureversion); core tables (the two billing columns confer no access). New-table docs are 189's.</step>
+    <step order="11">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="12">Record deviations in projects/ebilling-r1/notes/080-procedure-schema.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ontology-r1 has not passed the review, the owner has not given the OK, or uac-r2 does not agree to the profile reuse, STOP before step 7; run nothing but -WhatIf.</trigger>
+    <trigger>If a planned name or value exists with another meaning, or FilingCores cannot be parsed, STOP and present it; do not rename, renumber or hand-type a list.</trigger>
+    <trigger>If the review changes a name, value, delete behaviour or item, or -WhatIf shows anything not listed here, STOP and raise 🔔 Human Input Required.</trigger>
+    <trigger>If any item would need an existing column deleted or changed, STOP: destructive changes need the owner's explicit OK and are not this task.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_ruleset (RuleSetService.cs:320), sprk_policyversion (versions rules, not documents), sprk_policy.sprk_matter (one rule, one matter), sprk_assignedlawfirm1/2 (the submission rule). None holds a document, its issues, a per-record mode or a pinned version (model 3.3).</existing>
+    <extension>The rule set is extended (record lookups, two scope values, a Procedure link) instead of a new record-rule table. A Procedure needs non-billing documents, versions and per-record assignment a billing rule set cannot hold; reusing sprk_assignedlawfirm1 would change who may submit.</extension>
+    <cost-of-doing-nothing>No home for a Procedure and its versions; no grandfathering (O-4), per-record waiver or rule change (O-10), or per-work-date rule choice (O-12); the default firm list must guess between two firms (O-19).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Schema script</tool>
+    <tool name="dataverse-mcp">Metadata and row reads</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/ebilling/Deploy-EbillingProcedureSchema.ps1</output>
+    <output type="docs">scripts/README.md; docs/data-model/sprk_ruleset.md, sprk_ratecard.md, sprk_matter-related-tables.md, sprk_workassignment.md; projects/ebilling-r1/notes/080-procedure-schema.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The notes record, with dates and before the real run: both before-notices, uac-r2's answer on the profiles, ontology-r1's PASS and the owner's OK.</criterion>
+    <criterion testable="true">The five global choices have exactly the listed labels and values; sprk_area is bound to sprk_policydomain.</criterion>
+    <criterion testable="true">The three new tables exist, user-owned and audited, with every listed column; sprk_procedureversion -> sprk_procedure is parental; the alternate key is Active; the effective dates are DateOnly.</criterion>
+    <criterion testable="true">Each lookup reads the delete behaviour listed in the items constraint; no lookup whose target is a core table reads Restrict.</criterion>
+    <criterion testable="true">sprk_ruleset.sprk_scope has exactly 100000000 Client default, 100000001 Firm, 100000002 Record, 100000003 Firm record; the record lookups exist for every FilingCores table and no other.</criterion>
+    <criterion testable="true">Every P9 column reads IsSecured = true, with a Read-only permission row for the reader profile and a Create/Update row for the writer profile; no profile's members changed.</criterion>
+    <criterion testable="true">sprk_billingfirm and sprk_billingresponsible exist on every FilingCores table and on no other table.</criterion>
+    <criterion testable="true">Negative: no banner column, no sprk_isexceptions, no business-unit column or N:N, no sprk_ratecard.sprk_scope, no sprk_storedfile; sprk_ruleset.sprk_sourcedocument and the sprk_ratecard core lookups are unchanged; the External Collaborator role holds no privilege on the three new tables; git diff --stat src/ is empty.</criterion>
+    <criterion testable="true">A second run reports every item skipped and writes nothing.</criterion>
+    <criterion testable="true">The after-notices are recorded; the four docs are updated as in step 10.</criterion>
+  </acceptance-criteria>
+
+  <notes>Existing sprk_policyversion rows get no sprk_publishstate (dev data is recreated, O-13; only 082's loader reads it). The old script's sprk_createdbyperson on sprk_ratecard / sprk_ratecardrate is dropped: rate cards are no longer tied to a core record (model 12, D-120); ask uac-r2 to confirm in the before-notice.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

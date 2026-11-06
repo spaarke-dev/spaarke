@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "10990713878426831437"
+      "templateHash": "16193167852349809230"
     }
   },
   "parameters": {
@@ -244,7 +244,11 @@
     "contentSafetyName": "[format('sprk-{0}-{1}-contentsafety', parameters('customerId'), parameters('environmentName'))]",
     "redisCacheName": "[format('sprk-{0}-{1}-redis', parameters('customerId'), parameters('environmentName'))]",
     "acsDeadLetterContainerName": "acs-eventgrid-deadletter",
-    "effectiveStorageContainers": "[if(parameters('deployAcsMessaging'), union(parameters('storageContainers'), createArray(variables('acsDeadLetterContainerName'))), parameters('storageContainers'))]"
+    "bffBlobContainerNames": [
+      "ai-chunks"
+    ],
+    "baseStorageContainers": "[union(parameters('storageContainers'), variables('bffBlobContainerNames'))]",
+    "effectiveStorageContainers": "[if(parameters('deployAcsMessaging'), union(variables('baseStorageContainers'), createArray(variables('acsDeadLetterContainerName'))), variables('baseStorageContainers'))]"
   },
   "resources": [
     {
@@ -832,6 +836,9 @@
           "userAssignedIdentityPrincipalId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
           },
+          "userAssignedIdentityContainerNames": {
+            "value": "[variables('bffBlobContainerNames')]"
+          },
           "disableSharedKeyAccess": {
             "value": true
           },
@@ -846,7 +853,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "7454944092691742298"
+              "templateHash": "10104114510119534105"
             }
           },
           "parameters": {
@@ -908,18 +915,18 @@
                 "description": "Subnet ID for VNet network rule (empty = allow all)"
               }
             },
-            "appServicePrincipalId": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "App Service principal ID for Storage Blob Data Contributor RBAC role. HISTORICALLY the per-customer BFF App Service SystemAssigned MI; task 029 removed the SystemAssigned MI from `modules/app-service.bicep`. Task 030 canonical replacement is `userAssignedIdentityPrincipalId` below. Retained for legacy callers as interim safety net per plan.md §3 — remove post-Phase F acceptance."
-              }
-            },
             "userAssignedIdentityPrincipalId": {
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Storage Blob Data Contributor (built-in role `ba92f5b4-2d11-453d-a403-e96b0029c9fe`) on this Storage account. Task 030 canonical target per ADR-028 (UAMI-first data-plane access). Empty default skips the assignment (caller-side wiring). Emitted assignment sets principalType=ServicePrincipal."
+                "description": "Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Storage Blob Data Contributor (built-in role `ba92f5b4-2d11-453d-a403-e96b0029c9fe`) at CONTAINER scope on each container in `userAssignedIdentityContainerNames` — never on the account (owner 2026-10-21, ebilling-r1 re-plan Q5). Empty default skips the grants (caller-side wiring). Emitted assignments set principalType=ServicePrincipal."
+              }
+            },
+            "userAssignedIdentityContainerNames": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Containers (a subset of `containers`) on which `userAssignedIdentityPrincipalId` is granted Storage Blob Data Contributor, one assignment per container at the scope of that container. A name not in `containers` gets no grant, so the caller must also list it in `containers`. Default empty: no grant. Every blob consumer the identity runs needs its container here, or its calls fail 403 (ebilling-r1 notes/091-storage-provisioning.md §2)."
               }
             },
             "tags": {
@@ -1042,33 +1049,24 @@
               ]
             },
             {
-              "condition": "[not(empty(parameters('appServicePrincipalId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('appServicePrincipalId'), variables('storageBlobDataContributorRoleId'))]",
-              "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataContributorRoleId'))]",
-                "principalId": "[parameters('appServicePrincipalId')]",
-                "principalType": "ServicePrincipal"
+              "copy": {
+                "name": "uamiContainerBlobRbac",
+                "count": "[length(parameters('containers'))]"
               },
-              "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
-              ]
-            },
-            {
-              "condition": "[not(empty(parameters('userAssignedIdentityPrincipalId')))]",
+              "condition": "[and(not(empty(parameters('userAssignedIdentityPrincipalId'))), contains(parameters('userAssignedIdentityContainerNames'), parameters('containers')[copyIndex()]))]",
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('userAssignedIdentityPrincipalId'), variables('storageBlobDataContributorRoleId'))]",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', parameters('containers')[copyIndex()])]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', parameters('containers')[copyIndex()]), parameters('userAssignedIdentityPrincipalId'), variables('storageBlobDataContributorRoleId'))]",
               "properties": {
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataContributorRoleId'))]",
                 "principalId": "[parameters('userAssignedIdentityPrincipalId')]",
-                "principalType": "ServicePrincipal"
+                "principalType": "ServicePrincipal",
+                "description": "Stamp UAMI blob data access on this container only (container scope, ebilling-r1 re-plan Q5)"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', parameters('containers')[copyIndex()])]",
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', parameters('containers')[copyIndex()])]"
               ]
             }
           ],

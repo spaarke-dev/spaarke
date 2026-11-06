@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="ebilling-r1">
+  <metadata>
+    <title>InvoiceSubmissionProcessing job</title>
+    <phase>2 Submission and extraction (WP2)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The only creator of sprk_invoice (ADR-002), all-or-nothing persistence across several tables, idempotent re-delivery, and the point where AI output turns into accept / reject decisions.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Composes eight component contracts (043, 045, 046, 047, 072, 073, 014, 016) into one transactional pipeline; integration mistakes create partial or duplicate invoices.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>014, 016, 043, 044, 046, 047, 072, 073</deps>
+    <tags>bff, jobs, ai, write-path</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the ADR-004 IJobHandler for JobType InvoiceSubmissionProcessing (defined by 044) that runs Processing Pipeline steps 1-7 for one submission: read (043), resolve (046), code and observe (047), evaluate (072), decide (073), persist all-or-nothing, then enqueue indexing and the notification seam. Idempotent per submission id; every status transition persisted (FR-20, NFR-08).</prompt>
+
+  <role>SPAARKE platform developer. Expert in ADR-004 job handlers, Dataverse transactional writes and the Finance and Signals services. Follow ADRs strictly.</role>
+
+  <goal>A thin InvoiceSubmissionProcessingJobHandler delegating to an InvoiceSubmissionProcessor; Accepted creates invoice (In Review), lines, approval portion, Signals and the document's invoice link, recalculates totals through 016, enqueues indexing and calls the notification seam; Rejected writes outcome, reason code and findings JSON on the submission; Failed leaves no invoice; re-delivery never duplicates.</goal>
+
+  <context>
+    <background>Spec FR-20 (acceptance: idempotent per submission id; a failure after line creation leaves no invoice; status transitions persisted), Processing Pipeline steps 1-7, FR-21 (unreadable document → Failed or Rejected with stable reason code, never a partial invoice), NFR-08. Submission columns (020): sprk_processingstatus Received / Processing / Accepted / Rejected / Failed, sprk_outcomereasoncode, sprk_findingsjson, sprk_invoice, sprk_trackingnumber, sprk_firminvoicenumber. Existing handler shape to copy: Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs (JobTypeName :50, ExtractInvoiceFactsAsync call :221, InvoiceIndexing enqueue :357). Transactions: Spaarke.Dataverse DataverseServiceClientImpl.cs:2696 BulkUpdateAsync and :2737 BuildBulkUpdateTransaction cover single-table updates only; there is no multi-table create helper. Signals go through SignalWriter (Services/Signals/SignalWriter.cs) using 072's BillingFindingSignalMapper. Approver resolution is task 103's; notifications are 132's.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandler.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionProcessor.cs (+ interface; mapping 043 result to 046 input; persistence)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/IEbillingNotificationSink.cs (+ no-op implementation; 132 replaces it)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (shared append point; register the handler unconditionally per 040's rule — compare :175 and :186-189)</file>
+      <file role="modify">tests/Spaarke.ArchTests/Adr032/AsymmetricRegistrationTests.cs (only if the new registration needs a ratchet decision; prefer none)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/IJobHandler.cs, JobContract.cs, JobOutcome.cs (Success :19, Failure :34, Poisoned :50)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs:34 (JobTypeName InvoiceIndexing)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/InvoiceSubmissionProcessorTests.cs and tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Handlers/InvoiceSubmissionProcessingJobHandlerTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="014" status="required">Lifecycle service: the initial In Review state.</dependency>
+      <dependency task="016" status="required">IInvoiceTotalsService.RecalculateAsync.</dependency>
+      <dependency task="043" status="required">IInvoiceAi.ReadInvoiceAsync and its reason codes.</dependency>
+      <dependency task="044" status="required">Submission rows, JobType constant, payload shape.</dependency>
+      <dependency task="046" status="required">IInvoiceResolutionService and combined confidence.</dependency>
+      <dependency task="047" status="required">ILineCodingService.</dependency>
+      <dependency task="072" status="required">InvoiceComplianceEvaluator, BillingFactLoader, BillingFindingSignalMapper.</dependency>
+      <dependency task="073" status="required">SubmissionRejectionRule decider.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="074 ontology-r1 review K1/K3 (2026-10-17)">Recording billing Decision Records through BillingDecisionRecorder (074) brings two caller obligations.
+- (1) Exactly-once. The writer is exactly-once only for retries made one after another; two concurrent calls with one decision id can both write, and a duplicate in an append-only ledger is permanent. So:
+  - this task names its serialisation mechanism as an acceptance criterion. Examples: the job claims IIdempotencyService keyed by the decision id; an endpoint does a RowVersion-conditional status update and records only after it succeeds;
+  - it adds a test for the concurrent same-id case.
+- (2) Decider identity:
+  - derive the deciding user from the authenticated principal, never from request input;
+  - check invoice access through the UAC filter before recording;
+  - pass no contact id. The recorder looks the contact up itself, as DecisionCommitService does; 074's fix round removes that parameter.</constraint>
+    <constraint source="owner D-104 (2026-10-17)">Build Pending Spend, kept separate from actual spend. It sums In Review invoices that are NOT held.
+- Define the pending status set and the held exclusion once in FinanceBaseValues, next to CountedInvoiceStatuses.
+- Compute it on both paths: a stored rollup column on matter and project, written by FinanceRollupService; and a live FinanceBaseValues measure for Thresholds.
+- The new columns need §11 answers and an idempotent script under scripts/ebilling/. 053 syncs SpaarkeMaster.
+- Tests on both paths:
+  - must-fire: a held In Review invoice is not in pending spend; an Approved invoice is not in pending spend;
+  - must-not-fire: an unheld In Review invoice is counted.
+- Keep the fail-closed reader contract.
+- ontology-r1 reviews this part.
+- Give §11 answers for both the new FinanceBaseValues measure and the new rollup column. The owner approved the additive column (D-104).
+- When the column's logical name and type are fixed, send them to ontology-r1. They add it to PolicyVersionValidator.AuthorableColumns, the PredicateCompiler ranges and the RuleBodyDescriber labels in a follow-up of their own. Until then the column is stored but cannot be used in a Threshold rule, which is safe. Do not edit those ontology files.</constraint>
+    <constraint source="owner D-102 (2026-10-17), amended by D-103">D-103 (counted spend = Approved, Sent to AP, Paid) makes the exclusion below automatic, since a held invoice is In Review. Do NOT add a held predicate. DO add the must-fire test (a held In Review invoice is excluded from both sum paths, through FinanceRollupService and FinanceBaseValues.ReadAsync) and the must-not-fire test (a released invoice that reaches Approved is counted), and name D-102 in both. Original text, kept for the test intent: A held invoice (blocked submission, awaiting Override / Return) must not count toward spend. The FinanceRollupService counted-spend sum excludes it, which also covers POL-COMMIT-BUDGET and the ontology spend Thresholds that read sprk_totalspendtodate. It starts counting when Override releases it. Represent the hold with the state the Override / Return flow already needs (the originating submission's blocked status). Only if the rollup cannot read that cheaply, use a held flag on the invoice that only the lifecycle service sets and clears (§11 answers required). Required tests: a must-fire test that a held In Review invoice is excluded from the spend total and from the threshold input, and a must-not-fire test that a released invoice is counted. Ship this with 049, not later. There are TWO spend-sum paths and the exclusion covers both:
+- (a) FinanceRollupService (~235-248), which writes the stored sprk_totalspendtodate;
+- (b) FinanceBaseValues.ReadAsync → BuildGroupedSumFetchXml (~130-175), the live sum the ontology Threshold evaluator uses (SignalEvaluator.cs:233) for derived columns such as budget utilisation.
+Rules for the predicate and its tests:
+- Define the "held" predicate once in FinanceBaseValues, next to CountedInvoiceStatuses, and use it from both.
+- Run the must-fire and must-not-fire tests on BOTH paths, including through FinanceBaseValues.ReadAsync.
+- A submission link-entity in the FetchXML is acceptable. It must keep the fail-closed reader contract (~180: an unreadable shape throws, never reads as zero).
+- ontology-r1 reviews this part (their hot path); include it in the range sent to them.</constraint>
+    <constraint source="owner D-101 (2026-10-17)">Every submission that was read creates its invoice and lines in step 6 (all-or-nothing):
+- accepted → In Review;
+- automatically rejected → created with status Rejected through the lifecycle service (task 014), with findings and the report linked to both the submission and the invoice;
+- a blocked internal submission → In Review, held from approval until Override / Return.
+A submission that fails before it is read has no invoice. Two consequences:
+- If the lifecycle service cannot create an invoice directly in Rejected, extend it there (one owner of status). Do not write statuscode elsewhere.
+- The automatic rejection's Decision Record (system decision, null confirmer, `automated:` decider, null gate tier) files under that invoice through WriteBillingDecisionAsync (D-100).</constraint>
+    <constraint source="D-89 (owner, 2026-10-16) / 046-078 review">ApprovedTimekeeper findings hold the invoice for review and never reject. Enforce this directly (the rule outcome for ApprovedTimekeeper is never Reject), not only through the confidence cap: ReferenceMissingCap and ReliabilityThreshold are both editable settings, and a cap set at or above the threshold would otherwise let the rule reject. Add a test with the cap raised above the threshold.</constraint>
+    <constraint source="D-87 (owner, 2026-10-16)">Every submission already carries its tracking number from creation (044 via the allocator). The job does not allocate; a submission without sprk_submissionsequence is a defect to fail closed on, not a case to repair.</constraint>
+    <constraint source="CLAUDE.md §10">Every change under src/server/api/Sprk.Bff.Api follows .claude/constraints/bff-extensions.md.</constraint>
+    <constraint source="ADR-002">This processor is the only code that creates sprk_invoice and its lines for eBilling; totals only through 016; status only through 014; core-ancestor fields through 013's guard; owner through IRecordOwnershipResolver.</constraint>
+    <constraint source="FR-20 all-or-nothing">Invoice, lines, approval portion and document link are written in one Dataverse ExecuteTransaction (or, if the executor proves that impossible for these tables, by a compensation path that deletes every row it created before marking Failed). Signals are written after the transaction keyed so a retry never duplicates them; if a Signal write fails, the submission stays Processing and the job retries — re-delivery completes the missing Signals and never creates a second invoice.</constraint>
+    <constraint source="NFR-08 idempotency">Step 0 of the handler re-reads the submission: Accepted or Rejected → Success no-op; a linked sprk_invoice → resume at Signals / after-steps only; Processing from a crashed attempt → restart from read. Status transitions Received → Processing → Accepted / Rejected / Failed are persisted at each change (ADR-017).</constraint>
+    <constraint source="ADR-018">The handler checks EbillingOptions.Enabled first; off → submission Failed with reason ebilling.disabled, JobOutcome.Failure without retry storm (poison per the existing handler convention).</constraint>
+    <constraint source="FR-21 / FR-26 / I-5">Document-level read failures (invoice.read.unreadable, page_limit, no_invoice) → Rejected with that reason code; invoice.read.service_failed and transient errors → retry, then Failed. Rule-based rejection comes only from 073's decider; AI output alone never rejects. Accepted-with-findings keeps every finding.</constraint>
+    <constraint source="D-91 (owner, 2026-10-16)">The firm invoice number was typed at upload and the tracking number set at creation. Compare the number read from the PDF with the typed one (normalised: case, whitespace, punctuation); if they differ, record a finding that holds the invoice for review, citing both values. It never rejects on its own, and the tracking number is never changed.</constraint>
+    <constraint source="ADR-015">Logs carry submission id, invoice id, counts, timings, reason codes — no extracted values or narratives.</constraint>
+    <constraint source="044 K4 (2026-10-16)">A job whose submission row does not exist is Success, not a retry or failure: 044 compensation deletes the row when the enqueue call reports failure even though Service Bus may have accepted the message. Log it with the submission id.</constraint>
+    <constraint source="047/048 review (2026-10-16)">When line coding results are persisted, store each line's CodeSetSource / CodeSetNeedsReview (CodingModels.cs) with it, so a line coded under an AI-suggested (unconfirmed) code set stays flagged for review; never persist the suggested set as a mapping.</constraint>
+    <constraint source="ontology-r1, Signal dedupe (option a), 2026-10-18">One Signal per (policy, subject) per evaluation. SignalWriter's dedupe key is policy|subjectEntity|subjectId|episode, and a write to an existing open row only refreshes sprk_lastevaluated and the due date, so a second request with the same key in one run silently drops its reasons. Rules:
+      (1) The 072 mapper aggregates before the write. It sends exactly one request per key, with the reason codes sorted, the strongest consequence winning (Reject over Hold over Flag), and the evidence a union of FieldRefs with each reason's text kept separate.
+      (2) A withheld Duplicate reason (D-112) keeps the withheld template, and no other merged reason or evidence field may mention the hidden prior.
+      (3) Store a reason-set fingerprint (the sorted codes plus the strongest consequence) in the Signal's evidence. On re-evaluation, a different fingerprint closes the open Signal as Superseded and raises episode+1 (the policy-version mechanism, task 031 / D-13). The same fingerprint just refreshes. No reason left means the normal closure.
+      (4) The Decision Record fact snapshot lists every merged reason.
+      (5) D-115's rates-not-checked finding has its own reason code and is flag-only. It must never be merged into a Reject.
+    Required tests: two reasons on one line give one Signal carrying both, with the strongest consequence; a reason added on re-evaluation gives Superseded plus episode+1, and the new Signal carries both; a withheld plus a visible reason leak no hidden detail; a must-fire guard shows the mapper never sends a duplicate key in one evaluation.</constraint>
+    <constraint source="072 review fix round (2026-10-18)">Three caller obligations from 072's evaluator and mapper:
+- Supply BillingEvaluationRequest.ReceivedOn: the submission's received date (sprk_submission createdon, as a DateOnly). Rule versions in force and the D-111 / D-116 window checks are judged on that date, not on the date the job runs, so a retry or a late re-evaluation gives the same result.
+- Own the Signal lifecycle that option (a) needs: compare the reason-set fingerprint with the open Signal's; on a change, close the open one as Superseded and write episode n+1; on the same fingerprint, refresh only. The mapper produces the fingerprint; it does not supersede.
+- Read the header currency confidence from HeaderConfidence["Currency"] under exactly that key, and normalise "$" to USD before the currency check. A missing currency, or one read at low confidence, counts as non-USD (flag-only; 072's currency_not_usd template).</constraint>
+    <constraint source="074 fix-round adversarial pass (2026-10-18), caller obligations of BillingDecisionRecorder">Callers that record billing decisions through BillingDecisionRecorder must:
+- Derive the resolved Signal ids and the policy version id server-side, from the decision's own invoice and lines. Never take them from the request. The writer accepts any existing Signal or policy version (074 review K-2).
+- Record before mutating, or run the recorder's reads first. Its refusals that depend on Dataverse reads (unknown policy version, missing Signal, undetermined subject, contact read fault) happen after Preflight, so a caller that changes invoice status first can be left with a changed status and no Decision Record (K-3).
+- Serialise decisions per invoice (one at a time per invoice). The recorder's "already recorded" check and its create are not atomic (K-4).
+- Build Values the same way on every attempt (same types, same decimal scale), so that an honest retry hashes to the same content (K-5, unless 074's follow-up normalises decimals).</constraint>
+    <constraint source="072 part L adversarial passes (2026-10-18)">Two more caller obligations for the evaluation request:
+- Build BillingEvaluationRequest.CoreRecord from the same submission read that files the invoice, and file the invoice under that core record. If the submission's core record changed between evaluation and persistence (a re-file is a real operation since the master merge), re-evaluate; never persist findings judged under a different core. Otherwise a finding judged under a secure core could show a prior's detail on an invoice filed under an ordinary one (D-112).
+- Pass the allocated tracking number (sprk_submissionsequence, D-87) as BillingEvaluationRequest.TrackingNumber. A null tracking number makes Duplicate findings fall back to the headline text.</constraint>
+    <constraint source="ontology-r1 re-check of 072 part E (2026-10-18)">Build the Decision Record snapshot and any stored copy of a billing Signal's reasons from the merged, scrubbed BillingSignalMapping form (the request, sentence and evidence), never from BillingSignalMapping.Findings. In a withheld group, Findings still carries the visible reason's values.</constraint>
+    <constraint source="072 part W adversarial review K1 (2026-10-19)">A merged billing Signal's consequence is its version's configured consequence, and its primary message is the first reject-consequence reason in code order. Neither is 073's deciding reason. When a submission is Rejected, choose the Signal's primary reason (sprk_sentence) from SubmissionRejectionRule's deciding findings (Rejects), so the firm sees the reason that actually rejected. When 073 holds every reason, do not present the Signal as a rejection.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Jobs and write path</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/finance-intelligence-architecture.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Finance job handler" location="src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs">Copy the handler skeleton (JobTypeName, payload parse, outcome mapping, follow-on enqueue); the pipeline body lives in the processor.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context and rigor">Declare rigor FULL. Read the notes of 043, 044, 045, 046, 047, 072, 073 for their final contracts. Write a one-page step-to-component map in notes before coding; if contracts do not compose, escalate.</step>
+    <step order="1">Handler: parse payload {submissionId}; flag check; idempotency re-read; call the processor; map results to JobOutcome.</step>
+    <step order="2">Processor steps 1-5: set Processing; ReadInvoiceAsync; compare the read firm invoice number with the typed one (D-91); map to 046 input and resolve; code lines (047); evaluate (072) with resolved lines and combined confidence; decide (073).</step>
+    <step order="3">Persist Accepted: one transaction for invoice (In Review, firm, core-record fields, tracking number, correlation id), lines (line type, timekeeper, codes, coding confidence, extraction-confidence JSON per FR-04 from 043's per-field confidence / page / bounding box), approval portion (021 columns; approvers are 103's), document invoice link; then 016 totals; then Signals via SignalWriter; then submission Accepted with sprk_invoice.</step>
+    <step order="4">Persist Rejected: submission Rejected, reason code, findings JSON (finding, line, values read, rule, version, clause) for 130 / 133; no invoice.</step>
+    <step order="5">After steps: enqueue InvoiceIndexing for accepted invoices (its handler is registered only when DocumentIntelligence:Enabled — FinanceModule.cs:186-189; record behaviour when absent); call IEbillingNotificationSink (no-op) for Accepted and Rejected.</step>
+    <step order="6">Tests: accepted path writes everything once; rejected path writes no invoice; failure injected after line creation leaves no invoice and status Failed or retry; re-delivery after Accepted is a no-op; re-delivery after a Signal-write failure completes Signals without a second invoice; each read reason code; flag off; missing tracking number allocation; Null AI facade → Failed with ai.invoice.disabled.</step>
+    <step order="7">Run the job end to end in a local or dev environment on one sample invoice if the deploy task has not yet run; otherwise leave to 053. Build, test, publish-size delta.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="9">Record deviations (transaction vs compensation, Signal ordering, assumptions) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the component contracts from 043, 046, 047, 072, 073, 014 or 016 do not compose (missing field, conflicting confidence model, evaluator needs data the pipeline does not have), STOP and escalate with the step-to-component map rather than adapting a component silently.</trigger>
+    <trigger>If neither ExecuteTransaction nor a reliable compensation can give all-or-nothing for invoice + lines + approval + link, STOP: FR-20's acceptance cannot be met and the owner must choose.</trigger>
+    <trigger>If writing Signals inside the same all-or-nothing unit is required by the owner (rather than idempotent after-commit as specified here), STOP and escalate with ontology-r1 (SignalWriter is ontology-owned).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>InvoiceExtractionJobHandler creates invoice data from email-derived candidates via the legacy extraction path; no handler runs the eBilling pipeline. No notification seam for eBilling exists.</existing>
+    <extension>The legacy handler is tied to InvoiceAnalysisService and the review-confirm flow and is retired by 050; extending it would keep the legacy contract alive. The notification sink is a one-method seam so 132 can plug in without editing the processor.</extension>
+    <cost-of-doing-nothing>FR-20 fails: submissions stay Received forever, no invoice is ever created from SPA or internal submission, and the R1 loop does not exist.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">dotnet build src/server/api/Sprk.Bff.Api/ ; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">InvoiceSubmissionProcessingJobHandler.cs, Services/Finance/Submission/InvoiceSubmissionProcessor.cs, IEbillingNotificationSink.cs, FinanceModule.cs</output>
+    <output type="test">InvoiceSubmissionProcessorTests.cs, InvoiceSubmissionProcessingJobHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Accepted path: exactly one sprk_invoice (In Review), its lines with extraction-confidence JSON and codes, one approval portion, the document's invoice link, totals from 016, Signals for every finding, submission Accepted with sprk_invoice set; indexing enqueued; notification sink called once.</criterion>
+    <criterion testable="true">Rejected path: submission Rejected with reason code and findings JSON; no sprk_invoice, line or approval row exists.</criterion>
+    <criterion testable="true">Negative (FR-20): a fault injected after line creation leaves no invoice, lines or approval row; the submission is Failed or left for retry, never Accepted.</criterion>
+    <criterion testable="true">Negative (NFR-08): re-delivery of a completed job creates nothing new; re-delivery after a Signal-write failure completes the Signals and creates no second invoice.</criterion>
+    <criterion testable="true">Each read reason code maps as specified (document-level → Rejected; service_failed → retry then Failed); Ebilling:Enabled false → Failed ebilling.disabled; Null AI facade → Failed ai.invoice.disabled.</criterion>
+    <criterion testable="true">Status transitions are persisted in order Received, Processing, then one terminal state; each is observable through 044's GET route.</criterion>
+    <criterion testable="true">No AI output alone produces Rejected: a test with a failing AiObservation finding and all-reliable reads yields Accepted.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+    <criterion testable="true">Publish-size delta of Sprk.Bff.Api measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-20, FR-21, FR-26, NFR-08, Processing Pipeline. Shared append point: FinanceModule.cs. SPA and internal submissions skip attachment classification (FR-21). Eligible approvers and in-app notification are 103 / 132; the PDF report is 133; firm-visible projection of findings is 130 (this task stores the full findings JSON).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

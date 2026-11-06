@@ -1,0 +1,34 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0075",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0075","generator_id":"gen_eval_set.py@1 F-0075","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0075.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Hartwell & Forsythe LLP","firm_invoice_number":"LF0046106","invoice_date":"2025-12-03","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"20362-0023","po_number":"PO-4588636","fees_total":5781.0,"expenses_total":1378.87,"adjustments_total":0.0,"total_due":7159.87,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Ashdown","title":"Partner","rate":430.0,"billed_as":"AA"},{"name":"Cyrus Delacroix","title":"Paralegal","rate":145.0,"billed_as":"CD"},{"name":"Oliver Ramanathan","title":"Associate","rate":260.0,"billed_as":"OR"},{"name":"Victor Lindqvist","title":"Associate","rate":210.0,"billed_as":"VL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-04","timekeeper":"CD","timekeeper_name":"Cyrus Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":145.0,"amount":319.0,"narrative":"Update document review protocol and coding panel for the customs audit","codes":["L140","A110"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-07","timekeeper":"VL","timekeeper_name":"Victor Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":210.0,"amount":483.0,"narrative":"Attend deposition of Solano Freight corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-11","timekeeper":"AA","timekeeper_name":"Anders Ashdown","timekeeper_title":"Partner","title":"Ptr","hours":1.95,"rate":430.0,"amount":838.5,"narrative":"Research case law supporting discovery plan","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-13","timekeeper":"CD","timekeeper_name":"Cyrus Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":145.0,"amount":130.5,"narrative":"Plan strategy for upcoming phase of the insurance coverage issue with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-14","timekeeper":"VL","timekeeper_name":"Victor Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":210.0,"amount":525.0,"narrative":"Review opposing brief in response to protective order","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-17","timekeeper":"VL","timekeeper_name":"Victor Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":210.0,"amount":525.0,"narrative":"Prepare production set and cover correspondence for service on Caldera Energy","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-18","timekeeper":"VL","timekeeper_name":"Victor Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":210.0,"amount":588.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-11-21","timekeeper":"CD","timekeeper_name":"Cyrus Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":2.6,"rate":145.0,"amount":377.0,"narrative":"Review court docket and calendar of pending deadlines for the supply agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-11-24","timekeeper":"CD","timekeeper_name":"Cyrus Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":145.0,"amount":203.0,"narrative":"Research authority for interrogatory responses","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-11-24","timekeeper":"VL","timekeeper_name":"Victor Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":210.0,"amount":147.0,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-11-26","timekeeper":"VL","timekeeper_name":"Victor Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":210.0,"amount":84.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-11-26","timekeeper":"OR","timekeeper_name":"Oliver Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":260.0,"amount":520.0,"narrative":"Analyze key documents for deposition preparation","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"fee","date":"2025-11-27","timekeeper":"VL","timekeeper_name":"Victor Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":210.0,"amount":126.0,"narrative":"Draft pretrial brief in the supply agreement","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"fee","date":"2025-11-27","timekeeper":"OR","timekeeper_name":"Oliver Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":260.0,"amount":390.0,"narrative":"Prepare monthly status report to client regarding the employment claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"fee","date":"2025-11-28","timekeeper":"VL","timekeeper_name":"Victor Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":210.0,"amount":525.0,"narrative":"Draft answer and affirmative defenses regarding deficiencies in Bluepine Holdings responses","codes":["L350","A103"],"page":1,"narrative_style":"clear"},
+  {"n":16,"line_type":"expense","date":"2025-11-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1378.87,"amount":1378.87,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["873 Harbor Road","Minneapolis","Tax ID 74-1635464"],"template":"T19","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-03-09","matter_close":"2026-02-28","matter_budget":53639.0,"approved_timekeepers":["Cyrus Delacroix","Beatrix Halloran","Anders Ashdown","Samuel Oyelaran","Oliver Ramanathan","Gideon Zielinski","Victor Lindqvist","Katya Pemberton"],"invoice_received_date":"2025-12-13"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[3],"consequence":"Reduce"}
+ ],
+ "seeded_violations":1
+}

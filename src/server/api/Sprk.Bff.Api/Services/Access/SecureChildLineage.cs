@@ -35,6 +35,22 @@ namespace Sprk.Bff.Api.Services.Access;
 /// (<c>AnalysisEndpoints</c>, <c>AppOnlyAnalysisService</c>); a Decision Record's typed core. A Signal and a Decision Record
 /// name their core record and subject first (<c>RecordOwnershipContext.ForExistingRowAsync</c>). Secure-if-any reads every
 /// parent, so the order never decides whether a row is secure.</para>
+/// <para><b>The core record pair is a parent too (Signals and Decision Records).</b> A row of
+/// <c>RecordOwnershipContext.CorePairTables</c> names its core record in a pair, not a lookup: <c>sprk_corerecordtype</c> (a
+/// <c>sprk_recordtype_ref</c> catalog row) + <c>sprk_corerecordid</c> (a string). A Signal has no typed project or work-assignment
+/// column, so a Signal whose core is a project or work assignment, and whose subject is another record, reached its core only
+/// through the subject's stamp, and re-filing the subject (D-123) dropped the core from its roots. So every walk reads the pair
+/// beside the lookups (<see cref="Table.LineageColumns"/>) and adds the record it names as a parent
+/// (<see cref="CorePairParent"/>): a root when the catalog names a matter, project or work assignment; nothing for a service
+/// request (D-36: a root the resolver does not look through, as the remarks above); undetermined for a malformed pair
+/// (<see cref="MalformedCorePair"/>) and for a type the catalog maps to no core table, its table name blank or not one of the
+/// closed set of core tables (<see cref="UnknownCoreRecordType"/>): <c>ForExistingRowAsync</c>'s words and rule, so the walk
+/// holds such a row as the ownership question does, and the data error is seen (a warning per type per run). A catalog read
+/// that faults, a missing catalog row included, is a read fault like any other parent read: it propagates, and the walk's
+/// caller retries. The pair is the same rule on both
+/// tables; a Decision Record whose typed core lookup names the same record adds no second root. Adding a root can only narrow
+/// the intersection, so the pair never widens what a child receives. The pair is kept OUT of <see cref="Table.Lookups"/>:
+/// readers of the map as an edge registry (ownership order, filing edges, the form library) see only lookups.</para>
 /// </remarks>
 internal static class SecureChildLineage
 {
@@ -47,7 +63,82 @@ internal static class SecureChildLineage
 
         /// <summary>The table's primary id column (every Spaarke table: logical name + <c>id</c>, verified live).</summary>
         public string IdColumn => LogicalName + "id";
+
+        /// <summary>Whether the table's rows name a core record in a pair (<see cref="SecureChildLineage.HoldsCorePair"/>).</summary>
+        public bool HoldsCorePair => SecureChildLineage.HoldsCorePair(LogicalName);
+
+        /// <summary>
+        /// Every column a lineage walk reads to find a row's parents: <see cref="Lookups"/>, then the core record pair on a
+        /// table that holds one (see the class remarks). A row read without them would look as if it named no core record.
+        /// </summary>
+        public IReadOnlyList<string> LineageColumns =>
+            HoldsCorePair ? Lookups.Keys.Concat(CorePairColumns).ToArray() : Lookups.Keys.ToArray();
     }
+
+    /// <summary>The core record pair's two columns, in the order <see cref="Table.LineageColumns"/> appends them.</summary>
+    internal static readonly IReadOnlyList<string> CorePairColumns =
+    [
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.CoreRecordTypeColumn,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.CoreRecordIdColumn,
+    ];
+
+    /// <summary>The record-type catalog a pair's type names (read through <c>CoreAncestorResolver.CoreTableOfRecordTypeAsync</c>).</summary>
+    internal const string RecordTypeCatalogTable = "sprk_recordtype_ref";
+
+    /// <summary>Why a row whose core record pair is malformed has undetermined roots (<c>ForExistingRowAsync</c>'s words).</summary>
+    internal const string MalformedCorePair = "its core record pair is malformed";
+
+    /// <summary>Why a row whose core record pair's type maps to no core table (a blank or non-core <c>sprk_recordlogicalname</c>)
+    /// has undetermined roots (<c>ForExistingRowAsync</c>'s words).</summary>
+    internal const string UnknownCoreRecordType = "its core record type is not a core record table in the record-type catalog";
+
+    /// <summary>
+    /// The text forms of a core id the downward walk matches <c>sprk_corerecordid</c> against: every form <c>Guid.TryParse</c>
+    /// (<c>RecordOwnershipContext.CorePairOf</c>) accepts that a writer could plausibly store — <c>D</c> (its writers' form),
+    /// <c>B</c> (<c>{...}</c>), <c>P</c> (<c>(...)</c>) and <c>N</c> (32 hex digits). The hex-structure <c>X</c> form is left out:
+    /// no writer stores it.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> StoredCoreIdFormats = ["D", "B", "P", "N"];
+
+    /// <summary>True for a table whose rows name a core record in a pair: <c>RecordOwnershipContext.CorePairTables</c>.</summary>
+    internal static bool HoldsCorePair(string? logicalName) =>
+        logicalName is not null && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.CorePairTables.Contains(logicalName);
+
+    /// <summary>
+    /// The parent a whole core record pair adds to a row's lineage once its type has been read through the catalog
+    /// (<c>CoreAncestorResolver.CoreTableOfRecordTypeAsync</c>): the core record when it is one of the three roots; <c>null</c>
+    /// for a service request (D-36). A type the catalog maps to no core table (<c>null</c> here) is the caller's to hold as
+    /// undetermined (<see cref="UnknownCoreRecordType"/>) before it asks; a malformed pair never reaches here either
+    /// (<see cref="MalformedCorePair"/>). Pure.
+    /// </summary>
+    internal static (string Table, Guid Id)? CorePairParent(string? coreTable, Guid coreId) =>
+        coreTable is not null && IsRoot(coreTable) ? (coreTable.ToLowerInvariant(), coreId) : null;
+
+    /// <summary>
+    /// The conditions a DOWNWARD walk adds to a query of <paramref name="table"/> to find its rows whose core record pair names
+    /// one of <paramref name="frontier"/>'s roots: (<c>sprk_corerecordid</c>, the id in each of
+    /// <see cref="StoredCoreIdFormats"/>, lowercase; Dataverse compares text case-insensitively). Empty for a table with no pair
+    /// or a frontier with no root. The type is not matched here: each row found is decided by its own upward walk (or ownership
+    /// question), which reads the type. <paramref name="alsoServiceRequests"/>: the ORDINARY-parent-move pass only (F4-b), whose
+    /// root can be a service request and whose ownership question takes a service-request core as the row's primary parent;
+    /// the secure walks never pass it (D-36: a service request is no secure root).
+    /// </summary>
+    /// <remarks>Known limits. A stored id with leading or trailing whitespace is not matched (the text compare is exact; the
+    /// upward walk and the ownership question still read it, as <c>CorePairOf</c> trims). <c>sprk_corerecordid</c> is an
+    /// unindexed text column, so the <c>In</c> condition scans the table: acceptable at today's volumes, to revisit for
+    /// production volume.</remarks>
+    internal static IEnumerable<(string Column, object Value)> CorePairMatches(
+        string table, IEnumerable<(string Table, Guid Id)> frontier, bool alsoServiceRequests = false) =>
+        HoldsCorePair(table)
+            ? frontier
+                .Where(r => IsRoot(r.Table)
+                    || (alsoServiceRequests && string.Equals(r.Table, ServiceRequest, StringComparison.OrdinalIgnoreCase)))
+                .SelectMany(r => StoredCoreIdFormats.Select(format =>
+                    (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.CoreRecordIdColumn,
+                        (object)r.Id.ToString(format, System.Globalization.CultureInfo.InvariantCulture).ToLowerInvariant())))
+            : [];
+
+    private const string ServiceRequest = "sprk_servicerequest";
 
     private const string Project = "sprk_project";
     private const string Matter = "sprk_matter";
@@ -97,8 +188,10 @@ internal static class SecureChildLineage
             ("sprk_analysisid", "sprk_analysis")),
         T("sprk_attachmentartifact", "sprk_attachmentartifacts",
             ("sprk_document", "sprk_document"), ("sprk_emailartifact", "sprk_emailartifact")),
+        // ebilling-r1 task 013 (FR-05): + sprk_regardingworkassignment (ebilling-r1 task 010, live spaarkedev1 2026-10-15).
         T("sprk_billingevent", "sprk_billingevents",
-            ("sprk_invoice", "sprk_invoice"), ("sprk_matter", Matter), ("sprk_project", Project)),
+            ("sprk_invoice", "sprk_invoice"), ("sprk_matter", Matter), ("sprk_project", Project),
+            ("sprk_regardingworkassignment", WorkAssignment)),
         T("sprk_budget", "sprk_budgets",
             ("sprk_matter", Matter), ("sprk_project", Project)),
         // Ontology platform R1 task 044 (D-33/D-38): the revision a decision records is owned by the secure team under a Secure
@@ -132,14 +225,21 @@ internal static class SecureChildLineage
             Regarding("sprk_analysis", "sprk_budget", "sprk_event", "sprk_invoice", Matter, Project, WorkAssignment)),
         // spaarke-ontology-platform-r1 task 039 (owner D-33/D-36; reviewed by unified-access-control-r2 on #1355). Typed core
         // lookups read live, spaarkedev1 2026-10-07: sprk_corerecordtype (a catalog row) and sprk_corerecordid (a string) are
-        // not lookups to a parent; sprk_action and sprk_policyversion are not filing.
+        // not lookups to a parent, so they are not entries here: the walks read that pair beside these lookups
+        // (Table.LineageColumns, CorePairParent; see the remarks). sprk_action and sprk_policyversion are not filing.
         // unified-access-control-r2 task 182 (child-record contract C4): the subject's regarding lookups, the same eight as
         // the Signal row, live on spaarkedev1 2026-10-12 (ontology task 140, #1763). sprk_regardingservicerequest is left
         // out, as on the Signal row (see the remarks). The typed core lookups STAY: they are the decision context (D-34, the
         // core the decision was made on) and a lineage parent, not a stamp awaiting retirement. Ontology task 144 K1 and 145
         // keep them; the stamp follows the subject, the typed core does not, so stamp == core is no reason to retire one.
+        // ebilling-r1 task 026 (FR-15, D-94): + the invoice-line subject, sprk_regardinginvoiceline -> sprk_billingevent (live
+        // spaarkedev1 2026-10-16). An explicit tuple: Regarding("sprk_billingevent") would build sprk_regardingbillingevent.
         T("sprk_decisionrecord", "sprk_decisionrecords",
-            new[] { ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment) }
+            new[]
+                {
+                    ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment),
+                    ("sprk_regardinginvoiceline", "sprk_billingevent"),
+                }
                 .Concat(Regarding("sprk_communication", "sprk_document", "sprk_event", "sprk_invoice", Matter, Project,
                     "sprk_todo", WorkAssignment))
                 .ToArray()),
@@ -169,9 +269,36 @@ internal static class SecureChildLineage
             ("sprk_event", "sprk_event")),
         T("sprk_fileversion", "sprk_fileversions",
             ("sprk_document", "sprk_document")),
+        // ebilling-r1 task 013 (FR-05): + sprk_regardingworkassignment (task 012, live spaarkedev1 2026-10-15). Two other task
+        // 012 lookups are left out pending unified-access-control-r2: sprk_supersedesinvoice (the invoice a resubmission
+        // replaces — not a filing; as a lineage parent it would also join ParentLineage and the external invoices module's
+        // live-parent rule) and sprk_billingexport (an export batch is not a codified table). Task 013 notes, section 10.
         T("sprk_invoice", "sprk_invoices",
             new[] { ("sprk_matter", Matter), ("sprk_project", Project) }
-                .Concat(Regarding("sprk_agreement")).ToArray()),
+                .Concat(Regarding("sprk_agreement", WorkAssignment)).ToArray()),
+        // ebilling-r1 task 013 (FR-05, D-82): the invoice family's new tables, lookups read live, spaarkedev1 2026-10-15
+        // (EntityDefinitions(<table>)/ManyToOneRelationships). Each names its core record through the CoreAncestorLookups
+        // trio; the vendor organization, the submitter / decider contact and the issuing organization are identities, not
+        // parents.
+        // A submission's core record comes first, then its submitted PDF, so a row read with these columns names its core
+        // record as its ownership primary; the invoice and the report it produced, and the submission it resubmits, follow
+        // (UAC-r2 ruling on RecordFamilyEdges, 2026-10-28: outputs and a peer, not its filing).
+        T("sprk_invoicesubmission", "sprk_invoicesubmissions",
+            Regarding(Matter, Project, WorkAssignment).Concat(new[]
+            {
+                ("sprk_document", "sprk_document"), ("sprk_invoice", "sprk_invoice"), ("sprk_reportdocument", "sprk_document"),
+                ("sprk_resubmissionof", "sprk_invoicesubmission"),
+            }).ToArray()),
+        // Its sprk_decisionrecord lookup is left out: a Decision Record is stamped outside the access taxonomy and nothing is
+        // filed under one but a Signal (CoreAncestorResolver.StampedOutsideAccessTaxonomy, uac-r2's condition 3).
+        T("sprk_invoiceapproval", "sprk_invoiceapprovals",
+            new[] { ("sprk_invoice", "sprk_invoice") }
+                .Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
+        T("sprk_externalidentifier", "sprk_externalidentifiers",
+            Regarding("sprk_invoice", Matter, Project, WorkAssignment)),
+        T("sprk_invoicecorrection", "sprk_invoicecorrections",
+            new[] { ("sprk_invoice", "sprk_invoice"), ("sprk_invoiceline", "sprk_billingevent") }
+                .Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
         T("sprk_kpiassessment", "sprk_kpiassessments",
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_reportcard", "sprk_reportcard")),
         T("sprk_memo", "sprk_memos",
@@ -191,10 +318,18 @@ internal static class SecureChildLineage
         // spaarke-ontology-platform-r1 task 039 (owner D-33/D-36; reviewed by unified-access-control-r2 on #1355). Lookups
         // read live, spaarkedev1 2026-10-07: the typed core lookup sprk_matter, the subject's regarding lookups and the
         // Decision Record. sprk_regardingservicerequest is left out (see the remarks); sprk_policy, sprk_policyversion and
-        // sprk_corerecordtype (a catalog row) are not filing parents. #2084: the rule and its version are family tables now, but a
+        // sprk_corerecordtype (a catalog row) are not lookup entries. The core record pair (sprk_corerecordtype +
+        // sprk_corerecordid) IS a parent, read beside these lookups: a Signal has no typed project or work-assignment column, so
+        // without it a project or work-assignment core was reached only through the subject's stamp (see the remarks). #2084:
+        // the rule and its version are family tables now, but a
         // Signal CITES the rule that raised it and is not filed under it (RecordOwnershipResolver.CitationLookups).
+        // ebilling-r1 task 026 (FR-15, D-94): + sprk_regardinginvoiceline -> sprk_billingevent, as on the Decision Record row.
         T("sprk_signal", "sprk_signals",
-            new[] { ("sprk_matter", Matter), ("sprk_decisionrecord", "sprk_decisionrecord") }
+            new[]
+                {
+                    ("sprk_matter", Matter), ("sprk_decisionrecord", "sprk_decisionrecord"),
+                    ("sprk_regardinginvoiceline", "sprk_billingevent"),
+                }
                 .Concat(Regarding("sprk_communication", "sprk_document", "sprk_event", "sprk_invoice", Matter, Project,
                     "sprk_todo", WorkAssignment))
                 .ToArray()),
@@ -211,12 +346,15 @@ internal static class SecureChildLineage
     /// UAC task 194b R4: the primary order of a ROOT table whose rows are filed under a parent (a root is not a
     /// <see cref="Children"/> entry, so it has no <see cref="Table.LookupOrder"/> there). A project's primary is the record its
     /// ADR-024 pair names (<c>sprk_regardingrecordid</c>, <c>SecureRootInheritance.PairNamesAParentOnItsOwn</c>; the
-    /// field-mapping 070 registry's project→pair edge), asked under that column.
+    /// field-mapping 070 registry's project→pair edge), asked under that column. A work assignment's primary is its matter,
+    /// then its project, invoice, event: its filing order (<c>SecureRootInheritance.TypedLookupsOf</c>, owner decision
+    /// 2026-10-29). Without an entry the order fell to column name, which put the event first.
     /// </summary>
     internal static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> RootLookupOrder =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase)
         {
             [Project] = ["sprk_regardingrecordid"],
+            [WorkAssignment] = SecureRootInheritance.TypedLookupsOf(WorkAssignment).Select(t => t.Column).ToArray(),
         };
 
     /// <summary>True for a table whose rows the synchronizer mirrors (a child, never a root).</summary>

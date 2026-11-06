@@ -4,8 +4,10 @@
     <title>FR-11 (A-14): Anonymous share links must be tracked and revocable, or disabled</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-002</gate>
-    <status>completed-with-escalation</status>
-    <status-note>**Set to `completed-with-escalation` 2026-09-02** (unified-access-control-r2 item 8).
+    <status>completed</status>
+    <status-note>**Closed 2026-10-16: FR-11 met by option (b), disabled.** PR #2021 (merged `b1eaecb49`, owner-approved) retired `POST /api/documents/{id}/share-link`. Graph refuses `createLink` in SPE containers (#1350), no caller remained, and a working link would have bypassed Secure / No Access (#1752 link half). The escalation history below is kept for the record.
+
+**Set to `completed-with-escalation` 2026-09-02** (unified-access-control-r2 item 8).
 
 **What is actually fixed** — by task **072**, not by this task: the route gained a per-document `share`
 gate (it had none); the link gained a **mandatory bounded expiry** (it was `expiration: null`, i.e.

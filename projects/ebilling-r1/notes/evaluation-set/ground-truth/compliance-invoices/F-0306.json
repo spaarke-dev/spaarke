@@ -1,0 +1,24 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0306",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0306","generator_id":"gen_eval_set.py@1 F-0306","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0306.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Tennant and Ambrose LLP","firm_invoice_number":"INV-2026-83020","invoice_date":"2026-07-02","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"56152-0021","po_number":"PO-4528028","fees_total":3485.5,"expenses_total":494.22,"adjustments_total":0.0,"total_due":3979.72,"currency":"USD"},
+ "timekeepers":[{"name":"Louis Pemberton","title":"Partner","rate":370.0,"billed_as":"LP"},{"name":"Mei Hargrove","title":"Associate","rate":205.0,"billed_as":"MH"},{"name":"Peter Eriksen","title":"Associate","rate":230.0,"billed_as":"PE"},{"name":"Sofia Delacroix","title":"Associate","rate":210.0,"billed_as":"SD"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-01","timekeeper":"SD","timekeeper_name":"Sofia Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":210.0,"amount":84.0,"narrative":"Review documents produced by Alder & Finch Ltd for responsiveness","codes":["L320","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-05","timekeeper":"PE","timekeeper_name":"Peter Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":230.0,"amount":299.0,"narrative":"Research case law supporting settlement proposal","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-11","timekeeper":"SD","timekeeper_name":"Sofia Delacroix","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":210.0,"amount":588.0,"narrative":"Attend deposition of Quarry Lane Partners corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-19","timekeeper":"MH","timekeeper_name":"Mei Hargrove","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":205.0,"amount":61.5,"narrative":"Review expert report served by Caldera Energy","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-22","timekeeper":"LP","timekeeper_name":"Louis Pemberton","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":370.0,"amount":814.0,"narrative":"Review expert report served by Bluepine Holdings","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-25","timekeeper":"LP","timekeeper_name":"Louis Pemberton","timekeeper_title":"Partner","title":"Ptr","hours":3.0,"rate":370.0,"amount":1110.0,"narrative":"Prepare production set and cover correspondence for service on Solano Freight","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-25","timekeeper":"PE","timekeeper_name":"Peter Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":230.0,"amount":529.0,"narrative":"Meet and confer with counsel for Northwind Logistics regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-06-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":494.22,"amount":494.22,"narrative":"Airfare to Denver for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["214 Harbor Road","Atlanta","Tax ID 43-7018918"],"template":"T15","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-09-09","matter_close":"2026-09-28","matter_budget":40918.0,"approved_timekeepers":["Mei Hargrove","Anders Ashdown","Louis Pemberton","Louis Tavares","Sofia Delacroix","Peter Eriksen"],"invoice_received_date":"2026-07-04"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

@@ -91,8 +91,7 @@
       {
         "name": "invoiceStatus",
         "type": "string",
-        "description": "Validation status based on mathematical verification and completeness checks",
-        "$choices": "downstream:update_doc.sprk_invoicestatus"
+        "description": "Validation status based on mathematical verification and completeness checks"
       },
       {
         "name": "issues",
@@ -100,7 +99,11 @@
         "items": {
           "type": "object",
           "properties": {
-            "type": { "type": "string", "enum": ["DISCREPANCY", "MISSING", "SENSITIVE", "FLAG"], "description": "Issue category" },
+            "type": {
+              "type": "string",
+              "enum": ["DISCREPANCY", "MISSING", "SENSITIVE", "FLAG"],
+              "description": "Issue category"
+            },
             "description": { "type": "string", "description": "Detailed description of the issue" },
             "field": { "type": "string", "description": "Which field or line item is affected" }
           }
@@ -144,12 +147,30 @@
           "taxId": "84-1234567"
         },
         "lineItems": [
-          { "lineNumber": 1, "description": "Cloud Infrastructure Services (Feb 2026)", "quantity": 1, "unitPrice": 12500.00, "lineTotal": 12500.00 },
-          { "lineNumber": 2, "description": "Data Analytics Platform License", "quantity": 5, "unitPrice": 450.00, "lineTotal": 2250.00 },
-          { "lineNumber": 3, "description": "Professional Services: Migration Support", "quantity": 40, "unitPrice": 175.00, "lineTotal": 7000.00 }
+          {
+            "lineNumber": 1,
+            "description": "Cloud Infrastructure Services (Feb 2026)",
+            "quantity": 1,
+            "unitPrice": 12500.0,
+            "lineTotal": 12500.0
+          },
+          {
+            "lineNumber": 2,
+            "description": "Data Analytics Platform License",
+            "quantity": 5,
+            "unitPrice": 450.0,
+            "lineTotal": 2250.0
+          },
+          {
+            "lineNumber": 3,
+            "description": "Professional Services: Migration Support",
+            "quantity": 40,
+            "unitPrice": 175.0,
+            "lineTotal": 7000.0
+          }
         ],
         "financialSummary": {
-          "subtotal": 21750.00,
+          "subtotal": 21750.0,
           "taxAmount": 1794.38,
           "taxRate": "8.25% sales tax",
           "totalAmountDue": 23544.38,

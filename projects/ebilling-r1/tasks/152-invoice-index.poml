@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="152" project="ebilling-r1">
+  <metadata>
+    <title>Invoice index from structured records</title>
+    <phase>6 Export and index (WP6) — wave W6-1</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Reshapes an existing indexing job and index schema; tenant filtering is an existing invariant the deploy script verifies; no new endpoint.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends InvoiceIndexingJobHandler and the index JSON following the AI Search catalog; explicit field list and enqueue points below.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P6-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>049, 103</deps>
+    <tags>bff, ai-search, jobs</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Rebuild spaarke-invoices-index from structured invoice and line records (FR-43, D-44) — firm, core record, timekeepers, UTBMS codes, amounts, status and narrative — and re-index an invoice on acceptance and on every status or approval change, so an accepted invoice is searchable by firm, core record and UTBMS code within 5 minutes (NFR-03).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure AI Search index design, the BFF job contract (ADR-004) and the AI Search index catalog.</role>
+
+  <goal>InvoiceIndexingJobHandler indexes from sprk_invoice + sprk_billingevent rows (document text no longer required); the index JSON carries the new filterable fields and deploys through Deploy-AllIndexes.ps1; enqueue happens on acceptance (049), on every lifecycle transition (014) and on approval (103) with a key that is not deduplicated across changes; InvoiceSearchService keeps working; tests pass.</goal>
+
+  <context>
+    <background>Spec FR-43 (acceptance: an accepted invoice is searchable by firm, core record and UTBMS code within NFR-03; rejected submissions are not in the invoice index; index tenant-filtered; invoice PDFs follow the standard document pipeline into the files index), D-44, NFR-03. Today: Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs is document-centric (payload invoiceId + documentId, :80-85; uses the document's extracted text :109-121; embedding through IInvoiceAi.GenerateEmbeddingAsync :127; MergeOrUpload :164-176). It is enqueued only by InvoiceExtractionJobHandler.cs:595-605 with IdempotencyKey "invoice-index-{invoiceId}" — a fixed key that would deduplicate later status-change re-indexes. Index schema: infrastructure/ai-search/spaarke-invoices-index.json (fields id, content, contentVector, chunkIndex, invoiceId, documentId, matterId, projectId, vendorOrgId, vendorName, invoiceNumber, invoiceDate, totalAmount, currency, documentType, tenantId, indexedAt). Catalog: docs/architecture/AI-SEARCH-INDEX-CATALOG.md rows 6 (:173, :185 — schema only, empty pre-deletion). Deploy: scripts/ai-search/Deploy-AllIndexes.ps1 entry invoices-index (:263-271, invariants VectorFields contentVector, RequiredFilterableFields tenantId, invoiceId, matterId, projectId). Consumer: Services/Finance/InvoiceSearchService.cs (SearchFields content, vendorName, invoiceNumber :56) behind GET /api/finance/invoices/search.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</file>
+      <file role="modify">infrastructure/ai-search/spaarke-invoices-index.json</file>
+      <file role="modify">scripts/ai-search/Deploy-AllIndexes.ps1 (invoices-index invariants only)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceLifecycleService.cs (enqueue after a successful transition)</file>
+      <file role="modify">049's acceptance path and 103's approval path (enqueue only, if not covered by the lifecycle hook)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceSearchService.cs (only if a field it reads changes)</file>
+      <file role="modify">docs/architecture/AI-SEARCH-INDEX-CATALOG.md (row 6)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (InvoiceIndexingJobHandler tests — create the file under Services/Jobs/Handlers/ if none exists)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="049" status="pending">Accepted invoices with lines, codes and timekeepers</dependency>
+      <dependency task="103" status="pending">Approval path</dependency>
+      <dependency task="014" status="pending">InvoiceLifecycleService (earlier wave)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-43, D-44">One search document per invoice (id = invoice id) built from structured records: firm id and name, core record type, id and name (Matter, Project or Work Assignment), timekeeper ids and names, task / activity / expense codes (collections, filterable and facetable), billed and approved totals, statuscode, invoice date, billing period, and narratives in content. Record in notes if per-line documents are chosen instead, with the reason.</constraint>
+    <constraint source="ADR-004, NFR-08">Idempotent MergeOrUpload keyed by invoice id; enqueue keys include the change (for example invoice id plus row version or transition) so status-change re-indexes are not deduplicated away.</constraint>
+    <constraint source="ADR-014, catalog invariants">tenantId populated and filterable on every document; RequiredFilterableFields extended with the new firm and core-record fields; the vector field stays 3072-dim.</constraint>
+    <constraint source="FR-43">Only sprk_invoice rows are indexed; submissions (accepted or rejected) never are. Invoice PDFs stay in the standard files pipeline (no change here).</constraint>
+    <constraint source="ADR-013, ADR-015">Embeddings only through IInvoiceAi.GenerateEmbeddingAsync; logs carry ids, counts and timings, never narrative text.</constraint>
+    <constraint source="project">Index schema changes deploy only with Deploy-AllIndexes.ps1 (dev, -DryRun first) inside 153; this task edits the JSON and verifies with -DryRun. Changing an existing field's attributes requires recreating the index: escalate before relying on that.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement BFF IJobHandler (spec placement table), no package, publish-size delta recorded, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>.claude/patterns/ai/indexing-pipeline.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>projects/ebilling-r1/spec.md (FR-43, NFR-03)</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 049's and 103's write paths, 014's lifecycle service, and the current handler, index JSON and InvoiceSearchService; confirm the dev index is empty or disposable (catalog :185) before planning a recreate.</step>
+    <step order="1">Index JSON: add the fields in constraint 1; keep fields InvoiceSearchService reads; update Deploy-AllIndexes.ps1 invariants; run Deploy-AllIndexes.ps1 -Environment dev -Indexes invoices-index -DryRun and record the plan.</step>
+    <step order="2">Handler: payload invoiceId (documentId optional for legacy callers until 050 retires them); load invoice, lines, timekeepers, codes and core record; build content from header facts and line narratives; embed; MergeOrUpload.</step>
+    <step order="3">Enqueue: after each successful InvoiceLifecycleService transition and on acceptance in 049 (and 103 if approval is not a lifecycle transition there), with change-specific idempotency keys.</step>
+    <step order="4">Tests: document built from structured records (codes, timekeepers, firm, core record type Project not Matter for a Project invoice); tenantId always set; re-delivery of the same message produces the same document; a status change enqueues a new job that is not deduplicated; Null AI facade path follows the handler's existing behaviour; InvoiceSearchService query still binds.</step>
+    <step order="5">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="6">Update AI-SEARCH-INDEX-CATALOG.md row 6 (feeding: structured records; producers).</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (document granularity, recreate need, enqueue points) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the schema change needs an index recreate and the dev index holds documents other projects rely on, STOP and ask before 153 deploys it.</trigger>
+    <trigger>If 050 has not yet redirected InvoiceExtractionJobHandler and both paths would index the same invoice with different shapes, STOP and agree the order with the main session.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>InvoiceIndexingJobHandler and spaarke-invoices-index (catalog row 6); InvoiceSearchService consumes it; spec section 11 has no new-component row because this extends the existing handler and index.</existing>
+    <extension>Yes — the existing handler, index and deploy entry are extended; the only new surface is the enqueue call in the lifecycle service and the new index fields.</extension>
+    <cost-of-doing-nothing>The invoice index reflects document text only, cannot be filtered by firm, core record or UTBMS code, and never updates on status changes (FR-43, NFR-03 fail).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="pwsh">Deploy-AllIndexes.ps1 -DryRun</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">InvoiceIndexingJobHandler.cs; InvoiceLifecycleService.cs enqueue; spaarke-invoices-index.json; Deploy-AllIndexes.ps1 invariants</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Handlers/InvoiceIndexingJobHandlerTests.cs</output>
+    <output type="docs">docs/architecture/AI-SEARCH-INDEX-CATALOG.md row 6</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A search document built for an accepted invoice carries firm, core record type and id, timekeepers, task / activity / expense codes, totals, statuscode, tenantId and line narratives, all from structured records.</criterion>
+    <criterion testable="true">Each lifecycle transition and acceptance enqueues an indexing job whose idempotency key differs from the previous one for the same invoice; re-delivery of one message produces the same document.</criterion>
+    <criterion testable="true">No code path indexes an sprk_invoicesubmission.</criterion>
+    <criterion testable="true">Deploy-AllIndexes.ps1 -DryRun for invoices-index passes its invariants including the new required filterable fields.</criterion>
+    <criterion testable="true">GET /api/finance/invoices/search still compiles against the index fields (existing tests green).</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>NFR-03 (5 minutes end to end) is measured in dev by 153. P6-A runs with 150: this task owns the enqueue inside InvoiceLifecycleService.cs; 150 only calls the service. FinanceModule.cs is a shared append point if a registration changes.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

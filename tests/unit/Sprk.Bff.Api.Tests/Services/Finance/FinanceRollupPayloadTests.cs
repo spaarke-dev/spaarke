@@ -81,8 +81,18 @@ public class FinanceRollupPayloadTests
         var fields = Build();
 
         fields["sprk_totalspendtodate"].Should().Be(1234.56m);
+        fields.Should().NotContainKey("sprk_pendingspend", "D-104: Pending Spend goes in its own PATCH, so a missing column cannot block this one");
         fields["sprk_invoicecount"].Should().Be(3);
         fields["sprk_remainingbudget"].Should().Be(3765.44m);
         fields["sprk_monthovermonthvelocity"].Should().Be(-12.5m);
+    }
+
+    [Fact(DisplayName = "Pending Spend payload is the one column, as a bare decimal")]
+    public void BuildPendingSpendFields_IsTheOneColumn_AsABareDecimal()
+    {
+        var fields = FinanceRollupService.BuildPendingSpendFields(77.25m);
+
+        fields.Should().ContainSingle();
+        fields["sprk_pendingspend"].Should().Be(77.25m);
     }
 }

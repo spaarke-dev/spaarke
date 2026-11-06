@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="192" project="unified-access-control-r2">
+  <metadata>
+    <title>SPE JIT-grant revocation sweep: Graph "Invalid hostname for this tenancy" every run on dev (#1830 / R3 ISS-006)</title>
+    <phase>Session 28: UAC (R3 hand-off, 2026-10-22)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security: a sweep that fails on every run may leave revoked external users with SPE container membership (file access). Modifies .cs.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Root-cause diagnosis across Graph/SPE tenancy, the membership marker store and the sweep's failure handling; security-relevant.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches SpeContainerMembershipSync / SpeContainerMembershipService only; no overlap with #2253 or #2258.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, security, access-control, spe, background, testing</tags>
+    <estimated-effort>diagnosis half a day; fix per root cause</estimated-effort>
+    <origin>
+      GitHub #1830 (R3 ISS-006), handed to UAC by R3 at the owner's request on 2026-10-22. It was the only exception class in the 1283c41817 server gate, with 288 occurrences in 24 h, the same rate before and after the deploy (notes/task-190-round122-linked-eml-access.md §6).
+    </origin>
+  </metadata>
+
+  <goal>
+Every run of the revocation sweep (`SpeContainerMembershipSync.RemoveRevokedJitGrantsAsync`) removes the container membership of every revoked JIT grant it can reach. One unreadable container never stops the others. On dev, the "Invalid hostname for this tenancy" exception class goes to zero because its cause is removed, not because it is caught or logged at a lower level.
+  </goal>
+
+  <steps mode="directional">
+    1. Diagnose (read-only). Find which container id or ids the sweep reads when it throws: App Insights `spe-insights-dev-67e2xz`, role `spaarke-bff-dev`, plus the marker/grant rows in dev Dataverse. Establish why Graph answers "Invalid hostname for this tenancy" — for example a container of another tenant or app, a stale or deleted container, a wrong-tenant Graph client, or a malformed id. Do not purge or delete any SPE container.
+    2. Decide where the fix belongs: the data (a stale row), the sweep (per-item isolation), the Graph client or tenant selection, or more than one of these. Each part is fixed in scope or filed.
+    3. Implement the fix. Per-item failure isolation must keep failing closed: an unreadable grant stays queued for retry and is reported. It is never treated as revoked-and-done, and it never silently drops a revocation.
+    4. Tests: must-fire (one bad container does not stop the other revocations; the bad item is reported and retried) and must-not-fire (healthy runs unchanged). Perturbation-check them.
+    5. Run the ArchTests, the filtered unit tests, and both integration suites in full. Measure the publish delta. Open a PR. Merge, deploy through R3, then run the server gate: the exception class is at 0 and the sweep's run reports show revocations processed.
+  </steps>
+
+  <acceptance-criteria>
+    - The root cause is named with evidence (container id class, tenancy and why), recorded in notes/task-192-spe-revocation-sweep.md.
+    - After deploy, the dev App Insights count of "Invalid hostname for this tenancy" from the sweep is 0 over 30 min (it was about 6 per 30 min before).
+    - A revoked grant on a healthy container is removed even when another grant in the same run points at an unreadable container (test).
+    - An unreadable grant is not marked done and is visible in the run report or logs (test).
+    - No SPE container is purged or deleted, and there is no Key Vault, Entra or app-setting write without the owner's go.
+    - Negative: no change to the catch-and-log level alone counts as the fix.
+  </acceptance-criteria>
+
+  <constraints>
+    - CLAUDE.md §9-§11; ADR-028; ADR-052 (background work); never purge or delete SPE containers; dev only; no prod or non-dev Key Vault.
+    - Fail closed: on any doubt the grant stays pending revocation, not done.
+    - Don't touch `SpeAdminGraphService.cs`.
+  </constraints>
+</task>

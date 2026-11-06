@@ -62,7 +62,9 @@ public class DocumentAccessPermissionWriterGuardTests
             "OfficeDocumentPersistence.ApplyEmailCommunicationOutcome together with " +
             "AccessInheritance.OwnNarrowingUntilEmailIdentified(Restricted) (provisional, owner round 122) " +
             "(CreateDocumentRequest.AccessInheritanceRecord). The stager writes both in the one create and refuses a value " +
-            "without its record (DocumentCommunicationFieldsStagingTests)."),
+            "without its record (DocumentCommunicationFieldsStagingTests). ebilling-r1 task 095: the same method's " +
+            "submissionNarrowing branch sets Restricted with the NON-provisional AccessInheritance.OwnNarrowing(Restricted) and " +
+            "the submission marker, for the from-email submission's .eml only (SubmissionMarkerWriterGuardTests)."),
     };
 
     private static readonly IReadOnlyList<Writer> NonDocumentWriters = new[]

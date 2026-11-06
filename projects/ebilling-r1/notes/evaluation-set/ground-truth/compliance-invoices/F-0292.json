@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0292",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0292","generator_id":"gen_eval_set.py@1 F-0292","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0292.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Penhallow & Yardley LLP","firm_invoice_number":"INV-2026-31378","invoice_date":"2025-09-07","billing_period_start":"2025-05-01","billing_period_end":"2025-05-31","firm_matter_reference":"74390-0023","po_number":"PO-4565565","fees_total":4502.5,"expenses_total":116.24,"adjustments_total":0.0,"total_due":4618.74,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Castellanos","title":"Paralegal","rate":195.0,"billed_as":"AC"},{"name":"Clara Halloran","title":"Legal Assistant","rate":165.0,"billed_as":"CH"},{"name":"Gideon Wickham","title":"Associate","rate":370.0,"billed_as":"GW"},{"name":"Ivan Fairweather","title":"Senior Associate","rate":440.0,"billed_as":"IF"},{"name":"Katya Blackwood","title":"Paralegal","rate":190.0,"billed_as":"KB"},{"name":"Peter Abernathy","title":"Associate","rate":315.0,"billed_as":"PA"},{"name":"Priya Halloran","title":"Associate","rate":360.0,"billed_as":"PH"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-06","timekeeper":"KB","timekeeper_name":"Katya Blackwood","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":190.0,"amount":475.0,"narrative":"Scheduled conference call and updated calendar entries","codes":["L530","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":2,"line_type":"fee","date":"2025-05-07","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":370.0,"amount":740.0,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-05-15","timekeeper":"AC","timekeeper_name":"Anders Castellanos","timekeeper_title":"Paralegal","title":"Para","hours":0.25,"rate":195.0,"amount":48.75,"narrative":"Prepare case assessment memorandum regarding the warranty claim and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-05-16","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":370.0,"amount":277.5,"narrative":"Prepare for oral argument in the construction contract","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-05-19","timekeeper":"PA","timekeeper_name":"Peter Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":315.0,"amount":630.0,"narrative":"Research appealability issues in the employment claim","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-05-19","timekeeper":"CH","timekeeper_name":"Clara Halloran","timekeeper_title":"Legal Assistant","title":"LA","hours":3.0,"rate":230.0,"amount":690.0,"narrative":"Prepare monthly status report to client regarding the licensing dispute","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-05-23","timekeeper":"AC","timekeeper_name":"Anders Castellanos","timekeeper_title":"Paralegal","title":"Para","hours":2.25,"rate":195.0,"amount":438.75,"narrative":"Review court docket and calendar of pending deadlines for the vendor agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-05-26","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":370.0,"amount":185.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-05-27","timekeeper":"GW","timekeeper_name":"Gideon Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.75,"rate":370.0,"amount":1017.5,"narrative":"Prepare for oral argument in the construction contract","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-05-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":11.7,"amount":23.4,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-05-26","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":46.42,"amount":92.84,"narrative":"Overnight courier to Summit Ridge Homes counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["978 Lakeshore Drive","Minneapolis","Tax ID 15-7304969"],"template":"T15","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-07-18","matter_close":"2025-08-29","matter_budget":43474.0,"approved_timekeepers":["Katya Blackwood","Clara Halloran","Priya Halloran","Ivan Fairweather","Gideon Wickham","Peter Abernathy"],"invoice_received_date":"2025-09-08"},
+ "expected_findings":[
+  {"rule_id":"RS-04-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[3],"consequence":"Reject"},
+  {"rule_id":"RS-04-R01","rule_type":"ApprovedTimekeeper","scope":"line","line_refs":[7],"consequence":"Reject"},
+  {"rule_id":"RS-04-R02","rule_type":"ApprovedRate","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-04-R05","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-04-R08","rule_type":"NonBillableActivity","scope":"line","line_refs":[1],"consequence":"Disallow"}
+ ],
+ "seeded_violations":5
+}

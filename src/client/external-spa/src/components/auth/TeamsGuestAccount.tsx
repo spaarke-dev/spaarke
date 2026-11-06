@@ -30,12 +30,23 @@ const useStyles = makeStyles({
   },
   description: { maxWidth: '28rem' },
   icon: { color: tokens.colorNeutralForeground3 },
+  detail: {
+    marginTop: tokens.spacingVerticalL,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase100,
+    fontFamily: tokens.fontFamilyMonospace,
+  },
 });
 
 export const TEAMS_GUEST_HEADING = "This tab can't be used with a guest account";
 export const TEAMS_GUEST_DESCRIPTION = 'Open Spaarke in Teams signed in to your own organization.';
 
-export const TeamsGuestAccount: React.FC = () => {
+export interface TeamsGuestAccountProps {
+  /** Masked diagnostic from the guest verdict (sign-in path and signals; no ids, names or addresses). */
+  detail?: string;
+}
+
+export const TeamsGuestAccount: React.FC<TeamsGuestAccountProps> = ({ detail }) => {
   const s = useStyles();
   return (
     <div className={s.root}>
@@ -46,6 +57,7 @@ export const TeamsGuestAccount: React.FC = () => {
         description={TEAMS_GUEST_DESCRIPTION}
         descriptionClassName={s.description}
       />
+      {detail ? <div className={s.detail}>Diagnostic: {detail}</div> : null}
     </div>
   );
 };

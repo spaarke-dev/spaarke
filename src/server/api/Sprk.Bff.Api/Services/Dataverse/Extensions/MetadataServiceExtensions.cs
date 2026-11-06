@@ -34,6 +34,11 @@ public static class MetadataServiceExtensions
         // Registered here because Program.cs calls this method unconditionally (:81).
         services.AddRecordOwnershipResolver();
 
+        // field-mapping-server-write-path-r1 task 071 (FR-30): the family walk AS THE CALLER. Scoped: one read's state lives in
+        // the call, never across callers. Its dependencies are unconditional — the caller-scoped seam (CommunicationModule) and
+        // ASP.NET Data Protection (AddAuthentication) — so there is no flag (ADR-032). Placement: notes/task-071-notes.md.
+        services.AddScoped<RecordFamilyReader>();
+
         // Task 156 (owner round 4 item 5, option b; round 3 R3/R4 — minutes, not hours): the 5-minute safety net that
         // re-stamps a child whose core-ancestor copy differs from its intermediate's current root (writes outside the
         // BFF, failed cascades, regarding lookups cleared on a form). ADR-036 A1 rule 6: AddScheduledJob, once — here,

@@ -156,6 +156,11 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 
 **Reconciliation:** `ExternalAccessReconciliationJob` writes on dev since round 79 (2026-10-08, after a 0-change report); it was report-only until then (round 7). R4 deactivates grants whose record is gone (round 71). In any other environment, explain plainly and confirm before setting `ExternalAccess:Reconciliation:WritesEnabled` or `Communication__OwnershipHoldAlertUserIds__0`.
 
+**Record family (round 130, #2362):** the structured family entity (`sprk_securefamily`) is deferred to the roadmap, not built in this project. Binding meanwhile:
+- family membership stays computable from stored data (the primary-parent rule, round 129; one filing root per project, task 195);
+- every ownership write goes through `RecordOwnershipResolver`;
+- new code tests isolation through one shared predicate keyed on the Secure Record BU, never a hard-coded team id, and reads families through field-mapping W7, never raw lookups.
+
 ## 4. Coordination
 
 - **customer-provisioning-orchestration-r1 (cpo-r1):**
@@ -194,6 +199,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
   - **the BFF:** `pwsh -File scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev`, from a FRESH short-path worktree of `origin/master`;
   - **web resources:** `scripts/Deploy-WebResourceInline.ps1`, then read back and compare the hash;
   - use `pac.cmd` (the bash `pac` shim does nothing) and run PowerShell scripts from inside `pwsh`.
+  - **While dev runs R3's build (BFF since 2026-10-16 12:59Z `2c2fed38d`; external SPA since 13:13Z, same commit):** never deploy master alone to either one. Message R3 (`spaarke-wt-spa-external-access-platform-49`) first. Deploy a build that contains the live one: run the ancestry check, live build must be an ancestor. For the SPA, dispatch `deploy-external-spa` from R3's branch, never from master, until R3 merges.
 - **Branches:**
   - task and fix work happens in fresh short-path worktrees from `origin/master`;
   - `work/unified-access-control-r2` holds notes and tasks and is merged from master periodically (last 2026-10-07);
@@ -255,6 +261,8 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 - Python needs `PYTHONIOENCODING=utf-8`; scratchpad PowerShell stays ASCII under `pwsh`.
 - Count TASK-INDEX by its ASCII tokens (`[open]` `[wip]` `[done]` `[cancelled]` `[deferred]`); every row carries one.
 - Azure.Identity needs `AZURE_TOKEN_CREDENTIALS=dev`; the 034 canary needs `AzureCliCredential` + `SPAARKE_TESTS_ALLOW_OUTBOUND=1`.
+- **Master needs TWO required checks (2026-10-17): `Router` AND `Client lint (type-aware ratchet)`** (`gh api repos/spaarke-dev/spaarke/rules/branches/master`). A merge watcher must wait for every required check, not only Router, or `gh pr merge` fails with "base branch policy prohibits the merge". Client changes must pass `node scripts/quality/client-lint/client-lint.mjs check` (fix new `no-unnecessary-condition` findings; don't suppress them).
+- **Import every PCF/solution with `scripts/Import-SolutionScoped.ps1`, never a bare `pac solution import`.** A bare import leaves the `cc_…/bundle.js` web resources unpublished, so users keep getting the old bundle (2026-10-17: TrackingFieldTrio 1.0.50 stayed on 1.0.47 until a `-PublishOnly` run). Verify by the SERVED bundle's sha256 (`/WebResources/cc_<ns>.<control>/bundle.js`), not `customcontrols.version`.
 
 ## 7. Key documents
 

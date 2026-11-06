@@ -1,0 +1,83 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{96155153-6106-45f7-bd8d-1db2d1f1366d}</formid>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab verticallayout="true" id="{A13F218E-4A3D-70C3-B7FB-58A6C5C83E9E}" name="tab_general" IsUserDefined="1" expanded="true" showlabel="true">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_general" id="{725002E9-458C-A9D5-541A-DDE4C5C89BFF}" IsUserDefined="1" showlabel="true" showbar="false" columns="11" celllabelposition="Top" labelwidth="115" celllabelalignment="Left" layout="varwidth">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{6DD443F6-3C48-8B3B-6167-27C63578389A}">
+                        <labels>
+                          <label description="Code" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_code" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_code" />
+                      </cell>
+                      <cell id="{8F369AEA-5584-1A58-A0E3-4582C007EF2E}">
+                        <labels>
+                          <label description="Code Set" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_codeset" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_codeset" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{337A8FDB-154E-FB82-D305-C6EA807951AC}">
+                        <labels>
+                          <label description="Code Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_codetype" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_codetype" />
+                      </cell>
+                      <cell id="{B3F22ADF-5306-E5CA-8623-1EF1684AEFD2}">
+                        <labels>
+                          <label description="Phase" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_phase" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_phase" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{6383F85E-B01B-C6C2-0D27-E7ADA647E5FC}">
+                        <labels>
+                          <label description="Description" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_description" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_description" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{0F8BCD5D-9093-F2CF-BC1A-356E922DDAC9}" colspan="2" rowspan="3">
+                        <labels>
+                          <label description="Guidance Text" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_guidancetext" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_guidancetext" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Information" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

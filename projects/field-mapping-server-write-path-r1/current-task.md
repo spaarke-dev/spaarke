@@ -1,26 +1,32 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-29 ~02:15Z (by context-handoff). Recovery: read Quick Recovery first.
-> **Done on master**: 001–006, 010–016, 018, 037, 038, 070, 073. Work branch merged to master as #2392 (14b9335a6c); later doc commits are on the work branch (e2771ff315, 86dc5c1f92 and this one).
-> **Live on dev: 136568cf70** (R3, live 2026-10-29 02:23:53Z; UAC gate passed, no 5xx). SpaarkeMaster 1.2.4.0 published 02:24:48Z (run 40806065681, master a4b6459da3), not yet imported anywhere: map check follows model1-prod's upgrade or the next provisioning run (H6). #2408 merged a4b6459da3; C:\wt2400 removed.
+> **Last updated**: 2026-11-05 (main session checkpoint). Recovery: read Quick Recovery first.
+> **Done on master**: 001–006, 010–016, 017, 018, 037, 039, 038, 070, 071, 072, 073, 074. The work branch was merged to master as #2435 (6b0c1e2fed); later doc commits are on the work branch.
+> **Live on dev:** BFF master 0f53e053bf (042c + 048) since 2026-11-05T21:39:06Z; UAC-r2 gate PASS 21:39-22:09Z (0 5xx, 0 OWNERSHIP-REFUSED, reconcile 0 writes; record `notes/deploy-gate-2026-11-05-0f53e053bf.md` on uac-r2's branch). No chat traffic in the window: fm's own live checks of the 042c/048 refusals need the owner's go in THIS session. TrackingFieldTrio 1.0.55. Check that the BU→Matter index map is gone after the model1-prod upgrade or the next provisioning run (H6).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active** | **Task 071 (RecordFamilyReader, FR-30) IN PROGRESS** — FULL, opus @ xhigh. Gate met: UAC 194b merged 2cd0f62e2c (#2432). Work branch synced with master (e4dbc0b6de). Step 8: implementer agent on branch task/fm-071 from 2cd0f62e2c (worktree). Then Step 9.5: two adversarial passes (auth-tagged), adr-check, publish delta, CVE. **#2399** live part: dev re-own done; waiting for the owner's UI re-test. |
-| **Plan (design §13, accepted by UAC-r2 at 86dc5c1f92)** | (a) UAC builds the memberless team "Spaarke Customer Configuration Owners" and the role "Customer Configuration Owner" (Read at Basic on sprk_aisearchindex, sprk_fieldmappingprofile, sprk_fieldmappingrule) in 194b R4b-3b. **Wait for their sha.** (b) After the owner's go: create the team and role in BU1 (cb15f587-baa0-f111-aaac-000d3a99d1d7) on dev, then re-own 10 index rows + 7 profiles + 40 rules with a read-back (nothing cascades; checked). (c) FR-38: the server drops a client index on every BFF write path and applies the FINAL owning BU's index (empty and logged if none). (d) FR-39: provisioning owns it (one PR, H10 team + H12b owner bind; I review). (e) W3 wizards stop binding the index. |
-| **Next Action** | 1) **Owner decided 2026-10-29:** §13.5 Q2 = **(B)**: seed the 7 canonical index rows per customer, team-owned, no BU defaults. (A) was withdrawn because the Semantic Search picker needs the rows. Q1 = drop. Correction sent to provisioning and UAC-r2. 2) **Dev re-own DONE 2026-10-29** (owner's go): 57 rows → team 2dae7e6e… in BU1, read-back 57/57; Test User 1 has Read+AppendTo on BU1's index. Owner to re-test the WA create in the UI; then close #2399's live part. Rollback list: session scratchpad `reown-2399-backup.json`. Provisioning creates the team in H7c (#2429); UAC 194b = c4fd7175cd. 3) Scope procedure for FR-38/FR-39: spec amendment → task-create → TASK-INDEX → owner approval. 4) R3: when 1.2.4.0 reaches model1-prod, check the BU→Matter index map is gone and how it was upgraded; stamp proof = the next new provisioning run (H6 StageAndUpgrade); don't check ACME. Dev is already clean (checked 2026-10-28). bafe310ca4 (#2382) doesn't change Core User depth on index/profile/rule; §13 (e) removes the index entry from `config/core-user-wizard-linking-role.json` (0e5904d4aa). |
-| **Open PRs** | #2383 (074, draft, HOLD until 072). #2387 (075, draft, HOLD, ships with 040; head ed1cf9b5d1). #2408 (#2400 error icon, auto-merge). |
-| **Issues filed today** | #2399 (above), #2400 (icon; PR #2408), #2410 (CLOSED, not planned: owner says Basic users need no profile access), #2411 (CLOSED: duplicate inactive index row deleted on dev with the owner's OK), #2413 (known limit: index not recomputed on a BU move; discoverability only). |
-| **Running** | Nothing. |
-| **Waiting on** | UAC 194b sha → 071 → 072 (then mark #2383 ready). UAC 195 → 040, 076. UAC R4b-3b sha → #2399 re-own. 017 blocked on ebilling #1911. |
-| **Owner to do** | Drop stash d5d17bcc7f (074 agent's lint-staged backup). Leftover agent worktree `C:\code_files\spaarke\.claude\worktrees\agent-aec6d06ca99a5a9f6` (locked by a claude.exe; contents on origin) and C:\wt2400 (fix/2400 worktree) to remove with Remove-WorktreeSafe at the end. |
-
-## Blocked: 017
-
-Re-pointing the route and the chat create needs ebilling #1911 (still a draft) plus its reconcile, and these owner items:
-All four owner decisions are made (2026-10-22/23: 2a-2c option a, 2d option c); only ebilling #1911 remains.
+| **Active** | Checkpoint 2026-11-05 ~23:50Z. uac-r2: `spaarke-wt-unified-access-control-r2-20`; ontology: `spaarke-wt-spaarke-ontology-platform-r1-38`; ebilling: `spaarke-wt-ebilling-r1-c7`.
+- **PR #2573** (043 + 046), head 20fa0a0c09, auto-merge on. UAC-r2's two 043 clears stand (+3d1ff16cc3 narrowing accepted). After merge: TASK-INDEX already ✅ for 043/046; uac-r2 takes the merge SHA to the owner as the next dev candidate (may wait for 049). fm live checks of 043/042c/048 need the owner's go in THIS session.
+- **046b** (task/fm-046b, worktree agent-ae68466fd18cb8df3, tip 503b65063f): role files carry the rulings (G1, G2, G4-G8); `scripts/Set-FeatureRolePrivileges.ps1` + `config/feature-role-privileges.json`; dry run on dev = 8 changes (root + 5 BU copies), -Verify exit 1; ArchTests 1959/1959; 38 standalone add-on gaps + G9 sent to uac-r2 for the owner. **Opus pass 1 running** (agent on 046b); then pass 2 (security), fix rounds, merge into the work branch, uac-r2 runs -Apply. Holds 089e's G5 files byte-identical except ProcedureRolePrivilegeGuardTests (second to merge resolves by hand; ebilling told).
+- **049** (NFR-02): fix round 1 running in two halves. **Part A** agent on task/fm-049b (worktree agent-ab6391bd0d308344f): maker = assignee inline via IIdentityNormalizationService (fault → queue), Office test, settle after failing write, isolated create waits for CompleteIsolatedCreateAsync, wizard secure-project premise check (uac-r2: if both premises hold, close; else fm files an issue, neutral wording), AND the delete-guard fix (CallerMetadataReadMemo.DeleteAsync is a pass-through decorator; exempt API implementations' own DeleteAsync with must-fire/must-not-fire controls). **Part B** agent on task/fm-049c (worktree agent-a3d88f8312b09e715): scan $orderby + recent window ≥3× tick, reconcile re-derive notes (if removals not re-derived: FILE it), record-busy shapes; notes in task-049-backstop-notes.md (fold into task-049-notes.md). Then: merge 049c into 049b, verify-suites, Opus pass 2, head SHA → uac-r2, merge into work branch, PR, dev deploy via uac-r2, Project→Matter profile on dev, 021 re-measure.
+- **021**: wizard deploy waits on 049's re-measure (task/fm-021 d6dc73e9f6).
+- **033 must be re-scoped before it runs** (D-204).
+- **Live rows to delete later (owner):** task-021-live.md / task-019-live-checks.md.
+- **Private:** uac-r2 by message only. |
+| **Next Action** | 1. On agent reports (046b review, 049 A, 049 B): triage F/K, fix rounds, scoped re-checks, ranges to uac-r2.
+2. Watch PR #2573; then tell uac-r2 the merge SHA.
+3. Owner open: live checks on dev (042c/048 refusals, 043); standalone add-on batch (via uac-r2); inactive playbook at analysis start; Family 1.0.56; 076; #2556. |
+| **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
+| **Open PRs** | #2387 (075, HOLD, ships with 040). |
+| **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
+| **Waiting on** | - Owner: the Family 1.0.56 look (the four #2513 items on dev) and the 076 narrower-user pass. **Done 2026-11-03:** 005 `-Apply` on dev (36 migrated, VERIFY PASS, idempotent); pid 53128 (the pre-crash session) stopped on the owner's "kill it".
+- 041 live proof: dev BFF d763dc120e (carries #2541) is live since 2026-11-03T22:26:31Z. The post-deploy check passed on what existed (0 5xx; no index or child-records traffic; no rows since the deploy). The startup logger exception is pre-existing (#2549, DI-016). After the next real upload or create on dev, re-run the read-only checks (document `sprk_searchindexname` = spaarke-files-index; no `sprk_ai_search_index` on new rows). Send the results to **uac-r2** (it now runs dev deploys), and copy R3 (`spa-external-access-platform-f2`) only for its rollout record §17.
+- Rows to delete later: see `notes/task-019-notes.md` (the check-C event is the owner's and stays).
+- #2518 (ontology writer identity not provisioned): ontology's to own. |
+| **Owner to do** | 076 live check (owner + narrower user). Leftover locked worktrees agent-aec6d06ca99a5a9f6 (075) and agent-a7ed21b81867c4e2e (039, merged; locked by its agent process): end of project, via Remove-WorktreeSafe after unlock. |
 
 ## How wave-2 agents are run (lessons)
 
@@ -32,7 +38,7 @@ All four owner decisions are made (2026-10-22/23: 2a-2c option a, 2d option c); 
 - **Never run the unfiltered `Sprk.Bff.Api.Tests`** in an agent (the host reaches ~8 GB). Use the filtered set in
   `projects/field-mapping-server-write-path-r1/scripts/verify-suites.sh <repo> <log-dir>`. Publish-size delta + CVE:
   `scripts/publish-delta.ps1 -wt <worktree> -MasterSha <sha> -BranchSha <sha>` (same folder).
-- Call `Remove-WorktreeSafe.ps1` through PowerShell. If the delete is partial it leaves an unregistered folder; report it.
+- Call `Remove-WorktreeSafe.ps1` through PowerShell, and first `cd` every shell OUT of the worktree: a Bash shell whose cwd is the worktree holds its root, so git deletes every file, then fails "Permission denied" on the root (0 files left). Then `find <path> -depth -type d -empty -delete` + `git worktree prune`.
 - CI: the required checks are `Router` + `Client lint (type-aware ratchet)`. Router reports only after the slow Tier 2
   unit shards finish (~25 min). The Tier 2 ADR job may be CANCELLED by its 5-min timeout after passing (#2224); read
   the log before merging.
@@ -48,8 +54,7 @@ Dev reads: 0 of 64 matters have an empty `sprk_issecure`; 40 active Copy rules (
 
 1. **016 Repair questions:** cross-BU re-own (skip for now); whether Repair re-owns roots; SYSTEM/INTEGRATION-owned
    unfiled rows.
-2. **017 decisions:** FR-06 step 10 (UAC-r2 text recommended); #1608 columns; the chat matter/project number (recommend
-   refusing it); SystemPrincipal.
+2. ~~017 decisions~~: all decided 2026-10-22/23 (decisions.md).
 3. **Live smoke of #2191 on dev** (Office Project-from-Matter quick-create, mapped values, a secured column stays empty).
 4. **005 `-Apply` on dev**, then `-Verify`.
 5. **014:** confirm the 403 for a mapped filing lookup that fails field security. **015:** index precedence notes.

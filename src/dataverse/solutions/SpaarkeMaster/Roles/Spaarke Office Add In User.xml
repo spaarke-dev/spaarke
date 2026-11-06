@@ -402,6 +402,12 @@
     <RolePrivilege name="prvReadSLAKPIInstance" level="Basic" />
     <RolePrivilege name="prvReadSocialProfile" level="Basic" />
     <RolePrivilege name="prvReadsprk_AttachmentArtifact" level="Basic" />
+    <RolePrivilege name="prvReadsprk_billingcode" level="Global" />
+    <RolePrivilege name="prvReadsprk_billingcodeset" level="Global" />
+    <RolePrivilege name="prvReadsprk_BillingEvent" level="Deep" />
+    <RolePrivilege name="prvReadsprk_billingexport" level="Deep" />
+    <RolePrivilege name="prvReadsprk_ebillingoverride" level="Global" />
+    <RolePrivilege name="prvReadsprk_ebillingsetting" level="Global" />
     <RolePrivilege name="prvReadsprk_EmailArtifact" level="Basic" />
     <RolePrivilege name="prvReadsprk_Event" level="Deep" />
     <RolePrivilege name="prvReadsprk_EventType_Ref" level="Deep" />

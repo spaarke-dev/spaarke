@@ -123,9 +123,37 @@ public class OfficeDocumentPersistence
     /// created with its own Access Permission = Restricted. Returns <see langword="true"/> when it chose Restricted, so
     /// the caller logs it (<see cref="LogCreatedRestricted"/>) once the document id exists.
     /// </summary>
-    internal static bool ApplyEmailCommunicationOutcome(CreateDocumentRequest create, Guid? relatedCommunicationId)
+    /// <param name="create">The request this create sends.</param>
+    /// <param name="relatedCommunicationId">The email's communication, when one was identified.</param>
+    /// <param name="submissionNarrowing">
+    /// ebilling-r1 task 095 (model §9.1 own-Restricted, uac-r2 v5.7 change 1 and round 122): the <c>.eml</c> that the from-email
+    /// invoice submission creates. It is linked to its communication AND carries its own NON-provisional Restricted narrowing
+    /// (<see cref="Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing"/>, so linking never releases it) and the
+    /// invoice-submission marker, all in the same create. A communication is required: the submission path refuses before any
+    /// write when none resolves (model §9.1 F1-c), so a missing one here is a defect and throws. Returns <see langword="false"/>
+    /// (this Restricted is chosen, not the unidentified-email fallback the caller logs as an Error). This is the ONLY writer
+    /// of the marker (SubmissionMarkerWriterGuardTests), and the one save-time owner of an own narrowing stays this method (I-19).
+    /// </param>
+    internal static bool ApplyEmailCommunicationOutcome(
+        CreateDocumentRequest create, Guid? relatedCommunicationId, bool submissionNarrowing = false)
     {
         ArgumentNullException.ThrowIfNull(create);
+
+        const int restricted = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Restricted;
+        if (submissionNarrowing)
+        {
+            if (relatedCommunicationId is not { } submissionCommunicationId || submissionCommunicationId == Guid.Empty)
+            {
+                throw new InvalidOperationException(
+                    "A from-email submission .eml is created only linked to its communication (task 095, model 9.1 F1-c).");
+            }
+
+            create.RelatedCommunicationId = submissionCommunicationId;
+            create.AccessPermission = restricted;
+            create.AccessInheritanceRecord = Sprk.Bff.Api.Services.Access.AccessInheritance.OwnNarrowing(restricted).Serialize();
+            create.RestrictedBySubmission = true;
+            return false;
+        }
 
         if (relatedCommunicationId is { } communicationId && communicationId != Guid.Empty)
         {
@@ -138,7 +166,6 @@ public class OfficeDocumentPersistence
         // UAC-r2 task 189 (D7 T7a): the Restricted is recorded as the document's OWN narrowing in the same create, so the
         // reconciler keeps it when the document's parents are wider. Owner round 122: it is marked provisional, so once the
         // document is linked to a communication the reconciler releases it and the document follows that communication.
-        const int restricted = Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Restricted;
         create.RelatedCommunicationId = null;
         create.AccessPermission = restricted;
         create.AccessInheritanceRecord =
@@ -223,8 +250,13 @@ public class OfficeDocumentPersistence
         Guid? jobId = null,
         string? emailMessageIdFallback = null,
         bool emailCommunicationResolved = false,
-        EditableContentIdentity? editableContentIdentity = null)
+        EditableContentIdentity? editableContentIdentity = null,
+        bool submissionNarrowing = false)
     {
+        // Task 095: only an Email save carries the submission narrowing (the from-email route's .eml).
+        if (submissionNarrowing && request.ContentType != SaveContentType.Email)
+            throw new InvalidOperationException("The submission narrowing applies only to an Email save's .eml (task 095).");
+
         // Task 080 (write-path invariant I-6): an Office document create is ALWAYS team-owned. The writers resolve the
         // team (or refuse) before calling; a null here is a writer that skipped that step, and creating the row anyway
         // would silently make it app-owned in the ROOT business unit — invisible to its own author. Checked before the
@@ -346,8 +378,9 @@ public class OfficeDocumentPersistence
         // Task 130 (#2126): an email-derived document is created linked to its email's communication, or — when none
         // could be identified — Restricted. In the create itself, so no document exists, even briefly, with neither.
         // A Document save is untouched: no link, its Access Permission left at the default.
+        // Task 095: the from-email submission's .eml instead carries its own non-provisional Restricted and the marker.
         var createdRestricted = IsEmailDerived(request.ContentType)
-            && ApplyEmailCommunicationOutcome(createRequest, canonicalCommunicationId);
+            && ApplyEmailCommunicationOutcome(createRequest, canonicalCommunicationId, submissionNarrowing);
 
         var documentIdString = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
         var documentId = Guid.Parse(documentIdString);
@@ -927,6 +960,38 @@ public class OfficeDocumentPersistence
     /// the key the lookup actually used, not merely a non-empty field.
     /// </summary>
     internal static bool HasUsableMessageId(string? messageId) => OfficeEmailEnricher.IsRfcMessageId(messageId);
+
+    /// <summary>
+    /// ebilling-r1 task 095 (model §9.1 F1-c): the email's communication by its RFC Message-ID, for the from-email submission's save,
+    /// which must refuse BEFORE the job row and the upload when none resolves. Unlike <see cref="MergeUploaderAndResolveCanonicalAsync"/>
+    /// (best-effort, a fault is "none") a fault here is reported as such, so the submission answers it retryable (503) rather than
+    /// permanently. <c>(id, false)</c> found; <c>(null, false)</c> no communication (or no usable Message-ID); <c>(null, true)</c> the
+    /// lookup faulted or no lookup seam exists.
+    /// </summary>
+    internal async Task<(Guid? CommunicationId, bool Unavailable)> FindCommunicationForSubmissionAsync(
+        string? internetMessageId, CancellationToken ct)
+    {
+        if (!HasUsableMessageId(internetMessageId))
+            return (null, false);
+
+        if (_communicationService is null)
+        {
+            _logger.LogError("No communication lookup is available to OfficeDocumentPersistence; the submission save cannot identify its email.");
+            return (null, true);
+        }
+
+        try
+        {
+            var communication = await _communicationService.GetCommunicationByInternetMessageIdAsync(internetMessageId!, ct);
+            return (communication is { Id: var id } && id != Guid.Empty ? id : null, false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Ids only: the Message-ID is an email header (task 130).
+            _logger.LogWarning(ex, "The submission save's communication lookup by Message-ID failed (retryable).");
+            return (null, true);
+        }
+    }
 
     /// <summary>
     /// UAC task 194b R4-2: the communication an email-derived save's document will be created linked to, resolved BEFORE the

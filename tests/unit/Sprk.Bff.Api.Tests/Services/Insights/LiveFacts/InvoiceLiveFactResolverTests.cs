@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Insights.LiveFacts;
 using Xunit;
 
@@ -33,15 +34,21 @@ public class InvoiceLiveFactResolverTests
         var invoice = new Entity("sprk_invoice", InvoiceId);
         invoice["sprk_invoiceid"] = InvoiceId;
         invoice["sprk_invoicenumber"] = "INV-2026-007";
-        invoice["sprk_total"] = useMoney ? (object)new Money(totalAsDecimal) : totalAsDecimal;
-        invoice["sprk_status"] = new OptionSetValue(1);
+        // The live columns (ebilling-r1 task 015, ISS-001 / #1904): sprk_totalamount and statuscode.
+        invoice["sprk_totalamount"] = useMoney ? (object)new Money(totalAsDecimal) : totalAsDecimal;
+        invoice["statuscode"] = new OptionSetValue(InvoiceStatusCodes.Paid);
         if (withStatusFormatted)
         {
-            invoice.FormattedValues.Add("sprk_status", "Submitted");
+            invoice.FormattedValues.Add("statuscode", "Paid");
         }
         invoice["sprk_matter"] = new EntityReference("sprk_matter", RelatedMatterId) { Name = "Atlas Acquisition" };
         return invoice;
     }
+
+    // Only a read of the real columns gets the row: a read of a column the table does not have fails in Dataverse, so the
+    // strict mock refuses it too.
+    private static readonly string[] LiveInvoiceColumns =
+        ["sprk_invoiceid", "sprk_invoicenumber", "sprk_totalamount", "statuscode", "sprk_matter"];
 
     private void SetupReturnsInvoice(Entity invoice)
     {
@@ -49,7 +56,7 @@ public class InvoiceLiveFactResolverTests
             .Setup(s => s.RetrieveAsync(
                 "sprk_invoice",
                 InvoiceId,
-                It.IsAny<string[]>(),
+                It.Is<string[]>(columns => columns.OrderBy(c => c).SequenceEqual(LiveInvoiceColumns.OrderBy(c => c))),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(invoice);
     }
@@ -103,7 +110,18 @@ public class InvoiceLiveFactResolverTests
         var fact = await sut.ResolveAsync(InvoiceSubject, "invoiceStatus", TenantId, CancellationToken.None);
 
         fact.Should().NotBeNull();
-        fact!.Value.Raw.GetString().Should().Be("Submitted");
+        fact!.Value.Raw.GetString().Should().Be("Paid");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_InvoiceStatus_WithoutAFormattedValue_ReturnsTheStatuscodeNumber()
+    {
+        SetupReturnsInvoice(BuildInvoice(withStatusFormatted: false));
+        var sut = CreateSut();
+
+        var fact = await sut.ResolveAsync(InvoiceSubject, "invoiceStatus", TenantId, CancellationToken.None);
+
+        fact!.Value.Raw.GetString().Should().Be(InvoiceStatusCodes.Paid.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     [Fact]
@@ -142,7 +160,7 @@ public class InvoiceLiveFactResolverTests
         var raw = fact.Value.Raw;
         raw.GetProperty("invoiceNumber").GetString().Should().Be("INV-2026-007");
         raw.GetProperty("invoiceTotal").GetDecimal().Should().Be(12500.00m);
-        raw.GetProperty("invoiceStatus").GetString().Should().Be("Submitted");
+        raw.GetProperty("invoiceStatus").GetString().Should().Be("Paid");
         raw.GetProperty("relatedMatter").GetProperty("id").GetString().Should().Be(RelatedMatterId.ToString());
     }
 

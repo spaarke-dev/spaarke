@@ -1,0 +1,31 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0158",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0158","generator_id":"gen_eval_set.py@1 F-0158","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0158.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Garrison and Ellison LLP","firm_invoice_number":"INV-2025-74547","invoice_date":"2025-07-02","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"74478-0025","po_number":"PO-4556676","fees_total":6738.5,"expenses_total":21.14,"adjustments_total":0.0,"total_due":6759.64,"currency":"USD"},
+ "timekeepers":[{"name":"Farah Nwosu","title":"Paralegal","rate":185.0,"billed_as":"FN"},{"name":"Gideon Dunleavy","title":"Associate","rate":290.0,"billed_as":"GD"},{"name":"Louis Kowalczyk","title":"Partner","rate":535.0,"billed_as":"LK"},{"name":"Mei Blackwood","title":"Associate","rate":310.0,"billed_as":"MB"},{"name":"Sofia Fairweather","title":"Associate","rate":335.0,"billed_as":"SF"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-16","timekeeper":"MB","timekeeper_name":"Mei Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":310.0,"amount":589.0,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-06","timekeeper":"MB","timekeeper_name":"Mei Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":310.0,"amount":775.0,"narrative":"Research standard for provisional remedies concerning the employment claim","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-09","timekeeper":"FN","timekeeper_name":"Farah Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":2.2,"rate":185.0,"amount":407.0,"narrative":"Research standard for provisional remedies concerning the customs audit","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-09","timekeeper":"FN","timekeeper_name":"Farah Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":0.6,"rate":185.0,"amount":111.0,"narrative":"Review and revise complaint based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-10","timekeeper":"MB","timekeeper_name":"Mei Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":310.0,"amount":806.0,"narrative":"Research standard for provisional remedies concerning the distribution agreement","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-11","timekeeper":"LK","timekeeper_name":"Louis Kowalczyk","timekeeper_title":"Partner","title":"Ptr","hours":2.5,"rate":535.0,"amount":1337.5,"narrative":"Draft motion for preliminary injunction in the lease dispute","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-11","timekeeper":"GD","timekeeper_name":"Gideon Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":290.0,"amount":290.0,"narrative":"Attend case management conference in the data incident","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-12","timekeeper":"SF","timekeeper_name":"Sofia Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":335.0,"amount":402.0,"narrative":"Research pleading standards applicable to the distribution agreement","codes":["L210","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-13","timekeeper":"GD","timekeeper_name":"Gideon Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":290.0,"amount":870.0,"narrative":"Review and analyze client documents concerning the insurance coverage issue to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-06-19","timekeeper":"GD","timekeeper_name":"Gideon Dunleavy","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":290.0,"amount":841.0,"narrative":"Research public records concerning Alder & Finch Ltd and related entities","codes":["L110","A102"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-06-20","timekeeper":"MB","timekeeper_name":"Mei Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":310.0,"amount":93.0,"narrative":"Prepare case assessment memorandum regarding the vendor agreement and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"fee","date":"2025-06-25","timekeeper":"MB","timekeeper_name":"Mei Blackwood","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":310.0,"amount":217.0,"narrative":"Telephone conference with client representative regarding factual background of the supply agreement","codes":["L110","A106"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-06-12","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":10.57,"amount":21.14,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["771 Congress Boulevard","Boston","Tax ID 54-4813140"],"template":"T01","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-06-21","matter_close":"2025-09-28","matter_budget":52038.0,"approved_timekeepers":["Gideon Dunleavy","Louis Kowalczyk","Mei Blackwood","Farah Nwosu","Sofia Fairweather"],"invoice_received_date":"2025-07-10"},
+ "expected_findings":[
+  {"rule_id":"RS-02-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[1],"consequence":"Flag"}
+ ],
+ "seeded_violations":1
+}

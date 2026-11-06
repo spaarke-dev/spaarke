@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0460",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0460","generator_id":"gen_eval_set.py@1 F-0460","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0460.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Stanhope and Dunmore LLP","firm_invoice_number":"INV-2026-86861","invoice_date":"2025-10-01","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"59671-0027","po_number":"PO-4549363","fees_total":3885.0,"expenses_total":7190.09,"adjustments_total":0.0,"total_due":11075.09,"currency":"USD"},
+ "timekeepers":[{"name":"Elena Abernathy","title":"Associate","rate":390.0,"billed_as":"EA"},{"name":"Gregory Okafor","title":"Associate","rate":295.0,"billed_as":"GO"},{"name":"Gregory Pemberton","title":"Paralegal","rate":200.0,"billed_as":"GP"},{"name":"Jordan Fairweather","title":"Associate","rate":390.0,"billed_as":"JF"},{"name":"Katya Galbraith","title":"Senior Associate","rate":470.0,"billed_as":"KG"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-01","timekeeper":"JF","timekeeper_name":"Jordan Fairweather","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":390.0,"amount":487.5,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-02","timekeeper":"KG","timekeeper_name":"Katya Galbraith","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.0,"rate":470.0,"amount":470.0,"narrative":"Draft notice of deposition for trial in the data incident","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-03","timekeeper":"GP","timekeeper_name":"Gregory Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":2.25,"rate":200.0,"amount":450.0,"narrative":"Review draft expert disclosure for the employment claim","codes":["L420","A104"],"page":2,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-08","timekeeper":"EA","timekeeper_name":"Elena Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.25,"rate":390.0,"amount":487.5,"narrative":"Prepare monthly status report to client regarding the insurance coverage issue","codes":["L190","A111"],"page":2,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-16","timekeeper":"EA","timekeeper_name":"Elena Abernathy","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":390.0,"amount":682.5,"narrative":"Draft answer and affirmative defenses for trial in the warranty claim","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-18","timekeeper":"GP","timekeeper_name":"Gregory Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":200.0,"amount":600.0,"narrative":"Attend trial day in the data incident","codes":["L450","A109"],"page":2,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-18","timekeeper":"GO","timekeeper_name":"Gregory Okafor","timekeeper_title":"Associate","title":"Assoc","hours":1.75,"rate":295.0,"amount":516.25,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":2,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-19","timekeeper":"GO","timekeeper_name":"Gregory Okafor","timekeeper_title":"Associate","title":"Assoc","hours":0.25,"rate":295.0,"amount":73.75,"narrative":"Draft witness list for trial in the employment claim","codes":["L430","A103"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-09-19","timekeeper":"KG","timekeeper_name":"Katya Galbraith","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.25,"rate":470.0,"amount":117.5,"narrative":"Telephone conference with witness regarding the licensing dispute","codes":["L410","A106"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-09-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":26.02,"amount":78.06,"narrative":"Overnight courier to Quarry Lane Partners counsel","codes":["E107"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-09-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5845.53,"amount":5845.53,"narrative":"Consulting expert fees","codes":["E119"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-09-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1266.5,"amount":1266.5,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["720 Congress Boulevard","Phoenix","Tax ID 36-8426744"],"template":"T21","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-08-17","matter_close":"2025-12-29","matter_budget":69300.0,"approved_timekeepers":["Hannah Nakamura","Gideon Oyelaran","Oliver Lockhart","Katya Galbraith","Gregory Okafor","Elena Abernathy","Gregory Pemberton","Jordan Fairweather"],"invoice_received_date":"2025-10-15"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

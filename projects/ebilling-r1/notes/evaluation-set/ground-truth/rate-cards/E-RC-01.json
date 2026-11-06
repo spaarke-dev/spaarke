@@ -1,0 +1,37 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"rate-card",
+ "id":"E-RC-01",
+ "set":"E",
+ "meta":{"title":"Attorney General's civil panel counsel hourly rates (UK, from 2025-04-01)","source_url":"https://www.gov.uk/guidance/attorney-generals-panel-counsel-practical-information","licence":"Open Government Licence v3.0","licence_status":"open","pii_note":"Public document from an agency or court; counts only, no matched text recorded. Hits: email 31. Hits are agency contact details, addresses and generic role words, not private individuals.","pii_scan":{"file":"uk-ag-panel.html","tool":"pii_scan.py@1","scanned":"2026-10-15","chars":75516,"counts":{"email":31,"phone_us":0,"ssn":0,"card_number":0,"dob_label":0,"iban":0,"street_address":0,"case_party_marker":0},"disposition":"Business and agency contact details only; no private-person data expected. Safe for local evaluation use."},"storage":{"location":"local-only","path":"local/rate-cards/uk-ag-panel.html"},"spike":false,"label_method":"ai-drafted-pending-review"},
+ "document":{"issuer_type":"national-government","currency":"GBP","retrieved":"2026-10-15","pages":null},
+ "rates":[
+  {"key":"London A panel","amount":150,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"London panel"},
+  {"key":"London B panel","amount":125,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"London panel"},
+  {"key":"London C panel, over 5 years call","amount":100,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"London panel"},
+  {"key":"London C panel, under 5 years call","amount":75,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"London panel"},
+  {"key":"Regional A panel","amount":137.5,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"Regional panel"},
+  {"key":"Regional B panel","amount":112.5,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"Regional panel"},
+  {"key":"Regional C panel","amount":75,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"Regional panel"},
+  {"key":"PIL A panel","amount":150,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"PIL panel"},
+  {"key":"PIL B panel","amount":125,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"PIL panel"},
+  {"key":"PIL C panel, over 5 years call","amount":100,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"PIL panel"},
+  {"key":"PIL C panel, under 5 years call","amount":75,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"PIL panel"},
+  {"key":"Junior junior, second six","amount":31.25,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"off panel"},
+  {"key":"Junior junior, third six","amount":56.25,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"off panel"},
+  {"key":"Junior junior, tenant","amount":56.25,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"off panel"},
+  {"key":"KC, fewer than 10 years","amount":225,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"King's Counsel"},
+  {"key":"KC, 10 years or more, previous rate under 200","amount":245,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"King's Counsel"},
+  {"key":"KC, 10 years or more, previous rate 200 to 269","amount":270,"unit":"hour","effective_from":"2025-04-01","effective_to":null,"scope":"King's Counsel"},
+  {"key":"Immigration judicial review permission hearing, fixed fee","amount":437.5,"unit":"fixed","effective_from":"2025-04-01","effective_to":null,"scope":"fixed fee (plus VAT)"}
+ ],
+ "rules":[
+  {"rule_id":"E-RC-01-R01","rule_type":"ApprovedRate","params":{"rates":{"London A":150,"London B":125,"Regional A":137.5,"KC under 10 years":225},"currency":"GBP"},"consequence":null,"clause_ref":{"section":"Rates","page":1},"paraphrase":"Hourly rates by panel and seniority apply to all work from 1 April 2025.","expressible":true},
+  {"rule_id":"E-RC-01-R02","rule_type":"NonBillableActivity","params":{"travel_rate_pct":50,"non_working_travel_only":true,"no_travel_within":"M25 for London counsel"},"consequence":"Reduce","clause_ref":{"section":"Travel","page":1},"paraphrase":"Non-working travel time is paid at half the hourly rate and nothing is paid for travel inside the normal area of practice.","expressible":true},
+  {"rule_id":"E-RC-01-R03","rule_type":"RequiredData","params":{"fields":["case_reference","work_description_by_date","hourly_rate","time_spent","travel_time_separate"]},"consequence":null,"clause_ref":{"section":"Fee notes","page":1},"paraphrase":"A fee note shows the case reference, dated activity entries, the rate, the time and any non-working travel time.","expressible":true},
+  {"rule_id":"E-RC-01-R04","rule_type":"ExpenseRule","params":{"meals":"no subsistence rate","first_class_travel":"special circumstances only","differentiate_categories":true},"consequence":"Disallow","clause_ref":{"section":"Travel","page":1},"paraphrase":"No daily subsistence is paid and travel, accommodation and legal fees are shown separately.","expressible":true}
+ ],
+ "unmapped_provisions":[
+  {"clause_ref":{"section":"Rates","page":1},"paraphrase":"Rates are reviewed every two years from April 2027.","reason":"not-billing"}
+ ]
+}

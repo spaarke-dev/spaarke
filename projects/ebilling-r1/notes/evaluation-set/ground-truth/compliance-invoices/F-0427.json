@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0427",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0427","generator_id":"gen_eval_set.py@1 F-0427","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0427.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Ostrander & Ellison LLP","firm_invoice_number":"INV-2026-85137","invoice_date":"2026-07-04","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"52398-0006","po_number":"PO-4523441","fees_total":5562.5,"expenses_total":973.0,"adjustments_total":0.0,"total_due":6535.5,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Mbeki","title":"Paralegal","rate":200.0,"billed_as":"BM"},{"name":"Emeka Halloran","title":"Partner","rate":700.0,"billed_as":"EH"},{"name":"Hannah Zielinski","title":"Associate","rate":360.0,"billed_as":"HZ"},{"name":"Ivan Marchetti","title":"Paralegal","rate":190.0,"billed_as":"IM"},{"name":"Katya Brennan","title":"Associate","rate":360.0,"billed_as":"KB"},{"name":"Victor Lockhart","title":"Associate","rate":385.0,"billed_as":"VL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-02","timekeeper":"HZ","timekeeper_name":"Hannah Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":360.0,"amount":864.0,"narrative":"Draft motion to compel to Quarry Lane Partners","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-09","timekeeper":"BM","timekeeper_name":"Beatrix Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":2.0,"rate":200.0,"amount":400.0,"narrative":"Research authority for protective order","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-11","timekeeper":"KB","timekeeper_name":"Katya Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":360.0,"amount":504.0,"narrative":"Prepare production set and cover correspondence for service on Solano Freight","codes":["L320","A110"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-12","timekeeper":"BM","timekeeper_name":"Beatrix Mbeki","timekeeper_title":"Paralegal","title":"Para","hours":2.5,"rate":200.0,"amount":500.0,"narrative":"Prepare monthly status report to client regarding the distribution agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-15","timekeeper":"EH","timekeeper_name":"Emeka Halloran","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":700.0,"amount":1960.0,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-19","timekeeper":"IM","timekeeper_name":"Ivan Marchetti","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":190.0,"amount":38.0,"narrative":"Review expert report served by Ironbridge Steel","codes":["L340","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-23","timekeeper":"VL","timekeeper_name":"Victor Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":385.0,"amount":1116.5,"narrative":"Review and organize incoming production from Orchard Row Brands for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-06-26","timekeeper":"KB","timekeeper_name":"Katya Brennan","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":360.0,"amount":180.0,"narrative":"Review court docket and calendar of pending deadlines for the lease dispute","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-06-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":331.55,"amount":331.55,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-06-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":39.0,"rate":0.68,"amount":26.52,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-06-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":575.77,"amount":575.77,"narrative":"Airfare to Minneapolis for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-06-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":9.79,"amount":39.16,"narrative":"Postage - certified mail","codes":["E108"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["871 Federal Plaza","Denver","Tax ID 20-5701728"],"template":"T08","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-08-04","matter_close":"2026-09-28","matter_budget":51142.0,"approved_timekeepers":["Hannah Zielinski","Emeka Halloran","Katya Brennan","Beatrix Mbeki","Ivan Thornbury","Victor Lockhart","Sofia Brennan","Dmitri Fairweather","Ivan Marchetti"],"invoice_received_date":"2026-07-05"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

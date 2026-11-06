@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0560",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0560","generator_id":"gen_eval_set.py@1 F-0560","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0560.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-02"},
+ "header":{"firm":"Kestrel & Vance LLP","firm_invoice_number":"INV-2026-01745","invoice_date":"2025-04-02","billing_period_start":"2025-03-01","billing_period_end":"2025-03-31","firm_matter_reference":"42629-0007","po_number":"PO-4576368","fees_total":5154.0,"expenses_total":1603.91,"adjustments_total":0.0,"total_due":6757.91,"currency":"USD"},
+ "timekeepers":[{"name":"Dmitri Marchetti","title":"Partner","rate":495.0,"billed_as":"DM"},{"name":"Louis Ramanathan","title":"Senior Associate","rate":395.0,"billed_as":"LR"},{"name":"Priya Okafor","title":"Paralegal","rate":140.0,"billed_as":"PO"},{"name":"Tomas Castellanos","title":"Associate","rate":340.0,"billed_as":"TC"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-03-05","timekeeper":"DM","timekeeper_name":"Dmitri Marchetti","timekeeper_title":"Partner","title":"Ptr","hours":1.9,"rate":495.0,"amount":940.5,"narrative":"Draft post-trial motion in the customs audit","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-03-07","timekeeper":"LR","timekeeper_name":"Louis Ramanathan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.5,"rate":395.0,"amount":592.5,"narrative":"Attend trial day in the construction contract","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-03-13","timekeeper":"PO","timekeeper_name":"Priya Okafor","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":140.0,"amount":294.0,"narrative":"Attend hearing on motion for summary judgment in the supply agreement","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-03-19","timekeeper":"PO","timekeeper_name":"Priya Okafor","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":140.0,"amount":322.0,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-03-20","timekeeper":"TC","timekeeper_name":"Tomas Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":340.0,"amount":374.0,"narrative":"Review draft expert disclosure for the distribution agreement","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-03-21","timekeeper":"DM","timekeeper_name":"Dmitri Marchetti","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":495.0,"amount":1386.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the lease dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-03-25","timekeeper":"LR","timekeeper_name":"Louis Ramanathan","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.0,"rate":395.0,"amount":395.0,"narrative":"Draft post-trial motion in the regulatory inquiry","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-03-25","timekeeper":"TC","timekeeper_name":"Tomas Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":340.0,"amount":782.0,"narrative":"Telephone conference with witness regarding the data incident","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-03-27","timekeeper":"TC","timekeeper_name":"Tomas Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":340.0,"amount":68.0,"narrative":"Prepare fact witness for testimony regarding the vendor agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-03-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":44.57,"amount":89.14,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-03-13","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":325.2,"amount":325.2,"narrative":"Court filing fee","codes":["E112"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-03-21","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":4.0,"rate":22.97,"amount":91.88,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-03-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1097.69,"amount":1097.69,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["933 Pine Street","Seattle","Tax ID 50-9854483"],"template":"T01","pages":2},
+ "rule_set_id":"RS-02",
+ "context":{"matter_open":"2024-02-28","matter_close":"2025-06-29","matter_budget":52031.0,"approved_timekeepers":["Ingrid Castellanos","Hector Whitfield","Dmitri Marchetti","Louis Ramanathan","Helena Zielinski","Tomas Castellanos","Priya Okafor"],"invoice_received_date":"2025-04-19"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

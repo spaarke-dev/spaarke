@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="193" project="unified-access-control-r2">
+  <metadata>
+    <title>Manage Access: one "add person" entry — the server decides between a share and a grant for a contact (#2338)</title>
+    <phase>Session 28: UAC (owner round 128, 2026-10-27)</phase>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes an access write path (/grant, /share-user) and the Access Grant modal; auth/security tags; .cs + .tsx.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-relevant consolidation of three copies of the contact → internal-user rule, plus an extraction of the inline /share-user core.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits AccessGrantModal.tsx, GrantExternalAccessEndpoint.cs, InviteAndGrantExternalUserEndpoint.cs and GrantAccessNotifier.cs, which R3's combined GHSA branch (fix/r3-iss-005-combined) also changes. Start only after that branch is merged to master.</parallel-reason>
+    <deps>R3 combined GHSA merge (fix/r3-iss-005-combined) on master</deps>
+    <tags>bff-api, auth, access-control, pcf, react, fluent-ui, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>
+      GitHub #2338; owner round 128 item 2 (notes/session27-owner-decisions-and-research.md). The owner said, verbatim: "yes this seems like a good way to streamline and remove potential user training complexity; let's address this in this project".
+    </origin>
+  </metadata>
+
+  <goal>
+Staff add a person to a record's access from one entry. When the person is a contact who represents exactly one eligible internal user, the SERVER shares the record with that user (as /share-user does), so the person gets model-driven-app access, not just SPA access. Anyone else gets a grant, as today. The "is this contact an internal user" rule exists in exactly one server place, used by every caller. The modal no longer classifies contacts itself.
+  </goal>
+
+  <component-justification>
+    1. Existing: AssignedAccessMaterializer.ResolveTargetAsync (:1574), GrantAccessNotifier.NotifyContactGrantAsync (:116-220) and PersonalToDoAssignee (:146-154) each re-implement the contact → user rule with small differences. The modal's host check TrackingFieldTrio isInternalContact (:1384) is a fourth, looser copy: link only, no oid rule, no eligibility.
+    2. Extension: extract ONE shared resolver from the materializer's code. Extract the /share-user write core from its inline handler (InternalShareEndpoints.ShareAsync :276-581) into one method that both /share-user and /grant call. No new route, no new table.
+    3. Cost of doing nothing: staff who use "+ Contact" for an internal colleague silently give SPA-only access, with no model-driven-app access. That is the training trap the owner asked to remove.
+  </component-justification>
+
+  <steps mode="directional">
+    1. Shared resolver. Extract the contact branch of ResolveTargetAsync into one service, for example `ContactUserRepresentation` in Services/ExternalAccess, scoped. It reads the contact (GetContactAsync, status-first) and the link candidates (ReadLinkCandidatesAsync), applies AssignedLinkCandidate.Represents, and returns the represented users, each with its ClassifyEligibility result, plus a status (Read / Unreadable / NotFound / Inactive).
+       - Include the notifier's oid-only confirmation (FindContactsByOidAsync + ContactBindingDecision.DecideBoundContact, notifier :172-186) in the shared read. Today the materializer lacks it. Record this as a deliberate, tested correction.
+       - Move the materializer, the notifier and PersonalToDoAssignee onto it. Each keeps its own count policy: the materializer and the to-do assignee need exactly one; the notifier notifies every eligible user. Existing tests must stay green unchanged, except for tests that pin the oid correction.
+    2. Share core. Move the /share-user handler body into one core method, for example `InternalUserShareCore.ShareAsync`, with the same refusal codes, narrowing, No Access guard, read-back, cache invalidation, MarkShareAdoptedAsync, notification and secure-child fan-out. The /share-user handler becomes a thin call to it; InternalUserShareTests (73) stay green unchanged.
+    3. /grant on a contact. When the request names a contact (not an organization), ask the shared resolver with the record's Restricted flag:
+       - exactly one Eligible represented user → share through the core at the requested level. The response carries `sharedWithUser: { systemUserId, fullName }`, and no grant row is written.
+       - more than one represented user → 409 `sdap.access.grant.contact_represents_several_users`; nothing written.
+       - one represented user who is disabled or not a person → refuse with the share core's code (user_disabled / user_not_a_person); nothing written.
+       - one represented user barred on Restricted (flagged external, record Restricted) → refuse with the Restricted reason; nothing written.
+       - the resolver read fails → 503; nothing written. Never fall back to a contact grant on an unreadable link.
+       - no represented user → today's grant path, unchanged (including invite behaviour).
+       Authorization is unchanged (DelegationRuleFilter, Write + Share). The caller-rights probe at the two touched sites uses the equalised gate call (`GetCallerRightsForAuthorizationGateAsync`, #2334).
+    4. /invite-and-grant: when the email resolves to an existing contact that represents an internal user, the same decision applies. Never CIAM-invite an internal user.
+    5. Modal and host:
+       - Replace the "+ Contact" and "+ User" buttons with ONE "Add person" button. Keep "+ Organization" as it is.
+       - The button opens one lookup over contact and systemuser (`entityTypes: ['contact','systemuser']`, xrmNavigationServiceAdapter :233). On a Restricted record, keep the systemuser filter that excludes external users.
+       - A picked systemuser → /share-user, as today. A picked contact → /grant with contactId: the server decides. The modal no longer calls isInternalContact or routes to /invite-and-grant by its own judgement.
+       - When the response carries sharedWithUser, show it as an internal user share row ("Shared with X — internal user").
+       - Remove the isInternalContact prop from types.ts and from TrackingFieldTrio/index.ts.
+       - Update the empty-state strings that name "+ Contact" / "+ User".
+    6. Guide: update docs/guides/UAC-ACCESS-MODEL-GUIDE.md §2 (the tools table and the "+ Contact or + User" callout) to describe the one entry.
+    7. Tests:
+       - C#: the /grant decision matrix in step 3, one test per row; the oid correction in the shared resolver; the three callers unchanged.
+       - Jest: one button; a picked contact posts /grant; a picked user posts /share-user; a sharedWithUser response renders as a user share; no isInternalContact call.
+       - Perturbation-check the must-fire tests.
+    8. Build the PCF with npm run build:prod (scripts/Invoke-PcfBuildProd.ps1) and bump the TrackingFieldTrio version. Run the ArchTests, the filtered unit tests, both integration suites in full, and jest for Spaarke.UI.Components. Measure the BFF publish delta against a fresh master build. Open a PR; merge with both required checks green. Deploy the BFF via R3 (owner go). Import TrackingFieldTrio via scripts/Import-SolutionScoped.ps1. Run the server gate.
+  </steps>
+
+  <acceptance-criteria>
+    - One server method decides whether a contact represents an internal user. The materializer, notifier, to-do assignee and /grant all call it, and no other copy remains (grep proof in the PR).
+    - /grant on a contact that represents exactly one eligible user writes a share (read back), writes no sprk_externalrecordaccess row, and says so in the response.
+    - Ambiguous, disabled, not-a-person, Restricted-barred and unreadable cases each write nothing and answer as step 3 says (one test each).
+    - /grant on a contact with no represented user behaves exactly as before (existing grant and invite tests unchanged).
+    - The modal shows one "Add person" entry, keeps "+ Organization", and never classifies a contact client-side.
+    - InternalUserShareTests, AssignedAccessMaterializerTests, GrantAccessNotificationTests and GrantSendsInviteTests pass unchanged, except for the tests added for the oid correction.
+    - Negative: no new route, no new Dataverse column, no change to the Assigned-To policy (Secure suggests, Restricted no contact grant, Limited no organization grant).
+  </acceptance-criteria>
+
+  <constraints>
+    - CLAUDE.md §9-§11, §10 (BFF hygiene, publish delta), ADR-028; every Manage Access write still requires Write + Share as the caller.
+    - Fail closed: an unreadable link never becomes a contact grant to an internal user.
+    - Start only after R3's combined GHSA branch is merged; rebase onto it.
+    - PCF: npm run build:prod; import only through scripts/Import-SolutionScoped.ps1 (D-83: no full SpaarkeMaster import, no tenant-wide publish).
+    - Don't touch AnalysisServicesModule.cs or SpeAdminGraphService.cs.
+  </constraints>
+</task>

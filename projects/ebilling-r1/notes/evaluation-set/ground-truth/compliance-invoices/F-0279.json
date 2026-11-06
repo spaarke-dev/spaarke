@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0279",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0279","generator_id":"gen_eval_set.py@1 F-0279","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0279.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Ingersoll Vance PC","firm_invoice_number":"INV-2025-74958","invoice_date":"2026-01-01","billing_period_start":"2025-12-01","billing_period_end":"2025-12-31","firm_matter_reference":"95903-0040","po_number":null,"fees_total":4468.0,"expenses_total":1959.78,"adjustments_total":0.0,"total_due":6427.78,"currency":"USD"},
+ "timekeepers":[{"name":"Farah Hargrove","title":"Paralegal","rate":110.0,"billed_as":"Farah Hargrove"},{"name":"Louis Pemberton","title":"Paralegal","rate":145.0,"billed_as":"Louis Pemberton"},{"name":"Mei Halloran","title":"Associate","rate":215.0,"billed_as":"Mei Halloran"},{"name":"Nadia Abernathy","title":"Senior Associate","rate":300.0,"billed_as":"Nadia Abernathy"},{"name":"Samuel Oyelaran","title":"Partner","rate":385.0,"billed_as":"Samuel Oyelaran"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-12-01","timekeeper":"Mei Halloran","timekeeper_name":"Mei Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":215.0,"amount":430.0,"narrative":"Review court docket and calendar of pending deadlines for the distribution agreement","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-12-01","timekeeper":"Nadia Abernathy","timekeeper_name":"Nadia Abernathy","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":3.0,"rate":300.0,"amount":900.0,"narrative":"Draft appellate brief in the data incident","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-12-04","timekeeper":"Mei Halloran","timekeeper_name":"Mei Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":215.0,"amount":451.5,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-12-04","timekeeper":"Farah Hargrove","timekeeper_name":"Farah Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":110.0,"amount":22.0,"narrative":"Prepare for oral argument in the regulatory inquiry","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-12-05","timekeeper":"Farah Hargrove","timekeeper_name":"Farah Hargrove","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":110.0,"amount":253.0,"narrative":"Prepare case assessment memorandum regarding the customs audit and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-12-09","timekeeper":"Samuel Oyelaran","timekeeper_name":"Samuel Oyelaran","timekeeper_title":"Partner","title":"Ptr","hours":1.8,"rate":385.0,"amount":693.0,"narrative":"Prepare monthly status report to client regarding the customs audit","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-12-11","timekeeper":"Mei Halloran","timekeeper_name":"Mei Halloran","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":215.0,"amount":645.0,"narrative":"Research appealability issues in the insurance coverage issue","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-12-11","timekeeper":"Louis Pemberton","timekeeper_name":"Louis Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":145.0,"amount":275.5,"narrative":"Draft notice of appeal and docketing statement for the construction contract","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-12-25","timekeeper":"Mei Halloran","timekeeper_name":"Mei Halloran","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":215.0,"amount":580.5,"narrative":"Research appealability issues in the lease dispute","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-12-29","timekeeper":"Louis Pemberton","timekeeper_name":"Louis Pemberton","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":145.0,"amount":217.5,"narrative":"Prepare for oral argument in the insurance coverage issue","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-12-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":47.0,"rate":0.6,"amount":28.2,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-12-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1931.58,"amount":1931.58,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["367 Commerce Avenue","Denver","Tax ID 85-4052605"],"template":"T18","pages":1},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-11-02","matter_close":"2026-03-31","matter_budget":50711.0,"approved_timekeepers":["Louis Pemberton","Samuel Oyelaran","Farah Carmichael","Gideon Fairweather","Priya Mbeki","Mei Halloran","Farah Hargrove","Nadia Abernathy"],"invoice_received_date":"2026-01-15"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":1
+}

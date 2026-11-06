@@ -1577,3 +1577,516 @@ The full record is in `notes/185-invite-code-design.md` §11.
 - **The agent's assessment:** C stands on its own merits. The research recommended C **against** the owner's own round 94 suggestion (B, an access team). It matches Microsoft's guidance for a recurring user set. It has no per-row grant, a one-query drift check, isolation between families by construction, and `ReassignObjectsOwner` per family. The family key itself is the more direct design: today membership is a computed lineage walk, which is the root of #1506, #1857 (task 187) and the share-mirror drift. With the key, the walk runs once at write time, in one owner, and every reader uses one hop.
 - **Not more design research.** The §7 spikes verify platform behaviour and are the build's first phase, with go/no-go criteria. Spike 1 is dropped (B only). Spike 3 (BU depth through team membership) would hit B equally, so it can't flip the choice. Genuinely open design items: nested families (task 158), and whether to generalise to a "record family" (§8).
 - **Recorded:** C is decided, conditional on spikes 2–7. Not built; it needs its own task or project. Task 187's walk ships now and is replaced by the family key later.
+
+## Round 101 (2026-10-17): OWNER: sign-offs, the 186 ceiling, admin Signal rights
+
+1. **Sign-off on PR #2025 (#1576: disabled users and the per-request token) and PR #2035 (099a: GET /record-grants and Manage Access Current Access): "yes".** Both may merge on a green Router. #2025 is auth code (CLAUDE.md §6). Both go out in the next R3 dev BFF deploy, with server gates afterwards.
+2. **Task 186 ceiling: "yes"** to design note §0, option (a).
+   - The Workforce role "Spaarke Internal Contact User (Workforce)" is read app-only as a CEILING.
+   - A workforce-contact operation is allowed only when the role holds the privilege at any depth AND UAC's record scope allows it.
+   - It fails closed (`workforce_baseline_unavailable`), and privilege edits take effect within 5 minutes.
+   - Privileges for the role: `sprk_servicerequest` Create, Read, AppendTo and Delete at Basic, plus `sprk_document` Create (uploads).
+   - **The owner edits the role. UAC does not.** Until the owner adds these, the ceiling denies every workforce-contact operation on those routes, as designed.
+   - UAC builds task 186 now.
+3. **Ontology Administrator `prvAssignsprk_Signal` and `prvDeletesprk_Signal` (Deep): KEEP.** The owner said: "not a risk (we can remove later)". Raised by UAC in the review of ontology PR #2050 (task 049). Relayed to ontology-r1, who record it in their decisions and in security-roles.md. The guard is not extended to cover them.
+
+## Main-session decision, 2026-10-17: 099c add rule (option A)
+- **Context.** In default (non-issuer) mode, `/grant` and `/invite-and-grant` write an explicit `expiryDate` as given (`GrantExternalAccessEndpoint.cs` ~:422-427). Only the contact-issuer mode refuses to shorten.
+- **Decision.** Every add from Manage Access sends the record's *applied* date (POML constraint 43, owner 2026-09-10).
+- **Consequence.** Re-adding someone whose live grant ends later moves them to the record date. This happens only when the shares already diverge, which the dialog shows.
+- **Rationale.** The owner's model is one date for all sharing, and `/set-record-share-expiry` already moves every row, shortening included.
+- **Rejected.**
+  - (B) Skip the date for existing live grants: it keeps the divergence the owner wants corrected.
+  - (C) Server never shortens in default mode: out of scope, and against the model.
+
+## Round 102 (2026-10-18): OWNER — decisions batch
+1. **099b (#2063):** owner approves the Secure Record Owner role change and signs off.
+   - The change adds `prvReadsprk_ExternalRecordAccess` at Basic via `scripts/Set-SecureRecordOwnerRolePrivileges.ps1`.
+   - The owner asked whether UAC can apply it. Round 101's "the owner edits the role" stands until the owner explicitly says "apply it".
+2. **186 (#2061):** owner approves the Workforce role edit (round 101 item 2's privileges) and signs off. Same question, same rule.
+3. **036 (#2078):**
+   - (a) option 2: app-only `RetrievePrincipalAccess` and privilege read naming the systemuser, only for callers whose token can't be exchanged (WorkforceHome / A9).
+   - (f) `$orderby=modifiedon desc`, so a capped set keeps the most recently modified records.
+   - The owner approves R3 flipping `ExternalAccess:ImpersonatedRootSets:Enabled` on dev after 036 merges and deploys. R3 requires the owner to confirm that directly in R3's session.
+4. **#2084:** adopt the UAC fix, so a rule scoped to a matter that later becomes Secure follows it.
+   - Lineage entries for `sprk_policy` (via `sprk_matter`) and `sprk_policyversion` (via `sprk_policy`).
+   - Secure Record Owner Read on both tables.
+   - Builds after 099b merges.
+   - Ontology review, 2026-10-18:
+     - versions published after the flip must also be owned at create via RecordOwnershipResolver; the 2-minute recent-changes pass is only the net;
+     - the uniqueness-key existence oracle on a hidden rule's code is accepted as a known limit.
+5. **#2027 (provisioning):** audit retention is Forever (`-1`). Relayed to provisioning.
+6. **#1876 (ontology):** Decision Records from a communication filed to no record are visible to whoever the communication is associated with (its participants, through per-participant shares). Once the communication is filed, the team-owned path applies. Relayed to ontology-r1.
+7. **Model 1 `Set-ExternalFlagForB2BGuests.ps1 -Apply`:** NOT yet a go. The owner replied "if this follows what you recommended then ok". UAC re-explains the effect (flagged guests lose direct shares on every Restricted record) and needs an explicit go plus the customer tenant ids.
+8. **ebilling:** firms may see every invoice status, including Sent to AP (matches ebilling D-107). Relayed.
+9. **External CIAM user UAT:** the owner reports it PASSED UAC's checklist. Recorded for wrap-up 090's UAT section.
+10. **#1876 follow-up (owner, via ontology-r1, 2026-10-18):** gate Decision Records are visible to INTERNAL participants only. They are never shared with `sprk_isexternal` users or B2B guests, and a principal whose flag cannot be read is skipped (fail closed). This is ontology task 042b; UAC reviews its DirectThreadAccessService diff before the PR.
+
+## Round 103 (2026-10-18): OWNER — answers to the "still waiting" list
+1. **036 ADR conflict:** the owner leans **C** but asked what the conflict is. UAC explained it in plain terms (below), and the choice C / B / A is still open. 036 stays held until the owner answers.
+   - **The conflict:** ADR-028 forbids exchanging the caller's token (OBO) on the external collaboration path. Under 036's flag, `CallerRecordAccessProbe` confirms a Spaarke-tenant user's write by OBO-exchanging their token.
+   - **Path C:** every systemuser goes through the app-only, named-principal check that decision (a) built, and OBO is dropped there.
+2. **Role changes:** "yes you make role changes". UAC applied both on **dev only**. Other environments need the same edits at provisioning.
+   - **Secure Record Owner** (`e4ebabd9…`): `prvReadsprk_ExternalRecordAccess` at Basic. The platform also added SharePointDocument/Data privileges, as on any role edit. `Set-SecureRecordOwnerRolePrivileges.ps1 -Verify` PASS, 30/30.
+   - **Workforce** (root `9deaac9c…`): sprk_servicerequest Create/Read/AppendTo/Delete and sprk_document Create, all at Basic. Read back on all 6 BU copies.
+3. **Model 1, ACME:** the owner gave the environment and org ids. The tenant was resolved from the guests' domain: `78195073-407e-4788-8198-70fad63a73f5` (acmecorpdemo.onmicrosoft.com).
+   - Dry run on spaarke-acme: 2 guests, both ACME staff. **0 to tag, 0 to review**, so `-Apply` would change nothing and was not run.
+4. **Core-record delete:** "yes you can delete". UAC reads this as approval of recommendations D1–D8 in `core-record-delete-inventory.md` as written:
+   - a BFF delete operation with a preview and a confirm message;
+   - Decision Records kept, Signals deleted;
+   - finance rows block the delete;
+   - grants and the ledger kept, and project→assignedaccess switched to RemoveLink;
+   - rows also filed elsewhere are unlinked, not deleted;
+   - a named role only, and the AI tool refuses core tables;
+   - SPE files deleted, never containers;
+   - attachments deleted with their communication.
+   This reading was stated back to the owner so they can correct it. Next: a design note, then the build. D9 (commit the `sprk_policy_matter` Cascade to the solution XML) needs no decision.
+5. **036 flag:** R3 is tasked and has acknowledged. R3 acts after three things: the 036 merge sha, a dev deploy that contains it, and the owner's direct confirmation in R3's session.
+
+## Round 104 (owner, 2026-10-19)
+
+1. **#2084 policy role change: APPROVED** ("approve policy role change - yes approved"). Applied to spaarkedev1 with `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` against master's config: dry run, then -Apply, then -Verify.
+   - Added: prvReadsprk_Policy and prvReadsprk_PolicyVersion at Basic. The role went from 38 to 40 privileges. VERIFY PASS: 32 of 32 tables.
+   - Outside the file, unchanged by this apply:
+     - the SharePoint four at Global, from an earlier apply (§5.4 strip pending the owner);
+     - 4 ebilling Basic Reads (externalidentifier, invoiceapproval, invoicecorrection, invoicesubmission), not in the config, raised with ebilling.
+   - Ontology was sent before and after notices.
+2. **036:** the owner asked for the options, with details and a recommendation. Sent plainly; the answer is pending.
+3. **Delete Q1–Q5:** the owner asked for the questions. Re-sent; pending.
+4. **186 guest sign-in live gate:** the owner is available now (2026-10-19).
+   - Preconditions checked:
+     - BFF 44f802a1d carries 186;
+     - the SPA is deployed from R3 ebc74b331, tenant-pinned (A8);
+     - `WorkforceIdentity__CustomerTenantIds__1` holds bc3aa7f4;
+     - the Workforce role holds the sprk_servicerequest privileges.
+   - Still needed: a new, unlicensed guest, invited manually by the owner (dev only, 186 §7 Q5).
+
+## Round 105 (owner, 2026-10-20)
+
+1. **Secure dev matter:** the owner made PAT-908068 Secure (`5d46df87-e762-f111-ab0c-000d3a4d8152`). Owner UAT, PASS:
+   - a CIAM external user was granted access;
+   - the document landed in the Secure Record business unit;
+   - the CIAM user sees the Secure matter in the SPA, and can see, download and open its document.
+   - **Found:** the document's Access Permission shows "Standard". Filed as **#2119** (display copy ignores `sprk_issecure`); fix option (a) or (b) is for the owner.
+   - The #2102 Secure steps are re-running against this matter.
+2. **SharePoint four:** the owner asked what it means. Explained: one is "Sharepoint Document — Read: Organization" on the Tables tab; the other three are on the Miscellaneous tab. **Not yet approved.**
+   - The SRO role needs Read only on tables whose rows the Secure team owns, so it needs none on document types.
+   - The two document-type tables are `sprk_documenttype` (classification) and `sprk_documenttype_ref` (Insights Engine r2's organization-owned taxonomy).
+3. **036: HOLD.** The owner asked: "isn't OBO required for SharePoint Embedded? ... don't change this until this is definitively resolved". A definitive analysis is being written in `notes/036-obo-resolution.md`.
+   - OBO to Graph/SPE (GraphClientFactory, ADR-028 A4) is separate from the Dataverse record-access probe.
+   - The probe is used by more endpoints than first stated, so the earlier framing is to be corrected.
+4. **Delete decisions:**
+   - Q1 = **A** (a Dataverse role holds prvDelete; Core User loses it). The name and depth still need confirming; proposed "Spaarke Record Deleter", Parent:Child business units.
+   - Q2 = **recycle bin**.
+   - Q3: files ARE deleted (secure and non-secure alike, D7), **with a clear message on delete that its documents and files will be removed**. Whether the now-empty dedicated container of a secure record stays is still open.
+   - The owner's corollary was answered: a non-secure record's files are deleted too; the shared container stays.
+   - Q4 = **no Decision Record** for a delete.
+   - Q5: "if its decision records are deleted, then the signal records are deleted". This conflicts with approved D2 (DRs are kept and unlinked), so the owner was asked to confirm whether D2 changes.
+5. **186:** the guest is `tracy.cheatham@…` (home tenant bc3aa7f4). Sign-in failed with AADSTS90072 because the account isn't invited into the Spaarke tenant yet. The owner invites it, or approves UAC sending the B2B invite. **5b approved:** remove and restore Create on the Workforce role's sprk_servicerequest during the gate.
+
+## Round 106 (owner, 2026-10-20)
+
+1. **Secure meaning: KEEP as built.** Named external contacts are allowed on a Secure record; organization, standing and derived access are switched off (FR-22). The owner had understood "Secure = internal only". They asked: "let's make sure that it is not a matter of code or other wiring that is just not working correctly; let's ensure we are doing this as intended". A verification (code audit plus live check) is commissioned.
+2. **036:** "is option C the best technical decision? ... let's ensure we are doing the best long term solution". An independent long-term critique of C versus B is commissioned. 036 stays HELD.
+3. **#2119:** the owner proposes adding the Manage Access PCF to the Document record, wired into the same access management. A feasibility and design check is commissioned.
+4. **SharePoint four:** "don't worry about the Sharepoint settings". DROPPED; no strip.
+5. **Delete Q3: keep** a Secure record's own, now-empty dedicated container.
+6. **Delete Q5:** "if the Decision Record is deleted then also delete the signal that triggered it". A Signal follows the Decision Record that cites it. Applied with approved D2 (DRs are kept): a Signal cited by a kept DR is kept, and all other Signals are deleted. Asked the owner to confirm D2 itself (keep DRs when a matter is deleted).
+
+## Round 107 (owner, 2026-10-20)
+
+1. **Delete D2 REVERSED: delete Decision Records with the record.** "if a matter is deleted, then delete decision records (and signals)". When a core record is deleted, its Decision Records are deleted, and so are the Signals that triggered them (Q5 now applies in full: every Signal goes with its DR). This replaces D2 "Decision Records kept" in `core-record-delete-design.md` §4, and the "Audit" row's "the BFF never deletes a DR". Dataverse audit (ON for the DR table) is the surviving trace. Q4 stands: no Decision Record is written for the delete itself. The delete preview must count DRs and Signals under `willDelete`, and the "documents will be removed" warning (round 105 4-3) extends to Decision Records.
+   - *Open for build planning:* does any guard or ArchTest pin "the BFF never deletes a DR" (the append-only invariant)? If so, it is narrowed to "only the core-record delete operation deletes DRs", not removed.
+2. **186:** the owner reports the Tracy guest account is verified. The server-side gate was commissioned (results in `batch7-live-gates-2026-10-17.md`).
+3. The owner asked for details of the #2121 options, the 036 options and #2119 (answered in chat; decisions pending).
+
+## Round 108 (owner, 2026-10-20)
+
+1. **#2121: option (b).** For a Secure record reached only through an Assigned lookup, the server asks Dataverse, app-only and naming the systemuser (RetrievePrincipalAccess), and keeps the record with Read only if Dataverse admits it. PR #2122. This is security code: owner sign-off before merge.
+2. **036: option C.** App-only named-principal confirmation for every systemuser on `/api/v1/external`, and no OBO on that plane. The critique conditions apply: 404-only re-ask, fault vs denial, a no-OBO ArchTest, the CA note, and a live disabled/unlicensed check. ADR-028 A5 B1 is widened to every systemuser. Follow-up issue: impersonated writes.
+3. **#2119: Manage Access PCF on ALL record forms, for consistency.** Standalone Document, To Do and Event records (no parent) need their own access management. "We do not want to over complicate it." No stop-gap (dev only). A design check is commissioned (`notes/2119-manage-access-all-forms-design.md`).
+4. **Round 107 deletion confirmed ("correct").**
+5. **186:** the owner will sign in as Tracy when told. R3 059 E/F made the A9 SPA live (1908696a8).
+6. **#2128: option (1), remove the guest route** (the FR-15 auto-create for customer-tenant B2B guests). Question: how does self-registration put the contact in the correct BU? Answered in chat: `ExternalAccess:CustomerBusinessUnitId` → that BU's default team. A missing value, or the Secure BU, means nothing is created. It is one value per environment.
+
+## Round 109 (2026-10-20)
+
+- **#2138 (#2128, retire the FR-15 guest auto-create): owner "proceed with #2138".** This is the security sign-off after two adversarial passes; the second found no bypass. Merge when Router and Client lint are green. Deploy only after R3's SPA with `d4ea1b4a8` (merged to master as 28274e04e via #2141) is live on dev. At that deploy, run the PR-body data step on the 3 dev guest-bound contacts: clear `sprk_externalobjectid`, `sprk_identityplane` and `sprk_externalobjectidkey`, after checking each email domain.
+
+## Round 110 (owner, 2026-10-20)
+
+1. **D7 (#2126 / R3 ISS-015): accepted.** In the owner's words: "document access follows its parent (unless more restricted)." A child document may narrow partner visibility (its own Access Permission = Restricted, or derived from an internal-only / non-Open communication), never widen it. Design: `notes/2119-manage-access-all-forms-design.md` §6. The T8 fallback (an unidentifiable email → own Restricted) is approved with it.
+2. **036 / #2078: proceed** (sign-off), on confirmation that the design is fully agreed. The merge gates remain: the 034 negative canary (NFR-04), #2122 merges first, and master is merged in with the #2121 filter kept on the flag-off path.
+3. **#2122 (#2121 option b): approved.** This is the security sign-off.
+4. **186: Tracy access confirmed** by the owner (home-directory sign-in). Next is the server gate.
+5. Q1/Q10, #1864, #2119 D1–D6, census a/b/c, CustomerBusinessUnitId and #2139: the owner asked for more information. The explanations were given in chat; these remain open.
+
+## Round 111 (owner, 2026-10-21)
+
+1. **#2150 (#2143): option (a).** One bounded round 11 that changes only the log level and wording of the two round-10 F2 findings: the false "sharees may still open it" ERROR after a transient Failed mirror step, and the unsafe "Re-own it first" on an isolated row. Control flow stays as it is.
+2. **188: path B approved.** CLAUDE.md §6.5 path B, an amendment: the AI tools' User-OBO-only rule gains one narrow exception. That exception is `AppOnlyDocumentNarrowing`, which re-reads by id app-only and returns only a hide decision; it never returns rows or widens. This is the owner sign-off the I-14 text and `IDataverseUserClient` remarks were waiting on. The main session applies the `.claude/` text on the #2170 branch.
+3. **F1-B cascade (deleting a communication or parent .eml un-hides its documents): (a), Restrict**, with the owner's note "take the most consistent with other decisions". The main session confirmed this is consistent:
+   - "security fails closed" (CLAUDE.md §17);
+   - D7's "derived at read time, never stamped" (option (b)'s permanent stamp would contradict it);
+   - delete design D1's intent that a delete outside the BFF must not quietly change access.
+
+   Restrict applies to `sprk_communication → sprk_document` (`sprk_relatedcommunication`) and `sprk_document → sprk_document` (`sprk_parentdocument`). (Main-session implementation note, not owner text, corrected 2026-10-21:) the core-record delete deletes child documents first; a single-document delete of a parent that still has child documents is refused with 409 `document_has_child_documents`. Unlinking the children would un-hide them, so the BFF never unlinks. The core-record delete deletes documents (children first) before their communication.
+4. **Limited does not hide from partners.** D7 stays as written: only Restricted hides. A must-not-fire test pins it.
+5. **#2179: (c), accept and document.** Flagged-external systemusers who hold direct Dataverse access are trusted with it. D7's guarantee covers contacts (CIAM) and every BFF surface, not direct Dataverse access by flagged-external systemusers. This sits beside I-14's round-77 known limit.
+
+## Round 112 (owner, 2026-10-21)
+
+1. **#2169 sign-off: yes.** Task 189 (a document's own narrowing is never widened) may merge. CLAUDE.md §6 security sign-off given directly by the owner. Deploy order stands: #2169 before #2161, with the backfill gate.
+2. **#2150 sign-off: yes.** #2143 (ReparentAsync owner write is conditional and re-derived) may merge. CLAUDE.md §6 security sign-off given directly by the owner.
+
+## Round 113 (owner, 2026-10-21)
+
+Owner text, verbatim:
+
+> 1. let's ensure access for licensed 'is external' is correct for both dataverse access AND SPA access. if the systemuse is marked 'sprk_isexternal' then that user should not have access to any record that is marked 'internal only' whether in dataverse or SPA. Internal means internal to the customer/company--this may reverse the earlier decision. This should apply to Procedures files which are all considered 'internal only' for file download (there may be extracts in rules/decision records that an 'is external' can see--that's fine)
+>
+> Invoices and export files will need to be accessible to the related external user (i.e., its their invoice)
+>
+> 2. i'm not sure i'm following but we should take the email and invoice pdf as either all pass or none pass; e.g., we should not allow an email but not its invoice pdf; and vice versa we should not allow a invoice pdf if the email does not have rights to the matter.
+
+Main-session reading (not owner text):
+
+1. **Reverses #2179 (c) (round 111 item 5) and the round-77 I-14 known limit.** A systemuser with `sprk_isexternal = true` must not reach an internal-only record through Dataverse directly (Web API, model-driven app) or through any BFF/SPA surface. BFF-side narrowing (task 188) stays; Dataverse-side enforcement is new work (#2179 option (b) shape; design first). #2179 reopened.
+   - **ebilling F1-e:** the internal file route refuses flagged-external callers for Procedure files, always. Rule/decision-record extracts that an external user may see are not affected. Invoice and export files stay reachable by the related external user (their own invoice); the relation that decides "their invoice" is for ebilling and SPA-r3 to define.
+2. **ebilling K1: all-or-nothing.** The email and its invoice PDF are filed together or not at all. A failed isolation re-run after commit undoes everything the submission created (invoice, lines, findings, Signal rows, the file), not just the bytes. A PDF is never accepted under a matter the email is not allowed under. The residual is only the seconds between commit and the re-run, and only where the transaction's document-row guard cannot catch the race.
+3. **Definition of internal-only confirmed (owner, round 113 follow-up):** (a) any record whose Access Permission is Restricted (Limited stays visible, round 111); (b) communications marked internal-only, and the documents attached to or derived from them; (c) all Procedure files. Tracked as task 191 (`tasks/191-d7-flagged-external-dataverse-enforcement.poml`); the owner asked that it stay active in the plan.
+
+## Round 114 (owner, 2026-10-21) — task 191 design questions (partial)
+
+Owner text, verbatim:
+
+> 1. option A means that we will have to explicitely add the law firm to every record they have access, is that correct? OR can the organization access permissions script auto set this? we want their access in model driven app to mirror what they would have in the SPA (and vice versa)-- they can see all records unless secure or restricted (unless for restricted they are added to the access list)
+> 2. if this is the only way - then 'yes'
+> 3. use the same rule so its consitent
+> 4. yes acceptable
+> 5. can use script and alert--but this seems a little risky; if only condition for bff mediated is user admin rights, doesn't the bff already have that?
+
+Decided: **Q3** internal-only passes down to records under or about a hidden record, using the SPA's exact rule. **Q4** the ~2-minute window for out-of-product changes is accepted.
+Open (main session answered with facts; owner to confirm): **Q1/Q2** the target is "MDA = SPA: a flagged-external user sees every record except secure (unless shared), Restricted (unless on the access list) and internal-only". **Q5** the BFF app user is System Administrator (`SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md:76-77`), so a BFF job can move users.
+
+## Round 115 (owner, 2026-10-21)
+
+Owner text, verbatim: "yes deploy" / "yes for 191 approach".
+
+1. **Dev deploy of master a10e814d02 (#2169 + #2150): approved.** Relayed to R3, who deploys.
+2. **Task 191 approach (answers round 114 Q1, Q2, Q5):**
+   - **Q1:** design A with automatic sharing. Flagged-external users go into one "External Collaborators" business unit and team, with no business-unit depth. The share job shares every record that is not secure, Restricted or internal-only with that one team, and withdraws the share when a record becomes internal-only. Restricted records are shared only with people on their access list. Secure records keep their existing shares. The model-driven app and the SPA match by construction, because the 036 read set asks Dataverse.
+   - **Q2:** moot. Flagged-external users lose no ordinary records, so no "would lose" list is needed.
+   - **Q5:** a scheduled BFF job moves a newly flagged user into the external unit within about 2 minutes, with an alert only when a move fails. The move is one-way: un-flagging stays an operator step. The job acts only on a flag read as definitely true, never touches application users or administrators, and re-applies the external role after the move.
+
+## Round 116 (owner, 2026-10-21) — ebilling v5 UAC items
+
+Owner text, verbatim: "1. yes that's fine / 2. yes / 3. invoice file storage will be practically limited because can only be accessed through the Invoice record, correct? or when we have an invoice file search"
+
+1. **F1-1 (a′) effect accepted.** While its Submit Invoice source is internal-only or Restricted, the invoice and everything derived from it are hidden from external callers, the firm included. The invoice reappears when the source is lowered.
+2. **F1-4 confirmed.** A flagged-external systemuser sees only invoices of the firm their linked contact belongs to. No link means no invoices.
+3. **K-3 (blob network `defaultAction: Allow`):** the owner asked a clarifying question; main session answered (see session). Not yet decided.
+
+## Round 117 (owner, 2026-10-21)
+
+1. **ebilling K-3 (invoice-file blob storage network Allow): accept as a known limit.** Invoice files are reachable only through the invoice record and its gated file route. A network block (private endpoint, or public access denied) is due at prod hardening. Revisit if an invoice-file search is added. Relayed to ebilling.
+2. **Record family: open question, not a decision.** The owner asks whether an explicit "record family" would simplify UAC across related records, and how communications are associated today. Example: an email with invoice content is filed to the invoice rather than the matter. Is it then missing from the matter's messages view? Answer pending a code map of the communication regarding lookups and view queries.
+
+## Round 118 (owner, 2026-10-21)
+
+ebilling v5.5. The Outlook add-in always saves the invoice email as a `.eml` on the core record.
+1. **Invoice email exposure, option (i).** The from-email `.eml` is saved own-Restricted, with a recorded marker that the submission wrote that narrowing. ebilling (a′) skips only a marked narrowing, so firm F still sees its own invoice through the firm route, and other partners on the matter cannot open the invoice email.
+2. **An email the add-in can't identify: refuse with a retryable "try again".** No `.eml` and no submission are saved. It is all-or-nothing, as ebilling K1 requires. Relayed to ebilling.
+
+## Round 119 (owner, 2026-10-21)
+
+1. **#2161 sign-off: yes, and deploy.** CLAUDE.md §6 security sign-off. Merged as `84291ecea8`, then a deploy request to R3 for master `84291ecea8`, which also carries #2177 and #2205. R3 needs the owner's approval in its own session.
+2. **Task 188 round 4e approach: ok.** App-only generic writers refuse `sprk_parentdocument` and `sprk_relatedcommunication` on `sprk_document`, because they are D7 visibility inputs. Link changes go through the caller-checked re-file routes.
+3. **#2191: ok.** Merges when UAC accepts the parser-based guard re-check and CI is green.
+
+## Round 120 (owner, 2026-10-21)
+
+Owner text, verbatim: "1. yes and go for deploy steps / 2. ok (do i need to do anything?) / 3. i'm not following-what is optional re-file?"
+
+1. **#2170 and #2186 sign-off: yes, with a go for the deploy steps.** This is the CLAUDE.md §6 security sign-off.
+   - #2170 merged as `446c83d927` and #2186 as `f1b3dadcf5`. #2186 was first updated from master; its 3 conflicts were resolved keeping both sides. The I-14 row's #2179 limit now reads open (task 191).
+   - Approved steps, in order:
+     1. the BFF at `f1b3dadcf5` via R3 (R3 needs the owner's go in its own session);
+     2. `Set-DocumentLinkDeleteRestrict.ps1 -Apply`;
+     3. `Set-DocumentNarrowingFieldSecurity.ps1 -Apply` (dev BFF app users `5967251e…`, `1e40baad…`);
+     4. the `sprk_DocumentOperations.js` 1.28.2 web resource.
+   - Dry runs on dev were clean: exactly the two cascade changes, and every field-security precondition p1–p7 OK.
+   - K4 impact on dev: 11 partner-reachable documents become hidden. All 11 are own-Restricted and sit under one matter (`b68299c6…`). Of 598 documents, 27 fail D7 in total.
+2. **The #2177 Outlook check: ok.** The owner saves two `.eml` files from the add-in:
+   - one email with a communication record, expected linked to it and with an empty access value;
+   - one email with no record, expected own-Restricted.
+   The owner sends the times or subjects, and R3 / word-add-in read the rows back.
+3. **The #2161 test re-file was explained** (an ordinary document re-filed from one matter to another, then R3 reads a moved count of 1). No decision yet.
+
+Filed this round: #2213, `CrossPathLink` re-points an archive document already linked to another communication, which can un-hide it under D7.
+
+### Round 120 gate record: task 188 on dev (2026-10-21)
+
+**Deploy and steps.** R3 deployed master `f1b3dadcf5` (#2170 + #2186) at 21:45:37Z. healthz, healthz/dataverse and anonymous `/api/me` 401 all answered as expected. Steps run in order:
+1. `Set-DocumentLinkDeleteRestrict.ps1 -Apply` → VERIFY PASS.
+2. `Set-DocumentNarrowingFieldSecurity.ps1 -Apply` → VERIFY PASS. Each link column was masked about 17 s.
+3. `sprk_DocumentOperations.js` 1.28.2 → published on the second attempt (the first hit another customization in progress); the live bytes equal master.
+
+**The 30-min reading** (21:44:30Z → 22:16Z) was clean:
+- no new exception class;
+- no narrowing exception;
+- no 0x80040227, 409, 403 or field-security error;
+- the reconciliation runs all Succeeded.
+
+**Not exercised in the window:** a partner document read and a BFF document create. Live checks for when traffic comes, from dev ids:
+- **Hidden:** matter `b68299c6-bafb-f011-8407-7c1e520aa4df`, partner contacts `8e9918a9…` / `2e419a4f…`. Its 11 own-Restricted documents should disappear from the partner list. A partner download or versions call on `aadbb740-bdfb-f011-8407-7c1e520aa4df` should get the not-under-parent refusal.
+- **Must-not-fire:** matter `86335ce3-4c18-f111-8343-7ced8d1dc988`; documents `0f67ada5…`, `6c112598…` and `73910392…` stay visible.
+- **Writer path:** the first email, Office or upload document create after 21:5xZ must succeed. The BFF app users are Writers.
+
+## Round 121 (2026-10-22): T191a spike writes on dev approved
+
+Asked in-session (the questions, verbatim): "May I run the T191a spike writes on dev (business unit, role, shares, one test-user move, one SPE invite), each with its undo step?" and "Which user should play the flagged-external user for S1/S2?"
+
+Owner answers:
+1. **"Yes, all four"** (S1–S4). The scope is the write list in `notes/2179-flagged-external-dataverse-design.md` "T191a read-only results", taken from the researcher's report:
+   - S1: an "External Collaborators" business unit and a spike role; shares on test matter `fa328db3…` and its children; Write negatives and creates as the test user.
+   - S2: one business-unit move.
+   - S3: about 1,000 timed shares on rows that are neither secure nor Restricted.
+   - S4: one SPE item invite on a document under `fa328db3…`.
+
+   Each write is undone afterwards. Out of bounds: `65a3fab2…`, the Secure Record business unit, the 3 Restricted matters, and Key Vault.
+2. **Test user: the existing flagged guest `e44317a0…`**, the only enabled flagged user. It owns no rows and holds only self-shares. It is moved back to the root business unit, with its direct role restored, afterwards.
+
+## Round 122 (2026-10-22): a linked .eml archive's access matches its parent
+
+Raised by word-add-in through R3, as a non-blocking question. The question as asked: "An Outlook .eml saved as own-Restricted (its email couldn't be identified at save) may later be linked to its communication by the task 190 sweep. Should it then lose its own Restricted?" The main session recommended keeping Restricted, with no automatic loosening.
+
+The owner's answer, verbatim: **"the access should match the 'parent'"**.
+
+Reading: once such an archive is linked to exactly one communication (by the 190 sweep or by `CrossPathLink`), its access follows that communication. The system-set "unidentifiable at save" Restricted gives way to the communication's value.
+- A Restricted set on the archive by hand still stays (round 87). The implementation must tell the two apart.
+- Dev today: 0 unlinked archives are own-Restricted (190 census: 119 blank, 1 Standard), so the 190 Apply on dev is unaffected.
+- The design check is running; the implementation follows as a task-190 follow-up.
+
+## Round 123 (2026-10-22): user-started playbook runs write as the user (#2257)
+
+Raised by UAC's security pass 2 on PR #2253. Any signed-in internal user can create a playbook through the still-open authoring API (`POST /api/ai/playbooks`, then nodes), add an Update Record step, and run it. The step writes app-only, as System Administrator, to any record and any column the deny-lists don't name.
+
+The owner first asked what a playbook is, since the product moved away from playbooks as its design model. The explanation given:
+- the old engine still runs underneath: matter health's Update Record step, document summaries, the document email wizard, and the Console's playbook list;
+- its authoring API is still open to any signed-in user, though no screen uses it.
+
+The owner's choice, verbatim: **"Run as the user (Recommended)"**.
+
+Reading:
+- When a person starts a run (`RunUserId` set), the Update Record step and the output mapping write AS THAT PERSON: `ImpersonateSystemUserId` = `RunUserId`.
+- Runs with no person (scheduled or system) stay app-only, behind the `RefuseAppOnlyWrite` deny-lists.
+- `matter-health-single` keeps working, because the run filter already requires Write on the matter.
+- The authoring API is not locked in this change (the "Run as user + lock authoring" option was not chosen).
+- Implementation: #2257, after #2253.
+
+### Round 124 (2026-10-22): the "Spaarke AI Analysis Admin" role is admin-trusted
+
+Raised by PR #2258's security pass 1 (K2). A holder of "Spaarke AI Analysis Admin" (Global Write and Assign on `sprk_analysisplaybook`) can make a playbook scheduled (`sprk_playbooktype = 2`), or edit a routed playbook's nodes. The scheduler then runs it app-only, as System (`PlaybookSchedulerJob.cs:391`). Ordinary users have no such path.
+
+The owner's answer, verbatim: **"Yes, admin-trusted"**.
+
+Reading: no ownership check on System runs. The role is treated like a system administrator, and the `RefuseAppOnlyWrite` deny-lists remain the only limit on what a System run writes. This is recorded as a known limit in #2258 and #2262.
+
+**Main-session decision on #2258 (complies with existing rules; not an owner question).** Playbook writes ask `RefuseAppOnlyWrite` WHATEVER the run's identity, because the payload is built by configuration or a model, not by the runner. This is the same reason the field-mapping push asks it although it runs as its caller. Without it, user A's published playbook could lower user B's Restricted document when B runs it.
+
+### Round 125 (2026-10-22): #1830's dead container on secure project 65a3fab2 is removed from the stamp config, then re-provisioned
+
+The question was raised by the task 192 diagnosis (#1830, R3 ISS-006). On dev, the revocation sweep logged an error on every run. The cause is that container `b!MVasATu…`, which belongs to secure project `65a3fab2`, points at a SharePoint site that has been deleted. Graph answers 400 "Invalid hostname for this tenancy". The id is listed in `SharePointEmbedded__OwnedContainerIds`, so the ownership guard never reads it.
+
+- No revoked grant kept access as a result: JIT markers shipped on 2026-10-07, and the container was already dead on 2026-10-06.
+- The other 3 secure containers are processed on every run.
+
+The owner's answer, verbatim: **"Remove id + re-provision (Recommended)"**.
+
+Reading:
+- At the next dev BFF deploy, which goes through R3 and needs the owner's approval of that deploy by SHA in R3's session, remove `b!MVasATu…` from dev's `SharePointEmbedded__OwnedContainerIds`, keeping `b!vzGD…`. To roll back, re-add the id.
+- After that, re-provision project 65a3fab2's container through the existing provision-project endpoint.
+- No container is deleted or purged.
+- This lifts the "don't touch 65a3fab2" rule for this one action only.
+
+The code fix is PR #2268: the sweep reports a container that does not resolve as a warning, not a failure. #2267 (filed) covers checking configured container ids at startup.
+
+### Round 126 (2026-10-23): owner answers on R3's design questions for the private finding GHSA-hq7m-w2pf-v8j7
+
+R3 asked three design questions, (a)–(c), and the owner answered all three in UAC's session with "follow recommendation". The decisions and the evidence went to R3 privately. This entry is a reference only: the repo is public, so the mechanism and the design details stay out of it.
+
+- **(a)** A first-sign-in bind needs stronger proof than the email address alone.
+- **(b)** Removing a person entirely is admin-only, and so is undoing a removal.
+- **(c)** Every contact column the BFF trusts gets field security where Dataverse allows it, and a fail-closed check in the BFF where it does not.
+
+R3 sends the implementer brief and the diff to UAC for review, with two security passes, before any merge. ISS-005 merges with or after this fix.
+
+### Round 127 (2026-10-26): Workforce invite mode, and census accepted exceptions
+
+**1. Workforce invite mode, for the private finding GHSA-hq7m-w2pf-v8j7 (reference only; the design details are with R3).** The owner chose R3's option A: the existing invite endpoints get a Workforce mode. The owner added, verbatim: **"important that user does not need to know the organization tenant id"**.
+
+Reading:
+- Staff never enter a tenant id. The BFF works out the organisation from the invited email's domain and chooses the invite type itself.
+- Staff may still choose a portal account instead.
+- R3 implements it and UAC reviews it.
+
+**2. Census accepted exceptions (after the #2318 census extension).** The owner's answers, verbatim:
+- Billing Administrator's Global Read on rules and rule versions: **"Accepted exception"**. This follows the owner's EB-D-150, given in ebilling's session, to keep Global as a §6.5 path A project exception to design §5.2, against UAC's and ontology's recommendation of Deep.
+- AI Analysis Admin's Global Read on analysis and analysis output: **"Accepted exception"**. This was against UAC's recommendation to keep flagging it, because analyses carry document content from Secure matters.
+
+Reading:
+- The census reports both as low-severity accepted-exception lines that name the holder.
+- They do not count toward the isolation verdict, so the H13 gate does not refuse for them.
+- The exception covers exactly those roles and privileges, and only when the role is held directly. If the same role is held through a team, or the role reaches the secure BU through any other privilege, it is still a finding.
+
+Also recorded from ebilling's session: EB-D-151 (Core User stays as D-90, with a known limit) and EB-D-152 (#2310 option C).
+
+### Round 128 (2026-10-27): owner answers on the UAC access guide questions (#2337, #2338, #2339)
+
+**1. #2337, closing a matter or work assignment.** Asked: "should closing a matter also close the projects and work assignments filed under it?" (recommendation: no). The owner answered, verbatim: **"agree 'no'"**.
+
+Reading:
+- A close acts on the one record closed.
+- Filed core records keep their own grants. The close reports any filed core records that still have active grants.
+- #2337 is not scheduled in this project. The owner scheduled only #2338 and #2339.
+
+**2. #2338, one "add person" entry in Manage Access.** The owner answered, verbatim: **"yes this seems like a good way to streamline and remove potential user training complexity; let's address this in this project"**.
+
+Reading (UAC's design, stated back to the owner):
+- One entry replaces "+ Contact" and "+ User".
+- The server, not the modal, decides between a share and a grant. It uses the Assigned-To rule's contact → user resolution (task 141 link rule, plus `/share-user` eligibility), in one shared place.
+- A contact that represents exactly one eligible internal user is shared with as that user. Anyone else gets a grant.
+- An ambiguous link is refused, never guessed.
+- A user flagged external on a Restricted record gets nothing.
+
+Scheduled as task 193. This is in scope beyond the round-90 wrap-up because the owner asked for it.
+
+**3. #2339, the children of a parent reassigned to a new business unit.** The owner answered, verbatim: **"yes this is a gap that should be closed; also note that e-billing-r1 is asking the same and related questions; i will refer that project to you in order to ensure consistency; this fix should be addressed in this project"**.
+
+Reading:
+- UAC owns the fix. Scheduled as task 194.
+- ebilling-r1 is referred to UAC. Its child tables, the invoice family among them, follow the same rule and the same mechanism. ebilling does not build its own.
+
+### Round 129 (2026-10-27): the project's filing root (#2352) and one family per record (D-191)
+
+**1. #2352, how a project is filed under a matter.** The owner chose option (a) in field-mapping-r1's session and confirmed it in this session, verbatim: **"option (a) for the project-to-matter link (#2352) NOTE: there already exists a Project<>Matter N:N relationship if that has any effect on the solution approach"**.
+
+Reading:
+- A project has ONE filing root: its regarding pair (`sprk_regardingrecordid` + `sprk_regardingrecordtype`). The server writes it, never the wizard.
+- The existing Project ↔ Matter N:N stays as an association. It confers nothing and is not a Filing edge. Task 195's design note records the N:N cases: several matters on one project, a matter added through the subgrid, and the filing matter's N:N row removed.
+- UAC owns (i), the wizard write, and (ii), the dev backfill, as task 195. Field-mapping owns (iii), W7 and 040, which depend on 195.
+
+**2. One family per record.** The owner answered, verbatim: **"yes tell ontology that a record filed under several parents belongs to its primary parent's family"**.
+
+Reading (sent to ontology; recorded in ontology D-191 at 349ac7df2a, and in field-mapping FR-30 / design §12.3 B):
+- A record filed under several parents belongs to exactly ONE family, its primary parent's. The primary parent is the I-6 rule that decides ownership (`InPrimaryOrder` / `OrderedParentsOf`, task 194b).
+- The other filing edges are secondary: they can be navigated but confer no membership.
+- Isolation is decided separately: secure-if-any runs over all filing parents. Family is not the security boundary.
+
+**Recorded from peer sessions (the owner decided there):**
+- ebilling EB-D-162: Billing Administrator's Read on rule set, policy and policy version is Deep, not Global. The EB-D-150 accepted exception is removed from `SecureBuRoleDepthAssertion.AcceptedRoleExceptions` (UAC's condition). Live on dev 2026-10-27, -Verify PASS.
+- field-mapping #2354 (FR-36): a work assignment's `sprk_assignedto` defaults, fill-only at create, to its `sprk_assignedtointernal`. This is a UAC review gate; my conditions were sent.
+
+### Round 130 (2026-10-28): the structured family entity is deferred to the roadmap (#2362)
+
+Asked: should we build the structured family entity (`sprk_securefamily`, owner team per family, round 100b), and if not now, can it be built later? UAC recommended not now: nothing concrete fails without it. Isolation, membership (the primary-parent rule, round 129) and grouping (stamps plus field-mapping W7's computed family) already work. A later build is a one-time migration. The owner answered, verbatim: **"yes i agree with your 'don't build it now' decision. record it and we'll keep it on a future roadmap determination"**.
+
+Reading:
+- Not scheduled in this project. It is tracked as #2362 (triggers, rules, spikes, the §8 option).
+- **Triggers to revisit:**
+  - mirror-share growth near Dataverse limits;
+  - a feature that needs one deterministic family key across Secure records that the stamps and W7 cannot serve;
+  - a requirement for structural isolation between Secure families.
+- **Binding now, so that a later build stays cheap:**
+  1. Membership stays computable from stored data: the primary-parent rule and one filing root per project (task 195).
+  2. Every ownership write goes through `RecordOwnershipResolver`.
+  3. New code asks "is this row isolated" through one shared predicate keyed on the Secure Record BU (never a team id), and reads families through W7.
+- Ontology D-191's "Secure family qualifier, materialised by `sprk_securefamily`" stays a design target, not a scheduled build. Ontology, field-mapping and ebilling were told the same day.
+
+### Round 131 (2026-10-28): owner of the hard-deny tables (086, #2368), and how a colleague added through "Add person" sees the record (193, #2338)
+
+**1. 086: ordinary owner of the hard-deny tables.** These are `sprk_storedfile`, `sprk_procedureassignment`, `sprk_ruleset`, `sprk_policy` and `sprk_policyversion`.
+- While the record is ordinary, the owner is a **dedicated owner team in the root BU with no members**. Its own role grants Read only, at Basic, on exactly those five tables. This replaces the "owned by the application" proposal (a).
+- A Secure row still goes to the Secure Record Owners team.
+- Why this team: Dataverse only accepts a team as owner when the team can read the table, and every member of the owning team can then read every such row. Using the root BU's default team would expose these rows to the whole BU.
+- Binding conditions:
+  - The resolver answers this team only at the ordinary exit.
+  - The resolver fails closed if the team is missing, is outside the root BU, or has any member.
+  - Unsecure moves these rows to this team.
+  - The team and role are codified (config JSON plus an -Apply/-Verify script). They go live on dev only with the owner's separate go, and every customer environment needs them before a BFF carrying the rule runs.
+  - 191 never grants BU-depth or Deep Read on these tables.
+- Built in 194b (R4b). Ebilling records it as EB-D-168.
+
+**2. 193: a colleague added through "Add person" sees the record in the workforce app too, whichever way they were picked.**
+- A workforce user signs in as themselves, and is linked to their contact. The workforce app shows what the grants on that contact allow. The Dataverse share targets the system user and gives model-driven app access, and it can't target a contact.
+- So adding an internal colleague writes both a share to their system user and a grant on their linked contact. This applies whether the colleague was picked as a user or through their contact.
+- Neither the share nor the grant has an end date, so the two can't drift.
+- Revoking removes both. No invite is sent.
+- A contact with no linked system user keeps today's behaviour: a plain contact grant.
+
+### Round 132 (2026-10-28): #2382, Core User may create projects with linked people and organizations
+- The owner said yes: raise the Spaarke Core User role to the level the create wizards require, in the repo and on dev.
+- Rule: AppendTo on each bound target table at that table's Read depth, so a user can link to what they can already see, plus Append on the created table. Nothing else is raised.
+- Expected: AppendTo on contact goes from Basic to Deep, and AppendTo on `sprk_organization` goes from none to Deep. A guard test with a ratchet over the wizards' bound tables enforces it.
+- A shared helper turns a Dataverse privilege error into a plain sentence (no ids, no unfilled template).
+- Order: dry-run diff, UAC review of the access consequences, then -Apply on dev.
+
+### Round 133 (2026-10-28): 193 paired-grant expiry and the pairing record
+- **Expiry: (a), a normal date plus cleanup.**
+  - The paired contact grant takes the requested date or today + 90 and renews as today. The share keeps no end date.
+  - The modal states the workforce-app end date.
+  - The existing `ExternalAccessReconciliationJob` ends a paired grant once its user no longer holds the share. A read fault changes nothing and is counted.
+  - Gaps only ever reduce access.
+- **Pairing record: a new BFF-only lookup column `sprk_pairedsystemuser` on `sprk_externalrecordaccess`.**
+  - It is field-secured and refused in caller payloads.
+  - The BFF fails closed if the column is missing.
+  - The schema goes to dev with the owner's go at deploy time.
+  - It supersedes the earlier "stamp the ledger row" idea: ledger rows exist only for Assigned-To people.
+
+### Round 134 (2026-10-28): #2382, who may add a contact to an organization
+- Linking a contact or organization to a project or matter (AppendTo) is raised for every Core User to its Read depth, as round 132 decided.
+- Making a contact a member of an organization (`sprk_contactorganization`) is access-relevant: the contact inherits the organization's grants.
+  - These writes move to **Spaarke Access Administrator** (Create, Read, Write, Append at Global).
+  - Core User, Basic User and Internal Contact User (Workforce) keep Read only.
+- The change is applied in the repo and on dev after a reviewed dry-run diff.
+- The finding behind this was told to the owner in chat. It is not recorded here.
+
+## Round 135 (2026-10-28): making a record not Secure removes no access
+Owner: "If a record is moved from secure to not secure the access should not be removed (either in the model driven app or SPA)."
+
+Scope chosen: **keep all access**.
+- Unsecure, through every route (direct, the parent's cascade, re-file), keeps:
+  - every explicit share on the record;
+  - the shares it passed down to the work assignments and projects filed under it;
+  - every contact/workforce grant.
+- The owner change and the cleared Secure flag still happen.
+- Shares stay visible and removable in Current Access.
+
+This supersedes the earlier "every share is revoked" rule in `UnsecureProjectEndpoint` (steps 3.5 mirrored-share removal, 4 and 4.5). Owner's clarification: a Power Apps-licensed user keeps MDA access; a workforce contact has no MDA access, so the grant is their only path.
+
+## Round 136 (2026-10-28): business-unit model
+Owner: "we only want our 'product' tables at the Spaarke main parent; we do not want to put customer records at the Spaarke main parent; we should use the customer's main 'parent' as the de facto top level for any customer records, either configured/defined or working records."
+
+Confirmed reading:
+1. The Spaarke root BU holds Spaarke product data only.
+2. The customer's own BU is the top level for every customer record, configured or working. This is the direct child of the root that provisioning H10 creates (`customerBusinessUnitId`), a sibling of Secure Record.
+3. Round 131's memberless restricted-content owner team moves from the root to the customer's BU.
+4. Customer-configured reference data (event types, matter types, ...) is owned in the customer's BU. Core User's Deep Read then covers every user in that unit or below it.
+   - #2401 needs no role change. On dev the gap comes only from the layout: several sibling test BUs, with the reference rows in "Spaarke Business Unit 1".
+
+## Round 137 (2026-10-28): seeded customer rules; root-homed authors
+1. **Ontology's seeded rules** (Do-lane policies, POL-MATTER-NOBUDGET; created by an operator script):
+   - Production, and so the provisioning path: the seed script owns them to the restricted-content team in the customer's top BU (R4b-2c).
+   - Dev: no change. The rows stay owned in the root. The behaviour only has to be known and built for customers.
+   - Ontology owns the script task.
+2. **Admin-tab authoring:** **author wins.** A policy stays owned by its author wherever the author is homed, the root included. No change to `SavePolicyAsync`; this is an accepted exception to round 136.
+
+Related review (field-mapping #2399): Core User Global Read + AppendTo on `sprk_aisearchindex` was NOT recommended under round 136. Recommended instead: own the index rows in the customer BU, with no role change (optional: the server applies the BU's index). The owner decides through field-mapping. UAC owns test zz-046 (`WorkAssignmentCreateLiveTests.cs:119`), whose premise is stale.
+
+## Round 138 (2026-10-28): child shares follow the record after an Unsecure
+When a now-ordinary record (formerly Secure) has a person removed, what they got on its documents, events, to-dos and filed work assignments and projects through that share is removed too. Child access tracks the record's share list. Design: `notes/task-196-unsecure-keeps-access.md`.
+
+**Round 136 follow-up (2026-10-28, #2399):** the owner chose shape A for the AI search index catalog: re-own the 11 `sprk_aisearchindex` rows into the customer BU, with no Global role change. (B), the server applying the index itself, goes to field-mapping as a task.
+
+UAC design for the owning principal: a memberless "Spaarke Customer Configuration Owners" team per customer top BU, with a "Customer Configuration Owner" role (Read at Basic on the declared config tables only). It is built as a second declared team in the 194b R4b machinery (R4b-3b). Rejected: the BU default team (it hands the role to every member) and an app user (ties ownership to one credential).

@@ -59,6 +59,14 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
      */
     ns.PARTIES = { contact: true, sprk_organization: true, account: true };
 
+    /**
+     * ebilling-r1 task 151c-2: hosts that offer NO "New" child at all, neither the platform "+ New" nor the BFF "New <thing>". The
+     * AP export batch's "AP emails" subgrid only lists the emails the server sent for the batch (sprk_communication.sprk_billingexport,
+     * a plain reference written by the BFF, not a filing). A message cannot be composed against a batch (no regarding route names it),
+     * and the platform "+ New" would create an unfiled email by hand: so neither is offered.
+     */
+    ns.NO_NEW_HOSTS = { sprk_billingexport: true };
+
     /** Wizard code pages (envelope: entityType / entityId / bffBaseUrl - sprk_wizard_commands.js). */
     ns.WIZARDS = {
         sprk_todo: { page: "sprk_createtodowizard", title: "Create New To Do" },
@@ -70,7 +78,8 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
     /**
      * Tables created through POST /api/v1/child-records/{table}, then opened (no wizard of their own). r1c: the live
      * inventory of every main form adds the KPI assessment (matter, project and report card forms) and the billing event
-     * (invoice form) - the new row is a named draft filed under the host; its form asks for the rest.
+     * (invoice form) - the new row is a named draft filed under the host; its form asks for the rest. ebilling-r1 ISS-010:
+     * a billing event created on an invoice also binds the invoice's one core record (FR-05; see invoiceCoreBind).
      */
     ns.CREATE_THEN_OPEN = {
         sprk_budget: { label: "budget" },
@@ -134,16 +143,19 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
      */
     ns.nativeNewAllowed = function (primaryControl) {
         var host = ns.hostOf(primaryControl);
+        if (host && ns.NO_NEW_HOSTS[host.entity]) {
+            return false;
+        }
         if (!host || ns.PARTIES[host.entity]) {
             return true;
         }
         return ns.hostSecureFlag(primaryControl).then(function (flag) { return flag === false; });
     };
 
-    /** EnableRule for the "New <thing>" command: the exact complement of nativeNewAllowed (one of the two is shown). */
+    /** EnableRule for the "New <thing>" command: the exact complement of nativeNewAllowed (one of the two is shown), except NO_NEW_HOSTS, where neither is. */
     ns.newChildAvailable = function (primaryControl) {
         var host = ns.hostOf(primaryControl);
-        if (!host || ns.PARTIES[host.entity]) {
+        if (!host || ns.PARTIES[host.entity] || ns.NO_NEW_HOSTS[host.entity]) {
             return false;
         }
         return ns.hostSecureFlag(primaryControl).then(function (flag) { return flag !== false; });
@@ -234,6 +246,30 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
         });
     }
 
+    /** The core records an invoice can be filed under: its lookup column -> the core table (ebilling-r1 FR-05). */
+    var INVOICE_CORE_LOOKUPS = [
+        { column: "sprk_matter", table: "sprk_matter" },
+        { column: "sprk_project", table: "sprk_project" },
+        { column: "sprk_regardingworkassignment", table: "sprk_workassignment" }
+    ];
+
+    /**
+     * ebilling-r1 ISS-010 (FR-05): a billing event names exactly ONE core record through its OWN lookup (the server never
+     * takes it from the invoice, D-75), so "New Billing Event" on an invoice binds the invoice's own core record as well.
+     * Resolves { key, value } (the bind), or null when the invoice is not filed under exactly one (nothing is created).
+     */
+    function invoiceCoreBind(childTable, host) {
+        var select = "?$select=" + INVOICE_CORE_LOOKUPS.map(function (l) { return "_" + l.column + "_value"; }).join(",");
+        return Xrm.WebApi.retrieveRecord(host.entity, host.id, select).then(function (row) {
+            var named = INVOICE_CORE_LOOKUPS.filter(function (l) { return row && row["_" + l.column + "_value"]; });
+            if (named.length !== 1) return null;
+            var core = named[0];
+            return Promise.all([bindKeyFor(childTable, core.table, null), entitySetOf(core.table)]).then(function (parts) {
+                return { key: parts[0], value: "/" + parts[1].EntitySetName + "(" + cleanId(row["_" + core.column + "_value"]) + ")" };
+            });
+        });
+    }
+
     /** sprk_budget: create through the BFF (owned by the team the rule names), then open the new record. */
     function createThenOpen(childTable, host, primaryControl, selectedControl) {
         var label = ns.CREATE_THEN_OPEN[childTable].label;
@@ -243,11 +279,19 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
                     alert("New " + label, "Sign-in needed - reload the page and retry. Nothing was created.");
                     return null;
                 }
-                return Promise.all([bindKeyFor(childTable, host.entity, selectedControl), entitySetOf(host.entity), entitySetOf(childTable)])
+                var underInvoice = childTable === "sprk_billingevent" && host.entity === "sprk_invoice";
+                return Promise.all([bindKeyFor(childTable, host.entity, selectedControl), entitySetOf(host.entity), entitySetOf(childTable),
+                    underInvoice ? invoiceCoreBind(childTable, host) : Promise.resolve(undefined)])
                     .then(function (parts) {
+                        if (parts[3] === null) {
+                            alert("New " + label, "This invoice is not filed under exactly one matter, project or work assignment, " +
+                                "so a " + label + " cannot be added to it. Nothing was created.");
+                            return null;
+                        }
                         var payload = {};
                         payload[parts[2].PrimaryNameAttribute] = "New " + label;
                         payload[parts[0]] = "/" + parts[1].EntitySetName + "(" + host.id + ")";
+                        if (parts[3]) payload[parts[3].key] = parts[3].value;
                         return fetch(baseUrl + "/api/v1/child-records/" + childTable, {
                             method: "POST",
                             headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + token },
@@ -255,6 +299,7 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
                         });
                     })
                     .then(function (response) {
+                        if (!response) return null; // refused before the create (nothing was sent)
                         if (!response.ok) {
                             return problemText(response).then(function (text) {
                                 alert("New " + label, text + " Nothing was created.");

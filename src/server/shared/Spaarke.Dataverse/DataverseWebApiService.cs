@@ -575,36 +575,12 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         }
     }
 
-    public async Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        // Refuses (throws) before anything is sent when the request carries no owner (task 146, in the builder).
-        var payload = BuildCreateEventPayload(request);
-
-        _logger.LogInformation("Creating event: {Name}", request.Name);
-
-        var response = await SendPostAsJsonAsync("sprk_events", payload, ct);
-        response.EnsureSuccessStatusCode();
-
-        var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
-        if (entityIdHeader != null)
-        {
-            var idString = entityIdHeader.Split('(', ')')[1];
-            var id = Guid.Parse(idString);
-            var createdOn = DateTime.UtcNow;
-
-            _logger.LogInformation("Event created: {Id}", id);
-            return (id, createdOn);
-        }
-
-        throw new InvalidOperationException("Failed to extract entity ID from create response");
-    }
-
     /// <summary>
-    /// The Web API body <see cref="CreateEventAsync"/> POSTs to <c>sprk_events</c>. Internal (InternalsVisibleTo the
-    /// BFF unit tests) so the payload — including the unified-access-control-r2 task 152 <c>sprk_AssignedTo</c> bind —
-    /// is asserted without intercepting the HTTP transport (ADR-038 bans <c>Mock&lt;HttpMessageHandler&gt;</c>).
+    /// The Web API body the deleted <c>CreateEventAsync</c> POSTed to <c>sprk_events</c>. No production caller since
+    /// field-mapping-server-write-path-r1 task 031 (POST /api/v1/events creates through RecordCreationService, and its
+    /// payload is <c>EventEndpoints.BuildCreatePayload</c>); kept only because five BFF unit-test files still pin its
+    /// shapes (date-only, status, regarding write set, Assigned To). Follow-up: re-point them at
+    /// <c>EventEndpoints.BuildCreatePayload</c> and delete this builder with <c>AddRegardingWriteSet</c>.
     /// </summary>
     /// <exception cref="InvalidOperationException">The request carries no <see cref="CreateEventRequest.OwningTeamId"/>
     /// (unified-access-control-r2 task 146): no payload without an owner is ever built.</exception>
@@ -1251,7 +1227,17 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             HttpMethod.Get, url, ct, impersonateSystemUserId);
         request.Headers.TryAddWithoutValidation(
             "Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
-        var response = await _httpClient.SendAsync(request, ct);
+        // Headers first: the body of a 403 is read by TryReadErrorAsync, which tolerates one that cannot be read or decoded.
+        // Buffering it inside SendAsync would let a bad charset or a stream fault replace the 403 with another exception.
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            // Task 071 fix round 1: a 403 keeps Dataverse's code and message, so a caller can tell a missing table privilege
+            // from every other refusal (DataverseForbiddenException). Still an HttpRequestException with StatusCode 403.
+            var (code, message) = await TryReadErrorAsync(response, ct).ConfigureAwait(false);
+            throw new DataverseForbiddenException(code, message);
+        }
+
         response.EnsureSuccessStatusCode();
 
         var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -1882,11 +1868,30 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
             return (StringOf(error, "code"), StringOf(error, "message"));
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException or InvalidOperationException
+                                       or NotSupportedException)
         {
+            // An undecodable body (a bad charset, a stream fault) or a non-JSON one leaves code and message null; the 403 still
+            // identifies the failure. The same tolerated set as DataverseWebApiClient.CreateFailureAsync. Both callers treat
+            // (null, null) as "not an answer about the principal / not a missing privilege", never as success.
             return (null, null);
         }
     }
+
+    /// <summary>
+    /// Dataverse's HRESULT-style error code (for example <c>0x80060892</c>) and nothing else from a failed response, or
+    /// <see langword="null"/>. It is the one part of an error body that is safe to log: the message text can echo the
+    /// values that were written. A code that is not exactly eight hex digits after <c>0x</c> is dropped rather than logged,
+    /// so a body cannot smuggle text through the code field.
+    /// </summary>
+    private static async Task<string?> ReadLoggableErrorCodeAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        var (code, _) = await TryReadErrorAsync(response, ct).ConfigureAwait(false);
+        return code is not null && LoggableErrorCodePattern.IsMatch(code) ? code : null;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex LoggableErrorCodePattern =
+        new("^0x[0-9A-Fa-f]{8}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>How many records one batched share read names — keeps the OData filter far below the URL limit.</summary>
     public const int PrincipalAccessBatchSize = 25;
@@ -2108,23 +2113,17 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
         if (!response.IsSuccessStatusCode)
         {
-            var errorBody = await response.Content.ReadAsStringAsync(ct);
-            // R7 W12 debug: include the serialized payload body (with values, not just field
-            // names) so we can identify AI outputs that Dataverse rejects (e.g., object-shape
-            // values written to a string column). Values truncated at 500 chars per field to
-            // keep the log line bounded.
-            var truncatedFields = fields.ToDictionary(
-                kvp => kvp.Key,
-                kvp => (object?)(kvp.Value?.ToString() is { Length: > 500 } s ? s[..500] + "..." : kvp.Value));
-            var payloadJson = System.Text.Json.JsonSerializer.Serialize(truncatedFields);
+            // Privacy: ids, field NAMES, status and Dataverse's error CODE only. Never the payload values (a failed email
+            // draft create carries recipients and body; a quick-create carries a name and description) and never the
+            // error message text, which can echo them. See ReadLoggableErrorCodeAsync.
+            var errorCode = await ReadLoggableErrorCodeAsync(response, ct);
             _logger.LogError(
-                "UpdateRecordFieldsAsync PATCH failed: {StatusCode} for {Entity}({Id}). Fields: [{FieldNames}]. Payload: {Payload}. Response: {ErrorBody}",
+                "UpdateRecordFieldsAsync PATCH failed: {StatusCode} for {Entity}({Id}). Fields: [{FieldNames}]. ErrorCode: {ErrorCode}",
                 response.StatusCode,
                 entityLogicalName,
                 recordId,
                 string.Join(", ", fields.Keys),
-                payloadJson,
-                errorBody);
+                errorCode);
             response.EnsureSuccessStatusCode(); // still throw for the caller
         }
 
@@ -2132,10 +2131,19 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     }
 
     /// <inheritdoc />
+    public Task UpdateExistingRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        CancellationToken ct = default) =>
+        UpdateExistingRecordFieldsAsync(entityLogicalName, recordId, fields, impersonateSystemUserId: null, ct);
+
+    /// <inheritdoc />
     public async Task UpdateExistingRecordFieldsAsync(
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
+        Guid? impersonateSystemUserId,
         CancellationToken ct = default)
     {
         if (fields.Count == 0)
@@ -2147,10 +2155,13 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
 
         _logger.LogInformation(
-            "Updating EXISTING record fields (If-Match: *, no create): {Entity}({Id}), {FieldCount} fields",
-            entityLogicalName, recordId, fields.Count);
+            "Updating EXISTING record fields (If-Match: *, no create): {Entity}({Id}), {FieldCount} fields{Impersonation}",
+            entityLogicalName, recordId, fields.Count,
+            impersonateSystemUserId is { } imp && imp != Guid.Empty ? $" (impersonating {imp})" : string.Empty);
 
-        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})", ct);
+        // An empty caller id is refused here, before the PATCH is sent (task 104); null = app-only.
+        using var request = await CreateAuthenticatedRequestAsync(
+            HttpMethod.Patch, $"{DataverseIdentifier.RequireTableName(entitySetName, nameof(entitySetName))}({recordId})", ct, impersonateSystemUserId);
 
         // "Prevent create in upsert": If-Match: * makes the PATCH apply only to a row that already exists.
         // Without it the Web API creates a row with this id (the behaviour UpdateRecordFieldsAsync keeps).
@@ -2171,10 +2182,10 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
         if (!response.IsSuccessStatusCode)
         {
-            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            var errorCode = await ReadLoggableErrorCodeAsync(response, ct);
             _logger.LogError(
-                "UpdateExistingRecordFieldsAsync PATCH failed: {StatusCode} for {Entity}({Id}). Fields: [{FieldNames}]. Response: {ErrorBody}",
-                response.StatusCode, entityLogicalName, recordId, string.Join(", ", fields.Keys), errorBody);
+                "UpdateExistingRecordFieldsAsync PATCH failed: {StatusCode} for {Entity}({Id}). Fields: [{FieldNames}]. ErrorCode: {ErrorCode}",
+                response.StatusCode, entityLogicalName, recordId, string.Join(", ", fields.Keys), errorCode);
             response.EnsureSuccessStatusCode(); // still throw for the caller
         }
 
@@ -2229,10 +2240,10 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
         if (!response.IsSuccessStatusCode)
         {
-            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            var errorCode = await ReadLoggableErrorCodeAsync(response, ct);
             _logger.LogError(
-                "UpdateRecordFieldsIfUnchangedAsync PATCH failed: {StatusCode} for {Entity}({Id}). Fields: [{FieldNames}]. Response: {ErrorBody}",
-                response.StatusCode, entityLogicalName, recordId, string.Join(", ", fields.Keys), errorBody);
+                "UpdateRecordFieldsIfUnchangedAsync PATCH failed: {StatusCode} for {Entity}({Id}). Fields: [{FieldNames}]. ErrorCode: {ErrorCode}",
+                response.StatusCode, entityLogicalName, recordId, string.Join(", ", fields.Keys), errorCode);
             response.EnsureSuccessStatusCode(); // still throw for the caller
         }
 

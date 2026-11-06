@@ -4,7 +4,7 @@
     <title>TrackingFieldTrio Family tool — optional onOpenFamily callback, PCF wiring, Matter/Project/WA/Event forms (FR-33)</title>
     <phase>7 W7 Record family service and Family tool</phase>
     <gate>073 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a shared component and a PCF control (.tsx/.ts).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -86,4 +86,10 @@
   </ui-tests>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <notes>
+    Completed 2026-10-29. PR #2383 (task/fm-074 @ 0e7444ec5b, auto-merge), held until 072 (#2459) merged, then updated from master 11c3739d7e and re-verified: 7 suites / 136 tests (17 new Family tests), Invoke-PcfBuildProd PASS, bundle 1,092,856 bytes (+16,662 vs 1.0.54). TrackingFieldTrio 1.0.54 → 1.0.55 in all five version locations; the committed Solution bundle is refreshed at deploy (076).
+    Optional onOpenFamily icon (not gated by canGrantAccess; only on a bound record) opens the shared RecordFamilyModal with the gated authenticatedFetch (ADR-028: no token). Push / Assigned To actions stay disabled until 040.
+    The To Do form also carries the control; sprk_todo is a Filing family table (RecordFamilyEdges), so the icon is correct there. Live icon-per-form and dark-mode checks: task 076. Notes: notes/task-074-notes.md.
+    rework: none task 074
+  </notes>
 </task>

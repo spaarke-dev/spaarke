@@ -954,7 +954,7 @@ public class DecisionActionExecutorsTests
 
     /// <summary>070's executor, built only so the adapter can be constructed; these tests never run it.</summary>
     private static BudgetInquiryExecutor Inquiry() =>
-        new(new FakeUserClient(), Owner().Object, new Mock<IFieldMappingDataverseService>().Object,
+        new(new FakeUserClient(), Owner().Object,
             new InquiryEmailSender(null!, new HttpContextAccessor()), new HttpContextAccessor(), NullLogger<BudgetInquiryExecutor>.Instance);
 
     [Fact]
@@ -1185,6 +1185,8 @@ public class DecisionActionExecutorsTests
     {
         var sources = new Mock<DecisionParameterSources>(
             new Mock<IDataverseUserClient>().Object, new Mock<IGenericEntityService>().Object, new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>().Object,
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            new Mock<Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalAccessOptions>>().Object,
             NullLogger<DecisionParameterSources>.Instance)
         { CallBase = false };
         sources.Setup(s => s.OptionsAsync(It.IsAny<HttpContext>(), "metadata:sprk_budget.sprk_budgetcategory", It.IsAny<CancellationToken>()))
@@ -1603,7 +1605,7 @@ public class DecisionActionExecutorsTests
         var user = new FakeUserClient();
         var appOnly = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
         var inquiry = new BudgetInquiryExecutor(
-            user, Owner().Object, appOnly.Object, new InquiryEmailSender(null!, new HttpContextAccessor()), new HttpContextAccessor(),
+            user, Owner().Object, new InquiryEmailSender(null!, new HttpContextAccessor()), new HttpContextAccessor(),
             NullLogger<BudgetInquiryExecutor>.Instance);
         var executor = new BudgetInquiryActionExecutor(inquiry);
         var request = Request(new() { ["to"] = to, ["subject"] = "s", ["body"] = "b", ["outsideFirm"] = FirmId.ToString("D") });
@@ -1663,6 +1665,23 @@ public class DecisionActionExecutorsTests
         var rogue = new Mock<IDecisionActionExecutor>();
         rogue.SetupGet(e => e.Code).Returns("delete-everything");
         FluentActions.Invoking(() => new DecisionActionExecutors([rogue.Object])).Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void Registry_RefusesAnExecutorForABillingCode_AndTheCompleteSetStaysComplete_Ebilling074()
+    {
+        // ebilling-r1 task 074: billing decisions are recorded by the eBilling endpoints, never executed by the Signals commit route,
+        // so no executor (and no no-op stand-in) can be registered for one.
+        DecisionActionCatalog.BillingActions.Should().NotBeEmpty();
+        foreach (var billing in DecisionActionCatalog.BillingActions)
+        {
+            var stand_in = new Mock<IDecisionActionExecutor>();
+            stand_in.SetupGet(e => e.Code).Returns(billing.Code);
+            FluentActions.Invoking(() => new DecisionActionExecutors(AllExecutors().Append(stand_in.Object)))
+                .Should().Throw<InvalidOperationException>(because: billing.Code);
+        }
+
+        new DecisionActionExecutors(AllExecutors()).MissingCodes().Should().BeEmpty("billing codes are not commit-route actions");
     }
 
     [Fact]

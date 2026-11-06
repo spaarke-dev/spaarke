@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="ebilling-r1">
+  <metadata>
+    <title>Rule handlers for the 11 billing rule types</title>
+    <phase>3 Rules (WP3) — wave W3-2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Rule handlers decide which lines are flagged or rejected; a wrong comparison silently passes a non-compliant bill or rejects a valid one (NFR-06).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Eleven well-specified, pure, deterministic handlers with a fixed contract from 070; breadth of edge cases warrants xhigh effort rather than a higher tier.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P3-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>070</deps>
+    <tags>bff, rules</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Implement one pure, deterministic handler per billing rule type (ApprovedTimekeeper, ApprovedRate, TimeIncrement, DailyHoursCap, NonBillableActivity, ExpenseRule, InvoiceAge, CoreRecordWindow, Duplicate, RequiredData, AiObservation) over an in-memory invoice fact set, each emitting findings that carry policy, version, clause, the values read and the suggested adjustment, and recording which extracted fields each finding read (task 073 needs them).</prompt>
+
+  <role>SPAARKE platform developer. Expert in C# domain modelling, decimal money arithmetic and exhaustive must-fire / must-not-fire unit testing.</role>
+
+  <goal>A closed handler dispatch (exhaustive switch over the billing RuleType members from 070) plus the fact-set and finding contracts; every handler has must-fire and must-not-fire tests; a billing type with no handler is refused fail-closed; no I/O in any handler.</goal>
+
+  <context>
+    <background>Spec FR-24 (acceptance: per type, must-fire and must-not-fire tests), FR-21 (non-USD currency is a RequiredData finding), FR-23 (unmatched timekeeper feeds ApprovedTimekeeper), FR-36 (Duplicate ignores Rejected / Returned attempts for the same invoice number), NFR-05 (low-confidence codes flagged, never silently used). design.md section 6.1 gives checks, parameters, reference data and allowed consequences per type. 070 supplies the parsed billing rule definition (from its billing gate) and the per-type fact-field set that sprk_messagetemplate tokens may use. Evaluation-strategy split: 072 assembles facts and selects rules; this task only judges one rule against one fact set.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFactSet.cs (invoice, lines, timekeepers, rate-card rates, code tables, core-record dates, prior invoices, AI observations, per-field confidence)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingFinding.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/Handlers/ (one file per type, plus the dispatch)</file>
+      <file role="new">tests/unit/domain/Signals/Billing/Handlers/</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ (070's definitions — read, extend only if a handler needs a field 070 did not expose)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="070" status="pending">RuleType billing members, schemas, parsed definitions, fact-field sets</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-24, D-27">Closed dispatch: an exhaustive switch from RuleType to handler. No reflection, no registry, no expression evaluation.</constraint>
+    <constraint source="project">Handlers are pure: no Dataverse, HTTP, clock or randomness (the evaluation date comes in the fact set). Same input gives the same findings in the same order.</constraint>
+    <constraint source="project">Money and hours use decimal; state the rounding rule (to the cent, midpoint away from zero) once and test it. TimeIncrement uses exact decimal remainder, never floating point.</constraint>
+    <constraint source="spec I-5, NFR-05">A handler reports values and their confidence; it never decides rejection (073) and never treats a below-threshold AI code as a confirmed fact without carrying its confidence in the read set.</constraint>
+    <constraint source="design.md section 4">Reference data (rates, timekeepers, codes) arrives in the fact set; rule parameters never contain copied rates.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: no new package, no DI change unless 072 needs it, publish-size delta recorded.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/spec.md (FR-21, FR-23, FR-24, FR-36, NFR-05)</file>
+      <file>projects/ebilling-r1/design.md (section 6.1)</file>
+      <file>projects/ebilling-r1/notes/research/ledes-utbms-ocg-reference.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Maintain-class domain tests" location="tests/unit/domain/Signals/ThresholdRuleTests.cs">Pure tests, no mocks, one behaviour per test.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Step-0 check: git merge-base --is-ancestor f292ad119 HEAD. Read 070's billing definitions and fact-field sets.</step>
+    <step order="1">Define the fact set and finding contracts. A finding carries: rule type, policy id and code, policy version id, clause reference, subject (invoice or line id), values read as field name to value plus confidence, the list of extracted fields read (for 073), suggested adjustment (amount or disallow) where design 6.1 allows one, and a reason code.</step>
+    <step order="2">Implement handlers per design 6.1: ApprovedTimekeeper (approved for firm and core record on the line date; unmatched timekeeper fires); ApprovedRate (billed rate above approved rate in force on the line date for timekeeper else classification, plus tolerance; suggested reduction = excess times hours); TimeIncrement; DailyHoursCap (per timekeeper per day within the invoice); NonBillableActivity (AI code in the parameter list; suggested disallow); ExpenseRule (code not reimbursable, or amount over cap per item); InvoiceAge (line date more than N days before invoice date); CoreRecordWindow (outside open / close dates plus grace, or core record closed); Duplicate (invoice number already submitted by the firm excluding Rejected / Returned attempts — invoice-level; duplicate lines by the configured match fields — line-level); RequiredData (listed header / line fields present; currency other than USD fires); AiObservation (observation of the configured kind at or above the parameter threshold).</step>
+    <step order="3">Dispatch: exhaustive switch; an Ontology type or a billing type without a handler is refused (exception type of your choice, caught by 072 as a refused rule) — seeding-free here, 070 owns the security proof.</step>
+    <step order="4">Tests per type: at least one must-fire and one must-not-fire case, plus the boundaries named in step 2 (exact cap, exact increment, line date equal to window edge, rate equal to approved plus tolerance, missing rate card, missing core-record dates, prior attempt Rejected versus Accepted).</step>
+    <step order="5">Record in notes the read-field list per type (the contract 073 consumes).</step>
+    <step order="6">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="7">Request ontology-r1 review (Services/Signals is ontology-owned); record outcome in notes.</step>
+    <step order="8">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="9">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If design 6.1 and the spec disagree on a type's check or allowed consequence, or a type cannot be judged from the fields 010 / 017 / 018 / 021 define, STOP and escalate with the gap rather than inventing a field.</trigger>
+    <trigger>If a handler would need I/O (for example prior invoices not loadable up front by 072), STOP: the fact set must carry it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Finance SignalEvaluationService (Services/Finance/SignalEvaluationService.cs) and the Ontology FetchXML evaluator (Services/Signals/SignalEvaluator.cs); spec section 11 row "InvoiceComplianceEvaluator + billing rule handlers".</existing>
+    <extension>No — neither evaluates an invoice held in memory (D-23); SignalEvaluator compiles FetchXML over stored rows and SignalEvaluationService computes spend signals.</extension>
+    <cost-of-doing-nothing>No billing rule can be evaluated at submission, so no finding, flag or rejection exists for any invoice (FR-24, FR-25, FR-26 fail).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ (fact set, finding, Handlers/)</output>
+    <output type="test">tests/unit/domain/Signals/Billing/Handlers/</output>
+    <output type="docs">projects/ebilling-r1/notes/071-read-fields-per-type.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of the 11 types has a passing must-fire and must-not-fire test, plus the boundary cases in step 4.</criterion>
+    <criterion testable="true">Every finding carries policy id, policy version id, clause reference, subject, values read with confidence, read-field list and reason code; findings with an allowed suggested adjustment carry it (ApprovedRate reduction amount, NonBillableActivity disallow).</criterion>
+    <criterion testable="true">Running any handler twice on the same input yields equal findings in equal order.</criterion>
+    <criterion testable="true">A non-USD invoice produces a RequiredData finding, not an exception; an unmatched timekeeper produces an ApprovedTimekeeper finding; a prior Rejected or Returned attempt with the same invoice number does not trigger Duplicate.</criterion>
+    <criterion testable="true">Dispatch refuses an Ontology type; grep finds no reflection or registry in the handler dispatch.</criterion>
+    <criterion testable="true">No handler references IGenericEntityService, HttpClient, TimeProvider or DateTime.Now (grep).</criterion>
+    <criterion testable="true">dotnet build 0 errors; all tests green.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">ontology-r1 review recorded in task notes.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Parallel group P3-B runs with 074, 075 and 076; this task writes only under Services/Signals/Billing/ (handlers, fact set, finding) and its tests, so no file overlap. Firm-visible reason text (D-66, FR-15) is composed downstream from the reason code; do not put prose in handlers. Precedence (firm set over client default) is 072's, not a handler concern.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

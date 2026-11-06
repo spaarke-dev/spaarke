@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0011",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0011","generator_id":"gen_eval_set.py@1 F-0011","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0011.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Kestrel & Whitcombe LLP","firm_invoice_number":"INV-2026-03453","invoice_date":"2026-02-02","billing_period_start":"2026-01-01","billing_period_end":"2026-01-31","firm_matter_reference":"70384-0020","po_number":"PO-4599259","fees_total":5359.5,"expenses_total":561.68,"adjustments_total":0.0,"total_due":5921.18,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Quillen","title":"Partner","rate":515.0,"billed_as":"AQ"},{"name":"Dmitri Rosenthal","title":"Associate","rate":230.0,"billed_as":"DR"},{"name":"Helena Brennan","title":"Partner","rate":460.0,"billed_as":"HB"},{"name":"Mei Lockhart","title":"Associate","rate":295.0,"billed_as":"ML"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-29","timekeeper":"ML","timekeeper_name":"Mei Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":295.0,"amount":472.0,"narrative":"Review and revise complaint based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-01-14","timekeeper":"DR","timekeeper_name":"Dmitri Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.65,"rate":230.0,"amount":379.5,"narrative":"Review and analyze client documents concerning the supply agreement to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-01-16","timekeeper":"HB","timekeeper_name":"Helena Brennan","timekeeper_title":"Partner","title":"Ptr","hours":2.4,"rate":460.0,"amount":1104.0,"narrative":"Prepare for case management conference in the supply agreement","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-01-21","timekeeper":"DR","timekeeper_name":"Dmitri Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":230.0,"amount":230.0,"narrative":"Review and organize incoming production from Ironbridge Steel for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-01-21","timekeeper":"ML","timekeeper_name":"Mei Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":1.9,"rate":295.0,"amount":560.5,"narrative":"Research standard for provisional remedies concerning the licensing dispute","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-01-23","timekeeper":"ML","timekeeper_name":"Mei Lockhart","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":295.0,"amount":708.0,"narrative":"Conference with client regarding budget variance for the employment claim","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-01-23","timekeeper":"AQ","timekeeper_name":"Anders Quillen","timekeeper_title":"Partner","title":"Ptr","hours":3.0,"rate":515.0,"amount":1545.0,"narrative":"Conference with client regarding budget variance for the distribution agreement","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-01-29","timekeeper":"AQ","timekeeper_name":"Anders Quillen","timekeeper_title":"Partner","title":"Ptr","hours":0.7,"rate":515.0,"amount":360.5,"narrative":"Correspondence with consulting expert regarding scope of analysis","codes":["L130","A108"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-01-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5.53,"amount":5.53,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-01-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":556.15,"amount":556.15,"narrative":"Airfare to Dallas for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["414 Harbor Road","Seattle","Tax ID 68-2431010"],"template":"T05","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-10-02","matter_close":"2026-05-01","matter_budget":48684.0,"approved_timekeepers":["Leila Delacroix","Dmitri Rosenthal","Mei Lockhart","Anders Quillen","Victor Marchetti","Helena Brennan","Elena Nakamura"],"invoice_received_date":"2026-02-03"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[2],"consequence":"Reduce"},
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[1],"consequence":"Disallow"}
+ ],
+ "seeded_violations":2
+}

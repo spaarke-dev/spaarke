@@ -6,37 +6,6 @@ namespace Sprk.Bff.Api.Services.Finance.Models;
 /// </summary>
 public static class FinanceJsonSchemas
 {
-    public static readonly BinaryData ClassificationResultSchema = BinaryData.FromString("""
-    {
-      "type": "object",
-      "properties": {
-        "classification": {
-          "type": "string",
-          "enum": ["InvoiceCandidate", "NotInvoice", "Unknown"]
-        },
-        "confidence": {
-          "type": "number"
-        },
-        "hints": {
-          "type": ["object", "null"],
-          "properties": {
-            "vendorName": { "type": ["string", "null"] },
-            "invoiceNumber": { "type": ["string", "null"] },
-            "invoiceDate": { "type": ["string", "null"] },
-            "totalAmount": { "type": ["number", "null"] },
-            "currency": { "type": ["string", "null"] },
-            "matterReference": { "type": ["string", "null"] }
-          },
-          "required": ["vendorName", "invoiceNumber", "invoiceDate", "totalAmount", "currency", "matterReference"],
-          "additionalProperties": false
-        },
-        "reasoning": { "type": ["string", "null"] }
-      },
-      "required": ["classification", "confidence", "hints", "reasoning"],
-      "additionalProperties": false
-    }
-    """);
-
     public static readonly BinaryData ExtractionResultSchema = BinaryData.FromString("""
     {
       "type": "object",

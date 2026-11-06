@@ -65,7 +65,7 @@ During deployment preparation, discrepancies were found between assumed field na
 | `sprk_invoicedate` | DateTime | Invoice date |
 | `sprk_totalamount` | Currency | Invoice total |
 | `sprk_confidence` | Decimal | Classification confidence |
-| `sprk_invoicestatus` | Choice | ToReview \| Reviewed |
+| `statuscode` | Status | In Review \| Approved \| Sent to AP \| Paid \| Rejected \| Returned to Firm \| Cancelled (D-41; the old invoice-status choice column is retired) |
 | `sprk_extractionstatus` | Choice | NotRun \| Extracted \| Failed |
 | `sprk_correlationid` | Text | Job chain traceability |
 | `sprk_currency` | Text | ISO 4217 currency code |

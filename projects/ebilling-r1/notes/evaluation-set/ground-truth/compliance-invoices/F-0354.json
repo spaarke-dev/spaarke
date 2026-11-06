@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0354",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0354","generator_id":"gen_eval_set.py@1 F-0354","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0354.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Maddox and Yardley LLP","firm_invoice_number":"INV-2026-77096","invoice_date":"2026-08-02","billing_period_start":"2026-07-01","billing_period_end":"2026-07-31","firm_matter_reference":"74963-0002","po_number":"PO-4570816","fees_total":3793.0,"expenses_total":4777.73,"adjustments_total":0.0,"total_due":8570.73,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Galbraith","title":"Associate","rate":185.0,"billed_as":"CG"},{"name":"Gregory Voss","title":"Associate","rate":195.0,"billed_as":"GV"},{"name":"Sofia Carmichael","title":"Senior Associate","rate":260.0,"billed_as":"SC"},{"name":"Yusuf Tavares","title":"Associate","rate":240.0,"billed_as":"YT"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-07-02","timekeeper":"CG","timekeeper_name":"Cyrus Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":185.0,"amount":259.0,"narrative":"Plan strategy for upcoming phase of the vendor agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-07-06","timekeeper":"YT","timekeeper_name":"Yusuf Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":240.0,"amount":696.0,"narrative":"Prepare expert witness for testimony in the customs audit","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-07-07","timekeeper":"CG","timekeeper_name":"Cyrus Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":185.0,"amount":185.0,"narrative":"Draft requests for production for trial in the construction contract","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-07-15","timekeeper":"CG","timekeeper_name":"Cyrus Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":185.0,"amount":259.0,"narrative":"Draft post-trial motion in the licensing dispute","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-07-20","timekeeper":"GV","timekeeper_name":"Gregory Voss","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":195.0,"amount":58.5,"narrative":"Prepare trial notebook and demonstrative exhibits for the construction contract","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-07-20","timekeeper":"SC","timekeeper_name":"Sofia Carmichael","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.1,"rate":260.0,"amount":26.0,"narrative":"Research standard for new trial in the vendor agreement","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-07-22","timekeeper":"GV","timekeeper_name":"Gregory Voss","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":195.0,"amount":292.5,"narrative":"Plan strategy for upcoming phase of the supply agreement with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-07-23","timekeeper":"SC","timekeeper_name":"Sofia Carmichael","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.3,"rate":260.0,"amount":598.0,"narrative":"Draft mediation statement for trial in the supply agreement","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2026-07-27","timekeeper":"YT","timekeeper_name":"Yusuf Tavares","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":240.0,"amount":528.0,"narrative":"Attend trial day in the licensing dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2026-07-28","timekeeper":"GV","timekeeper_name":"Gregory Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":195.0,"amount":507.0,"narrative":"Attend hearing on motion to compel in the licensing dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2026-07-29","timekeeper":"YT","timekeeper_name":"Yusuf Tavares","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":240.0,"amount":384.0,"narrative":"Draft motion to compel for trial in the construction contract","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2026-07-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":29.03,"amount":87.09,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2026-07-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1607.05,"amount":1607.05,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2026-07-31","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3083.59,"amount":3083.59,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["298 Peachtree Way","Seattle","Tax ID 14-5384304"],"template":"T01","pages":2},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2025-09-16","matter_close":"2026-10-29","matter_budget":59282.0,"approved_timekeepers":["Yusuf Tavares","Gregory Voss","Beatrix Carmichael","Cyrus Galbraith","Sofia Carmichael"],"invoice_received_date":"2026-08-06"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

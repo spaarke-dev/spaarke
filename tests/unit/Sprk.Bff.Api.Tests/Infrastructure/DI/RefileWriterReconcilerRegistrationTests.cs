@@ -52,6 +52,26 @@ public sealed class RefileWriterReconcilerRegistrationTests : IClassFixture<Cust
     }
 
     [Fact]
+    public void WithScopeValidation_TheSubmissionCommitGate_AndTheSubmissionAfterStepsCompose()
+    {
+        // ebilling-r1 task 094 (model 9.1 steps 5-6): the 050a re-file (InvoiceDocumentRefile) is retired - a Submit Invoice source
+        // is copied, never re-filed - and the commit gate is the post-commit step of every channel. The gate, the persister and the
+        // after-steps compose from the real host with scope validation on.
+        using var validating = Validating();
+        using var scope = validating.Services.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Services.Finance.Submission.SubmissionCommitGate>()
+            .Should().BeOfType<Sprk.Bff.Api.Services.Finance.Submission.SubmissionCommitGate>("the production gate, not a test seam's subclass");
+        scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Services.Finance.Submission.IInvoiceSubmissionPersister>()
+            .Should().BeOfType<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister>("the persister runs the gate after its commit");
+        scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Services.Finance.Submission.IInvoiceSubmissionAfterSteps>()
+            .Should().BeOfType<Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionAfterSteps>(
+                "the after-steps take the gate as a constructor dependency (the resume runs it first), so they compose only with it registered");
+        typeof(Sprk.Bff.Api.Services.Finance.Submission.SubmissionCommitGate).Assembly
+            .GetType("Sprk.Bff.Api.Services.Finance.Submission.InvoiceDocumentRefile").Should().BeNull("the 050a re-file is retired (task 094)");
+    }
+
+    [Fact]
     public void WithScopeValidation_TheThreadJoinWriters_HoldTheRootsScopeFactory_WhoseScopeResolvesTheReconciler()
     {
         // #2091: ThreadResolver's join and CommunicationService's respond-into-thread (both singletons the reconciler itself

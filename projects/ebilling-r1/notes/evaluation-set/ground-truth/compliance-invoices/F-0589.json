@@ -1,0 +1,24 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0589",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0589","generator_id":"gen_eval_set.py@1 F-0589","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0589.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Lindenmeyer Zeller PC","firm_invoice_number":"A-25238/2026","invoice_date":"2026-04-01","billing_period_start":"2026-03-01","billing_period_end":"2026-03-31","firm_matter_reference":"94711-0016","po_number":"PO-4522665","fees_total":3143.5,"expenses_total":28.0,"adjustments_total":0.0,"total_due":3171.5,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Brennan","title":"Associate","rate":285.0,"billed_as":"BB"},{"name":"Dmitri Rosenthal","title":"Associate","rate":270.0,"billed_as":"DR"},{"name":"Imani Oyelaran","title":"Associate","rate":270.0,"billed_as":"IO"},{"name":"Victor Lindqvist","title":"Senior Associate","rate":385.0,"billed_as":"VL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-03-03","timekeeper":"DR","timekeeper_name":"Dmitri Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":270.0,"amount":270.0,"narrative":"Review and analyze client documents concerning the regulatory inquiry to identify key facts","codes":["L110","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-03-09","timekeeper":"VL","timekeeper_name":"Victor Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":2.5,"rate":385.0,"amount":962.5,"narrative":"Conference with client regarding budget variance for the data incident","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-03-12","timekeeper":"BB","timekeeper_name":"Beatrix Brennan","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":285.0,"amount":484.5,"narrative":"Research standard for provisional remedies concerning the customs audit","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-03-13","timekeeper":"IO","timekeeper_name":"Imani Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":270.0,"amount":324.0,"narrative":"Review and revise answer and affirmative defenses based on client comments","codes":["L210","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-03-24","timekeeper":"VL","timekeeper_name":"Victor Lindqvist","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.9,"rate":385.0,"amount":346.5,"narrative":"Review and organize incoming production from Caldera Energy for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-03-30","timekeeper":"DR","timekeeper_name":"Dmitri Rosenthal","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":270.0,"amount":432.0,"narrative":"Prepare updated litigation budget for the regulatory inquiry","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-03-30","timekeeper":"IO","timekeeper_name":"Imani Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":270.0,"amount":324.0,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-03-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":40.0,"rate":0.7,"amount":28.0,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["77 Pine Street","Dallas","Tax ID 64-5406465"],"template":"T07","pages":1},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-12-19","matter_close":"2026-06-29","matter_budget":37686.0,"approved_timekeepers":["Dmitri Rosenthal","Beatrix Brennan","Victor Lindqvist","Sofia Abernathy","Katya Lindqvist","Imani Oyelaran","Rafael Halloran"],"invoice_received_date":"2026-04-05"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

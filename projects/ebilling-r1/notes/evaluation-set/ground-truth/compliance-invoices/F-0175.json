@@ -1,0 +1,35 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0175",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0175","generator_id":"gen_eval_set.py@1 F-0175","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0175.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Ostrander & Ambrose LLP","firm_invoice_number":"2026006422","invoice_date":"2025-11-04","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"83514-0016","po_number":"PO-4533490","fees_total":4682.0,"expenses_total":5248.31,"adjustments_total":0.0,"total_due":9930.31,"currency":"USD"},
+ "timekeepers":[{"name":"Aisha Lindqvist","title":"Associate","rate":430.0,"billed_as":"Aisha Lindqvist"},{"name":"Clara Carmichael","title":"Paralegal","rate":215.0,"billed_as":"Clara Carmichael"},{"name":"Dalia Fairweather","title":"Partner","rate":775.0,"billed_as":"Dalia Fairweather"},{"name":"Elena Nakamura","title":"Associate","rate":430.0,"billed_as":"Elena Nakamura"},{"name":"Ingrid Whitfield","title":"Partner","rate":745.0,"billed_as":"Ingrid Whitfield"},{"name":"Nadia Okafor","title":"Paralegal","rate":210.0,"billed_as":"Nadia Okafor"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-01","timekeeper":"Aisha Lindqvist","timekeeper_name":"Aisha Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":1.3,"rate":430.0,"amount":559.0,"narrative":"Prepare case assessment memorandum regarding the lease dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-06","timekeeper":"Dalia Fairweather","timekeeper_name":"Dalia Fairweather","timekeeper_title":"Partner","title":"Ptr","hours":0.8,"rate":775.0,"amount":620.0,"narrative":"Prepare examination outlines for trial in the vendor agreement","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-06","timekeeper":"Nadia Okafor","timekeeper_name":"Nadia Okafor","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":210.0,"amount":504.0,"narrative":"Revise motion to compel after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-07","timekeeper":"Nadia Okafor","timekeeper_name":"Nadia Okafor","timekeeper_title":"Paralegal","title":"Para","hours":2.4,"rate":210.0,"amount":504.0,"narrative":"Review draft expert disclosure for the regulatory inquiry","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-16","timekeeper":"Dalia Fairweather","timekeeper_name":"Dalia Fairweather","timekeeper_title":"Partner","title":"Ptr","hours":0.1,"rate":775.0,"amount":77.5,"narrative":"Review court docket and calendar of pending deadlines for the construction contract","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-17","timekeeper":"Elena Nakamura","timekeeper_name":"Elena Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.05,"rate":430.0,"amount":451.5,"narrative":"Research standard for new trial in the supply agreement","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-17","timekeeper":"Aisha Lindqvist","timekeeper_name":"Aisha Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":430.0,"amount":43.0,"narrative":"Prepare expert witness for testimony in the customs audit","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-27","timekeeper":"Clara Carmichael","timekeeper_name":"Clara Carmichael","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":215.0,"amount":150.5,"narrative":"Prepare trial notebook and demonstrative exhibits for the supply agreement","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-10-29","timekeeper":"Ingrid Whitfield","timekeeper_name":"Ingrid Whitfield","timekeeper_title":"Partner","title":"Ptr","hours":1.6,"rate":745.0,"amount":1192.0,"narrative":"Prepare case assessment memorandum regarding the licensing dispute and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-10-30","timekeeper":"Elena Nakamura","timekeeper_name":"Elena Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.35,"rate":430.0,"amount":580.5,"narrative":"Review draft expert disclosure for the insurance coverage issue","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-10-01","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":688.06,"amount":688.06,"narrative":"Airfare to Atlanta for deposition","codes":["E110"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-10-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":20.0,"rate":0.62,"amount":12.4,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-10-15","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":49.63,"amount":148.89,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":14,"line_type":"expense","date":"2025-10-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":810.0,"rate":0.21,"amount":170.1,"narrative":"Photocopies - 810 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":15,"line_type":"expense","date":"2025-10-22","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4228.86,"amount":4228.86,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["769 Commerce Avenue","Portland","Tax ID 42-9221148"],"template":"T02","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-06-06","matter_close":"2026-01-29","matter_budget":64721.0,"approved_timekeepers":["Elena Nakamura","Clara Carmichael","Aisha Abernathy","Ingrid Whitfield","Dalia Fairweather","Aisha Lindqvist","Nadia Okafor"],"invoice_received_date":"2025-11-09"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[10],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R05","rule_type":"ExpenseRule","scope":"line","line_refs":[14],"consequence":"Reduce"}
+ ],
+ "seeded_violations":3
+}

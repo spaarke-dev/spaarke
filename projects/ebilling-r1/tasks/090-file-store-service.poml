@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ebilling-r1">
+  <metadata>
+    <title>File store service: staged blob, Not yet servable row, verified flip; internal download route; orphan reconcile job</title>
+    <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-B</phase>
+    <gate>088 merged and applied on dev; 099 merged (its step-0 definition is reused); uac-r2 reviews the route and copy rule before merge; no live writes</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New service, endpoint, endpoint filter, DI registrations and scheduled job; the route is an authorization gate on invoice files of Secure records.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive fail-closed route plus a storage abstraction moved out of AI code; 092, 093, 094 and 150 build on its API.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Beside 081; the only possible shared file is Infrastructure/DI/FinanceModule.cs (separate registration blocks; the second to merge rebases).</parallel-reason>
+    <deps>088, 099</deps>
+    <tags>bff-api, api, endpoints, security, storage, job, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the file store of notes/procedure-and-file-model.md section 4 (EB-D-148 supersedes D-44/D-55 "SPE, never Blob"): a BFF service that stages bytes to Azure Blob under a deterministic Stored File id, builds the sprk_storedfile row as Not yet servable and flips it to Servable after checking the blob exists and its SHA-256 matches; one internal download route that refuses flagged-external callers, checks Read on the parent and applies the copy rule (B); the download audit event; one ADR-036 job for the orphan reconcile and the not-servable detector. Submissions (092, 094), exports (150) and UI are not in this task.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure.Storage.Blobs with managed identity, Minimal API endpoint filters, Dataverse optimistic concurrency and Spaarke.Scheduling.</role>
+
+  <goal>StoredFileService, GET /api/finance/files/{fileId}/content with the section 4.3 checks in order, the audit event and StoredFileReconcileJob exist; every criterion below passes; SessionFileBlobStore behaves exactly as before.</goal>
+
+  <context>
+    <background>Model 4.1-4.3, 5.3, 9.1 steps 2 and 4-6; reviews section 6. Columns and values from 088's script: sprk_purpose, sprk_firmvisible, sprk_filestatus (Not yet servable 100000000, Servable 100000001, Removed 100000002), sprk_sourcedocument, sprk_sourcecommunication, sprk_sourceattachmentidentity, sprk_sourceversion (String, max length 20: the canonical string of the source row version), sprk_sourcesha256, sprk_sha256, sprk_contenttype, sprk_sizebytes (Integer, whole number 0 to 2147483647; not BigInt: run 1 on dev showed a BigInt cannot be secured, owner decision 2026-10-22), sprk_blobpath, parents sprk_procedureversion / sprk_invoice / sprk_billingexport (RemoveLink). Code: SessionFileBlobStore.cs has the gateway (SessionFileBlobGateway :736, AzureBlobSessionFileGateway :756), the secret-bearing endpoint refusal (:704-722) and the tenant-partitioned name rule (:44-97); InvoiceSubmissionPersister.IdOf (:198) and InvoiceIdFor (:189); CallerRecordAccessProbe.GetCallerRightsForRecordsAsync (:346, gate variant); ProblemDetailsHelper.UniformRecordNotFound (:316); endpoints are mapped in Infrastructure/DI/EndpointMappingExtensions.cs (:383).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/Storage/BlobGateway.cs (gateway and endpoint refusal MOVED from SessionFileBlobStore.cs; adds create-if-none-match, properties/metadata, index-tag read, streamed read)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionFileBlobStore.cs (uses the moved types only)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Files/StoredFileService.cs (service, StoredFileIds, name rule, scan state, audit helper)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Files/StoredFileReconcileJob.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/StoredFileEndpoints.cs (route + StoredFileAccessFilter)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/FinanceOptions.cs, appsettings.template.json, Infrastructure/DI/FinanceModule.cs, Infrastructure/DI/EndpointMappingExtensions.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Files/StoredFileServiceTests.cs, StoredFileReconcileJobTests.cs; tests/unit/Sprk.Bff.Api.Tests/Api/Finance/StoredFileEndpointsTests.cs; tests/integration/tenant/Finance/StoredFileTenantIsolationTests.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs and any route census the build names</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="root §10, bff-extensions A, D">Placement BFF (ADR-052 B2, B3), stated in the PR. Publish-size delta recorded; no new package; no new HIGH CVE.</constraint>
+    <constraint source="ADR-013, bff-extensions A.4">No type under Services/Finance or Api/Finance references a Services.Ai.* type. SessionFileBlobStore's behaviour, config key and tests stay unchanged.</constraint>
+    <constraint source="ADR-028, root §9, model 4.2">Managed identity only; an endpoint with AccountKey, SAS or a connection string is refused at start-up; no SAS or storage URL reaches a client. Logs carry ids only.</constraint>
+    <constraint source="model 4.2">Containers: Procedure source → procedures; Invoice PDF, Invoice supporting file → invoice-files; Export file → billing-exports. Name {tenantId}/{parent table}/{parent id}/{file id}, every segment validated (no separator, no "..", GUID ids), finished name re-checked against the tenant. Write-once: If-None-Match *; an existing blob with the same SHA-256 is reused, a different one refuses and stays unchanged. Metadata: sha256, purpose, submission id when a submission staged it.</constraint>
+    <constraint source="model 4.1, 9.1 step 2 (uac-r2 F4-4, N6)">StoredFileIds.ForSourceVersion(submissionId, version), ForAttachment(submissionId, identity), ForUpload(submissionId) (the fixed 0) use IdOf with distinct key prefixes; New() for a caller upload.</constraint>
+    <constraint source="088 retype (owner 2026-10-22)">sprk_sizebytes is a whole number (Integer 0 to 2147483647), written through a CHECKED conversion: a file larger than int.MaxValue (2,147,483,647 bytes) is refused (fail closed, a typed refusal before any blob or row write), never an unchecked (int) cast that wraps. Must-fire test: a length of int.MaxValue + 1 (and a negative length) is refused with no blob write and no row; int.MaxValue itself is accepted (must-not-fire). A file over 2 GiB cannot be stored (known limit).</constraint>
+    <constraint source="088 retype (owner 2026-10-22)">sprk_sourceversion (String, max length 20) and StoredFileIds.ForSourceVersion(submissionId, version) use ONE canonical string form of the source row version: invariant culture, no padding, no separators (version.ToString(CultureInfo.InvariantCulture)), produced by a single helper that both call. Test: for a given version the value stored in sprk_sourceversion and the string fed to the id derivation are the same string (assert equality, and a culture with another digit or group separator, for example de-DE or ar-SA, changes neither), and a version that does not fit 20 characters is refused.</constraint>
+    <constraint source="model 9.1 steps 4-5 (uac-r2 F2-1)">BuildRow returns the create for a caller's transaction: status Not yet servable, every authorization column set, owner and creator person passed in. FlipToServableAsync: blob exists and its SHA-256, recomputed by streaming, equals sprk_sha256, then Update sprk_filestatus with IfRowVersionMatches. Missing blob or mismatch → typed definitive failure, no write; changed row version → typed concurrency failure; a fault throws.</constraint>
+    <constraint source="model 4.3, 5.3 (uac-r2 Q5, F1-3, F1-e, F4-2)">GET /api/finance/files/{fileId:guid}/content: RequireAuthorization, RequireEbillingEnabled, StoredFileAccessFilter before the handler, in this order: (1) step 0 with 099's definition → 403 before any record read; (2) app-only row read, unknown id → 404; (3) caller's own Read on the parent, gate variant → else 404; (4) when sprk_sourcedocument is set, caller's own Read on it, gate variant → else 404; (5) Servable, path parent equals row parent, scan Clean (Malicious, not Servable, Removed, mismatch → 404; Pending → 409 file_scan_pending). Any read fault → 503. Every 404 is UniformRecordNotFound, byte-identical to an unknown id's.</constraint>
+    <constraint source="model 4.2 (uac-r2 Q5)">Scan state from the Defender for Storage malware-scan index tag, read on demand: "No threats found" → Clean, "Malicious" → Malicious, absent or other → Pending. Only an explicit FileStore MalwareScanningEnabled = false serves a file as NotScanned; absent means enabled. Confirm the tag key and values on Microsoft Learn (researcher) and record them.</constraint>
+    <constraint source="model 4.3 (O-29)">Before the first byte the handler writes one structured log event StoredFileDownloaded (fixed EventId; file id, parent table and id, caller systemuser or contact id, route kind internal|firm) through a static helper 093 reuses. No Dataverse audit row.</constraint>
+    <constraint source="model 4.3 upload">UploadForCallerAsync (no HTTP route here; the control waits for O-14): step 0 → caller's Write on the parent (gate variant) → stage under New() → row → flip; a failed row write deletes the blob. CreateForAppAsync (stage → row → flip, no caller checks) is for callers that already authorized (150). OpenForProcessingAsync returns bytes for jobs only when Servable-or-staged and scan Clean, else a typed Pending / Malicious / Missing result.</constraint>
+    <constraint source="ADR-036 A1, ADR-052, model 4.2">StoredFileReconcileJob is one IScheduledJob via AddScheduledJob (no BackgroundService), a scope per run, one heartbeat log per run. A row whose parent lookups are all null or whose parent read is a successful not-found → delete blob then row; a row-less blob (successful not-found) older than the grace → delete; a fault skips the unit; a blob whose metadata submission is not terminal is skipped. Grace is config, validated at start-up ≥ the submission job's maximum retry horizon. Detector: rows Not yet servable older than N minutes (config) → one warning event with count and ids, no repair.</constraint>
+    <constraint source="project">No live Azure or Dataverse write, no deploy; storage provisioning is 091's.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (4, 5.3, 9.1)</file>
+      <file>projects/ebilling-r1/tasks/088-stored-file-schema.poml, 099-finance-step-0.poml</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/scheduled-jobs.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Managed-identity blob store, tenant-partitioned names" location="src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionFileBlobStore.cs">Move its gateway; copy its name validation.</pattern>
+      <pattern name="Blob sweep as a scheduled job" location="src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionFileRetentionJob.cs, Infrastructure/DI/AiPersistenceModule.cs:249-296">Registration and per-unit handling.</pattern>
+      <pattern name="Resolve-then-authorize filters" location="src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs (resolve-email-identity)">Filter order before the handler.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. Read 088's script and 099's step-0 code. Confirm the Defender tag (researcher).</step>
+    <step order="1">Move and extend the gateway; SessionFileBlobStore tests green unchanged.</step>
+    <step order="2">StoredFileService, options, DI.</step>
+    <step order="3">Route, filter, handler with the audit event.</step>
+    <step order="4">StoredFileReconcileJob with the detector.</step>
+    <step order="5">Tests, seeding proofs, ArchTests, build, publish-size delta, /conflict-check; notes in projects/ebilling-r1/notes/090-file-store-service.md (API summary for 092/093/094/150, tag values, placement).</step>
+    <step order="6">code-review, adr-check, two adversarial passes (security), uac-r2 review; then TASK-INDEX.md status cell `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 088's columns or status values differ from the background, STOP; do not adapt the schema.</trigger>
+    <trigger>If moving the gateway changes SessionFileBlobStore's behaviour or tests, STOP and report the options.</trigger>
+    <trigger>If the Defender tag key or values cannot be confirmed, STOP and record it for 091. (Tag reads are settled: Storage Blob Data Contributor lacks blobs/tags/read, so 091 option A (owner 2026-10-21) grants a custom role = Contributor + blobs/tags/read per container; 090 relies on that role and needs no further escalation for it.)</trigger>
+    <trigger>If any download check cannot run before the first byte, STOP.</trigger>
+    <trigger>If uac-r2 asks for a Dataverse audit row instead of the log event, STOP and raise 🔔 Human Input Required (O-29).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SessionFileBlobStore stores AI chat session bytes keyed by session under AI retention; sprk_document is SPE document management, ruled out (O-2, O-8); grep for "storedfile" finds no service, route or job.</existing>
+    <extension>The gateway is reused by moving it out of the AI namespace, and FinanceOptions, FinanceModule and the scheduler are extended; a new service is needed because nothing writes business files keyed by a Dataverse parent with a servable status, and the session-keyed contract and retention do not fit.</extension>
+    <cost-of-doing-nothing>Invoice PDFs, Procedure sources and export files have nowhere to live once the 028 SPE path retires (092, 150); the review page cannot load an invoice PDF; bytes of parents deleted outside the BFF stay forever.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">BlobGateway.cs, StoredFileService.cs, StoredFileReconcileJob.cs, StoredFileEndpoints.cs, FinanceOptions.cs, FinanceModule.cs, EndpointMappingExtensions.cs, SessionFileBlobStore.cs</output>
+    <output type="test">the test files in relevant-files</output>
+    <output type="docs">projects/ebilling-r1/notes/090-file-store-service.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Stage writes to the purpose's container at the stated name; a separator, "..", a non-GUID id or another tenant is refused before any storage call; re-staging the same bytes reuses the blob; different bytes under an existing id are refused and the blob is unchanged.</criterion>
+    <criterion testable="true">StoredFileIds are deterministic and distinct across the three kinds for one submission.</criterion>
+    <criterion testable="true">BuildRow sets Not yet servable and every authorization column.</criterion>
+    <criterion testable="true">Size and source version (088 retype): a size above int.MaxValue or below 0 is refused before any blob or row write (must-fire), int.MaxValue is accepted (must-not-fire), and no unchecked (int) cast of the size exists in the service; the string stored in sprk_sourceversion equals the string ForSourceVersion hashes, under any current culture.</criterion>
+    <criterion testable="true">Flip: present and equal → Update with IfRowVersionMatches to Servable; missing → definitive failure, no Update; SHA different → definitive failure, no Update; row version changed → concurrency failure returned; storage fault → throws.</criterion>
+    <criterion testable="true">Download must-fire, (a)-(c) before any row read: (a) flagged-external → 403; (b) no systemuser row → 403; (c) flag read fault → 403; (d) no Read on parent → 404; (e) source set, no Read on it → 404; (f) Not yet servable, Removed, Malicious, path mismatch → 404; (g) tag absent or Pending → 409 file_scan_pending; (h) read fault → 503. Every 404 byte-identical to an unknown id's.</criterion>
+    <criterion testable="true">Download must-not-fire: internal caller (flag false; flag blank) with the needed Reads, Servable, Clean → 200 with the row's content type and bytes and exactly one audit event before the first byte; with MalwareScanningEnabled explicitly false an untagged file is served.</criterion>
+    <criterion testable="true">UploadForCallerAsync: flagged-external refused before any read or write; no Write → refused, no blob; failed row write → blob deleted.</criterion>
+    <criterion testable="true">Reconcile: parent confirmed gone → blob and row deleted; parent read fault → both kept; row-less blob kept inside the grace, deleted after; non-terminal submission's blob kept; a second run over the same state does nothing new; detector logs rows past N minutes; cancellation stops the run; ResultJson carries the counts.</criterion>
+    <criterion testable="true">Seeding proofs, one per guard, recorded in the notes: removing step 0 fails (a); removing the parent Read fails (d); removing the copy rule fails (e).</criterion>
+    <criterion testable="true">SessionFileBlobStore tests pass unchanged; no Finance type depends on a Services.Ai type (ArchTest or recorded grep); the route is in the RouteAuthorizationGuardTests ledger; full ArchTests green.</criterion>
+    <criterion testable="true">dotnet build exits 0; filtered unit and tenant tests pass; publish-size delta recorded; no package; no new HIGH CVE; /conflict-check run.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Internal route only; flagged-external users get invoice files through 093's firm route. 092 wires uploads, extraction and the review page's file id; 094 the Submit Invoice copy; 150 export files; 086 the secure family. 079 sets dev values after 091. SCAN-TAG (uac-r2 condition 3, 2026-10-21): the BFF keeps blob write, so it can overwrite a scanned blob. The download serves only when the tag 'Malware Scanning scan result' = 'No threats found' AND the scan time is no earlier than the blob's Last-Modified. A missing tag, an unreadable tag or an older scan refuses. Pinned by a test: tagged clean, then Last-Modified later, then refused. Keep the time check even if dev shows an overwrite clears tags.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for rigor, checkpoints and quality gates.</protocol>
+  </execution>
+</task>

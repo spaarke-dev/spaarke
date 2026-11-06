@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{de71004e-a70c-4ba9-a3b5-5e461cfda031}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_ratecardid">
+          <cell name="sprk_name" width="220" />
+          <cell name="sprk_firm" width="150" />
+          <cell name="sprk_matter" width="150" />
+          <cell name="sprk_project" width="150" />
+          <cell name="sprk_workassignment" width="150" />
+          <cell name="sprk_effectivefrom" width="150" />
+          <cell name="sprk_effectiveto" width="150" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_ratecard">
+          <attribute name="sprk_ratecardid" />
+          <attribute name="sprk_name" />
+          <attribute name="sprk_firm" />
+          <attribute name="sprk_matter" />
+          <attribute name="sprk_project" />
+          <attribute name="sprk_workassignment" />
+          <attribute name="sprk_effectivefrom" />
+          <attribute name="sprk_effectiveto" />
+          <order attribute="sprk_name" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active Rate Cards" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

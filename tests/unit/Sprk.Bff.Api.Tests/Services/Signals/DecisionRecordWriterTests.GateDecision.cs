@@ -768,4 +768,47 @@ public sealed partial class DecisionRecordWriterTests
             "re-owned at write to the resolver's team");
         world.RecordSharees(result.RecordId).Should().BeEmpty("a filed communication's record gets no participant share");
     }
+
+    // ── Owner decision 2026-10-29: a communication filed under a person-owned work assignment ──────────────────────────
+
+    /// <summary>A person-owned communication (ChildBu) filed under a person-owned work assignment (GeneralBu) that is filed under an
+    /// ordinary matter in CustomerChildBu (<paramref name="filed"/>) or under nothing.</summary>
+    private static Harness CommunicationUnderAPersonOwnedWorkAssignment(bool filed)
+    {
+        var workAssignment = new EntityReference("sprk_workassignment", GateWorkAssignment);
+        var directory = Standard()
+            .WithRecord("sprk_matter", MatterId, CustomerChildBu, owningTeam: CustomerChildTeam)
+            .WithRecord("sprk_workassignment", GateWorkAssignment, GeneralBu, owningTeam: null,
+                extra: filed ? new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) } : new())
+            .WithRecord("sprk_communication", CommunicationId, ChildBu, extra: new() { ["sprk_regardingworkassignment"] = workAssignment });
+        var h = new Harness(realResolver: directory.Resolver());
+        h.Rows[("sprk_communication", CommunicationId)] =
+            new Entity("sprk_communication", CommunicationId) { ["sprk_regardingworkassignment"] = workAssignment };
+        return h;
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29: the gate's record about a communication under a FILED person-owned work assignment is owned by the matter's unit — the review's answer too")]
+    public async Task Gate_ACommunicationUnderAFiledPersonOwnedWorkAssignment_IsOwnedInTheMattersUnit_AsTheReviewIs()
+    {
+        var h = CommunicationUnderAPersonOwnedWorkAssignment(filed: true);
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+        var review = await h.Writer.ResolveOwnerAsync(Request(core: Core("sprk_workassignment", GateWorkAssignment)));
+
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(CustomerChildTeam,
+            "the work assignment belongs to its matter: the matter's unit, never the work assignment's or the communication's");
+        h.Row.Contains("owninguser").Should().BeFalse("a core record is never content: the D-144 owner never applies");
+        review.Resolution.OwningTeamId.Should().Be(CustomerChildTeam, "the review writer asks the same core first");
+    }
+
+    [Fact(DisplayName = "Owner decision 2026-10-29: the gate's record about a communication under an UNFILED person-owned work assignment is owned by the work assignment's own unit — never the communication's owner")]
+    public async Task Gate_ACommunicationUnderAnUnfiledPersonOwnedWorkAssignment_IsOwnedInTheWorkAssignmentsUnit()
+    {
+        var h = CommunicationUnderAPersonOwnedWorkAssignment(filed: false);
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(GeneralTeam, "an unfiled work assignment keeps its own unit");
+        h.Row.Contains("owninguser").Should().BeFalse();
+    }
 }

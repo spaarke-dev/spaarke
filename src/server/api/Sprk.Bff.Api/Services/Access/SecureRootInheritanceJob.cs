@@ -206,13 +206,20 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
 
         // Task 175 (owner round 84): the other direction, and the Access Permission. A listing that cannot complete throws
         // (ADR-036 A1 rule 4) — a failed run, nothing decided on part of it.
-        (string Table, Guid Id)? unsecureAfter;
+        (string Table, Guid Id)? unsecureAfter, rootOwnerAfter;
         lock (_cursorGate)
+        {
             unsecureAfter = _unsecureCursor;
+            rootOwnerAfter = _rootOwnerCursor;
+        }
+
         var follow = await inheritance.FollowParentsPassAsync(
-            traceId, unsecureAfter, MaxUnsecuresPerRun, MaxRecordWritesPerRun, cancellationToken).ConfigureAwait(false);
+            traceId, unsecureAfter, MaxUnsecuresPerRun, MaxRecordWritesPerRun, cancellationToken, rootOwnerAfter).ConfigureAwait(false);
         lock (_cursorGate)
+        {
             _unsecureCursor = follow.UnsecureResumeAfter;
+            _rootOwnerCursor = follow.RootOwners.Cursor;
+        }
         if (follow.Untrusted is { } untrusted)
         {
             // Task 175 fix round 2: access records could not be trusted (the column is not field-secured, or the BFF's read
@@ -302,6 +309,10 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
                     resumeAfter = follow.UnsecureResumeAfter is { } u ? $"{u.Table}:{u.Id:D}" : null,
                     problems = follow.Problems,
                     changes = follow.Changes,
+                    // Owner decision 2026-10-29: an ordinary filed root follows its family's owner (report-only unless
+                    // SecureRoot:Inheritance:RootOwnerWritesEnabled and SecureChild:Reconciliation:OrdinaryMovesWritesEnabled are
+                    // both true; resumeAfter is its cursor, crossUnit the re-owns whose documents the ordinary-moves pass moves).
+                    rootOwners = follow.RootOwners,
                 },
                 incomplete = incomplete.Take(50).ToArray(),
                 records = sampled,
@@ -366,4 +377,8 @@ public sealed class SecureRootInheritanceJob : IScheduledJob
 
     // Task 175: the un-secure pass's cursor — the last record it tried while it deferred others (same rules as _cursor).
     private (string Table, Guid Id)? _unsecureCursor;
+
+    // Fix round (B-F2): the root-owner step's cursor — the last root it reached when a bound stopped it (same rules as
+    // _cursor: per instance; a run that reached every root clears it, so the next starts from the beginning).
+    private (string Table, Guid Id)? _rootOwnerCursor;
 }

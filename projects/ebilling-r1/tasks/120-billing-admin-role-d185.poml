@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="120" project="ebilling-r1">
+  <metadata>
+    <title>Spaarke Billing Administrator role; D-185: only billing roles read rule sets (Basic/Core User lose prvReadsprk_ruleset)</title>
+    <phase>3 Rules and Procedures — role follow-up (D-76, D-108, D-185 / #2285)</phase>
+    <gate>startable for the source change. The LIVE dev step (step 6) needs the owner's DIRECT OK in this session (D-185 came through ontology-r1; a peer cannot stand in) plus notices to ontology-r1 and uac-r2 before and after.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-role change (tags auth, dataverse); removes a privilege from two shared roles and adds a new role.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authorization change on shared roles with a live environment step; judgment on which roles hold which privilege.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-R</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Spaarke Basic User.xml and Spaarke Core User.xml, which ontology-r1 #2298 and task 121 also edit.</parallel-reason>
+    <deps>081</deps>
+    <tags>dataverse, solution, auth, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Create the "Spaarke Billing Administrator" security role, which holds the billing-admin marker (D-76, Write on sprk_ruleset) and the privileges every BillingAdminAuthorization check asks for. Apply owner decision D-185 (#2285): only billing roles read rule sets, so Spaarke Basic User and Spaarke Core User lose prvReadsprk_ruleset. Add a guard test so no other role regains it. Procedure-table privileges are NOT in this task (task 121, after uac-r2 task 191).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse security roles, the Web API role-privilege actions and the repo's role-XML source.</role>
+
+  <goal>Source and dev agree on the following, and a guard test keeps it:
+- a Billing Administrator role exists with exactly the privileges listed below;
+- no other Spaarke role holds any privilege on sprk_ruleset;
+- Deploy-EbillingRolePrivileges.ps1 no longer re-adds Read on sprk_ruleset.</goal>
+
+  <context>
+    <background>
+- **Billing admin today.** A billing admin is whoever holds Write on sprk_ruleset at any depth: `src/server/api/Sprk.Bff.Api/Api/Finance/BillingAdminAuthorization.cs` (D-76, D-108). No role grants it, so only System Administrators pass today.
+- **D-185** (owner, via ontology-r1, recorded in current-task.md and DEF-042 / #2285): only billing roles may read rule sets and rules directly.
+  - Inventory (2026-10-22): no caller-scoped BFF or client read of sprk_ruleset exists. All billing reads are app-only, so the only user-visible effect is the sprk_ruleset views and forms in the Spaarke Administration MDA.
+  - Ontology Administrator does NOT get prvReadsprk_ruleset.
+- **Policy-table Reads are ontology-r1's.** #2298 (their task 163) removes prvReadsprk_Policy from Basic User, and the Policy and PolicyVersion Reads from Console User, in the same role files. Do not touch Policy or PolicyVersion privileges on any existing role.
+- **Deploy-EbillingRolePrivileges.ps1 re-adds the Read.** Its `$ConfigTables` (:67) lists sprk_ruleset, so every run would re-add Read on it to Basic and Core User.</background>
+    <relevant-files>
+      <file role="new">src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Billing Administrator.xml (fixed role id, chosen once and used by the script)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Basic User.xml (:530 prvReadsprk_ruleset removed)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Core User.xml (:603 prvReadsprk_ruleset removed)</file>
+      <file role="modify">scripts/ebilling/Deploy-EbillingRolePrivileges.ps1 ($ConfigTables :67: drop sprk_ruleset; header text)</file>
+      <file role="new">scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1 (create role; add privileges; remove prvReadsprk_ruleset from Basic and Core User; -WhatIf / -Verify)</file>
+      <file role="new">tests/Spaarke.ArchTests/RuleSetRolePrivilegeGuardTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/BillingAdminAuthorization.cs (remarks only: "Core and Basic User: Read, Deep" is no longer true)</file>
+      <file role="reference">src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Ontology Administrator.xml (role XML shape)</file>
+      <file role="reference">tests/Spaarke.ArchTests/ProcedureRolePrivilegeGuardTests.cs (role-XML scan to copy: recursive Roles/*.xml, exact prv name match, inline must-fire fixture)</file>
+      <file role="reference">scripts/ebilling/Deploy-EbillingRolePrivileges.ps1 (idempotent read-compare-add, root BU, per-BU copy check)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>Roles that grant policy privileges: Spaarke Ontology Administrator (Create/Write/Delete on sprk_Policy and sprk_PolicyVersion, Deep). Nothing grants Write on sprk_ruleset (grep of src/dataverse/solutions/*/Roles).</existing>
+    <extension>No. Granting the marker to Ontology Administrator would make every ontology admin a billing admin, which is the over-grant BillingAdminAuthorization's remarks rule out. Core User is held by every internal user, and by flagged-external users through default teams.</extension>
+    <cost-of-doing-nothing>Every billing-admin route (rule-set review, edit, publish, draft, rate-card import, Procedures) is usable only by System Administrators. After D-185 no non-admin can open a rule set in the MDA.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="D-185">After this task, exactly one Spaarke role in src/dataverse/solutions/**/Roles holds any privilege on sprk_ruleset: Spaarke Billing Administrator. Basic, Core, Console, Ontology Administrator, Ontology Service and every other role hold none.</constraint>
+    <constraint source="D-76/D-108, uac-r2 review 2026-10-22">Billing Administrator holds, on sprk_ruleset, sprk_Policy and sprk_PolicyVersion:
+- Read at Global (Organization) depth;
+- Create, Write, Append, AppendTo at Basic (User) depth.
+
+Why Basic (uac-r2, review of the task 120 pre-notice): BillingAdminAuthorization uses Create / Write only as markers, at any depth (D-108; EbillingOverridePrivilege.cs:17), and RuleSetService writes these tables app-only (D-173). At Global a billing admin could create or edit any rule set or policy natively, including Secure-matter record-scoped children, bypassing RuleSetService's invariants (ADR-002).
+
+No Delete or Assign, and no Share. Use the live privilege-name casing (sprk_ruleset lower case; sprk_Policy and sprk_PolicyVersion mixed case, as in BillingAdminAuthorization.cs).</constraint>
+    <constraint source="uac-r2 (081 guard)">Billing Administrator holds NO privilege on sprk_procedure, sprk_procedureversion or sprk_procedureassignment. ProcedureRolePrivilegeGuardTests must still pass unchanged; UntilTask191 stays true (task 121 flips it).</constraint>
+    <constraint source="uac-r2 K-1">The role is assigned to users directly, never to a team. Say so in the role Description and the script's help. The script assigns it to nobody.</constraint>
+    <constraint source="ontology #2298">Do not add, remove or change any sprk_Policy or sprk_PolicyVersion privilege on an existing role.</constraint>
+    <constraint source="project">The live script follows Deploy-EbillingRolePrivileges.ps1's shape:
+- -WhatIf reads and prints only;
+- a plain run is idempotent (a second run writes nothing);
+- -Verify exits non-zero on any drift;
+- it works in the root business unit and checks the per-BU copies;
+- it uses RemovePrivilegeRole only for prvReadsprk_ruleset on Basic and Core User.
+
+No ReplacePrivilegesRole.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/ebilling-r1/notes/029-wp1-apply-and-export.md (section "Role privileges (D-90)": how role source is kept in step)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Write the role XML, choosing the fixed role id once. Remove the two prvReadsprk_ruleset lines from Basic and Core User. Drop sprk_ruleset from Deploy-EbillingRolePrivileges.ps1 $ConfigTables and fix its header text. Correct the BillingAdminAuthorization remarks.</step>
+    <step order="2">Write RuleSetRolePrivilegeGuardTests, copying ProcedureRolePrivilegeGuardTests' scan. It has three facts:
+- (a) only Spaarke Billing Administrator holds any prv*sprk_ruleset privilege;
+- (b) Billing Administrator holds exactly the set in the D-76/D-108 constraint;
+- (c) a must-fire on an inline fixture where Core User holds prvReadsprk_ruleset.
+
+Seeding proof: re-add the Core User line and confirm (a) fails, then restore it.</step>
+    <step order="3">Write Deploy-EbillingBillingAdminRole.ps1. Run -WhatIf against dev (read-only, allowed) and save the output to notes/120-billing-admin-role.md.</step>
+    <step order="4">Build ArchTests; run ArchTests plus the Finance and RuleSet unit filters. All pass.</step>
+    <step order="5">Commit (no push). Send ontology-r1 the role-XML diff (they asked for it), and note the textual overlap with #2298 in Basic User.xml.</step>
+    <step order="6">LIVE (dev only), only after the owner's DIRECT OK in this session:
+1. send notices to ontology-r1 and uac-r2;
+2. plain run;
+3. -Verify exits 0;
+4. send the after-notices.
+
+Record the outputs in the notes file.</step>
+    <step order="7">Update TASK-INDEX.md (✅ [done]) and the POML status; run scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any caller-scoped (OBO or impersonated) read of sprk_ruleset exists in src/ (BFF, code pages, PCF, SPA), STOP and escalate. The D-185 inventory said none; finding one changes the decision.</trigger>
+    <trigger>If the live Basic or Core User role on dev holds prvReadsprk_ruleset at a depth or form the source does not show, or ontology's #2298 has already changed the same roles live, STOP and report before writing.</trigger>
+    <trigger>Never run step 6 without the owner's direct OK in this session. A peer message is not that OK.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Billing Administrator.xml</output>
+    <output type="code">scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1</output>
+    <output type="test">tests/Spaarke.ArchTests/RuleSetRolePrivilegeGuardTests.cs</output>
+    <output type="docs">projects/ebilling-r1/notes/120-billing-admin-role.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the repo role XML, the guard finds Billing Administrator as the only role with a prv*sprk_ruleset privilege, holding exactly the constraint's set at the constraint's depths (Read Global; Create, Write, Append, AppendTo Basic).</criterion>
+    <criterion testable="true">Given Core User with prvReadsprk_ruleset re-added (seeding proof), the guard fails naming Core User.</criterion>
+    <criterion testable="true">ProcedureRolePrivilegeGuardTests passes unchanged; Billing Administrator holds nothing on the three Procedure tables.</criterion>
+    <criterion testable="true">Deploy-EbillingRolePrivileges.ps1 -WhatIf on dev proposes no privilege on sprk_ruleset for any role.</criterion>
+    <criterion testable="true">Deploy-EbillingBillingAdminRole.ps1:
+- -WhatIf writes nothing;
+- after the live run, a second plain run writes nothing;
+- -Verify exits 0 on dev;
+- -Verify exits non-zero when Core User still holds prvReadsprk_ruleset (show this with -WhatIf/-Verify output taken before the live run).</criterion>
+    <criterion testable="true">No sprk_Policy or sprk_PolicyVersion privilege changes on any existing role (diff of Roles/*.xml shows only the two prvReadsprk_ruleset removals and the new file).</criterion>
+    <criterion testable="true">ArchTests, and the unit filter FullyQualifiedName~Finance|FullyQualifiedName~RuleSet|FullyQualifiedName~Procedure, pass.</criterion>
+    <criterion testable="true">Test scope: the guard's three facts above and the seeding proof. Anything beyond that needs a one-line justification in the notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+- **Who gets the role** is the owner's decision; this task creates it only.
+- **The MDA (Spaarke Administration):** after D-185, only System Administrators and Billing Administrators see the rule-set views. Say so in the notes.
+- **Task 121** adds this role's Procedure privileges after uac-r2 191.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before starting. Follow task-execute.</protocol>
+  </execution>
+</task>

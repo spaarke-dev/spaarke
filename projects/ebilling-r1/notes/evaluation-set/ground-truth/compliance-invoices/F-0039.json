@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0039",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0039","generator_id":"gen_eval_set.py@1 F-0039","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0039.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Stanhope Ellison PC","firm_invoice_number":"INV-2025-63382","invoice_date":"2025-07-01","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"99726-0025","po_number":"PO-4594423","fees_total":2786.75,"expenses_total":2504.63,"adjustments_total":0.0,"total_due":5291.38,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Brennan","title":"Of Counsel","rate":350.0,"billed_as":"Clara Brennan"},{"name":"Hannah Eriksen","title":"Associate","rate":230.0,"billed_as":"Hannah Eriksen"},{"name":"Peter Dunleavy","title":"Legal Assistant","rate":95.0,"billed_as":"Peter Dunleavy"},{"name":"Peter Nakamura","title":"Associate","rate":270.0,"billed_as":"Peter Nakamura"},{"name":"Rafael Galbraith","title":"Paralegal","rate":115.0,"billed_as":"Rafael Galbraith"},{"name":"Yusuf Yilmaz","title":"Associate","rate":255.0,"billed_as":"Yusuf Yilmaz"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-25","timekeeper":"Clara Brennan","timekeeper_name":"Clara Brennan","timekeeper_title":"Of Counsel","title":"O/C","hours":0.75,"rate":350.0,"amount":262.5,"narrative":"Draft motion to compel for trial in the warranty claim","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-23","timekeeper":"Hannah Eriksen","timekeeper_name":"Hannah Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":2.2,"rate":230.0,"amount":506.0,"narrative":"Attend hearing on witness list in the data incident","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-23","timekeeper":"Hannah Eriksen","timekeeper_name":"Hannah Eriksen","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":230.0,"amount":667.0,"narrative":"Internal conference with Hannah Eriksen regarding strategy for the insurance coverage issue","codes":["L410","A105"],"page":1,"narrative_style":"clerical"},
+  {"n":4,"line_type":"fee","date":"2025-06-11","timekeeper":"Peter Dunleavy","timekeeper_name":"Peter Dunleavy","timekeeper_title":"Legal Assistant","title":"LA","hours":2.8,"rate":95.0,"amount":266.0,"narrative":"Draft mediation statement for trial in the warranty claim","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-11","timekeeper":"Peter Dunleavy","timekeeper_name":"Peter Dunleavy","timekeeper_title":"Legal Assistant","title":"LA","hours":0.15,"rate":95.0,"amount":14.25,"narrative":"Prepare case assessment memorandum regarding the data incident and recommended strategy","codes":["L120","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-25","timekeeper":"Peter Nakamura","timekeeper_name":"Peter Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":270.0,"amount":405.0,"narrative":"Research standard for new trial in the warranty claim","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-13","timekeeper":"Rafael Galbraith","timekeeper_name":"Rafael Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":1.7,"rate":115.0,"amount":195.5,"narrative":"Draft complaint for trial in the data incident","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-18","timekeeper":"Rafael Galbraith","timekeeper_name":"Rafael Galbraith","timekeeper_title":"Paralegal","title":"Para","hours":0.1,"rate":115.0,"amount":11.5,"narrative":"Telephone conference with witness regarding the regulatory inquiry","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-26","timekeeper":"Yusuf Yilmaz","timekeeper_name":"Yusuf Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":1.8,"rate":255.0,"amount":459.0,"narrative":"Draft motion to dismiss for trial in the supply agreement","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-06-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":692.27,"amount":692.27,"narrative":"Airfare to Minneapolis for deposition","codes":["E110"],"page":2,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-06-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1751.61,"amount":1751.61,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":2,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-06-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":60.75,"amount":60.75,"narrative":"Overnight courier to Northwind Logistics counsel","codes":["E107"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["456 Pine Street","Denver","Tax ID 91-2228935"],"template":"T03","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-01-29","matter_close":"2025-09-28","matter_budget":46165.0,"approved_timekeepers":["Peter Nakamura","Yusuf Yilmaz","Hannah Eriksen","Rafael Galbraith","Aisha Fairweather","Clara Brennan","Peter Dunleavy"],"invoice_received_date":"2025-07-16"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[1],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[5],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[3],"consequence":"Disallow"}
+ ],
+ "seeded_violations":3
+}

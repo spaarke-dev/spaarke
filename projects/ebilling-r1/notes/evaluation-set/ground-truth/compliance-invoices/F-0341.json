@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0341",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0341","generator_id":"gen_eval_set.py@1 F-0341","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0341.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Ravenscroft and Ellison LLP","firm_invoice_number":"INV-2026-50887","invoice_date":"2025-08-04","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"86245-0029","po_number":"PO-4510559","fees_total":3298.5,"expenses_total":410.8,"adjustments_total":0.0,"total_due":3709.3,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Voss","title":"Paralegal","rate":130.0,"billed_as":"CV"},{"name":"Farah Nakamura","title":"Senior Associate","rate":405.0,"billed_as":"FN"},{"name":"Hector Sandoval","title":"Associate","rate":240.0,"billed_as":"HS"},{"name":"Katya Oyelaran","title":"Associate","rate":265.0,"billed_as":"KO"},{"name":"Louis Wickham","title":"Associate","rate":290.0,"billed_as":"LW"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-02","timekeeper":"FN","timekeeper_name":"Farah Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.6,"rate":405.0,"amount":648.0,"narrative":"Draft settlement proposal for trial in the insurance coverage issue","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-03","timekeeper":"HS","timekeeper_name":"Hector Sandoval","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":240.0,"amount":480.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-04","timekeeper":"KO","timekeeper_name":"Katya Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.8,"rate":265.0,"amount":212.0,"narrative":"Prepare fact witness for testimony regarding the vendor agreement","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-08","timekeeper":"CV","timekeeper_name":"Cyrus Voss","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":130.0,"amount":182.0,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-10","timekeeper":"LW","timekeeper_name":"Louis Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":290.0,"amount":725.0,"narrative":"Review draft expert disclosure for the regulatory inquiry","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-15","timekeeper":"FN","timekeeper_name":"Farah Nakamura","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.7,"rate":405.0,"amount":283.5,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-15","timekeeper":"CV","timekeeper_name":"Cyrus Voss","timekeeper_title":"Paralegal","title":"Para","hours":0.6,"rate":130.0,"amount":78.0,"narrative":"Analyze exposure and damages model for the employment claim","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-16","timekeeper":"KO","timekeeper_name":"Katya Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":265.0,"amount":53.0,"narrative":"Prepare examination outlines for trial in the customs audit","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-21","timekeeper":"CV","timekeeper_name":"Cyrus Voss","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":130.0,"amount":195.0,"narrative":"Review draft expert disclosure for the vendor agreement","codes":["L420","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-07-29","timekeeper":"CV","timekeeper_name":"Cyrus Voss","timekeeper_title":"Paralegal","title":"Para","hours":2.9,"rate":130.0,"amount":377.0,"narrative":"Draft post-trial motion in the customs audit","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"fee","date":"2025-07-30","timekeeper":"CV","timekeeper_name":"Cyrus Voss","timekeeper_title":"Paralegal","title":"Para","hours":0.5,"rate":130.0,"amount":65.0,"narrative":"Review court docket and calendar of pending deadlines for the insurance coverage issue","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-07-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":410.8,"amount":410.8,"narrative":"Airfare to Boston for deposition","codes":["E110"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["151 Federal Plaza","Seattle","Tax ID 94-9796624"],"template":"T01","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-09-16","matter_close":"2025-10-29","matter_budget":39837.0,"approved_timekeepers":["Katya Oyelaran","Marcus Hargrove","Farah Nakamura","Hector Sandoval","Yusuf Whitfield","Cyrus Voss","Louis Wickham","Marcus Rosenthal"],"invoice_received_date":"2025-08-06"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

@@ -352,6 +352,16 @@ public class SpeFileStore : ISpeFileOperations
         => _driveItemOps.GetDriveItemAsync(driveId, itemId, selectFields, ct);
 
     /// <summary>
+    /// The drive item at a root-relative path (app-only), or null. See <see cref="DriveItemOperations.GetDriveItemByPathAsync"/>.
+    /// <c>virtual</c> for the same module-boundary-test-double reason as <see cref="GetDriveItemAsync"/>.
+    /// </summary>
+    public virtual Task<SpeDriveItemSummary?> GetDriveItemByPathAsync(
+        string driveId,
+        string path,
+        CancellationToken ct = default)
+        => _driveItemOps.GetDriveItemByPathAsync(driveId, path, ct);
+
+    /// <summary>
     /// FR-01 (task 012): resolves an absolute document URL to the SPE drive item it names, as the caller, via
     /// Graph <c>/shares</c>. See <see cref="DriveItemOperations.ResolveSharedItemAsUserAsync"/>.
     /// </summary>

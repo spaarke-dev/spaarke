@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>FR-40: the search index follows the content type, never the user (#2502, DI-012)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up; runs before W3)</phase>
+    <gate>019 complete; 039 complete; owner approval of this task (requested 2026-11-02)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api across RAG indexing, the create pipeline and Repair; tags include bff-api; removes DTO fields and deletes tests (deletion, TEST-MODIFYING override).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting change over ~20 existing files and 8 hot-path producers (RagEndpoints, Compose, Communication, ExternalAccess) next to the per-caller retrieval trim (auth-adjacent): task-create 3.5.5b "3+ consumers, high blast radius". The design (§14) is complete, so effort stays high. Design §14.11 proposed sonnet/high; raised for the blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordCreationService.cs and RecordCreationService.Repair.cs, which 042b also edits, and hot-path BFF files; W2 core files are sequential.</parallel-reason>
+    <deps>019, 039</deps>
+    <tags>bff-api, ai, azure-search, testing, deletion</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement design.md §14 (#2502) exactly: the server picks the search index from the content type. Remove the index field from the indexing request types, delete `SearchIndexNameResolver.ResolveAsync` and every caller, make step 8 of `RecordCreationService` a recorded no-op, stop Repair filling the index, keep task 039's client drop, and make every stamp equal the index written. Do the read-only dev count first; leave old chunks where they are.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, Azure AI Search indexing pipeline and the Dataverse write path. Follow ADRs strictly; never move a retrieval trim call.</role>
+  <goal>No request field, record column or business-unit column decides where an SPE document is indexed; every index-file, SendToIndex, RAG job, bulk job and Office worker write goes to `KnowledgeIndexName` and stamps that name; no server path writes `sprk_ai_search_index` / `sprk_searchindexname` on the six search-indexed tables; search-time selection and the retrieval trim are unchanged.</goal>
+
+  <context>
+    <background>Binding design: design.md §14 (moved from the addendum 2026-11-02), including §14.12 Reviews (UAC-r2 OK with conditions; provisioning: no dependency). Spec: FR-40 (new), FR-38/FR-10/FR-14/FR-25 amendment notes, NFR-07 note. Owner: notes/decisions.md 2026-11-01 "#2502" and 2026-11-02 items 1 and "#2502 addendum reviewed". DI-012 in notes/defer-issues.md. Line numbers in §14 are at 4fdb0a5c99; re-grep before editing (master's a50ada7330, #2514, moved one drop log into the service).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs (FileIndexRequest, ContentIndexRequest: remove SearchIndexName)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs (payload field; resolver calls; INDEX_NOT_ALLOWED retry; stamp)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/IPostUploadIndexingEnqueuer.cs and PostUploadIndexingEnqueuer.cs (remove the field; stamp = ISearchIndexNameResolver.GetDefaultIndexName())</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs (searchIndexName: null to RagService; drop the IndexTextInternalAsync parameter)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs (IndexFile; SendToIndex resolver call removed; both stamp GetDefaultIndexName())</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/BulkRagIndexingJobHandler.cs; src/server/api/Sprk.Bff.Api/Workers/Office/IndexingWorkerHostedService.cs (resolver calls and retry branches removed)</file>
+      <file role="modify">The 8 producers in design §14.4 row 6 (delete the `SearchIndexName: null` argument line only)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/SearchIndexNameResolver.cs (delete ResolveAsync and its FetchXml helpers; keep GetDefaultIndexName)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (step 8 → recorded NoOp; delete SearchIndexFill, BusinessUnitSearchDefaultsAsync, the step-8 warning; keep TeamBusinessUnitAsync)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs (delete RepairSearchIndexAsync and its three reason codes; keep the mapping guard at ~:342-343)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (receive LookupColumn/LegacyTextColumn; fix "only writer" comments; drop-log level ~:773, ~:780)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs (~:151-167: constants move)</file>
+      <file role="modify">scripts/backfill-multi-container-multi-index/Audit-MultiContainerMultiIndex-Drift.ps1 (retire or update; provisioning condition)</file>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (I-5 row, ~:135); docs/architecture/AI-SEARCH-INDEX-CATALOG.md (§4 routing paragraph = design §14.2)</file>
+      <file role="modify">Tests listed in design §14.7 (must-fire rewrites, deletions, compile-only updates), at their existing paths</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Ai/RagSendToIndexIndexNameContractTests.cs (contract harness for index-file / SendToIndex)</file>
+      <file role="canonical-reference">tests/integration/data-mutation/RecordOwnership/SearchIndexDefaultTests.cs (task 039's create world for must-fire 5)</file>
+      <file role="canonical-reference">tests/integration/contract/EndToEnd/SearchIndexNameEndpointContractTests.cs (search-route selection; must stay green unchanged)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="019" status="required">W2 deploy and review set must not be disturbed (design §14.11).</dependency>
+      <dependency task="039" status="complete">The client drop this task keeps.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §6 gotcha 2026-10-20">Brief line 1: `git switch -c task/fm-041 &lt;tip of work/field-mapping-server-write-path-r1&gt;` (385e060e67 when written; use the current tip), then confirm this POML exists on the branch.</constraint>
+    <constraint source="design §14.4 scope">Scope: rows 1-11 of §14.4 and the script and docs named here. No client file (W3 owns them), no schema change, no Dataverse write, no change to session-files, discovery or invoice routing, no change to search-time selection.</constraint>
+    <constraint source="owner 2026-11-02">Old chunks in a non-default index are LEFT. No delete, re-index or clean-up of chunks or of record/BU column values.</constraint>
+    <constraint source="UAC-r2 2026-11-02">Scope: retrieval trims. No call to IRetrievalAccessTrim / TrimToReadableDocumentsAsync moves, is removed or changes arguments (RagEndpoints, SemanticSearchEndpoints, ReadableRagSearch, AnalysisRagProcessor, DocumentSearchHandler, PlaybookChatContextProvider, Communication, ExternalAccess).</constraint>
+    <constraint source="provisioning 2026-11-02">The `sprk_aisearchindex` catalog and the meaning of `sprk_isdefault` (on `spaarke-files-index`) are unchanged; no code starts reading or writing `sprk_isdefault`.</constraint>
+    <constraint source="ADR-008 path A (spec ADR Tensions)">CallerWriteAuthorization and the index-file / send-to-index endpoint filters are unchanged. Cite path A in the PR.</constraint>
+    <constraint source="ADR-010 / ADR-013">No new registration, interface or service. PostUploadIndexingEnqueuer swaps IOptions&lt;AnalysisOptions&gt; for the already-registered ISearchIndexNameResolver. RecordCreation stops referencing SearchIndexNameResolver.</constraint>
+    <constraint source="ADR-038">KEEP paths only. New tests go in tests/integration/contract/Api/Ai/**, tests/integration/data-mutation/RecordOwnership/**, tests/unit/domain/Ai/** or tests/Spaarke.ArchTests/**. No new file under tests/unit/Sprk.Bff.Api.Tests/** (existing files there are only edited or have tests deleted per §14.7). No Mock&lt;HttpMessageHandler&gt;. Delete only the tests §14.7 lists as "subject gone", with the A3 evidence in the PR.</constraint>
+    <constraint source="CLAUDE.md §10">Placement and publish delta: see notes. Run /conflict-check on the hot-path files before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/field-mapping-server-write-path-r1/design.md (§14, incl. §14.12; §13.3b on the trim)</file>
+      <file>projects/field-mapping-server-write-path-r1/spec.md (FR-40, FR-38 amendment)</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Branch (constraint 1); declare FULL rigor; rebase on master; /conflict-check for the hot-path files in §14.4 rows 3 and 6.</step>
+    <step order="1">Read-only dev count (Dataverse MCP read_query only; no write): (a) sprk_document rows with sprk_searchindexname set and not 'spaarke-files-index', with a count per name; (b) for each of the six tables, rows whose _sprk_ai_search_index_value is set and is not the spaarke-files-index catalog row; (c) business units with an index. Record queries, timestamp and results in notes/task-041-notes.md. Nothing is cleaned.</step>
+    <step order="2">Write must-fire 1-7 (§14.7) and the search-route allow-list test (AC10) failing first.</step>
+    <step order="3">Make §14.4 rows 1-10 and the test updates/deletions in §14.7.</step>
+    <step order="4">Drop-log level, script, docs (§14.4 row 11), and the §15.5 bullet (AC13, AC14, AC16).</step>
+    <step order="5">Build; run the filtered suites named in AC12 and ArchTests (never the unfiltered Sprk.Bff.Api.Tests); publish delta; CVE check.</step>
+    <step order="6">Send the diff to UAC-r2 for the scoped check (AC17); fix every finding; record the verdict line.</step>
+    <step order="7">After merge: close #2206, #2413 and #2502 with the PR link, and DI-012 in notes/defer-issues.md (AC15). Update TASK-INDEX to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the step-1 count shows any sprk_document stamp naming an index other than spaarke-files-index and spaarke-discovery-index, record it and continue (owner: leave them); if it shows a business unit whose index is NOT spaarke-files-index, STOP and escalate (the "no behaviour change" premise of §14.6 is false).</trigger>
+    <trigger>If removing a resolver call would move, remove or reorder a retrieval trim call, STOP and escalate to UAC-r2.</trigger>
+    <trigger>If a DTO named in §14.4 row 1 sets JsonUnmappedMemberHandling.Disallow (or an equivalent strict binder), STOP and escalate: old clients would get 400.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">The src files in relevant-files</output>
+    <output type="test">Updated and new tests at the paths in §14.7 (KEEP paths for new tests)</output>
+    <output type="docs">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md; docs/architecture/AI-SEARCH-INDEX-CATALOG.md</output>
+    <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-041-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (step 1): the read-only dev count (a)-(c) is recorded in notes/task-041-notes.md with its queries and timestamp, before any src change is committed; no Dataverse write was made and no chunk was cleaned.</criterion>
+    <criterion testable="true">AC2: index-file with a `searchIndexName` that is allow-listed (e.g. "spaarke-invoices-index"), not allow-listed, or absent writes to KnowledgeIndexName (RagService receives no index) and stamps the same name; a non-allow-listed body value returns 200, never 400 INDEX_NOT_ALLOWED.</criterion>
+    <criterion testable="true">AC3: SendToIndex, RagIndexingJobHandler, BulkRagIndexingJobHandler and IndexingWorkerHostedService, for a document whose lookup, text column, parent or BU names another index, issue no Dataverse read of sprk_ai_search_index / sprk_searchindexname on any record or BU, and write and stamp KnowledgeIndexName. Their INDEX_NOT_ALLOWED retry branches are gone.</criterion>
+    <criterion testable="true">AC4: FileIndexRequest, ContentIndexRequest, RagIndexingJobPayload and PostUploadIndexingRequest have no index field; `grep -n "ResolveAsync" src/server/api/Sprk.Bff.Api/Services/Ai/SearchIndexNameResolver.cs` returns nothing; GetDefaultIndexName() and its two tests remain.</criterion>
+    <criterion testable="true">AC5: a unified create on each of the six search-indexed tables, with an owning BU that has an index, sends neither column; the step-8 trace is NoOp; no businessunit retrieve is issued for the index. Step numbers 9-12 are unchanged.</criterion>
+    <criterion testable="true">AC6: Repair writes neither column on any row; RepairSearchIndexAsync and its three reason codes are deleted; Repair's mapping still cannot write the columns.</criterion>
+    <criterion testable="true">AC7: the OBO enqueuer stamps KnowledgeIndexName when AnalysisOptions.SharedIndexName differs from it.</criterion>
+    <criterion testable="true">AC8 (negative): no create, update or Repair body contains either column as null; existing values are unchanged on read-back in the seam tests.</criterion>
+    <criterion testable="true">AC9 (negative): the 039 drop tests, SearchIndexGenericUpdatePathTests, SecureChildOwnershipAiToolTests.SearchIndex*, Spaarke.ArchTests/SearchIndexDropGuardTests, the index-file authorization contract tests (tenant 403, row 409, knowledge-source 400), SearchIndexNameEndpointContractTests, RagEndpointsTests search-selection tests, RelocatedFileIndexingTests and the session-files / discovery / invoice routing tests pass with no edit to their assertions.</criterion>
+    <criterion testable="true">AC10 (negative, UAC-r2): a test at a KEEP path shows a request-named index outside the allow-list is refused 400 INDEX_NOT_ALLOWED on the search routes, through the real allow-list check (not a mocked throw). Use an existing test if one does this (cite it in the notes); else add one under tests/integration/contract/Api/Ai/.</criterion>
+    <criterion testable="true">AC11 (negative): no retrieval trim call moved, was removed or changed its arguments (diff of the files in the UAC-r2 constraint shows only routing lines); `sprk_isdefault` is not newly read or written anywhere in src.</criterion>
+    <criterion testable="true">AC12: BFF build 0 errors; filtered suites (RecordCreation, SearchIndex*, RecordRepairMode*, RagIndexingJobHandler*, BulkRagIndexingJobHandler*, FileIndexingService*, PostUploadIndexingEnqueuer*, RagSendToIndex*, RelocatedFileIndexing*, VersionSaveAiRefresh*, Office quick-create contract, CrossSurfaceOwner, SecureChildOwnership*) and ArchTests pass; publish-size delta against a fresh master build (both sizes, file counts, zip tool) and the CVE result are recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">AC13 (UAC-r2): every `client_search_index_dropped` log site in src (grep after rebase; RecordTableRules.cs ~:773 and ~:780, plus any in RecordCreationService from #2514) logs at Information, ids only plus the name for the name column; a test or the notes show the level. Task 035 returns it to Warning.</criterion>
+    <criterion testable="true">AC14 (provisioning): Audit-MultiContainerMultiIndex-Drift.ps1 no longer reads businessunits.sprk_searchindexname or reports index drift (the index half is removed and the container half kept), or the script is retired with the reason in the notes; the runbook reference is listed for task 062. The two Backfill-MultiContainerMultiIndex-*.ps1 scripts, which also write sprk_searchindexname, are inventoried in the notes and filed per /project-defer-issue-tracking if they can write a value that differs from the written index; they are not changed here.</criterion>
+    <criterion testable="true">AC15 (UAC-r2): #2206 and #2413 are closed on merge with a link to the PR, only after AC1's count is recorded; #2502 and DI-012 are closed the same way.</criterion>
+    <criterion testable="true">AC16 (UAC-r2, §15.5): if 042b merged first, the §15.5 step-8 bullet in design.md and 042b's "event index empty plus search_index_unset_for_owner_bu" assertion are updated here to "step 8 is a NoOp; no index column"; if 042b has not merged, the notes record that 042b carries it.</criterion>
+    <criterion testable="true">AC17 (UAC-r2): before merge UAC-r2 does a scoped check of the diff (only routing removed; no trim call moved in RagEndpoints, Communication, ExternalAccess); its verdict line is in the PR and every finding is fixed or filed.</criterion>
+    <criterion testable="true">AC18: I-5 in DATAVERSE-WRITE-PATH-ARCHITECTURE.md reads "no server writer; client values dropped; the stamp is the pipeline's", and AI-SEARCH-INDEX-CATALOG.md §4 carries the routing rule of design §14.2, in the same PR.</criterion>
+    <criterion testable="true">AC19: these W3/W5 lines were rewritten at task creation (2026-11-02) from "the owning BU's search index present at create" to "no index column written by the server; the document stamp names the files index after indexing": 029 goal (:23), step 2 (:72), step 5 (:75), escalation (:82), ui-test (:89), relevant-file (:31); 030 goal (:22), step 1 (:78), criterion (:110); 036 goal (:23), step 3 (:74), criterion (:103); 052 goal (:22); 053 prompt (:21), step 4 (:68), criterion (:88). 028 gained createXrmEmailComposeHandlers.ts:281, :308-310 in scope. If 041's final behaviour differs from that reading, those lines are corrected in this PR.</criterion>
+    <criterion testable="true">Test scope: cover must-fire 1-7 and must-not-fire 1-6 of design §14.7 plus AC10. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Placement Justification (CLAUDE.md §10, bff-extensions.md): in the BFF, where the indexing pipeline and RecordCreationService already live; modifications and deletions only; no endpoint, service, background work or package; expected publish delta ≈ 0 (deletions), measured against a fresh master build.
+§11: no new surface. No endpoint, service, interface, registration, column or package; LookupColumn/LegacyTextColumn move from SearchIndexNameResolver to RecordTableRules (a relocation). The three questions do not apply (design §14.8).
+ADR-008 path A: the payload checks stay in CallerWriteAuthorization; the caller controls one input fewer.
+Release note: index-file ignores searchIndexName; a non-allow-listed value no longer gets 400. One adversarial pass plus UAC-r2's scoped check.
+Added 2026-11-02 by the scope path (design §14 → UAC-r2 and provisioning reviews → spec FR-40 → this task → TASK-INDEX → owner approval). Awaiting owner approval.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

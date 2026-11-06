@@ -107,3 +107,14 @@ CLAUDE.md fact 1 used to read "on the MDA, Dataverse enforces natively and we wr
   - Task 173 (PR #1458): the column is a DISPLAY copy (most restrictive across the parents), written by the BFF and locked on the form while a parent exists. Q6's ACCESS rule stands: no access decision reads a child's copy. `scripts/Retire-CommunicationAccessPermission.ps1` is deleted (running it would destroy the column).
 - **"Parent unsecured → its secured work assignments and projects STAY secure; no unsecure cascade"** (round 6 item 4, 2026-10-02; task 158 constraint).
   - REPLACED 2026-10-08 by round 84: a child's access always follows its parent, both ways, and is locked while it has a parent.
+- **D-113, G5 AppendTo on business-owned lookup targets (systemuser, team, businessunit), as given on #1355 comment 6089838200 §6.** The original rule applied every grant's depth at the caller's own BU.
+  - AMENDED 2026-10-16, after UAC's review of ontology PR #2012 (task 126): **each grant applies at its own anchor BU**, as Dataverse evaluates it. Roles can come from any BU, and an owner team's role is anchored at the team's BU.
+  - The amended rule:
+    - Global: any BU.
+    - Deep: the anchor BU or a BU under it (`UnderOrEqual`, asked as the caller).
+    - Local: the anchor BU only.
+    - Basic: only the caller's own systemuser row. Team and businessunit at Basic are denied.
+    - A missing anchor is denied.
+    - The row must always be readable as the caller, and every refusal returns the same uniform 404.
+  - Why: the literal rule over-grants. It would apply a foreign team's Local or Deep grant at the caller's own BU. PR #2012's own-BU-only narrowing gives a false 404 to matrix-BU and cross-BU owner-team users.
+  - Still open: whether `RetrieveUserSetOfPrivilegesByNames` returns team-inherited grants. Ontology's live leg will settle it.

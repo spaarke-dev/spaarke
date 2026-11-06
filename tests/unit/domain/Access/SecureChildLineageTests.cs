@@ -61,7 +61,7 @@ public class SecureChildLineageTests
     }
 
     /// <summary>
-    /// Task 182 (contract C4): the Decision Record is filed under its subject like a Signal. Its row carries the same eight
+    /// Task 182 (contract C4): the Decision Record is filed under its subject like a Signal. Its row carries the same nine (eight before ebilling-r1 task 026)
     /// subject lookups as the Signal row (never the service request's) and keeps the three typed core lookups: they are
     /// the decision context and a lineage parent, kept for good (ontology task 144 K1 / 145), not retired after a backfill.
     /// </summary>
@@ -73,7 +73,9 @@ public class SecureChildLineageTests
             .Where(l => l.Key.StartsWith("sprk_regarding", StringComparison.Ordinal))
             .ToDictionary(l => l.Key, l => l.Value);
 
-        signalSubjects.Should().HaveCount(8);
+        // Nine since ebilling-r1 task 026 (FR-15, D-94): + sprk_regardinginvoiceline -> sprk_billingevent.
+        signalSubjects.Should().HaveCount(9);
+        signalSubjects.Should().Contain("sprk_regardinginvoiceline", "sprk_billingevent");
         decisionRecord.Where(l => l.Key.StartsWith("sprk_regarding", StringComparison.Ordinal))
             .ToDictionary(l => l.Key, l => l.Value)
             .Should().BeEquivalentTo(signalSubjects);
@@ -83,8 +85,87 @@ public class SecureChildLineageTests
             ["sprk_project"] = "sprk_project",
             ["sprk_workassignment"] = "sprk_workassignment",
         });
-        decisionRecord.Should().HaveCount(11);
+        decisionRecord.Should().HaveCount(12);
         decisionRecord.Keys.Should().NotContain("sprk_regardingservicerequest");
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 013 (FR-05): every core-record lookup of the invoice family is a lineage parent — a dropped one
+    /// could leave out the root with the fewest sharees and widen the child's share intersection. The line's invoice stays
+    /// a parent too (an extra lookup only narrows), but the line's CORE record is its own lookup (D-75).
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_invoice", "sprk_matter", "sprk_project", "sprk_regardingworkassignment")]
+    [InlineData("sprk_billingevent", "sprk_matter", "sprk_project", "sprk_regardingworkassignment")]
+    [InlineData("sprk_invoicesubmission", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    [InlineData("sprk_invoiceapproval", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    [InlineData("sprk_externalidentifier", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    [InlineData("sprk_invoicecorrection", "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment")]
+    public void TheInvoiceFamily_FilesUnderEveryCoreRecordLookup(string table, string matter, string project, string workAssignment)
+    {
+        var lookups = SecureChildLineage.Children[table].Lookups;
+
+        lookups.Should().Contain(new Dictionary<string, string>
+        {
+            [matter] = "sprk_matter",
+            [project] = "sprk_project",
+            [workAssignment] = "sprk_workassignment",
+        });
+        InvoiceFamilyCoreRecordGuard.CoreRecordLookups[table].Select(l => l.Column)
+            .Should().BeSubsetOf(lookups.Keys, "the guard's core lookups and the lineage's parents are the same columns");
+    }
+
+    /// <summary>ebilling-r1 task 013: the family rows that name an invoice, a line or a document keep that parent too.</summary>
+    [Fact]
+    public void TheInvoiceFamily_KeepsItsInvoiceLineAndDocumentParents()
+    {
+        SecureChildLineage.Children["sprk_invoicesubmission"].Lookups.Should().Contain(new Dictionary<string, string>
+        {
+            ["sprk_invoice"] = "sprk_invoice",
+            ["sprk_document"] = "sprk_document",
+            ["sprk_reportdocument"] = "sprk_document",
+            ["sprk_resubmissionof"] = "sprk_invoicesubmission",
+        });
+        SecureChildLineage.Children["sprk_invoiceapproval"].Lookups.Should().Contain("sprk_invoice", "sprk_invoice");
+        SecureChildLineage.Children["sprk_invoiceapproval"].Lookups.Keys.Should().NotContain("sprk_decisionrecord",
+            "a Decision Record is stamped outside the access taxonomy; nothing but a Signal is filed under one");
+        SecureChildLineage.Children["sprk_externalidentifier"].Lookups.Should().Contain("sprk_regardinginvoice", "sprk_invoice");
+        SecureChildLineage.Children["sprk_invoicecorrection"].Lookups.Should().Contain(new Dictionary<string, string>
+        {
+            ["sprk_invoice"] = "sprk_invoice",
+            ["sprk_invoiceline"] = "sprk_billingevent",
+        });
+    }
+
+    /// <summary>
+    /// UAC-r2 ruling on RecordFamilyEdges (2026-10-28): a submission's core record is its ownership primary, even when the
+    /// invoice it produced (and its submitted PDF) is set. A row read with the lineage's columns, in their order, names the
+    /// core record first; the invoice is an output, not the submission's filing.
+    /// </summary>
+    [Fact]
+    public void TheInvoiceSubmission_OwnershipPrimaryIsItsCoreRecord_EvenWithItsInvoiceSet()
+    {
+        var lineage = SecureChildLineage.Children["sprk_invoicesubmission"].Lookups;
+        lineage.Keys.Take(4).Should().Equal(
+            "sprk_regardingmatter", "sprk_regardingproject", "sprk_regardingworkassignment", "sprk_document");
+
+        var matter = Guid.NewGuid();
+        var values = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference>
+        {
+            ["sprk_regardingmatter"] = new("sprk_matter", matter),
+            ["sprk_document"] = new("sprk_document", Guid.NewGuid()),
+            ["sprk_invoice"] = new("sprk_invoice", Guid.NewGuid()),
+            ["sprk_reportdocument"] = new("sprk_document", Guid.NewGuid()),
+        };
+        var row = new Microsoft.Xrm.Sdk.Entity("sprk_invoicesubmission", Guid.NewGuid());
+        foreach (var column in lineage.Keys.Where(values.ContainsKey))
+            row[column] = values[column]; // as a read projected by the lineage's columns returns them
+
+        var context = RecordOwnershipContext.ForParents(RecordOwnershipContext.ParentsOf(row));
+
+        context.TargetEntityLogicalName.Should().Be("sprk_matter");
+        context.TargetRecordId.Should().Be(matter);
+        context.Parents.Select(p => p.EntityLogicalName).Should().Contain("sprk_invoice", "the invoice stays a lineage parent");
     }
 
     /// <summary>
@@ -179,6 +260,86 @@ public class SecureChildLineageTests
         {
             ["sprk_policy"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_policy", rule),
         }).Parents.Should().Equal(new RecordOwnershipParent("sprk_policy", rule));
+    }
+
+    // ── The core record pair (a Signal's and Decision Record's core record) ─────────────────────────────────────────────
+
+    /// <summary>The pair is read by every lineage walk on the two tables that hold one, and is never an entry of the lookup map
+    /// (ownership order, filing edges and the form library read the map as an edge registry).</summary>
+    [Fact]
+    public void LineageColumns_AreTheLookupsPlusTheCorePair_OnlyOnSignalsAndDecisionRecords()
+    {
+        foreach (var table in SecureChildLineage.Children.Values)
+        {
+            table.Lookups.Keys.Should().NotContain(new[] { "sprk_corerecordtype", "sprk_corerecordid" }, $"{table.LogicalName}'s pair is not a lookup");
+            var expected = table.LogicalName is "sprk_signal" or "sprk_decisionrecord"
+                ? table.Lookups.Keys.Concat(["sprk_corerecordtype", "sprk_corerecordid"])
+                : table.Lookups.Keys;
+            table.LineageColumns.Should().Equal(expected, table.LogicalName);
+            table.HoldsCorePair.Should().Be(RecordOwnershipContext.CorePairTables.Contains(table.LogicalName));
+        }
+    }
+
+    [Theory]
+    [InlineData("sprk_project", true)]
+    [InlineData("sprk_matter", true)]
+    [InlineData("sprk_workassignment", true)]
+    [InlineData("SPRK_PROJECT", true)]
+    [InlineData("sprk_servicerequest", false)] // D-36: not a root, so the pair adds nothing
+    [InlineData(null, false)]                  // the catalog names no core table: the caller holds it before asking
+    public void CorePairParent_IsTheCoreRecord_OnlyWhenItIsARoot(string? coreTable, bool isParent)
+    {
+        var core = Guid.NewGuid();
+
+        var parent = SecureChildLineage.CorePairParent(coreTable, core);
+
+        if (isParent)
+            parent.Should().Be((coreTable!.ToLowerInvariant(), core));
+        else
+            parent.Should().BeNull();
+    }
+
+    [Fact]
+    public void CorePairMatches_NameTheFrontiersRootsByTheirStoredId_OnlyOnTablesWithAPair()
+    {
+        var (project, matter) = (Guid.NewGuid(), Guid.NewGuid());
+        (string, Guid)[] frontier = [("sprk_project", project), ("sprk_event", Guid.NewGuid()), ("sprk_matter", matter)];
+
+        SecureChildLineage.CorePairMatches("sprk_signal", frontier).Should().Equal(
+            new[] { "D", "B", "P", "N" }.Select(f => ("sprk_corerecordid", (object)project.ToString(f).ToLowerInvariant()))
+                .Concat(new[] { "D", "B", "P", "N" }.Select(f => ("sprk_corerecordid", (object)matter.ToString(f).ToLowerInvariant()))),
+            "every form Guid.TryParse reads that a writer could store: D, {B}, (P) and N");
+        SecureChildLineage.CorePairMatches("SPRK_DECISIONRECORD", frontier).Should().HaveCount(8);
+        SecureChildLineage.CorePairMatches("sprk_event", frontier).Should().BeEmpty("an event has no pair");
+        SecureChildLineage.CorePairMatches("sprk_signal", [("sprk_event", Guid.NewGuid())]).Should().BeEmpty("a child is never a core record");
+    }
+
+    [Fact]
+    public void CorePairMatches_EveryStoredForm_ParsesBackToTheRoot_AsTheUpwardReadReadsIt()
+    {
+        var project = Guid.NewGuid();
+
+        foreach (var (_, value) in SecureChildLineage.CorePairMatches("sprk_signal", [("sprk_project", project)]))
+        {
+            var row = new Microsoft.Xrm.Sdk.Entity("sprk_signal", Guid.NewGuid())
+            {
+                ["sprk_corerecordtype"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", Guid.NewGuid()),
+                ["sprk_corerecordid"] = (string)value,
+            };
+            RecordOwnershipContext.CorePairOf(row).CoreId.Should().Be(project, $"{value} is a form the upward read accepts");
+        }
+    }
+
+    [Fact]
+    public void CorePairMatches_AServiceRequestRoot_IsMatchedOnlyForTheOrdinaryPass()
+    {
+        var request = Guid.NewGuid();
+        (string, Guid)[] frontier = [("sprk_servicerequest", request)];
+
+        SecureChildLineage.CorePairMatches("sprk_signal", frontier).Should().BeEmpty("D-36: a service request is no secure root");
+        SecureChildLineage.CorePairMatches("sprk_signal", frontier, alsoServiceRequests: true).Select(m => m.Value)
+            .Should().Equal(new[] { "D", "B", "P", "N" }.Select(f => (object)request.ToString(f).ToLowerInvariant()));
+        SecureChildLineage.CorePairMatches("sprk_event", frontier, alsoServiceRequests: true).Should().BeEmpty("an event has no pair");
     }
 
     // ── What a child receives (Dataverse AccessRights values as literals) ────────────────────────────────────────────

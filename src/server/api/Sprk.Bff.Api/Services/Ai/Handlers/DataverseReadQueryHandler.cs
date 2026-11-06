@@ -41,6 +41,10 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// their source document or an analysis's output file is (or cannot be decided), through the same seam's hide-only overload
 /// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>); their source links are read as the user
 /// (<see cref="ExternalCallerCommunicationGuard.ReadSourceDocumentIdsAsync"/>).
+/// ebilling-r1 task 098 (procedure-and-file-model 9.1, (a')): a SECOND hide-only app-only seam,
+/// <see cref="AppOnlyInvoiceFamilyHiding"/>, hides an external caller's invoice-family row (an invoice, or a row derived from
+/// one) whose invoice the (a') predicate hides, decided after the read by row id. It can only HIDE a row the user's own read
+/// returned. (Raised with uac-r2 as an amendment to the round-111 exception.)
 /// </para>
 /// <para>
 /// <b>Grounding (ADR-039)</b>: every returned row carries the table's primary id (added to
@@ -71,6 +75,8 @@ public sealed class DataverseReadQueryHandler : IToolHandler
     private readonly ISystemUserIdentityResolver _identityResolver;
     /// <summary>Task 188: THE document narrowing, app-only by id (see the remarks: the one amended dependency).</summary>
     private readonly AppOnlyDocumentNarrowing _narrowDocuments;
+    /// <summary>Task 098: the (a') invoice-family hiding, app-only by id, hide-only (see the remarks).</summary>
+    private readonly AppOnlyInvoiceFamilyHiding _hideInvoiceFamily;
 
     public DataverseReadQueryHandler(
         IDataverseUserClient dataverse,
@@ -78,7 +84,8 @@ public sealed class DataverseReadQueryHandler : IToolHandler
         IHttpContextAccessor httpContextAccessor,
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
-        AppOnlyDocumentNarrowing narrowDocuments)
+        AppOnlyDocumentNarrowing narrowDocuments,
+        AppOnlyInvoiceFamilyHiding hideInvoiceFamily)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -86,6 +93,7 @@ public sealed class DataverseReadQueryHandler : IToolHandler
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
         _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
+        _hideInvoiceFamily = hideInvoiceFamily ?? throw new ArgumentNullException(nameof(hideInvoiceFamily));
     }
 
     /// <inheritdoc />
@@ -180,9 +188,11 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             var guardCommunications = false;
             var guardDocuments = false;
             var guardDerived = false;
+            var guardInvoices = false;
             if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(translation.EntityLogicalName) ||
                  ExternalCallerCommunicationGuard.IsDocumentTable(translation.EntityLogicalName) ||
-                 ExternalCallerCommunicationGuard.IsDocumentDerivedTable(translation.EntityLogicalName)) &&
+                 ExternalCallerCommunicationGuard.IsDocumentDerivedTable(translation.EntityLogicalName) ||
+                 ExternalInvoiceVisibility.IsInvoiceFamilyTable(translation.EntityLogicalName)) &&
                 await ExternalCallerCommunicationGuard.IsExternalCallerAsync(
                     _httpContextAccessor, _callerResolver, _identityResolver, cancellationToken).ConfigureAwait(false))
             {
@@ -194,6 +204,11 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 {
                     // Task 188 round 3 slice C: decided after the read by row id; nothing is injected into the query.
                     guardDerived = true;
+                }
+                else if (ExternalInvoiceVisibility.IsInvoiceFamilyTable(translation.EntityLogicalName))
+                {
+                    // ebilling-r1 task 098 ((a')): decided after the read by row id; nothing is injected into the query.
+                    guardInvoices = true;
                 }
                 else if (!ExternalCallerCommunicationGuard.IsCommunicationTable(translation.EntityLogicalName))
                 {
@@ -347,9 +362,27 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     .ConfigureAwait(false);
             }
 
+            // ebilling-r1 task 098 ((a')): an invoice-family row whose invoice the predicate hides (or cannot decide) is
+            // hidden. One hide-only app-only call for the page (its own batched reads); a fault throws into the error result
+            // below (no rows). A row without a readable id is hidden.
+            IReadOnlySet<Guid>? hiddenInvoiceRows = null;
+            if (guardInvoices &&
+                response.Body is { } invoiceBody && invoiceBody.TryGetProperty("value", out var invoiceValue) &&
+                invoiceValue.ValueKind == JsonValueKind.Array)
+            {
+                var rowIds = invoiceValue.EnumerateArray()
+                    .Select(record => RecordIdOf(record, primaryIdAttribute))
+                    .Where(id => id != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                hiddenInvoiceRows = await _hideInvoiceFamily(translation.EntityLogicalName!, rowIds, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
             var rows = new List<Dictionary<string, object?>>();
             var citations = new List<ToolResultCitation>();
             var hiddenRows = 0;
+            var hiddenInvoiceFamily = 0;
             var hiddenDocuments = new List<Guid>();
             var hiddenDerivedSources = new List<Guid>();
             // Task 188 round 4a (F1-5): the row cap is measured on the RAW page Dataverse returned, before any row is
@@ -373,6 +406,14 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                         (narrowing is null || !narrowing.IsVisible(documentId)))
                     {
                         hiddenDocuments.Add(documentId);
+                        continue;
+                    }
+
+                    if (guardInvoices &&
+                        RecordIdOf(record, primaryIdAttribute) is var familyId &&
+                        (familyId == Guid.Empty || hiddenInvoiceRows is null || hiddenInvoiceRows.Contains(familyId)))
+                    {
+                        hiddenInvoiceFamily++;
                         continue;
                     }
 
@@ -443,6 +484,13 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     translation.EntityLogicalName,
                     narrowing?.HiddenSummary(hiddenDocuments) ?? DocumentNarrowingResult.CodeOf(DocumentNarrowingReason.ReadFailed),
                     context.DecisionId);
+            }
+            if (hiddenInvoiceFamily > 0)
+            {
+                // ADR-015: entity + a reason code with a count only — never query text, ids or row content.
+                _logger.LogInformation(
+                    "[dataverse.read_query] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    translation.EntityLogicalName, $"invoice_hidden={hiddenInvoiceFamily}", context.DecisionId);
             }
             if (hiddenDerivedSources.Count > 0)
             {

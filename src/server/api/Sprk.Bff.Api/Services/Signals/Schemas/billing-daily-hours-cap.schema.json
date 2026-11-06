@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/billing/billing-daily-hours-cap.schema.json",
+  "title": "DailyHoursCap billing rule body",
+  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = DailyHoursCap (ebilling-r1 task 070; spec FR-24, design.md 6.1). 4. Hours per timekeeper per day are at most a cap (within the invoice in R1). Parameters only: no rates, timekeepers or code descriptions, and no consequence (that is the sprk_consequence column). additionalProperties=false: any other member is refused, not ignored. 'messageTemplate' (anywhere) and 'then' are refused by RuleBodySchemaValidator before this schema runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "maxHoursPerDay"
+  ],
+  "properties": {
+    "type": {
+      "const": "DailyHoursCap"
+    },
+    "maxHoursPerDay": {
+      "description": "The most hours one timekeeper may bill on one day. More than 0, at most 24.",
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 24
+    }
+  }
+}

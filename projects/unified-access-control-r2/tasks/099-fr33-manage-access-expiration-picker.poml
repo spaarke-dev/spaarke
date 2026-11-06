@@ -3,16 +3,17 @@
   <metadata>
     <title>FR-33 — "Expiration" date picker on the Manage Access toolbar, applying to every share on the record</title>
     <phase>FR-33 External grant expiry</phase>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in the shared UI library; tags pcf/react; controls the lifetime of external access.</rigor-reason>
-    <model-tier>sonnet</model-tier>
+    <model-tier>opus</model-tier>
     <model-tier-reason>Well-specified UI change against an owner screenshot; the one real judgment point (M8 sequencing with task 065) is an escalation trigger.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Edits AccessGrantModal.tsx, which task 065 also edits. Sequence with 065; never run both at once.</parallel-reason>
     <deps>097, 098, 065</deps>
+    <issues>#1010 (amendment 4)</issues>
     <tags>pcf, react, fluent-ui, frontend, testing</tags>
     <estimated-effort>3-5 hours</estimated-effort>
     <origin>Owner 2026-09-10, with screenshot: "add to the toolbar a field 'Expiration' and a date picker so the write user can set it (and it applies to all sharing)"</origin>
@@ -29,6 +30,10 @@
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</file>
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/</file>
       <file role="canonical-reference">projects/unified-access-control-r2/tasks/065-access-modal-user-picker.poml</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/index.ts</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ (new record-grants route; amendment 4)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RecordAccessGateEndpoint.cs</file>
     </relevant-files>
   </context>
 
@@ -81,7 +86,8 @@
 
   <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10-§12. Sequenced against task 065 (shared file + M8).
 
-ESCALATION FIRED 2026-09-15 (session 12) — no code written. M8 has not landed: AccessGrantModal.tsx:334 is still `return (await res.json()) as T` with no res.ok check, and the doc comment at :325 wrongly says it "throws (message-bearing) on failure". OWNER DECISION: option (a), wait for 065. This task now depends on 065, which lands M8 (and M2 on top of it); 065 is itself blocked behind 063. Do not take M8 here. Also correct when resuming: the justification's "every share would be rejected" is stale. Since task 097 the server defaults an absent expiry to today + 90, so shares work without the picker. What is missing is the user's ability to see and set the date.</notes>
+ESCALATION FIRED 2026-09-15 (session 12) — no code written. M8 has not landed: AccessGrantModal.tsx:334 is still `return (await res.json()) as T` with no res.ok check, and the doc comment at :325 wrongly says it "throws (message-bearing) on failure". OWNER DECISION: option (a), wait for 065. This task now depends on 065, which lands M8 (and M2 on top of it); 065 is itself blocked behind 063. Do not take M8 here. Also correct when resuming: the justification's "every share would be rejected" is stale. Since task 097 the server defaults an absent expiry to today + 90, so shares work without the picker. What is missing is the user's ability to see and set the date.
+2026-10-16 progress: 099a was delivered as PR #2035 (head 882eae925). The route is GET /api/v1/external-access/record-grants. The modal is option (A), a main-session decision: 099a owns the Current Access error state (ProblemDetails detail verbatim), the 'Expired {date}' badge, the bare-date formatGrantDate fix and the optional types.ts expiresDate/isExpired fields. 099c builds the picker on top of them. TrackingFieldTrio is now 1.0.48. The live dev check runs after the next R3 deploy (steps are in the PR body). rework: none task 099.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
   <amendments date="2026-10-05" source="owner round 59, 2026-10-05, BINDING (notes/session27-owner-decisions-and-research.md, 'Owner round 59'; evidence: notes/batch5-scope-review-2026-10-05.md, row 099)">
@@ -89,5 +95,68 @@ ESCALATION FIRED 2026-09-15 (session 12) — no code written. M8 has not landed:
     <amendment n="1" title="Scope">A user with Write can see and change the expiry date that applies to a record's external shares (the toolbar Expiration picker over /set-record-share-expiry, which has no client caller today). Grants lapse at 90 days with no in-product way to extend: a re-grant keeps the old date (GrantExternalAccessEndpoint.cs:371-387).</amendment>
     <amendment n="2" title="Defects added to scope">fetchExistingGrants (TrackingFieldTrio/index.ts:903-950) selects sprk_expiresdate and marks expired rows as expired (they show as live today). A failed read shows an error state, not 'No active grants'. The picker changes the date only, never the level (ISS-023: the renewal route writes only sprk_expiresdate).</amendment>
     <amendment n="3" title="Dependencies">066 is removed from deps: the dependency was not real, and 066 is merged into 067. 065's M8 blocker is cleared. In practice this runs after 067 (same PCF, one deploy).</amendment>
+  </amendments>
+  <amendments date="2026-10-16" source="owner decision 2026-10-16 (#1010: 'yes, verify and fix it'); verification in this amendment">
+    <amendment n="4" title="#1010(a) folded in: Current Access reads the grants through the BFF, behind the delegation gate">
+**Verified 2026-10-16** (code on master plus live dev data):
+- Defect (b), the swallowed read at `TrackingFieldTrio/index.ts:1149` (`catch { return []; }`), is still present. Amendment 2 already scopes its fix.
+- Defect (a) is live. 61 of the 62 active `sprk_externalrecordaccess` rows on dev are owned in the ROOT business unit "Spaarke" (owned by mi-bff-api-dev or SDAP-BFF-SPE-API: the grant routes write app-only and never set `ownerid`). All 36 created since 2026-10-01 are root-owned.
+- Spaarke Basic User and Spaarke Core User read the table at **Deep** depth. So any user in Spaarke Dev 1, Test 1, Business Unit 1 or Demo reads zero rows, and Current Access shows "no grants" on a record that has grants.
+- Task 172 (team-owned owner column) does not touch this read.
+
+**Fix (in this task; one change to `fetchExistingGrants`, not two):**
+- **Server.** Add `GET /api/external-access/record-grants?recordType=&recordId=` on the external-access management group. It is authorized by the SAME `DelegationRuleFilter` target case as `/can-manage-access`: Write on the record plus Share on its table. That makes the reader exactly the dialog's audience, whatever BU owns the grant row.
+  - It returns the record's active grants, each with: contact or organization (id and display name), level, granted-by (user or contact), granted date, `sprk_expiresdate` and `isExpired`.
+  - It reads app-only through the existing grant-row read in `ExternalGrantLifecycle`; extend it, don't write a new reader.
+  - A read failure answers a typed 503 ProblemDetails, never an empty 200.
+  - Add a route-authorization ledger entry and positive/negative twins in the `RecordAccessGateTests` style.
+- **Client.** `fetchExistingGrants` calls the route through the control's existing BFF client (the one `/can-manage-access` uses) instead of `context.webAPI`.
+  - On non-200, show the amendment-2 error state.
+  - Remove the host-context read of `sprk_externalrecordaccess` from the control.
+- **Ownership: implement D-11, which is BINDING** (owner 2026-09-22; `notes/owner-decision-brief-2026-09-18.md` §D-11; project CLAUDE.md §2 "Ownership is team ownership"). Grant rows are created with no `ownerid`, which leaves them owned by the BFF identity in the root BU. They must instead be created team-owned, record-first:
+  1. the granted record's BU default Owner team (`isdefault = true` AND `teamtype = 0`);
+  2. failing that, the acting user's BU default team;
+  3. a secure record's grants go to the "Secure Record Owners" team.
+  - Reuse the existing ownership resolver the other app-written rows use (`IRecordOwnershipResolver` / `RecordOwnershipResolver`); do not write a second team lookup. Set it in the grant create payload on every grant route (/grant, /invite, /invite-and-grant, /contact-grants, org grants).
+  - Backfill the existing rows (61 on dev at 2026-10-16) by re-owning them through the same resolver: an idempotent script with -WhatIf, -Apply and -Verify, or an existing reconciler if one already covers re-owning ordinary rows. Report the counts before and after.
+  - Cost of not doing it: D-11 is violated on every grant, and task 101's estate-wide "External shares by expiration" views, which read through Dataverse depth, show nothing to users outside the root BU.
+- **Why D-11 alone does not fix the dialog, so the BFF read above is still required:**
+  - Grants on a secure record are owned in the Secure Record BU, which the Write-holders who manage them are not in.
+  - A user who holds Write on a record through a share, from another BU, can't read rows owned in the record's BU at Deep depth.
+  - The dialog's audience is the delegation rule, not BU depth. Do both changes, in one task.
+- **§11 answers.**
+  - Existing: `/can-manage-access` (the gate only, no data) and `/contact-grants` (by contact, not by record).
+  - Extension: the gate's `DelegationRuleFilter` case and `ExternalGrantLifecycle`'s row read are reused. The gate route stays a pure yes/no answer (its remarks, task 138/139).
+  - Cost of doing nothing: users in a child BU who have Manage Access see "no grants" on records that have them, may re-grant, or fail to revoke.
+- **Acceptance (added).**
+  - A seeded test user in a child BU with Spaarke Core User, holding Write and Share on a record with a root-owned grant, sees that grant in Current Access. Verify live on dev.
+  - Negative: a caller without Write gets 403 from the route.
+  - Negative: an injected read fault gives 503, and the dialog shows the error state, not "no grants".
+  - A new grant on a record in a child BU is owned by that BU's default Owner team. A new grant on a secure record is owned by Secure Record Owners. Neither is ever owned by the BFF identity. Assert the create payload per route, and check live on dev.
+  - After the backfill, -Verify shows 0 active grants owned by an application user.
+- **Rigor and model:** this now touches the BFF and an authorization path. Run it on **opus**, effort high. Two adversarial passes (auth). §10 publish-size delta. Owner sign-off before merge (CLAUDE.md §6). On completion, close #1010 with the merge SHA.
+    </amendment>
+    <amendment n="5" title="Delivered as three PRs under task id 099 (main session, 2026-10-16, after the executor's scoping read)">
+- **099a: the gated grant read.**
+  - Builds the `GET /api/external-access/record-grants` route: the `/can-manage-access` target case in `DelegationRuleFilter`, the `ExternalGrantLifecycle` row read, and a typed 503 on a read fault.
+  - Adds the ledger entry and the positive/negative test pairs.
+  - In `TrackingFieldTrio`, `fetchExistingGrants` calls the route through the control's existing BFF client and returns the expiry and `isExpired`. A failed read shows the error state, and the `context.webAPI` read of `sprk_externalrecordaccess` is removed.
+  - Includes the live check with a child-BU user.
+  - `RouteAuthorizationGuardTests.Ledger.cs` is shared with ontology PR #2019. Whichever merges second rebases.
+- **099b: D-11 team ownership on every grant create.**
+  - Set in ONE place, `GrantExternalAccessEndpoint.CreateGrantAsync`/`BuildGrantPayload`, through `IRecordOwnershipResolver`. It covers `/grant`, `ContactGrantEndpoints`, `InviteAndGrantExternalUserEndpoint` and `AssignedAccessMaterializer`.
+  - The materializer's Assigned-To grants are included deliberately: D-11 applies to every record, and there is no reason for an exception.
+  - Resolver faults follow the `ExternalIntakeEndpoints.cs:18-30` idiom: 503 on a read fault, refuse (500) when no team resolves, never an application-owned row.
+  - Starts after PR #2025 merges, since both touch the resolver and the grant endpoint.
+- **099b backfill decision (option c: extend what exists).** Extend `scripts/Backfill-RecordOwnership.ps1` with `sprk_externalrecordaccess`. That script is the existing D-11/I-6 backfill: it mirrors `RecordOwnershipResolver`'s record-first order, keeps a write-ahead reversal manifest, reads back each write, caps writes with -MaxWritesPerRun, and is idempotent.
+  - For a grant, the target is its root record lookup.
+  - A secure root goes to Secure Record Owners, as in `Migrate-SecureRecordsToNamedOwnerTeam.ps1`.
+  - No new BFF admin route (option a): a one-off data fix does not justify a permanent authenticated surface.
+  - No new standalone script (option b): this is the existing script's job.
+  - The script's existing safety model replaces the "-WhatIf/-Apply/-Verify" wording above. Dry-run is the default; -Verify is the dry-run reporting `ToWrite: 0` and application-owned = 0.
+  - The executor runs the dry-run only on dev. The main session runs -Apply after merge.
+- **099c: the Expiration picker** (amendments 1–2). Starts after 099a merges, because it reads 099a's expiry and both edit `TrackingFieldTrio/index.ts`. Covers the version bump in four places and `build:prod`.
+- Each PR: Opus, effort high, two adversarial passes for 099a and 099b (auth path), owner sign-off before merge. #1010 closes when 099a and 099b have both merged. #961 closes with 099c.
+    </amendment>
   </amendments>
 </task>

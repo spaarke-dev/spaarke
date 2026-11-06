@@ -924,6 +924,13 @@ public static class ContactBindingDecision
     /// <summary>The invite email matches a contact bound on the workforce plane.</summary>
     public const string InviteWorkforceBoundContact = "sdap.access.invite.workforce_bound_contact";
 
+    /// <summary>
+    /// The invite email matches a contact bound on the WorkforceHome plane: the person already signs in with their
+    /// organization's work account (task 047 self-registration). Refused (409, nothing created, written or sent), but it is
+    /// NOT an identity collision and nothing is flagged: staff use Grant access to give the contact access.
+    /// </summary>
+    public const string InviteWorkforceHomeContact = "sdap.access.invite.workforce_home_contact";
+
     /// <summary>The invite email matches a contact a systemuser links to.</summary>
     public const string InviteContactLinkedToInternalUser = "sdap.access.invite.contact_linked_to_internal_user";
 
@@ -1539,8 +1546,14 @@ public static class ContactBindingDecision
                 IdentityCollisionReason.BindingUnreadable, new[] { row.ContactId });
         }
 
-        // A WorkforceHome binding (task 047) is a workforce contact's home-directory sign-in: refused exactly like the
-        // Workforce plane, never "AlreadyProvisioned" as if it were a CIAM account.
+        // A WorkforceHome binding (task 047) is a workforce contact's healthy home-directory sign-in: refused (never
+        // "AlreadyProvisioned" as if it were a CIAM account), but it is not a collision, so nothing is flagged and staff are
+        // pointed to Grant access. Only the Spaarke-tenant Workforce plane below keeps the collision refusal and flag.
+        if (binding.Kind == BindingKind.Bound && binding.Plane == IdentityPlaneMarker.WorkforceHome)
+        {
+            return new InviteDecision(InviteContactAction.Refuse, row.ContactId, InviteWorkforceHomeContact);
+        }
+
         if (binding.Kind == BindingKind.Bound && IsWorkforcePlane(binding.Plane))
         {
             return new InviteDecision(InviteContactAction.Refuse, row.ContactId, InviteWorkforceBoundContact,
@@ -1746,8 +1759,10 @@ public static class ContactBindingDecision
                 => party.Plane == IdentityPlaneMarker.External
                     ? links.Count > 0
                     : links.Any(r => r.Oid != party.Oid),
+            // A WorkforceHome contact is no longer flagged by the invite (it is not a collision), so a flag an earlier build
+            // wrote on one clears here; only the Workforce plane, or an internal user's link, still holds it.
             IdentityCollisionReason.InviteMatchesWorkforceContact
-                => (binding.Kind == BindingKind.Bound && IsWorkforcePlane(binding.Plane))
+                => (binding.Kind == BindingKind.Bound && binding.Plane == IdentityPlaneMarker.Workforce)
                    || links.Count > 0,
             // Re-decided per systemuser by the job's first pass. Reaching here means that systemuser was not
             // re-decided this run (disabled, removed, or out of scope) — the collision has no live party.

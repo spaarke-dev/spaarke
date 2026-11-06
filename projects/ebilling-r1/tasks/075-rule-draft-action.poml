@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="075" project="ebilling-r1">
+  <metadata>
+    <title>Rule drafting Action BILLING-RULE-DRAFT@v1 and job</title>
+    <phase>3 Rules (WP3) — wave W3-2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Follows the established Action + Binding + IJobHandler wiring; output is advisory (Draft rows an admin reviews), never published by the job.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Pattern-following wiring (jps-action-create, CommunicationTriageAi facade, InvoiceExtractionJobHandler) with a clear schema contract from 070.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>041, 070</deps>
+    <tags>bff, ai, jps, jobs</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Author the Action BILLING-RULE-DRAFT@v1 (consumer type billing-rule-draft, Binding, Standard tier) that reads a guideline, rate or procedure document from the Procedure Library and proposes rules only from the billing catalogue, each with parameters, consequence and clause quote plus location, listing unsupported text as "not converted"; run it from an ADR-004 job that validates every proposal against 070's schemas and writes valid ones as Draft policy versions in the rule set — never publishing.</prompt>
+
+  <role>SPAARKE platform developer. Expert in JPS Action authoring, the IActionRunner spine, PublicContracts facades and IJobHandler.</role>
+
+  <goal>Action JSON plus Dataverse mirrors and Binding row seeded in dev; IInvoiceAi.DraftRulesAsync (from 041) wired to it; BillingRuleDraftJobHandler writes Draft proposals idempotently; a 202 trigger endpoint; an ADR-043 seam test; unknown-type or schema-invalid proposals dropped and listed.</goal>
+
+  <context>
+    <background>Spec FR-27 (acceptance: schema-validated against the rule-type schemas; unknown type dropped and listed; versioned by its @vN code), NFR-11, design.md 7.2. 041 adds IInvoiceAi.DraftRulesAsync as a thin IActionRunner wrapper (consumer key billing-rule-draft) with a Null peer. Wiring references: Services/Ai/PublicContracts/CommunicationTriageAi.cs:70-123 and ConsumerTypes.cs; Action mirrors infra/dataverse/actions/*.action.json deployed by scripts/Deploy-ActionMirrors.ps1 (Seed-JpsActions.ps1 is retired, scripts/README.md:171); output-schema mirrors infra/dataverse/outputschemas/; Binding rows infra/dataverse/sprk_playbookconsumer-rows.json seeded by scripts/dataverse/Seed-PlaybookConsumers.ps1; job pattern Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs:28-80 (JobTypeName constant, Poisoned outcomes); seam tests under tests/integration/seam/Ai/PublicContracts/. No task in the brief owns the "start drafting" trigger, so this task adds it.</background>
+    <relevant-files>
+      <file role="new">infra/dataverse/actions/billing-rule-draft.action.json</file>
+      <file role="new">infra/dataverse/outputschemas/billing-rule-draft.schema.json</file>
+      <file role="modify">infra/dataverse/sprk_playbookconsumer-rows.json (one Binding row)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvoiceAi.cs (only if 041's DraftRulesAsync needs completing)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/BillingRuleDraftJobHandler.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/BillingRuleDraftEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs and the Finance endpoint-mapping call site (shared append points)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Handlers/BillingRuleDraftJobHandlerTests.cs</file>
+      <file role="new">tests/integration/seam/Ai/PublicContracts/BillingRuleDraftSeamTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="pending">IInvoiceAi.DraftRulesAsync, consumer key, Null peer</dependency>
+      <dependency task="070" status="pending">Billing rule-type schemas and ValidateForSave</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DEF-015 (owner, 2026-10-15)">Do not create Procedure Library sprk_document rows linked to a matter, project or work assignment: how procedure files are stored (dedicated Procedures table vs unlinked Documents) is an open design discussion with the owner. If this task needs a decision, STOP and report.</constraint>
+    <constraint source="ADR-013, ADR-043, D-52">AI only through IInvoiceAi to IActionRunner. No by-name playbook lookup, no C# output schema (schema lives in the Action row and its mirror), no node-graph engine.</constraint>
+    <constraint source="ADR-039, spec FR-27">Model output is untrusted: each proposal's ruleType must be one of the 11 billing names (closed enum in the output schema) and its parameters must pass 070's schema for that type server-side; otherwise it is dropped and listed with a reason.</constraint>
+    <constraint source="project">The job writes Draft rows only (domain Billing, rule set lookup, clause quote and location, consequence from the allowed list); it never sets Published, in-force dates or current version. Re-delivery of the same job creates no duplicate drafts (NFR-08).</constraint>
+    <constraint source="ADR-004, ADR-017">Job via IJobHandler; trigger returns 202 with job id and status URL; status transitions persisted.</constraint>
+    <constraint source="ADR-008, ADR-019, 040">Trigger route: endpoint-filter authorization with the same admin check 076 uses, ProblemDetails with stable codes, eBilling disabled code when the flag is off.</constraint>
+    <constraint source="ADR-015, NFR-11">Send only the document text needed; log ids, sizes, timings and outcome codes, never document or clause text.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">BFF hygiene: placement (BFF IJobHandler per spec placement table), publish-size delta, no new HIGH CVE, no package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="JPS exemplar" location=".claude/skills/jps-action-create/examples/document-profiler.json">Simple extraction Action shape.</pattern>
+      <pattern name="Action mirror plus Binding" location="infra/dataverse/actions/triage-email.action.json">Mirror file and its Binding row in sprk_playbookconsumer-rows.json.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Step-0 check: git merge-base --is-ancestor f292ad119 HEAD. Confirm 041's DraftRulesAsync signature and Null peer; confirm how Procedure Library document text is obtained today (Grep IDocumentTextSource / text extraction for an SPE document).</step>
+    <step order="1">Author the Action with jps-action-create: instruction (catalogue-only proposals; quote the clause verbatim with section and page location; list unconvertible text), output schema with proposals[] (ruleType closed enum of 11 names, parameters object, consequence closed enum, clauseQuote, clauseLocation) and notConverted[] (text, location, reason). Validate with jps-validate. Mirror to infra/dataverse/actions and outputschemas.</step>
+    <step order="2">Add the Binding row (consumer type billing-rule-draft, Standard tier; record whether the evaluation needs a Reasoning override). Seed Action and Binding in dev (Deploy-ActionMirrors.ps1, Seed-PlaybookConsumers.ps1); verify by read query.</step>
+    <step order="3">Job handler: load rule set and source document, call DraftRulesAsync, validate each proposal with 070's billing ValidateForSave, write valid ones as Draft rows keyed for idempotency (rule set, document, proposal index), store the not-converted list on the rule set or job result (per 019's columns), persist job status.</step>
+    <step order="4">Trigger endpoint POST /api/finance/rulesets/{id}/draft (route directional, under the Finance group): admin check, flag check, enqueue, 202.</step>
+    <step order="5">Tests: unknown ruleType dropped and listed; schema-invalid parameters dropped and listed; valid proposals written as Draft only; re-delivery writes no duplicates; Null peer (AI disabled) ends the job with a stable reason and no rows; missing Binding fails closed with a logged reason; non-admin trigger 403; ADR-043 seam test through IActionRunner.</step>
+    <step order="6">dotnet build and dotnet test green; publish-size delta and vulnerable-package check recorded.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations (route, idempotency key, where not-converted text is stored) in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no existing path extracts text from a Procedure Library (SPE) document for an Action, STOP and report rather than adding a new extraction pipeline.</trigger>
+    <trigger>If 019 has no column to hold the "not converted" list or the proposal status Draft, STOP and propose the smallest schema addition instead of encoding it in another column.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spec section 11 row "Rule-drafting Action BILLING-RULE-DRAFT@v1 + Binding + job" (overlap: NDA review playbook); IInvoiceAi facade (041); InvoiceExtractionJobHandler pattern; no rule-drafting job or trigger route exists (grep "billing-rule-draft" in src finds none before 041).</existing>
+    <extension>The facade method is 041's; the job and route are new because no existing job writes policy drafts and the NDA playbook has no closed rule-schema output.</extension>
+    <cost-of-doing-nothing>Admins hand-configure every rule from each OCG; FR-27 and success criterion 3 (publish an OCG rule set where every rule cites its clause) fail.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="pwsh">Deploy-ActionMirrors.ps1, Seed-PlaybookConsumers.ps1</tool>
+    <tool name="dataverse-mcp">read_query verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">infra/dataverse/actions/billing-rule-draft.action.json; infra/dataverse/outputschemas/billing-rule-draft.schema.json; infra/dataverse/sprk_playbookconsumer-rows.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/BillingRuleDraftJobHandler.cs; Api/Finance/BillingRuleDraftEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Handlers/BillingRuleDraftJobHandlerTests.cs; tests/integration/seam/Ai/PublicContracts/BillingRuleDraftSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The billing-rule-draft constant is added to ConsumerTypes.All in the same change that seeds its Binding row (RoutingConsumerTypeHealthCheck.cs:251-262 turns /healthz Unhealthy for an All entry without a Binding); after seeding in dev, /healthz stays Healthy.</criterion>
+    <criterion testable="true">The Action passes jps-validate; its output schema restricts ruleType to the 11 billing names and consequence to the closed list; the mirror matches the dev row.</criterion>
+    <criterion testable="true">A proposal with an unknown type or schema-invalid parameters is not written and appears in the not-converted list with a reason.</criterion>
+    <criterion testable="true">Valid proposals are written as Draft rows with clause quote and location; none is Published or in force.</criterion>
+    <criterion testable="true">Re-delivering the same job message creates no additional drafts.</criterion>
+    <criterion testable="true">With the AI kill switch on (Null peer) or the Binding missing, the job ends with a stable reason code, writes nothing, and logs no document text.</criterion>
+    <criterion testable="true">POST trigger: 401 unauthenticated, 403 non-admin, eBilling disabled code when the flag is off, 202 with job id for an admin.</criterion>
+    <criterion testable="true">ADR-043 seam test resolves the Action through the Binding and runs it via IActionRunner.</criterion>
+    <criterion testable="true">Publish-size delta measured against a fresh master build and recorded in task notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Shared append points: FinanceModule.cs, the Finance endpoint-mapping call site (Infrastructure/DI/EndpointMappingExtensions.cs:376-377 region) and infra/dataverse/sprk_playbookconsumer-rows.json — re-read immediately before editing, add only this task's lines. Admin check: use the mechanism 076 chooses; if 076 has not landed, implement the same FinanceAuthorizationCheck.CallerPrivilege check and note it so the second task reuses the first's helper. Parallel group P3-B: no file overlap with 071, 074, 076.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

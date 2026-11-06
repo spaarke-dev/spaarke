@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0215",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0215","generator_id":"gen_eval_set.py@1 F-0215","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0215.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Quimby and Dunmore LLP","firm_invoice_number":"INV-2026-27962","invoice_date":"2025-10-04","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"80701-0010","po_number":null,"fees_total":3386.5,"expenses_total":283.91,"adjustments_total":0.0,"total_due":3670.41,"currency":"USD"},
+ "timekeepers":[{"name":"Gideon Thornbury","title":"Partner","rate":480.0,"billed_as":"GT"},{"name":"Ivan Esposito","title":"Paralegal","rate":145.0,"billed_as":"IE"},{"name":"Ivan Marchetti","title":"Associate","rate":235.0,"billed_as":"IM"},{"name":"Naomi Rosenthal","title":"Legal Assistant","rate":100.0,"billed_as":"NR"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-05-31","timekeeper":"IM","timekeeper_name":"Ivan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":1.1,"rate":235.0,"amount":258.5,"narrative":"Research authority for motion to dismiss","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-03","timekeeper":"GT","timekeeper_name":"Gideon Thornbury","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":480.0,"amount":1056.0,"narrative":"Review and summarize deposition transcript of Orchard Row Brands witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-05","timekeeper":"IM","timekeeper_name":"Ivan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":235.0,"amount":564.0,"narrative":"Prepare outline for deposition of Alder & Finch Ltd witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-11","timekeeper":"GT","timekeeper_name":"Gideon Thornbury","timekeeper_title":"Partner","title":"Ptr","hours":0.9,"rate":480.0,"amount":432.0,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-12","timekeeper":"IM","timekeeper_name":"Ivan Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":0.3,"rate":235.0,"amount":70.5,"narrative":"Attend deposition of Alder & Finch Ltd corporate representative","codes":["L330","A109"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-15","timekeeper":"NR","timekeeper_name":"Naomi Rosenthal","timekeeper_title":"Legal Assistant","title":"LA","hours":0.2,"rate":100.0,"amount":20.0,"narrative":"Prepare responses and objections to protective order","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-18","timekeeper":"IE","timekeeper_name":"Ivan Esposito","timekeeper_title":"Paralegal","title":"Para","hours":1.5,"rate":145.0,"amount":217.5,"narrative":"Review and summarize deposition transcript of Ironbridge Steel witness","codes":["L330","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-09-22","timekeeper":"GT","timekeeper_name":"Gideon Thornbury","timekeeper_title":"Partner","title":"Ptr","hours":1.6,"rate":480.0,"amount":768.0,"narrative":"Meet and confer with counsel for Larkspur Medical regarding discovery dispute","codes":["L350","A107"],"page":2,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-09-18","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":35.6,"amount":71.2,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":2,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-09-30","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":212.71,"amount":212.71,"narrative":"Court filing fee","codes":["E112"],"page":2,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["125 Peachtree Way","Boston","Tax ID 11-6175296"],"template":"T22","pages":2},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-08-08","matter_close":"2025-12-29","matter_budget":39681.0,"approved_timekeepers":["Ivan Marchetti","Gideon Thornbury","Mei Whitfield","Cyrus Ashdown","Jordan Wickham","Ivan Esposito","Naomi Rosenthal"],"invoice_received_date":"2025-10-20"},
+ "expected_findings":[
+  {"rule_id":"RS-05-R07","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"},
+  {"rule_id":"RS-05-R08","rule_type":"InvoiceAge","scope":"line","line_refs":[1],"consequence":"Disallow"}
+ ],
+ "seeded_violations":2
+}

@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="118a" project="ebilling-r1">
+  <metadata>
+    <title>InvoiceAttachmentMarking: the shared, host-agnostic marking component (split out of 118 for word-add-in-r1)</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148); split 2026-10-27 (EB-D-159)</phase>
+    <gate>none. The component does no I/O and its contract was agreed with word-add-in-r1 on 2026-10-21. word-add-in-r1 reviews the PR.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New .tsx in a shared client library consumed by two hosts (the email UI and the Outlook add-in).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A pure, controlled UI component with a closed props contract and two pure functions; no server or authorization work.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build only the InvoiceAttachmentMarking component and its two pure functions from task 118, and export them as a file subpath of @spaarke/communication-components. word-add-in-r1 adopts it in their task 133 slice B; task 118 later uses it in the email UI. Nothing else from 118 (toolbar, attachments badge, Email Review tab, SubmitInvoiceFromEmail) is in scope.</prompt>
+
+  <role>SPAARKE frontend developer. Expert in Fluent UI v9, React 16-19 compatible shared components and package exports.</role>
+
+  <goal>@spaarke/communication-components/invoice-attachment-marking resolves and exports exactly the agreed types, the controlled component and the two pure functions; the rules hold in unit tests; the folder imports no barrel, Xrm, Office.js, fetch or service code.</goal>
+
+  <context>
+    <background>Contract agreed with word-add-in-r1 on 2026-10-21, copied verbatim from 118's constraints below. Model 9.1 sets the marks: Invoice (exactly one, required, PDF only), Supporting, Don't save.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/InvoiceAttachmentMarking/ (InvoiceAttachmentMarking.tsx, invoiceMarking.ts with the two pure functions, index.ts) and tests beside them</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/package.json (exports: the file subpath ./invoice-attachment-marking)</file>
+      <file role="reference">package.json "exports" of src/client/shared/Spaarke.UI.Components (the lookup-field file-subpath precedent)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="word-add-in-r1 2026-10-21">InvoiceAttachmentMarking is controlled and does no I/O. Exactly these exports: type InvoiceAttachmentRole = 'invoice' | 'supporting' | 'skip'; interface MarkableAttachment { id: string (opaque: sprk_document id in the email UI, Office attachment id in the add-in); fileName: string; contentType?: string; sizeBytes?: number; suggestedInvoice?: boolean; disabledReason?: string }; InvoiceAttachmentMarkingProps { attachments; value: Record&lt;string, InvoiceAttachmentRole&gt;; onChange(next); mode: 'new' | 'correction' | 'supporting-only'; disabled?: boolean }; defaultInvoiceMarking(attachments, mode); validateInvoiceMarking(value, mode) returning { ok: true } or { ok: false; reason: 'no-invoice' | 'more-than-one-invoice' | 'invoice-not-allowed' }. No submit callback: each host owns its button and route.</constraint>
+    <constraint source="word-add-in-r1 2026-10-21">Rules live in the pure functions: new and correction need exactly one 'invoice'; supporting-only allows none and offers no Invoice option. defaultInvoiceMarking pre-selects 'invoice' only when there is exactly one candidate (exactly one suggestedInvoice, else exactly one PDF); every other attachment defaults to 'supporting' (owner 2026-10-21, both hosts; the user can switch any to Don't save), except an attachment with a disabledReason, which defaults to 'skip', cannot be marked and shows the reason.</constraint>
+    <constraint source="word-add-in-r1 2026-10-21 (their task 100 rule)">Exported as a FILE subpath (@spaarke/communication-components/invoice-attachment-marking). The component folder and everything it imports must not import the package barrel, Xrm, Office.js or any fetch/service code; no React-18-only APIs (Fluent useId, not React.useId); peers React 16-19 and Fluent v9 as the package already declares.</constraint>
+    <constraint source="model 9.1">Invoice is PDF only: a non-PDF attachment offers no Invoice option in 'new' and 'correction' modes, and validateInvoiceMarking refuses a non-PDF marked 'invoice' with 'invoice-not-allowed'.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; light and dark mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (9.1)</file>
+      <file>projects/ebilling-r1/tasks/118-submit-invoice-email-ui.poml</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">invoiceMarking.ts: the types and the two pure functions, with unit tests.</step>
+    <step order="2">InvoiceAttachmentMarking.tsx (controlled; a per-attachment role choice; disabledReason shown), index.ts.</step>
+    <step order="3">package.json file-subpath export; a resolution test and the source-scan test.</step>
+    <step order="4">Run the package's tests, typecheck and lint; record deviations in projects/ebilling-r1/notes/118a-invoice-attachment-marking.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">InvoiceAttachmentMarking/ (component, invoiceMarking.ts, index.ts), package.json exports</output>
+    <output type="test">tests beside the component and the functions</output>
+    <output type="docs">projects/ebilling-r1/notes/118a-invoice-attachment-marking.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The subpath @spaarke/communication-components/invoice-attachment-marking resolves and exports exactly the listed types, the component and the two functions; a source-scan test fails if any file in InvoiceAttachmentMarking/ imports the package barrel, Xrm, Office, fetch or a service module.</criterion>
+    <criterion testable="true">validateInvoiceMarking: new and correction with zero 'invoice' give 'no-invoice', with two give 'more-than-one-invoice', with a non-PDF 'invoice' give 'invoice-not-allowed'; supporting-only with any 'invoice' gives 'invoice-not-allowed' and with none gives ok.</criterion>
+    <criterion testable="true">defaultInvoiceMarking: exactly one suggestedInvoice is pre-marked 'invoice'; with none suggested, exactly one PDF is pre-marked; two candidates pre-mark none; every other attachment is 'supporting'; a disabledReason attachment is 'skip'; supporting-only pre-marks no 'invoice'.</criterion>
+    <criterion testable="true">The component calls onChange with the full next map; it offers no Invoice option in supporting-only mode or for a non-PDF; a disabledReason attachment cannot be changed and shows its reason; disabled disables every choice.</criterion>
+    <criterion testable="true">Light and dark mode render with tokens only.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Split out of 118 on 2026-10-27 at word-add-in-r1's request (EB-D-159), so their slice B does not wait on 094. 118 now consumes this component instead of building it. word-add-in-r1 reviews the PR.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

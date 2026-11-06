@@ -1,0 +1,28 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0451",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0451","generator_id":"gen_eval_set.py@1 F-0451","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0451.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Penhallow and Forsythe LLP","firm_invoice_number":"INV-2025-04086","invoice_date":"2025-07-01","billing_period_start":"2025-06-01","billing_period_end":"2025-06-30","firm_matter_reference":"55992-0028","po_number":"PO-4550101","fees_total":6716.5,"expenses_total":1057.99,"adjustments_total":0.0,"total_due":7774.49,"currency":"USD"},
+ "timekeepers":[{"name":"Beatrix Voss","title":"Associate","rate":470.0,"billed_as":"Voss, B."},{"name":"Gideon Halloran","title":"Senior Associate","rate":630.0,"billed_as":"Halloran, G."},{"name":"Gregory Whitfield","title":"Paralegal","rate":275.0,"billed_as":"Whitfield, G."},{"name":"Hector Yilmaz","title":"Associate","rate":480.0,"billed_as":"Yilmaz, H."},{"name":"Ivan Wickham","title":"Associate","rate":505.0,"billed_as":"Wickham, I."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-06-05","timekeeper":"Whitfield, G.","timekeeper_name":"Gregory Whitfield","timekeeper_title":"Paralegal","title":"Paralegal","hours":2.0,"rate":275.0,"amount":550.0,"narrative":"Prepare for case management conference in the vendor agreement","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-06-05","timekeeper":"Halloran, G.","timekeeper_name":"Gideon Halloran","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":1.6,"rate":630.0,"amount":1008.0,"narrative":"Attend case management conference in the data incident","codes":["L230","A109"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-06-16","timekeeper":"Halloran, G.","timekeeper_name":"Gideon Halloran","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":1.4,"rate":630.0,"amount":882.0,"narrative":"Prepare for case management conference in the customs audit","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-06-19","timekeeper":"Voss, B.","timekeeper_name":"Beatrix Voss","timekeeper_title":"Associate","title":"Associate","hours":1.8,"rate":470.0,"amount":846.0,"narrative":"Review expert qualifications and prior testimony for the vendor agreement","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-06-20","timekeeper":"Yilmaz, H.","timekeeper_name":"Hector Yilmaz","timekeeper_title":"Associate","title":"Associate","hours":0.4,"rate":480.0,"amount":192.0,"narrative":"Prepare monthly status report to client regarding the supply agreement","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-06-24","timekeeper":"Yilmaz, H.","timekeeper_name":"Hector Yilmaz","timekeeper_title":"Associate","title":"Associate","hours":1.3,"rate":480.0,"amount":624.0,"narrative":"Draft motion for preliminary injunction in the customs audit","codes":["L220","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-06-24","timekeeper":"Halloran, G.","timekeeper_name":"Gideon Halloran","timekeeper_title":"Senior Associate","title":"Senior Associate","hours":0.9,"rate":630.0,"amount":567.0,"narrative":"Review expert qualifications and prior testimony for the lease dispute","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-06-26","timekeeper":"Voss, B.","timekeeper_name":"Beatrix Voss","timekeeper_title":"Associate","title":"Associate","hours":0.8,"rate":470.0,"amount":376.0,"narrative":"Prepare updated litigation budget for the customs audit","codes":["L150","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-06-27","timekeeper":"Wickham, I.","timekeeper_name":"Ivan Wickham","timekeeper_title":"Associate","title":"Associate","hours":2.1,"rate":505.0,"amount":1060.5,"narrative":"Conference with client regarding budget variance for the vendor agreement","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-06-30","timekeeper":"Voss, B.","timekeeper_name":"Beatrix Voss","timekeeper_title":"Associate","title":"Associate","hours":1.3,"rate":470.0,"amount":611.0,"narrative":"Draft settlement term sheet for the construction contract","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-06-19","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":61.61,"amount":61.61,"narrative":"Overnight courier to Pacifica Telecom counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-06-24","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":996.38,"amount":996.38,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["888 Lakeshore Drive","Boston","Tax ID 39-2140193"],"template":"T06","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-08-24","matter_close":"2025-09-28","matter_budget":56097.0,"approved_timekeepers":["Gregory Whitfield","Samuel Santoro","Marcus Zielinski","Hector Yilmaz","Mei Marchetti","Ivan Wickham","Gideon Halloran","Beatrix Voss"],"invoice_received_date":"2025-07-04"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

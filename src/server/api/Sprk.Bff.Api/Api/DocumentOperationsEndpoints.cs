@@ -502,6 +502,8 @@ public static class DocumentOperationsEndpoints
                 // Dataverse's Restrict at the row (a child created after the count) the file is gone and the row kept.
                 HasChildDocumentsDeleteResult hasChildren =>
                     ProblemDetailsHelper.DocumentHasChildDocuments(hasChildren.ChildCount, correlationId, hasChildren.FileGone),
+                // ebilling-r1 task 094 fix round (F1-c; EB-D-166): an invoice was submitted from the document. Nothing was deleted.
+                InvoiceSourceDeleteResult => ProblemDetailsHelper.DocumentIsInvoiceSource(correlationId),
                 // R3 ISS-004 (#1650): the SPE file was not deleted (or its pointer was refused), so the row was KEPT, as on
                 // the external delete-own route (ExternalProjectDataEndpoints.DeleteOwnDocument): the result's status (503
                 // retryable, 409 for a refused pointer) and its code in reasonCode, with the correlation id of this plane.

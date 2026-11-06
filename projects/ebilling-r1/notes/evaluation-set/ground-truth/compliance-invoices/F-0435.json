@@ -1,0 +1,24 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0435",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0435","generator_id":"gen_eval_set.py@1 F-0435","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0435.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Montclair Yardley PC","firm_invoice_number":"INV-2025-64706","invoice_date":"2025-09-03","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"88292-0039","po_number":"PO-4562242","fees_total":1620.0,"expenses_total":117.18,"adjustments_total":0.0,"total_due":1737.18,"currency":"USD"},
+ "timekeepers":[{"name":"Dalia Delacroix","title":"Paralegal","rate":120.0,"billed_as":"DD"},{"name":"Gregory Castellanos","title":"Associate","rate":240.0,"billed_as":"GC"},{"name":"Priya Zielinski","title":"Paralegal","rate":115.0,"billed_as":"PZ"},{"name":"Samuel Lockhart","title":"Legal Assistant","rate":105.0,"billed_as":"SL"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-07","timekeeper":"GC","timekeeper_name":"Gregory Castellanos","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":240.0,"amount":600.0,"narrative":"Draft requests for production for trial in the construction contract","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-08-08","timekeeper":"SL","timekeeper_name":"Samuel Lockhart","timekeeper_title":"Legal Assistant","title":"LA","hours":1.0,"rate":105.0,"amount":105.0,"narrative":"Prepare fact witness for testimony regarding the customs audit","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-08-13","timekeeper":"PZ","timekeeper_name":"Priya Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":115.0,"amount":322.0,"narrative":"Prepare monthly status report to client regarding the warranty claim","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-18","timekeeper":"DD","timekeeper_name":"Dalia Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":120.0,"amount":48.0,"narrative":"Revise complaint after review by lead counsel","codes":["L430","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-20","timekeeper":"DD","timekeeper_name":"Dalia Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":120.0,"amount":24.0,"narrative":"Research standard for new trial in the warranty claim","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-27","timekeeper":"DD","timekeeper_name":"Dalia Delacroix","timekeeper_title":"Paralegal","title":"Para","hours":3.0,"rate":120.0,"amount":360.0,"narrative":"Prepare examination outlines for trial in the licensing dispute","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-28","timekeeper":"PZ","timekeeper_name":"Priya Zielinski","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":115.0,"amount":161.0,"narrative":"Prepare examination outlines for trial in the insurance coverage issue","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-08-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":39.06,"amount":117.18,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["977 Lakeshore Drive","Chicago","Tax ID 73-7755066"],"template":"T17","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-09-15","matter_close":"2025-11-29","matter_budget":31948.0,"approved_timekeepers":["Dalia Ashdown","Priya Zielinski","Dalia Delacroix","Gregory Castellanos","Clara Pemberton","Samuel Lockhart","Yusuf Kowalczyk","Katya Lindqvist","Victor Oyelaran"],"invoice_received_date":"2025-09-19"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

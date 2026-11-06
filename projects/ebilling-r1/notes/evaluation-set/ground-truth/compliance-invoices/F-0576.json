@@ -1,0 +1,29 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0576",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0576","generator_id":"gen_eval_set.py@1 F-0576","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0576.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-06"},
+ "header":{"firm":"Fenwick and Beckett LLP","firm_invoice_number":"A-88571/2026","invoice_date":"2025-08-03","billing_period_start":"2025-07-01","billing_period_end":"2025-07-31","firm_matter_reference":"46554-0029","po_number":"PO-4553410","fees_total":5252.5,"expenses_total":127.99,"adjustments_total":0.0,"total_due":5380.49,"currency":"USD"},
+ "timekeepers":[{"name":"Cyrus Whitfield","title":"Associate","rate":215.0,"billed_as":"CW"},{"name":"Dmitri Mbeki","title":"Senior Associate","rate":270.0,"billed_as":"DM"},{"name":"Elena Esposito","title":"Associate","rate":215.0,"billed_as":"EE"},{"name":"Nadia Nakamura","title":"Associate","rate":235.0,"billed_as":"NN"},{"name":"Priya Rosenthal","title":"Paralegal","rate":100.0,"billed_as":"PR"},{"name":"Rafael Nwosu","title":"Partner","rate":440.0,"billed_as":"RN"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-07-01","timekeeper":"PR","timekeeper_name":"Priya Rosenthal","timekeeper_title":"Paralegal","title":"Para","hours":1.9,"rate":100.0,"amount":190.0,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-07-03","timekeeper":"NN","timekeeper_name":"Nadia Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":1.0,"rate":235.0,"amount":235.0,"narrative":"Research case law supporting settlement proposal","codes":["L240","A102"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-07-03","timekeeper":"RN","timekeeper_name":"Rafael Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":440.0,"amount":1232.0,"narrative":"Meet and confer with counsel for Bluepine Holdings regarding discovery dispute","codes":["L350","A107"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-07-03","timekeeper":"NN","timekeeper_name":"Nadia Nakamura","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":235.0,"amount":705.0,"narrative":"Draft mediation statement to Bluepine Holdings","codes":["L310","A103"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-07-07","timekeeper":"DM","timekeeper_name":"Dmitri Mbeki","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.2,"rate":270.0,"amount":324.0,"narrative":"Draft pretrial brief in the distribution agreement","codes":["L250","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-07-09","timekeeper":"EE","timekeeper_name":"Elena Esposito","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":215.0,"amount":258.0,"narrative":"Review opposing brief in response to answer and affirmative defenses","codes":["L240","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-07-15","timekeeper":"CW","timekeeper_name":"Cyrus Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.6,"rate":215.0,"amount":559.0,"narrative":"Research authority for notice of deposition","codes":["L250","A102"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-07-22","timekeeper":"CW","timekeeper_name":"Cyrus Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":215.0,"amount":193.5,"narrative":"Analyze exposure and damages model for the construction contract","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-07-23","timekeeper":"DM","timekeeper_name":"Dmitri Mbeki","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.2,"rate":270.0,"amount":324.0,"narrative":"Prepare outline for deposition of Summit Ridge Homes witness","codes":["L330","A101"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"fee","date":"2025-07-29","timekeeper":"RN","timekeeper_name":"Rafael Nwosu","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":440.0,"amount":1232.0,"narrative":"Review privilege log entries before service","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-07-03","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":2.0,"rate":22.01,"amount":44.02,"narrative":"Overnight courier to Larkspur Medical counsel","codes":["E107"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-07-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":26.24,"amount":78.72,"narrative":"Working meal during deposition preparation","codes":["E111"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-07-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":5.25,"amount":5.25,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["902 Union Square","Atlanta","Tax ID 65-6710028"],"template":"T07","pages":1},
+ "rule_set_id":"RS-06",
+ "context":{"matter_open":"2024-05-16","matter_close":"2025-10-29","matter_budget":46521.0,"approved_timekeepers":["Nadia Nakamura","Mei Lockhart","Elena Esposito","Ivan Carmichael","Dmitri Mbeki","Cyrus Whitfield","Rafael Nwosu","Priya Rosenthal"],"invoice_received_date":"2025-08-14"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

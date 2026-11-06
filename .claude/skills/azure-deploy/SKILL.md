@@ -5,13 +5,13 @@ techStack: [azure, bicep, key-vault, azure-cli]
 appliesTo: ["infrastructure/**", "deploy to azure", "deploy infrastructure", "bicep deploy", "key vault", "azure resource"]
 alwaysApply: false
 exemplar: infrastructure/bicep/stacks/ai-foundry-stack.bicep
-last-reviewed: 2026-05-17
+last-reviewed: 2026-11-03
 ---
 
 # Azure Deploy
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-05-17
+> **Last Reviewed**: 2026-11-03
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2c — refactored: removed stale BFF deploy section [defer to `bff-deploy`]; extracted Office Add-ins to new `office-addins-deploy` skill; fixed 2 broken workflow filename references; renumbered Key Vault from Type 4 to Type 2 since only Infrastructure + Key Vault remain in scope)
 > **Exemplar rationale**: `infrastructure/bicep/stacks/ai-foundry-stack.bicep` is a comprehensive Bicep stack demonstrating module composition, parameter passing, and Key Vault wiring.
 
@@ -107,6 +107,18 @@ az account show --query "{Name:name, Id:id}" -o table
 
 ---
 
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Prerequisites: tools installed, access confirmed, `az login` and subscription verified
+- [ ] Deployment Type 1: Deploy Infrastructure (Bicep)
+- [ ] Deployment Type 1: Verify Deployment (resources match Expected Resources)
+- [ ] Deployment Type 2: Store Secrets in Key Vault (only if secrets are in scope)
+- [ ] Verification Procedures: API health check, Azure resource and AI services checks
+```
+
 ## Deployment Type 1: Azure Infrastructure (Bicep)
 
 ### When to Use
@@ -144,6 +156,8 @@ az resource list `
   --resource-group spe-infrastructure-westus2 `
   --output table
 ```
+
+If verification fails: fix the cause, redeploy, and re-run verification; do not report success until it passes.
 
 ### Expected Resources (AI Foundry Stack)
 

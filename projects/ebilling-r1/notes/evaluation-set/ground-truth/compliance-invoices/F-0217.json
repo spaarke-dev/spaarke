@@ -1,0 +1,33 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0217",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0217","generator_id":"gen_eval_set.py@1 F-0217","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0217.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Fenwick & Vance LLP","firm_invoice_number":"INV-2026-03743","invoice_date":"2025-12-01","billing_period_start":"2025-11-01","billing_period_end":"2025-11-30","firm_matter_reference":"62547-0032","po_number":"PO-4523280","fees_total":5979.0,"expenses_total":3138.07,"adjustments_total":0.0,"total_due":9117.07,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Fairweather","title":"Partner","rate":480.0,"billed_as":"AF"},{"name":"Clara Zielinski","title":"Associate","rate":270.0,"billed_as":"CZ"},{"name":"Dmitri Yilmaz","title":"Paralegal","rate":135.0,"billed_as":"DY"},{"name":"Priya Thornbury","title":"Partner","rate":495.0,"billed_as":"PT"},{"name":"Rafael Pemberton","title":"Associate","rate":270.0,"billed_as":"RP"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-11-04","timekeeper":"RP","timekeeper_name":"Rafael Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":2.0,"rate":270.0,"amount":540.0,"narrative":"Review and organize incoming production from Ironbridge Steel for matter file","codes":["L140","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-11-07","timekeeper":"CZ","timekeeper_name":"Clara Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":270.0,"amount":810.0,"narrative":"Review expert qualifications and prior testimony for the employment claim","codes":["L130","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-11-07","timekeeper":"AF","timekeeper_name":"Anders Fairweather","timekeeper_title":"Partner","title":"Ptr","hours":2.2,"rate":480.0,"amount":1056.0,"narrative":"Analyze exposure and damages model for the insurance coverage issue","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-11-11","timekeeper":"DY","timekeeper_name":"Dmitri Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":135.0,"amount":378.0,"narrative":"Prepare for case management conference in the distribution agreement","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-11-11","timekeeper":"DY","timekeeper_name":"Dmitri Yilmaz","timekeeper_title":"Paralegal","title":"Para","hours":2.8,"rate":135.0,"amount":378.0,"narrative":"Prepare for case management conference in the distribution agreement","codes":["L230","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-11-14","timekeeper":"CZ","timekeeper_name":"Clara Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.6,"rate":270.0,"amount":432.0,"narrative":"Prepare monthly status report to client regarding the regulatory inquiry","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-11-25","timekeeper":"CZ","timekeeper_name":"Clara Zielinski","timekeeper_title":"Associate","title":"Assoc","hours":1.2,"rate":270.0,"amount":324.0,"narrative":"Photocopied exhibits and assembled binders","codes":["L160","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":8,"line_type":"fee","date":"2025-11-25","timekeeper":"RP","timekeeper_name":"Rafael Pemberton","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":270.0,"amount":675.0,"narrative":"Research standard for provisional remedies concerning the lease dispute","codes":["L220","A102"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"fee","date":"2025-11-27","timekeeper":"PT","timekeeper_name":"Priya Thornbury","timekeeper_title":"Partner","title":"Ptr","hours":2.8,"rate":495.0,"amount":1386.0,"narrative":"Scheduled conference call and updated calendar entries","codes":["L190","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":10,"line_type":"expense","date":"2025-11-06","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":39.6,"amount":39.6,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-11-07","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":55.0,"rate":0.64,"amount":35.2,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":12,"line_type":"expense","date":"2025-11-17","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3025.52,"amount":3025.52,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":13,"line_type":"expense","date":"2025-11-27","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":37.75,"amount":37.75,"narrative":"Long distance conference call charges","codes":["E105"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["238 Pine Street","Atlanta","Tax ID 36-3147748"],"template":"T17","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2024-10-14","matter_close":"2026-02-28","matter_budget":61468.0,"approved_timekeepers":["Clara Zielinski","Rafael Pemberton","Elena Galbraith","Priya Thornbury","Dmitri Yilmaz","Naomi Brennan","Anders Fairweather"],"invoice_received_date":"2025-12-17"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R03","rule_type":"NonBillableActivity","scope":"line","line_refs":[7],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R03","rule_type":"NonBillableActivity","scope":"line","line_refs":[9],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R07","rule_type":"Duplicate","scope":"line","line_refs":[5],"consequence":"Disallow","related_line_refs":[4]}
+ ],
+ "seeded_violations":3
+}

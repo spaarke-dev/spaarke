@@ -530,7 +530,7 @@ External users cannot submit an invoice through the portal; invoices are created
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Resolved (GitHub #2001 closed 2026-10-22). ACME stamp app PATCHed to `removeUnverifiedEmailClaim: true` with the owner's OK. Whether new stamps set it is provisioning's to confirm (073 handoff #2532). |
 | **Urgency** | next-round (before any customer stamp enables A9 workforce sign-in) |
 | **Filed** | 2026-10-16 |
 | **Source** | Task 047 adversarial review, known limit K1 (`notes/task-047-notes.md:186`) |
@@ -604,7 +604,7 @@ For an external caller, refuse a configuration whose target entity is in the `sp
 
 | Field | Value |
 |---|---|
-| **Status** | Open — D7 accepted by the owner (2026-10-20); fix = uac-r2 task 188 (T7 predicate) + word-add-in task 130 (T8 writer gaps); deploy via R3 |
+| **Status** | Resolved (GitHub #2126 closed 2026-10-21 by #2177, uac-r2 task 188 D7 T7 document narrowing). |
 | **Urgency** | next-round |
 | **Filed** | 2026-10-20 |
 | **Source** | Task 078 review pass 1 (F1) plus a code map; not reproduced live |
@@ -653,7 +653,7 @@ Fix owners: Office and Communication. Options: set the link in those writers, an
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Resolved (GitHub #2127 closed 2026-10-22). Fixed by #2170 (uac-r2 task 188): RAG retrieval and chat archive ingest narrowed for external callers. |
 | **Urgency** | next-round (closes with ISS-010's real fix) |
 | **Filed** | 2026-10-20 |
 | **Source** | Task 078 review pass 2 (F4) |
@@ -705,7 +705,7 @@ A customer employee whose Entra user has no Email gets a token with no `email` c
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed: PR #2175 (`3531ed65e`), dev SPA run 39536100531 (2026-10-21); owner smoke pending |
+| **Status** | Resolved (GitHub #2166 closed 2026-10-21). PR #2175, live on the dev SPA since 2026-10-21. |
 | **Urgency** | before 072 |
 | **Filed** | 2026-10-20 |
 | **Source** | Owner live check on dev SPA `28274e04e` (ralph.schroeder@spaarke.com) |
@@ -767,3 +767,149 @@ MSAL's account list is shared across clients in the tab. The CIAM plane has no a
 
 - `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessRemovalSweep.cs` (`RunAsync`)
 - `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/IdentityLinkReconciliationJob.cs` (`RunRemovalSweepAsync`, heartbeat)
+
+### ISS-021 — The shared DataGrid sorts Money columns as text
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 002 adversarial review B (owner grid columns) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2446 |
+
+**Description**
+
+A Money value reaches the browser as `{ value: n }`, and `DataGrid` `compare` sorts on the formatted label as text ("$1,000.00" before "$200.00"). It affects the Invoices grid's `sprk_totalamount` today, and `sprk_totalamount_base` after task 002. Fix: compare `.value` numerically when both sides carry it. The code is shared UI, so it is filed rather than changed in R3.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx` (`compare`, ~1160-1174)
+
+### ISS-022 — DataGrid Export to Excel writes Money and option-set cells as raw values
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 002 adversarial review B (owner grid columns) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2447 |
+
+**Description**
+
+The CSV export uses the raw value, not `@formattedValues`. A Money cell is exported as `{"value":1234.5}`, and option-set and status cells are exported as raw values. It affects all six external SPA grids. Fix: use `formattedLabelOf` first, and unwrap `{ value }`. The code is shared UI, so it is filed rather than changed in R3.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/csvExport.ts` (~64-78), `commandBar/defaults.ts:228`
+
+### ISS-023 — The profile form shows an email that registration then refuses
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 |
+| **Source** | R3 task 074 probe 5 (Tony Howe, a Dewey Cheatham member with no email attribute) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2449 |
+
+**Description**
+
+When the home token has no `email` claim, the form's prefill falls back to the username, but registration accepts the `email` claim only. The person fills in a form that can never succeed and then sees "We could not read your email address". Registration refusing the username is correct. Fix: have the `registration_required` refusal on `/me` say whether the email is usable, and show the "contact your administrator" state instead of the form when it is not. Workaround: an administrator sets the account's email attribute.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs` (~717-734)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs` (`WorkforceCallerClaims.TokenEmail`, the form prefill, which falls back to the username); registration itself reads only the `email` claim (`ExternalRegistrationEndpoints.TokenEmail`). Corrected 2026-10-29.
+- `src/client/external-spa/src/pages/RegistrationPage.tsx`
+
+### ISS-024 — Grant notifier emails a home-linked workforce contact as an external person (DI-137)
+
+| Field | Value |
+|---|---|
+| **Status** | **Resolved.** PR #2500 (R3 task 079, owner option 2; also fixes #2491), deployed to dev as fcf01480f4 on 2026-11-01 at 14:03:20Z. The owner accepted it without a live re-run, because the 2026-11-01 test Task was created through "+ New", which never notifies. Follow-ups: #2499 |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-29 (by ontology-r1 as DI-137) |
+| **Source** | Ontology task 168 fix round 3, after the R3 review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2458 |
+
+**Description**
+
+`GrantAccessNotifier.NotifyContactGrantAsync` decides "an internal user represents this contact" from `sprk_primarycontact` and the Spaarke-tenant object id only. A WorkforceHome contact linked to a licensed user by the home pair alone (the link the portal reads first) is therefore emailed a portal notice as an external person, while the portal shows that person the user's view. The notice is the only content involved. Reference fix: read the home link before the external branch, as `AssignTaskRecipientGate.HomeLinkAsync` (commit `bd32be448f`) does. The natural home is uac-r2 193 `ContactUserRepresentation` (DI-136 #2457).
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs` (`NotifyContactGrantAsync`, `EmailExternalContactGrantAsync` ~270-330)
+
+### ISS-025: Teams mobile layout not optimized (deferred to R4)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-29, task 071 (owner) |
+| **What** | The Teams tab loads in Teams mobile, but its layout is not adapted to the phone surface. |
+| **Decision** | Owner: not for this release; it loads. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2466 |
+
+### ISS-026: Grids do not remember a user's column widths or sort order (deferred to R4)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-31, task 002 (owner) |
+| **What** | Column widths and sort order reset to the grid configuration on every open. The shared `DataGrid` has no resize callback and keeps sort locally, so nothing is saved. |
+| **Decision** | R4. It needs a change to the shared `DataGrid`, which other surfaces also use. First step: per browser; per user across devices later. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2489 |
+
+### ISS-027: The record Documents list's columns cannot be resized and overlap (deferred to R4)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-31, task 072 (owner UAT) |
+| **What** | `components/DocumentLibrary.tsx` renders the record Documents list (record modal, project page) with its own Fluent `DataGrid`. It sets no widths and no `resizableColumns`, so its columns cannot be resized and they overlap. The Documents tab uses the shared grid and does not have this problem. |
+| **Decision** | Owner: R4. The preferred fix moves the list onto the shared `DataGrid`. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2490 |
+
+### ISS-028: The in-memory contact store returns the home tenant from GetContactAsync; the gate's portal principal carries an empty tenant
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-01, task 079 adversarial review |
+| **What** | `InMemoryContactIdentityStore.GetContactAsync` returns rows that carry `sprk_externaltenantid`, which the real `ContactSelect` never returns. That divergence hid #2491. Separately, `AssignTaskRecipientGate.ComposePortalPrincipalAsync` passes the row's tenant, which is always empty on Dataverse. Nothing reads it today, so no outcome changes. |
+| **Decision** | Known limit, filed. Task 079 moved both known readers to `ReadHomeTenantAsync`. The gate file is ontology's. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2499 |
+
+### ISS-029: Work-account contacts with record grants see no record tabs in the portal (deferred to R4)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-01, owner UAT on dev (task 079 re-check; Tony Howe, WorkforceHome, Collaborate on CMRCL-479772) |
+| **What** | The Projects, Matters, Work Assignments, Documents and Invoices widgets are `planes: ['ciam']` (`widgetRegistry.ts`). Workforce-plane callers get only the default modules (Legal Front Door, Policy Library, Service Requests). A granted matter is reachable only from the grant email's link or the bell. |
+| **Decision** | Owner 2026-11-01: R4. Show the record tabs to a workforce contact who holds grants, scoped by Tier-2. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2508 |
+
+### ISS-030: Production go-live of external.spaarke.com (task 073) moved to the provisioning project
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, owner decision at R3 wrap-up |
+| **What** | Task 073 deploys the production SPA to `external.spaarke.com`, hands over the production Teams package and smoke-tests three personas against one provisioned stamp (ACME). Every gate item belongs to provisioning or the owner (`notes/task-073-gate-acme.md`). |
+| **Decision** | Owner 2026-11-03: a production demo activity; customer-provisioning-orchestration-r1 runs it. R3 closes without it. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2532 |
+
+### ISS-031: Auth architecture doc predates ADR-028 A9
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, R3 wrap-up (task 090) |
+| **What** | `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md` exists only on `work/spaarke-auth-system-of-record-r1` (last commit 2026-10-10). Its §5.3, §5.8 and §8.2 predate A9: the WorkforceHome plane, the A9 identity routes, and the decisions A9 closed. |
+| **Decision** | Handed to spaarke-auth-system-of-record-r1 when it resumes; otherwise R4 lands the doc on master. R3 does not edit another project's branch. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2534 |
+
+### ISS-032: UAC provisioning timeout test is flaky under machine load
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, R3 wrap-up (task 090) test triage |
+| **What** | `ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_FailsLoudlyAndLogsTheContainerId` failed twice with a real-clock 30 s `WaitAsync` timeout while other full suites ran. It passed 5 / 5 alone. The endpoint has no logic race. |
+| **Decision** | Filed to unified-access-control-r2 (the test's owner): register it `TimingSensitive`, or lengthen the real-clock waits. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2543 |

@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="ebilling-r1">
+  <metadata>
+    <title>sprk_billingapproverrole into source; firm billing contact</title>
+    <phase>1 Data model (WP1)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New script file and a new lookup column; touches existing dev columns that hold data (preserve-only); no C# code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Ensure-exists schema script on known tables with a canonical exemplar; the judgment points are escalation triggers.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, schema</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the existing dev global choice sprk_billingapproverrole and its multi-select columns on Matter, Project and Work Assignment part of the SpaarkeMaster solution in dev without changing their values, and add a firm billing-contact lookup on sprk_organization, with one idempotent Web API script.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse metadata Web API scripting, global option sets and solution components. Follow ADRs strictly.</role>
+
+  <goal>scripts/ebilling/Deploy-EbillingApproverRoleSchema.ps1 exists and has been run against spaarkedev1 (second run: no change); the global choice, the three multi-select columns and sprk_organization.sprk_billingcontact exist in dev and are components of the dev SpaarkeMaster solution, so task 029's export brings them into source; existing dev values are unchanged.</goal>
+
+  <context>
+    <background>spec.md FR-14: bring sprk_billingapproverrole (multi-select, global choice) on Matter, Project and Work Assignment into solution source; empty means the settings default (FR-48, task 025); no record-creation path changes; add a firm billing-contact lookup on sprk_organization (D-45). D-33: the choice already exists on the three tables in dev, not in solution source (verified 2026-10-15: no sprk_billingapproverrole in src/dataverse/solutions/SpaarkeMaster/OptionSets/ nor in any Entity.xml; git grep finds it only in projects/ebilling-r1). D-33 option meaning: which assignment field holds approvers — Assigned Attorney 1, Assigned Attorney 2, Assigned Paralegal 1, Assigned Paralegal 2, Assigned To Internal, Assigned To External, Assigned To.</background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingApproverRoleSchema.ps1</file>
+      <file role="modify">docs/data-model/sprk_workassignment.md (add the sprk_billingapproverrole row only)</file>
+      <file role="modify">docs/data-model/sprk_invoice-matter-project.md (add the Matter and Project sprk_billingapproverrole rows only)</file>
+      <file role="canonical-reference">scripts/Deploy-ChartDefinitionEntity.ps1:133-180 (global option set check / create)</file>
+      <file role="canonical-reference">scripts/Create-ScopeCapabilityFields.ps1:197 (MultiSelectPicklistAttributeMetadata)</file>
+      <file role="canonical-reference">scripts/Deploy-AccessEventEntity.ps1:188-202 (AddSolutionComponent helper) and :585 (MSCRM.SolutionUniqueName header)</file>
+      <file role="canonical-reference">src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Organization/Entity.xml (existing sprk_PrimaryContact1 / 2 lookups, for naming)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Task 025 references this global choice; it exists in dev already (D-33), so 025 does not wait for this task.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">This task writes ONE script, scripts/ebilling/Deploy-EbillingApproverRoleSchema.ps1, runs it only against https://spaarkedev1.crm.dynamics.com, supports -WhatIf, and publishes with an entity-scoped PublishXml for sprk_matter, sprk_project, sprk_workassignment and sprk_organization plus the option set.</constraint>
+    <constraint source="project">Preserve-only for existing components: the script never relabels, renumbers, removes or retypes an existing option, option set or column, and never writes record data. It creates a component only when absent.</constraint>
+    <constraint source="project">Do NOT edit src/dataverse/solutions/SpaarkeMaster/** (task 029 exports). No record-creation path, form script or default-value logic is added (FR-14).</constraint>
+    <constraint source="ADR-002">No plugin, business rule or flow defaults the field; an empty value is resolved by the BFF from the settings record (task 103).</constraint>
+    <constraint source="project">Shared append points under docs/data-model/: re-read before editing, add only this task's rows.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse global choices and solution components</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + read dev">Declare RIGOR LEVEL: STANDARD. Read FR-14, D-33, D-45, D-54. Read from dev and record in task notes: the global option set sprk_billingapproverrole (name, every value and label); the column on each of sprk_matter, sprk_project, sprk_workassignment (logical name, type, option set it uses); the count of rows per table with a non-empty value; and, from solutioncomponents, whether each table is a whole-table SpaarkeMaster component (rootcomponentbehavior 0) and whether the option set is a component.</step>
+    <step order="1" name="Script: choice + columns">Write the script from the Deploy-ChartDefinitionEntity.ps1 helpers. Phase 1: if the global option set is absent, create it with the seven D-33 values; if present, leave it untouched and print its values. Phase 2: on each of the three tables, if sprk_billingapproverrole is absent, create it as a multi-select column on the global option set; if present, leave it.</step>
+    <step order="2" name="Script: billing contact">Phase 3: on sprk_organization create lookup sprk_billingcontact → contact (display "Billing Contact", Delete = RemoveLink, others NoCascade) if absent.</step>
+    <step order="3" name="Script: solution membership">Phase 4: add to the dev SpaarkeMaster solution any of these components that step 0 found missing (option set component type 9; a column as type 2 only when its table is not a whole-table component). Creates in phases 1-3 carry header MSCRM.SolutionUniqueName = SpaarkeMaster.</step>
+    <step order="4" name="Run">-WhatIf, review, real run, second run reports no change.</step>
+    <step order="5" name="Verify">Re-read everything from step 0. Option values and labels identical to step 0; non-empty row counts identical; all components now in SpaarkeMaster; sprk_billingcontact present. Record before / after in task notes.</step>
+    <step order="6" name="Docs">Add the column rows to docs/data-model/sprk_workassignment.md and sprk_invoice-matter-project.md, and the billing-contact note where sprk_organization is documented (or in task notes if no page exists).</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status cell to ✅ [done].</step>
+    <step order="8">Record any deviation in projects/ebilling-r1/notes/ and this task's notes, including the dev option values for task 025 and 103.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the dev option set's values or labels differ from the D-33 list, or a table's column is not multi-select on that global option set, STOP and escalate with the observed definition; do not change it.</trigger>
+    <trigger>If sprk_billingapproverrole is absent from dev on any of the three tables (contradicting D-33), STOP and confirm with the owner before creating it.</trigger>
+    <trigger>If sprk_organization already has a billing-contact-like lookup (any lookup to contact other than sprk_PrimaryContact1 / 2), STOP and ask whether to reuse it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_organization has sprk_PrimaryContact1 / sprk_PrimaryContact2 (Entities/sprk_Organization/Entity.xml); the approver-role choice exists only in dev (D-33).</existing>
+    <extension>The choice and columns are existing dev components brought into the solution, not new. The billing contact cannot reuse a primary contact: primary contacts are relationship contacts, not the invoice-notice recipient (spec section New Components).</extension>
+    <cost-of-doing-nothing>Without the components in SpaarkeMaster, customer environments get no approver configuration and every approval falls to the default; without a billing contact, firm notices reach only the submitter (FR-39, D-45).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Run the schema script</tool>
+    <tool name="az">Dataverse token</tool>
+    <tool name="mcp-dataverse">describe and read_query for step 0 and step 5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/ebilling/Deploy-EbillingApproverRoleSchema.ps1</output>
+    <output type="docs">docs/data-model rows for sprk_billingapproverrole and sprk_billingcontact</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">After the run, the global option set and the multi-select column on sprk_matter, sprk_project and sprk_workassignment are components of the dev SpaarkeMaster solution (solutioncomponents read recorded).</criterion>
+    <criterion testable="true">The option values and labels, and the per-table count of rows with a non-empty value, are identical before and after the run (existing dev values preserved).</criterion>
+    <criterion testable="true">sprk_organization.sprk_billingcontact exists as a lookup to contact and is in SpaarkeMaster.</criterion>
+    <criterion testable="true">A second run reports no change; -WhatIf makes no change.</criterion>
+    <criterion testable="true">No file under src/dataverse/solutions/SpaarkeMaster/ is modified, and no form, view, script or default value is added.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    FR-14's "a record with an empty field resolves approvers from the settings default for its type (test per core type)" is approver-resolution behaviour and is tested in task 103, not here.
+    Column logical names on the core tables are taken from dev as found (step 0); task 103 reads them from these notes.
+
+    STATUS 2026-10-15: IN PROGRESS. Everything except the Matter multi-select replacement is done and verified in dev. The Matter replacement is destructive and waits for the owner's OK (DEF-011, GitHub #1941). Acceptance criterion 1 ("multi-select column on sprk_matter ... in SpaarkeMaster") is met for Project and Work Assignment; for Matter the column is in SpaarkeMaster (whole-table component) but is still single-select.
+
+    Step 0 read (dev spaarkedev1, 2026-10-15), before the run:
+    - Global choice sprk_billingapproverrole, MetadataId 6ce9d250-0ec8-f111-a05c-0022482913fc, global, unmanaged, customizable. Values: 100000000 Assigned Attorney 1; 100000001 Assigned Attorney 2; 100000002 Assigned Paralegal 1; 100000003 Assigned Paralegal 2; 100000004 Assigned To Internal; 100000005 "Assigned to External" (lower-case "to"; D-33 text spells "Assigned To External": casing only, left as is, preserve-only); 100000006 Assigned To. Task 025 and task 103 use these values.
+    - Columns (logical name sprk_billingapproverrole, schema sprk_BillingApproverRole, display "Billing Approver Role", required None, bound to the global choice on all three): sprk_project = MultiSelectPicklist (id 10d5bb53-0fc8-f111-a05a-7c1e520a989f); sprk_workassignment = MultiSelectPicklist (id d827596c-0fc8-f111-a05c-3833c5e9614d); sprk_matter = single-select Picklist (id 3dba4a3d-0fc8-f111-a05c-7c1e52154cae) - contradicts D-33, see DEF-011.
+    - Rows holding a value: sprk_matter 0 of 65, sprk_project 0 of 23, sprk_workassignment 0 of 22 (all rows, all states; read twice, once by `ne null` and once by reading every row; the totals drift because other work deletes test rows). Identical after the run.
+    - solutioncomponents (SpaarkeMaster 1.2.3.0): sprk_matter, sprk_project, sprk_workassignment and sprk_organization are each a WHOLE-TABLE component (type 1, rootcomponentbehavior 0), so their columns, including the new sprk_billingcontact, are included without type-2 entries. The global choice was ALREADY a SpaarkeMaster component (type 9) before the run. D-33's "not yet in solution source" is about the git export (task 029), not the dev solution; the script's phase 4 found nothing to add.
+    - sprk_organization had no contact lookup other than sprk_primarycontact1 / 2, so the escalation trigger did not fire.
+
+    Run (Deploy-EbillingApproverRoleSchema.ps1, WhatIf then real, exit 0): created sprk_organization.sprk_billingcontact (lookup to contact, relationship sprk_organization_billingcontact_contact, delete RemoveLink, assign / share NoCascade), published sprk_matter / sprk_project / sprk_workassignment / sprk_organization plus the option set. Second run: created 0, changed 0, skipped 9, "nothing changed - no publish". The only deferred item is the Matter column.
+
+    Matter / DEF-011: see notes/defer-issues.md DEF-011. Evidence: 0 rows hold a value; RetrieveDependenciesForDelete lists 1 dependency, the platform-generated aiskillconfig ais_FormFillFieldOptOut_sprk_matter_sprk_billingapproverrole (type 10314, a form-fill opt-out config created with the column, in the Default solution); no form (5), view (9), personal view (1), chart or workflow / business rule of sprk_matter references the column. The script path is prepared: `-ReplaceMatterApproverRole` re-runs these guards, refuses on any row with a value, any dependency other than that skill config, or any reference in a form / view / chart / workflow, and only then drops and recreates the column as a multi-select on the same global choice. Because nothing places the column on a form or view today, there is nothing to re-add; if that changes before the switch is used the script stops and lists them. The switch was NOT run (not even with -WhatIf). The create body (MultiSelectPicklistAttributeMetadata + GlobalOptionSet@odata.bind) was checked by posting it against sprk_project, where Dataverse parsed it and refused it as a duplicate (0x80047013), no write.
+
+    sprk_assignedto: this task does not depend on it. 024 creates no approver resolution; it stores which assignment fields are approvers. Matter and Project have no sprk_assignedto lookup (confirmed by task 021's pre-check), so the option "Assigned To" (100000006) can only resolve on Work Assignment; task 103 must treat it as "no approver" on Matter and Project. Not handled in 024 beyond this note.
+
+    Billing contact docs: no data-model page documents sprk_organization, so the billing-contact note lives here: sprk_organization.sprk_billingcontact (display "Billing Contact", lookup to contact, optional): the firm's billing contact; firm notices (rejection, return, whole-invoice reject, approval with adjustments) go to the submitter and this contact (D-45, FR-39). Tasks reading it: 131 / 132 notification work.
+
+    Docs added: docs/data-model/sprk_workassignment.md and docs/data-model/sprk_invoice-matter-project.md (rows for sprk_billingapproverrole; Matter row states the single-select reality).
+
+    Not done by design: TASK-INDEX.md (parallel mode: the main session updates it), src/dataverse/solutions/SpaarkeMaster/** (task 029).
+Owner OK 2026-10-15 (DEF-011): the main session ran -ReplaceMatterApproverRole in dev. The first run was refused (0x8004f01f) by the generated aiskillconfig ais_FormFillFieldOptOut_sprk_matter_sprk_billingapproverrole; the script now deletes that config (unmanaged, platform-generated) before the column. Second run: created sprk_matter.sprk_billingapproverrole as multi-select on the global choice, 0 rows before and after; re-run created 0 / changed 0 / skipped 10. #1941 closed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

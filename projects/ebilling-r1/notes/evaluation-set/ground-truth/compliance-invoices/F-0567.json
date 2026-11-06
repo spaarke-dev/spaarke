@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0567",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0567","generator_id":"gen_eval_set.py@1 F-0567","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0567.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Fenwick and Ambrose LLP","firm_invoice_number":"INV-2026-08845","invoice_date":"2026-07-01","billing_period_start":"2026-06-01","billing_period_end":"2026-06-30","firm_matter_reference":"95144-0039","po_number":"PO-4509983","fees_total":1511.0,"expenses_total":11069.43,"adjustments_total":0.0,"total_due":12580.43,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Whitfield","title":"Associate","rate":235.0,"billed_as":"Whitfield, A."},{"name":"Cyrus Okafor","title":"Paralegal","rate":145.0,"billed_as":"Okafor, C."},{"name":"Hector Ramanathan","title":"Paralegal","rate":120.0,"billed_as":"Ramanathan, H."},{"name":"Priya Nakamura","title":"Of Counsel","rate":395.0,"billed_as":"Nakamura, P."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-06-15","timekeeper":"Whitfield, A.","timekeeper_name":"Anders Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":0.2,"rate":235.0,"amount":47.0,"narrative":"Prepare examination outlines for trial in the regulatory inquiry","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-06-18","timekeeper":"Whitfield, A.","timekeeper_name":"Anders Whitfield","timekeeper_title":"Associate","title":"Assoc","hours":2.4,"rate":235.0,"amount":564.0,"narrative":"Prepare trial notebook and demonstrative exhibits for the regulatory inquiry","codes":["L440","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-06-04","timekeeper":"Okafor, C.","timekeeper_name":"Cyrus Okafor","timekeeper_title":"Paralegal","title":"Para","hours":0.6,"rate":145.0,"amount":87.0,"narrative":"Analyze exposure and damages model for the supply agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-06-23","timekeeper":"Okafor, C.","timekeeper_name":"Cyrus Okafor","timekeeper_title":"Paralegal","title":"Para","hours":0.4,"rate":145.0,"amount":58.0,"narrative":"Research standard for new trial in the lease dispute","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-06-17","timekeeper":"Ramanathan, H.","timekeeper_name":"Hector Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":2.3,"rate":120.0,"amount":276.0,"narrative":"Research standard for new trial in the distribution agreement","codes":["L460","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-06-30","timekeeper":"Ramanathan, H.","timekeeper_name":"Hector Ramanathan","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":120.0,"amount":84.0,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-06-23","timekeeper":"Nakamura, P.","timekeeper_name":"Priya Nakamura","timekeeper_title":"Of Counsel","title":"O/C","hours":1.0,"rate":395.0,"amount":395.0,"narrative":"Plan strategy for upcoming phase of the lease dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2026-06-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":6327.01,"amount":6327.01,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2026-06-29","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":4742.42,"amount":4742.42,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["687 Pine Street","Portland","Tax ID 60-1395792"],"template":"T24","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-07-31","matter_close":"2026-09-28","matter_budget":75321.0,"approved_timekeepers":["Nadia Brennan","Hector Ramanathan","Anders Whitfield","Jordan Nwosu","Priya Nakamura","Cyrus Okafor"],"invoice_received_date":"2026-07-16"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

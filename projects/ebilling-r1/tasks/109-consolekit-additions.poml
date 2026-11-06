@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="109" project="ebilling-r1">
+  <metadata>
+    <title>ConsoleKit additions: outcome cards, count filters, disclosure, status labels</title>
+    <phase>4 Review and approval (WP4) — wave W4-1</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Small presentational additions to an existing shared kit; existing ConsoleKit behaviour must stay unchanged (ontology-r1 consumers).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The prototype provides working reference implementations; the work is porting to library conventions with tests.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend, fluent-ui, shared-ui</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Extend the shared ConsoleKit with what the Invoice Review page needs and the kit lacks: a label / tone override on StatusBar and RecordRow so eBilling states (Approved, Rejected, Returned to firm, Accepted, Reduced, Disallowed) can be shown (prototype F-3), OutcomeCards (decision choices as cards, suggestion first, body under the chosen card), CountFilters (count cards that filter a list, one selected), and a Disclosure reveal — each justified, each tested, with no change to existing Console behaviour.</prompt>
+
+  <role>SPAARKE frontend developer. Expert in Fluent UI v9 composition, accessibility and shared-library conventions.</role>
+
+  <goal>Additive ConsoleKit exports with jest tests; existing ConsoleKit tests unchanged and green; ontology-r1 notified (ConsoleKit came from its task 057).</goal>
+
+  <context>
+    <background>Spec FR-31, NFR-13; prototype README F-3 (StatusBar / RecordRow have fixed Console labels; add a label override or eBilling states) and "What is shared and what is prototype-only" (OutcomeCards, CountFilters, Disclosure — "AggregateCard is a link card with no selected state, so it can't act as a filter"). Reference implementations: c:\code_files\spaarke-prototype\projects\ebilling.r1\src\ui\kit.tsx (Disclosure :69, CountFilters :121 on ToggleButton, OutcomeCards :186 on RadioGroup / Radio with selected-card styling), src\review\InvoiceStatusBar.tsx (the eBilling status bar built in StatusBar's shape). Existing kit: src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/ — StatusBar.tsx (state: ConsoleState, label and tone from CONSOLE_STATE_BADGES), RecordRow.tsx (RecordRowProps :25, state: ConsoleState), consoleStatus.ts (the one state-to-badge table; header says no other place maps a state), AggregateCard.tsx, index.ts, __tests__/ConsoleKit.test.tsx. ConsoleKit is exported through components/index.ts:328.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/StatusBar.tsx (optional label / tone override)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/RecordRow.tsx (same override)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/OutcomeCards.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/CountFilters.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/Disclosure.tsx (only if Fluent Accordion does not fit — see step 1)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/__tests__/ConsoleKitAdditions.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">Independent; 110 and 111 consume it</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="F-3, consoleStatus.ts header">Do not add eBilling states to ConsoleState or CONSOLE_STATE_BADGES (that table is the Console's single mapping). Add an optional override prop (label plus StatusBadgeTone) to StatusBar and RecordRow; when absent, output is byte-for-byte unchanged.</constraint>
+    <constraint source="ADR-012">Domain-free: no invoice, line or eBilling wording inside the components; labels come from props.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; light, dark and high-contrast.</constraint>
+    <constraint source="project">React-16-safe shared library: no React.useId (the prototype Disclosure uses it at kit.tsx:72 — generate ids another way), no useSyncExternalStore, no createRoot.</constraint>
+    <constraint source="accessibility">OutcomeCards is a radio group with an accessible name (keyboard arrows move selection; nothing happens until the host confirms). CountFilters is a group of toggle buttons with aria-pressed and "label: count" names. Disclosure uses aria-expanded / aria-controls.</constraint>
+    <constraint source="NFR-12">No new npm package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\src\ui\kit.tsx</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\src\review\InvoiceStatusBar.tsx</file>
+      <file>c:\code_files\spaarke-prototype\projects\ebilling.r1\README.md (F-3, shared vs prototype-only table)</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing kit piece" location="src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/AggregateCard.tsx">File layout, makeStyles with tokens, props doc comments.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Disclosure decision (CLAUDE.md section 11): try Fluent v9 Accordion with one collapsible item for the "Why this was flagged" reveal; add Disclosure only if Accordion cannot give the inline transparent-button look; record the decision in notes.</step>
+    <step order="2">Add the override prop to StatusBar and RecordRow.</step>
+    <step order="3">Port OutcomeCards and CountFilters from kit.tsx to library conventions (typed generics, doc comments, className pass-through).</step>
+    <step order="4">Export from ConsoleKit/index.ts.</step>
+    <step order="5">Tests: override shows the given label and tone, absent override renders as before; OutcomeCards selection, disabled option, body only under the chosen card, keyboard; CountFilters counts, one selected, onChange; Disclosure (if added) expands and collapses with aria-expanded.</step>
+    <step order="6">npm run build, npm test and npm run lint in the shared library green; existing ConsoleKit.test.tsx unchanged.</step>
+    <step order="7">Run the ui-tests below in a local scratch harness or 110's page; record results.</step>
+    <step order="8">Notify ontology-r1 (owner of ConsoleKit, task 057) of the additive change; record in notes.</step>
+    <step order="9">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="10">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ontology-r1 objects to an override prop on StatusBar / RecordRow, STOP and present the alternative (an eBilling status bar composed from StatusBadge and MessageBar in the page, as the prototype's InvoiceStatusBar does).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ConsoleKit (StatusBar, RecordRow, AggregateCard, EvidenceLine); Fluent RadioGroup, ToggleButton and Accordion; no outcome-card, count-filter or reveal component in the shared library (grep).</existing>
+    <extension>StatusBar and RecordRow are extended (override prop), not forked. OutcomeCards and CountFilters are thin compositions because AggregateCard has no selected state and RadioGroup has no per-option body; Disclosure is added only if Accordion does not fit.</extension>
+    <cost-of-doing-nothing>110 / 111 would show Console labels ("Decided", "Authorized") for invoice outcomes and would hand-roll decision cards and filters in the page, against ADR-012 and the owner-reviewed prototype (F-3).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Outcome cards and count filters">
+      <steps>
+        <step>Render OutcomeCards with three options (suggestion first) and CountFilters with five counts</step>
+        <step>Select each card with mouse and keyboard; verify only the chosen card shows its body</step>
+        <step>Select each count card; verify one is selected and counts do not change</step>
+      </steps>
+      <expected>Matches prototype kit.tsx behaviour and look</expected>
+    </test>
+    <test name="Status label override">
+      <steps>
+        <step>Render StatusBar with an override "Returned to firm" (warning tone) and without one</step>
+      </steps>
+      <expected>Override label and tone shown; default Console label unchanged without override</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the theme to dark and high contrast</step>
+        <step>Verify selected and unselected cards, count cards and the status bar are legible with no white backgrounds or black text</step>
+      </steps>
+      <expected>All colours from Fluent tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">build, test, lint (shared library)</tool>
+    <tool name="ui-test">browser checks via the ui-test skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">ConsoleKit/OutcomeCards.tsx; CountFilters.tsx; Disclosure.tsx (conditional); StatusBar.tsx and RecordRow.tsx override</output>
+    <output type="test">ConsoleKit/__tests__/ConsoleKitAdditions.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">StatusBar and RecordRow accept an optional label / tone override; without it the existing ConsoleKit tests pass unchanged.</criterion>
+    <criterion testable="true">CONSOLE_STATE_BADGES and ConsoleState are unchanged.</criterion>
+    <criterion testable="true">OutcomeCards, CountFilters (and Disclosure if added) are exported from @spaarke/ui-components with the accessibility roles stated above, covered by tests.</criterion>
+    <criterion testable="true">No eBilling-specific wording in the components; no useId / useSyncExternalStore / createRoot (grep); no new npm package.</criterion>
+    <criterion testable="true">The Disclosure-versus-Accordion decision and the ontology-r1 notification are recorded in notes.</criterion>
+    <criterion testable="true">npm run build, npm test and npm run lint green; ui-tests pass including dark mode.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Parallel group P4-A: this task alone edits ConsoleKit/ (108 edits FilePreview/). Never import from the prototype repository.
+Completed: statusOverride on StatusBar and RecordRow, covered by ConsoleKit/__tests__/ConsoleKitStatusOverride.test.tsx. TASK-INDEX.md left to the orchestrator (parallel mode).
+Review outcome (ontology-r1, 2026-10-15, CLAUDE.md section 11): ConsoleKit is the ontology state-vocabulary kit, so OutcomeCards, CountFilters and Disclosure (first delivered here) were REMOVED with their exports and tests; ONLY statusOverride remains. The steps, relevant-files, justification and acceptance criteria above that name those three components are superseded by this note. Task 110 reuses existing components instead: WorkspaceShell MetricCard + MetricCardRow (count filters), Fluent v9 Accordion (disclosure), SprkChat/OutcomeCard or a Fluent RadioGroup (outcome choice); exact imports are in task 110's constraints. Browser ui-tests now cover statusOverride only (run on 110's page); Jest covers the override and the dark-theme render.
+Detail: projects/ebilling-r1/notes/109-consolekit-additions.md
+rework: ontology-r1 review - removed OutcomeCards / CountFilters / Disclosure, kept statusOverride (task 109)</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first, then the fluent-v9-component skill. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

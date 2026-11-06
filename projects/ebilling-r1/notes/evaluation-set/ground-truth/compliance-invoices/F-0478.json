@@ -1,0 +1,25 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0478",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0478","generator_id":"gen_eval_set.py@1 F-0478","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0478.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-04"},
+ "header":{"firm":"Kingsley & Ellison LLP","firm_invoice_number":"INV-2025-99391","invoice_date":"2025-11-04","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"41434-0026","po_number":"PO-4547733","fees_total":5911.25,"expenses_total":1300.65,"adjustments_total":0.0,"total_due":7211.9,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Okafor","title":"Senior Associate","rate":430.0,"billed_as":"Clara Okafor"},{"name":"Marcus Okafor","title":"Partner","rate":705.0,"billed_as":"Marcus Okafor"},{"name":"Rafael Oyelaran","title":"Associate","rate":325.0,"billed_as":"Rafael Oyelaran"},{"name":"Yusuf Yilmaz","title":"Associate","rate":370.0,"billed_as":"Yusuf Yilmaz"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-08","timekeeper":"Clara Okafor","timekeeper_name":"Clara Okafor","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":0.25,"rate":430.0,"amount":107.5,"narrative":"Attend trial day in the construction contract","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-13","timekeeper":"Marcus Okafor","timekeeper_name":"Marcus Okafor","timekeeper_title":"Partner","title":"Ptr","hours":2.75,"rate":705.0,"amount":1938.75,"narrative":"Prepare expert witness for testimony in the customs audit","codes":["L420","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-02","timekeeper":"Rafael Oyelaran","timekeeper_name":"Rafael Oyelaran","timekeeper_title":"Associate","title":"Assoc","hours":2.5,"rate":325.0,"amount":812.5,"narrative":"Attend trial day in the lease dispute","codes":["L450","A109"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-02","timekeeper":"Yusuf Yilmaz","timekeeper_name":"Yusuf Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":370.0,"amount":1110.0,"narrative":"Prepare fact witness for testimony regarding the data incident","codes":["L410","A101"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-08","timekeeper":"Yusuf Yilmaz","timekeeper_name":"Yusuf Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":0.75,"rate":370.0,"amount":277.5,"narrative":"Draft post-trial motion in the licensing dispute","codes":["L460","A103"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-13","timekeeper":"Yusuf Yilmaz","timekeeper_name":"Yusuf Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":3.0,"rate":370.0,"amount":1110.0,"narrative":"Draft settlement proposal for trial in the licensing dispute","codes":["L430","A103"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-14","timekeeper":"Yusuf Yilmaz","timekeeper_name":"Yusuf Yilmaz","timekeeper_title":"Associate","title":"Assoc","hours":1.5,"rate":370.0,"amount":555.0,"narrative":"Telephone conference with witness regarding the supply agreement","codes":["L410","A106"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-10-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":27.0,"rate":0.63,"amount":17.01,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-10-08","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1283.64,"amount":1283.64,"narrative":"Court reporter and transcript - deposition","codes":["E115"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["720 Commerce Avenue","Phoenix","Tax ID 11-1466613"],"template":"T03","pages":2},
+ "rule_set_id":"RS-04",
+ "context":{"matter_open":"2024-07-17","matter_close":"2026-01-29","matter_budget":53847.0,"approved_timekeepers":["Yusuf Yilmaz","Clara Okafor","Marcus Okafor","Imani Thornbury","Rafael Oyelaran"],"invoice_received_date":"2025-11-15"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

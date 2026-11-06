@@ -14,18 +14,23 @@ public static class GraphModule
     /// App settings naming this stamp's own SharePoint Embedded containers. Written by provisioning (H4b, from
     /// H8's container — task 227c) or an operator; never by the customer. The ownership guard treats them as
     /// owned without reading a marker (task 227d). Only <c>SharePointEmbedded:OwnedContainerIds</c> is a list
-    /// (separated by <c>,</c> or <c>;</c>); the other two are single ids, taken verbatim.
+    /// (separated by <c>,</c> or <c>;</c>); the others are single ids, taken verbatim.
     /// </summary>
     /// <remarks>
-    /// <c>SharePointEmbedded:OwnedContainerIds</c> is for environments whose containers predate the ownership
+    /// <para><c>SharePointEmbedded:OwnedContainerIds</c> is for environments whose containers predate the ownership
     /// marker (dev, demo): an operator lists them there. Provisioned stamps never need it — the BFF marks every
-    /// container it creates, and H4b writes the other two.
+    /// container it creates, and H4b writes the default and archive keys.</para>
+    /// <para>The <c>Finance:</c> key is the eBilling Procedure Library container (ebilling-r1 FR-16, owner D-55 / D-67), so
+    /// app-only eBilling writers (rule-set sources, rate-card workbooks) reach it. Same status as the keys above: written by
+    /// provisioning or an operator, never by the customer. <c>Finance:EbillingOutputContainerId</c> was retired by ebilling-r1
+    /// task 092: export files are Stored Files in the Finance file store, not SPE documents.</para>
     /// </remarks>
     public static readonly IReadOnlyList<string> StampContainerSettingKeys = new[]
     {
         "EmailProcessing:DefaultContainerId",
         "Communication:ArchiveContainerId",
         OwnedContainerIdsKey,
+        "Finance:ProcedureLibraryContainerId",
     };
 
     private const string OwnedContainerIdsKey = "SharePointEmbedded:OwnedContainerIds";

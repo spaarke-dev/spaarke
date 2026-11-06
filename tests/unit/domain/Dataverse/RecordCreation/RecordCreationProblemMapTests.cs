@@ -124,6 +124,18 @@ public class RecordCreationProblemMapTests
     }
 
     [Fact]
+    public void ToProblemDetails_AServiceRequestNotFound_NamesAServiceRequest_NotARecord()
+    {
+        // Task 017 (2d-5): the budget inquiry's sprk_servicerequest has its own noun; before, NounOf fell through to the
+        // child-record route's "record", and the uniform not-found read "A record this record is filed under …".
+        var missing = new RecordCreationRefusal(RecordCreationRefusalKind.NotFoundOrDenied, RecordCreationRefusal.NotFoundCode,
+            "No AppendTo on the matter.");
+
+        RecordCreationProblemMap.ToProblemDetails(missing, "sprk_servicerequest", "t").Detail.Should().Be(
+            "A record this service request is filed under was not found. The service request was not saved.");
+    }
+
+    [Fact]
     public void ToProblemDetails_AnOwnerRefusal_IsTheExistingOwnerRefusalShape()
     {
         var refusal = new RecordCreationRefusal(RecordCreationRefusalKind.OwnerUnresolved, "NoOwnerSource", "no owner could be resolved");

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="134" project="ebilling-r1">
+  <metadata>
+    <title>SPA invoice detail and on-screen report</title>
+    <phase>5 Firm feedback (WP5) — wave W5-2</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Frontend over an existing read route (130) inside existing SPA detail surfaces; no server change, no auth decision on the client.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fluent v9 component work mirroring existing external-SPA detail components, with explicit content and layout rules.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>130</deps>
+    <tags>frontend, external-spa, fluent-ui</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Show the firm its invoice outcome in the external SPA (FR-38): tracking number, status, billed and approved totals, every Reduced / Disallowed line and invoice-level adjustment with reason, rule set name and version, section reference and quoted clause text exactly as 130 projects them, plus a PDF download (133) — as one InvoiceOutcomeReport component used by the invoice detail view and by 051's rejected-submission result screen.</prompt>
+
+  <role>SPAARKE frontend developer. Expert in React 18, Fluent UI v9 (ADR-021), the external SPA's bffApiCall client and accessible responsive layouts.</role>
+
+  <goal>InvoiceOutcomeReport renders 130's outcome DTO; the sprk_invoice record detail shows it as an "Outcome" section; 051's result screen uses it in place of its placeholder; PDF download works when a report exists; vitest tests and ui-tests (including dark mode and phone width) pass.</goal>
+
+  <context>
+    <background>Spec FR-38 (acceptance: a firm user sees only its own firm's invoices — enforced server-side by 130; Pending findings never appear), FR-18 (on-screen report per finding: line, values read, rule, clause; PDF download; leaving and returning shows the same result), FR-40 (same content as the PDF), NFR-13 (Fluent v9, shared components, phone width), D-66. The SPA opens invoices in the read-only RecordDetailModal (src/client/external-spa/src/components/detail/RecordDetailModal.tsx; sprk_invoice config in RecordDetailFields.tsx:135-150) through bffApiCall. 130 provides GET /api/v1/external/ebilling/{invoices|submissions}/{id}/outcome (exact routes in 130's notes); 133 provides the report download route; 051 builds the submission result screen with a placeholder for this report. The client renders what the server returns and never filters for security.</background>
+    <relevant-files>
+      <file role="new">src/client/external-spa/src/components/ebilling/InvoiceOutcomeReport.tsx</file>
+      <file role="modify">src/client/external-spa/src/api/ebilling-client.ts (add outcome and report calls; create the file if 051 did not)</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailModal.tsx (one "Outcome" section for sprk_invoice)</file>
+      <file role="modify">051's submission result screen (replace the report placeholder)</file>
+      <file role="new">src/client/external-spa/tests/InvoiceOutcomeReport.test.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/SectionCard.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="130" status="pending">Outcome routes and DTO</dependency>
+      <dependency task="133" status="pending">Report download route (parallel in P5-B: wire to its documented contract; the button shows only when the DTO says a report exists)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021, NFR-13">Fluent v9 components and semantic tokens only; no hard-coded colours; works at 360 px width (findings table becomes stacked cards below the small breakpoint); no new npm package.</constraint>
+    <constraint source="ADR-012">Use @spaarke/ui-components and existing SPA components (SectionCard, SprkModal content conventions) before writing new primitives.</constraint>
+    <constraint source="D-66, NFR-10">Render only fields present in the DTO; no client-side links to documents other than the report download route; no client-side filtering presented as security.</constraint>
+    <constraint source="FR-38">For an outcome still In Review, show status and billed total and the text "Under review" only.</constraint>
+    <constraint source="project">Network calls only through the SPA's existing bffApiCall path (ADR-028 auth v2); errors map to the SPA's existing error presentation (403 → no access message, 503 ebilling.disabled → hidden section).</constraint>
+    <constraint source="project">src/client/external-spa is shared with SPA-r3: change RecordDetailModal minimally (one section) and run /conflict-check before the PR.</constraint>
+    <constraint source="076 review round 2 item 5 (notes/076-ruleset-endpoints.md section 8)">Clause text for firms comes only from RuleSetService.GetFirmClauseAsync(policyVersionId, invoiceFirmId, ct). invoiceFirmId is the firm of the INVOICE the finding belongs to: the invoice's sprk_vendororg, read server-side, and passed only after the route's own firm-membership check has established that the caller may see that invoice. Never pass a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may belong to several firms, and internal callers have no SPA identity. Guid.Empty (the invoice has no firm) returns no text. Required test: a caller in two firms, viewing firm A's invoice, gets A's clause and never B's.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file>docs/architecture/external-access-spa-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/ebilling-r1/spec.md (FR-18, FR-38, FR-40, NFR-13)</file>
+    </files>
+    <patterns>
+      <pattern name="External detail section" location="src/client/external-spa/src/components/detail/RecordDetailModal.tsx">Section layout, bffApiCall use, loading and error states inside the canonical SprkModal.</pattern>
+      <pattern name="Card container" location="src/client/external-spa/src/components/SectionCard.tsx">Visual anchor for the outcome summary and findings list.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read 130's DTO and routes, 133's download contract and 051's result screen; run npm install --legacy-peer-deps --no-audit --no-fund in src/client/external-spa.</step>
+    <step order="1">InvoiceOutcomeReport: summary (tracking number, status, billed, approved when present), findings list grouped by line then adjustments (subject, decision, reason, citation block with rule set name, version, section and quoted clause; or reason only when the DTO omits the citation), totals reconciliation, Download PDF button when report-available.</step>
+    <step order="2">Client calls in ebilling-client.ts; loading, empty, 403 and 503 states.</step>
+    <step order="3">Add the Outcome section to the sprk_invoice detail; replace 051's placeholder for rejected submissions.</step>
+    <step order="4">Vitest: renders every DTO item; citation omitted when absent; In Review shows no findings; download hidden without a report; 403 and 503 states; narrow viewport renders stacked cards.</step>
+    <step order="5">npm run build and npm test green; npm run lint clean for touched files.</step>
+    <step order="6">Run the ui-tests below against dev after 136 deploys, or locally with the SPA dev host; record results.</step>
+    <step order="7">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="8">Record deviations in projects/ebilling-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 130's DTO lacks a field FR-38 requires (for example section reference), STOP and raise it against 130 rather than reading another endpoint.</trigger>
+    <trigger>If SPA-r3 has restructured RecordDetailModal or the Invoices widget since this POML was written, STOP and coordinate before editing.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>RecordDetailModal / RecordDetailFields (generic invoice fields), SectionCard; 051's result screen placeholder; no component renders eBilling outcomes (grep "Outcome" in src/client/external-spa/src finds none).</existing>
+    <extension>The generic detail view is extended with one section; a dedicated component is needed because the same report renders in two places (detail and result screen) and the generic field list cannot render grouped findings with citations.</extension>
+    <cost-of-doing-nothing>Firms see no reasons for reductions or rejections in the SPA (FR-38, FR-18 fail; success criterion 6 fails).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Outcome renders for own invoice">
+      <url>https://{external-spa-dev-host}/?record=invoice:{invoiceId}</url>
+      <steps>
+        <step>Sign in as a firm user whose firm submitted an approved-with-adjustments invoice</step>
+        <step>Open the invoice from the Invoices widget</step>
+        <step>Verify tracking number, status, billed and approved totals, and each reduced line with reason and clause quote</step>
+        <step>Click Download PDF and verify a PDF opens with the same items</step>
+        <step>Check the browser console for errors</step>
+      </steps>
+      <expected>Outcome matches 130's projection and the PDF; no console errors.</expected>
+    </test>
+    <test name="Under review shows no findings">
+      <steps>
+        <step>Open an invoice still In Review</step>
+      </steps>
+      <expected>Status and billed total only, with "Under review"; no findings listed.</expected>
+    </test>
+    <test name="Phone width (NFR-13)">
+      <steps>
+        <step>Set the viewport to 360 by 740</step>
+        <step>Open the outcome of an invoice with several findings</step>
+      </steps>
+      <expected>Findings render as stacked cards; no horizontal page scroll; download button reachable.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the SPA to dark theme</step>
+        <step>Open the outcome section and the result screen</step>
+        <step>Verify backgrounds, text, borders and the citation block use theme tokens (no white panels, no black text)</step>
+      </steps>
+      <expected>All colours come from Fluent v9 semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">install, build, test, lint</tool>
+    <tool name="ui-test">browser checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/ebilling/InvoiceOutcomeReport.tsx; src/client/external-spa/src/api/ebilling-client.ts; RecordDetailModal.tsx section</output>
+    <output type="test">src/client/external-spa/tests/InvoiceOutcomeReport.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every item in a fixture outcome DTO renders with subject, decision, reason and (when present) rule set name, version, section reference and clause quote; items without a citation render reason only.</criterion>
+    <criterion testable="true">An In Review outcome renders status, billed total and "Under review" and no findings.</criterion>
+    <criterion testable="true">Download PDF appears only when the DTO marks a report available and calls 133's route through bffApiCall.</criterion>
+    <criterion testable="true">403 renders the SPA's no-access state; 503 ebilling.disabled hides the section.</criterion>
+    <criterion testable="true">051's rejected-submission result screen shows the same component.</criterion>
+    <criterion testable="true">npm run build and npm test pass; no new npm dependency in package.json.</criterion>
+    <criterion testable="true">ui-tests pass, including phone width and dark mode.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>After 015, invoice status in the generic field list comes from statuscode (015 changes RecordDetailFields); this task does not touch that field. P5-B: 135 owns its own client file and widget, so no file overlap with this task; 131 and 133 are server-only.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

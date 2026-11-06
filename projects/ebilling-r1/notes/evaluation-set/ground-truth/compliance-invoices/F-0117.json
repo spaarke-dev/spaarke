@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0117",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0117","generator_id":"gen_eval_set.py@1 F-0117","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0117.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Pryce & Whitcombe LLP","firm_invoice_number":"INV-2026-61772","invoice_date":"2026-03-04","billing_period_start":"2026-02-01","billing_period_end":"2026-02-28","firm_matter_reference":"86006-0031","po_number":"PO-4500964","fees_total":2981.5,"expenses_total":65.55,"adjustments_total":0.0,"total_due":3047.05,"currency":"USD"},
+ "timekeepers":[{"name":"Anders Kowalczyk","title":"Associate","rate":230.0,"billed_as":"Kowalczyk, A."},{"name":"Jordan Ramanathan","title":"Associate","rate":220.0,"billed_as":"Ramanathan, J."},{"name":"Naomi Nwosu","title":"Paralegal","rate":125.0,"billed_as":"Nwosu, N."},{"name":"Oliver Pemberton","title":"Of Counsel","rate":405.0,"billed_as":"Pemberton, O."},{"name":"Peter Santoro","title":"Senior Associate","rate":310.0,"billed_as":"Santoro, P."}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2026-02-03","timekeeper":"Kowalczyk, A.","timekeeper_name":"Anders Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":2.1,"rate":230.0,"amount":483.0,"narrative":"Plan strategy for upcoming phase of the licensing dispute with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2026-02-04","timekeeper":"Kowalczyk, A.","timekeeper_name":"Anders Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":2.8,"rate":230.0,"amount":644.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2026-02-09","timekeeper":"Kowalczyk, A.","timekeeper_name":"Anders Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":230.0,"amount":92.0,"narrative":"Prepare for oral argument in the regulatory inquiry","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2026-02-09","timekeeper":"Kowalczyk, A.","timekeeper_name":"Anders Kowalczyk","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":230.0,"amount":391.0,"narrative":"Research appealability issues in the insurance coverage issue","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2026-02-09","timekeeper":"Ramanathan, J.","timekeeper_name":"Jordan Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":0.1,"rate":375.0,"amount":37.5,"narrative":"Prepare for oral argument in the insurance coverage issue","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2026-02-13","timekeeper":"Nwosu, N.","timekeeper_name":"Naomi Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":0.3,"rate":125.0,"amount":37.5,"narrative":"Review court docket and calendar of pending deadlines for the data incident","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2026-02-16","timekeeper":"Pemberton, O.","timekeeper_name":"Oliver Pemberton","timekeeper_title":"Of Counsel","title":"O/C","hours":1.4,"rate":405.0,"amount":567.0,"narrative":"Draft appellate brief in the licensing dispute","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2026-02-20","timekeeper":"Pemberton, O.","timekeeper_name":"Oliver Pemberton","timekeeper_title":"Of Counsel","title":"O/C","hours":0.5,"rate":405.0,"amount":202.5,"narrative":"Organized and indexed file materials","codes":["L520","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":9,"line_type":"fee","date":"2026-02-05","timekeeper":"Santoro, P.","timekeeper_name":"Peter Santoro","timekeeper_title":"Senior Associate","title":"Sr Assoc","hours":1.7,"rate":310.0,"amount":527.0,"narrative":"Revise appellate brief after cite check","codes":["L520","A104"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2026-02-20","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":374.0,"rate":0.08,"amount":29.92,"narrative":"Photocopies - 374 pages","codes":["E101"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2026-02-23","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":509.0,"rate":0.07,"amount":35.63,"narrative":"Photocopies - 509 pages","codes":["E101"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["99 Lakeshore Drive","Houston","Tax ID 87-8299594"],"template":"T24","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2025-03-23","matter_close":"2026-05-29","matter_budget":37188.0,"approved_timekeepers":["Jordan Ramanathan","Naomi Nwosu","Peter Santoro","Anders Kowalczyk","Jordan Quillen","Oliver Pemberton"],"invoice_received_date":"2026-03-13"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[5],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[8],"consequence":"Disallow"}
+ ],
+ "seeded_violations":2
+}

@@ -1,0 +1,24 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0593",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0593","generator_id":"gen_eval_set.py@1 F-0593","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0593.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-05"},
+ "header":{"firm":"Garrison & Ellison LLP","firm_invoice_number":"LF0022387","invoice_date":"2025-10-04","billing_period_start":"2025-09-01","billing_period_end":"2025-09-30","firm_matter_reference":"42371-0031","po_number":"PO-4535675","fees_total":2192.5,"expenses_total":71.82,"adjustments_total":0.0,"total_due":2264.32,"currency":"USD"},
+ "timekeepers":[{"name":"Clara Marchetti","title":"Associate","rate":255.0,"billed_as":"CM"},{"name":"Gregory Fairweather","title":"Paralegal","rate":120.0,"billed_as":"GF"},{"name":"Ivan Lindqvist","title":"Partner","rate":525.0,"billed_as":"IL"},{"name":"Marcus Lindqvist","title":"Associate","rate":290.0,"billed_as":"ML"},{"name":"Oliver Galbraith","title":"Associate","rate":305.0,"billed_as":"OG"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-09-09","timekeeper":"IL","timekeeper_name":"Ivan Lindqvist","timekeeper_title":"Partner","title":"Ptr","hours":0.4,"rate":525.0,"amount":210.0,"narrative":"Draft witness list in the data incident","codes":["L210","A103"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-09-10","timekeeper":"ML","timekeeper_name":"Marcus Lindqvist","timekeeper_title":"Associate","title":"Assoc","hours":0.9,"rate":290.0,"amount":261.0,"narrative":"Plan strategy for upcoming phase of the data incident with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-09-17","timekeeper":"GF","timekeeper_name":"Gregory Fairweather","timekeeper_title":"Paralegal","title":"Para","hours":0.2,"rate":120.0,"amount":24.0,"narrative":"Conference with client regarding budget variance for the lease dispute","codes":["L150","A106"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-09-17","timekeeper":"GF","timekeeper_name":"Gregory Fairweather","timekeeper_title":"Paralegal","title":"Para","hours":2.1,"rate":120.0,"amount":252.0,"narrative":"Conference with client regarding settlement authority for the licensing dispute","codes":["L160","A106"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-09-22","timekeeper":"CM","timekeeper_name":"Clara Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":0.5,"rate":255.0,"amount":127.5,"narrative":"Review court docket and calendar of pending deadlines for the regulatory inquiry","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-09-25","timekeeper":"OG","timekeeper_name":"Oliver Galbraith","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":305.0,"amount":884.5,"narrative":"Analyze exposure and damages model for the vendor agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-09-25","timekeeper":"CM","timekeeper_name":"Clara Marchetti","timekeeper_title":"Associate","title":"Assoc","hours":1.7,"rate":255.0,"amount":433.5,"narrative":"Draft settlement term sheet for the supply agreement","codes":["L160","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-09-05","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":3.0,"rate":23.94,"amount":71.82,"narrative":"Overnight courier to Meridian Foods counsel","codes":["E107"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["925 Elm Court","Minneapolis","Tax ID 70-7520401"],"template":"T19","pages":1},
+ "rule_set_id":"RS-05",
+ "context":{"matter_open":"2024-06-08","matter_close":"2025-12-29","matter_budget":34057.0,"approved_timekeepers":["Beatrix Blackwood","Clara Marchetti","Ivan Lindqvist","Gregory Fairweather","Leila Whitfield","Oliver Galbraith","Peter Voss","Marcus Lindqvist"],"invoice_received_date":"2025-10-20"},
+ "expected_findings":[],
+ "seeded_violations":0
+}

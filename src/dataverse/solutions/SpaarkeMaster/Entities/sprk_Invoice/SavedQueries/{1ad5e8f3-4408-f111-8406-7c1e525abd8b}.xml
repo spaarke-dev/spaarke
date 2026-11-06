@@ -34,7 +34,7 @@
           <attribute name="sprk_totalamount_base" />
           <attribute name="sprk_invoicedate" />
           <filter type="and">
-            <condition attribute="sprk_invoicestatus" operator="eq" value="100000000" />
+            <condition attribute="statuscode" operator="eq" value="1" />
           </filter>
         </entity>
       </fetch>

@@ -25,6 +25,13 @@ function json(status: number, body: unknown): Response {
   return fakeResponse(status, body);
 }
 
+/**
+ * A table that is NOT created through the BFF — the example of a write that passes through to the inner service. Field-mapping
+ * task 020: sprk_matter was the example until it became a BFF create table; the intent of every test using this is unchanged.
+ */
+const NON_BFF_TABLE = 'account';
+const NON_BFF_PAYLOAD = { name: 'a' };
+
 function innerService(): jest.Mocked<IDataService> {
   return {
     createRecord: jest.fn().mockResolvedValue('inner-id'),
@@ -36,6 +43,10 @@ function innerService(): jest.Mocked<IDataService> {
 }
 
 describe('BFF child-record writes (task 147 r1)', () => {
+  it('the pass-through example table is not a BFF create table (else the tests below change meaning silently)', () => {
+    expect(BFF_CHILD_CREATE_TABLES).not.toContain(NON_BFF_TABLE);
+  });
+
   it('lists exactly the census create tables', () => {
     expect([...BFF_CHILD_CREATE_TABLES].sort()).toEqual(
       [
@@ -48,6 +59,9 @@ describe('BFF child-record writes (task 147 r1)', () => {
         'sprk_todo',
         // Ontology task 046 (D-113): a work assignment is created through the same route (a root; the server plans it).
         'sprk_workassignment',
+        // Field-mapping task 020 (FR-15): the Matter and Project roots are created through the same route.
+        'sprk_matter',
+        'sprk_project',
       ].sort()
     );
   });
@@ -78,6 +92,74 @@ describe('BFF child-record writes (task 147 r1)', () => {
     expect(url).toBe('https://bff.example.com/api/v1/child-records/sprk_todo');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual(payload);
+  });
+
+  describe('task 020: matter / project creates and the optional mapping source (FR-03, FR-15)', () => {
+    it.each(['sprk_matter', 'sprk_project'])(
+      'creates a %s through the route with no query and the unchanged payload',
+      async table => {
+        const fetchFn = jest.fn().mockResolvedValue(json(201, { id: ID }));
+        const payload = { sprk_name: 'Acme v. Beta' };
+
+        await createChildRecordViaBff(fetchFn, BFF, table, payload);
+
+        const [url, init] = fetchFn.mock.calls[0];
+        expect(url).toBe(`https://bff.example.com/api/v1/child-records/${table}`);
+        expect(JSON.parse(init.body)).toEqual(payload);
+      }
+    );
+
+    it('sends a named mapping source as the two query parameters only — never as a key of the payload', async () => {
+      const fetchFn = jest.fn().mockResolvedValue(json(201, { id: ID }));
+      const payload = { sprk_name: 'Phase 1' };
+
+      await createRecordViaBffWithWarnings(fetchFn, BFF, 'sprk_project', payload, {
+        mappingSource: { entity: ' SPRK_Matter ', id: `{${ID.toUpperCase()}}` },
+      });
+
+      const [url, init] = fetchFn.mock.calls[0];
+      expect(url).toBe(
+        `https://bff.example.com/api/v1/child-records/sprk_project?mappingSourceEntity=sprk_matter&mappingSourceId=${ID}`
+      );
+      expect(JSON.parse(init.body)).toEqual(payload);
+      expect(payload).toEqual({ sprk_name: 'Phase 1' });
+    });
+
+    it('passes the mapping source through createChildRecordViaBff, and surfaces a mapping warning', async () => {
+      const fetchFn = jest
+        .fn()
+        .mockResolvedValue(json(201, { id: ID, warnings: ['The record to copy fields from could not be read.'] }));
+
+      const created = await createRecordViaBffWithWarnings(
+        fetchFn,
+        BFF,
+        'sprk_todo',
+        { sprk_name: 'x' },
+        {
+          mappingSource: { entity: 'sprk_matter', id: ID },
+        }
+      );
+      await createChildRecordViaBff(
+        fetchFn,
+        BFF,
+        'sprk_todo',
+        { sprk_name: 'x' },
+        { mappingSource: { entity: 'sprk_project', id: ID } }
+      );
+
+      expect(created.warnings).toEqual(['The record to copy fields from could not be read.']);
+      expect(fetchFn.mock.calls[1][0]).toBe(
+        `https://bff.example.com/api/v1/child-records/sprk_todo?mappingSourceEntity=sprk_project&mappingSourceId=${ID}`
+      );
+    });
+
+    it('adds no query when the options carry no mapping source', async () => {
+      const fetchFn = jest.fn().mockResolvedValue(json(201, { id: ID }));
+
+      await createChildRecordViaBff(fetchFn, BFF, 'sprk_event', { sprk_eventname: 'x' }, {});
+
+      expect(fetchFn.mock.calls[0][0]).toBe('https://bff.example.com/api/v1/child-records/sprk_event');
+    });
   });
 
   it('surfaces the server ProblemDetails message and reason code on a refusal', async () => {
@@ -117,7 +199,7 @@ describe('BFF child-record writes (task 147 r1)', () => {
 
   it('refuses a table that is not created through the BFF, without calling it', async () => {
     const fetchFn = jest.fn();
-    await expect(createChildRecordViaBff(fetchFn, BFF, 'sprk_matter', {})).rejects.toBeInstanceOf(
+    await expect(createChildRecordViaBff(fetchFn, BFF, NON_BFF_TABLE, {})).rejects.toBeInstanceOf(
       ChildRecordWriteError
     );
     expect(fetchFn).not.toHaveBeenCalled();
@@ -145,14 +227,14 @@ describe('BFF child-record writes (task 147 r1)', () => {
       const fetchFn = jest.fn();
       const service = withBffChildWrites(inner, fetchFn, BFF);
 
-      await service.createRecord('sprk_matter', { sprk_mattername: 'm' });
+      await service.createRecord(NON_BFF_TABLE, NON_BFF_PAYLOAD);
       await service.updateRecord('sprk_project', ID, { sprk_projectname: 'p' });
       await service.retrieveRecord('sprk_todo', ID, '?$select=sprk_name');
       await service.retrieveMultipleRecords('sprk_todo', '?$top=1');
       await service.deleteRecord('sprk_todo', ID);
 
       expect(fetchFn).not.toHaveBeenCalled();
-      expect(inner.createRecord).toHaveBeenCalledWith('sprk_matter', { sprk_mattername: 'm' });
+      expect(inner.createRecord).toHaveBeenCalledWith(NON_BFF_TABLE, NON_BFF_PAYLOAD);
       expect(inner.updateRecord).toHaveBeenCalledWith('sprk_project', ID, { sprk_projectname: 'p' });
       expect(inner.deleteRecord).toHaveBeenCalledWith('sprk_todo', ID);
     });
@@ -168,10 +250,10 @@ describe('BFF child-record writes (task 147 r1)', () => {
         ChildRecordWriteError
       );
       // A non-child write still goes through.
-      await service.createRecord('sprk_matter', { sprk_mattername: 'm' });
+      await service.createRecord(NON_BFF_TABLE, NON_BFF_PAYLOAD);
 
       expect(inner.createRecord).toHaveBeenCalledTimes(1);
-      expect(inner.createRecord).toHaveBeenCalledWith('sprk_matter', { sprk_mattername: 'm' });
+      expect(inner.createRecord).toHaveBeenCalledWith(NON_BFF_TABLE, NON_BFF_PAYLOAD);
       expect(inner.updateRecord).not.toHaveBeenCalled();
     });
 

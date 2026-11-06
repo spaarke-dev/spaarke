@@ -1,0 +1,32 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0283",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0283","generator_id":"gen_eval_set.py@1 F-0283","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0283.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-01"},
+ "header":{"firm":"Sutherland & Zeller LLP","firm_invoice_number":"2026025376","invoice_date":"2026-01-06","billing_period_start":"2025-10-01","billing_period_end":"2025-10-31","firm_matter_reference":"63913-0040","po_number":null,"fees_total":4671.0,"expenses_total":1184.52,"adjustments_total":0.0,"total_due":5855.52,"currency":"USD"},
+ "timekeepers":[{"name":"Farah Nwosu","title":"Paralegal","rate":260.0,"billed_as":"Farah Nwosu"},{"name":"Ivan Sandoval","title":"Partner","rate":810.0,"billed_as":"Ivan Sandoval"},{"name":"Katya Wickham","title":"Associate","rate":435.0,"billed_as":"Katya Wickham"},{"name":"Mei Castellanos","title":"Partner","rate":855.0,"billed_as":"Mei Castellanos"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-10-01","timekeeper":"Farah Nwosu","timekeeper_name":"Farah Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":0.7,"rate":260.0,"amount":182.0,"narrative":"Review court docket and calendar of pending deadlines for the warranty claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":2,"line_type":"fee","date":"2025-10-02","timekeeper":"Farah Nwosu","timekeeper_name":"Farah Nwosu","timekeeper_title":"Paralegal","title":"Para","hours":1.4,"rate":260.0,"amount":364.0,"narrative":"Draft appellate brief in the supply agreement","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":3,"line_type":"fee","date":"2025-10-06","timekeeper":"Katya Wickham","timekeeper_name":"Katya Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.4,"rate":435.0,"amount":174.0,"narrative":"Plan strategy for upcoming phase of the warranty claim with team","codes":["L120","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-10-17","timekeeper":"Katya Wickham","timekeeper_name":"Katya Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.9,"rate":435.0,"amount":1261.5,"narrative":"Analyze exposure and damages model for the vendor agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-10-20","timekeeper":"Katya Wickham","timekeeper_name":"Katya Wickham","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":435.0,"amount":1174.5,"narrative":"Analyze exposure and damages model for the distribution agreement","codes":["L120","A104"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-10-21","timekeeper":"Katya Wickham","timekeeper_name":"Katya Wickham","timekeeper_title":"Associate","title":"Assoc","hours":0.7,"rate":435.0,"amount":304.5,"narrative":"Prepare monthly status report to client regarding the data incident","codes":["L190","A111"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-10-21","timekeeper":"Ivan Sandoval","timekeeper_name":"Ivan Sandoval","timekeeper_title":"Partner","title":"Ptr","hours":0.65,"rate":810.0,"amount":526.5,"narrative":"Draft notice of appeal and docketing statement for the construction contract","codes":["L510","A103"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"fee","date":"2025-10-22","timekeeper":"Mei Castellanos","timekeeper_name":"Mei Castellanos","timekeeper_title":"Partner","title":"Ptr","hours":0.8,"rate":855.0,"amount":684.0,"narrative":"Draft appellate brief in the insurance coverage issue","codes":["L520","A103"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-10-02","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":49.07,"amount":49.07,"narrative":"Online legal research charges","codes":["E106"],"page":1,"narrative_style":"clear"},
+  {"n":10,"line_type":"expense","date":"2025-10-09","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1107.25,"amount":1107.25,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":11,"line_type":"expense","date":"2025-10-10","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":47.0,"rate":0.6,"amount":28.2,"narrative":"Mileage to courthouse","codes":["E109"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["283 Market Street","Minneapolis","Tax ID 67-5100116"],"template":"T02","pages":2},
+ "rule_set_id":"RS-01",
+ "context":{"matter_open":"2025-01-04","matter_close":"2026-01-29","matter_budget":48422.0,"approved_timekeepers":["Farah Nwosu","Clara Eriksen","Ivan Sandoval","Sofia Lindqvist","Katya Wickham","Jordan Pemberton","Mei Castellanos","Nadia Yilmaz","Sofia Galbraith"],"invoice_received_date":"2026-01-07"},
+ "expected_findings":[
+  {"rule_id":"RS-01-R01","rule_type":"TimeIncrement","scope":"line","line_refs":[7],"consequence":"Reduce"},
+  {"rule_id":"RS-01-R04","rule_type":"ExpenseRule","scope":"line","line_refs":[9],"consequence":"Disallow"},
+  {"rule_id":"RS-01-R06","rule_type":"InvoiceAge","scope":"invoice","line_refs":[],"consequence":"Flag"},
+  {"rule_id":"RS-01-R08","rule_type":"RequiredData","scope":"invoice","line_refs":[],"consequence":"Reject"}
+ ],
+ "seeded_violations":4
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/billing/billing-ai-observation.schema.json",
+  "title": "AiObservation billing rule body",
+  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = AiObservation (ebilling-r1 task 070; spec FR-24, design.md 6.1). 11. An AI observation is present at or above a confidence. Flag only (I-5): a Reject consequence is refused at publish (task 073). Parameters only: no rates, timekeepers or code descriptions, and no consequence (that is the sprk_consequence column). additionalProperties=false: any other member is refused, not ignored. 'messageTemplate' (anywhere) and 'then' are refused by RuleBodySchemaValidator before this schema runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "observation",
+    "minConfidence"
+  ],
+  "properties": {
+    "type": {
+      "const": "AiObservation"
+    },
+    "observation": {
+      "description": "The observation kind.",
+      "enum": [
+        "blockBilling",
+        "vagueDescription"
+      ]
+    },
+    "minConfidence": {
+      "description": "Confidence at or above which the observation counts. More than 0, at most 1.",
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1
+    }
+  }
+}

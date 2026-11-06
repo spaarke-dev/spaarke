@@ -93,6 +93,50 @@ public interface IGenericEntityService
     /// implied nothing had happened.</para>
     /// </remarks>
     Task BulkUpdateAsync(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates, CancellationToken ct = default);
+
+    /// <summary>
+    /// <see cref="BulkUpdateAsync"/> where every update is applied only while its row is still at <c>rowVersion</c> (the row's
+    /// <c>versionnumber</c> as the caller read it; Dataverse optimistic concurrency, <c>ConcurrencyBehavior.IfRowVersionMatches</c>).
+    /// All-or-nothing, as <see cref="BulkUpdateAsync"/>: one row changed since it was read rolls the whole transaction back.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Failure.</b> A row version mismatch (<c>ConcurrencyVersionMismatch</c>, 0x80060882) throws
+    /// <see cref="System.Data.DBConcurrencyException"/>: NO update was applied. Any other failure throws as
+    /// <see cref="BulkUpdateAsync"/> does. Cancellation surfaces as <see cref="OperationCanceledException"/>.</para>
+    /// <para>Added for ebilling-r1 task 076 (review pass 2): the rule set publish writes as the application identity and must not
+    /// overwrite a version or policy row another admin changed after the publish read it. Same seam and identity as
+    /// <see cref="BulkUpdateAsync"/>; the existing conditional writes are single-row and run on other identities
+    /// (<c>IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync</c>, the Ontology writer's own connection).</para>
+    /// <para>The default body throws: only the ServiceClient implementation (<c>DataverseServiceClientImpl</c>) sends it, so a
+    /// substitute that does not model row versions fails loudly instead of writing unconditionally.</para>
+    /// </remarks>
+    Task BulkUpdateIfRowVersionsMatchAsync(
+        string entityLogicalName, List<(Guid id, Dictionary<string, object> fields, long rowVersion)> updates, CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "BulkUpdateIfRowVersionsMatchAsync is implemented by DataverseServiceClientImpl only; a substitute must model row versions.");
+
+    /// <summary>
+    /// Sends <paramref name="requests"/> (creates, updates, deletes, in any mix of tables) as ONE <c>ExecuteTransactionRequest</c>,
+    /// <b>all-or-nothing</b>: Dataverse rolls the whole transaction back when any request faults. Requests run in list order.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Failure.</b> Throws <see cref="DataverseTransactionException"/> (an <see cref="InvalidOperationException"/>) whose
+    /// <see cref="DataverseTransactionException.FailedRequestIndex"/> is the zero-based index of the request Dataverse says faulted,
+    /// and whose <see cref="DataverseTransactionException.OutcomeUnknown"/> is true when Dataverse returned no fault (a timeout can
+    /// land after the commit). Cancellation surfaces as <see cref="OperationCanceledException"/>. A null, empty or nested
+    /// (<c>ExecuteMultiple</c> / <c>ExecuteTransaction</c>) list throws <see cref="ArgumentException"/> before any I/O.</para>
+    /// <para><b>Limits.</b> No responses are returned. Dataverse documents no request count for a transaction; keep a call to the same
+    /// 1,000-request bound <see cref="BulkUpdateAsync"/> uses.</para>
+    /// <para>Added for ebilling-r1 task 049 (G1): the submission pipeline persists an invoice, its lines, its approval portion and the
+    /// document link across several tables in one unit, and <see cref="BulkUpdateAsync"/> covers single-table updates only.</para>
+    /// <para>The default body throws, as <see cref="BulkUpdateIfRowVersionsMatchAsync"/>'s does: only the ServiceClient
+    /// implementation (<c>DataverseServiceClientImpl</c>) sends it, so a substitute that does not model transactions fails loudly
+    /// instead of writing the rows one by one.</para>
+    /// </remarks>
+    Task ExecuteTransactionAsync(IReadOnlyList<OrganizationRequest> requests, CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "ExecuteTransactionAsync is implemented by DataverseServiceClientImpl only; a substitute must model the transaction.");
+
     Task<Entity> RetrieveByAlternateKeyAsync(string entityLogicalName, KeyAttributeCollection alternateKeyValues, string[]? columns = null, CancellationToken ct = default);
     Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default);
     Task<LookupNavigationMetadata> GetLookupNavigationAsync(string childEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);
@@ -122,6 +166,19 @@ public interface IGenericEntityService
     Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default);
 
     Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// The <c>systemuserid</c> of the identity this connection authenticates as (Dataverse <c>WhoAmI</c>): the id Dataverse stamps in the
+    /// <c>createdby</c> of every row this service creates without impersonation. A caller that later has to recognise its own rows (the
+    /// rule drafting job's retry compensation, ebilling-r1 task 075) matches <c>createdby</c> against it.
+    /// </summary>
+    /// <remarks>
+    /// A fault, or an empty id, is thrown and never cached, so the caller fails closed. The default body throws: only the ServiceClient
+    /// implementation (<c>DataverseServiceClientImpl</c>) can answer, so a substitute that does not model identities fails loudly instead
+    /// of letting a caller treat every row as foreign (or as its own).
+    /// </remarks>
+    Task<Guid> GetCurrentIdentityIdAsync(CancellationToken ct = default) =>
+        throw new NotSupportedException("GetCurrentIdentityIdAsync is implemented by DataverseServiceClientImpl only; a substitute must model identities.");
 
     /// <summary>
     /// Associates a primary entity with one or more related entities via a many-to-many

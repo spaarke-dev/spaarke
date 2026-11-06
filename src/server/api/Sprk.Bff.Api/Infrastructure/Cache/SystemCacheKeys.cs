@@ -134,7 +134,7 @@ public static class SystemCacheKeys
 
     /// <summary>
     /// Dataverse entity-metadata schema cache (org-wide; one BFF per org per ADR-029).
-    /// Site: <c>Services/Dataverse/MetadataService.cs</c>. Raw key: <c>sdap:dv:entitymetadata:{logicalName}</c>.
+    /// Site: <c>Services/Dataverse/MetadataService.cs</c>. Raw key: <c>sdap:dv:entitymetadata:v2:{logicalName}</c>.
     /// Justification: entity metadata is org-wide configuration; tenant-scoping would
     /// defeat the purpose of the schema cache.
     /// </summary>

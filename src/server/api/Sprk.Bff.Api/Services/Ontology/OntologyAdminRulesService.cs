@@ -44,8 +44,8 @@ public sealed class OntologyAdminRulesService
     /// <summary>The longest <c>sprk_retiredreason</c> (the column is a 2000-character memo).</summary>
     public const int MaxReasonLength = 2000;
 
-    /// <summary><c>sprk_domain</c> = Ontology (live option value on spaarkedev1; Billing is 100000000, Docketing 100000002).</summary>
-    internal const int OntologyDomain = 100000001;
+    /// <summary><c>sprk_domain</c> = Ontology, from <see cref="RuleDomains"/> (ebilling-r1 task 070).</summary>
+    internal const int OntologyDomain = RuleDomains.PolicyDomainOntology;
 
     /// <summary>One page of policies; a result this long is refused rather than shown as the whole list.</summary>
     internal const int MaxPolicies = 1000;
@@ -138,8 +138,8 @@ public sealed class OntologyAdminRulesService
     // The Ontology-only condition. ONE place, used by every sprk_policy query and by-id read in this class.
     // ================================================================================================================
 
-    // Swap to RuleDomains (ebilling-r1 task 070, #1911) when it lands
-    private static string OntologyOnly() => $"(sprk_domain eq null or sprk_domain eq {OntologyDomain})";
+    private static string OntologyOnly() =>
+        $"({RuleDomains.PolicyDomainColumn} eq null or {RuleDomains.PolicyDomainColumn} eq {OntologyDomain.ToString(CultureInfo.InvariantCulture)})";
 
     // ================================================================================================================
     // Reads

@@ -4,7 +4,7 @@
     <title>RecordFamilyReader — caller-scoped (OBO) family walk with pruning, primary-parent rule, caps and protected continuation (FR-30)</title>
     <phase>7 W7 Record family service and Family tool</phase>
     <gate>070 complete + UAC 194b merged (primary-parent order)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF service; reads as the caller and must never reveal unreadable records (existence-leak class); Data Protection continuation.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -101,5 +101,13 @@
     <criterion testable="true">BFF build 0 errors; filtered suites and ArchTests green; publish-size delta and CVE recorded.</criterion>
   </acceptance-criteria>
 
+  <notes>
+    Completed 2026-10-29. PR #2442 (task/fm-071 @ 9c151ead66, includes UAC #2451). RecordFamilyReader reads every member, parent, catalog and thread row as the caller (MSCRMCallerID impersonation), never app-only.
+    Reviews: two Opus adversarial passes (A leak/auth: no leak; B ordering/ADRs). Fix round 1 covered no-privilege tables as zero rows (DataverseForbiddenException; 0x80040220 + prvRead&lt;table&gt;, confirmed live on dev), key paging (gt vs $orderby live-checked on dev), the 194b thread rank plus a parity test, pruning and dedupe tests, and a NotAccessTables entry. A scoped re-check found F2/F3/K1/K2/K4, fixed in round 2. The WA parity test now checks 194b's OrderedParentsOf after #2451.
+    Owner decision: the depth cap is counted from the top (exception to UAC C4; design §12.11). Shared ordering helper: #2444 (UAC).
+    Verification: BFF build 0/0; RecordFamilyReader 29/29; filtered suites green; ArchTests 1665/1665; publish +22,180 B (37.97 MB, 192 files both sides); no vulnerable packages.
+    Known limits: notes/task-071-notes.md (K1-K12), plus K2: ResponseHeadersRead leaves a stalled body bounded by the caller's token, not HttpClient.Timeout.
+    rework: fix-round-2 task 071
+  </notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

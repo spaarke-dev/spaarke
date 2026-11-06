@@ -1,0 +1,30 @@
+{
+ "schema":"ebilling-eval/1",
+ "kind":"invoice",
+ "id":"F-0171",
+ "set":"F",
+ "meta":{"title":"Synthetic invoice F-0171","generator_id":"gen_eval_set.py@1 F-0171","licence":"Synthetic (project generator, no third-party rights)","licence_status":"synthetic","pii_note":"Synthetic; no personal data","pii_scan":null,"storage":{"location":"regenerate","path":"local/synthetic/F-0171.pdf"},"spike":false,"label_method":"generator","rule_set_id":"RS-03"},
+ "header":{"firm":"Fenwick and Zeller LLP","firm_invoice_number":"INV-2026-17830","invoice_date":"2025-09-03","billing_period_start":"2025-08-01","billing_period_end":"2025-08-31","firm_matter_reference":"78468-0019","po_number":"PO-4596395","fees_total":2854.25,"expenses_total":4913.35,"adjustments_total":0.0,"total_due":7767.6,"currency":"USD"},
+ "timekeepers":[{"name":"Farah Ramanathan","title":"Associate","rate":270.0,"billed_as":"F. Ramanathan"},{"name":"Ingrid Castellanos","title":"Partner","rate":390.0,"billed_as":"I. Castellanos"},{"name":"Leila Lockhart","title":"Paralegal","rate":145.0,"billed_as":"L. Lockhart"},{"name":"Victor Voss","title":"Associate","rate":245.0,"billed_as":"V. Voss"}],
+ "lines":[
+  {"n":1,"line_type":"fee","date":"2025-08-25","timekeeper":"F. Ramanathan","timekeeper_name":"Farah Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":2.3,"rate":270.0,"amount":621.0,"narrative":"Internal conference with Farah Ramanathan regarding strategy for the customs audit","codes":["L530","A105"],"page":1,"narrative_style":"clerical"},
+  {"n":2,"line_type":"fee","date":"2025-08-29","timekeeper":"F. Ramanathan","timekeeper_name":"Farah Ramanathan","timekeeper_title":"Associate","title":"Assoc","hours":1.4,"rate":270.0,"amount":378.0,"narrative":"Organized and indexed file materials","codes":["L190","A110"],"page":1,"narrative_style":"clerical"},
+  {"n":3,"line_type":"fee","date":"2025-08-22","timekeeper":"I. Castellanos","timekeeper_name":"Ingrid Castellanos","timekeeper_title":"Partner","title":"Ptr","hours":1.2,"rate":390.0,"amount":468.0,"narrative":"Prepare for oral argument in the insurance coverage issue","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":4,"line_type":"fee","date":"2025-08-05","timekeeper":"L. Lockhart","timekeeper_name":"Leila Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":0.9,"rate":145.0,"amount":130.5,"narrative":"Research appealability issues in the lease dispute","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":5,"line_type":"fee","date":"2025-08-08","timekeeper":"L. Lockhart","timekeeper_name":"Leila Lockhart","timekeeper_title":"Paralegal","title":"Para","hours":0.95,"rate":145.0,"amount":137.75,"narrative":"Research appealability issues in the vendor agreement","codes":["L510","A102"],"page":1,"narrative_style":"clear"},
+  {"n":6,"line_type":"fee","date":"2025-08-18","timekeeper":"V. Voss","timekeeper_name":"Victor Voss","timekeeper_title":"Associate","title":"Assoc","hours":2.7,"rate":360.0,"amount":972.0,"narrative":"Review court docket and calendar of pending deadlines for the employment claim","codes":["L190","A104"],"page":1,"narrative_style":"clear"},
+  {"n":7,"line_type":"fee","date":"2025-08-25","timekeeper":"V. Voss","timekeeper_name":"Victor Voss","timekeeper_title":"Associate","title":"Assoc","hours":0.6,"rate":245.0,"amount":147.0,"narrative":"Prepare for oral argument in the licensing dispute","codes":["L530","A101"],"page":1,"narrative_style":"clear"},
+  {"n":8,"line_type":"expense","date":"2025-08-04","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":1084.33,"amount":1084.33,"narrative":"Document hosting and processing vendor","codes":["E118"],"page":1,"narrative_style":"clear"},
+  {"n":9,"line_type":"expense","date":"2025-08-14","timekeeper":null,"timekeeper_name":null,"timekeeper_title":null,"title":null,"hours":1.0,"rate":3829.02,"amount":3829.02,"narrative":"Consulting expert fees","codes":["E119"],"page":1,"narrative_style":"clear"}
+ ],
+ "document":{"letterhead":["978 Peachtree Way","Houston","Tax ID 80-5217087"],"template":"T16","pages":2},
+ "rule_set_id":"RS-03",
+ "context":{"matter_open":"2024-12-16","matter_close":"2025-11-29","matter_budget":56070.0,"approved_timekeepers":["Gregory Galbraith","Oliver Rosenthal","Leila Quillen","Victor Voss","Farah Ramanathan","Ingrid Castellanos","Rafael Wickham","Gregory Esposito","Leila Lockhart"],"invoice_received_date":"2025-09-06"},
+ "expected_findings":[
+  {"rule_id":"RS-03-R01","rule_type":"ApprovedRate","scope":"line","line_refs":[6],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R02","rule_type":"TimeIncrement","scope":"line","line_refs":[5],"consequence":"Reduce"},
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[1],"consequence":"Disallow"},
+  {"rule_id":"RS-03-R04","rule_type":"NonBillableActivity","scope":"line","line_refs":[2],"consequence":"Disallow"}
+ ],
+ "seeded_violations":4
+}
