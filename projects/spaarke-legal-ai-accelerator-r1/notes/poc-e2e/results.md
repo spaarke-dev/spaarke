@@ -97,3 +97,36 @@ If A imports directly and B doesn't, the preamble is the trigger.
 - Interactive dashboards are possible (inline JavaScript).
 - The preview is **not network-isolated**: an output page can call out to the internet. Keep our generated HTML script-free (OD-30 stands); that is now a security rule, not just a style choice.
 - Cards (V3) are not needed for charts. Mermaid gives diagrams in chat, and the Office previews give charts in files.
+
+### Steps 2–5: review the Brightwater NDA (2026-11-05, Claude via Chrome; about 5 minutes)
+
+**Prompt** (new task, no skill named): `Review this NDA: "Brightwater Mutual NDA.docx" in the Acme Company team site, Shared Documents/Legal Knowledge/Matters/Brightwater Systems/.` Plan text: `evidence/act3/plan-chat.md`.
+
+| Check | Result |
+|---|---|
+| **T-P2** routing | **Ours.** Cowork chose `Spaarke NDA (MVP) (nda-review)`, with Legal for Cowork ON and Microsoft's `review-contract` available. Connectors: SharePoint, Work IQ |
+| **T-P10**, our skill | **Yes.** It read the profile, then `Spaarke NDA – Mutual v1.0.md` from the team-site `Playbooks/NDA/` folder. The personal fallback folder is empty, so no fallback was needed |
+| Provenance line | "Standards: Spaarke NDA – Mutual v1.0 (customer playbook) · Skill: nda-review v0.1.2-poc", plus the profile defaults, the "test positions" warning and the hidden-text scan |
+| Plan preview | Chat table of 12 changes in priority order, the escalations, the fallbacks accepted with no edit, 5 open questions, then an **Approve and build / Change something / Skip** card. No file was built before approval |
+| Saving | One approval card for 5 uploads ("Approve All (5)") into the **matter folder beside the original**, plus a copy in `Cowork/Tasks/<task>/output/` |
+| Cover email | Cowork offered: Email to me / to someone else / Draft only / No email. We chose No email |
+| `check_outputs` | Passed, per the skill: every change is tracked, 12 comments, the clean copy equals the redline with changes accepted, and the external copy has no comments |
+| Cost | `/cost` = **122 credits** (2,697 this month) |
+
+**Scoring against `answer-key.md`** (from the audit pack's Topics sheet; scratchpad `act3_score.py`):
+- 24 topics rated: **7 RED, 6 YELLOW, 11 GREEN**. The key has 6 RED and 7 YELLOW.
+- **12 of 13** flagged topics match. The miss: `nda.representatives` was rated RED where the key says YELLOW. The Brightwater 4.2 clause is word for word our **Fallback** ("bound by written or professional obligations"). It says nothing about responsibility, and the model read that silence as our **Prohibited** "No responsibility for Representatives". This is a playbook-wording ambiguity, not a careless model (gap #16).
+- No false GREENs: every topic the key flags was flagged.
+- Not raised: the policy findings (NDA-3.3 to 3.5) and General Counsel approval (NDA-4.3). `nda-review` does not read the policy document; it is not in its inputs. Act 4 step 3 tests grounding on the policy.
+
+**Outputs and fidelity:**
+
+| Output | Cowork preview | Word or Excel desktop (COM, from `evidence/act3/`) |
+|---|---|---|
+| `Redline with Comments (internal).docx` | Opens | 5 pages; 15 tracked revisions (10 insertions, 5 deletions); 12 comments; page-1 summary table with 12 working links; 10 bookmarks |
+| `Redline.docx` (external) | Opens | 4 pages; the same 15 revisions; **0 comments** |
+| `Clean Revised.docx` | Opens | 4 pages; 0 revisions |
+| `Review Dashboard.html` | **Renders in dark and light** (the preview has a theme toggle): tiles 7/6/11/12/1, both bar charts in rating colours, the escalation table and the change list. No script and no `on*=` handlers. Its only URL is a link to the source NDA | — |
+| `Audit Pack.xlsx` | Renders (Excel for the web): 4 sheets, coloured rating cells. **Polish:** "Topics by rating" bars were all red, and the second chart sat at column L, off screen (gap #17, fixed) | — |
+
+Gap #14 (white text in the preview) **does not affect our dashboard**: its CSS switches text and background together.

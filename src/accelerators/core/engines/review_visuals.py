@@ -284,10 +284,13 @@ def render_xlsx(review, plan, catalogue, counts, path, doc_link=None):
         s.append([p, counts["priority"][p]])
     s.append(["Escalations", counts["escalations"]], style="bold")
     s.widths = [16, 70]
-    s.add_chart("Topics by rating", (h1 + 1, 1, h1 + 4, 1), [("Topics", (h1 + 1, 2, h1 + 4, 2), "D03B3B")],
+    # same per-bar colours as the dashboard; charts stacked so both show beside the table
+    s.add_chart("Topics by rating", (h1 + 1, 1, h1 + 4, 1),
+                [("Topics", (h1 + 1, 2, h1 + 4, 2), "5C5C58", [COLOR[k].upper() for k in RATINGS])],
                 anchor=(3, 1), size=(7, 14), bar_dir="bar")
-    s.add_chart("Changes by priority", (h2 + 1, 1, h2 + 3, 1), [("Changes", (h2 + 1, 2, h2 + 3, 2), "5C5C58")],
-                anchor=(11, 1), size=(7, 14), bar_dir="bar")
+    s.add_chart("Changes by priority", (h2 + 1, 1, h2 + 3, 1),
+                [("Changes", (h2 + 1, 2, h2 + 3, 2), "5C5C58", [COLOR[p].upper() for p in PRIORITIES])],
+                anchor=(3, 16), size=(7, 14), bar_dir="bar")
 
     t = wb.sheet("Topics")
     t.append(["Topic ID", "Topic", "Rating", "Status", "Clause", "Quote", "Playbook basis", "Note", "Action", "Priority"],

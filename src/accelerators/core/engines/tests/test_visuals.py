@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -83,6 +84,23 @@ class XlsxTests(Base):
             self.assertIn("<c:numCache>", chart)
             self.assertIn("'Sum- -x-'!$B$2:$B$3", chart)
             self.assertIn("xl/worksheets/_rels/sheet1.xml.rels", z.namelist())
+            self.assertNotIn("<c:dPt>", chart)  # no per-point colours unless asked
+
+    def test_point_colours_are_written_in_schema_order(self):
+        wb = xlsx_lite.Workbook()
+        s = wb.sheet("S")
+        s.append(["k", "n"])
+        s.append(["RED", 2])
+        s.append(["GREEN", 3])
+        s.add_chart("t", (2, 1, 3, 1), [("n", (2, 2, 3, 2), "5C5C58", ["D03B3B", "0CA30C"])])
+        with zipfile.ZipFile(wb.save(os.path.join(self.d, "p.xlsx"))) as z:
+            chart = z.read("xl/charts/chart1.xml").decode()
+        etree.fromstring(chart.encode())
+        self.assertEqual(chart.count("<c:dPt>"), 2)
+        self.assertLess(chart.index("<c:invertIfNegative"), chart.index("<c:dPt>"))
+        self.assertLess(chart.rindex("</c:dPt>"), chart.index("<c:cat>"))
+        self.assertIn('<c:idx val="1"/><c:invertIfNegative val="0"/><c:bubble3D val="0"/><c:spPr><a:solidFill>'
+                      '<a:srgbClr val="0CA30C"/>', chart)
 
 
 class ReviewVisualsTests(Base):
@@ -97,7 +115,13 @@ class ReviewVisualsTests(Base):
             text = f.read().lower()
         self.assertNotIn("<script", text)
         self.assertNotIn("http://", text)
+        # the Cowork preview runs scripts with internet access (POC gap #13): no event handlers either
+        self.assertIsNone(re.search(r"<[^>]*\son[a-z]+\s*=", text))
         self.assertTrue(zipfile.is_zipfile(xl))
+        with zipfile.ZipFile(xl) as z:
+            c1 = z.read("xl/charts/chart1.xml").decode()
+        self.assertIn('<a:srgbClr val="D03B3B"/>', c1)
+        self.assertIn('<a:srgbClr val="0CA30C"/>', c1)
 
     def test_unknown_topic_is_bad_input(self):
         r = review()

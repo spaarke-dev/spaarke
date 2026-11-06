@@ -76,7 +76,8 @@ class Sheet:
         return len(self.rows)   # 1-based row number
 
     def add_chart(self, title, cats, series, anchor=None, size=(8, 16), bar_dir="col", stacked=False):
-        """cats / series refs are (row1, col1, row2, col2) on THIS sheet; series = [(name, ref, rgb)]."""
+        """cats / series refs are (row1, col1, row2, col2) on THIS sheet; series = [(name, ref, rgb)] or
+        [(name, ref, rgb, point_rgbs)], where point_rgbs colours each bar in category order (None keeps rgb)."""
         self.charts.append({"title": title, "cats": cats, "series": series, "anchor": anchor,
                             "size": size, "bar_dir": bar_dir, "stacked": stacked})
 
@@ -162,15 +163,20 @@ class Workbook:
         cat_cache = f'<c:strCache><c:ptCount val="{len(cats)}"/>' + "".join(
             f'<c:pt idx="{i}"><c:v>{_x(v if v is not None else "")}</c:v></c:pt>' for i, v in enumerate(cats)) + "</c:strCache>"
         sers = []
-        for i, (name, t, rgb) in enumerate(ch["series"]):
+        for i, (name, t, rgb, *rest) in enumerate(ch["series"]):
             vals = cells(t)
             num = f'<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="{len(vals)}"/>' + "".join(
                 f'<c:pt idx="{j}"><c:v>{v}</c:v></c:pt>' for j, v in enumerate(vals) if isinstance(v, (int, float))) + "</c:numCache>"
+            # CT_BarSer order: idx, order, tx, spPr, invertIfNegative, dPt*, cat, val
+            dpts = "".join(
+                f'<c:dPt><c:idx val="{j}"/><c:invertIfNegative val="0"/><c:bubble3D val="0"/>'
+                f'<c:spPr><a:solidFill><a:srgbClr val="{p}"/></a:solidFill></c:spPr></c:dPt>'
+                for j, p in enumerate(rest[0] if rest and rest[0] else []) if p)
             sers.append(
                 f'<c:ser><c:idx val="{i}"/><c:order val="{i}"/>'
                 f'<c:tx><c:v>{_x(name)}</c:v></c:tx>'
                 f'<c:spPr><a:solidFill><a:srgbClr val="{rgb}"/></a:solidFill></c:spPr>'
-                f'<c:invertIfNegative val="0"/>'
+                f'<c:invertIfNegative val="0"/>{dpts}'
                 f'<c:cat><c:strRef><c:f>{rng(ch["cats"])}</c:f>{cat_cache}</c:strRef></c:cat>'
                 f'<c:val><c:numRef><c:f>{rng(t)}</c:f>{num}</c:numRef></c:val></c:ser>')
         horiz = ch["bar_dir"] == "bar"
