@@ -1359,6 +1359,7 @@ public sealed partial class DecisionCommitServiceTests
     [InlineData("return-to-firm")]
     [InlineData("override-submission")]
     [InlineData("assign-firm")] // 095d-1b
+    [InlineData("add-line")] // 164a-2 (EB-D-198): BillingActions only
     [InlineData("accept-line")]
     public async Task ABillingCode_IsRefusedByTheCommitRoute_NothingWritten_Ebilling074(string code)
     {

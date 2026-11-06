@@ -86,6 +86,50 @@ public sealed class InvoiceTotalsServiceTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // Task 164a-2 (EB-D-193, EB-D-199): the recalculation reads the marker from the extraction column and applies the added-line rule.
+    [Theory]
+    [InlineData("""{"provenance":{"source":"reviewer","decisionId":"0d0d0d0d-0000-4000-8000-000000000001"}}""", true)]
+    [InlineData("""{"provenance":{"analyzerId":"sprk_invoice_v1","apiVersion":"2026-06-01-preview"}}""", false)]
+    [InlineData("""{"provenance":{"source":"extraction"}}""", false)]
+    [InlineData("""{"fields":{}}""", false)]
+    [InlineData("not json", false)]
+    [InlineData(null, false)]
+    public async Task Recalculate_ReadsTheReviewerAddedMarkerFromTheExtractionColumn_AndStoresTheApprovedTotalPerEb199(string? extraction, bool reviewerAdded)
+    {
+        GivenInvoice(1000L, version: 5L);
+        var added = Line(InvoiceLineCostType.Fee, 200m, InvoiceLineStatus.Accepted, approved: 200m);
+        if (extraction is not null) added["sprk_extractionconfidence"] = extraction;
+        QueryExpression? query = null;
+        _entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) => query = q)
+            .ReturnsAsync(new EntityCollection(new List<Entity> { Line(InvoiceLineCostType.Fee, 1000m), added }));
+
+        Dictionary<string, object?>? invoiceWrite = null;
+        _records
+            .Setup(r => r.UpdateRecordFieldsIfUnchangedAsync("sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), 5L, It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, long, CancellationToken>((_, _, f, _, _) => invoiceWrite = f)
+            .Returns(Task.CompletedTask);
+
+        var result = await CreateService().RecalculateAsync(InvoiceId);
+
+        query!.ColumnSet.Columns.Should().Contain("sprk_extractionconfidence", "the marker lives there; without it an added line would be counted as billed");
+        result.IsRefused.Should().BeFalse();
+        if (reviewerAdded)
+        {
+            // billed stays 1000; the Accepted added line of 200 is added to the approved total, and is in neither the fees nor the expenses.
+            invoiceWrite!["sprk_approvedtotal"].Should().Be(1200m);
+            invoiceWrite["sprk_feestotal"].Should().Be(1000m);
+            invoiceWrite["sprk_expensestotal"].Should().Be(0m);
+        }
+        else
+        {
+            // An intake line: it is in the fees total and (Accepted) adjusts nothing, so approved stays the billed total.
+            invoiceWrite!["sprk_approvedtotal"].Should().Be(1000m);
+            invoiceWrite["sprk_feestotal"].Should().Be(1200m);
+        }
+    }
+
     // D-121 (ebilling-r1 task 049 part A): a credit line is read with its negative sprk_amount and summed as a signed value.
     [Fact]
     public async Task Recalculate_WithACreditLine_SumsItSigned_AndWritesTheNetTotals()

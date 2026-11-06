@@ -3,6 +3,7 @@ using System.Globalization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -182,7 +183,9 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
     {
         var query = new QueryExpression(LineEntity)
         {
-            ColumnSet = new ColumnSet(LineCostType, LineAmount, LineApprovedAmount, LineStatus, LineAdjustmentMethod, LineAdjustmentValue, LineState),
+            ColumnSet = new ColumnSet(
+                LineCostType, LineAmount, LineApprovedAmount, LineStatus, LineAdjustmentMethod, LineAdjustmentValue, LineState,
+                InvoiceSubmissionPersister.LineExtractionConfidence),
             Criteria = new FilterExpression(LogicalOperator.And),
             PageInfo = new PagingInfo { PageNumber = 1, Count = PageSize },
         };
@@ -236,7 +239,16 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
         line.GetAttributeValue<Money>(LineApprovedAmount)?.Value,
         OptionOf<InvoiceLineStatus>(line, LineStatus),
         OptionOf<InvoiceAdjustmentMethod>(line, LineAdjustmentMethod),
-        line.GetAttributeValue<decimal?>(LineAdjustmentValue));
+        line.GetAttributeValue<decimal?>(LineAdjustmentValue),
+        ReviewerAddedOf(line));
+
+    /// <summary>
+    /// True when the line is one the reviewer added through Add line (EB-D-193): <c>provenance.source = "reviewer"</c> in its
+    /// <c>sprk_extractionconfidence</c>. The one definition every <see cref="InvoiceLineInput"/> builder uses, so no totals path can count an added
+    /// line as a billed one. A row without the column read, an empty or unreadable column, or another source is not reviewer-added.
+    /// </summary>
+    internal static bool ReviewerAddedOf(Entity line) =>
+        ExtractionProvenance.IsReviewerAdded(line.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence));
 
     /// <summary>The enum for an option-set column, or null for an empty column or a value the enum does not name (the calculator refuses it).</summary>
     private static T? OptionOf<T>(Entity line, string column) where T : struct, Enum =>

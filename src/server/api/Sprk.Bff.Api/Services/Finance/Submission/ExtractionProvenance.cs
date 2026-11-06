@@ -36,6 +36,49 @@ internal static class ExtractionProvenance
     internal const string ActionVersionMember = "actionVersion";
     internal const string HeaderMember = "header";
 
+    // ── Task 164a-2 (EB-D-193): the reviewer-added marker ──
+
+    /// <summary>The member of a line's <c>provenance</c> that says where the line came from. Absent on a line intake wrote.</summary>
+    internal const string SourceMember = "source";
+
+    /// <summary>The <see cref="SourceMember"/> value of a line a reviewer added through Add line. Its totals rule is EB-D-199.</summary>
+    internal const string ReviewerSource = "reviewer";
+
+    /// <summary>The member that names the Add line decision that created the line (the deterministic decision id, a Guid in text).</summary>
+    internal const string DecisionIdMember = "decisionId";
+
+    /// <summary>
+    /// A reviewer-added line's whole <c>sprk_extractionconfidence</c> (EB-D-193): <c>{ "provenance": { "source": "reviewer", "decisionId": "..." } }</c>.
+    /// Numbers, flags and ids only: no name, text or value (EB-D-189 conditions), and no new column. A line written this way carries no
+    /// analyzer pair, so <see cref="LineProvenance.HasExtraction"/> is false and an extracted-field correction of it is refused (brief K1).
+    /// </summary>
+    internal static string ForReviewerAddedLine(Guid decisionId) =>
+        new JsonObject
+        {
+            [Member] = new JsonObject
+            {
+                [SourceMember] = ReviewerSource,
+                [DecisionIdMember] = decisionId.ToString("D", CultureInfo.InvariantCulture),
+            },
+        }.ToJsonString();
+
+    /// <summary>
+    /// True when the line's extraction JSON says <c>provenance.source = "reviewer"</c>. False for an empty or unreadable column, a line with no
+    /// <c>provenance</c> (or none naming a source), and any other source: the marker is exact, never guessed. Ordinal comparison.
+    /// </summary>
+    internal static bool IsReviewerAdded(string? extractionJson) =>
+        ReadMember(extractionJson) is { } member && IsReviewerSource(member);
+
+    /// <summary>The <see cref="IsReviewerAdded(string?)"/> test over a root the caller has already parsed (the review read parses once).</summary>
+    internal static bool IsReviewerAdded(JsonElement extractionRoot) =>
+        extractionRoot.ValueKind == JsonValueKind.Object
+        && extractionRoot.TryGetProperty(Member, out var member)
+        && member.ValueKind == JsonValueKind.Object
+        && IsReviewerSource(member);
+
+    private static bool IsReviewerSource(JsonElement provenance) =>
+        string.Equals(Text(provenance, SourceMember), ReviewerSource, StringComparison.Ordinal);
+
     /// <summary>The header fields a reviewer may correct, under the <see cref="BillingFieldNames"/> / resolution spellings.</summary>
     internal static readonly string[] HeaderFieldNames =
     [

@@ -531,4 +531,144 @@ public sealed class InvoiceTotalsCalculatorTests
                 .Should().Be(InvoiceTotalsRefusalCodes.AdjustmentInvalid);
         }
     }
+
+    // ── Task 164a-2 (EB-D-192, EB-D-199, add-line T8): a reviewer-added line is outside billed, fees, expenses and the percent base ──
+
+    private static InvoiceLineInput AddedFee(decimal amount, InvoiceLineStatus? status = InvoiceLineStatus.Flagged, decimal? approved = null) =>
+        new(Guid.NewGuid(), InvoiceLineCostType.Fee, amount, approved, status, null, null, ReviewerAdded: true);
+
+    private static InvoiceLineInput AddedExpense(decimal amount, InvoiceLineStatus? status = InvoiceLineStatus.Flagged, decimal? approved = null) =>
+        new(Guid.NewGuid(), InvoiceLineCostType.Expense, amount, approved, status, null, null, ReviewerAdded: true);
+
+    [Theory]
+    [InlineData(InvoiceLineStatus.Flagged, null, 1200)]     // undecided: the amount counts while the reviewer decides
+    [InlineData(InvoiceLineStatus.Pending, null, 1200)]
+    [InlineData(InvoiceLineStatus.Clean, null, 1200)]
+    [InlineData(InvoiceLineStatus.Accepted, 200, 1200)]      // accepted: billed + the amount
+    [InlineData(InvoiceLineStatus.Reduced, 150, 1150)]       // reduced: billed + the approved amount
+    [InlineData(InvoiceLineStatus.Reduced, 0, 1000)]
+    [InlineData(InvoiceLineStatus.Disallowed, 0, 1000)]      // disallowed: billed + 0, never billed - 200
+    public void AddedFeeLine_ContributesPerEb192_AndLeavesBilledFeesAndExpensesUnchanged(InvoiceLineStatus status, int? approved, int expectedApproved)
+    {
+        var firm = Fee(1000m, InvoiceLineStatus.Accepted, 1000m);
+        var added = AddedFee(200m, status, approved is null ? null : (decimal)approved);
+
+        var result = InvoiceTotalsCalculator.Calculate(1000m, new[] { firm, added });
+
+        result.IsRefused.Should().BeFalse();
+        result.ApprovedTotal.Should().Be((decimal)expectedApproved);
+        result.FeesTotal.Should().Be(1000m, "the added line is not in the fees total");
+        result.ExpensesTotal.Should().Be(0m);
+        result.LineAdjustmentsTotal.Should().Be(0m, "an added line has no firm-line adjustment, whatever its decision");
+        result.InvoiceAdjustmentsTotal.Should().Be(0m);
+    }
+
+    [Theory]
+    [InlineData(InvoiceLineStatus.Flagged, null, 1200)]
+    [InlineData(InvoiceLineStatus.Accepted, 200, 1200)]
+    [InlineData(InvoiceLineStatus.Reduced, 150, 1150)]
+    [InlineData(InvoiceLineStatus.Disallowed, 0, 1000)]
+    public void AddedExpenseLine_ContributesPerEb192_AndLeavesTheExpensesTotalUnchanged(InvoiceLineStatus status, int? approved, int expectedApproved)
+    {
+        var result = InvoiceTotalsCalculator.Calculate(
+            1000m, new[] { Fee(800m), Expense(200m), AddedExpense(200m, status, approved is null ? null : (decimal)approved) });
+
+        result.ApprovedTotal.Should().Be((decimal)expectedApproved);
+        result.FeesTotal.Should().Be(800m);
+        result.ExpensesTotal.Should().Be(200m, "the added line is not in the expenses total");
+        result.LineAdjustmentsTotal.Should().Be(0m);
+    }
+
+    [Fact]
+    public void AddedLines_AreOutsideThePercentBase_AndAreCombinedWithFirmLineAndInvoiceAdjustments()
+    {
+        // billed 1000 (fees 1000); a firm fee of 300 is disallowed (line adjustment 300); an added fee of 500 is Accepted.
+        // Percent base = fees 1000 - 300 = 700 (the added 500 is NOT in it): 10% = 70. Fixed 30.
+        // approved = billed 1000 + added 500 - line adjustments 300 - invoice adjustments (70 + 30) = 1100.
+        var result = InvoiceTotalsCalculator.Calculate(
+            1000m,
+            new[]
+            {
+                Fee(700m, InvoiceLineStatus.Accepted, 700m), Fee(300m, InvoiceLineStatus.Disallowed),
+                AddedFee(500m, InvoiceLineStatus.Accepted, 500m), Percent(10m), Fixed(30m),
+            });
+
+        result.FeesTotal.Should().Be(1000m);
+        result.LineAdjustmentsTotal.Should().Be(300m);
+        result.InvoiceAdjustmentsTotal.Should().Be(100m);
+        result.ApprovedTotal.Should().Be(1100m);
+    }
+
+    [Fact]
+    public void AnAddedLine_Disallowed_NeverSubtractsFromTheFirmsBilledLines()
+    {
+        var withAdded = InvoiceTotalsCalculator.Calculate(
+            1000m, new[] { Fee(1000m, InvoiceLineStatus.Accepted, 1000m), AddedFee(400m, InvoiceLineStatus.Disallowed) });
+        var without = InvoiceTotalsCalculator.Calculate(1000m, new[] { Fee(1000m, InvoiceLineStatus.Accepted, 1000m) });
+
+        withAdded.ApprovedTotal.Should().Be(without.ApprovedTotal).And.Be(1000m);
+    }
+
+    [Fact]
+    public void AnAddedCredit_IsSummedSigned_ByTheSameRule()
+    {
+        // A reviewer-added credit of -50: undecided or Accepted it reduces what is payable; Disallowed it contributes 0.
+        InvoiceTotalsCalculator.Calculate(1000m, new[] { Fee(1000m), AddedFee(-50m) }).ApprovedTotal.Should().Be(950m);
+        InvoiceTotalsCalculator.Calculate(1000m, new[] { Fee(1000m), AddedFee(-50m, InvoiceLineStatus.Disallowed) }).ApprovedTotal.Should().Be(1000m);
+        InvoiceTotalsCalculator.Calculate(1000m, new[] { Fee(1000m), AddedFee(-50m, InvoiceLineStatus.Reduced, -20m) }).ApprovedTotal.Should().Be(980m);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(-1.0)]
+    [InlineData(250.0)]
+    public void AReducedAddedLine_WithAnUnusableApprovedAmount_IsRefused_LikeAnyReducedLine(double? approved)
+    {
+        var added = AddedFee(200m, InvoiceLineStatus.Reduced, approved is null ? null : (decimal)approved);
+
+        var result = InvoiceTotalsCalculator.Calculate(1000m, new[] { Fee(1000m), added });
+
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.LineApprovedAmountInvalid);
+        result.Refusal.LineId.Should().Be(added.Id);
+    }
+
+    [Fact]
+    public void AnAddedLine_DoesNotLiftTheFr32FloorOrChangeTheBilledTotal()
+    {
+        // billed 100; a fixed adjustment of 150 exceeds it. The added line (undecided, 30) raises the approved total to -20, still below zero: refused.
+        var result = InvoiceTotalsCalculator.Calculate(100m, new[] { Fee(100m), AddedFee(30m), Fixed(150m) });
+
+        result.Refusal!.Code.Should().Be(InvoiceTotalsRefusalCodes.ApprovedTotalNegative);
+        result.ApprovedTotal.Should().Be(-20m);
+        result.FeesTotal.Should().Be(100m);
+    }
+
+    // Must-not-fire: the marker alone decides. An intake line (ReviewerAdded false) behaves exactly as before, whatever its amount or status.
+    [Theory]
+    [InlineData(InvoiceLineStatus.Flagged, null, 1000, 0)]       // undecided: nothing added, nothing taken
+    [InlineData(InvoiceLineStatus.Accepted, 200, 1000, 0)]       // accepted: nothing added (an intake line is in billed already)
+    [InlineData(InvoiceLineStatus.Reduced, 150, 950, 50)]        // reduced: the billed total less the 50 taken off
+    [InlineData(InvoiceLineStatus.Disallowed, 0, 800, 200)]      // disallowed: the billed total less the whole line
+    public void AnIntakeLine_ReviewerAddedFalse_BehavesExactlyAsBefore(InvoiceLineStatus status, int? approved, int expectedApproved, int expectedLineAdjustment)
+    {
+        var intake = Fee(200m, status, approved is null ? null : (decimal)approved);
+        intake.ReviewerAdded.Should().BeFalse("the default for every existing caller");
+
+        var result = InvoiceTotalsCalculator.Calculate(1000m, new[] { Fee(800m, InvoiceLineStatus.Accepted, 800m), intake });
+
+        result.ApprovedTotal.Should().Be((decimal)expectedApproved);
+        result.LineAdjustmentsTotal.Should().Be((decimal)expectedLineAdjustment);
+        result.FeesTotal.Should().Be(1000m, "an intake line is in the fees total");
+    }
+
+    [Fact]
+    public void TheReviewerAddedFlag_IsIgnoredOnAnAdjustmentLine()
+    {
+        var adjustment = new InvoiceLineInput(Guid.NewGuid(), InvoiceLineCostType.Adjustment, 0m, null, null, InvoiceAdjustmentMethod.Fixed, 40m, ReviewerAdded: true);
+
+        var result = InvoiceTotalsCalculator.Calculate(1000m, new[] { Fee(1000m), adjustment });
+
+        result.InvoiceAdjustmentsTotal.Should().Be(40m);
+        result.ApprovedTotal.Should().Be(960m);
+    }
 }

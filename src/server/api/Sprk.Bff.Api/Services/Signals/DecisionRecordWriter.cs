@@ -1242,7 +1242,7 @@ public sealed class DecisionRecordWriter
     private const int BillingLookupTop = 10;
 
     /// <summary>
-    /// The billing entry's OWN allowed subjects, one table per billing code: the line for the three line codes, the invoice for every other
+    /// The billing entry's OWN allowed subjects, one table per billing code: the line for the line codes (accept, reduce, disallow and add-line), the invoice for every other
     /// (D-75; D-101: an override and an automatic rejection file under the invoice the submission created). This list is consulted by
     /// <see cref="WriteBillingDecisionAsync"/> only; <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/> neither reads nor
     /// changes it. Built from the catalog's billing set, so every billing code has a subject; but a NEW line-level code that is not named in
@@ -1253,7 +1253,7 @@ public sealed class DecisionRecordWriter
     private static readonly FrozenDictionary<string, string> BillingSubjectByCode = DecisionActionCatalog.BillingActions
         .ToFrozenDictionary(
             d => d.Code,
-            d => d.Code is "accept-line" or "reduce-line" or "disallow-line" ? BillingLineEntity : BillingInvoiceEntity,
+            d => d.Code is "accept-line" or "reduce-line" or "disallow-line" or "add-line" ? BillingLineEntity : BillingInvoiceEntity,
             StringComparer.Ordinal);
 
     /// <summary>K4 (ontology-r1): the billing codes, as the "already recorded" lookup's <c>sprk_actioncode In</c> values (ordinal order, so
