@@ -131,15 +131,22 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
     /// <summary><c>sprk_fieldmappingrule.sprk_targetfieldtype</c> "Lookup" (its own option set: 100000000-based).</summary>
     internal const int TargetFieldTypeLookup = 100000001;
 
-    /// <summary>
-    /// <c>sprk_fieldmappingrule.sprk_syncmode</c> "One-time" (0), written EXPLICITLY on every seeded rule (field-mapping-server-write-path-r1
-    /// task 040, DI-003 / #2181). Every rule this seeder creates targets an Assigned-To column (the attorney matrix), and the
-    /// sync-mode migration is class-aware: an Assigned-To target stays One-time. A push never reads the sync mode of such a rule — it
-    /// applies them only to a request that opts in (<c>includeAssignedTo</c>) — so a seeded rule is neither silently skipped nor
-    /// re-pushed by an ordinary push. A rule of any OTHER class added to <see cref="SeedProfiles"/> is plain data and takes Manual
-    /// Refresh (1): change this and the test <c>SeedAsync_EveryRuleCarriesAnExplicitSyncMode_OneTimeForTheAssignedToMatrix</c> together.
-    /// </summary>
-    internal const int SeededRuleSyncMode = 0;
+    /// <summary><c>sprk_fieldmappingrule.sprk_syncmode</c> "One-time" (0).</summary>
+    internal const int SyncModeOneTime = 0;
+
+    /// <summary><c>sprk_fieldmappingrule.sprk_syncmode</c> "Manual Refresh" (1): the value a push selects.</summary>
+    internal const int SyncModeManualRefresh = 1;
+
+    // field-mapping-server-write-path-r1 task 040 (DI-003 / #2181; fix round 1, one Assigned-To classifier): every seeded rule is
+    // written with an EXPLICIT sync mode, never the column's default, and the value follows the rule's class:
+    //   - Assigned-To: the target column is listed for the target table in the BFF's access registry
+    //     (MembershipOptions.AccessConferringRoles, seeded from MembershipOptionsDefaults.CanonicalAccessConferringRegistry).
+    //     One-time (0): a push applies such a rule only to a request that opts in (includeAssignedTo), whatever its value, and
+    //     the sync-mode script gives the same class 0.
+    //   - Plain data: anything else. Manual Refresh (1), so an ordinary push refreshes it.
+    // This project cannot reference the BFF, so the value is stated per profile; the ArchTest
+    // FieldMappingSeederSyncModeClassTests asks the BFF's classifier (PushRuleSelection.AssignedToColumnsOf) about every seeded
+    // rule and fails when a value disagrees with the class.
 
     /// <summary>
     /// The default attorney-matrix profiles this seeder maintains. Ground-truthed
@@ -152,6 +159,8 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
         new FieldMappingProfileSeedItem(
             ProfileName: "Matter to Event (Attorney Matrix)",
             TargetEntityLogicalName: "sprk_event",
+            // Every target is an Assigned-To column of sprk_event in the registry.
+            RuleSyncMode: SyncModeOneTime,
             Rules: new[]
             {
                 new FieldMappingRuleSeedItem("sprk_assignedattorney1", "sprk_assignedattorney1", 1),
@@ -166,6 +175,8 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
         new FieldMappingProfileSeedItem(
             ProfileName: "Matter to Invoice (Attorney Matrix)",
             TargetEntityLogicalName: "sprk_invoice",
+            // Every target is an Assigned-To column of sprk_invoice in the registry.
+            RuleSyncMode: SyncModeOneTime,
             Rules: new[]
             {
                 // Invoice renames attorney/paralegal fields; has NO law-firm field
@@ -180,6 +191,9 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
         new FieldMappingProfileSeedItem(
             ProfileName: "Matter to Report Card (Attorney Matrix)",
             TargetEntityLogicalName: "sprk_reportcard",
+            // The registry lists no sprk_reportcard column (its "assigned" columns confer no access), so these rules are plain
+            // data: Manual Refresh. If the registry ever lists them, they become Assigned-To and this value must change to 0.
+            RuleSyncMode: SyncModeManualRefresh,
             Rules: new[]
             {
                 // Report Card matches Matter's names for attorney/paralegal/
@@ -328,7 +342,7 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
         foreach (var rule in profile.Rules)
         {
             var (ruleFailure, ruleOutcome) = await FindOrCreateRuleAsync(
-                envUri, bearerToken, profileIdResult.Id!, profile.ProfileName, rule, cancellationToken).ConfigureAwait(false);
+                envUri, bearerToken, profileIdResult.Id!, profile.ProfileName, profile.RuleSyncMode, rule, cancellationToken).ConfigureAwait(false);
             if (ruleFailure is not null)
             {
                 return (AppConfigSeederResult.Failed(
@@ -500,7 +514,7 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
     /// (same rationale as the profile-level upsert).
     /// </summary>
     private async Task<(AppConfigSeederResult? Failure, string Outcome)> FindOrCreateRuleAsync(
-        Uri envUri, string bearerToken, string profileId, string profileName,
+        Uri envUri, string bearerToken, string profileId, string profileName, int ruleSyncMode,
         FieldMappingRuleSeedItem rule, CancellationToken cancellationToken)
     {
         // A lookup filters on its _<name>_value form; the bare lookup name is a Dataverse 400 (#1318, FR-05c).
@@ -559,7 +573,7 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
             // (live spaarkedev1 rules and ACME metadata); 1 is not a valid option and Dataverse refuses it.
             ["sprk_targetfieldtype"] = TargetFieldTypeLookup,
             ["sprk_executionorder"] = rule.ExecutionOrder,
-            ["sprk_syncmode"] = SeededRuleSyncMode,
+            ["sprk_syncmode"] = ruleSyncMode,
             ["sprk_isactive"] = true,
         };
 
@@ -613,9 +627,12 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
         => string.IsNullOrEmpty(s) || s.Length <= max ? s : s[..max] + "...[truncated]";
 
     /// <summary>One default field-mapping profile this seeder maintains. Exposed <c>internal</c> so tests can construct fixtures directly.</summary>
+    /// <param name="RuleSyncMode">The <c>sprk_syncmode</c> every rule of the profile is created with: the value of the rules'
+    /// class (see <see cref="SyncModeOneTime"/>; task 040).</param>
     internal sealed record FieldMappingProfileSeedItem(
         string ProfileName,
         string TargetEntityLogicalName,
+        int RuleSyncMode,
         IReadOnlyList<FieldMappingRuleSeedItem> Rules);
 
     /// <summary>One Copy rule within a profile. Exposed <c>internal</c> so tests can construct fixtures directly.</summary>

@@ -137,7 +137,7 @@ public sealed class DataverseWebApiFieldMappingSeederTests
     // ---------- sync mode: written explicitly, class-aware (task 040, DI-003 / #2181) ----------
 
     [Fact]
-    public async Task SeedAsync_EveryRuleCarriesAnExplicitSyncMode_OneTimeForTheAssignedToMatrix()
+    public async Task SeedAsync_EveryRuleCarriesItsProfilesExplicitSyncMode_OneTimeForAssignedTo_ManualRefreshForPlainData()
     {
         var fake = new FakeDataverseHandler
         {
@@ -153,18 +153,23 @@ public sealed class DataverseWebApiFieldMappingSeederTests
 
         var rulePosts = fake.Requests.Where(r => r.Method == HttpMethod.Post && r.Uri.AbsolutePath.Contains("sprk_fieldmappingrules")).ToList();
         rulePosts.Should().HaveCount(20);
-        foreach (var post in rulePosts)
-        {
-            using var body = JsonDocument.Parse(post.Body!);
-            body.RootElement.TryGetProperty("sprk_syncmode", out var syncMode).Should().BeTrue("a seeded rule never leaves the sync mode to the column's default");
-            syncMode.GetInt32().Should().Be(0, "every seeded rule targets an Assigned-To column, which stays One-time; a push applies it only on an opt-in request");
-        }
+        var byProfile = rulePosts
+            .Select(post => JsonDocument.Parse(post.Body!).RootElement)
+            .GroupBy(body => ProfileOf(body.GetProperty("sprk_name").GetString()!))
+            .ToDictionary(g => g.Key, g => g.Select(body =>
+            {
+                body.TryGetProperty("sprk_syncmode", out var syncMode).Should().BeTrue("a seeded rule never leaves the sync mode to the column's default");
+                return syncMode.GetInt32();
+            }).Distinct().ToArray());
 
-        DataverseWebApiFieldMappingSeeder.SeedProfiles
-            .SelectMany(p => p.Rules)
-            .Should().OnlyContain(r => r.TargetField.StartsWith("sprk_assigned", StringComparison.Ordinal),
-                "a seeded rule of another class needs the Manual Refresh value; see SeededRuleSyncMode");
+        // The class of each profile's targets is the BFF registry's (pinned by the ArchTest FieldMappingSeederSyncModeClassTests).
+        byProfile["Matter to Event (Attorney Matrix)"].Should().Equal(DataverseWebApiFieldMappingSeeder.SyncModeOneTime);
+        byProfile["Matter to Invoice (Attorney Matrix)"].Should().Equal(DataverseWebApiFieldMappingSeeder.SyncModeOneTime);
+        byProfile["Matter to Report Card (Attorney Matrix)"].Should().Equal(DataverseWebApiFieldMappingSeeder.SyncModeManualRefresh);
     }
+
+    /// <summary>"a -> b (Matter to Event (Attorney Matrix))" names the profile after its first " (".</summary>
+    private static string ProfileOf(string ruleName) => ruleName[(ruleName.IndexOf(" (", StringComparison.Ordinal) + 2)..^1];
 
     // ---------- T3 idempotency: everything already exists ----------
 
