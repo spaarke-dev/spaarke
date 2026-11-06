@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
+using Azure.Core;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -452,6 +454,13 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
     /// </summary>
     public Dictionary<(string Entity, Guid Id), Entity> SourceRows { get; } = new();
 
+    /// <summary>
+    /// Field mapping task 030a (K3): the <c>sprk_recordtype_ref</c> id the best-effort record-type search answers for the regarding
+    /// table (<see cref="RecordTypeCatalogSetup.MatterTypeId"/> for a matter), so the To Do carries the typed ADR-024 pair. Null
+    /// (the default) leaves the search unanswered, as before: no type, the typed lookup alone. Set before the first request.
+    /// </summary>
+    public Guid? RegardingRecordTypeId { get; init; }
+
     /// <summary>Task 156: carriers whose read fails.</summary>
     public HashSet<(string Entity, Guid Id)> CarrierFaults { get; } = new();
 
@@ -572,8 +581,36 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
                         .Select(r => r.Value)
                         .ToList());
                 });
+            // Field mapping task 030a (K3): the ADR-024 record-type catalog, read app-only by the stamp derivation.
+            dataverseMock
+                .Setup(d => d.RetrieveMultipleAsync(
+                    It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => RecordTypeCatalogSetup.IsCatalogQuery(q)),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) => RecordTypeCatalogSetup.Answer(q));
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseMock.Object);
+
+            if (RegardingRecordTypeId is { } recordTypeId)
+            {
+                // The best-effort search for the regarding table's record-type ref (OfficeSearchService, app-only Web API).
+                var searchClient = new Mock<DataverseWebApiClient>(
+                    MockBehavior.Loose,
+                    Mock.Of<IConfiguration>(c => c["Dataverse:ServiceUrl"] == "https://test.crm.dynamics.com"),
+                    Mock.Of<ILogger<DataverseWebApiClient>>(),
+                    new NoOpTokenCredential(),
+                    (IConfidentialClientProvider)null!);
+                searchClient
+                    .Setup(c => c.QueryAsync<Dictionary<string, System.Text.Json.JsonElement>>(
+                        "sprk_recordtype_refs", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                        It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(
+                    [
+                        System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(
+                            $"{{ \"sprk_recordtype_refid\": \"{recordTypeId:D}\" }}")!,
+                    ]);
+                services.RemoveAll<DataverseWebApiClient>();
+                services.AddSingleton(searchClient.Object);
+            }
 
             // CoreAncestorResolver: replace the base registration (which opens a real MetadataService
             // scope) with one built from an in-memory column probe.
@@ -632,4 +669,15 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
 
     /// <summary>One captured log entry.</summary>
     public sealed record LogEntry(LogLevel Level, string Message);
+
+    /// <summary>A <see cref="TokenCredential"/> that never touches the network (local, as the other Office suites' copies are).</summary>
+    private sealed class NoOpTokenCredential : TokenCredential
+    {
+        private static AccessToken Token => new("stub-token-not-a-real-credential", DateTimeOffset.UtcNow.AddHours(1));
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken) => Token;
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new(Token);
+    }
 }

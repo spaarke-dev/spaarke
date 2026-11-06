@@ -89,7 +89,7 @@ public class FeatureRolePrivilegeGuardTests
         + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:115-131";
 
     /// <summary>The Office To Do's payload (task 030a): the record regarding, its record type, the carriers and the Assigned To contact.</summary>
-    private const string OfficeTodoCreate = Bff + "Services/Office/OfficeService.cs:2925-2963,2976-2990; ";
+    private const string OfficeTodoCreate = Bff + "Services/Office/OfficeService.cs:2918-2980,2984-2996; ";
 
     /// <summary>The Office "Save as version" offer needs Read on the colliding document, asked of the caller.</summary>
     private const string VersionOfferRead = Bff + "Api/Office/OfficeEndpoints.cs:547-605";
@@ -271,6 +271,10 @@ public class FeatureRolePrivilegeGuardTests
             "prvAppendTosprk_Communication", "prvAppendToContact"),
         .. For("Office To Do", [Core], "Basic", OfficeTodoCreate + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:494-500",
             "prvAppendTosprk_RecordType_Ref"),
+        // The service reads the pair's record-type catalog row as the caller; a caller who cannot read it is refused with the To Do
+        // route's uniform 403 (OfficeTodoCreateThroughServiceContractTests), so the role set is held to that Read.
+        .. For("Office To Do", [Core], "Basic", Bff + "Services/RecordCreation/RecordCreationService.Mapping.cs:266,990-1000",
+            "prvReadsprk_RecordType_Ref"),
 
         // Communication send / reply (POST /api/communications/send and /send-bulk, fix round 3): the route filter asks AppendTo, as the
         // caller, on every association and on every regarding record copied from the email being replied to (RegardingFieldMap.All, all

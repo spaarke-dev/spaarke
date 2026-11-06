@@ -71,7 +71,7 @@ This is an 018b-sized change on its own.
 
 ## 4. Gates
 
-Nothing was built or published, so there is no publish-size delta and no CVE result. No test was added or changed.
+This line covers the 030b-only status: the stopped document-save half built nothing, published nothing and changed no test. Task 030a (section 5) did add and change tests, and its gate results are in section 5.
 
 ## 5. Task 030a: Office To Do through the unified create (done)
 
@@ -146,5 +146,28 @@ host file and the double's `OpenTables`.
 - A To Do filed only under a document or email carrier reads no mapping source: no profile applies, as on the events route.
 - A requested assignee the caller may not AppendTo is now refused with the uniform body. Before, only Read was asked.
 - A refusal of kind Forbidden, Invalid or Unavailable is the generic `OFFICE_010`, as every other failure was before.
+- A caller whose own contact they cannot AppendTo gets the To Do without an assignee; the response carries no warning. The server
+  logs `todo_assignee_unset` with reason `caller_contact_not_appendable` and the service's own mapping warning; the reason
+  `caller_has_no_linked_contact` is logged only when the caller has no linked contact.
+- `OFFICE_010` now also covers `Upstream` (a Dataverse 429 or 5xx during the caller's checks) and `PrincipalUnresolved` (the
+  caller's token exchange failed), as well as an underivable stamp. Before, these did not arise on this route: the caller's
+  rights were checked only by the route filter.
+- AppendTo is now asked on the communication or document the To Do carries, not only on the assignee (a carrier the caller
+  cannot AppendTo gets the uniform 403 `OFFICE_009`).
+- A field-mapping profile that fills Assigned To outranks the caller's own contact. Order: the requested contact, else the
+  mapped value, else the caller's linked contact. Owner-confirmed 2026-11-06. Pinned by
+  `Post_Todo_NoAssignee_AMappedAssignedTo_BeatsTheCallersOwnContact` and
+  `Post_Todo_AnExplicitAssignee_BeatsTheMappedValue_AndTheCallersOwnContact`.
+
+### Fix round (review of 030a)
+
+- F2: the unset-assignee log no longer says the caller has no linked contact when a contact was offered but the service did not
+  write it.
+- F4: `IOfficeService.CreateTodoAsync` documentation, the architecture-doc line citations and the stale comments on
+  `TodoSourceAccessFilter` and `OfficeEndpoints` now describe the create service as the creator; section 4 above is corrected.
+- K3: host cases for the typed record-type pair (`MatterTypeId`) and for a caller who lacks the record-type Read or AppendTo (the
+  uniform 403); `FeatureRolePrivilegeGuardTests` now lists Read on the record type for the Office To Do.
+- The route filter's refusal detail also advises choosing a different person to assign the To Do to, so it covers the assignee
+  case without naming any record. It is still one string for every denial; status and codes are unchanged.
 
 rework: none task 030

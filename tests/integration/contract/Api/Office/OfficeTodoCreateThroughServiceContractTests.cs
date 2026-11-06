@@ -101,6 +101,116 @@ public class OfficeTodoCreateThroughServiceContractTests
         created.GetAttributeValue<string>("sprk_name").Should().Be("What the user typed", "FR-02: fill-only, the user's value wins");
     }
 
+    /// <summary>
+    /// Assigned To order (owner-confirmed 2026-11-06): the user's explicit choice, then the value a field-mapping profile fills,
+    /// then the user's own linked contact. Mapped beats the caller default.
+    /// </summary>
+    [Fact]
+    public async Task Post_Todo_NoAssignee_AMappedAssignedTo_BeatsTheCallersOwnContact()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory();
+        var (matterId, mappedContactId, callerContactId) = ArrangeAssignedToProfile(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new CreateTodoRequest
+        {
+            Name = "Assignee from the profile",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = matterId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        factory.CreatedEntities.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("sprk_assignedto")
+            .Should().BeEquivalentTo(new EntityReference("contact", mappedContactId),
+                "no assignee was chosen, so the profile's value outranks the caller's own contact");
+        mappedContactId.Should().NotBe(callerContactId);
+    }
+
+    /// <summary>The user's explicit assignee beats both the mapped value and the caller's own contact.</summary>
+    [Fact]
+    public async Task Post_Todo_AnExplicitAssignee_BeatsTheMappedValue_AndTheCallersOwnContact()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory();
+        var (matterId, mappedContactId, callerContactId) = ArrangeAssignedToProfile(factory);
+        var explicitContactId = Guid.NewGuid();
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new CreateTodoRequest
+        {
+            Name = "Assignee the user chose",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = matterId,
+            AssignedToContactId = explicitContactId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        factory.CreatedEntities.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("sprk_assignedto")
+            .Should().BeEquivalentTo(new EntityReference("contact", explicitContactId),
+                "the user's explicit choice is first in the order");
+        new[] { mappedContactId, callerContactId }.Should().NotContain(explicitContactId);
+    }
+
+    /// <summary>K3: the typed pair path. The record-type search answers the matter's catalog row, so the To Do carries the pair's type.</summary>
+    [Fact]
+    public async Task Post_Todo_UnderAMatter_WhenTheRecordTypeResolves_CarriesTheTypedPair()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory { RegardingRecordTypeId = RecordTypeCatalogSetup.MatterTypeId };
+        var matterId = Guid.NewGuid();
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new CreateTodoRequest
+        {
+            Name = "Typed pair",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = matterId,
+            RegardingRecordName = "Acme v. Beta",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = factory.CreatedEntities.Should().ContainSingle().Subject;
+        created.GetAttributeValue<EntityReference>("sprk_regardingrecordtype")!.Id.Should().Be(RecordTypeCatalogSetup.MatterTypeId);
+        created.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(matterId.ToString());
+        created.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(matterId);
+    }
+
+    /// <summary>K3: a caller who may not AppendTo the record type the typed pair names gets the uniform refusal; nothing is written.</summary>
+    [Fact]
+    public async Task Post_Todo_UnderAMatter_WhenTheCallerLacksAppendToOnTheRecordType_IsTheUniformRefusal_AndNothingIsCreated()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory { RegardingRecordTypeId = RecordTypeCatalogSetup.MatterTypeId };
+        factory.RecordCreation.CallerDataverse.Held.Remove("prvAppendTosprk_RecordType_Ref");
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new CreateTodoRequest
+        {
+            Name = "Record type not usable",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = Guid.NewGuid(),
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await NormalizeAsync(response)).Should().Be(await FilterDenialBodyAsync(), "the uniform body, identical for every denial");
+        AssertNothingCreated(factory);
+    }
+
+    /// <summary>
+    /// K3: the record type row is also READ as the caller (the pair's type is checked before anything is written). A catalog row the
+    /// caller cannot read is a refusal too: the uniform 403, nothing written.
+    /// </summary>
+    [Fact]
+    public async Task Post_Todo_UnderAMatter_WhenTheCallerCannotReadTheRecordTypeRow_IsRefused_AndNothingIsCreated()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory { RegardingRecordTypeId = RecordTypeCatalogSetup.MatterTypeId };
+        factory.RecordCreation.CallerDataverse.Unreadable.Add(("sprk_recordtype_ref", RecordTypeCatalogSetup.MatterTypeId));
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new CreateTodoRequest
+        {
+            Name = "Record type row unreadable",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = Guid.NewGuid(),
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await NormalizeAsync(response)).Should().Be(await FilterDenialBodyAsync(), "the uniform body, identical for every denial");
+        AssertNothingCreated(factory);
+    }
+
     [Fact]
     public async Task Post_Todo_ARegardingRecordTheCallerMayNotAppendTo_IsTheFiltersUniformRefusal_AndNothingIsCreated()
     {
@@ -205,7 +315,66 @@ public class OfficeTodoCreateThroughServiceContractTests
         AssertNothingCreated(factory);
     }
 
+    /// <summary>
+    /// The one refusal detail also covers the assignee case, without naming any record (one string for every denial).
+    /// </summary>
+    [Fact]
+    public void TheUniformRefusalDetail_AlsoAdvisesChoosingADifferentAssignee_AndNamesNoRecord()
+    {
+        Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedDetail.Should().Be(
+            "You do not have permission to create a To Do against one or more of the records it refers to, "
+            + "or those records are not available. Open the record you want the To Do filed against and try "
+            + "again, ask its owner to share it with you, or choose a different person to assign it to.");
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A caller with a linked contact, and a Matter to To Do profile that copies a matter contact into Assigned To: the three
+    /// candidates for the column (explicit, mapped, the caller's own).
+    /// </summary>
+    private static (Guid MatterId, Guid MappedContactId, Guid CallerContactId) ArrangeAssignedToProfile(TodoRegardingTestWebAppFactory factory)
+    {
+        var matterId = Guid.NewGuid();
+        var mappedContactId = Guid.NewGuid();
+        var callerContactId = Guid.NewGuid();
+        var callerSystemUserId = Guid.NewGuid();
+
+        factory.CallerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolution.Resolved(callerSystemUserId.ToString("D")));
+        factory.Identity
+            .Setup(i => i.ResolveAsync(callerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Sprk.Bff.Api.Services.Ai.Membership.Models.PersonIdentity(callerSystemUserId, ContactId: callerContactId));
+
+        var matter = new Entity("sprk_matter", matterId) { ["sprk_primarycontact"] = new EntityReference("contact", mappedContactId) };
+        factory.SourceRows[("sprk_matter", matterId)] = matter;
+        factory.RecordCreation.CallerReadableRows[matterId] = matter;
+        factory.RecordCreation.FieldMappings
+            .Setup(m => m.GetFieldMappingProfileWithRulesAsync("sprk_matter", "sprk_todo", true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FieldMappingProfileEntity
+            {
+                Name = "Matter to To Do",
+                SourceEntity = "sprk_matter",
+                TargetEntity = "sprk_todo",
+                IsActive = true,
+                Rules =
+                [
+                    new FieldMappingRuleEntity
+                    {
+                        Name = "primary contact to assigned to",
+                        SourceField = "sprk_primarycontact",
+                        SourceFieldType = CreateTimeFieldMapping.FieldTypeLookup,
+                        TargetField = "sprk_assignedto",
+                        TargetFieldType = CreateTimeFieldMapping.FieldTypeLookup,
+                        MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+                        ExecutionOrder = 0,
+                        IsActive = true,
+                    },
+                ],
+            });
+        return (matterId, mappedContactId, callerContactId);
+    }
 
     private static async Task<(HttpStatusCode Status, string Body, TodoRegardingTestWebAppFactory Factory)> PostAsync(
         Action<OfficeCallerDataverseDouble> arrange, CreateTodoRequest request)

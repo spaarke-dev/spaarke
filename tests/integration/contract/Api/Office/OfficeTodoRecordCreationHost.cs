@@ -85,6 +85,11 @@ public sealed class OfficeTodoRecordCreationHost
         foreach (var (table, entitySet, schema) in NamedTables)
             world.Tables[table] = (entitySet, "UserOwned", schema, table + "id");
 
+        // The ADR-024 record-type catalog (organization-owned): the rows a typed pair names, as the catalog holds them.
+        world.Tables["sprk_recordtype_ref"] = ("sprk_recordtype_refs", "OrganizationOwned", "sprk_RecordType_Ref", "sprk_recordtype_refid");
+        world.Rows[("sprk_recordtype_ref", RecordTypeCatalogSetup.MatterTypeId)] = new() { ["sprk_recordlogicalname"] = "sprk_matter" };
+        world.Rows[("sprk_recordtype_ref", RecordTypeCatalogSetup.ProjectTypeId)] = new() { ["sprk_recordlogicalname"] = "sprk_project" };
+
         world.OpenTables.UnionWith(
         [
             "sprk_matter", "sprk_project", "sprk_invoice", "sprk_document", "sprk_communication", "sprk_workassignment",
@@ -137,6 +142,7 @@ public sealed class OfficeTodoRecordCreationHost
             "prvCreatesprk_Todo", "prvAppendsprk_Todo",
             "prvAppendTosprk_Document", "prvAppendTosprk_Communication", "prvAppendTosprk_WorkAssignment",
             "prvAppendTosprk_ServiceRequest",
+            "prvReadsprk_RecordType_Ref", "prvAppendTosprk_RecordType_Ref",
         ]);
     }
 }
