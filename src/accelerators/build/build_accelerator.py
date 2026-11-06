@@ -239,7 +239,15 @@ def main(argv=None):
             except playbook_parse.FormatError as ex:
                 raise GateFailure(f"{pb['source']}: " + "; ".join(ex.args[0])) from None
             log(f"  - {pb['source']}: {len(parsed['topics'])} topics, silent {parsed['silent_topics']}")
-            rendered.append(render_word_playbook.render(parsed, cat, os.path.join(wp_dir, pb["word"])))
+            # Primary Word copy: Microsoft's four-column shape (design §5.3, OD-39), checked like
+            # create-playbook's verify-playbook.py. The heading layout stays until the Word tests settle X3.
+            word_path = render_word_playbook.render_table(parsed, cat, os.path.join(wp_dir, pb["word"]))
+            problems = render_word_playbook.check_table(word_path, parsed, cat)
+            if problems:
+                raise GateFailure(f"{pb['word']}: " + "; ".join(problems))
+            rendered.append(word_path)
+            stem, ext = os.path.splitext(pb["word"])
+            rendered.append(render_word_playbook.render(parsed, cat, os.path.join(wp_dir, f"{stem} (headings){ext}")))
         results["gates"]["topic-alignment"] = "ok"
 
         log("[3/8] eval corpus")

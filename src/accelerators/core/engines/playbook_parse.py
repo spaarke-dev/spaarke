@@ -53,6 +53,7 @@ class FormatError(Exception):
 def parse(text, catalogue_ids, side_filter=None):
     errors, lines = [], text.splitlines()
     title, meta, topics, cur, field = None, {}, [], None, None
+    intro = []  # free text between the header and the first topic (scope / introduction)
     for n, raw in enumerate(lines, 1):
         line = raw.rstrip()
         if not line.strip():
@@ -88,7 +89,9 @@ def parse(text, catalogue_ids, side_filter=None):
             cur, field = None, None
             continue
         if cur is None:
-            continue  # free text before the first topic is allowed (introduction)
+            if title is not None:
+                intro.append(line.strip())  # free text before the first topic is allowed (introduction)
+            continue
         fm = FIELD_RE.match(line)
         if fm and fm.group("label").strip().lower() in FIELDS:
             field = FIELDS[fm.group("label").strip().lower()]
@@ -135,7 +138,7 @@ def parse(text, catalogue_ids, side_filter=None):
     for t in topics:
         t.pop("line", None)
     meta["side"] = side
-    return {"title": title, "meta": meta, "topics": topics, "silent_topics": silent}
+    return {"title": title, "meta": meta, "intro": " ".join(intro), "topics": topics, "silent_topics": silent}
 
 
 def load_catalogue(path):

@@ -22,7 +22,6 @@ import sys
 import tempfile
 
 import docx
-from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -592,34 +591,18 @@ def write_playbooks(version, term_change, outdir):
              "Do not use for: one-way NDAs, M&A confidentiality agreements, employee confidentiality agreements.\n")
     lines = src.split("\n")
     first_topic = next(i for i, l in enumerate(lines) if l.startswith("## topic:"))
-    src = "\n".join(lines[:first_topic]) + scope + "\n" + "\n".join(lines[first_topic:])
+    # the customer copy carries the scope, not the baseline's own commentary
+    src = "\n".join(lines[:2]) + "\n" + scope + "\n" + "\n".join(lines[first_topic:])
     os.makedirs(outdir, exist_ok=True)
     open(os.path.join(outdir, f"{name}.md"), "w", encoding="utf-8").write(src)
     parsed = pp.parse(src, sides)
     rw.render(parsed, cat, os.path.join(outdir, f"{name}.docx"))
-    # four-column table (Microsoft create-playbook shape) with the scope block above it
-    titles = {t["id"]: t["title"] for t in cat["topics"]}
-    d = docx.Document()
-    style_doc(d, "Calibri", 10)
-    s = d.sections[0]
-    s.orientation, s.page_width, s.page_height = WD_ORIENT.LANDSCAPE, s.page_height, s.page_width
-    d.core_properties.title = name
-    d.add_heading(name, level=1)
-    d.add_paragraph(scope.strip())
-    d.add_paragraph(f"Version {version} | Owner: Spaarke Legal Engineering | Effective: 2026-11-01 | Status: POC test positions, not attorney-approved")
-    t = d.add_table(rows=1, cols=4)
-    t.style = "Table Grid"
-    for i, hcell in enumerate(("Topic", "Instructions", "Example Text", "Compromise Positions")):
-        t.rows[0].cells[i].text = hcell
-    for tp in parsed["topics"]:
-        instr = tp.get("preferred", "")
-        if tp.get("escalate") and tp["escalate"] != "n/a":
-            instr += f" Escalate: {tp['escalate']}"
-        comp = tp.get("fallback", "") if tp.get("fallback") not in (None, "n/a") else ""
-        row = t.add_row().cells
-        row[0].text = f"{titles.get(tp['id'], tp['id'])} ({tp['id']})"
-        row[1].text, row[2].text, row[3].text = instr, (tp.get("model_language") or "").strip(' "'), comp
-    d.save(os.path.join(outdir, f"{name} (table).docx"))
+    # the Word copy: Microsoft's four-column shape, from the build renderer (design §5.3, OD-39)
+    for placement, suffix in (("none", " (table)"), ("instructions", " (table, ids in Instructions)")):
+        path = rw.render_table(parsed, cat, os.path.join(outdir, f"{name}{suffix}.docx"), placement)
+        problems = rw.check_table(path, parsed, cat, placement)
+        if problems:
+            raise SystemExit(f"{path}: {problems}")
     return name
 
 

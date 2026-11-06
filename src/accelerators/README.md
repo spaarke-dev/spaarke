@@ -51,7 +51,7 @@ Outputs in `build/out/nda/`:
 | `t0/spaarke-nda-mvp.zip` | Cowork: Customize › Upload plugin (unified manifest, `agentSkills[]`) |
 | `t0/spaarke-nda-mvp-claude-format.zip` | Claude-format plugin, to test conversion (spike S1) |
 | `t0/skills/<name>/` and `.zip` | Copy to OneDrive `Documents/Cowork/Skills/`, or upload a single skill |
-| `t0/word-playbooks/*.docx` | Word legal plugin: Review contract › Attach from Cloud |
+| `t0/word-playbooks/*.docx` | Word copy (Microsoft's four columns, checked at build) for the Word legal plugin: Review contract › New playbook › Attach from Cloud. `* (headings).docx` is the transitional heading layout, dropped once the Word tests pass (backlog X3) |
 | `e2e/` | Local end-to-end outputs on the synthetic corpus |
 | `manifest.json` | Versions, gate results, SHA-256 of every output |
 

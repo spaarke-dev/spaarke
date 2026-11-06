@@ -121,12 +121,13 @@ The policy follows §7.2a of `playbook-library-and-grounding.md`:
 **Setup.**
 - Open `Matters/Brightwater Systems/Brightwater Mutual NDA.docx` from the team site, in **Word desktop**.
 - The library holds v1.1 in `Legal Knowledge/Playbooks/NDA/`, with v1.0 in `Archive/`.
-- Run R1–R3 now with the current files. Run them again once the four-column template (backlog X2) is rendered.
+- **The four-column template (backlog X2) is built (2026-11-06).** It copies Cowork's `create-playbook` file: a Title-style name, one scope paragraph, one table (Topic | Instructions | Example Text | Compromise Positions), and no ids. Its v1.1 copies are in OneDrive `Documents/Cowork/Test/POC-Act2/` and in `kit-held/Act 2 - Word copy template v2/`. The library still holds the older table file from 11-05.
 
 | # | Steps | Log |
 |---|---|---|
-| **R1** | `/` **Review contract** → **New playbook** → **Attach from Cloud** → `Spaarke NDA – Mutual v1.1 (table).docx` | Is it read as a playbook (24 topics, our rules, compromise positions shown) or synthesised as a precedent ("Counsel decision")? |
-| **R2** | The same with the heading-format `Spaarke NDA – Mutual v1.1.docx` | Does Attach from Cloud find the team-site library? (T-P10, Word side.) Which format reads better? |
+| **R1** | `/` **Review contract** → **New playbook** → **Attach from Cloud** → OneDrive `Cowork/Test/POC-Act2/Spaarke NDA – Mutual v1.1 (table).docx` (new template) | Is it **imported directly** as a saved-playbook card named "Spaarke NDA – Mutual v1.1" (like Cowork's file in Act 1), or synthesised as a precedent ("Counsel decision")? Are the Compromise Positions kept? |
+| **R1b** | The same with `… v1.1 (table, ids in Instructions).docx` | Does a `Topic ID: nda.xxx` last line in Instructions survive the import, or trigger synthesis? Decides the topic-id placement |
+| **R2** | Attach from Cloud from the **team-site library** `Legal Knowledge/Playbooks/NDA/`: the heading-format `Spaarke NDA – Mutual v1.1.docx` | Does Attach from Cloud find the team-site library? (T-P10, Word side.) Is the heading format read better or worse than R1? |
 | **R3** | **Run review** with the better of R1 and R2 | Is `nda.term` GREEN (v1.1)? Score against `answer-key.md` (Brightwater: 6 RED, 7 YELLOW; term GREEN under v1.1). Keep the review |
 | **R4** | **Save playbook** | The saved name (the document Title?). Is a file created, and where (`Documents/Copilot/…`)? |
 | **R5** | A **new chat** → `/` Review contract | Is the saved v1.1 offered? Does it run without attaching? |

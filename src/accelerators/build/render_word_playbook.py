@@ -1,15 +1,34 @@
-"""render_word_playbook.py - render a parsed legal playbook (playbook_parse.py JSON) as a Word playbook.
+"""render_word_playbook.py - render a parsed legal playbook (playbook_parse.py JSON) as a Word copy.
 
-Build-time (python-docx). The output is what an attorney attaches to the Word legal plugin's
-"Review this contract using a playbook" (Attach from Cloud). The plugin imports it as a playbook
-object of topics, each with Name / Rules / Examples (T-12 desktop, results L24), so the layout
-mirrors that shape: one Heading 2 per topic, the rule fields as labelled lines, model language last.
-The importer strips bracketed ids from headings, so the topic id travels as a "Topic ID:" line
-inside the rules, where it survives and lets a Word review be compared with a Cowork review.
+Build-time (python-docx). The Word copy is what an attorney attaches to the Word legal plugin's
+"Review this contract using a playbook" (Attach from Cloud), or saves there as a playbook.
+
+Two layouts:
+  render_table()  PRIMARY (design v0.6 §5.3, OD-39). Microsoft's contract-review playbook shape, as
+                  written by Legal for Cowork `create-playbook` (whose output Word imported directly,
+                  POC Act 1): landscape US Letter; a Title-style heading (Word names a saved playbook
+                  after it); one short scope paragraph; ONE table with exactly four columns
+                  Topic | Instructions | Example Text | Compromise Positions; repeating header row;
+                  rows that do not split; page numbers. No fifth column, no narrative sections.
+                  The Markdown master stays the superset: Priority and Rationale are not rendered.
+  render()        Transitional heading layout (Heading 2 per topic, labelled lines). Kept until the
+                  Word test set (runbook Act 2, R1-R7 and A/B) confirms the table (backlog X3).
+
 Practice-neutral: nothing here names a contract type.
 """
+import re
+
 import docx
-from docx.shared import Pt
+from docx.enum.section import WD_ORIENT
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Inches, Pt, RGBColor
+
+COLUMNS = ("Topic", "Instructions", "Example Text", "Compromise Positions")
+COLUMN_WIDTHS = (Inches(1.7), Inches(3.4), Inches(2.6), Inches(2.1))  # 9.8" = 11" - 2 x 0.6" margins
+TOPIC_ID_PLACEMENTS = ("none", "instructions", "topic")  # decided by the Word A/B test; "none" = Cowork's shape
+SILENT_INSTRUCTION = "No standard position in this playbook. Do not edit; flag the clause for attorney review."
 
 FIELDS = [("preferred", "Preferred position"), ("fallback", "Acceptable fallback"),
           ("escalate", "Prohibited / escalate"), ("rationale", "Rationale"), ("model_language", "Model language")]
@@ -80,3 +99,205 @@ def render(playbook, catalogue, out_path, fallback_label="Acceptable fallback"):
                 labelled(d, labels[key], f"“{t[key]}”" if key == "model_language" else t[key])
     d.save(out_path)
     return out_path
+
+
+# ---------------------------------------------------------------- four-column table (primary)
+
+def word_name(playbook):
+    """The name Word shows for a saved playbook: the title, with the version if the title lacks it."""
+    title, version = playbook["title"].strip(), playbook["meta"].get("version", "").strip()
+    if version and not re.search(rf"\bv{re.escape(version)}\s*$", title):
+        title = f"{title} v{version}"
+    return title
+
+
+def scope_paragraph(playbook):
+    """One short paragraph above the table: the master's introduction, then the header facts."""
+    meta = playbook["meta"]
+    intro = (playbook.get("intro") or "").strip()
+    facts = []  # header facts the introduction doesn't already state
+    if meta.get("side") and "side:" not in intro.lower():
+        side = meta["side"]
+        facts.append("Side: mutual (apply every position to both parties)" if side == "mutual" else f"Side: {side}")
+    if meta.get("jurisdiction_default") and meta["jurisdiction_default"] not in intro:
+        facts.append(f"Default governing law and venue: {meta['jurisdiction_default']}")
+    for key, label in (("version", "Version"), ("owner", "Owner"), ("effective", "Effective"), ("status", "Status")):
+        if meta.get(key):
+            facts.append(f"{label}: {meta[key]}")
+    tail = ". ".join(facts) + "." if facts else ""
+    return f"{intro} {tail}".strip()
+
+
+def example_text(model_language):
+    """Model language is often an insertion fragment for redlining; mark a fragment with an ellipsis."""
+    text = (model_language or "").strip()
+    if not text:
+        return ""
+    if text[0] in ",;:" or text[0].islower():
+        text = "…" + text.lstrip(",;: ")
+    return text
+
+
+def instruction_paragraphs(topic, topic_ids):
+    out = [topic["preferred"].strip()]
+    if topic.get("escalate"):
+        out.append(f"Escalate if: {topic['escalate'].strip()}")
+    if topic_ids == "instructions":
+        out.append(f"Topic ID: {topic['id']}")
+    return out
+
+
+def table_rows(playbook, catalogue, topic_ids="none"):
+    """The table as data: a list of 4-tuples of cell paragraph lists. Shared by the renderer and its checker."""
+    if topic_ids not in TOPIC_ID_PLACEMENTS:
+        raise ValueError(f"topic_ids must be one of {TOPIC_ID_PLACEMENTS}")
+    titles = {t["id"]: t for t in catalogue["topics"]}
+
+    def topic_cell(tid):
+        name = titles.get(tid, {}).get("title", tid)
+        return [f"{name} ({tid})" if topic_ids == "topic" else name]
+
+    rows = []
+    for t in playbook["topics"]:
+        ex, comp = example_text(t.get("model_language")), (t.get("fallback") or "").strip()
+        rows.append((topic_cell(t["id"]), instruction_paragraphs(t, topic_ids), [ex] if ex else [], [comp] if comp else []))
+    for tid in playbook.get("silent_topics", []):
+        instr = [SILENT_INSTRUCTION] + ([f"Topic ID: {tid}"] if topic_ids == "instructions" else [])
+        rows.append((topic_cell(tid), instr, [], []))
+    return rows
+
+
+def _set_cell_width(cell, width):
+    cell.width = width  # python-docx writes w:tcW in dxa
+
+
+def _fixed_layout(table):
+    """Grid column widths; table.autofit = False already writes <w:tblLayout w:type="fixed"/>."""
+    for col, width in zip(table.columns, COLUMN_WIDTHS):
+        col.width = width  # w:gridCol
+
+
+def _row_flag(row, tag):
+    trpr = row._tr.get_or_add_trPr()
+    el = OxmlElement(tag)
+    el.set(qn("w:val"), "true")
+    trpr.append(el)
+
+
+def _shade(cell, fill):
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), fill)
+    cell._tc.get_or_add_tcPr().append(shd)
+
+
+def _fill(cell, paragraphs, bold=False, muted_prefix=None):
+    cell.text = ""
+    first = cell.paragraphs[0]
+    for i, text in enumerate(paragraphs):
+        p = first if i == 0 else cell.add_paragraph()
+        run = p.add_run(text)
+        run.bold = bold
+        if muted_prefix and text.startswith(muted_prefix):
+            run.font.size, run.font.color.rgb = Pt(8), RGBColor(0x59, 0x59, 0x59)
+
+
+def _field(paragraph, instr):
+    """Append a simple field (PAGE / NUMPAGES) to a paragraph."""
+    run = paragraph.add_run()
+    for kind, text in (("begin", None), (None, instr), ("separate", None), (None, "1"), ("end", None)):
+        if kind:
+            el = OxmlElement("w:fldChar")
+            el.set(qn("w:fldCharType"), kind)
+        elif text == instr:
+            el = OxmlElement("w:instrText")
+            el.set(qn("xml:space"), "preserve")
+            el.text = f" {instr} "
+        else:
+            el = OxmlElement("w:t")
+            el.text = text
+        run._r.append(el)
+
+
+def render_table(playbook, catalogue, out_path, topic_ids="none"):
+    """Render the Word copy in Microsoft's four-column contract-review playbook shape."""
+    rows = table_rows(playbook, catalogue, topic_ids)
+    name = word_name(playbook)
+    d = docx.Document()
+    normal = d.styles["Normal"]
+    normal.font.name, normal.font.size = "Calibri", Pt(10)
+    s = d.sections[0]
+    s.orientation = WD_ORIENT.LANDSCAPE
+    s.page_width, s.page_height = Inches(11), Inches(8.5)
+    for side in ("left_margin", "right_margin", "top_margin", "bottom_margin"):
+        setattr(s, side, Inches(0.6))
+    status = playbook["meta"].get("status")
+    s.header.paragraphs[0].text = f"{name} | {status}" if status else name
+    foot = s.footer.paragraphs[0]
+    foot.add_run("Page ")
+    _field(foot, "PAGE")
+    foot.add_run(" of ")
+    _field(foot, "NUMPAGES")
+
+    props = d.core_properties
+    props.title, props.subject, props.author = name, "Playbook", "Spaarke accelerator build"
+    props.comments = ("Word copy of a legal playbook. In Word: Copilot > Review contract > New playbook > Attach "
+                      "from Cloud. Generated from the Markdown master; edit the master, not this file. Draft for "
+                      "attorney review; not legal advice.")
+
+    d.add_paragraph(name, style="Title")
+    d.add_paragraph(scope_paragraph(playbook))
+
+    t = d.add_table(rows=1, cols=4)
+    t.style, t.alignment, t.autofit = "Table Grid", WD_TABLE_ALIGNMENT.CENTER, False
+    _fixed_layout(t)
+    header = t.rows[0]
+    _row_flag(header, "w:tblHeader")
+    _row_flag(header, "w:cantSplit")
+    for cell, label, width in zip(header.cells, COLUMNS, COLUMN_WIDTHS):
+        _fill(cell, [label], bold=True)
+        _shade(cell, "D9D9D9")
+        _set_cell_width(cell, width)
+    for row in rows:
+        r = t.add_row()
+        _row_flag(r, "w:cantSplit")
+        for cell, paragraphs, width in zip(r.cells, row, COLUMN_WIDTHS):
+            _fill(cell, paragraphs, muted_prefix="Topic ID: ")
+            _set_cell_width(cell, width)
+    d.save(out_path)
+    return out_path
+
+
+def check_table(path, playbook, catalogue, topic_ids="none"):
+    """Deterministic checker (cf. Microsoft create-playbook's verify-playbook.py). Returns a list of problems."""
+    problems, expected = [], table_rows(playbook, catalogue, topic_ids)
+    d = docx.Document(path)
+    if len(d.tables) != 1:
+        return [f"expected exactly 1 table, found {len(d.tables)}"]
+    t = d.tables[0]
+    head = [c.text for c in t.rows[0].cells]
+    if tuple(head) != COLUMNS:
+        problems.append(f"header row is {head}, expected {list(COLUMNS)}")
+    if any(len(r.cells) != 4 for r in t.rows):
+        problems.append("a row does not have exactly four cells")
+    body = t.rows[1:]
+    if len(body) != len(expected):
+        problems.append(f"{len(body)} topic rows, expected {len(expected)}")
+    for i, (r, want) in enumerate(zip(body, expected), 1):
+        got = tuple("\n".join(p.text for p in c.paragraphs).strip() for c in r.cells)
+        want = tuple("\n".join(cell).strip() for cell in want)
+        if got != want:
+            problems.append(f"row {i} ({want[0]}): cell text differs from the playbook")
+    titles = [p for p in d.paragraphs if p.style.name == "Title"]
+    if len(titles) != 1 or titles[0].text != word_name(playbook):
+        problems.append("expected one Title paragraph equal to the playbook name")
+    if d.core_properties.title != word_name(playbook):
+        problems.append("document Title property differs from the playbook name")
+    if d.sections[0].orientation != WD_ORIENT.LANDSCAPE:
+        problems.append("page is not landscape")
+    if any(p.style.name.startswith("Heading") for p in d.paragraphs):
+        problems.append("narrative headings present (no sections outside the table)")
+    if t.rows[0]._tr.trPr is None or t.rows[0]._tr.trPr.find(qn("w:tblHeader")) is None:
+        problems.append("header row does not repeat across pages")
+    return problems
