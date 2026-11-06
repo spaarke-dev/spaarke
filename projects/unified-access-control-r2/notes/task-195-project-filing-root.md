@@ -133,3 +133,29 @@ The secure-matter container check (open check above) is engineering work. It is 
 | `ProjectMatterFiling.FileAsync` (static helper, no DI registration) | The chat tool's pair sequence (removed) and `OwnedChildWrite.RefileAsync` | `RefileAsync` is the child re-file, which treats a root as "not a re-file" and re-derives an owner; a root's version-conditioned pair write is a different sequence, so it sits beside it | The wizards cannot file a project (the pair is field-secured) and the chat tool keeps writing it with `If-Match: *` and no read-back |
 | Codes `project_filing.not_a_matter`, `.already_filed`, `.secure_matter_unsupported` (the conflict reuses `sdap.inherit.changed_concurrently`); the route's optional `move` query parameter | `child_record.*` and the `sdap.inherit.*` codes | No existing code says "not a matter", "already filed, not moved" or names the secure-matter refusal (#1506); the conflict code is reused | Clients and the backfill script cannot tell these refusals apart from a generic 400/409; without `move`, a stale or unreadable client read of the pair would move a filed project silently |
 | `sprk_project` on the existing PATCH route (a dispatch, no new endpoint) | `PATCH /api/v1/child-records/{table}/{id}` | It is the extension: the same route and handler, a table-specific branch | The browser has no BFF path to file a project |
+
+## 5. Live result on dev (2026-11-01)
+
+Merged as d0c1c5dc3c (PR #2496). Deployed with the owner's go ("Deploy all + backfill", 2026-10-31), under the shared-dev protocol: R3's OK for this SHA, ebilling notified, `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` PASS.
+
+| Step | Time (UTC) | Result |
+|---|---|---|
+| BFF | new build up 03:09:00Z | The first deploy hit the platform's 10-minute status timeout; the script's stop → zipdeploy → start recovered it. 4 critical hashes match, healthz 200, all app settings intact (ebilling's six keys included). |
+| Web resources | 03:12Z | `sprk_wizard_commands`, `sprk_createprojectwizard`, `sprk_creatematterwizard`; each read back by SHA-256. |
+| Backfill `-Apply` | 03:14:07Z → 03:14:58Z | Filed 7, unverified 0, skipped 0, failed 0. None of the 7 matters is secure. |
+| Root-owner moves | 03:15:10Z – 03:15:14Z | The three owner-accepted moves: PRJ-000038 and PRJ-000034 → BU1 team; PRJT.10006.01 → root team. |
+| Ordinary moves | 03:22Z (7), 03:25Z (2) | Children followed; every run refused 0, failed 0; converged (moved 0) from 03:28Z. |
+| Ribbon | about 03:27Z | Solution `SpaarkeProjectMatterLinkRibbons`, additive only, imported after a fresh export and a platform-drift check; verified with RetrieveEntityRibbon. |
+| Census | — | 7 "linked, no pair" at 03:10Z (before the backfill); no census line since 03:15Z, and the line is logged only when a count is nonzero, so both counts are 0. |
+
+**Gate (03:09Z → about 03:31Z): PASS.** 41 requests; the 4 non-2xx were anonymous 401s on `/` and the robots probe. 0 5xx, 0 `[OWNERSHIP-REFUSED]`, external routes 0 requests. Warnings were only the pre-existing SECURE-CENSUS and ID-LINK lines (#2163).
+
+**One transient, explained.** 20 `Sql Number: 207` (invalid column) faults hit the ordinary-moves descendant read from 03:14:36Z to 03:15:18Z. That was exactly ebilling's delete of `sprk_invoice.sprk_invoicestatus`. Later runs show failed 0, and the moves converged. Ebilling has recorded it and will warn of this window in future column-delete notices.
+
+**Access effect reported to the owner.** PRJT.10001.01 now inherits Restricted from its matter REAL-2026-123456.02 (round 84). It had no project-level external grants, so no partner lost access. There are 0 No Access entries on the 14 records involved.
+
+**Owner browser click-test** (round 90: on the checklist, does not hold the task open). Hard-refresh first.
+1. Project form → Matters subgrid: New opens the Create Matter wizard, pre-filled with the project; Add Existing is hidden.
+2. Matter form → Projects subgrid: New opens the Create Project wizard, locked to the matter.
+3. Any other matter or project subgrid still shows the platform New and Add Existing.
+4. The Related tab's Matters/Projects views behave as in 1 and 2.
