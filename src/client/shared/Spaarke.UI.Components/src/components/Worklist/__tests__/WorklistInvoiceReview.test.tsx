@@ -254,6 +254,16 @@ describe('opening a billing item (D-207)', () => {
 });
 
 describe('items without invoiceReview behave as before', () => {
+  it('the wizard never offers a billing item under Also resolve (D-207)', async () => {
+    const { launchWizard } = renderWidget({ openInvoiceReview: jest.fn(async () => undefined) });
+    await ready();
+    await userEvent.click(line(A1));
+    const request = launchWizard.mock.calls[0][0];
+    const wizardItem = await request.loadItem!(A1);
+    // A1's core also holds INV_LINE and INV_ONLY (billing) and A2: only A2 can be resolved with it.
+    expect(wizardItem.otherOpenItems.map(i => i.signalId)).toEqual([A2]);
+  });
+
   it('a matter item still opens the wizard, with a browse set that leaves the billing items out', async () => {
     const open = jest.fn(async () => undefined);
     const { launchWizard } = renderWidget({ openInvoiceReview: open });
