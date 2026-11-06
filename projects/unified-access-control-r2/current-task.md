@@ -31,7 +31,10 @@
     - G6: Office Add In gets Write on document (Deep);
     - G7/G8: Office Add In gets AppendTo on account and sprk_budget (Deep).
 
-    The standalone add-on gap list goes to the owner before anything from it is applied. The guard pins Ontology Administrator as the only person role with C/W/D on the writer-only tables.
+    046b is on `task/fm-046b` (script `scripts/Set-FeatureRolePrivileges.ps1`; dry run = exactly G1, G2, G4, G6, G7, G8). **Hold -Apply until fm's Opus pass 2.** Owner rulings 2026-11-05 (decisions.md):
+    - no standalone grants: Office and AI Analysis need Core User, and so does Console User;
+    - removals, with the owner's go: Ontology Admin Create on budgetrevision, and Basic User AppendTo on reportcard (fm adds a removal step);
+    - DONE: Office Add In User removed from the root default team "Spaarke" on dev (now Console User and Basic User only).
   - **049b** (`task/fm-049b`, fix round in progress). My decisions, sent:
     - the maker-as-assignee pass stays inline, with a test pinning both sides;
     - only the removal paths take the lease; fm's notes must show the reconcile re-derives Assigned-To grants, or the gap is filed;
@@ -42,6 +45,7 @@
 - **ontology** (`-38`): owed TO them: Signals 200 from organic traffic, and the nightly suppression and Undetermined counts on 909754869f and on 0f53e053bf (live since 21:39:06Z).
 
 ## Owner items outstanding
+- **NEW: #2574.** Turn on `JobRevokeOnChangeEnabled` (gate G-8) on dev, so the reconciliation heals a stale add that raced a removal. It's an app-setting change: owner go here.
 - **NEW (ontology recommendation): column auditing on the writer-only tables' lookups.**
   - Today the org and the three tables audit, but no custom lookup column is audited.
   - At least: Signal (sprk_matter, sprk_decisionrecord, sprk_policy, sprk_policyversion); DR (sprk_matter, sprk_project, sprk_policyversion); BudgetRevision (sprk_budget, sprk_matter).
