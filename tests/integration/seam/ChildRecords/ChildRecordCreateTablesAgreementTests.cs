@@ -19,12 +19,13 @@ public sealed partial class ChildRecordCreateTablesAgreementTests
 {
     /// <summary>
     /// The tables the server creates through the route but the client adapter does not route: the secure-record ribbon's
-    /// "New Budget" / "New KPI Assessment" / "New Billing Event" (unified-access-control-r2 task 147, owner round 28 item 2)
+    /// "New Budget" / "New KPI Assessment" (unified-access-control-r2 task 147, owner round 28 item 2)
     /// post to the route from their own ribbon script, not through <c>withBffChildWrites</c>. Whether they should join the
-    /// client set is a separate decision (task 020 notes, deferred item).
+    /// client set is a separate decision (task 020 notes, deferred item). ebilling-r1 task 164a-1 (uac-r2 Q6): "New Billing
+    /// Event" is gone, and the route no longer creates an invoice line.
     /// </summary>
     internal static readonly IReadOnlySet<string> RibbonOnlyCreateTables =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_budget", "sprk_kpiassessment", "sprk_billingevent" };
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_budget", "sprk_kpiassessment" };
 
     private static readonly string AdapterFile = Path.Combine(
         RepoRoot(), "src", "client", "shared", "Spaarke.UI.Components", "src", "utils", "adapters", "bffChildWriteAdapter.ts");

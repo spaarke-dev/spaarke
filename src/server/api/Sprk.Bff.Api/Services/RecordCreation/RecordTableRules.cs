@@ -33,7 +33,8 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// <para><b>OWNER REVIEW (defaults).</b> Field mapping applies unless a table names a <see cref="RecordTableRule.MappingExclusion"/>:
 /// a table with no mapping profile maps nothing (the Office create's "missing profile is a silent no-op"), so the default
 /// widens nothing. Spec FR-16 names the wizard tables; <c>sprk_memo</c>, <c>sprk_budget</c>, <c>sprk_kpiassessment</c>,
-/// <c>sprk_billingevent</c> and <c>sprk_communication</c> are not among them and take the default. The
+/// <c>sprk_billingevent</c> and <c>sprk_communication</c> are not among them and take the default (<c>sprk_billingevent</c>:
+/// generic create refused; update and delete as before — ebilling-r1 task 164a-1, <see cref="RecordTableRule.GenericCreateOnlyRefused"/>). The
 /// <see cref="RecordTableRule.ServerDefaults"/> are read from today's server writers (cited per entry), not from an old
 /// list; tasks 013 and 015 confirm them when they consume them.</para>
 /// <para><b>ADR-010.</b> A static class: no DI registration, no interface.</para>
@@ -333,6 +334,11 @@ internal static partial class RecordTableRules
             // Task 014 (ebilling-r1's review of 013, item 3): as sprk_invoice.
             MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_billingevent"),
             PreWriteRules = [InvoiceFamilyRule],
+            // ebilling-r1 task 164a-1 (uac-r2 Q6, approved 2026-11-06): one server-side owner of a NEW invoice line (extraction, a
+            // line decision, Add line), so a generic create is refused (record_creation.table_unsupported). Create only: D-96's
+            // detach / move / re-attach updates a line through the generic update paths, so update and delete are as before
+            // (CreatedOnlyByItsWriter, which also drives those refusals, stays false).
+            GenericCreateOnlyRefused = true,
         },
 
         // ── The rest of the invoice family (task 017): InvoiceFamilyCoreRecordGuard.CoreRecordLookups keys ──────────
@@ -1138,6 +1144,25 @@ internal sealed record RecordTableRule
     /// Task 048 (owner decision 2026-11-04, D-204 extended to updates): the same flag says the rows are CHANGED only by the
     /// writer too; every generic update path refuses such a table through <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/>,
     /// so create and update read one list.
+    /// <para>The create sites read <see cref="GenericCreateRefused"/>, which also covers <see cref="GenericCreateOnlyRefused"/>;
+    /// the update and delete refusals read this flag alone.</para>
     /// </summary>
     public bool CreatedOnlyByItsWriter { get; init; }
+
+    /// <summary>
+    /// Whether ONLY the generic create of the table is refused (ebilling-r1 task 164a-1; uac-r2 Q6, approved 2026-11-06): its new
+    /// rows have one server-side owner (its typed writers), but the generic update and delete paths keep serving it, unlike
+    /// <see cref="CreatedOnlyByItsWriter"/>. Today only <c>sprk_billingevent</c>: D-96's supported detach / move / re-attach
+    /// sequence updates an invoice line through the playbook update and the output orchestrator. Never read on its own; the
+    /// create sites read <see cref="GenericCreateRefused"/>.
+    /// </summary>
+    public bool GenericCreateOnlyRefused { get; init; }
+
+    /// <summary>
+    /// Whether a GENERIC create of the table is refused: <see cref="CreatedOnlyByItsWriter"/> or
+    /// <see cref="GenericCreateOnlyRefused"/>. Every generic create site reads this (<see cref="RecordCreationService"/>, the chat
+    /// create tool's validate and execute); the update and delete refusals read <see cref="CreatedOnlyByItsWriter"/> alone, so a
+    /// create-only table is still updated and deleted as before.
+    /// </summary>
+    public bool GenericCreateRefused => CreatedOnlyByItsWriter || GenericCreateOnlyRefused;
 }

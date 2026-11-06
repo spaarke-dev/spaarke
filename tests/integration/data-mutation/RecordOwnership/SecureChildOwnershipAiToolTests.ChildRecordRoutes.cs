@@ -460,7 +460,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         { "sprk_document", "sprk_Matter" },
         { "sprk_budget", "sprk_Matter" },
         { "sprk_kpiassessment", "sprk_Matter" },
-        { "sprk_billingevent", "sprk_matter" },
+        // ebilling-r1 task 164a-1 (uac-r2 Q6): sprk_billingevent left the route; its refusal is in
+        // SecureChildOwnershipAiToolTests.InvoiceFamilyGuard.cs.
     };
 
     [Fact]

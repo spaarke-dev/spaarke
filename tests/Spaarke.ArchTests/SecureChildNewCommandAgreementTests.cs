@@ -153,6 +153,14 @@ public class SecureChildNewCommandAgreementTests
         Assert.Equal(server, client);
     }
 
+    /// <summary>
+    /// ebilling-r1 task 164a-1 (uac-r2 Q6): served tables with NO ribbon create, by design. The script still hides their
+    /// platform "+ New" (the served table's enable rule), but a new row has one server-side owner elsewhere, and the BFF refuses
+    /// the table's generic create (<c>RecordTableRule.GenericCreateRefused</c>). An invoice line is created by extraction, a line
+    /// decision or Add line in the invoice's review.
+    /// </summary>
+    private static readonly string[] ServedWithNoRibbonCreate = { "sprk_billingevent" };
+
     [Fact]
     public void EveryServedTable_HasACreateSurface_AndEveryCreateThenOpenTable_IsOnTheBffCreateRoute()
     {
@@ -167,8 +175,19 @@ public class SecureChildNewCommandAgreementTests
         var ownBranches = new[] { "sprk_document", "sprk_communication" }
             .Where(t => script.Contains($"childTable === \"{t}\"", StringComparison.Ordinal)).ToArray();
 
-        var withoutSurface = ScriptTables().Except(wizards).Except(createThenOpen).Except(ownBranches).ToList();
+        var withoutSurface = ScriptTables().Except(wizards).Except(createThenOpen).Except(ownBranches).Except(ServedWithNoRibbonCreate).ToList();
         Assert.True(withoutSurface.Count == 0, "Served with no create surface: " + string.Join(", ", withoutSurface));
+
+        // The no-create tables are served (their platform "+ New" stays hidden), have no create surface here, and are refused by the
+        // BFF's generic create, so the exception cannot outlive its reason.
+        Assert.All(ServedWithNoRibbonCreate, t =>
+        {
+            Assert.Contains(t, ScriptTables());
+            Assert.DoesNotContain(t, wizards);
+            Assert.DoesNotContain(t, createThenOpen);
+            Assert.True(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Find(t) is { GenericCreateRefused: true },
+                $"{t} is served with no ribbon create only while the BFF refuses its generic create.");
+        });
 
         var createTables = Quoted(Regex.Match(File.ReadAllText(ChildRecordEndpointsFile),
             @"CreateTables\s*=\s*new HashSet<string>\(StringComparer\.OrdinalIgnoreCase\)\s*\{(?<list>[^}]*)\}").Groups["list"].Value);
