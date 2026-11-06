@@ -25,6 +25,15 @@ Four clauses, each load-bearing. Drop **consolidate** → a point solution. Drop
 | The model-driven app | **Spaarke Matter Management** |
 | The external SPA | **Spaarke External Access** |
 | Source-system integration (SKU) | **Spaarke Connect** (component name: **Connection Engine**; code namespace `Sprk.Connect.*`) |
+| Microsoft 365 Copilot / Cowork offering (family) `[2026-11-06]` | **Spaarke for Microsoft 365 Copilot** (docs and marketing; check Microsoft trademark rules before any public listing) |
+| The Copilot connector for core legal operations `[2026-11-06]` | **Spaarke**; later product areas are **Spaarke {Area}** (e.g. **Spaarke Patents**, **Spaarke Trademarks**). One connector per product area, not per function. In admin text say **"Copilot connector"**: "connector" alone keeps its Spaarke meaning (Connection Engine, inbound) |
+| The declarative agent (fallback only) | **Spaarke AI** (unchanged) |
+| Retired | ~~Spaarke Copilot~~ (overlaps the family name) |
+
+> The four `[2026-11-06]` rows: owner-approved in spaarkeai-mcp-bff-api-r1's naming review (decisions 1–8), **relayed** to ontology
+> 2026-11-06; source `projects/spaarkeai-mcp-bff-api-r1/notes/coordination/2026-11-06-copilot-naming-and-ownership.md` (engineering
+> conventions — routes, tool and skill names — stay there). In Copilot the Decide lane keeps §3's words: a row is a **Work Item**, the
+> condition behind it a **Signal**, what a decision writes a **Decision Record**.
 
 ### 1.2 The value hierarchy — what is the product and what is load-bearing
 
@@ -564,7 +573,8 @@ The 13-rung ladder with an explicit deterministic/AI partition (`RungKind.cs`), 
 | **Spaarke External Access** (SPA) | requesters, Legal Front Door | Request origination |
 | **Office add-ins** | Outlook / Word | capture, save, share |
 | **MCP server** | external agents + Foundry IQ as a knowledge source | object read, link traversal, fact query, gated action invocation |
-| **Copilot declarative agent** | M365 | existing |
+| **Spaarke for Microsoft 365 Copilot** (the **Spaarke** Copilot connector, MCP tools in the BFF; spaarkeai-mcp-bff-api-r1) `[2026-11-06]` | M365 Copilot / Cowork users | the Decide lane and the Decision wizard over the same services as the Console; billing Work Items appear as a link out to Invoice Review (D-207) |
+| **Copilot declarative agent** (**Spaarke AI**, fallback) | M365 | existing |
 
 **Two scope reductions that fell out:** policy authoring and connection admin are **model-driven app forms**, not custom surfaces. Dataverse gives the form, version list, row security and audit for free.
 
