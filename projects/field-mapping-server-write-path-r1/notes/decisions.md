@@ -841,3 +841,7 @@ Numbering note (2026-11-04): the "task 043" planned on 2026-11-02 for the `sprk_
 ## 2026-11-06 — Removal R2 is not applied (under the 2026-11-05 ruling's own condition)
 
 Basic User keeps AppendTo on `sprk_reportcard`. The ruling removed it only if no §5.1 feature needed it on Basic User. Communication send, reply and re-file ask that privilege as the caller when a report card is a regarding record (`CommunicationRecordAuthorizationFilter`), so the condition fails. Task 046b adds matrix rows for those routes. Removal R1 (Ontology Administrator loses Create on `sprk_budgetrevision`) proceeds. Recorded by fm and UAC-r2; the owner was informed through UAC-r2.
+
+## 2026-11-06 — Communication send, reply and re-file need Core User (owner, in fm's session)
+
+Basic User is not raised for communication send, reply or re-file (task 046b gaps G11 and G12). These features need Core User, like the other add-on rulings of 2026-11-05. A caller who holds Basic User only is refused with the routes' normal 403. The gaps stay in the guard's baseline, marked "owner ruled: not granted", so any change to them is a deliberate one. Removal R1 was applied on dev on 2026-11-06 (UAC-r2, from `e6c0c94fa3`).
