@@ -198,17 +198,53 @@ public sealed partial class InvoiceSubmissionRerunTests
         var pending = InvoiceSubmissionService.ToView(world.Row(SubmissionId));
         pending.FirmId.Should().Be(Firm, "the setup: Set firm wrote the firm");
 
-        var before = await PartnerDecisionAsync(pending);
+        var before = await PartnerDecisionAsync(world, pending);
 
         before.IsVisible(SubmissionId).Should().BeFalse("partners only see a state decided with the firm");
         before.HiddenSummary().Should().Be($"{InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.FirmMissing)}=1");
 
         (await new JobHarness(world).ProcessAsync(final: false)).Status.Should().Be(JobStatus.Completed);
-        var after = await PartnerDecisionAsync(InvoiceSubmissionService.ToView(world.Row(SubmissionId)));
+        var after = await PartnerDecisionAsync(world, InvoiceSubmissionService.ToView(world.Row(SubmissionId)));
 
         // Must-not-fire control: once committed, the withhold no longer applies (the invoice predicate decides, as for any submission).
         after.HiddenSummary().Should().NotContain(InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.FirmMissing));
         after.IsVisible(SubmissionId).Should().BeTrue(after.HiddenSummary());
+    }
+
+    [Theory(DisplayName = "095d-2b-1 fix round (uac-r2 C1, seed: the invoice-marker condition dropped from the submission withhold): a user edit of the submission's reason, firm or invoice link does not lift the withhold while the invoice's marker is pending")]
+    [InlineData("reason")]
+    [InlineData("firm")]
+    [InlineData("unlinked")]
+    [InlineData("repointed")]
+    public async Task AUserEditOfTheSubmission_DoesNotLiftTheWithhold_WhileTheMarkerIsPending(string edit)
+    {
+        var world = await World.SeedAsync();
+        var view = InvoiceSubmissionService.ToView(world.Row(SubmissionId));
+        var edited = edit switch
+        {
+            "reason" => view with { OutcomeReasonCode = SubmissionReasonCodes.Blocked },
+            "firm" => view with { OutcomeReasonCode = SubmissionReasonCodes.Blocked, FirmId = Guid.NewGuid() },
+            "unlinked" => view with { OutcomeReasonCode = SubmissionReasonCodes.Blocked, InvoiceId = null },
+            _ => view with { OutcomeReasonCode = SubmissionReasonCodes.Blocked, InvoiceId = Guid.NewGuid() },
+        };
+        InvoiceFirmHold.StateOf(world.Row(InvoiceId)).Should().Be(InvoiceFirmHold.InvoiceHoldState.RerunPending, "the setup: Set firm wrote the marker");
+
+        var decision = await PartnerDecisionAsync(world, edited);
+
+        decision.IsVisible(SubmissionId).Should().BeFalse("the invoice's field-secured marker decides, not a user-writable submission column");
+        decision.HiddenSummary().Should().Be($"{InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.FirmMissing)}=1");
+    }
+
+    [Fact(DisplayName = "095d-2b-1 fix round (uac-r2 C1) must not fire: after the re-run commit clears the marker, the same edited submission shows")]
+    public async Task AfterTheCommit_TheSubmissionShows_WhateverItsReason()
+    {
+        var world = await World.SeedAsync();
+        (await new JobHarness(world).ProcessAsync(final: false)).Status.Should().Be(JobStatus.Completed);
+        InvoiceFirmHold.StateOf(world.Row(InvoiceId)).Should().Be(InvoiceFirmHold.InvoiceHoldState.None, "the commit cleared the marker");
+
+        var decision = await PartnerDecisionAsync(world, InvoiceSubmissionService.ToView(world.Row(SubmissionId)));
+
+        decision.IsVisible(SubmissionId).Should().BeTrue(decision.HiddenSummary());
     }
 
     [Fact(DisplayName = "095d-2b-1 (uac-r2 condition 2): a re-run that dead-letters (its commit failing on every delivery) leaves the hold and the partner withhold in place")]
@@ -227,7 +263,7 @@ public sealed partial class InvoiceSubmissionRerunTests
         world.Findings()[InvoiceAssignFirmService.StoredDecisionMember]!["rulesRerun"]!.GetValue<string>().Should().Be(InvoiceAssignFirmService.RulesRerunPending);
         job.Totals.VerifyNoOtherCalls();
 
-        var decision = await PartnerDecisionAsync(InvoiceSubmissionService.ToView(world.Row(SubmissionId)));
+        var decision = await PartnerDecisionAsync(world, InvoiceSubmissionService.ToView(world.Row(SubmissionId)));
         decision.IsVisible(SubmissionId).Should().BeFalse("a failed re-run never releases the submission to partners");
     }
 
@@ -239,7 +275,7 @@ public sealed partial class InvoiceSubmissionRerunTests
 
         (await new JobHarness(world).ProcessAsync(final: false)).Status.Should().Be(JobStatus.Poisoned);
 
-        (await PartnerDecisionAsync(InvoiceSubmissionService.ToView(world.Row(SubmissionId)))).IsVisible(SubmissionId).Should().BeFalse();
+        (await PartnerDecisionAsync(world, InvoiceSubmissionService.ToView(world.Row(SubmissionId)))).IsVisible(SubmissionId).Should().BeFalse();
     }
 
     // ── U1(a): the partner projection of a committed procedures_unresolved hold ──
@@ -260,7 +296,7 @@ public sealed partial class InvoiceSubmissionRerunTests
         }));
 
         var view = InvoiceSubmissionService.ToView(world.Row(SubmissionId));
-        (await PartnerDecisionAsync(view)).IsVisible(SubmissionId).Should().BeTrue("the re-run committed: the withhold is lifted");
+        (await PartnerDecisionAsync(world, view)).IsVisible(SubmissionId).Should().BeTrue("the re-run committed: the withhold is lifted");
         var projection = PartnerProjection(view, world.Row(InvoiceId));
 
         Leaks(projection).Should().BeEmpty(projection);
@@ -304,15 +340,23 @@ public sealed partial class InvoiceSubmissionRerunTests
 
     /// <summary>
     /// The partner decision over one submission (<see cref="ExternalInvoiceVisibility.DecideSubmissionsAsync"/>, the routes' and the assistant
-    /// tools' one decision), with readers that find no Stored File, source or Restricted root: so only the firm rules can withhold it.
+    /// tools' one decision), with readers that find no Stored File, source or Restricted root: so only the firm rules can withhold it. The
+    /// invoice's firm hold is read by the REAL app-only reader (<see cref="ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync"/>) over the
+    /// world's rows, so the marker the re-run clears is the one the decision reads.
     /// </summary>
-    private static Task<InvoiceVisibilityResult> PartnerDecisionAsync(InvoiceSubmissionView view) =>
-        ExternalInvoiceVisibility.DecideSubmissionsAsync([view], new InvoiceVisibilityReaders(
+    private static Task<InvoiceVisibilityResult> PartnerDecisionAsync(World world, InvoiceSubmissionView view)
+    {
+        var entities = new Mock<Spaarke.Dataverse.IGenericEntityService>(MockBehavior.Strict);
+        entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) => world.Query(query));
+        return ExternalInvoiceVisibility.DecideSubmissionsAsync([view], new InvoiceVisibilityReaders(
             (_, _, _) => Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>([]),
             (_, _) => throw new InvalidOperationException("no source is decided here"),
             (_, _) => throw new InvalidOperationException("no root walk here"),
             (_, ids, _) => Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(ids.ToDictionary(id => id, _ => default(RootRecordFlags))),
-            NullLogger.Instance), CancellationToken.None);
+            NullLogger.Instance,
+            (ids, ct) => ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync(entities.Object, ids, ct)), CancellationToken.None);
+    }
 
     // ── harness ──
 

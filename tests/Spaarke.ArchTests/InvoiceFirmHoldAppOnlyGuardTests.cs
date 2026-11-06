@@ -45,6 +45,11 @@ public sealed class InvoiceFirmHoldAppOnlyGuardTests
         // READER and WRITER (095d-2a-2): the re-run reads the invoice's hold through its own IGenericEntityService (app-only) and clears the
         // rerun-pending marker in its one ExecuteTransactionAsync (app-only, row-version conditioned), the only clearer of that marker.
         typeof(InvoiceSubmissionRerun),
+        // READER (095d-2b-1 fix round, uac-r2 2026-11-06 C1/C2): the external invoice predicate withholds an invoice and its submissions while
+        // the hold is set. ReadFirmHeldInvoicesAsync reads the column through the IGenericEntityService ExternalDataService passes (its
+        // app-only filing reader; none -> the read throws and everything asked is hidden). It never writes the column, and the decision never
+        // reads it from a caller-token row.
+        typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalInvoiceVisibility),
     ];
 
     /// <summary>Types that name the column without reading or writing a row: held to C1 and C2, not C3.</summary>

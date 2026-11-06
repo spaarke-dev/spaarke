@@ -2017,7 +2017,12 @@ public class ExternalDataService
         (rows, ct) => ExternalDocumentNarrowing.DecideAsync(rows, QueryRowsOrThrowAsync, ct, honourSubmissionMarker: true),
         GetLiveParentRootsAsync,
         rootFlags,
-        _logger);
+        _logger,
+        // 095d-2b-1: the invoice's field-secured firm hold, read through the app-only IGenericEntityService. Without one (a test double),
+        // the read throws and every asked invoice and submission is hidden (fail closed).
+        (invoiceIds, ct) => _filing is null
+            ? throw new InvalidOperationException("No app-only reader for the invoice firm hold; failing closed.")
+            : ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync(_filing, invoiceIds, ct));
 
     /// <summary>The ONE (a′) cost line per request: invoices checked and hidden, reads per level. Counts only (ADR-015).</summary>
     private void LogInvoiceVisibilityCost(string plane, int invoices, InvoiceVisibilityResult decision)

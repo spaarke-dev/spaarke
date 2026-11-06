@@ -838,6 +838,9 @@ public sealed partial class InvoiceSubmissionRerunTests
             return rerun;
         }
 
+        /// <summary>095d-2b-1: the world's app-only read, for a reader the test calls directly (the partner visibility's firm-hold read).</summary>
+        public EntityCollection Query(QueryExpression query) => Retrieve(query);
+
         private EntityCollection Retrieve(QueryExpression query)
         {
             // K1: the re-check reads only which rows the invoice has (no extraction JSON); a row attached since the evaluation's read shows here.
