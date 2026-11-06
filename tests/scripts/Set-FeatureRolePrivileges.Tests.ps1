@@ -23,6 +23,9 @@
 #      dry run, -Restore -Apply (AddPrivilegesRole at expectedDepth, read back on every copy, nothing else changed on the root role)
 #      and -Restore -Verify; a depth other than expected, a depth the privilege cannot be held at, -Remove with -Restore, a copy that
 #      never receives it and a failed write all stop or fail.
+#  11. (046c fix round 2) -Remove refuses while any add is pending, a business-unit copy that differs on a changes role included;
+#      -Verify -ChangesOnly passes with the adds in place and the removals pending; the rollback line after the apply repeats the
+#      NOT exact note; a run that refuses prints no rollback line.
 #
 # Pester 5 (CI pins 5.7.1):  Import-Module Pester -RequiredVersion 5.7.1 ; Invoke-Pester tests/scripts/Set-FeatureRolePrivileges.Tests.ps1
 # ---------------------------------------------------------------------------
@@ -739,6 +742,131 @@ Describe 'Set-FeatureRolePrivileges.ps1 (stubbed Dataverse)' {
             $r.Exit | Should -Be 0
             $r.Out | Should -Match 'Rollback\s+: pwsh scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://example.invalid -Restore -Gap R1,R2 -Apply'
             $r.Out | Should -Match 'restores exactly the 2 removal\(s\) above'
+        }
+    }
+
+    Context '046c fix round 2: the gate counts business-unit copy drift on the changes roles as a pending add' {
+        BeforeAll {
+            # Role A's root holds its add, its copy does not; everything else is in place and the removal is pending.
+            $script:copyMissing = { New-Scenario @{ held = @{ ra = @{ pa = 'Deep' }; ra1 = @{}; rb = @{ pb = 'Deep' }; rb1 = @{ pb = 'Deep' }; rc = @{ pc = 'Deep'; pz = 'Basic' }; rc1 = @{ pc = 'Deep'; pz = 'Basic' } } } }
+        }
+        It '-Remove -Apply refuses, exits 1, lists the copy and posts nothing' {
+            $r = Invoke-Frp (& $script:copyMissing) @('-Remove', '-Apply') -WithRemoval -AddsPending
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'REFUSED: -Remove will not run while 1 business-unit copy difference\(s\) on a declared privilege: Role A prvCreatesprk_a copy ra1 holds None root holds Deep'
+            $r.Out | Should -Match 'Nothing was changed'
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'the dry run refuses too, prints the copy in the report and no rollback line' {
+            $r = Invoke-Frp (& $script:copyMissing) @('-Remove') -WithRemoval -AddsPending
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'REFUSED'
+            $r.Out | Should -Match '  Role A\s+prvCreatesprk_a\s+copy ra1 holds None'
+            $r.Out | Should -Not -Match 'Rollback\s+:'
+            $r.Out | Should -Not -Match 'DRY RUN: no writes'
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'a pending change AND a differing copy are both named, and the hint names the adds-only verify' {
+            $s = & $script:copyMissing
+            $s.held['rb'] = @{}; $s.held['rb1'] = @{}
+            $r = Invoke-Frp $s @('-Remove', '-Gap', 'R1', '-Apply') -WithRemoval -AddsPending
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'while 1 declared change\(s\) are pending: Role B prvCreatesprk_b \(G2\) and 1 business-unit copy difference\(s\)'
+            $r.Out | Should -Match 'confirm with pwsh scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://example.invalid -Verify -ChangesOnly, then re-run -Remove -Gap R1 -Apply'
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'a copy that matches its root role does not refuse (control)' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 0
+            $r.Posts.Count | Should -Be 1
+        }
+        It 'a drifted copy of a role that is not in the changes block does not refuse (control)' {
+            # Role C's copy differs from its root role on pz, which is not a declared change.
+            $s = New-Scenario
+            $s.held['rc1'] = @{ pc = 'Deep' }
+            $r = Invoke-Frp $s @('-Remove', '-Apply') -WithRemoval
+            $r.Out | Should -Not -Match 'REFUSED'
+        }
+    }
+
+    Context '046c fix round 2: -Verify -ChangesOnly, the check that can pass before the removals' {
+        BeforeAll {
+            $script:addsHeld = @{ ra = @{ pa = 'Deep' }; ra1 = @{ pa = 'Deep' }; rb = @{ pb = 'Deep' }; rb1 = @{ pb = 'Deep' } }
+            $script:addsDoneRemovalPending = { New-Scenario @{ held = ($script:addsHeld + @{ rc = @{ pc = 'Deep'; pz = 'Basic' }; rc1 = @{ pc = 'Deep'; pz = 'Basic' } }) } }
+        }
+        It 'adds applied everywhere and the removal pending: -Verify -ChangesOnly exits 0 and does not read the removals roles' {
+            $r = Invoke-Frp (& $script:addsDoneRemovalPending) @('-Verify', '-ChangesOnly') -WithRemoval
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'VERIFY PASS: the live roles hold the declared set \(-ChangesOnly: the removals were not checked\)'
+            $r.Out | Should -Not -Match 'Removals\s+:'
+            @($r.Requests | Where-Object { $_.Uri -match '=rc|sprk_c' }).Count | Should -Be 0
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'plain -Verify fails at the same state (control: the removal is pending)' {
+            $r = Invoke-Frp (& $script:addsDoneRemovalPending) @('-Verify') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match '1 removal\(s\) pending'
+        }
+        It '-Verify -ChangesOnly fails while a change is pending, and while a copy differs' {
+            $pending = Invoke-Frp (New-Scenario) @('-Verify', '-ChangesOnly') -WithRemoval
+            $pending.Exit | Should -Be 1
+            $pending.Out | Should -Match 'VERIFY FAIL: 2 change\(s\) pending'
+            $drift = Invoke-Frp (New-Scenario @{ held = @{ ra = @{ pa = 'Deep' }; ra1 = @{}; rb = @{ pb = 'Deep' }; rb1 = @{ pb = 'Deep' }; rc = @{ pc = 'Deep' }; rc1 = @{ pc = 'Deep' } } }) @('-Verify', '-ChangesOnly') -WithRemoval
+            $drift.Exit | Should -Be 1
+            $drift.Out | Should -Match '1 business-unit copy difference\(s\)'
+        }
+        It '-ChangesOnly without -Verify, or with -Remove or -Restore, stops before anything is read' {
+            foreach ($a in @(@('-ChangesOnly'), @('-ChangesOnly', '-Apply'), @('-ChangesOnly', '-Remove'), @('-Verify', '-ChangesOnly', '-Restore'))) {
+                $r = Invoke-Frp (New-Scenario) $a -WithRemoval
+                $r.Exit | Should -Be 1
+                $r.Out | Should -Match '-ChangesOnly'
+                $r.Requests.Count | Should -Be 0
+            }
+        }
+        It 'the refusal of -Remove names this command, and it passes at the state the refusal waits for' {
+            $refused = Invoke-Frp (New-Scenario) @('-Remove') -WithRemoval -AddsPending
+            $refused.Out | Should -Match 'confirm with pwsh scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://example.invalid -Verify -ChangesOnly,'
+            $refused.Out | Should -Not -Match 'confirm with -Verify,'
+            (Invoke-Frp (& $script:addsDoneRemovalPending) @('-Verify', '-ChangesOnly') -WithRemoval).Exit | Should -Be 0
+        }
+    }
+
+    Context '046c fix round 2: the rollback line after the apply carries the same exactness as the one before' {
+        It 'not exact: both lines carry the NOT exact note, and the second does not claim to put back the removals above' {
+            # R1 (Role C) is pending; R1 also lists Role D, whose root role no longer holds it, so -Restore would add Role D's too.
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Apply') -WithRemoval -SecondRemoval -SecondGap 'R1'
+            $r.Out | Should -Match 'REMOVED and read back'
+            @([regex]::Matches($r.Out, 'NOT exact: 1 listed removal\(s\) are not pending here')).Count | Should -Be 2
+            @([regex]::Matches($r.Out, 'add them as well:\s+Role D\s+prvAppendTosprk_d')).Count | Should -Be 2
+            $r.Out | Should -Not -Match 'puts back the'
+            @([regex]::Matches($r.Out, 'Rollback\s+:')).Count | Should -Be 2
+        }
+        It 'exact: the line after the apply still says it puts back the removals above (control)' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Apply') -WithRemoval
+            $r.Out | Should -Match 'Rollback\s+: .* \(puts back the 1 removal\(s\) above\)'
+            $r.Out | Should -Not -Match 'NOT exact'
+        }
+    }
+
+    Context '046c fix round 2: a run that will refuse prints no rollback line' {
+        BeforeAll {
+            $script:roleDGlobal = { $s = New-Scenario; $s.held['rd'] = @{ pd = 'Global' }; $s.held['rd1'] = @{ pd = 'Global' }; $s }
+        }
+        It 'a dry run with one removal planned and another held at another depth refuses and prints no rollback' {
+            $r = Invoke-Frp (& $script:roleDGlobal) @('-Remove') -WithRemoval -SecondRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'held at Global, the config expects Deep'
+            $r.Out | Should -Not -Match 'Rollback\s+:'
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'the same state under -Apply prints no rollback line either' {
+            $r = Invoke-Frp (& $script:roleDGlobal) @('-Remove', '-Apply') -WithRemoval -SecondRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Not -Match 'Rollback\s+:'
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'a dry run that does not refuse still prints it (control)' {
+            (Invoke-Frp (New-Scenario) @('-Remove') -WithRemoval).Out | Should -Match 'Rollback\s+:'
         }
     }
 
