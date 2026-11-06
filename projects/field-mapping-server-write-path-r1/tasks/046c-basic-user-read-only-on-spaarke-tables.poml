@@ -39,6 +39,10 @@
     <constraint source="confidentiality (repo is public)">Files state the rule (Basic User is read-only on Spaarke tables) and gaps only. They never list the privileges being removed as holdings, never name teams or principals, and never describe an exposure. The inventory goes in the final report and to UAC-r2 by message.</constraint>
     <constraint source="CLAUDE.md §16">The new guard ships with must-fire and must-not-fire controls and a seeded-drift proof. The role file changes in the same commit as the guard, so no ratchet baseline is needed.</constraint>
     <constraint source="ADR-038">KEEP paths only (tests/Spaarke.ArchTests/**).</constraint>
+    <constraint source="UAC-r2 2026-11-06 (pre-apply evidence, report only)">Before the removals go to UAC-r2, the final report must add the following, all gathered by read-only queries against dev. (1) Every non-human principal: the BFF app user, the ontology service identity, the provisioning, ebilling and other job identities, and Power Automate or connection owners. For each, list the roles it holds directly and what it would lose. A principal whose app-only writes depend on Basic User is a stop. (2) Enabled human holders of Basic User without Core User, as counts by kind (licensed, flagged external, service or demo), never by name. (3) For those principals, their creates, updates and deletes on sprk_* tables in the last 14 days (createdby/modifiedby, or audit where enabled). Each is either expected to stop, with the reason, or a stop. (4) Confirmation that team-owned rows stay valid with Read alone: business-unit default teams and the restricted-content team. None of this goes into a committed file.</constraint>
+    <constraint source="UAC-r2 2026-11-06 (rollback)">From the same dry run, generate a rollback that restores exactly what was removed in one command (an -Add block or an AddPrivilegesRole list). Give it to UAC-r2 with the dry run. If the script lacks a mode for it, add one with Pester 5 tests on stubbed calls.</constraint>
+    <constraint source="UAC-r2 2026-11-06 (guard)">The guard compares the role file with the rule: Read only on sprk_*. Platform privileges are out of scope and are listed by name in the guard, not inferred. It has must-fire and must-not-fire controls.</constraint>
+    <constraint source="UAC-r2 2026-11-06 (apply window, UAC-r2's)">The live run is its own window: not in the 02:20–03:00Z restart window, and not combined with a BFF deploy. After it, a watch of at least 2 h: privilege-denied (0x80040220) counts by table and principal kind against a baseline, 403 counts on the record routes, and the job heartbeats (secure-child, follow-parent, Signal writer).</constraint>
   </constraints>
 
   <steps mode="directional">
@@ -55,6 +59,7 @@
     <criterion testable="true">AC3: every removed privilege's feature is shown to be covered by Core User, or the task stopped for an owner ruling.</criterion>
     <criterion testable="true">AC4: no committed file lists the removed privileges as holdings or names teams or principals.</criterion>
     <criterion testable="true">AC5: ArchTests build 0 warnings and pass in full; Sprk.Bff.Api.Tests not run.</criterion>
+    <criterion testable="true">AC6: the final report holds the pre-apply evidence (non-human principals, human holder counts by kind, 14-day writes, team-owned rows) and a one-command rollback generated from the dry run. Any stop it finds holds the task for an owner ruling.</criterion>
   </acceptance-criteria>
 
   <notes>Added 2026-11-06 from the owner's ruling in fm's session.</notes>
