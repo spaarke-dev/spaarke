@@ -132,6 +132,10 @@
       the partner view of a linked submission is withheld.</criterion>
     <criterion>uac-r2 condition 2: a failed re-run (dead-letter, row-version retries exhausted, Procedures unresolvable) leaves the submission held (pending withhold
       plus procedures_unresolved through InvoiceOpenHolds), never released. Test the dead-letter case.</criterion>
+    <criterion>uac-r2 2026-11-06 U1(a) (binding on 2b): when 2a-2 commits the procedures_unresolved hold on the final delivery and 2b lifts the
+      partner withhold, the partner-visible projection of that submission shows only the neutral "could not be checked" reason: no Procedure
+      names, rule ids or internal detail text. Test: assert the partner projection for this case (must fire if a Procedure name or rule id
+      appears).</criterion>
     <criterion>uac-r2 condition 3 (binding): the Procedures run in the re-run. A new hold removes the override stamp in the same write; Override stays under D-142.</criterion>
     <criterion>Placement (uac-r2 Q7): if the re-run can call AI coding (owner Q3 answer), the handler lives in Services/Ai/Jobs/ (bff-extensions section D, Path C comply);
       if it never calls AI, Services/Jobs/Handlers/. State the reason in the Placement Justification. One IJobHandler, one DI registration, no new direct model calls.</criterion>
