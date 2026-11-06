@@ -296,6 +296,8 @@ export type ApiResult<T> = { ok: true; value: T } | { ok: false; failure: ApiFai
 export const CODE_EBILLING_DISABLED = 'ebilling.disabled';
 export const CODE_DECISION_INCOMPLETE = 'ebilling.decision.incomplete';
 export const CODE_CORRECTION_INCOMPLETE = 'ebilling.correction.incomplete';
+/** 409: the invoice needs its firm first (EB-D-185), so the line decision was refused and nothing was written. */
+export const CODE_LINE_DECISION_FIRM_MISSING = 'ebilling.line_decision.firm_missing';
 
 function str(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -336,6 +338,14 @@ export function toFailure(err: unknown): ApiFailure {
 /** True when the change was saved but a later step did not finish: the same request, repeated, completes it. */
 export function isIncomplete(f: ApiFailure): boolean {
   return f.errorCode === CODE_DECISION_INCOMPLETE || f.errorCode === CODE_CORRECTION_INCOMPLETE;
+}
+
+/**
+ * True when a write was refused because the invoice needs its firm first (EB-D-185, 409 `ebilling.line_decision.firm_missing`). Nothing was
+ * written and the invoice has not changed, so Reload would help nothing: the server's sentence is shown and the form keeps what was typed.
+ */
+export function isFirmFirst(f: ApiFailure): boolean {
+  return f.status === 409 && f.errorCode === CODE_LINE_DECISION_FIRM_MISSING;
 }
 
 /** The page-level sentence for a failed read of the review. */

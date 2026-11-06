@@ -7,10 +7,16 @@ import { InvoiceReviewPage } from '../components/InvoiceReviewPage';
 import { LINE_FINDING_FALLBACK } from '../services/reviewModel';
 import { INVOICE_ID, failed, field, finding, flagged, line, lineId, listSourceFiles, mockApi, ok, problem, review, type MockApi } from './testKit';
 
-function renderPage(api: MockApi, opts: { theme?: typeof webLightTheme; pollIntervalMs?: number; openRecord?: jest.Mock } = {}) {
+function renderPage(api: MockApi, opts: { theme?: typeof webLightTheme; pollIntervalMs?: number; openRecord?: jest.Mock; firmNeeded?: boolean } = {}) {
   return render(
     <FluentProvider theme={opts.theme ?? webLightTheme}>
-      <InvoiceReviewPage invoiceId={INVOICE_ID} api={api as never} openRecord={opts.openRecord} pollIntervalMs={opts.pollIntervalMs ?? 60_000} />
+      <InvoiceReviewPage
+        invoiceId={INVOICE_ID}
+        api={api as never}
+        openRecord={opts.openRecord}
+        pollIntervalMs={opts.pollIntervalMs ?? 60_000}
+        firmNeeded={opts.firmNeeded}
+      />
     </FluentProvider>
   );
 }
@@ -356,6 +362,103 @@ describe('InvoiceReviewPage: decisions (task 100)', () => {
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Disallow 1 line' }));
     expect(await within(dialog).findByTestId('bulk-error')).toHaveTextContent('A reason is required to disallow.');
+  });
+});
+
+describe('InvoiceReviewPage: the invoice needs its firm first (095d-0, EB-D-185 / EB-D-197)', () => {
+  const FIRM_SENTENCE = 'This invoice needs its firm first (or its billing rules are being checked again after the firm was set). Add the firm, then decide.';
+  const SERVER_SENTENCE = 'This invoice has no firm. A reviewer must add the firm before its lines can be decided.';
+
+  it('must-fire: disables Confirm (Accept, Reduce, Disallow), the ticked-row actions, Accept all clean, the By-rule suggestions and the corrections, and says why', async () => {
+    const api = mockApi(normal());
+    renderPage(api, { firmNeeded: true });
+    await screen.findByTestId('review-title');
+
+    expect(screen.getByTestId('firm-first-notice')).toHaveTextContent(FIRM_SENTENCE);
+    expect(screen.getByTestId('accept-clean')).toBeDisabled();
+    expect(screen.getByTestId('correct-header')).toBeDisabled();
+
+    fireEvent.click(row(2));
+    const pane = await screen.findByTestId(`pane-line-${lineId(2)}`);
+    fireEvent.click(within(pane).getByRole('radio', { name: 'Disallow' }));
+    expect(within(pane).getByTestId('decision-confirm')).toBeDisabled();
+    expect(within(pane).getByTestId('decision-firm-first')).toHaveTextContent(FIRM_SENTENCE);
+    expect(within(pane).getByTestId('correct-Hours')).toBeDisabled();
+
+    fireEvent.click(within(row(2)).getByRole('checkbox'));
+    expect(screen.getByTestId('bulk-accept')).toBeDisabled();
+    expect(screen.getByTestId('bulk-disallow')).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'By rule' }));
+    expect(await screen.findByRole('button', { name: 'Apply suggestion to 2 lines…' })).toBeDisabled();
+    expect(api.decideLine).not.toHaveBeenCalled();
+    expect(api.decideLines).not.toHaveBeenCalled();
+    expect(api.acceptClean).not.toHaveBeenCalled();
+  });
+
+  it('must-not-fire: with no firm need (the default) every one of them is enabled and no notice is shown', async () => {
+    renderPage(mockApi(normal()));
+    await screen.findByTestId('review-title');
+
+    expect(screen.queryByTestId('firm-first-notice')).not.toBeInTheDocument();
+    expect(screen.getByTestId('accept-clean')).toBeEnabled();
+    expect(screen.getByTestId('correct-header')).toBeEnabled();
+    fireEvent.click(row(2));
+    const pane = await screen.findByTestId(`pane-line-${lineId(2)}`);
+    fireEvent.click(within(pane).getByRole('radio', { name: 'Disallow' }));
+    expect(within(pane).getByTestId('decision-confirm')).toBeEnabled();
+    expect(within(pane).queryByTestId('decision-firm-first')).not.toBeInTheDocument();
+    expect(within(pane).getByTestId('correct-Hours')).toBeEnabled();
+    fireEvent.click(within(row(2)).getByRole('checkbox'));
+    expect(screen.getByTestId('bulk-accept')).toBeEnabled();
+    expect(screen.getByTestId('bulk-disallow')).toBeEnabled();
+  });
+
+  it('keeps the bulk Reduce/Disallow dialog open on a 409 firm_missing, with the typed reason and the server sentence, and offers no Reload', async () => {
+    const api = mockApi(normal());
+    api.decideLines.mockResolvedValue(failed(problem(409, 'ebilling.line_decision.firm_missing', { detail: SERVER_SENTENCE })));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(within(row(2)).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('bulk-disallow'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Rate above the agreed cap' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Disallow 1 line' }));
+
+    expect(await within(dialog).findByTestId('bulk-error')).toHaveTextContent(SERVER_SENTENCE);
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Reason')).toHaveValue('Rate above the agreed cap');
+    expect(screen.queryByTestId('notice-reload')).not.toBeInTheDocument();
+    expect(api.getReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the pane form and its reason on a 409 firm_missing, shows the server sentence and offers no Reload', async () => {
+    const api = mockApi(normal());
+    api.decideLine.mockResolvedValue(failed(problem(409, 'ebilling.line_decision.firm_missing', { detail: SERVER_SENTENCE })));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(row(2));
+    const pane = await screen.findByTestId(`pane-line-${lineId(2)}`);
+    fireEvent.click(within(pane).getByRole('radio', { name: 'Disallow' }));
+    fireEvent.change(within(pane).getByLabelText('Reason for line 2'), { target: { value: 'Duplicate of line 1' } });
+    fireEvent.click(within(pane).getByTestId('decision-confirm'));
+
+    await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent(SERVER_SENTENCE));
+    expect(screen.queryByTestId('notice-reload')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Reason for line 2')).toHaveValue('Duplicate of line 1');
+    expect(api.getReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('must-not-fire: any other 409 still closes the dialog and offers Reload', async () => {
+    const api = mockApi(normal());
+    api.decideLines.mockResolvedValue(failed(problem(409, 'ebilling.line.changed', { detail: 'A line changed. Reload and decide again.' })));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(within(row(2)).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('bulk-disallow'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Disallow 1 line' }));
+    expect(await screen.findByTestId('notice-reload')).toBeInTheDocument();
   });
 });
 

@@ -20,6 +20,13 @@ import type {
 // Line status (F-1: stored Pending is displayed as Processing)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The words for why a line decision, an adjustment or a correction is not available while the invoice needs its firm (EB-D-185 / EB-D-197): it
+ * has no firm, is held for one, or its billing rules are being checked again after the firm was set. The server refuses them (409) in that state.
+ */
+export const FIRM_FIRST_WORDS =
+  'This invoice needs its firm first (or its billing rules are being checked again after the firm was set). Add the firm, then decide.';
+
 export const DECIDED_STATUSES: ReadonlySet<string> = new Set(['Accepted', 'Reduced', 'Disallowed']);
 
 /** The one table of what each stored line status shows (F-1). Pending is never labelled "Pending". */

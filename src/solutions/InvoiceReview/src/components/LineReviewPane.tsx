@@ -37,6 +37,7 @@ import { Edit16Regular, ErrorCircle16Filled, Info16Regular, PersonWarning16Regul
 import { AiFieldTag, EvidenceLine, StatusBadge, StatusBar, type ConsoleStatusOverride } from '@spaarke/ui-components';
 import type { Correction, DecisionAction, ReviewFinding, ReviewLine } from '../services/invoiceReviewApi';
 import {
+  FIRM_FIRST_WORDS,
   LINE_STATUS,
   fieldLabel,
   findingText,
@@ -103,6 +104,8 @@ export interface LineReviewPaneProps {
   /** Decisions and corrections are offered (flags.canDecide, not refused 403). */
   canWrite: boolean;
   busy: boolean;
+  /** The invoice needs its firm first (EB-D-185 / EB-D-197): Confirm (Accept, Reduce, Disallow) and the corrections are disabled. */
+  firmNeeded?: boolean;
   /** Correction rows of this line (GET corrections), newest first. */
   corrections: Correction[];
   toDecideCount: number;
@@ -203,7 +206,7 @@ function decisionFormKey(line: ReviewLine): string {
 }
 
 /** "Your decision": suggestion first, nothing happens until the single Confirm. */
-function DecisionForm({ line, busy, onDecide }: { line: ReviewLine; busy: boolean; onDecide: (d: PaneDecision) => void }) {
+function DecisionForm({ line, busy, firmNeeded, onDecide }: { line: ReviewLine; busy: boolean; firmNeeded: boolean; onDecide: (d: PaneDecision) => void }) {
   const s = useStyles();
   const suggestion = lineSuggestion(line);
   const suggestedAmount = suggestion?.kind === 'Reduce' && suggestion.amount !== null ? reducedAmount(line.amount, suggestion.amount) : null;
@@ -282,8 +285,13 @@ function DecisionForm({ line, busy, onDecide }: { line: ReviewLine; busy: boolea
         <Radio value="disallow" label="Disallow" />
         {body('disallow')}
       </RadioGroup>
+      {firmNeeded && (
+        <Caption1 className={s.muted} data-testid="decision-firm-first">
+          {FIRM_FIRST_WORDS}
+        </Caption1>
+      )}
       <div className={s.actions}>
-        <Button appearance="primary" disabled={!effective || busy} onClick={confirm} data-testid="decision-confirm">
+        <Button appearance="primary" disabled={!effective || busy || firmNeeded} onClick={confirm} data-testid="decision-confirm">
           Confirm
         </Button>
       </div>
@@ -435,7 +443,7 @@ function WhatWasRead({
 
 export function LineReviewPane(props: LineReviewPaneProps) {
   const s = useStyles();
-  const { line, invoiceFindings, canWrite, busy, corrections, toDecideCount, onStart, onDecide, onCorrect, onConfirm, onShowField } = props;
+  const { line, invoiceFindings, canWrite, busy, firmNeeded = false, corrections, toDecideCount, onStart, onDecide, onCorrect, onConfirm, onShowField } = props;
 
   if (!line) {
     return (
@@ -516,13 +524,13 @@ export function LineReviewPane(props: LineReviewPaneProps) {
       {isDecided(line) && <DecidedState line={line} />}
       {/* Keyed on what the choice was made against: a correction re-runs the rules and can change the status, the amount or the suggestion,
           and a stale "Suggested" choice or amount must not survive that. */}
-      {decidable && <DecisionForm key={decisionFormKey(line)} line={line} busy={busy} onDecide={onDecide} />}
+      {decidable && <DecisionForm key={decisionFormKey(line)} line={line} busy={busy} firmNeeded={firmNeeded} onDecide={onDecide} />}
 
       <Divider />
       <WhatWasRead
         line={line}
         canCorrect={correctable}
-        busy={busy}
+        busy={busy || firmNeeded}
         corrections={corrections}
         onCorrect={onCorrect}
         onConfirm={onConfirm}

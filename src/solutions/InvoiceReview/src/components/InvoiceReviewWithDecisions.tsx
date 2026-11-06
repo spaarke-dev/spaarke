@@ -12,7 +12,7 @@
 
 import * as React from 'react';
 import { InvoiceReviewPage, type InvoiceReviewPageProps, type PaneTabSlot } from './InvoiceReviewPage';
-import { ApprovalProvider } from './decision/ApprovalProvider';
+import { ApprovalProvider, useApproval } from './decision/ApprovalProvider';
 import { AwaitingApprovers } from './decision/AwaitingApprovers';
 import { BlockedBanner } from './decision/BlockedBanner';
 import { DecideInvoiceAction } from './decision/DecideInvoiceAction';
@@ -28,6 +28,15 @@ export interface InvoiceReviewWithDecisionsProps extends Pick<InvoiceReviewPageP
   notifyStep?: NotifyStep;
 }
 
+/**
+ * The page with the approval state's `firmNeeded` (EB-D-185 / EB-D-197) fed in: the line decisions, adjustments and corrections are disabled
+ * while the invoice needs its firm. The state is read inside the provider, so this sits between the provider and the page.
+ */
+function ReviewPageWithApproval(props: InvoiceReviewPageProps) {
+  const { state } = useApproval();
+  return <InvoiceReviewPage {...props} firmNeeded={state?.firmNeeded === true} />;
+}
+
 export function InvoiceReviewWithDecisions({ invoiceId, api, decisionApi, openRecord, pollIntervalMs, notifyStep }: InvoiceReviewWithDecisionsProps) {
   const paneTabs = React.useMemo<PaneTabSlot[]>(
     () => [
@@ -40,7 +49,7 @@ export function InvoiceReviewWithDecisions({ invoiceId, api, decisionApi, openRe
 
   return (
     <ApprovalProvider api={decisionApi} invoiceId={invoiceId}>
-      <InvoiceReviewPage
+      <ReviewPageWithApproval
         invoiceId={invoiceId}
         api={api}
         openRecord={openRecord}

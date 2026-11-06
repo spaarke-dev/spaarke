@@ -9,6 +9,7 @@
 import type { StatusBadgeTone } from '@spaarke/ui-components';
 import type { Correction, InvoiceReview, ReviewDecisionRecord } from './invoiceReviewApi';
 import type { ApprovalState } from './decisionApi';
+import { FIRM_FIRST_WORDS } from './reviewModel';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // What the server lets this caller do (FR-35: actions render only from server signals)
@@ -37,11 +38,12 @@ export function decisionAccess(review: Pick<InvoiceReview, 'header'>, approval: 
   return canWrite && approval.callerEligible ? 'decide' : 'none';
 }
 
-/** The words for why Approve and Reject are not available while the invoice needs its firm (EB-D-190), or null when it does not. */
+/**
+ * The words for why Approve, Reject, the line decisions, adjustments and corrections are not available while the invoice needs its firm
+ * (EB-D-185, EB-D-190, EB-D-197), or null when it does not.
+ */
 export function firmNeededBlocker(approval: ApprovalState): string | null {
-  return approval.firmNeeded === true
-    ? 'This invoice needs its firm first (or its billing rules are being checked again after the firm was set). Add the firm, then decide.'
-    : null;
+  return approval.firmNeeded === true ? FIRM_FIRST_WORDS : null;
 }
 
 /** The words for why Approve is not available now (I-2: open counts first), or null when it is available. */

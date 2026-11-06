@@ -381,6 +381,31 @@ describe('Approve', () => {
     expect(within(d).getByTestId('add-adjustment')).toHaveTextContent('Add adjustment');
   });
 
+  it('EB-D-197: when the invoice needs its firm (the approval re-read says so), Add adjustment and Remove are disabled and the words say why', async () => {
+    const decision = mockDecisionApi();
+    let firmNeeded = false;
+    decision.getApproval.mockImplementation(async () => ok(firmNeeded ? approval({ firmNeeded: true, canApprove: false }) : approval()));
+    const original = decision.addAdjustment.getMockImplementation()!;
+    decision.addAdjustment.mockImplementation(async (...args: unknown[]) => {
+      const r = await original(...args);
+      firmNeeded = true;
+      return r;
+    });
+    renderDecisions([clean(), adjusted()], decision);
+    const d = await openWizard();
+    await fillAdjustment(d);
+    expect(within(d).queryByTestId('adjustment-firm-first')).not.toBeInTheDocument();
+    expect(within(d).getByTestId('add-adjustment')).toBeEnabled();
+    fireEvent.click(within(d).getByTestId('add-adjustment'));
+
+    expect(await within(d).findByTestId('adjustment-firm-first')).toHaveTextContent('needs its firm first');
+    await within(d).findByTestId(`adjustment-${lineId(90)}`);
+    expect(within(d).getByTestId(`remove-adjustment-${lineId(90)}`)).toBeDisabled();
+    fireEvent.change(within(d).getByLabelText('Adjustment value'), { target: { value: '5' } });
+    fireEvent.change(within(d).getByLabelText('Adjustment reason'), { target: { value: 'Again' } });
+    expect(within(d).getByTestId('add-adjustment')).toBeDisabled();
+  });
+
   it('keeps the remove form open with an error when the removal is saved but the re-read fails', async () => {
     const decision = mockDecisionApi();
     const adj = line(90, { type: 'Adjustment', amount: -250, status: 'Accepted', statusLabel: 'Accepted', reason: 'Courtesy' });
@@ -447,7 +472,7 @@ describe('Approve', () => {
     expect(next(d)).toBeEnabled();
   });
 
-  it('disables Approve and Reject, and says why, while the invoice needs its firm (EB-D-148 / EB-D-190); Return to firm is not disabled here', async () => {
+  it('disables Approve and Reject, and says why, while the invoice needs its firm (EB-D-185 / EB-D-190); Return to firm is not disabled here', async () => {
     const decision = mockDecisionApi(approval({ canApprove: false, firmNeeded: true }));
     renderDecisions(clean(), decision);
     const d = await openWizard();

@@ -162,7 +162,9 @@ const REREAD_FAILED = 'The totals could not be read back from the server, so the
 
 export function AdjustStep() {
   const s = useStyles();
-  const { form, set, readOnly, review, api, invoiceId, reload } = useWiz();
+  const { form, set, readOnly, review, api, invoiceId, reload, approval } = useWiz();
+  // EB-D-197: an adjustment (add or remove) is refused (409) while the invoice needs its firm, so it is disabled the same way Approve is.
+  const firmBlocker = readOnly ? null : firmNeededBlocker(approval);
   const [rules, setRules] = React.useState<AdjustmentRule[] | null>(null);
   const [rulesUnavailable, setRulesUnavailable] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -196,7 +198,7 @@ export function AdjustStep() {
 
   const adjustments = review.lines.filter(isAdjustment);
   const valueError = adjustmentValueError(form.adjMethod, form.adjValue);
-  const canAdd = !readOnly && !busy && form.adjValue.trim() !== '' && !valueError && form.adjReason.trim() !== '';
+  const canAdd = !readOnly && !busy && firmBlocker === null && form.adjValue.trim() !== '' && !valueError && form.adjReason.trim() !== '';
 
   const add = async () => {
     setBusy(true);
@@ -271,13 +273,19 @@ export function AdjustStep() {
                 {a.reason ? ` · ${a.reason}` : ''}
               </Text>
               {!readOnly && (
-                <Button size="small" appearance="subtle" onClick={() => { setRemoveError(null); setRemoving(a); }} data-testid={`remove-adjustment-${a.id}`}>
+                <Button size="small" appearance="subtle" disabled={firmBlocker !== null} onClick={() => { setRemoveError(null); setRemoving(a); }} data-testid={`remove-adjustment-${a.id}`}>
                   Remove…
                 </Button>
               )}
             </div>
           ))}
         </div>
+      )}
+
+      {firmBlocker !== null && (
+        <MessageBar intent="warning" layout="multiline" data-testid="adjustment-firm-first">
+          <MessageBarBody>{firmBlocker}</MessageBarBody>
+        </MessageBar>
       )}
 
       {!readOnly && (

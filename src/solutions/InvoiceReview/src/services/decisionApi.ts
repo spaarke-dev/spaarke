@@ -59,8 +59,9 @@ export interface ApprovalState {
   decisionRecordId: string | null;
   eligibleResolvedOn: string | null;
   /**
-   * The invoice has no firm, is held for one, or its re-run after Set firm has not finished (EB-D-148 / EB-D-190). The server refuses approve and
-   * reject (409) in that state; return to firm has its own firm check. Optional so an older server reads as "not needed".
+   * The invoice has no firm, is held for one, or its re-run after Set firm has not finished (EB-D-185; EB-D-190 adds Reject, EB-D-197 adds
+   * adjustments and corrections). The server refuses approve, reject, the line decisions, adjustments and corrections (409) in that state;
+   * return to firm has its own firm check. Optional so an older server reads as "not needed".
    */
   firmNeeded?: boolean;
 }
