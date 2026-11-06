@@ -715,5 +715,5 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 
 - **Ruling (relayed):** `sprk_signal.sprk_corerecordtype` and `sprk_corerecordid` get no field security. Readability of a Signal stays decided by the core record's own row security.
 - **Write integrity** of the pair (the 042c rule: a half pair is never written on any path) rests on role privileges, the writers' server-side refusal, column auditing (D-206) and field-mapping 052's report, which also flags a pair changed after create.
-- **Readers fail closed:** if a caller's read of a Signal returns no pair, the server re-checks it and denies the Signal when a pair exists, both on the single-Signal routes and on the Worklist (field-mapping 044 fix round, reviewed by ontology and uac-r2).
+- **Readers:** Signal access fails closed whenever the server cannot confirm the pair (field-mapping 044 fix round, reviewed by ontology and uac-r2).
 - **Recorded in** this file. Told field-mapping and uac-r2. Detail of the review is kept out of this public file.
