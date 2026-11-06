@@ -62,6 +62,9 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
         // Ontology task 144: Signals and Decision Records are mirrored and released with their subject (SecureChildLineage).
         ["sprk_signals"] = "sprk_signal",
         ["sprk_decisionrecords"] = "sprk_decisionrecord",
+        // GitHub #2560: the hard-deny tables that are secure-lineage children (a mirrored share on them carries Read only).
+        ["sprk_policies"] = "sprk_policy",
+        ["sprk_policyversions"] = "sprk_policyversion",
     };
 
     /// <summary>Makes the batched strict read throw for this table only (task 149: one table's read failing).</summary>
