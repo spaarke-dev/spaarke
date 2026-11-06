@@ -853,3 +853,7 @@ On every Spaarke table (`sprk_*`), Spaarke Basic User holds Read only. Creating,
 ## 2026-11-06 — Core User reads communication threads at Deep (owner, in fm's session)
 
 Sending into a communication thread asks Read on `sprk_communicationthread` as the caller, and that table is user-owned. Core User gets that Read at Deep, so a Core user can reply into threads across their business-unit tree, like Core User's other reads (task 046b gap G13). For Basic User the gap stays "owner ruled: not granted" under the read-only ruling. UAC-r2 applies it through the reviewed add step.
+
+## 2026-11-06 — G13 grant withdrawn (supersedes "Core User reads communication threads at Deep")
+
+The ruling above rested on a wrong premise. Core User is not raised. Direct threads are private by ownership and explicit shares, so the depth of Read on `sprk_communicationthread` is part of their privacy rule and stays Basic. Record threads are owned by the owner of the record they are filed to, normally a team, and a member reads them at Basic. Task 046b sets the send/reply row to match. G13 stays open only if a record thread can remain owned by its creator. The owner was told in fm's session.
