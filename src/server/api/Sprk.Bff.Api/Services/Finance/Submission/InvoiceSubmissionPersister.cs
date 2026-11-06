@@ -1963,6 +1963,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         {
             ["fields"] = fields,
             ["coding"] = codingJson,
+
+            // Task 095d-2a-1 (EB-D-189): a flag, never a value. The read gave no date, so sprk_eventdate holds the invoice date (above); the re-run
+            // after Set firm rebuilds the line with no date, as intake judged it.
+            [ExtractionProvenance.LineDateMissingMember] = line.Date.Value is null,
             [ExtractionProvenance.Member] = ExtractionProvenance.ForLine(outcome.Read!, coding is { Status: not LineCodingStatus.NoNarrative }),
         }.ToJsonString(Json);
     }
@@ -2131,7 +2135,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             ["signalPlan"] = SignalPlanJson(outcome, invoiceId, out planRefusals),
 
             // EB-D-170: the header's home for provenance: the pair, and the header fields as read (a correction of one still names what the AI read).
-            [ExtractionProvenance.Member] = ExtractionProvenance.ForSubmission(outcome.Read!, outcome.Coding is not null, outcome.Resolution),
+            [ExtractionProvenance.Member] = ExtractionProvenance.ForSubmission(outcome.Read!, outcome.Coding, outcome.Resolution),
         };
         if (planRefusals.Count > 0)
         {
