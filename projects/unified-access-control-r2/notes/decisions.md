@@ -283,3 +283,10 @@ The owner's removal of Basic User's AppendTo on `sprk_reportcard` (2026-11-05, a
 Removal R1 (Ontology Administrator loses Create on `sprk_budgetrevision`) stands and was re-verified: only the writer identity creates budget revisions.
 
 If the owner later wants Basic-only users unable to file emails against report cards, that is a separate change (the Connections editor and the regarding map), not a role edit.
+
+## 2026-11-06: Dataverse auditing and field-secured columns
+
+ontology turns on Dataverse auditing on dev for the Spaarke tables and changeable columns (the owner's direction in ontology's session: find what changed and why when there is an issue). Two access rules come with it:
+
+- **`sprk_invoicesubmission.sprk_findingsjson` stays audited** (owner, 2026-11-06, in this session). Once ebilling's option A ships, it holds timekeeper names and AI-quoted text. The owner accepted that past values persist in change history and that any later erasure must cover change history too. This replaces uac-r2's earlier position (column auditing off) and narrows the option-A condition "not logged" to application logs.
+- **Change history stays System Administrator only.** On dev, no Spaarke role holds `prvReadRecordAuditHistory` or `prvReadAuditSummary`, so audit history exposes no field-secured value to anyone who couldn't already read it. Before any non-admin role is given those privileges, test that audit history hides field-secured values from a user without the field profile. Without that test, granting them would undo field security for the 102 secured columns.
