@@ -2957,7 +2957,11 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
 
         // Assigned To → CONTACT: the requested one, in the caller's payload (checked as the caller); else the caller's own
         // linked contact as a post-mapping default (task 083, #1044 writer half).
+        // Order on the row: the requested contact, else a value the matching field-mapping profile
+        // fills, else the caller's linked contact. The caller's contact is only a default: the service drops it, with a warning,
+        // when the caller may not AppendTo it.
         Dictionary<string, object?>? defaults = null;
+        var callerHasNoContact = false;
         if (request.AssignedToContactId is { } contactId && contactId != Guid.Empty)
         {
             payload[forPerson.Column] = LookupValue(forPerson.RelatedTable, contactId);
@@ -2969,6 +2973,10 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             {
                 [forPerson.Column] = new Microsoft.Xrm.Sdk.EntityReference(forPerson.RelatedTable, callerContact),
             };
+        }
+        else
+        {
+            callerHasNoContact = true;
         }
 
         // Field mapping from what the To Do is filed under (the source is inferred by the service), read as the caller (FR-04).
@@ -3005,18 +3013,26 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             return null; // neither a row nor a refusal: never a 201 (fail closed)
         }
 
-        if (request.AssignedToContactId is not { } chosen || chosen == Guid.Empty)
+        if ((callerHasNoContact || defaults is not null) && !Wrote(outcome, forPerson.Column))
         {
-            if (!Wrote(outcome, forPerson.Column))
-            {
-                _logger.LogWarning(
-                    "todo_assignee_unset: caller={CallerId} reason={Reason} — no assignee was chosen and the "
-                    + "caller has no linked contact, so sprk_assignedto is left blank; the To Do is still "
-                    + "created (never refused) but will not surface in the caller's Daily Briefing until the "
-                    + "link exists",
-                    ownerSystemUserId ?? "(unresolved)",
-                    "caller_has_no_linked_contact");
-            }
+            // Two different reasons, never one: no link to offer, or a contact that was offered but the service did not write
+            // (the caller may not AppendTo it, or it could not be checked). The second is named by the service's own warning.
+            var reason = callerHasNoContact ? "caller_has_no_linked_contact" : "caller_contact_not_appendable";
+            var detail = callerHasNoContact
+                ? "the caller has no linked contact"
+                : outcome.MappingWarnings
+                    .FirstOrDefault(w =>
+                        w.Code == Sprk.Bff.Api.Services.RecordCreation.RecordCreationWarning.DefaultValueDroppedCode
+                        && string.Equals(w.Column, forPerson.Column, StringComparison.OrdinalIgnoreCase))
+                    ?.Detail
+                  ?? "the caller's contact was not written";
+            _logger.LogWarning(
+                "todo_assignee_unset: caller={CallerId} reason={Reason} — no assignee was chosen and {Detail}, so "
+                + "sprk_assignedto is left blank; the To Do is still created (never refused) but will not surface in the "
+                + "caller's Daily Briefing",
+                ownerSystemUserId ?? "(unresolved)",
+                reason,
+                detail);
         }
 
         _logger.LogInformation(

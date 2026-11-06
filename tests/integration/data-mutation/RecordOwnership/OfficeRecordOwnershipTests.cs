@@ -381,8 +381,48 @@ public class OfficeRecordOwnershipTests
         factory.Logs.Entries.Should().Contain(e =>
             e.Level == LogLevel.Warning
             && e.Message.Contains("todo_assignee_unset")
+            && e.Message.Contains("reason=caller_has_no_linked_contact")
             && e.Message.Contains(callerSystemUserId.ToString("D")),
             "the missing link must be logged, naming the caller");
+    }
+
+    [Fact]
+    public async Task CreateTodo_NoAssignee_WhenTheCallersOwnContactIsNotAppendable_StillCreates_WithNoAssignedTo_AndLogsTheDistinctReason()
+    {
+        // The caller HAS a linked contact, but may not AppendTo it: the service drops the post-mapping default with a warning
+        // and the To Do is created without an assignee. The log must not claim the caller has no linked contact.
+        using var factory = new TodoRegardingTestWebAppFactory();
+        var callerSystemUserId = Guid.NewGuid();
+        var callerContactId = Guid.NewGuid();
+        factory.RecordCreation.CallerDataverse.NoAppendTo.Add(("contact", callerContactId));
+
+        factory.CallerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Resolved(callerSystemUserId.ToString("D")));
+        factory.Identity
+            .Setup(i => i.ResolveAsync(callerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(callerSystemUserId, ContactId: callerContactId));
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Contact not appendable",
+            DocumentId = Guid.NewGuid(),
+            PriorityScore = 50,
+            EffortScore = 50,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "a default the caller may not use must never refuse the create");
+        var created = factory.CreatedEntities.Should().ContainSingle().Subject;
+        created.Contains("sprk_assignedto").Should().BeFalse("the service did not write the default");
+
+        factory.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning
+            && e.Message.Contains("todo_assignee_unset")
+            && e.Message.Contains("reason=caller_contact_not_appendable")
+            && e.Message.Contains("The default value for 'sprk_assignedto' was not written"),
+            "a contact that was offered but not written is a different reason, with the service's own warning");
+        factory.Logs.Entries.Should().NotContain(e => e.Message.Contains("reason=caller_has_no_linked_contact"),
+            "the caller does have a linked contact");
     }
 
     // =====================================================================================
