@@ -147,3 +147,30 @@ Steps 1 and 2 (Word side) are with the owner. For step 2, Claude uploaded `kit-h
 - The policy reaches the attorney through `draft-legal-memo`, not through `nda-review`. That is one answer to gap #18: compose the skills rather than add policy reading to `nda-review`.
 - No skill rates a counterparty's markup against the playbook (gap #19). That is the next obvious Spaarke skill: "respond to markup".
 - The PDF path works, with a clear warning. The redline is built on a reconstruction, so formatting differs from the original.
+
+## Act 6: library review across 16 NDAs (2026-11-06, Claude via Chrome)
+
+### 6a: Microsoft `compare-key-terms` (259 credits; about 25 minutes, about 10 of them waiting on an approval)
+Prompt: "Build a key-terms grid … use NDA Key Terms Columns v1.0 … Excel with a citation for each answer, save to `Test/POC-Act6/`". Cowork loaded both our `nda-library-review` and `compare-key-terms` and used **`compare-key-terms`** with the Excel connector.
+- **Output** `evidence/act6/6a - NDA Key Terms Grid (compare-key-terms).xlsx`:
+  - **Key Terms:** 16 rows × 17 columns, following our format grounding. Each cell holds the answer, the section and a short quote.
+  - **Citations:** 225 rows, each with the term, value, Found/Not stated, the exact quote, the location and the source URL. The URLs are text, not hyperlinks.
+  - **Coverage:** what was read, and how, for each file.
+  - **Schema:** the columns and questions.
+- **No playbook positions:** it extracts fields; it doesn't say whether a field is acceptable. That is Microsoft's baseline for a tabular review.
+- **Approvals:** create the folder `POC-Act6`, then upload. The create-folder card waited about 10 minutes before Claude noticed it (gap #24).
+
+### 6b: Microsoft `review-contract` on a folder (449 credits)
+Prompt names the skill: "Use the Legal for Cowork review-contract skill: review all NDAs in … NDA batch/ against our NDA playbook".
+- **It doesn't refuse and doesn't do just one: it loops over all 16.** The runbook expected one at a time.
+- **First it summarizes the playbook and asks for confirmation.** It took the `.md` as the master over the two `.docx` copies. It turned our General guidelines into run rules ("you MUST NOT replace whole clauses"), which is gap #3 in action. It listed **gaps in our playbook**:
+  - nothing on inserting a missing clause;
+  - reverse engineering when nothing tangible is disclosed;
+  - DTSA notice applicability;
+  - disclosure periods over 2 years;
+  - home state unknown for the governing-law fallback.
+  These are useful for playbook quality (gap #25).
+- **Four questions:** confirm the summary; where redlines go (copies / edit originals / report only); insert missing clauses or comment; PDFs report-only or convert. We chose report only, comments, and PDFs findings-only.
+- **Output** `evidence/act6/6b - review-contract batch report.docx`: one Word report, with a summary table (overall status, escalations, other findings) and a section per NDA with clause, quote, classification and action.
+- **Score: overall status 16 of 16** against the key (all-GREEN = Compliant, any YELLOW = Fallback, any RED = Escalate). Before signing, it also flagged that every NDA names Jordan Ellis as signatory, that 11 effective dates are in the future, and that none has a notices clause.
+- **What it lacks against 6c:** no topic-by-document grid, no machine-readable result, no visuals. It is a narrative report.
