@@ -13,13 +13,13 @@
 | **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; peers take the owner's go for their own live writes in their sessions. |
 | **Active work** | None in code. **PR #2577 MERGED** as `f34993dc78` (POST /api/v1/documents: the caller needs Create on sprk_document, in the caller's BU container); worktree C:/wtdc removed; fm was told and adds the "Summarize Files (unfiled document)" matrix row in 046b. No uncommitted files. |
 | **Dev state** | BFF = **0f53e053bf** since 2026-11-05T21:39:06Z (gate PASS; record `notes/deploy-gate-2026-11-05-0f53e053bf.md`; gate script `$TEMP/uacmerge/uacg/gate0f5.sh`). Rollback snapshot `deploy/rollback/wwwroot-20261105T213757Z` = 909754869f. Dev SPA = b083d62183. 046b role additions are live (below). The root default team "Spaarke" holds Console User + Basic User only. |
-| **Next action** | 1. (Done: #2577 merged.) 2. After 02:30Z: read the nightly SignalReevaluationJob counts on 0f53e053bf (suppression, SuppressionPartitionUndeterminedException, 5xx, exceptions) and send them to ontology. Expect the #2578 WhoAmI 403 every 5 min (pre-existing). 3. (Done 02:35Z: 046b R1 removed on dev from `e6c0c94fa3`; -Remove -Verify and -Verify PASS.) Review the 046b PR when fm sends it; G11/G12 Basic User gaps go to the owner through fm (my recommendation: not granted, fail closed 403). 4. Review fm 049b when the head SHA arrives (~3–4 h from 01:00Z). 5. Then ONE combined deploy (owner's go naming the SHA; every peer re-OKs the combined SHA, ontology included; avoid restarts 02:20–03:00Z). |
+| **Next action** | 1. (Done: #2577 merged.) 2. (Done: nightly on 0f53e053bf clean; sent to ontology 02:5xZ; census now 5, after the root-team change.) 3. (Done 02:35Z: 046b R1 removed on dev from `e6c0c94fa3`; -Remove -Verify and -Verify PASS.) Review the 046b PR when fm sends it; G11/G12 Basic User gaps go to the owner through fm (my recommendation: not granted, fail closed 403). 4. Review fm 049b when the head SHA arrives (~3–4 h from 01:00Z). 5. Then ONE combined deploy (owner's go naming the SHA; every peer re-OKs the combined SHA, ontology included; avoid restarts 02:20–03:00Z). |
 
 ## The next dev deploy (owner: wait for 049)
 - Contents: master `0f6618094b` (#2573 fm 043) + #2577 (`f34993dc78`) + 049. Code pages: LegalWorkspace, SpaarkeAi, CreateProjectWizard, AI.Widgets.
 - Gate: gate0f5.sh set, plus:
   - fm 043: analysis create 0 5xx; push 0 5xx with the 409 rate unchanged on non-analysis targets; child-records create 0 5xx;
-  - ontology: table_unsupported = baseline 0; writer codes 0; SignalWriter/DecisionRecordWriter refusals 0; Undetermined 0; census unchanged (9).
+  - ontology: table_unsupported = baseline 0; writer codes 0; SignalWriter/DecisionRecordWriter refusals 0; Undetermined 0; census unchanged (5 since 2026-11-06 00:30Z).
 - ebilling gates: `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` (params in project CLAUDE.md §5 / gate notes) exits 0; `Ebilling__StoredFileReconcileEnabled` stays false.
 
 ## Reviews in flight
@@ -40,7 +40,7 @@
   - EB-D-188: ledger entry; G5 on the invoice; In Review + firm only; no external reach; the DR names the caller.
   - **164a (sprk_billingevent): generic CREATE refused only** (the full writer-only rule would break D-96's detach/move/re-attach, which uses generic update). Conditions sent: a separate create-only flag (NOT `CreatedOnlyByItsWriter`, which also drives 048's update/delete refusals) plus one derived property read by every create site; the PR lists every reader of the flag as create or update/delete; tests: create refusals write nothing; must-not-fire on D-96 re-attach and the typed writers; signal/DR/budgetrevision refusals unchanged; delete unchanged and stated; guard text at AccessTableReaderScanTests:73 updated. Gate effect: ontology's `table_unsupported` baseline count must be filtered by table after 164a deploys (tell ontology at that deploy).
   - After the PR: P2 migration (their session), then my flip of `Ebilling__StoredFileReconcileEnabled` (owner go HERE).
-- **ontology** (`-38`): Worklist 200 from organic traffic DONE (01:31:37Z). Still owed: the nightly counts from 2026-11-06 02:30Z.
+- **ontology** (`-38`): Worklist 200 from organic traffic DONE (01:31:37Z). Nightly counts sent (clean). 174 (commit route refuses billing Signals, 409 `decision.decided_in_invoice_review`) approved in placement; binding condition: the PR lists every Signal-decide entry point (refuse + test, or a reason with file:line). Send-SHA pending. Audit pass at 03:00Z: 89 tables / 569 columns incl. the 59 field-secured (owner go in ontology's session).
 
 ## Owner items outstanding
 - **#2574:** turn on `JobRevokeOnChangeEnabled` (G-8) on dev. App-setting change: owner go here.
