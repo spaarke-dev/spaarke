@@ -752,3 +752,14 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - F2: the headline is "No billing terms in force for some work dates"; no copy of the old string remains in `src/` or `tests/`.
     - The K note is in ebilling's `082-procedure-resolver.md`.
     - Not reviewed by ontology (uac-r2 owns them): U1–U3, and P0 `9ad335b8f3`.
+
+## D-206 — Dataverse auditing on every Spaarke table and substantive column (owner, 2026-11-05)
+
+- **Owner (this session):** "track changes / auditing needs to be on for every table and every substantive decision related field"; exclusions only where they would not help find an issue and why, especially an invoice issue.
+- **Dev before (read 2026-11-06 ~01:45Z):** org audit on, user-access audit on, retention forever. 161 `sprk_` tables: 22 N:N intersect, 48 audited, 91 not; 570 changeable columns off (incl. 17 on `sprk_signal`, 20 on `sprk_decisionrecord`, 3 on `sprk_budgetrevision`, 18 on `sprk_invoice`, 15 on `sprk_billingevent`, 11 on `sprk_invoicesubmission`).
+- **Scope applied on dev (from 03:00Z):** 89 tables and 510 columns turned on; entity-scoped PublishXml in batches of 10.
+  - **Excluded:** `sprk_aichatmessage`, `sprk_aichatsummary` (Assistant conversations, no invoice or decision data); N:N intersect tables (not separately auditable; associate/disassociate is audited on the parents).
+  - **Not excluded:** job/run/outbox tables (they record invoice AI runs and emails); `sprk_signal.sprk_lastevaluated`; no churn exclusion (no lease/heartbeat tables in Dataverse; 24 h churn low).
+  - **Field-secured columns untouched** (102; 59 off stay off, 43 on stay on) pending the owner: uac-r2 and ebilling ask `sprk_invoicesubmission.sprk_findingsjson` column auditing OFF (EB-D-189 will put timekeeper names and AI-quoted text there; audit keeps every past copy), `sprk_invoice.sprk_firmhold` only once field-profile masking is shown. Facts: both columns and both tables are already audited on dev; no Spaarke role holds `prvReadRecordAuditHistory`/`prvReadAuditSummary` (only System Administrator and Microsoft service roles), so audit history shows secured values to no one who cannot already read them; masking cannot be tested until a non-admin role gets audit history.
+- **Solution:** SpaarkeMaster `Entity.xml` mirrors dev in its own PR, listing the exceptions; customer-provisioning H6 already sets org `isauditenabled` and retention forever (`isuseraccessauditenabled` proposed to the owner by customer-provisioning).
+- **Rule for new columns:** create with `IsAuditEnabled` = true (ebilling `95590650bd`).
