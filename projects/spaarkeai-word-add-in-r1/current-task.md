@@ -2,7 +2,7 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas". History: git log + `notes/handoff-history/` (do not load on recovery; the state before 2026-11-01 is archived verbatim in `notes/handoff-history/2026-11.md`).
 
-> **Last Updated**: 2026-11-06 (work branch merged with master and records reviewed before /merge-to-master; dev BFF 20669df6a9 live; #2552 held).
+> **Last Updated**: 2026-11-06 (fm 030a content read sent; dev BFF 20669df6a9 live; #2552 held).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -13,11 +13,11 @@
 | **Live dev BFF** | **20669df6a9 since 2026-11-06T16:44:51Z** (deployed by uac-r2; rollback 0f53e053bf; server gate PASS to 17:14:51Z). No Office or Finance server change since d763dc120e. |
 | **Owner checks open** | On whatever build is live: (1) an Office save filed to a matter, (2) an Office save with no related record, (3) one Submit Invoice from an email. Then read `sprk_document` rows created after the live time (`sprk_searchindexcompletedon`, `sprk_searchindexname`) and the invoice submission, invoice and line rows; send the result to uac-r2. None made yet (checked after 16:44:51Z). |
 | **Last merge to master** | **PR #2604 MERGED** 2026-11-06 as bcdc0e0069 (project records only; Router, client lint and every other check pass; Tier 1/2 skipped as docs-only). Main checkout fast-forwarded to it. Issue #945 commented; board Tasks Completed corrected 127 → 126 (042 is 🔄; the old count read the ✅ in its dependency cell). |
-| **Next Action** | Wait for: the owner's three checks; ebilling's 095c SHA (#2552); fm's 030a and 030b PRs for a content read before their dev deploy; ebilling's 095a/095b/151e PR + SHA (banner, invoice Files section). |
+| **Next Action** | Wait for: the owner's three checks; ebilling's 095c SHA (#2552); fm's answer on OFFICE_010 and the 030b PR for a content read before its dev deploy (030a read done); ebilling's 095a/095b/151e PR + SHA (banner, invoice Files section). |
 
 ## Decisions and alignment (2026-11-04 to 11-06)
 - **W3 create paths** (owner 2026-11-06, fm decisions.md, UAC-r2 reviewed): see project `CLAUDE.md` "Create paths follow fm's W3 direction" and the spec ADR Tensions row. fm confirmed the 030b "existing id refused" guard covers creates only; the version save (`existingDocumentId` + `isNewVersion`) and the re-file (`documentId`) get must-not-fire tests.
-- **fm 030a** (Office To Do through the service): built on `task/fm-030`, in fm review. Its To Do refusal is **403** OFFICE_009 `source_record_inaccessible` (unchanged body); new: an assignee contact needs AppendTo (Core User has it). The pane shows the server's detail sentence, so no pane change. Suggested to fm (optional): add "or choose a different person" to the sentence.
+- **fm 030a** (Office To Do through the service): built, in fm review (content read of fe8e8913e6 sent 2026-11-06: OK). Its To Do refusal is **403** OFFICE_009 `source_record_inaccessible`, now ending "or choose a different person to assign it to"; an assignee contact needs AppendTo (Core User has it). The pane pins nothing and shows the server detail under the catalog title, so no pane change. A To Do created with no assignee needs no pane notice (the confirmation never shows an assignee). Open note to fm: OFFICE_010 shows the title "Cannot Create Entity"; a transient cause ("a check it couldn't make") should say "try again" in its detail, not the old permission sentence. Waiting on fm's answer and the 030b PR.
 - **Roles** (owner): Office Add In User needs Core User and is for licensed core users only; Basic User becomes Read-only on `sprk_*` (fm 046c, live apply by uac-r2). The four service and demo accounts do not get the add-in role (2026-11-05). The five add-in holders who lacked Core User were given it (2026-11-06, read back on dev); every add-in role holder now has Core User or System Administrator.
 - **ebilling contract** (#2552): `"firm": null` prefill accepted; "Firm: none" kept (ebilling confirmed); §12 reviewer refusals not on any pane route; 082c-3 `warning` is SPA-only, no pane impact.
 
