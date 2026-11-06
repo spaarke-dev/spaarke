@@ -170,11 +170,12 @@ public interface IOfficeService
     /// <param name="userId">Authenticated user id (OBO oid).</param>
     /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c>. It only picks the default Assigned To contact (the caller's linked contact, used when the request names none and no field-mapping profile fills the column). It is not the owner and is not the identity the create runs as.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The created To Do id + name. <see langword="null"/> when the request carries no name (the endpoint validates the name first, so this is a defensive guard), or when the create service refused for a reason the route does not map (an I-1 stamp that could not be derived or a check that could not be made); the endpoint answers that as 403 OFFICE_010 and nothing was written.</returns>
+    /// <returns>The created To Do id + name. <see langword="null"/> when the request carries no name (the endpoint validates the name first, so this is a defensive guard), or when the create service refused for a reason the route does not map and a retry would not clear (an I-1 stamp that cannot be derived, a privilege or column refusal, an upstream 400, 403 or 404); the endpoint answers that as the generic 403 OFFICE_010 and nothing was written.</returns>
     /// <exception cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException">
     /// 403 OFFICE_022 when no owner resolves; 403 OFFICE_009 with reason code <c>source_record_inaccessible</c> (the To Do route
     /// filter's one uniform body) when the caller may not AppendTo, or cannot find, a record, document, email or assignee the
-    /// request names.
+    /// request names; 403 OFFICE_010 with a "try again" detail when the refusal is transient (a check or the owner decision
+    /// faulted, whether the create may stand could not be decided, or Dataverse answered 429, 503 or 504) and nothing was saved.
     /// </exception>
     /// <remarks>
     /// <para>

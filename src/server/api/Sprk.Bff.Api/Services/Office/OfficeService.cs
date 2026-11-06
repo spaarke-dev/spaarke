@@ -3005,7 +3005,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                 throw problem;
             }
 
-            return null; // the route's existing generic failure (403 OFFICE_010); nothing was written
+            return null; // the route's existing generic failure (403 OFFICE_010, non-transient kinds); nothing was written
         }
 
         if (outcome.CreatedId is not { } todoId)
@@ -3047,15 +3047,35 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
     /// no owner → 403 <see cref="OfficeErrorCodes.RecordOwnerUnresolved"/> with the words it had; a record the request names
     /// that the caller may not use, or that does not exist → the route filter's ONE uniform refusal (403
     /// <see cref="OfficeErrorCodes.AccessDenied"/>, <see cref="Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.DeniedReasonCode"/>),
-    /// so "denied" and "not found" stay indistinguishable. Every other refusal (an I-1 stamp that could not be derived, a check
-    /// that could not be made, a privilege or column refusal, an unknown kind) is <see langword="null"/>: the route's existing
-    /// generic failure, 403 OFFICE_010 (fail closed). Nothing was written in any case.
+    /// so "denied" and "not found" stay indistinguishable. A TRANSIENT refusal, one a retry can clear (<c>Unavailable</c>: a check
+    /// or the owner decision faulted, including an I-1 stamp that could not be read; <c>Undecided</c>: whether the create may
+    /// stand could not be decided; <c>Upstream</c> whose status is 429, 503 or 504), keeps the route's existing code and status,
+    /// 403 <see cref="OfficeErrorCodes.CannotCreateEntity"/> (OFFICE_010), but says to try again (<see cref="TransientDetail"/>).
+    /// Every other refusal (an I-1 stamp that cannot be derived, a privilege or column refusal, an upstream 400, 403 or 404, an
+    /// unknown kind) is <see langword="null"/>: the route's existing generic failure, 403 OFFICE_010 (fail closed). Nothing was
+    /// written in any case.
     /// </summary>
+    /// <remarks>
+    /// <para>An <c>Upstream</c> refusal's status is the one <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationProblemMap.StatusOf"/>
+    /// gives it (the caller's Dataverse status, 408 as 504 and any other 5xx or a call that never left the BFF as 503), so this
+    /// route and the HTTP adapters of the same service agree on which upstream failures are transient. The detail carries no
+    /// exception text, record id or service reason.</para>
+    /// <para>Unlike <see cref="MapQuickCreateRefusal"/>, an <c>Undecided</c> refusal that carries a provisioning or secure-create
+    /// code is not passed through under that code: this route has one error code (OFFICE_010) and a fixed detail, so every
+    /// <c>Undecided</c> refusal says to try again and, if it keeps failing, to contact an administrator. The code stays in the log.</para>
+    /// </remarks>
     /// <param name="refusal">The service's refusal.</param>
     /// <param name="targetTable">What the To Do is filed against (the record, else a carrier), or <see langword="null"/>.</param>
     internal static SdapProblemException? MapTodoRefusal(
         Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusal refusal, string? targetTable) => refusal.Kind switch
     {
+        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Unavailable
+            or Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Undecided => TransientTodoRefusal(),
+        Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.Upstream
+            when Sprk.Bff.Api.Services.RecordCreation.RecordCreationProblemMap.StatusOf(refusal)
+                is StatusCodes.Status429TooManyRequests
+                or StatusCodes.Status503ServiceUnavailable
+                or StatusCodes.Status504GatewayTimeout => TransientTodoRefusal(),
         Sprk.Bff.Api.Services.RecordCreation.RecordCreationRefusalKind.OwnerUnresolved => new SdapProblemException(
             OfficeErrorCodes.RecordOwnerUnresolved,
             OfficeErrorCodes.GetTitle(OfficeErrorCodes.RecordOwnerUnresolved),
@@ -3076,6 +3096,21 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
             }),
         _ => null,
     };
+
+    /// <summary>
+    /// What the add-in pane shows for a To Do create that failed for a reason a retry can clear (<see cref="MapTodoRefusal"/>).
+    /// Nothing was saved. No exception text, record id or service reason.
+    /// </summary>
+    internal const string TransientDetail =
+        "The To Do could not be created right now, and nothing was saved. Try again in a moment. "
+        + "If it keeps failing, contact your administrator.";
+
+    /// <summary>403 OFFICE_010 (the route's existing code and status) with <see cref="TransientDetail"/>.</summary>
+    private static SdapProblemException TransientTodoRefusal() => new(
+        OfficeErrorCodes.CannotCreateEntity,
+        OfficeErrorCodes.GetTitle(OfficeErrorCodes.CannotCreateEntity),
+        TransientDetail,
+        OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.CannotCreateEntity));
 
     /// <inheritdoc />
     public IAsyncEnumerable<byte[]> StreamJobStatusAsync(

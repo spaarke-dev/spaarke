@@ -171,3 +171,21 @@ host file and the double's `OpenTables`.
   case without naming any record. It is still one string for every denial; status and codes are unchanged.
 
 rework: none task 030
+
+### Fix round 2 (OFFICE_010 transient text)
+
+- Problem: `OfficeService.MapTodoRefusal` returned null for every refusal except `OwnerUnresolved` and `NotFoundOrDenied`, so a
+  transient failure got the route's generic 403 OFFICE_010 "Failed to create the To Do.", with no hint to retry.
+- Now mapped to an `SdapProblemException` that keeps errorCode OFFICE_010, status 403 and the existing title
+  ("Cannot Create Entity"), with a fixed "try again" detail (`OfficeService.TransientDetail`): `Unavailable` (a check or the
+  owner decision faulted, including the I-1 stamp read), `Undecided`, and `Upstream` whose status is 429, 503 or 504. The
+  upstream status is `RecordCreationProblemMap.StatusOf(refusal)` (from `ClientFailure.StatusCode`; no text is parsed), so a raw
+  408 (as 504) or another 5xx / a call that never left the BFF (as 503) is transient here exactly as it is for the HTTP adapters.
+- Unchanged (route's generic path, null): Forbidden, BlockedColumn, Invalid, PrincipalUnresolved, Conflict, Upstream 400/403/404.
+- `Undecided` with a provisioning or secure-create code: the quick-create mapper passes those through under their own code at 500.
+  The To Do route has one code and a fixed contract, so every `Undecided` says to try again and, if it keeps failing, to contact
+  an administrator. The code stays in the log line. The detail carries no exception text, record id or service reason.
+- Tests: `OfficeTodoRefusalMapTests` (map table, the pinned detail, the non-transient controls) and two cases in
+  `OfficeTodoCreateThroughServiceContractTests` (a faulted stamp read gives the try-again detail; no create right gives the
+  generic detail). With the mapping arms removed, 10 failed (9 map rows, 1 contract); the pin and the controls passed, as they
+  describe unchanged behaviour.
