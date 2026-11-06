@@ -46,6 +46,7 @@
   - #2582 audit flags merged; H6 covers org auditing; audit history stays SysAdmin only.
 
 ## Owner items outstanding
+- ebilling (private): invoice hold reasons sit in a submission column that Core User can write on dev today, so a hold can be edited away. Fix in ebilling task 165, ordered first and before AP export is turned on anywhere; ebilling tells the owner. 095d-2b-1: conditions C1 and C2 (withhold keyed on a user-writable column; invoice visible while the re-run is pending) are in a fix round, re-keyed on the invoice firmhold read app-only. Waiting for the SHA.
 - ebilling: approval accepts a fee or expense line of unknown origin. ebilling fixes it in 164a-4a; I review the 164 diff. Condition: a user cannot forge the add-line Decision Record. Does the owner want tracking beyond 164? (Private; do not describe the mechanism in public text.)
 - Should customer environments turn on revoke-on-change (G-8) through provisioning?
 - #2590: a project created app-only with no person lands in the root BU. Choose the rule (refuse vs route) and whether to move the dev row.
