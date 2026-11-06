@@ -16,7 +16,8 @@
 | **Next action** | 1. (Done: #2577 merged.) 2. (Done: nightly on 0f53e053bf clean; sent to ontology 02:5xZ; census now 5, after the root-team change.) 3. (Done 02:35Z: 046b R1 removed on dev from `e6c0c94fa3`; -Remove -Verify and -Verify PASS.) Review the 046b PR when fm sends it; G11/G12: owner ruled in fm's session "not granted (Core User required)"; 12 entries stay in the ratchet; fm's final round checks that send and re-file answer a not-held probe with 403, not 500. 4. Review fm 049b when the head SHA arrives (~3–4 h from 01:00Z). 5. Then ONE combined deploy (owner's go naming the SHA; every peer re-OKs the combined SHA, ontology included; avoid restarts 02:20–03:00Z). |
 
 ## The next dev deploy (owner: wait for 049)
-- Contents: master `0f6618094b` (#2573 fm 043) + #2577 (`f34993dc78`) + 049. Code pages: LegalWorkspace, SpaarkeAi, CreateProjectWizard, AI.Widgets.
+- Contents: master `0f6618094b` (#2573 fm 043) + #2577 (`f34993dc78`) + 049.
+- **Pre-deploy check:** master must NOT carry ontology 174 (#2580: billing Signals refused with a 409) unless it is switched off. 174 ships only with 175 (the Console) after ebilling 112. If 174 is on master and unswitched, stop. Code pages: LegalWorkspace, SpaarkeAi, CreateProjectWizard, AI.Widgets.
 - Gate: gate0f5.sh set, plus:
   - fm 043: analysis create 0 5xx; push 0 5xx with the 409 rate unchanged on non-analysis targets; child-records create 0 5xx;
   - ontology: table_unsupported = baseline 0; writer codes 0; SignalWriter/DecisionRecordWriter refusals 0; Undetermined 0; census unchanged (5 since 2026-11-06 00:30Z).
