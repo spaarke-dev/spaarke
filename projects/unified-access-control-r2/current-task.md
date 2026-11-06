@@ -13,7 +13,7 @@
 | **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; peers take the owner's go for their own live writes in their sessions. |
 | **Active work** | Reviews (below). No deploy in flight. No uncommitted files. |
 | **Dev state** | BFF = **0f53e053bf** since 2026-11-05T21:39:06Z (gate PASS; record `notes/deploy-gate-2026-11-05-0f53e053bf.md`; gate script `$TEMP/uacmerge/uacg/gate0f5.sh`). Rollback snapshot `deploy/rollback/wwwroot-20261105T213757Z` is 909754869f. Dev SPA = b083d62183. |
-| **Next action** | 1. fm 049b: review when fm sends the final head SHA (fix round in progress, with my decisions below). 2. 046b -Apply on dev when fm's script and WhatIf are ready (owner go given for G1, G2, G4-G8). 3. ebilling master PR review when it opens. 4. Owed to ontology: Signals 200 and the nightly counts on 0f53e053bf. |
+| **Next action** | 0. Next dev deploy = ONE combined deploy after 049 merges (owner: wait for 049; 0f6618094b = #2573 fm 043 held; every peer re-OKs the combined SHA). 1. fm 049b: review when fm sends the final head SHA (fix round in progress, with my decisions below). 2. 046b -Apply on dev when fm's script and WhatIf are ready (owner go given for G1, G2, G4-G8). 3. ebilling master PR review when it opens. 4. Owed to ontology: Signals 200 and the nightly counts on 0f53e053bf. |
 
 ## Reviews in flight
 - **ebilling** (`-c7`):
@@ -45,6 +45,7 @@
 - **ontology** (`-38`): owed TO them: Signals 200 from organic traffic, and the nightly suppression and Undetermined counts on 909754869f and on 0f53e053bf (live since 21:39:06Z).
 
 ## Owner items outstanding
+- In flight: an Opus implementer on POST /api/v1/documents (branch task/uac-doc-create-auth, worktree C:/wtdc): Create privilege as the caller + the caller BU container only. Review its report, then open the PR.
 - **NEW: #2574.** Turn on `JobRevokeOnChangeEnabled` (gate G-8) on dev, so the reconciliation heals a stale add that raced a removal. It's an app-setting change: owner go here.
 - **NEW (ontology recommendation): column auditing on the writer-only tables' lookups.**
   - Today the org and the three tables audit, but no custom lookup column is audited.

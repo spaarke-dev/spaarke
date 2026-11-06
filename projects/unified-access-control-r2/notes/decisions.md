@@ -270,3 +270,8 @@ The owner asked for the best technical and process answer.
 **Why not change rule A3 as well.** A3 ("an Assigned-To grant that existed before the record became secure is kept") protects people already working on a record that is secured later. Changing it would remove their access, and this case doesn't need it: the fix is to stop the wizard's project being a non-secure record before it is secured.
 
 **Checked on dev, 2026-11-05:** no secure project holds an active granted or shared Assigned-To row, so no existing data needs repair.
+
+## 2026-11-05: Who holds Spaarke Office Add In User; the next dev deploy
+
+- **Office Add In User is for licensed core users** (attorneys, paralegals and the like), assigned directly, never through a team. After its removal from the root default team, four dev service or demo accounts no longer hold it (# Accounts Payable, # Invoice Processing, # Spaarke Get Started, # UAC Child BU Test User). The owner ruled that none of them gets it back. Office add-in saves by those accounts are refused, as expected.
+- **The next dev BFF deploy waits for field-mapping 049.** Master `0f6618094b` (#2573, field-mapping 043) is not deployed alone. One combined deploy follows 049's merge: the BFF plus the LegalWorkspace, SpaarkeAi, CreateProjectWizard and AI.Widgets code pages. Each peer re-checks the combined SHA; ontology's OK covered `0f6618094b` only.
