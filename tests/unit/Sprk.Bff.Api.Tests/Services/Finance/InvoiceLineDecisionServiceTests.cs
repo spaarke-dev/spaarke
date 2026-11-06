@@ -136,7 +136,7 @@ public sealed partial class InvoiceLineDecisionServiceTests
                 ["statuscode"] = new OptionSetValue(status),
                 ["sprk_totalamount"] = new Money(billedTotal),
                 ["sprk_project"] = new EntityReference("sprk_project", Core),
-                // Task 095d-0 (D-148): a firm comes first, so every line decision here is made on an invoice that has one (InvoiceFirmGateLineDecisionTests drops it).
+                // Task 095d-0 (EB-D-185): a firm comes first, so every line decision here is made on an invoice that has one (InvoiceFirmGateLineDecisionTests drops it).
                 ["sprk_vendororg"] = new EntityReference("sprk_organization", Firm),
                 ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", Guid.NewGuid()),
                 ["sprk_regardingrecordid"] = Core.ToString("D"),

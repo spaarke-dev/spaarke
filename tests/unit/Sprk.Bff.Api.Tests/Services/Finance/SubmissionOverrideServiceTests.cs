@@ -3152,7 +3152,7 @@ public partial class SubmissionOverrideServiceTests
 
     public static TheoryData<string, int?> RemainingHolds => new()
     {
-        // Task 095d-0 (D-148): "the invoice's own firm hold is still set" and "the invoice names no firm" are no longer reachable through an Override
+        // Task 095d-0 (EB-D-185): "the invoice's own firm hold is still set" and "the invoice names no firm" are no longer reachable through an Override
         // (it is refused 409 ebilling.override.firm_missing first, InvoiceFirmGateOverrideTests); the derivation itself is pinned in InvoiceOpenHoldsTests.
         { "another linked submission still holds a gap", InvoiceReviewDetail.WaitingForBillingTerms },
         { "another linked submission still could not be checked", InvoiceReviewDetail.BillingTermsNotChecked },
@@ -3415,7 +3415,7 @@ public partial class SubmissionOverrideServiceTests
         StoredSetIds(w).Should().NotContain(signal, "the stored set excludes it");
     }
 
-    [Fact(DisplayName = "114b must-fire (a), FLIPPED by 095d-0 (D-148): an Internal gap Override while the firm hold remains is REFUSED 409 ebilling.override.firm_missing - no Decision Record, no stored set, no Signal closed (the shared SubmissionIntegrity Signal and the rule Signal stay Open), the detail unchanged")]
+    [Fact(DisplayName = "114b must-fire (a), FLIPPED by 095d-0 (EB-D-185): an Internal gap Override while the firm hold remains is REFUSED 409 ebilling.override.firm_missing - no Decision Record, no stored set, no Signal closed (the shared SubmissionIntegrity Signal and the rule Signal stay Open), the detail unchanged")]
     public async Task Release_WhileTheFirmHoldRemains_IsRefused_AndLeavesEverySignalOpen()
     {
         var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
@@ -3477,7 +3477,7 @@ public partial class SubmissionOverrideServiceTests
         w.InvoiceDetail.Should().BeNull();
     }
 
-    [Fact(DisplayName = "114b, FLIPPED by 095d-0 (D-148): an ordinary override (no Procedure hold) on an invoice held for its firm is REFUSED 409 ebilling.override.firm_missing - it no longer leaves the shared Signal open with the rest closed: no Decision Record, no stored set, no Signal closed")]
+    [Fact(DisplayName = "114b, FLIPPED by 095d-0 (EB-D-185): an ordinary override (no Procedure hold) on an invoice held for its firm is REFUSED 409 ebilling.override.firm_missing - it no longer leaves the shared Signal open with the rest closed: no Decision Record, no stored set, no Signal closed")]
     public async Task OrdinaryOverride_WhileTheFirmHoldStands_IsRefused_AndClosesNothing()
     {
         var w = await World.CreateAsync();

@@ -107,7 +107,7 @@ public static class BlockedSubmissionErrors
     /// <summary>503: a read or the lock could not be done right now. Retry.</summary>
     public const string Unavailable = "ebilling.blocked.unavailable";
 
-    /// <summary>409 (task 095d-0, D-148; Override only): the invoice has no firm, is held for one, or its post-Set-firm re-run is pending, so no
+    /// <summary>409 (task 095d-0, EB-D-185; Override only): the invoice has no firm, is held for one, or its post-Set-firm re-run is pending, so no
     /// Override (an ordinary release or a Procedure-hold release) is made. Return is not gated. Nothing was changed.</summary>
     public const string FirmMissing = "ebilling.override.firm_missing";
 
@@ -870,7 +870,7 @@ public sealed class SubmissionOverrideService
             return denied;
         }
 
-        // ── Task 095d-0 (D-148, ontology-r1 2026-11-05): a firm comes first. Override only (Return stays open). After the rights (403 first), and BEFORE
+        // ── Task 095d-0 (EB-D-185, ontology-r1 2026-11-05): a firm comes first. Override only (Return stays open). After the rights (403 first), and BEFORE
         //    the holds derivation, the set's store, the Decision Record and the Signal closes, so a refused request leaves nothing for a retry to
         //    trip over. A read fault answers 503 with nothing written. ──
         if (verb == Verb.Override)

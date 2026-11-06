@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
@@ -70,6 +71,8 @@ public sealed class InvoiceAdjustmentServiceTests
         public readonly Guid InvoiceId = Guid.NewGuid();
         public readonly Entity Invoice;
         public readonly List<Entity> Lines = [];
+        /// <summary>095d-0: the submissions linked to the invoice (the firm gate reads their reason and stored findings).</summary>
+        public readonly List<Entity> Submissions = [];
         public readonly InMemoryLocks Locks = new();
         public readonly Mock<IGenericEntityService> Entities = new();
         public readonly Mock<IFieldMappingDataverseService> Records = new();
@@ -132,6 +135,7 @@ public sealed class InvoiceAdjustmentServiceTests
                         return Task.FromResult(query.EntityName switch
                         {
                             "sprk_invoice" => new EntityCollection([Copy(Invoice)]),
+                            "sprk_invoicesubmission" => new EntityCollection(Submissions.Select(Copy).ToList()),
                             "sprk_billingevent" => new EntityCollection(LinesFor(query).Select(Copy).ToList()),
                             "sprk_ruleset" => new EntityCollection(RuleSetNames
                                 .Select(n => new Entity("sprk_ruleset", n.Key) { ["sprk_name"] = n.Value }).ToList()),
@@ -1424,17 +1428,21 @@ public sealed class InvoiceAdjustmentServiceTests
         w.FirmsAsked.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "095c-4 must not fire: an uncited adjustment on an invoice with no firm is applied, with no firm lookup on the row")]
-    public async Task NoFirm_UncitedAdjustment_IsApplied_WithoutAFirmLookup()
+    [Fact(DisplayName = "095d-0 must-fire (EB-D-197; was 095c-4 'applied'): an UNCITED adjustment on an invoice with no firm is now 409 firm_missing and writes nothing")]
+    public async Task NoFirm_UncitedAdjustment_Is409_WritesNothing()
     {
         var w = new World();
         w.Invoice.Attributes.Remove("sprk_vendororg");
 
         var result = await w.Service().AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
 
-        result.Status.Should().Be(AdjustmentStatus.Applied);
-        w.Row(result.Adjustment!.LineId).Contains("sprk_vendororg").Should().BeFalse("no firm lookup, never the empty id");
-        w.Stored("sprk_approvedtotal").Should().Be(850m);
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        result.Detail.Should().Be(AdjustmentCodes.AdjustFirmMissingDetail);
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+        w.Queue.Sent.Should().BeEmpty("no re-index queued");
+        w.Invoice.Contains("sprk_approvedtotal").Should().BeFalse("the stored total is untouched");
     }
 
     // ── 095c-5 review K2: a held invoice that shows a firm is refused as one with no firm (the hold is read app-only) ──
@@ -1468,16 +1476,16 @@ public sealed class InvoiceAdjustmentServiceTests
 
         result.Status.Should().Be(AdjustmentStatus.FirmMissing);
         result.Code.Should().Be(AdjustmentCodes.FirmMissing);
-        result.Detail.Should().Be(AdjustmentCodes.FirmHeldDetail);
+        result.Detail.Should().Be(AdjustmentCodes.AdjustFirmHeldDetail);
         w.CreateCount.Should().Be(0);
         w.TotalsWriteCount.Should().Be(0);
         w.FirmsAsked.Should().BeEmpty();
     }
 
-    // ── 095c-5 pass-2 review: a rule-less adjustment on a held invoice must not copy the unconfirmed firm onto its line ──
+    // ── 095c-5 pass-2 review: no unconfirmed firm on a line. EB-D-197: a rule-less adjustment on a held invoice is now refused outright. ──
 
-    [Fact(DisplayName = "095c-5 pass-2 (must fire): a rule-less adjustment on an invoice held for a firm, firm column set directly, is applied and its line carries no firm")]
-    public async Task HeldWithAFirm_RuleLessAdjustment_IsApplied_TheLineCarriesNoFirm()
+    [Fact(DisplayName = "095d-0 must-fire (EB-D-197; was 095c-5 pass-2 'applied with no firm'): a rule-less adjustment on an invoice held for a firm, firm column set directly, is 409 firm_missing and writes nothing")]
+    public async Task HeldWithAFirm_RuleLessAdjustment_Is409_WritesNothing()
     {
         var w = new World();
         w.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldValue;
@@ -1485,9 +1493,156 @@ public sealed class InvoiceAdjustmentServiceTests
 
         var result = await w.Service().AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
 
-        result.Status.Should().Be(AdjustmentStatus.Applied, "an adjustment that cites no rule is allowed by design");
-        w.Row(result.Adjustment!.LineId).Contains("sprk_vendororg").Should().BeFalse("an unconfirmed firm is not copied onto the line");
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Detail.Should().Be(AdjustmentCodes.AdjustFirmHeldDetail);
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+    }
+
+    // ── 095d-0 (EB-D-197): no adjustment - add or remove, rule-less or rule-cited - while the invoice has no firm, is held, or its Set-firm re-run is pending ──
+
+    public enum GateState { NoFirm, HeldOwnColumn, HeldBySubmission, MarkerRerunPending, SubmissionRerunPending, UnknownOwnValue }
+
+    private static void PutInGateState(World w, GateState state)
+    {
+        const string findingsKey = "sprk_findingsjson";
+        switch (state)
+        {
+            case GateState.NoFirm:
+                w.Invoice.Attributes.Remove("sprk_vendororg");
+                break;
+            case GateState.HeldOwnColumn:
+                w.Invoice[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;
+                break;
+            case GateState.HeldBySubmission:
+                w.Submissions.Add(new Entity("sprk_invoicesubmission", Guid.NewGuid())
+                {
+                    ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+                    ["sprk_outcomereasoncode"] = SubmissionReasonCodes.FirmMissing,
+                    [findingsKey] = "{\"pipelineFindings\":[],\"lineFindings\":[]}",
+                });
+                break;
+            case GateState.MarkerRerunPending:
+                // The row Set firm leaves: the marker, plus the submission still storing the firm_missing reason beside the pending decision.
+                w.Invoice[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceRerunPendingValue;
+                w.Submissions.Add(new Entity("sprk_invoicesubmission", Guid.NewGuid())
+                {
+                    ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+                    ["sprk_outcomereasoncode"] = SubmissionReasonCodes.FirmMissing,
+                    [findingsKey] = InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunPending, Firm),
+                });
+                break;
+            case GateState.SubmissionRerunPending:
+                w.Submissions.Add(new Entity("sprk_invoicesubmission", Guid.NewGuid())
+                {
+                    ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+                    [findingsKey] = InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunPending, Firm),
+                });
+                break;
+            default:
+                w.Invoice[InvoiceFirmHold.InvoiceHoldColumn] = "ebilling.submission.something_new";
+                break;
+        }
+    }
+
+    private static InvoiceFirmGateResult ExpectedGate(GateState state) => state switch
+    {
+        GateState.NoFirm => InvoiceFirmGateResult.NoFirm,
+        GateState.MarkerRerunPending or GateState.SubmissionRerunPending => InvoiceFirmGateResult.RerunPending,
+        _ => InvoiceFirmGateResult.HeldForFirm,
+    };
+
+    [Theory(DisplayName = "095d-0 must-fire (EB-D-197): an adjustment - rule-less or rule-cited - on an invoice with no firm, held for one, or with the Set-firm re-run pending is 409 ebilling.adjustment.firm_missing; nothing written, no re-index")]
+    [InlineData(GateState.NoFirm, false)]
+    [InlineData(GateState.NoFirm, true)]
+    [InlineData(GateState.HeldOwnColumn, false)]
+    [InlineData(GateState.HeldOwnColumn, true)]
+    [InlineData(GateState.HeldBySubmission, false)]
+    [InlineData(GateState.HeldBySubmission, true)]
+    [InlineData(GateState.MarkerRerunPending, false)]
+    [InlineData(GateState.MarkerRerunPending, true)]
+    [InlineData(GateState.SubmissionRerunPending, false)]
+    [InlineData(GateState.SubmissionRerunPending, true)]
+    [InlineData(GateState.UnknownOwnValue, false)]
+    [InlineData(GateState.UnknownOwnValue, true)]
+    public async Task Add_WithoutAnOpenFirmGate_Is409_WritesNothing(GateState state, bool cited)
+    {
+        var w = new World();
+        var rule = Rule();
+        w.Candidates.Add(rule);
+        PutInGateState(w, state);
+
+        var result = await w.Service().AddAsync(cited ? Add(w, "percent", 10m, rule: rule.PolicyVersionId) : Add(w, "fixed", 150m), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be("ebilling.adjustment.firm_missing");
+        result.Detail.Should().Be(AdjustmentCodes.AdjustFirmDetailFor(ExpectedGate(state)));
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+        w.DeactivationCount.Should().Be(0);
+        w.Queue.Sent.Should().BeEmpty();
         w.FirmsAsked.Should().BeEmpty();
+        w.Invoice.Contains("sprk_approvedtotal").Should().BeFalse("the stored total is untouched");
+    }
+
+    [Theory(DisplayName = "095d-0 must-fire (EB-D-197): removing an adjustment on an invoice that is not open is 409 ebilling.adjustment.firm_missing; the row stays active, totals untouched")]
+    [InlineData(GateState.NoFirm)]
+    [InlineData(GateState.HeldOwnColumn)]
+    [InlineData(GateState.MarkerRerunPending)]
+    public async Task Remove_WithoutAnOpenFirmGate_Is409_ChangesNothing(GateState state)
+    {
+        var w = new World();
+        var service = w.Service();
+        var added = await service.AddAsync(Add(w, "percent", 10m), CancellationToken.None);
+        added.Status.Should().Be(AdjustmentStatus.Applied);
+        var totalsWrites = w.TotalsWriteCount;
+        PutInGateState(w, state);
+
+        var removed = await service.RemoveAsync(new RemoveAdjustmentCommand(w.InvoiceId, added.Adjustment!.LineId, Remover), CancellationToken.None);
+
+        removed.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        removed.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        removed.Detail.Should().Be(AdjustmentCodes.AdjustFirmDetailFor(ExpectedGate(state)));
+        w.DeactivationCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(totalsWrites);
+        w.Row(added.Adjustment.LineId).GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(0, "still active");
+        w.Stored("sprk_approvedtotal").Should().Be(910m);
+    }
+
+    [Fact(DisplayName = "095d-0 must-not-fire (EB-D-197): a firm, no hold and a Set-firm re-run 'completed' takes a rule-less and a cited adjustment and removes one")]
+    public async Task OpenGate_TakesAnAdjustment_AndRemovesOne()
+    {
+        var w = new World();
+        w.Submissions.Add(new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+            ["sprk_findingsjson"] = InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted, Firm),
+        });
+        var rule = Rule();
+        w.Candidates.Add(rule);
+        var service = w.Service();
+
+        var plain = await service.AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
+        var cited = await service.AddAsync(Add(w, "percent", 10m, rule: rule.PolicyVersionId), CancellationToken.None);
+        var removed = await service.RemoveAsync(new RemoveAdjustmentCommand(w.InvoiceId, plain.Adjustment!.LineId, Remover), CancellationToken.None);
+
+        plain.Status.Should().Be(AdjustmentStatus.Applied);
+        cited.Status.Should().Be(AdjustmentStatus.Applied);
+        removed.Status.Should().Be(AdjustmentStatus.Applied);
+    }
+
+    [Fact(DisplayName = "095d-0 must-fire (EB-D-197): a fault reading the firm gate for an adjustment is Unavailable with nothing written (fail closed)")]
+    public async Task Add_WhenTheFirmGateCannotBeRead_IsUnavailable()
+    {
+        var w = new World();
+        w.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("dataverse"));
+
+        var result = await w.Service().AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Unavailable);
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
     }
 
     [Fact(DisplayName = "095c-5 pass-2 must not fire: a rule-less adjustment on an ordinary firm invoice carries the invoice's firm on its line")]

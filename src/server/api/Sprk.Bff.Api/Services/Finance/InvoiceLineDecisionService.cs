@@ -79,7 +79,7 @@ public enum LineDecisionStatus
     /// route's rule); NOTHING was changed.</summary>
     Forbidden,
 
-    /// <summary>Task 095d-0 (D-148): the invoice has no firm, is held for one, or its post-Set-firm re-run is pending (<see cref="InvoiceFirmGate"/>);
+    /// <summary>Task 095d-0 (EB-D-185): the invoice has no firm, is held for one, or its post-Set-firm re-run is pending (<see cref="InvoiceFirmGate"/>);
     /// 409, NOTHING was changed.</summary>
     FirmRequired,
 }
@@ -111,7 +111,7 @@ public static class LineDecisionCodes
     /// finished; 409, nothing was changed. The detail names each correction by field and line and says to repeat it.</summary>
     public const string CorrectionsPending = "ebilling.line.corrections_pending";
 
-    /// <summary>409 (task 095d-0, D-148): no line is decided while the invoice has no firm, is held for one, or its post-Set-firm re-run is pending.</summary>
+    /// <summary>409 (task 095d-0, EB-D-185): no line is decided while the invoice has no firm, is held for one, or its post-Set-firm re-run is pending.</summary>
     public const string FirmMissing = "ebilling.line_decision.firm_missing";
 
     /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/> when the invoice names no firm.</summary>
@@ -689,7 +689,7 @@ public sealed class InvoiceLineDecisionService
             return denied;
         }
 
-        // ── Task 095d-0 (D-148): a firm comes first. After the caller's rights (403 first), before any write: no firm, held for one, or the
+        // ── Task 095d-0 (EB-D-185): a firm comes first. After the caller's rights (403 first), before any write: no firm, held for one, or the
         //    post-Set-firm re-run pending refuses (409). A read fault refuses (fail closed). ──
         if (await FirmGateRefusalAsync(command, invoice, ct).ConfigureAwait(false) is { } firmRefused)
         {
@@ -1052,7 +1052,7 @@ public sealed class InvoiceLineDecisionService
         }
     }
 
-    /// <summary>Task 095d-0 (D-148): <see cref="LineDecisionStatus.FirmRequired"/> unless <see cref="InvoiceFirmGate"/> is open; a read fault is
+    /// <summary>Task 095d-0 (EB-D-185): <see cref="LineDecisionStatus.FirmRequired"/> unless <see cref="InvoiceFirmGate"/> is open; a read fault is
     /// <see cref="LineDecisionStatus.Unavailable"/> (nothing changed). Null when the decision may proceed.</summary>
     private async Task<LineDecisionResult?> FirmGateRefusalAsync(LineDecisionCommand command, Entity invoice, CancellationToken ct)
     {

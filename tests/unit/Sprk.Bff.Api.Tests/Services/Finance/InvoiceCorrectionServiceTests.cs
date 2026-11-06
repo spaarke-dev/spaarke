@@ -968,4 +968,84 @@ public sealed class InvoiceCorrectionServiceTests
 
         NothingWritten(world);
     }
+
+    // =========================================================================================
+    // Task 095d-0 (EB-D-197): a correction also waits for the Set-firm re-run (and for a recognised hold)
+    // =========================================================================================
+
+    public enum RerunState { MarkerWithTheSubmission, MarkerAlone, SubmissionPendingOnly, UnknownOwnValue }
+
+    private static void PutInRerunState(CorrectionWorld world, RerunState state)
+    {
+        string Pending(string rulesRerun) =>
+            InvoiceFirmGateTests.WithAssignFirm(JsonNode.Parse(CorrectionWorld.HeaderFindingsJson)!.AsObject(), rulesRerun).ToJsonString();
+
+        switch (state)
+        {
+            case RerunState.MarkerWithTheSubmission:
+                // The row Set firm leaves: the marker, and the submission still storing the firm_missing reason beside the pending decision.
+                world.Invoice[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceRerunPendingValue;
+                world.Submission!["sprk_outcomereasoncode"] = SubmissionReasonCodes.FirmMissing;
+                world.Submission["sprk_findingsjson"] = Pending(InvoiceAssignFirmService.RulesRerunPending);
+                break;
+            case RerunState.MarkerAlone:
+                // The submission's link was removed or re-pointed after Set firm: only the invoice's own marker is found.
+                world.Submission = null;
+                world.Invoice[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceRerunPendingValue;
+                break;
+            case RerunState.SubmissionPendingOnly:
+                world.Submission!["sprk_findingsjson"] = Pending(InvoiceAssignFirmService.RulesRerunPending);
+                break;
+            default:
+                world.Invoice[InvoiceFirmHold.InvoiceHoldColumn] = "ebilling.submission.something_new";
+                break;
+        }
+    }
+
+    [Theory(DisplayName = "095d-0 must-fire (EB-D-197): a line or header correction while the Set-firm re-run is pending (the marker, with or without the submission; or the stored decision alone) is 409 ebilling.correction.firm_missing with the re-run sentence; nothing written")]
+    [InlineData(RerunState.MarkerWithTheSubmission)]
+    [InlineData(RerunState.MarkerAlone)]
+    [InlineData(RerunState.SubmissionPendingOnly)]
+    public async Task RerunPending_Correction_Is409_WritesNothing(RerunState state)
+    {
+        var world = new CorrectionWorld();
+        PutInRerunState(world, state);
+
+        var line = await world.Service().CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+        var header = await world.Service().CorrectAsync(Header("TotalDue", "2400"), CancellationToken.None);
+
+        foreach (var result in new[] { line, header })
+        {
+            result.Status.Should().Be(CorrectionStatus.FirmMissing);
+            result.Code.Should().Be("ebilling.correction.firm_missing");
+            result.Detail.Should().Be(CorrectionCodes.FirmRerunPendingDetail);
+        }
+
+        NothingWritten(world);
+    }
+
+    [Fact(DisplayName = "095d-0 must-fire (uac-r2 condition 1): a correction with an unrecognised word in the invoice's own hold is refused as HELD (fail closed); nothing written")]
+    public async Task UnknownOwnHoldValue_Correction_Is409Held_WritesNothing()
+    {
+        var world = new CorrectionWorld();
+        PutInRerunState(world, RerunState.UnknownOwnValue);
+
+        var line = await world.Service().CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+
+        line.Status.Should().Be(CorrectionStatus.FirmMissing);
+        line.Detail.Should().Be(CorrectionCodes.FirmHeldDetail);
+        NothingWritten(world);
+    }
+
+    [Fact(DisplayName = "095d-0 must-not-fire (EB-D-197): a firm, no hold and a stored Set-firm decision 'completed' - a line correction is applied")]
+    public async Task RerunCompleted_Correction_IsApplied()
+    {
+        var world = new CorrectionWorld();
+        world.Submission!["sprk_findingsjson"] = InvoiceFirmGateTests.WithAssignFirm(
+            JsonNode.Parse(CorrectionWorld.HeaderFindingsJson)!.AsObject(), InvoiceAssignFirmService.RulesRerunCompleted).ToJsonString();
+
+        var result = await world.Service().CorrectAsync(Line("Hours", "2.5"), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.Applied);
+    }
 }

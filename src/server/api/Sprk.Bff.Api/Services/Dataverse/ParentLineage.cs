@@ -1017,7 +1017,7 @@ internal static class InheritedAccessPermission
     /// (<c>InvoiceSubmissionPersister.InvoiceVendorOrg</c>). Neither decides access, but both decide whether the invoice can be approved,
     /// returned, corrected and exported: cleared by a generic write, the hold would no longer keep a no-firm invoice from approval; a firm
     /// set by one would be a firm no pipeline resolved. Their writers are typed: the persister writes both in the invoice's create (the
-    /// firm, or the hold when there is none), and Set firm (task 095d-1b, <c>InvoiceAssignFirmService</c>) sets the firm and clears the hold
+    /// firm, or the hold when there is none), and Set firm (task 095d-1b, <c>InvoiceAssignFirmService</c>) sets the firm and replaces the hold with the rerun-pending marker (EB-D-185)
     /// in its one renumber transaction. No
     /// playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</item>
     /// <item>ebilling-r1 082c-2 fix round 1 (uac-r2 review F4). <c>sprk_invoice.sprk_reviewdetail</c> (<c>InvoiceReviewDetail.Column</c>):

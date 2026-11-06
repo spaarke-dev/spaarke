@@ -78,7 +78,7 @@ public static class InvoiceApprovalCodes
     /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
     public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
 
-    /// <summary>Task 095d-0 (D-148): the sentence with <see cref="FirmMissing"/> while the re-run after Set firm has not completed
+    /// <summary>Task 095d-0 (EB-D-185): the sentence with <see cref="FirmMissing"/> while the re-run after Set firm has not completed
     /// (<see cref="InvoiceFirmGateResult.RerunPending"/>).</summary>
     public const string FirmRerunPendingDetail =
         "This invoice's firm was just assigned and its billing rules are being checked again. Try again when the check finishes.";
@@ -352,7 +352,7 @@ public sealed class InvoiceApprovalService
         // 082c-2: a Procedure hold refuses approve, so the state shows it as held (canApprove false).
         var held = await IsHeldAsync(invoiceId, ct).ConfigureAwait(false)
             || (await InvoiceProcedureHold.ReasonsAsync(_entities, invoiceId, ct).ConfigureAwait(false)).Count > 0;
-        // Task 095d-0 (D-148, EB-D-190): the page's Approve and Reject follow the same gate the routes refuse on (no firm, held, or the re-run pending).
+        // Task 095d-0 (EB-D-185, EB-D-190): the page's Approve and Reject follow the same gate the routes refuse on (no firm, held, or the re-run pending).
         var firmNeeded = await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) != InvoiceFirmGateResult.Open;
         var correctionsPending = (await InvoiceCorrectionReevaluation.ReadUnappliedAsync(_entities, invoiceId, lines, ct).ConfigureAwait(false)).Count > 0;
 
@@ -561,7 +561,7 @@ public sealed class InvoiceApprovalService
             }
 
             // ── Task 095c-4: no firm, or a stored "firm needed" hold (a firm set natively does not lift it). Before I-2, so zero lines are refused. ──
-            //    Task 095d-0 (D-148): the same gate every decision uses (InvoiceFirmGate): no firm, held for one, or the post-Set-firm re-run pending. ──
+            //    Task 095d-0 (EB-D-185): the same gate every decision uses (InvoiceFirmGate): no firm, held for one, or the post-Set-firm re-run pending. ──
             if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var need)
             {
                 _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice needs a firm ({Need}); nothing changed.", invoiceId, need);

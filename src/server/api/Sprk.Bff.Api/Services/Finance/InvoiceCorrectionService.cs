@@ -138,6 +138,17 @@ public static class CorrectionCodes
 
     /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
     public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
+
+    /// <summary>EB-D-197: the sentence with <see cref="FirmMissing"/> while the Set-firm re-run is pending (the same sentence the line decisions give).</summary>
+    public const string FirmRerunPendingDetail = "This invoice's firm was just assigned and its billing rules are being checked again. Try again when the check finishes; nothing was changed.";
+
+    /// <summary>EB-D-197: the <see cref="FirmMissing"/> sentence for <paramref name="gate"/> (<see cref="InvoiceFirmGateResult.Open"/> has none and gets the no-firm sentence).</summary>
+    public static string FirmDetailFor(InvoiceFirmGateResult gate) => gate switch
+    {
+        InvoiceFirmGateResult.HeldForFirm => FirmHeldDetail,
+        InvoiceFirmGateResult.RerunPending => FirmRerunPendingDetail,
+        _ => FirmMissingDetail,
+    };
 }
 
 /// <summary>
@@ -415,9 +426,10 @@ public sealed class InvoiceCorrectionService
             }
 
             // Task 095c-4: a correction re-runs the firm's rules (InvoiceCorrectionReevaluation); with no firm, or a stored "firm needed" hold, it waits.
-            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
+            // Task 095d-0 (EB-D-197): and while the Set-firm re-run is pending (which also removes a race between a correction and the re-run).
+            if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var gate)
             {
-                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmDetailFor(need));
+                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmDetailFor(gate));
             }
 
             line = await ReadLineAsync(command.InvoiceId, command.LineId!.Value, ct).ConfigureAwait(false);
@@ -708,9 +720,10 @@ public sealed class InvoiceCorrectionService
             }
 
             // Task 095c-4: a correction re-runs the firm's rules (InvoiceCorrectionReevaluation); with no firm, or a stored "firm needed" hold, it waits.
-            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
+            // Task 095d-0 (EB-D-197): and while the Set-firm re-run is pending.
+            if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var gate)
             {
-                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmDetailFor(need));
+                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmDetailFor(gate));
             }
 
             prior = await ReadPriorAsync(command.InvoiceId, null, spec.Name, ct).ConfigureAwait(false);

@@ -4,7 +4,7 @@
 // Component Justification (CLAUDE.md §11):
 //   (1) Existing — TrackingNumberAllocator.RenumberSubmissionAsync (095d-1a) moves a no-firm submission into a firm's scope in one transaction,
 //       but decides nothing about the invoice; InvoiceApprovalService and SubmissionOverrideService decide an invoice but never set its firm;
-//       InvoiceFirmHold reads the hold and nothing replaces it (grep: no writer of sprk_firmhold but the persister's create).
+//       InvoiceFirmHold reads the hold; the only writers of sprk_firmhold are the persister's create and this service's apply (the rerun-pending marker, EB-D-185).
 //   (2) Extension — the allocator is the number columns' only writer (D-37) and must stay ignorant of invoices, lines and files; the approval
 //       and override services each own another decision's order and recovery (ADR-002: one owner per invariant). Setting a firm is its own
 //       decision with its own refusals, stored decision and repeat rule, so it is its own service that hands its apply to the allocator.
