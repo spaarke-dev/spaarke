@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "description": "The owner's role rulings on task 046's gaps (2026-11-05; projects/field-mapping-server-write-path-r1/notes/decisions.md, 'Role rulings on task 046's gaps'): the privileges each role is given or raised to so the feature named works for its users. This file is the ONE declared list of those changes. The role files under src/dataverse/solutions/SpaarkeMaster/Roles hold each one at exactly 'depth' (tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs checks it, and checks that putting any one back to 'from' fails the feature permission guard); scripts/Set-FeatureRolePrivileges.ps1 applies it to an environment.",
+  "howToExtend": [
+    "Add an entry only for a role change the owner ruled (cite the gap or decision in 'gap'). Gaps the owner has not ruled on stay in the guard's ratchet baseline, not here.",
+    "'privilege' is the name from metadata (EntityDefinitions(LogicalName='x')/Privileges); 'table' is the logical name the script reads it from.",
+    "'depth' is the depth the role holds after the change; 'from' is the role file's depth before it ('None' when the role held none). The script only adds or raises to 'depth'; it never lowers and never removes.",
+    "'removals' is a separate block for the owner's removals: role, table, privilege and 'expectedDepth', the depth the privilege is held at now. Only `-Remove` reads it, and it removes exactly these privileges (RemovePrivilegeRole on the root role) and nothing else. The role files must NOT hold a listed privilege (the ArchTests check it)."
+  ],
+  "changes": [
+    {
+      "gap": "G1",
+      "role": "Spaarke Core User",
+      "table": "sprk_reportcard",
+      "privilege": "prvCreatesprk_ReportCard",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "Report Card wizard (create)"
+    },
+    {
+      "gap": "G1",
+      "role": "Spaarke Core User",
+      "table": "sprk_reportcard",
+      "privilege": "prvAppendsprk_ReportCard",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "Report Card wizard (lookups on the created row)"
+    },
+    {
+      "gap": "G1",
+      "role": "Spaarke Core User",
+      "table": "sprk_reportcard",
+      "privilege": "prvAppendTosprk_ReportCard",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "KPI assessment filed under a report card"
+    },
+    {
+      "gap": "G2",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_eventtype_ref",
+      "privilege": "prvAppendTosprk_EventType_Ref",
+      "depth": "Global",
+      "from": "Deep",
+      "feature": "Event (typed route): the event type"
+    },
+    {
+      "gap": "G4, G7",
+      "role": "Spaarke Office Add In User",
+      "table": "contact",
+      "privilege": "prvAppendToContact",
+      "depth": "Deep",
+      "from": "Basic",
+      "feature": "Office quick create with an assignee; Event (typed route) regarding a contact"
+    },
+    {
+      "gap": "G5",
+      "role": "Spaarke Billing Administrator",
+      "table": "sprk_procedure",
+      "privilege": "prvReadsprk_procedure",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "Billing: Procedure override remove / preview (ebilling-r1 089e adds the same line)"
+    },
+    {
+      "gap": "G6",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_document",
+      "privilege": "prvWritesprk_Document",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "Office version save (Word)"
+    },
+    {
+      "gap": "G7",
+      "role": "Spaarke Office Add In User",
+      "table": "account",
+      "privilege": "prvAppendToAccount",
+      "depth": "Deep",
+      "from": "Basic",
+      "feature": "Event (typed route) regarding an account"
+    },
+    {
+      "gap": "G8",
+      "role": "Spaarke Office Add In User",
+      "table": "sprk_budget",
+      "privilege": "prvAppendTosprk_Budget",
+      "depth": "Deep",
+      "from": "None",
+      "feature": "Event (typed route) regarding a budget"
+    }
+  ],
+  "removals": [
+    {
+      "gap": "R1",
+      "role": "Spaarke Ontology Administrator",
+      "table": "sprk_budgetrevision",
+      "privilege": "prvCreatesprk_BudgetRevision",
+      "expectedDepth": "Deep",
+      "feature": "Budget Revision create: only the writer creates one (owner ruling 2026-11-05); the role keeps Write and Delete"
+    }
+  ]
+}

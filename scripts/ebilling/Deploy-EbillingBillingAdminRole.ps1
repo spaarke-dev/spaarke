@@ -27,8 +27,10 @@
          BFF uses Create / Write only as markers at any depth (D-108) and writes these tables app-only (D-173), so Global
          would only let a billing admin create or edit any rule set or policy natively, bypassing RuleSetService's
          invariants (ADR-002). Any other privilege held deeper than that stops a plain run (exit 2; it is never lowered).
-         Never Delete, Assign or Share; nothing on sprk_procedure, sprk_procedureversion or sprk_procedureassignment (task
-         121 adds those after uac-r2 task 191). Holding one of these stops the run (exit 2).
+         Never Delete, Assign or Share; on the Procedure tables only Read on sprk_procedure, at Deep (task 089e, owner
+         2026-11-04: "Add to role file + apply on dev"; the depth of the rule-set Read), which the Procedure override removal
+         and preview ask of the caller. Nothing else on sprk_procedure, sprk_procedureversion or sprk_procedureassignment (task
+         121 adds the rest after uac-r2 task 191). Holding one of these stops the run (exit 2).
       3. Spaarke Core User and Spaarke Basic User: prvReadsprk_ruleset is removed with RemovePrivilegeRole, one call per
          root role. That is the ONLY removal this script makes. If either role holds any OTHER privilege on sprk_ruleset, or
          holds the Read at a depth other than Deep (the depth the role source showed), the run stops before writing (exit 2).
@@ -196,8 +198,14 @@ try {
         foreach ($v in $AdminVerbs) { if (-not $privs[$t][$v].($AdminDepth[$v])) { throw [EscalationException]::new("$($privs[$t][$v].Name) cannot be held at $($AdminDepth[$v]). Nothing was changed.") } }
     }
     $wanted = @(foreach ($t in $AdminTables.Keys) { foreach ($v in $AdminVerbs) { $p = $privs[$t][$v]; [pscustomobject]@{ Name = $p.Name; Id = $p.Id; Depth = $AdminDepth[$v] } } })
+    # Task 089e (owner 2026-11-04): Read on sprk_procedure at Deep, the depth of the rule-set Read. The Procedure override removal and its
+    # preview ask the caller's own Read on that Procedure (RequireReadOnTheOverridesSubject), so without it only a System Administrator passes.
+    $procedureRead = $privs['sprk_procedure']['Read']
+    if (-not $procedureRead) { throw "Privilege prvReadsprk_procedure not found." }
+    if (-not $procedureRead.Deep) { throw [EscalationException]::new("$($procedureRead.Name) cannot be held at Deep. Nothing was changed.") }
+    $wanted += [pscustomobject]@{ Name = $procedureRead.Name; Id = $procedureRead.Id; Depth = 'Deep' }
     $forbiddenForAdmin = @(foreach ($t in $AdminTables.Keys) { foreach ($v in $Verbs) { if ($AdminVerbs -notcontains $v) { $privs[$t][$v] } } }) +
-    @(foreach ($t in $ProcedureTables) { $privs[$t].Values })
+    @(foreach ($t in $ProcedureTables) { $privs[$t].Values | Where-Object { $_.Id -ne $procedureRead.Id } })
     $ruleSetPrivs = @($privs['sprk_ruleset'].Values)
     $stripPriv = $privs['sprk_ruleset']['Read']
     $rootBu = Get-RootBusinessUnitId
@@ -254,11 +262,11 @@ try {
 
     # --- 3. The role's privileges --------------------------------------------------------------------------------------
     Write-Host ""
-    Write-Host "3. $RoleName privileges (Read Deep; Create / Write / Append / AppendTo Basic)" -ForegroundColor Cyan
+    Write-Host "3. $RoleName privileges (Read Deep; Create / Write / Append / AppendTo Basic; Read Deep on sprk_procedure)" -ForegroundColor Cyan
     $have = if ($roleExists) { Get-RolePrivilegeMap $RoleId } else { @{} }
     $forbidden = @($forbiddenForAdmin | Where-Object { $have.ContainsKey($_.Id) })
     if ($forbidden.Count) {
-        $msg = "$RoleName holds $(($forbidden | ForEach-Object { "$($_.Name) ($($have[$_.Id].Depth))" }) -join ', '): no Delete / Assign / Share on the rule-set and policy tables and nothing on the Procedure tables (D-76, uac-r2 081)."
+        $msg = "$RoleName holds $(($forbidden | ForEach-Object { "$($_.Name) ($($have[$_.Id].Depth))" }) -join ', '): no Delete / Assign / Share on the rule-set and policy tables and nothing on the Procedure tables but Read on sprk_procedure (D-76, uac-r2 081, 089e)."
         if ($Verify) { $Gaps.Add($msg) } else { throw [EscalationException]::new("$msg STOP: this script removes nothing from the role. Nothing further was changed.") }
     }
     # The one lowering (owner EB-D-162): a Read still held at Global, the task 120 depth, goes to Deep. RemovePrivilegeRole first,
