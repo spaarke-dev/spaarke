@@ -144,5 +144,27 @@ class SyncAuditFlagsTests(unittest.TestCase):
         assert sync.main(["--state", str(state), "--solution-root", str(root)]) == 2
 
 
+    def test_a_table_in_two_solution_folders_merges_its_findings(self):
+        # sprk_Document has an Entity.xml in SpaarkeMaster AND spaarke_containers. The findings must not be decided by
+        # whichever folder is read last (#2584): before the fix this reported sprk_a missing and lost folder A's flag.
+        tmp_path = self.tmp
+        a = tmp_path / "A" / "Entities" / "sprk_Thing"
+        b = tmp_path / "B" / "Entities" / "sprk_Thing"
+        a.mkdir(parents=True)
+        b.mkdir(parents=True)
+        (a / "Entity.xml").write_bytes(_entity_xml("sprk_Thing", 1, {"sprk_a": 1, "sprk_x": 0}))  # sprk_a on, dev off
+        (b / "Entity.xml").write_bytes(_entity_xml("sprk_Thing", 1, {"sprk_b": 1, "sprk_y": 0}))
+        state = _state(tmp_path, {"sprk_thing": _table(True, {"sprk_a": False, "sprk_b": True, "sprk_c": True})})
+        roots = ["--solution-root", str(tmp_path / "A"), "--solution-root", str(tmp_path / "B")]
+
+        code, report = sync.run(state, [tmp_path / "A", tmp_path / "B"], check=True, strict=True)
+
+        assert report["attrs_in_state_without_node"] == {"sprk_thing": ["sprk_c"]}  # a and b each have a node somewhere
+        assert report["attrs_in_source_not_in_state"] == {"sprk_thing": ["sprk_x", "sprk_y"]}
+        assert report["source_on_dev_off"] == {"sprk_thing": ["sprk_a"]}  # found in A, not overwritten by B
+        assert code == 1
+        assert sync.main(["--state", str(state), *roots, "--check", "--strict"]) == 1
+
+
 if __name__ == "__main__":
     unittest.main()
