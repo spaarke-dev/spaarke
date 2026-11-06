@@ -107,9 +107,11 @@ public class FeatureRolePrivilegeGuardTests
         + Bff + "Services/Communication/CommunicationThreadReadService.cs:1311-1335";
 
     /// <summary>The send reads the thread it is stamped into, and the thread's regarding record, as the caller (an impersonated query,
-    /// so Dataverse asks Read on <c>sprk_communicationthread</c>). The table is user-owned in the solution (<c>OwnershipTypeMask</c>
-    /// UserOwned): a per-user thread is the user's own, a record thread is team-owned (I-6), so the guard's rule for team-owned rows
-    /// applies: Deep.</summary>
+    /// so Dataverse asks Read on <c>sprk_communicationthread</c>). Basic is the depth (owner-directed, G13 closed): record threads are
+    /// owned by their record's team (<c>ThreadResolver.CreateThreadAsync</c>, <c>CreateRecordThreadAsync</c>, and the anchored-owner
+    /// reconcile of <c>CommunicationThreadFilingSweepJob</c>), which a member reads at Basic through team membership; Direct threads
+    /// are private by ownership and share, so a deeper Read would open them across the business-unit tree. Even a share needs the
+    /// privilege at Basic, which both roles hold.</summary>
     private const string CommSendThreadRead = Bff + "Api/Filters/CommunicationRecordAuthorizationFilter.cs:647,672,767; "
         + Bff + "Services/Communication/CommunicationThreadReadService.cs:1260-1275";
 
@@ -263,10 +265,10 @@ public class FeatureRolePrivilegeGuardTests
         // files and reads.
         .. For("Communication send / reply", [Core], "Deep", CommSendRegarding, CommunicationRegardingAppendTo),
         .. For("Communication send / reply", [Core], "Deep", CommSendReplyRead, "prvReadsprk_Communication"),
-        .. For("Communication send / reply", [Core], "Deep", CommSendThreadRead, "prvReadsprk_CommunicationThread"),
+        .. For("Communication send / reply", [Core], "Basic", CommSendThreadRead, "prvReadsprk_CommunicationThread"),
         .. For("Communication send / reply (Basic User)", [Basic], "Deep", CommSendRegarding, CommunicationRegardingAppendTo),
         .. For("Communication send / reply (Basic User)", [Basic], "Deep", CommSendReplyRead, "prvReadsprk_Communication"),
-        .. For("Communication send / reply (Basic User)", [Basic], "Deep", CommSendThreadRead, "prvReadsprk_CommunicationThread"),
+        .. For("Communication send / reply (Basic User)", [Basic], "Basic", CommSendThreadRead, "prvReadsprk_CommunicationThread"),
 
         // Communication re-file (PATCH /api/communications/{id}/filing): the route filter asks Write on the communication, the re-file core
         // reads the row and asks AppendTo on every record it is moved under, as the caller (Dataverse asks it on the lookups of the
@@ -573,15 +575,11 @@ public class FeatureRolePrivilegeGuardTests
         // G11 and G12 (fix round 3; the final round adds Append on sprk_communication to G12): the communication send / reply and re-file rows
         // for Basic User. Owner ruled 2026-11-06 (decisions.md, "Communication send, reply and re-file need Core User"): not granted. Basic
         // User is not raised; these features need Core User. The entries stay as the ratchet baseline, so a change to them is deliberate.
-        // G13 (final round): the send reads the thread as the caller; Core User holds Read on the thread at Basic, so the gap is Core's too.
-        new("Communication send / reply", "prvReadsprk_CommunicationThread", "Basic",
-            ThreadReadWait),
         new("Communication send / reply (Basic User)", "prvAppendTosprk_ServiceRequest", "none", CommunicationBasicWait("G11")),
         new("Communication send / reply (Basic User)", "prvAppendTosprk_Budget", "none", CommunicationBasicWait("G11")),
         new("Communication send / reply (Basic User)", "prvAppendToAccount", "Basic", CommunicationBasicWait("G11")),
         new("Communication send / reply (Basic User)", "prvAppendToContact", "Basic", CommunicationBasicWait("G11")),
         new("Communication send / reply (Basic User)", "prvReadsprk_Communication", "Basic", CommunicationBasicWait("G11")),
-        new("Communication send / reply (Basic User)", "prvReadsprk_CommunicationThread", "Basic", ThreadReadWait),
         new("Communication re-file (Basic User)", "prvWritesprk_Communication", "Basic", CommunicationBasicWait("G12")),
         new("Communication re-file (Basic User)", "prvReadsprk_Communication", "Basic", CommunicationBasicWait("G12")),
         new("Communication re-file (Basic User)", "prvAppendsprk_Communication", "Basic", CommunicationBasicWait("G12")),
@@ -593,11 +591,6 @@ public class FeatureRolePrivilegeGuardTests
 
     private static string CommunicationBasicWait(string gap) =>
         $"{gap}. Owner ruled: not granted (Core User required), 2026-11-06: Spaarke Basic User holds less than the depth the communication route asks of the caller and is not raised.";
-
-    /// <summary>G13 (final round): the send reads the thread as the caller, and Core User and Basic User both hold Read on it at Basic.
-    /// The 2026-11-06 ruling covers Basic User only; Core User's entry still waits on the owner.</summary>
-    private const string ThreadReadWait =
-        "G13. Owner decision pending (found in the final round of 046b): Core User and Basic User hold Read on sprk_communicationthread at Basic, below the depth the send asks of the caller.";
 
     private static readonly string[] DepthOrder = ["Basic", "Local", "Deep", "Global"];
 
@@ -1181,6 +1174,11 @@ public class FeatureRolePrivilegeGuardTests
     public void RemovingCommunicationAppendFromCoreUserFailsTheRefileRow() =>
         Assert.Contains(UnlistedAfterRemovingFromCopy(Core, "prvAppendsprk_Communication"),
             u => u.StartsWith("Communication re-file: prvAppendsprk_Communication", StringComparison.OrdinalIgnoreCase));
+
+    [Fact(DisplayName = "046b G13 closed: taking Read on sprk_communicationthread off a copy of Core User fails the guard through the send row")]
+    public void RemovingThreadReadFromCoreUserFailsTheSendRow() =>
+        Assert.Contains(UnlistedAfterRemovingFromCopy(Core, "prvReadsprk_CommunicationThread"),
+            u => u.StartsWith("Communication send / reply: prvReadsprk_CommunicationThread", StringComparison.OrdinalIgnoreCase));
 
     [Fact(DisplayName = "046b must-not-hold seeded drift: each forbidden privilege given to any person role but the excepted one is reported")]
     public void MustNotHoldFiresForEverySeededPersonRole()
