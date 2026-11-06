@@ -6,27 +6,26 @@ namespace Spaarke.ArchTests;
 /// <summary>
 /// Field-mapping-server-write-path-r1 task 037 (spec FR-36; UAC-r2 conditions 1 and 4): a work assignment's Assigned To
 /// defaults to its own Assigned To Internal. The rule is DECLARED once — one <c>CopiedFrom =</c> in
-/// <c>RecordTableRules.cs</c> — and APPLIED only by the two server create paths, each through
-/// <c>RecordTableRules.CopiedDefaultsFor</c>: the owned create (<c>OwnedChildWrite.CreateAsync</c>, the child-records route)
-/// and <c>RecordCreationService</c>'s step 3½. No update, repair pass or push may read it (create only), and no path may keep
-/// a second copy of it.
+/// <c>RecordTableRules.cs</c> — and APPLIED only by the server create, through <c>RecordTableRules.CopiedDefaultsFor</c>:
+/// <c>RecordCreationService</c>'s step 3½. Task 017 (2d-5) deleted the second path that applied it, the owned create
+/// (<c>OwnedChildWrite.CreateAsync</c>), once the child-records route and the chat creates were re-pointed to the service.
+/// No update, repair pass or push may read it (create only), and no path may keep a second copy of it.
 /// </summary>
 /// <remarks>
 /// <para><b>Signal and limits.</b> A source scan of <c>src/server/**</c> code text (line comments stripped) for an
 /// assignment <c>CopiedFrom =</c> and for a member access <c>.CopiedDefaultsFor</c> (a call or a method group). A copy of the
 /// rule that names neither (a hand-written "if the Assigned To is empty, take the Internal" in another writer) is not seen;
-/// the registry tests and the two paths' seam tests pin the behaviour. Enforced by: this guard (ArchTests in CI and the
+/// the registry tests and the service's seam tests pin the behaviour. Enforced by: this guard (ArchTests in CI and the
 /// Stop hook).</para>
 /// </remarks>
 public class RecordTableCopiedDefaultGuardTests
 {
     private const string Registry = "src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs";
 
-    /// <summary>The files allowed to apply a copied default, each with the create path it is.</summary>
+    /// <summary>The files allowed to apply a copied default, each with the create path it is. Task 017 (2d-5): the owned
+    /// create (<c>OwnedChildWrite.cs</c>) is no longer one — its create half was deleted.</summary>
     private static readonly IReadOnlyDictionary<string, string> AllowedAppliers = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs"] =
-            "the owned create (POST /api/v1/child-records/{table}, and the chat create on the same core)",
         ["src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Mapping.cs"] =
             "RecordCreationService's create, step 3½ (never its Repair mode)",
     };
@@ -39,8 +38,8 @@ public class RecordTableCopiedDefaultGuardTests
 
     internal static int Applications(string source) => Application.Matches(SourceScan.CodeText(source.Split('\n'))).Count;
 
-    [Fact(DisplayName = "Task 037: the copied default is declared once, in RecordTableRules, and applied only by the two create paths")]
-    public void TheCopiedDefault_IsDeclaredOnce_AndAppliedOnlyByTheTwoCreatePaths()
+    [Fact(DisplayName = "Task 037: the copied default is declared once, in RecordTableRules, and applied only by the server create")]
+    public void TheCopiedDefault_IsDeclaredOnce_AndAppliedOnlyByTheServerCreate()
     {
         var problems = new List<string>();
         var declarations = 0;
@@ -61,7 +60,7 @@ public class RecordTableCopiedDefaultGuardTests
                 continue;
             applied.Add(relative);
             if (!AllowedAppliers.ContainsKey(relative))
-                problems.Add($"{relative}: {applies} use(s) of RecordTableRules.CopiedDefaultsFor outside the two create paths (create only)");
+                problems.Add($"{relative}: {applies} use(s) of RecordTableRules.CopiedDefaultsFor outside the server create (create only)");
         }
 
         if (declarations != 1)
@@ -74,7 +73,7 @@ public class RecordTableCopiedDefaultGuardTests
         }
 
         Assert.True(problems.Count == 0,
-            "A work assignment's Assigned To default is declared once and applied by the two server create paths only (task 037, "
+            "A work assignment's Assigned To default is declared once and applied by the server create only (task 037, "
             + "UAC-r2 conditions 1 and 4):\n" + string.Join("\n", problems));
     }
 

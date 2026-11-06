@@ -60,10 +60,10 @@ public sealed class RefileWriterAfterRefileHookTests
         _shares.Seed("sprk_todo", TodoUnderCommunication, DataversePrincipalRef.User(Sharee), CollaborateMask);
 
         _write
-            .Setup(w => w.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()))
-            .Returns((string table, Guid id, Dictionary<string, object?> fields, CancellationToken _, Guid? _) =>
+            .Setup(w => w.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, Dictionary<string, object?> fields, Guid? _, CancellationToken _) =>
             {
                 if (_failWrite)
                     throw new HttpRequestException("0x80040220 the caller lacks Write on the record", null, System.Net.HttpStatusCode.Forbidden);

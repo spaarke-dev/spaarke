@@ -136,14 +136,14 @@ internal sealed partial class RecordCreationService
         if (serverSetLookupColumns is not { Count: > 0 })
             return null;
 
-        if (serverSetLookupColumns.FirstOrDefault(c => IsChildFilingLookup(table, c.Trim().ToLowerInvariant())) is { } listed)
+        // The set is the request's, already trimmed and lower-cased (RecordCreationRequest.ServerSetLookupColumns, R3-1).
+        if (serverSetLookupColumns.FirstOrDefault(c => IsChildFilingLookup(table, c)) is { } listed)
             return listed;
 
         if (SecureRootInheritance.Inherits(table))
             return null;
 
-        var serverSet = serverSetLookupColumns.Select(c => c.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return item.Lookups.FirstOrDefault(l => serverSet.Contains(l.Column) && FilesUnderOwnershipParent(table, l))?.Column;
+        return item.Lookups.FirstOrDefault(l => serverSetLookupColumns.Contains(l.Column) && FilesUnderOwnershipParent(table, l))?.Column;
     }
 
     /// <summary>
@@ -160,10 +160,9 @@ internal sealed partial class RecordCreationService
         if (serverSetLookupColumns is not { Count: > 0 } || !SecureRootInheritance.Inherits(table))
             return [];
 
-        var serverSet = serverSetLookupColumns.Select(c => c.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var filing = SecureRootInheritance.FilingColumnsOf(table);
         return item.Lookups
-            .Where(l => serverSet.Contains(l.Column) && (filing.Contains(l.Column) || FilesUnderOwnershipParent(table, l)))
+            .Where(l => serverSetLookupColumns.Contains(l.Column) && (filing.Contains(l.Column) || FilesUnderOwnershipParent(table, l)))
             .ToArray();
     }
 
@@ -203,7 +202,7 @@ internal sealed partial class RecordCreationService
         }
 
         if (serverSetLookupColumns is not null)
-            columns.UnionWith(serverSetLookupColumns.Select(c => c.Trim()));
+            columns.UnionWith(serverSetLookupColumns);
         return columns;
     }
 
@@ -602,7 +601,7 @@ internal sealed partial class RecordCreationService
     };
 
     /// <summary>A post-mapping default: the SDK value the adapter gave (its type is its FR-02 kind) and its item form.</summary>
-    private sealed record PostMappingDefault(object Value, JsonElement ItemValue);
+    internal sealed record PostMappingDefault(object Value, JsonElement ItemValue);
 
     /// <summary>
     /// Task 018a fix round (F4-1): whether <paramref name="column"/> of <paramref name="table"/> may NEVER be an optional
@@ -701,11 +700,13 @@ internal sealed partial class RecordCreationService
     /// (<see cref="RecordTableRules.CopiedDefaultsFor"/>): each lookup the row binds in the source column, as-is, for a target
     /// the row leaves UNSET — so an explicit null the caller sent is never filled (it is in the row's columns). A default the
     /// request already names for that column is the adapter's and is kept. A source the row leaves unset adds nothing and
-    /// is reported as a structured warning: the column stays blank.
+    /// is reported as a structured warning: the column stays blank — unless a default the request names fills that source
+    /// (task 017, 037 review K2: the copy runs after the defaults merge), which is then copied, as the caller's own.
     /// </summary>
     /// <returns>The defaults, and each (column, source column) pair a copied default was added for — so a copy of a
-    /// SERVER-set source can be server-set too (the owned create's rule, <c>OwnedChildWrite.CreateAsync</c>).</returns>
-    private (IReadOnlyDictionary<string, PostMappingDefault> Defaults, IReadOnlyList<(string Column, string Source)> Copied) WithCopiedDefaults(
+    /// SERVER-set source can be server-set too (the rule of the owned create this replaced, <c>OwnedChildWrite.CreateAsync</c>,
+    /// deleted in 017).</returns>
+    internal (IReadOnlyDictionary<string, PostMappingDefault> Defaults, IReadOnlyList<(string Column, string Source)> Copied) WithCopiedDefaults(
         string table, RecordTableRule rule, DataverseWriteItemMapper.MappedItem item,
         IReadOnlyDictionary<string, PostMappingDefault> defaults)
     {
@@ -718,6 +719,32 @@ internal sealed partial class RecordCreationService
         foreach (var fill in fills)
         {
             var column = fill.Default.Column.Trim().ToLowerInvariant();
+            if (fill.Source is null
+                && fill.Default.CopiedFrom?.Trim().ToLowerInvariant() is { } sourceColumn
+                && defaults.TryGetValue(sourceColumn, out var sourceDefault)
+                && sourceDefault.Value is EntityReference { Id: var defaultId } defaultSource
+                && defaultId != Guid.Empty)
+            {
+                // Task 017 (037 review K2): the copy runs AFTER the adapter's post-mapping defaults are merged — a source the
+                // row leaves unset but an adapter default fills is copied too, so the target names the record the source will.
+                // Such a copy is never server-set: a default may not name a server-set column (PostMappingDefaultValues), so it
+                // is not added to the copies the request's server-set set is widened by; step 5 asks it as the caller's own.
+                var copy = new EntityReference(defaultSource.LogicalName, defaultId);
+                if (ToItemValue(copy, dateBehaviour: null) is { } copyValue)
+                {
+                    merged.TryAdd(column, new PostMappingDefault(copy, copyValue));
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "copied_default_value_unconvertible: entity={Entity} column={Column} source={Source} — the source's default " +
+                        "has no Web API form, so the column stays blank (task 017, 037 review K2)",
+                        table, column, fill.Default.CopiedFrom);
+                }
+
+                continue;
+            }
+
             if (fill.Source is not { } source)
             {
                 _logger.LogWarning(
@@ -823,7 +850,7 @@ internal sealed partial class RecordCreationService
         IReadOnlySet<string>? serverSetLookupColumns, string noun, List<RecordCreationWarning> warnings, CancellationToken ct)
     {
         var named = references.Select(c => c.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var serverSet = (serverSetLookupColumns ?? NoDefaultColumns).Select(c => c.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var serverSet = serverSetLookupColumns ?? NoDefaultColumns;
         var dropped = new List<string>();
         foreach (var lookup in item.Lookups)
         {

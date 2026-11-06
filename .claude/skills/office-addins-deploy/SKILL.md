@@ -5,13 +5,13 @@ techStack: [react, typescript, webpack, swa-cli, azure-static-web-apps, m365-adm
 appliesTo: ["src/client/office-addins/**", "deploy office add-in", "deploy outlook addin", "deploy word addin", "office add-in deploy", "swa deploy"]
 alwaysApply: false
 exemplar: scripts/Deploy-OfficeAddins.ps1
-last-reviewed: 2026-05-17
+last-reviewed: 2026-11-03
 ---
 
 # Office Add-ins Deploy
 
 > **Category**: Operations (Tier 3)
-> **Last Reviewed**: 2026-05-17
+> **Last Reviewed**: 2026-11-03
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2c — extracted from `azure-deploy` as a focused single-purpose skill)
 > **Exemplar rationale**: `scripts/Deploy-OfficeAddins.ps1` IS the canonical operational pattern — it's exercised on every Office Add-in deploy and contains all the SWA-spinner-workaround logic.
 
@@ -53,6 +53,16 @@ Deploy Spaarke Office Add-ins (Outlook, Word) to Azure Static Web App via SWA CL
 
 ---
 
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Dev Deployment: run `scripts/Deploy-OfficeAddins.ps1` (build, fresh token, SWA deploy)
+- [ ] Verify the deployment (script's cache-busted curl and reported manifest version)
+- [ ] Manifest Upload After Deploy (only if a manifest changed: bump the version, upload to M365 Admin Center)
+```
+
 ## Dev Deployment (Recommended for Iteration)
 
 **Always use the deployment script** — it handles all the complexity (spinner workaround, fresh token, build-or-skip):
@@ -77,6 +87,8 @@ Deploy Spaarke Office Add-ins (Outlook, Word) to Azure Static Web App via SWA CL
 3. Deploys using SWA CLI with the spinner workaround (`Start-Process` + log redirect)
 4. Verifies deployment with a cache-busted curl
 5. Reports manifest version from the deployed manifest.xml
+
+If verification fails: fix the cause, redeploy, and re-run verification; do not report success until it passes.
 
 ---
 

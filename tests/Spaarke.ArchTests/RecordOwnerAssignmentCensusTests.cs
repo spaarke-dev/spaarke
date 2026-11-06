@@ -167,9 +167,8 @@ public class RecordOwnerAssignmentCensusTests
         new CensusEntry("DataverseServiceClientImpl.cs", "sprk_attachmentartifact", 1, Disposition.Seam,
             "CreateAttachmentArtifactAsync — refuses without the OwningTeamId request property; UploadFinalizationWorker "
             + "passes its document's team (task 146)."),
-        new CensusEntry("DataverseWebApiService.cs", "sprk_event", 1, Disposition.Seam,
-            "CreateEventAsync — throws when CreateEventRequest.OwningTeamId is absent; EventEndpoints resolves it from "
-            + "the regarding record (or the caller for an unfiled event)."),
+        // Field-mapping-server-write-path-r1 task 031 fix round 1: DataverseWebApiService.CreateEventAsync (the sprk_event POST,
+        // a Seam) was deleted - POST /api/v1/events creates through RecordCreationService - so its entry is gone.
 
         // ── Routed: the file resolves the owner and writes it ───────────────────────────────────────────────────
         new CensusEntry("DataverseWebApiService.cs", "sprk_eventlog", 1, Disposition.Routed,
@@ -239,8 +238,8 @@ public class RecordOwnerAssignmentCensusTests
         // ── Task 146 b2 (verifier AC10): create-by-upsert sites the scanner now sees (a PATCH of a fresh id) ─────────
         // ebilling-r1 050a (D-134): the invoice confirm no longer creates sprk_invoice (its create-by-upsert entry is gone); the
         // submission job creates it (UnscannedWriter InvoiceSubmissionPersister.cs below). No confirm path creates an invoice; other
-        // sprk_invoice creators remain on purpose (task 013: ChildRecordEndpoints CreateTables via OwnedChildWrite, the chat create_record
-        // tool, the decision route).
+        // sprk_invoice creators remain on purpose (task 013: ChildRecordEndpoints CreateTables via RecordCreationService since task 017,
+        // the chat create_record tool, the decision route).
         new CensusEntry("InvoiceSubmissionService.cs", "sprk_invoicesubmission", 1, Disposition.Routed,
             "ebilling-r1 task 044 (FR-17): the submission row is built here and created by TrackingNumberAllocator with its number "
             + "(D-87). Its owner is ResolveOwnerAsync ForParents over the one core record it is filed against (secure-if-any) and "
@@ -332,6 +331,10 @@ public class RecordOwnerAssignmentCensusTests
             "transaction UpsertRequests of sprk_invoicecorrection rows built with deterministic ids (the Accepted-in-bulk rows)",
             "ebilling-r1 task 100: ResolveOwnerAsync ForParents over the invoice's one core record (secure-if-any), applied with "
             + "RecordOwnerResolution.ApplyTo to every row; an unresolved owner refuses before the first write, so nothing is created."),
+        new UnscannedWriter("InvoiceCorrectionService.cs",
+            "transaction UpsertRequest of one sprk_invoicecorrection row (Corrected or Confirmed individually) built with a deterministic id",
+            "ebilling-r1 task 101 part B1: ResolveOwnerAsync over the row's own question (RecordOwnershipContext.ForChild, the same one the "
+            + "secure-child reconciler asks), applied with RecordOwnerResolution.ApplyTo; an unresolved owner refuses before the write, so nothing is created."),
         new UnscannedWriter("InvoiceAdjustmentService.cs",
             "transaction CreateRequest of one sprk_billingevent Adjustment line built with a deterministic id",
             "ebilling-r1 task 102: ResolveOwnerAsync ForParents over the invoice's one core record (secure-if-any), applied with "
@@ -344,10 +347,12 @@ public class RecordOwnerAssignmentCensusTests
             "A service request is a root with no parent, so the owner is the default team of the business unit that owns the "
             + "requester's contact (target = the contact; owner decision 2026-10-11, I-6), resolved before the create; "
             + "unresolved refuses with 500 EXT_INTAKE_OWNER_UNRESOLVED and ExternalDataService refuses an empty team."),
-        new UnscannedWriter("EventEndpoints.cs", "seam caller (CreateEventAsync, CreateEventLogAsync)",
-            "Owner resolved from the regarding record. The re-file route (PUT /{id}) was deleted by task 159 (owner round 10 item 1)."),
+        new UnscannedWriter("EventEndpoints.cs", "seam caller (CreateEventLogAsync)",
+            "The event row is created by RecordCreationService (field-mapping task 031), which decides its owner; the audit row takes the "
+            + "owner the service wrote. The re-file route (PUT /{id}) was deleted by task 159 (owner round 10 item 1)."),
         new UnscannedWriter("AnalysisEndpoints.cs", "seam caller (CreateAnalysisAsync)",
-            "Create and promote resolve the owner from the document and regarding record; a refusal is a 409 (the fork route was deleted by task 162)."),
+            "Promote resolves the owner from the document and regarding record; create goes through RecordCreationService (field-mapping "
+            + "task 031). A refusal is a 409 (the fork route was deleted by task 162)."),
         new UnscannedWriter("AnalysisResultPersistence.cs", "seam caller (CreateAnalysisAsync, CreateAnalysisOutputAsync)",
             "Outputs are owned like their analysis; a refusal skips the analysis and its outputs."),
         new UnscannedWriter("AppOnlyAnalysisService.cs", "seam caller (CreateAnalysisAsync, CreateAnalysisOutputAsync)",
@@ -373,12 +378,16 @@ public class RecordOwnerAssignmentCensusTests
         // ── task 146 r2: the chat tools that write AS THE USER (verifier items 2 and 6) ──────────────────────────────
         new UnscannedWriter("DataverseCreateRecordHandler.cs", "run-as-user POST to a computed entity set (any table)",
             "Owner S1 (1) / G5: a CHILD row filed under a record is checked as the caller, then created by the APPLICATION "
-            + "owned by the resolver's team (OwnedChildWrite); any other table filed under a SECURE record is refused."),
+            + "owned by the resolver's team (RecordCreationService.CreateAsync since field-mapping task 017, 2d-3); any other "
+            + "table filed under a SECURE record is refused."),
         new UnscannedWriter("EmailDraftToolHandler.cs", "run-as-user POST of a sprk_communication draft",
             "Owner S1 (1) / G5: a draft filed under a record is created by the APPLICATION owned by the resolver's team, the "
-            + "drafter recorded as sprk_sentby; an unfiled draft is still created as the user (E1)."),
-        new UnscannedWriter("OwnedChildWrite.cs", "app-only create-by-upsert of a filed child (S1 / G5)",
-            "The one owned-create path of the chat tools: as-the-caller checks, the resolver's owner, the app-only create."),
+            + "drafter recorded as sprk_sentby; an unfiled draft is still created as the user (E1). Since field-mapping task "
+            + "017 (2d-4) through RecordCreationService.CreateAsync (as the caller)."),
+        new UnscannedWriter("OwnedChildWrite.cs", "run-as-user re-file PATCH of a child, then its owner re-derived (RefileAsync)",
+            "The shared re-file core (unified-access-control-r2's): the caller's own PATCH, then ReparentAsync. Its create "
+            + "half (the chat tools' owned create, OwnedChildWrite.CreateAsync) was deleted in field-mapping task 017 (2d-5); "
+            + "every owned create now runs through RecordCreationService."),
         new UnscannedWriter("RecordCreationService.cs", "app-only create-by-upsert of any registered table (task 013, FR-06)",
             "The unified create (Services/RecordCreation): the table is a parameter, so the scanner sees no create site; the "
             + "owner is the resolver's (DecideOwnerAsync) or the secure-create plan's named team, after the as-the-caller checks."),
@@ -386,15 +395,17 @@ public class RecordOwnerAssignmentCensusTests
             "A lookup change on a CHILD table is a re-file (ReparentAsync: the caller's PATCH, then the owner assigned and "
             + "read back); any other table moved under a SECURE record is refused. Since task 147 r1 through the shared "
             + "OwnedChildWrite.RefileAsync. #1616: a project's BFF-managed (field-secured) pair is written update-only by the "
-            + "application after the caller's AppendTo/Write/Append checks (OwnedChildWrite.PatchWithBffManagedPairAsync); "
+            + "application after the caller's AppendTo/Write/Append checks, conditioned on the row version (task 195: ProjectMatterFiling.FileAsync); "
             + "the owner is never written there."),
 
         // ── task 147 r1 (owner round 28 item 1): the browser's child writers, through the BFF ─────────────────────────
         new UnscannedWriter("ChildRecordEndpoints.cs", "app-only create (G5) + run-as-user re-file PATCH of a child table",
-            "POST /api/v1/child-records/{table}: OwnedChildWrite.CreateAsync (as-the-caller checks, the resolver's owner, the "
-            + "app-only create). PATCH /api/v1/child-records/{table}/{id}, /api/v1/events/{id}/filing and "
+            "POST /api/v1/child-records/{table}: RecordCreationService.CreateAsync since field-mapping task 017 (the ONE "
+            + "server create: as-the-caller checks, the resolver's owner or the secure-create plan's named team, the app-only "
+            + "create, then the post-create steps). PATCH /api/v1/child-records/{table}/{id}, /api/v1/events/{id}/filing and "
             + "/api/communications/{id}/filing: OwnedChildWrite.RefileAsync (ReparentAsync); a PATCH that files nothing is the "
-            + "caller's own update."),
+            + "caller's own update. Task 195: PATCH .../sprk_project/{id} takes the filing pair only, written by "
+            + "ProjectMatterFiling.FileAsync (the application, version-conditioned; the owner is never written there)."),
 
         // ── #2084 (owner round 102 item 4, option A3 agreed with spaarke-ontology-platform-r1) ─────────────────────────
         new UnscannedWriter("OntologyAdminAuthoringService.cs",
@@ -427,7 +438,7 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerSeam("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", Calls("RequireArtifactOwner")),
         new OwnerSeam("DataverseServiceClientImpl.cs", "RequireArtifactOwner", Refusal),
         // b2 merge (task 152 extracted the payload builder): the refusal lives in the builder, so no payload without an
-        // owner is ever built; CreateEventAsync's POST uses only that builder.
+        // owner is ever built (its CreateEventAsync POST was deleted by field-mapping task 031; no production caller is left).
         new OwnerSeam("DataverseWebApiService.cs", "BuildCreateEventPayload", Refusal),
         // r2 (verifier items 3 and 15): a builder must REFUSE an empty team AND BIND the team it was handed — dropping the
         // bind used to pass every test, leaving the external create owned by the BFF application user.
@@ -542,7 +553,7 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", 1, OwnerWriteKind.Seam,
             "The OwningTeamId request property — RequireArtifactOwner refuses without it."),
         new OwnerWriteEntry("DataverseWebApiService.cs", "BuildCreateEventPayload", 1, OwnerWriteKind.Seam,
-            "CreateEventRequest.OwningTeamId — throws without it (the builder CreateEventAsync POSTs; task 152 extracted it)."),
+            "CreateEventRequest.OwningTeamId — throws without it (task 152 extracted it; its CreateEventAsync POST was deleted by field-mapping task 031)."),
         new OwnerWriteEntry("DataverseWebApiService.cs", "CreateEventLogAsync", 1, OwnerWriteKind.Seam,
             "The owner EventEndpoints resolved as content of the event; null only when the resolver answered Unchanged."),
         new OwnerWriteEntry("ExternalDataService.cs", "BuildDocumentCreatePayload", 1, OwnerWriteKind.Seam,
@@ -610,8 +621,8 @@ public class RecordOwnerAssignmentCensusTests
             "AI create-task — ForChild over the stamped parents."),
         new OwnerWriteEntry("InquiryReplyTodoCreator.cs", "CreateIfNeededAsync", 1, OwnerWriteKind.Routed,
             "The budget-inquiry outcome To Do (ontology 071) - ForChild over its matter, the resolver's team; nothing is created on a refusal."),
-        new OwnerWriteEntry("OwnedChildWrite.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
-            "The chat tools' owned create (owner S1 / G5) — the resolver's team, after the as-the-caller checks."),
+        // Field-mapping task 017 (2d-5): OwnedChildWrite.cs's two owner writes (CreateAsync, CreateIntoIsolationAsync) were
+        // deleted with its create half; RecordCreationService.cs's OwnedCreateFields and IsolatedCreateFields (below) are them.
         new OwnerWriteEntry("SecureChildReconciler.cs", "AssignAsync", 1, OwnerWriteKind.Routed,
             "Task 148: an EXISTING child of a root moved into or out of isolation (provisioning, unsecure, the sweep) — the " +
             "team IRecordOwnershipResolver answered for the row's own parents, its own update, read back."),
@@ -642,11 +653,8 @@ public class RecordOwnerAssignmentCensusTests
         // The Office quick-create of a MATTER or PROJECT (a root) writes its owner through the unified create below
         // (RecordCreationService.cs: OwnedCreateFields, IsolatedCreateFields) since field mapping task 018; task 018c deleted
         // the Office creation core and its three owner writes (CreateMatterAsync, CreateProjectAsync, IsolateProjectCreate).
-        new OwnerWriteEntry("OwnedChildWrite.cs", "CreateIntoIsolationAsync", 1, OwnerWriteKind.Root,
-            "Task 158 r1 (owner round 31 item 2): a chat-created work assignment / project (a root) filed under a secure record " +
-            "is created INTO isolation, owned by the named team provisioning's topology names (SecureRootInheritance.PlanCreateAsync)."),
         // field-mapping-server-write-path-r1 task 013: the unified create (Services/RecordCreation/RecordCreationService.cs)
-        // ports OwnedChildWrite's two owner writes unchanged; tasks 017/018 re-pointed the callers. (UAC-r2 F-3: ServerFiles()
+        // ports OwnedChildWrite's two owner writes unchanged; tasks 017/018 re-pointed the callers and 017 (2d-5) deleted them. (UAC-r2 F-3: ServerFiles()
         // keys files by NAME — why the Office core was renamed away from this file's name before 018c deleted it.)
         new OwnerWriteEntry("RecordCreationService.cs", "OwnedCreateFields", 1, OwnerWriteKind.Routed,
             "Task 013: the unified create of an OWNED row — the resolver's team (DecideOwnerAsync), after the as-the-caller checks."),
@@ -659,7 +667,8 @@ public class RecordOwnerAssignmentCensusTests
             "through, is moved); one conditional update, then the owner-change eviction."),
         new OwnerWriteEntry("RecordCreationService.cs", "IsolatedCreateFields", 1, OwnerWriteKind.Root,
             "Task 013: a work assignment / project (a root) filed under a secure record, created INTO isolation by the unified " +
-            "create — owned by the named team SecureRootFilingGate.PlanCreateAsync resolves (OwnedChildWrite.CreateIntoIsolationAsync's)."),
+            "create — owned by the named team SecureRootFilingGate.PlanCreateAsync resolves (the service's isolated create, which " +
+            "replaced OwnedChildWrite.CreateIntoIsolationAsync, deleted in task 017)."),
 
         new OwnerWriteEntry("ProvisionProjectEndpoint.cs", "MoveOwnerAsync", 1, OwnerWriteKind.Root,
             "Secure provisioning assigns the ROOT to the named Secure team (task 144), and its compensation moves the ROOT " +
@@ -1942,11 +1951,43 @@ public class RecordOwnerAssignmentCensusTests
         @"(?s)^(?=.*\bRequireOwner\s*\(\s*owningTeamId\b)(?=.*\[\s*OwnerBindKey\s*\]\s*=\s*\$""/teams\(\{owningTeamId\}\)"")");
 
 
-    /// <summary>A resolver call — the ONE owner (task 146 constraint: no writer computes a team itself). r2: the chat tools'
-    /// one owned-create path (<c>OwnedChildWrite.CreateAsync</c>, itself an UnscannedWriter that calls the resolver).</summary>
+    /// <summary>A resolver call — the ONE owner (task 146 constraint: no writer computes a team itself). Field-mapping task
+    /// 017 (2d-4): the unified create through the scoped <c>RecordCreationService</c> held as <c>recordCreation</c> /
+    /// <c>_recordCreation</c> (itself an UnscannedWriter whose step 7 calls the resolver). 2d-5 deleted the chat tools' old
+    /// owned-create path, <c>OwnedChildWrite.CreateAsync</c>, so a call of it no longer counts (the symbol does not exist).</summary>
     private static readonly Regex ResolverCall = new(
-        @"\b(ResolveOwnerAsync|ResolveOwningTeamAsync|ReparentAsync|AssignToThreadReconcilingOwnerAsync|ResolveDocumentOwnerTeamAsync|OwnedChildWrite\.CreateAsync|OwnedChildWrite\.RefileAsync)\s*\(",
+        @"\b(ResolveOwnerAsync|ResolveOwningTeamAsync|ReparentAsync|AssignToThreadReconcilingOwnerAsync|ResolveDocumentOwnerTeamAsync|OwnedChildWrite\.RefileAsync|_?recordCreation\.CreateAsync)\s*\(",
         RegexOptions.Compiled);
+
+    [Fact(DisplayName = "Task 017: the unified create counts as routing the owner; another CreateAsync does not")]
+    public void TheUnifiedCreateCountsAsAResolverCall()
+    {
+        Assert.True(ResolverCall.IsMatch("var outcome = await _recordCreation.CreateAsync(request, principal, ct);"), "must fire");
+        Assert.True(ResolverCall.IsMatch("await recordCreation.CreateAsync(new RecordCreationRequest(t, p), principal, ct)"), "must fire");
+        Assert.False(ResolverCall.IsMatch("await _entities.CreateAsync(entity, ct);"), "must not fire: a raw create");
+        Assert.False(ResolverCall.IsMatch("await myrecordCreation.CreateAsync(x);"), "must not fire: another receiver");
+    }
+
+    [Fact(DisplayName = "Task 017 (2d-5): the deleted owned create, or any other unknown create, no longer counts as routing the owner")]
+    public void TheDeletedOwnedCreate_NoLongerCountsAsAResolverCall()
+    {
+        // Must fire (the guard reports the writer): a file whose only owner routing is a create that names no resolver is
+        // "no IRecordOwnershipResolver call" — the deleted OwnedChildWrite.CreateAsync included.
+        var unknownCreate = SourceScan.CodeText(new[]
+        {
+            "internal sealed class NewOwnedWriter(IFieldMappingDataverseService appOnly)",
+            "{",
+            "    var outcome = await OwnedChildWrite.CreateAsync(user, ownership, appOnly, table, item, null, oid, ct);",
+            "    var other = await SomeCore.CreateAsync(table, item, ct);",
+            "    await appOnly.UpdateRecordFieldsAsync(table, Guid.NewGuid(), fields, ct);",
+            "}",
+        });
+        Assert.False(ResolverCall.IsMatch(unknownCreate), "must fire: an unknown create is not a resolver call");
+
+        // Must not fire: the same writer through the service, or through the re-file core, is.
+        Assert.Matches(ResolverCall, unknownCreate + "\n    await _recordCreation.CreateAsync(request, principal, ct);");
+        Assert.Matches(ResolverCall, "await OwnedChildWrite.RefileAsync(user, ownership, table, id, item, ct);");
+    }
 
     /// <summary>An owner write onto a row about to be created.</summary>
     private static readonly Regex OwnerWrite = new(
@@ -2067,6 +2108,11 @@ public class RecordOwnerAssignmentCensusTests
     /// are <see cref="UnscannedWriters"/>; so is the update tool, whose re-file the r1 census never saw (verifier item 2).</remarks>
     private static readonly IReadOnlyDictionary<string, string> RunAsUserWritesThatFileNothing = new Dictionary<string, string>
     {
+        ["ProjectMatterFiling.cs"] = "uac-r2 task 195: the chat update tool's other columns of a project, PATCHed as the caller after "
+                                     + "the regarding pair is stripped from the body. They are the general update tool's columns, governed "
+                                     + "by the caller's own Dataverse rights (Assign included), as on any update. The pair, a project's only "
+                                     + "filing, is not in that PATCH: the application writes it, version-conditioned (an "
+                                     + "ExternalDocumentNarrowingGuard writer), so this PATCH files the project under nothing.",
         ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
         ["InquiryDispositionService.cs"] = "Ontology task 071 (D-111): the caller's own PATCHes of scalar columns only (the inquiry's "
                                            + "disposition and state, the reply's association status, the outcome To Do's state): no lookup "
@@ -2545,17 +2591,20 @@ public class RecordOwnerAssignmentCensusTests
 
     private static readonly IReadOnlyList<PersonBearingWriter> PersonBearingWriters = new[]
     {
-        new PersonBearingWriter("OwnedChildWrite.cs", "CreateAsync", "the chat caller (WhoAmI) — dataverse.create_record, email.draft"),
+        // Field-mapping task 017 (2d-5): OwnedChildWrite.cs's CreateAsync (the chat caller) was deleted; the chat creates and
+        // email.draft name their caller through RecordCreationService.DecideOwnerAsync (next).
         new PersonBearingWriter("RecordCreationService.cs", "DecideOwnerAsync", "task 013: the caller (WhoAmI) or the system principal's RequestedBy"),
         new PersonBearingWriter("DataverseDocumentsEndpoints.cs", "CreateDocumentAsync", "POST /api/v1/documents caller (oid)"),
         new PersonBearingWriter("InvoiceSubmissionService.cs", "DecideAsync",
             "the submitter of an invoice (ebilling-r1 task 044; the one decision both SubmitAsync and 050a's SubmitExistingDocumentAsync "
             + "call): the internal caller (oid) or a workforce SPA caller (systemuser); a CIAM contact is recorded as sprk_submitter "
             + "(task 092: an upload creates no document; the Stored File the persister creates carries the workforce submitter as its creator person, none for a contact)"),
-        new PersonBearingWriter("EventEndpoints.cs", "OwnershipContextFor", "POST /api/v1/events caller (oid)"),
-        new PersonBearingWriter("EventEndpoints.cs", "CreateEventInDataverseAsync", "the event and its creation log row"),
+        // Field-mapping task 031 (FR-19): POST /api/v1/events and POST /api/ai/analysis/create create their row through
+        // RecordCreationService (the row above: DecideOwnerAsync names the caller via WhoAmI), so EventEndpoints.OwnershipContextFor,
+        // EventEndpoints.CreateEventInDataverseAsync and AnalysisEndpoints.CreateAnalysis no longer create or decide an owner and
+        // left this list. The event's creation LOG row (below, and here) still names the person whose create it records.
+        new PersonBearingWriter("EventEndpoints.cs", "WriteCreatedAuditLogAsync", "the caller whose create the event's creation log row records"),
         new PersonBearingWriter("EventEndpoints.cs", "ResolveEventLogOwnerAsync", "the caller whose change a log row records"),
-        new PersonBearingWriter("AnalysisEndpoints.cs", "CreateAnalysis", "POST /api/ai/analysis/create caller"),
         // (ForkAnalysis left with POST /api/ai/analysis/fork, deleted by task 162 under owner round 10 item 1.)
         new PersonBearingWriter("AnalysisEndpoints.cs", "PromoteSession", "promote caller"),
         new PersonBearingWriter("AnalysisResultPersistence.cs", "StoreDocumentProfileOutputsAsync", "the user who ran the profile"),

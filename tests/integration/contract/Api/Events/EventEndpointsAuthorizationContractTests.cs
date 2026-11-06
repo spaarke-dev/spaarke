@@ -25,8 +25,13 @@ using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.RecordCreation;
+using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
+using Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 using Sprk.Bff.Api.Tests.Services.Ai.Membership.Events;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using EventStatusCode = Spaarke.Dataverse.EventStatusCode;
 
@@ -341,6 +346,7 @@ public class EventEndpointsAuthorizationContractTests
             .Should().Be("sdap.access.deny.insufficient_privilege");
         host.Probe.PrivilegeCalls.Should().Equal((CreateEventPrivilege, true));
         host.Events.VerifyNoOtherCalls();
+        host.AssertServiceNotReached();
     }
 
     [Fact]
@@ -358,6 +364,7 @@ public class EventEndpointsAuthorizationContractTests
         JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>()
             .Should().Be("sdap.access.deny.insufficient_rights");
         host.Events.VerifyNoOtherCalls();
+        host.AssertServiceNotReached();
     }
 
     [Fact]
@@ -387,6 +394,7 @@ public class EventEndpointsAuthorizationContractTests
 
         bodies.Distinct().Should().ContainSingle("an unknown id, a denied one and a set-lookup fault must not be told apart");
         host.Events.VerifyNoOtherCalls();
+        host.AssertServiceNotReached();
     }
 
     [Fact]
@@ -410,11 +418,52 @@ public class EventEndpointsAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         host.Probe.RightsCalls.Should().Equal((AnalysesSet, analysis, true));
         var created = creates.Should().ContainSingle().Subject;
-        created.RegardingEntitySetName.Should().Be(AnalysesSet, "the record authorized is the record bound");
-        var payload = DataverseWebApiService.BuildCreateEventPayload(created);
+        // Task 031: the capture seam moved from the DTO to the service's create body; the entity set the create BINDS is read from
+        // the bind path (the DTO's RegardingEntitySetName no longer exists on this route).
+        var payload = created.Payload;
+        ((string)payload["sprk_RegardingAnalysis@odata.bind"]!).Should().StartWith($"/{AnalysesSet}(", "the record authorized is the record bound");
         payload["sprk_RegardingAnalysis@odata.bind"].Should().Be($"/{AnalysesSet}({analysis:D})");
         payload["sprk_RegardingMatter@odata.bind"].Should().Be($"/{MattersSet}({matter:D})", "FR-26: the analysis's core ancestor is stamped");
         payload.Keys.Should().NotContain("sprk_RegardingRecordType@odata.bind", "this environment double has no record-type row for analysis");
+    }
+
+    [Fact]
+    public async Task Create_ABodyNamingAContact_IsIgnored_TheRowNamesTheCallersLinkedContact()
+    {
+        // Task 031 (UAC-r2, 2026-11-04): sprk_assignedto is the server-set lookup that costs no AppendTo, so it must come from
+        // the caller's identity on the server and never from the body. The create body has no contact field; every spelling
+        // a client might try is dropped at binding, and the row names the caller's LINKED contact.
+        var linkedContact = Guid.Parse("c0c0c0c0-0031-4031-8031-000000000031");
+        var bodyContact = Guid.Parse("c0c0c0c0-0031-4031-8031-0000000000bb");
+        await using var host = await EventsAuthHost.StartAsync();
+        host.Identity.Setup(i => i.ResolveAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(CallerSystemUserId, ContactId: linkedContact));
+        var analysis = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant(AnalysesSet, analysis, AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync(AnalysesSet);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync(MattersSet);
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync((Entity?)null);
+        host.Entities.Setup(e => e.RetrieveAsync("sprk_analysis", analysis, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_analysis", analysis) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter) });
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new Dictionary<string, object>
+        {
+            ["subject"] = "Review",
+            ["regardingRecordType"] = 3,
+            ["regardingRecordId"] = analysis,
+            ["assigneeContactId"] = bodyContact,
+            ["assignedToContactId"] = bodyContact,
+            ["sprk_assignedto"] = bodyContact,
+            ["sprk_AssignedTo@odata.bind"] = $"/contacts({bodyContact:D})",
+        }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var payload = creates.Should().ContainSingle().Subject.Payload;
+        payload["sprk_AssignedTo@odata.bind"].Should().Be($"/contacts({linkedContact:D})", "the caller's linked contact, resolved on the server");
+        System.Text.Json.JsonSerializer.Serialize(payload).Should().NotContain(bodyContact.ToString("D"), "nothing the body names reaches the row");
     }
 
     /// <summary>
@@ -454,7 +503,7 @@ public class EventEndpointsAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var created = creates.Should().ContainSingle().Subject;
         created.AccessPermission.Should().Be(100000002);
-        DataverseWebApiService.BuildCreateEventPayload(created)["sprk_accesspermission"].Should().Be(100000002,
+        created.Payload["sprk_accesspermission"].Should().Be(100000002,
             "the event shows the matter at the top of its filing, from the moment it exists");
     }
 
@@ -479,7 +528,7 @@ public class EventEndpointsAuthorizationContractTests
         host.Probe.Grant(entitySet, target, AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync(logicalName, It.IsAny<CancellationToken>())).ReturnsAsync(entitySet);
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync(logicalName, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = numberColumn });
+            .ReturnsAsync(host.InCallerCatalog(logicalName, new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = numberColumn }));
         host.Entities.Setup(e => e.RetrieveAsync(logicalName, target, It.Is<string[]>(c => c.Contains(numberColumn)), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity(logicalName, target) { [numberColumn] = number });
         var creates = host.CaptureCreates();
@@ -500,7 +549,7 @@ public class EventEndpointsAuthorizationContractTests
         host.Probe.Grant("sprk_matters", matter, AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_nosuchnumber" });
+            .ReturnsAsync(host.InCallerCatalog("sprk_matter", new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_nosuchnumber" }));
         host.Entities.Setup(e => e.RetrieveAsync("sprk_matter", matter, It.Is<string[]>(c => c.Contains("sprk_nosuchnumber")), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("'sprk_matter' entity doesn't contain attribute with Name = 'sprk_nosuchnumber'"));
         host.Entities.Setup(e => e.RetrieveAsync("sprk_matter", matter, It.Is<string[]>(c => c.Length == 1 && c[0] == "sprk_mattername"), It.IsAny<CancellationToken>()))
@@ -539,7 +588,7 @@ public class EventEndpointsAuthorizationContractTests
         MatterWithNumber(host, matter);
         host.RecordTypes.SetupSequence(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TimeoutException("catalog timed out"))
-            .ReturnsAsync(MatterCatalogRow());
+            .ReturnsAsync(host.InCallerCatalog("sprk_matter", MatterCatalogRow()));
         var creates = host.CaptureCreates();
 
         var response = await host.SendAsync(CreateRequest(new { subject = "Retried", regardingRecordType = 1, regardingRecordId = matter }));
@@ -613,7 +662,7 @@ public class EventEndpointsAuthorizationContractTests
         host.Probe.Grant("contacts", contact, AccessRights.AppendTo);
         host.Entities.Setup(e => e.GetEntitySetNameAsync("contact", It.IsAny<CancellationToken>())).ReturnsAsync("contacts");
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("contact", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_recordtype_ref", Guid.NewGuid())); // live: contact names no number column
+            .ReturnsAsync(host.InCallerCatalog("contact", new Entity("sprk_recordtype_ref", Guid.NewGuid()))); // live: contact names no number column
         var creates = host.CaptureCreates();
 
         var response = await host.SendAsync(CreateRequest(new { subject = "Call", regardingRecordType = 5, regardingRecordId = contact }));
@@ -632,7 +681,9 @@ public class EventEndpointsAuthorizationContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         host.Probe.RightsCalls.Should().BeEmpty();
-        creates.Should().ContainSingle().Which.RegardingRecordType.Should().BeNull();
+        // Task 031: the old DTO's RegardingRecordType == null is, in the create body, no regarding column of any kind.
+        creates.Should().ContainSingle().Which.Payload.Keys.Should().NotContain(
+            k => k.StartsWith("sprk_regarding", StringComparison.OrdinalIgnoreCase), "an event filed under nothing carries no regarding column");
     }
 
     [Fact]
@@ -662,6 +713,7 @@ public class EventEndpointsAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         host.Probe.PrivilegeCalls.Should().BeEmpty();
         host.Events.VerifyNoOtherCalls();
+        host.AssertServiceNotReached();
     }
 
     [Fact]
@@ -674,6 +726,7 @@ public class EventEndpointsAuthorizationContractTests
         host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync(AnalysesSet);
         host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_analysis", It.IsAny<CancellationToken>())).ReturnsAsync((Entity?)null);
         host.ColumnProbe = (_, _) => throw new InvalidOperationException("metadata unavailable"); // the resolver fails closed (Error)
+        var creates = host.CaptureCreates(); // task 031: the request reaches the service (as the caller), which refuses it
 
         var response = await host.SendAsync(CreateRequest(new { subject = "Review", regardingRecordType = 3, regardingRecordId = analysis }));
 
@@ -681,7 +734,9 @@ public class EventEndpointsAuthorizationContractTests
         var body = await response.Content.ReadAsStringAsync();
         body.Should().NotContain(analysis.ToString());
         JsonNode.Parse(body)!["errorCode"]!.GetValue<string>().Should().Be("events.regarding_stamp_failed");
-        host.Events.Verify(e => e.CreateEventAsync(It.IsAny<CreateEventRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        creates.Should().BeEmpty("task 031: the service wrote nothing - not the row, not an owner");
+        host.AppOnlyCreates.Should().BeEmpty();
+        host.Publisher.Published.Should().BeEmpty("no membership event for a row that was never created");
         host.Events.Verify(e => e.CreateEventLogAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -704,6 +759,7 @@ public class EventEndpointsAuthorizationContractTests
 
         response.StatusCode.Should().Be(route == "create" ? HttpStatusCode.Forbidden : HttpStatusCode.NotFound);
         host.Events.VerifyNoOtherCalls();
+        host.AssertServiceNotReached();
     }
 
     [Fact]
@@ -716,6 +772,7 @@ public class EventEndpointsAuthorizationContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         host.Events.VerifyNoOtherCalls();
+        host.AssertServiceNotReached();
     }
 
     [Theory]
@@ -737,6 +794,7 @@ public class EventEndpointsAuthorizationContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         host.Events.VerifyNoOtherCalls();
+        host.AssertServiceNotReached();
     }
 
     /// <summary>
@@ -955,6 +1013,59 @@ public class EventEndpointsAuthorizationContractTests
         /// </summary>
         public Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient> FilingUser { get; } = FilingUserClient();
 
+        /// <summary>
+        /// Field-mapping-server-write-path-r1 task 031 (FR-19): the caller's Dataverse client the REAL <see cref="RecordCreationService"/>
+        /// asks (WhoAmI, its own as-caller checks and metadata). Registered behind <see cref="CallerClient"/>: the filing tests keep
+        /// the strict <see cref="FilingUser"/>; <see cref="CaptureCreates"/> switches to this scripted caller, whose every question
+        /// is counted so "the service was not reached" is asserted, not assumed.
+        /// </summary>
+        public SecureChildOwnershipAiToolTests.ScriptedUserClient ScriptedCaller { get; } = new(CallerSystemUserId);
+
+        /// <summary>The user client the host registers: the strict filing client until a test lets the service create as the caller.</summary>
+        public CountingUserClient CallerClient { get; }
+
+        /// <summary>
+        /// Task 031: every app-only create the service makes (its upsert of a client-chosen id), as the table, the id and the
+        /// Web API body it sent. Replaces the old <c>IEventDataverseService.CreateEventAsync</c> capture: that create no longer
+        /// exists on this route.
+        /// </summary>
+        public List<(string Table, Guid Id, Dictionary<string, object?> Fields)> AppOnlyCreates { get; } = new();
+
+        /// <summary>Task 031: the service's app-only writer (loose: its reads answer nothing; its one create is captured).</summary>
+        public Mock<IFieldMappingDataverseService> AppOnly { get; } = new(MockBehavior.Loose);
+
+        /// <summary>
+        /// Task 031: the catalog row the route reads (<c>QueryRecordTypeRefAsync</c>) is ALSO a row the service reads back as the caller
+        /// ("the core's pair rule": the pair's type must name the table the id belongs to). Registers it in the scripted caller's
+        /// catalog and returns it, so a test states the row once.
+        /// </summary>
+        public Entity InCallerCatalog(string logicalName, Entity row)
+        {
+            ScriptedCaller.RecordTypes[row.Id] = logicalName;
+            return row;
+        }
+
+        public EventsAuthHost()
+        {
+            CallerClient = new CountingUserClient(FilingUser.Object);
+            AppOnly.Setup(a => a.UpdateRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) => AppOnlyCreates.Add((table, id, fields)))
+                .Returns(Task.CompletedTask);
+        }
+
+        /// <summary>
+        /// Task 031 (AC "service not invoked when the filter denies"): nothing the service does is visible anywhere - no owner
+        /// question, no question to the caller's Dataverse, no app-only write and no membership event.
+        /// </summary>
+        public void AssertServiceNotReached()
+        {
+            Ownership.Requests.Should().BeEmpty("the route filter answered before the service was reached");
+            CallerClient.Calls.Should().Be(0, "the service asks the caller's Dataverse first; a denied request never gets there");
+            AppOnlyCreates.Should().BeEmpty();
+            Publisher.Published.Should().BeEmpty();
+        }
+
         private static Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient> FilingUserClient()
         {
             var user = new Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(MockBehavior.Strict);
@@ -1013,11 +1124,26 @@ public class EventEndpointsAuthorizationContractTests
             builder.Services.AddSingleton(Identity.Object);
             builder.Services.AddSingleton<IMembershipEventPublisher>(Publisher);
             builder.Services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
-            builder.Services.AddSingleton(new CoreAncestorResolver(
-                Entities.Object, (entity, ct) => ColumnProbe(entity, ct), NullLogger<CoreAncestorResolver>.Instance));
+            var coreAncestors = new CoreAncestorResolver(
+                Entities.Object, (entity, ct) => ColumnProbe(entity, ct), NullLogger<CoreAncestorResolver>.Instance);
+            builder.Services.AddSingleton(coreAncestors);
+
+            // Task 031 (FR-19): the create is the ONE server create, as the caller. The REAL service over this host's own seams: the
+            // owner double, the app-only writer, the host's Dataverse double, the real stamp derivation over the host's column probe
+            // (so a stamp failure still fails the create closed), and the host's membership publisher.
+            builder.Services.AddSingleton<IDataverseUserClient>(CallerClient);
+            builder.Services.AddSingleton(RouteRecordCreation.Over(
+                Ownership,
+                AppOnly.Object,
+                new CoreAncestorRestamper(Entities.Object, coreAncestors, NullLogger<CoreAncestorRestamper>.Instance),
+                Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard()
+                    .Synchronizer(new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
+                SecureRootFilingGateFixtures.NothingSecure(),
+                null,
+                Publisher,
+                Entities.Object));
 
             // Task 147 r1c: the filing route's services (the re-file core's own tests drive them fully).
-            builder.Services.AddSingleton(FilingUser.Object);
             builder.Services.AddSingleton(new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper);
             builder.Services.AddScoped(_ => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.ReconcilerOver(
                 () => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard(), new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable(), null!));
@@ -1070,14 +1196,24 @@ public class EventEndpointsAuthorizationContractTests
             return captured;
         }
 
-        public List<CreateEventRequest> CaptureCreates()
+        /// <summary>
+        /// Lets the create reach the service as the caller (the scripted caller replaces the strict filing client) and returns what
+        /// the service's ONE app-only create wrote, parsed back into the values these tests read. Task 031: the row is no longer
+        /// created through <see cref="IEventDataverseService"/>; the capture seam moved, the assertions did not.
+        /// </summary>
+        public List<CapturedEventCreate> CaptureCreates()
         {
-            var captured = new List<CreateEventRequest>();
-            var createdId = Guid.NewGuid();
-            Events.Setup(e => e.CreateEventAsync(It.IsAny<CreateEventRequest>(), It.IsAny<CancellationToken>()))
-                .Callback<CreateEventRequest, CancellationToken>((r, _) => captured.Add(r))
-                .ReturnsAsync((createdId, DateTime.UtcNow));
-            Events.Setup(e => e.CreateEventLogAsync(createdId, EventLogAction.Created, It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            CallerClient.Inner = ScriptedCaller;
+            var captured = new List<CapturedEventCreate>();
+            AppOnly.Setup(a => a.UpdateRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) =>
+                {
+                    AppOnlyCreates.Add((table, id, fields));
+                    captured.Add(new CapturedEventCreate(table, id, fields));
+                })
+                .Returns(Task.CompletedTask);
+            Events.Setup(e => e.CreateEventLogAsync(It.IsAny<Guid>(), EventLogAction.Created, It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Guid.NewGuid());
             return captured;
         }
@@ -1092,6 +1228,87 @@ public class EventEndpointsAuthorizationContractTests
             }
         }
     }
+}
+
+/// <summary>
+/// The caller's Dataverse client the host registers: forwards to <see cref="Inner"/> and counts every question, so a test can
+/// assert the create service (which asks the caller's Dataverse first) was never reached.
+/// </summary>
+internal sealed class CountingUserClient(IDataverseUserClient inner) : IDataverseUserClient
+{
+    public IDataverseUserClient Inner { get; set; } = inner;
+
+    public int Calls { get; private set; }
+
+    public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return Inner.GetAsync(relativePath, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return Inner.PostAsync(absoluteApiPath, jsonBody, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, bool preferRepresentation, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return Inner.PostAsync(absoluteApiPath, jsonBody, preferRepresentation, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return Inner.PatchAsync(relativePath, jsonBody, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return Inner.DeleteAsync(relativePath, cancellationToken);
+    }
+}
+
+/// <summary>
+/// The event as the service's one app-only create wrote it (Web API logical names). <see cref="Payload"/> reads the body the way
+/// <c>DataverseWebApiService.BuildCreateEventPayload</c> was read by the contract assertions: a lookup is its
+/// <c>{navigation}@odata.bind</c> path, a number an <see cref="int"/>, a string a string.
+/// </summary>
+internal sealed class CapturedEventCreate(string table, Guid id, IReadOnlyDictionary<string, object?> fields)
+{
+    public string Table { get; } = table;
+
+    public Guid Id { get; } = id;
+
+    public IReadOnlyDictionary<string, object?> Fields { get; } = fields;
+
+    public Dictionary<string, object?> Payload { get; } = fields.ToDictionary(f => f.Key, f => Plain(f.Value), StringComparer.Ordinal);
+
+    /// <summary>The regarding record's number as the create wrote it (<c>sprk_regardingrecordnumber</c>), or null.</summary>
+    public string? RegardingRecordNumber => Payload.GetValueOrDefault("sprk_regardingrecordnumber") as string;
+
+    /// <summary>The regarding record's name as the create wrote it (<c>sprk_regardingrecordname</c>), or null.</summary>
+    public string? RegardingRecordName => Payload.GetValueOrDefault("sprk_regardingrecordname") as string;
+
+    /// <summary>The regarding record's id as the create wrote it (<c>sprk_regardingrecordid</c>), or null when it filed under nothing.</summary>
+    public string? RegardingRecordId => Payload.GetValueOrDefault("sprk_regardingrecordid") as string;
+
+    /// <summary>The Access Permission the create wrote (<c>sprk_accesspermission</c>), or null.</summary>
+    public int? AccessPermission => Payload.GetValueOrDefault("sprk_accesspermission") as int?;
+
+    private static object? Plain(object? value) => value is not System.Text.Json.JsonElement element
+        ? value
+        : element.ValueKind switch
+        {
+            System.Text.Json.JsonValueKind.String => element.GetString(),
+            System.Text.Json.JsonValueKind.Number when element.TryGetInt32(out var number) => number,
+            System.Text.Json.JsonValueKind.True => true,
+            System.Text.Json.JsonValueKind.False => false,
+            System.Text.Json.JsonValueKind.Null => null,
+            _ => element.GetRawText(),
+        };
 }
 
 /// <summary>Authenticates a request carrying <see cref="CallerHeader"/> as a caller with an Entra <c>oid</c>,

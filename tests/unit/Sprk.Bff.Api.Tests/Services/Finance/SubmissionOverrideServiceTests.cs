@@ -54,6 +54,9 @@ public class SubmissionOverrideServiceTests
         public Entity Submission { get; }
         public Entity? Invoice { get; set; }
 
+        /// <summary>Task 152: the queue the service's re-index is submitted to.</summary>
+        public IndexQueueDouble Queue { get; } = new();
+
         /// <summary>What happened, in order: lock, record, transition, update, notify, unlock.</summary>
         public List<string> Order { get; } = [];
 
@@ -297,7 +300,8 @@ public class SubmissionOverrideServiceTests
                         ? Task.FromException<DecisionRecordWriter.BillingStoredResolvedSet?>(fault)
                         : Recorder.FindStoredResolvedSetAsync(code, invoice, decisionId, ct);
                 },
-                Clock);
+                Clock,
+                Queue.Submitter);
 
             // The open-Signal read (049's ReadOpenSignalSetAsync): the invoice's lines, then the Signals on the invoice or a line.
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
@@ -623,6 +627,29 @@ public class SubmissionOverrideServiceTests
         }
     }
 
+    [Fact(DisplayName = "152 FR-43: an override that releases the hold queues the invoice's re-index (a Return does not: its status move does); a failed enqueue never fails the override")]
+    public async Task Override_QueuesTheReindex_AReturnDoesNot_AndAFailedEnqueueNeverFailsIt()
+    {
+        var w = await World.CreateAsync();
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        var job = w.Queue.Sent.Should().ContainSingle().Subject;
+        job.JobType.Should().Be("InvoiceIndexing");
+        job.SubjectId.Should().Be(World.InvoiceId.ToString());
+        job.IdempotencyKey.Should().Be($"invoice-index-{World.InvoiceId:N}-o{SubmissionOverrideService.OverrideDecisionIdFor(World.SubmissionId):N}");
+
+        var returned = await World.CreateAsync();
+        (await returned.ReturnAsync()).Kind.Should().Be(BlockedDecisionKind.Decided);
+        returned.Queue.Sent.Should().BeEmpty("the Return's status move is queued by the lifecycle service, which is a double here");
+
+        var faulted = await World.CreateAsync();
+        faulted.Queue.Fault = new InvalidOperationException("service bus down");
+        (await faulted.OverrideAsync()).Kind.Should().Be(BlockedDecisionKind.Decided);
+        faulted.Queue.Sent.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Override_TheDecisionRecordIsBuiltOnlyFromTheCallerAndTheStoredFindings()
     {
@@ -907,6 +934,7 @@ public class SubmissionOverrideServiceTests
     [InlineData(InvoiceLifecycleStatus.Paid)]
     [InlineData(InvoiceLifecycleStatus.Rejected)]
     [InlineData(InvoiceLifecycleStatus.Cancelled)]
+    [InlineData(InvoiceLifecycleStatus.Superseded)] // task 097a: closed by its correction
     public async Task Override_WhenTheInvoiceIsNoLongerInReview_Is409InvoiceNotHeld_AndNothingChanges(InvoiceLifecycleStatus status)
     {
         var w = await World.CreateAsync();
@@ -1361,11 +1389,13 @@ public class SubmissionOverrideServiceTests
         overridden.Transitions.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task Return_WhenTheInvoiceIsAlreadyApprovedOrGone_Is409_AndNothingChanges()
+    [Theory]
+    [InlineData(InvoiceLifecycleStatus.Approved)]
+    [InlineData(InvoiceLifecycleStatus.Superseded)] // task 097a: closed by its correction; never returned
+    public async Task Return_WhenTheInvoiceIsAlreadyApprovedOrGone_Is409_AndNothingChanges(InvoiceLifecycleStatus status)
     {
         var w = await World.CreateAsync();
-        w.SetInvoiceStatus(InvoiceLifecycleStatus.Approved);
+        w.SetInvoiceStatus(status);
 
         var result = await w.ReturnAsync();
 
@@ -1434,6 +1464,7 @@ public class SubmissionOverrideServiceTests
     [Theory]
     [InlineData(InvoiceLifecycleStatus.Approved)]
     [InlineData(InvoiceLifecycleStatus.Paid)]
+    [InlineData(InvoiceLifecycleStatus.Superseded)] // task 097a
     public async Task Get_WhenTheInvoiceIsNoLongerInReview_CannotOverrideOrReturn(InvoiceLifecycleStatus status)
     {
         var w = await World.CreateAsync();
@@ -2449,6 +2480,23 @@ public class SubmissionOverrideServiceTests
         w.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("nothing is re-closed", StringComparison.Ordinal));
     }
 
+    [Fact(DisplayName = "ontology-r1 ask 2: a repeat the writer refuses to read logs the refusal warning exactly once")]
+    public async Task Repeat_WhenTheWriterRefusesTheStoredSet_LogsTheRefusalWarningOnce()
+    {
+        var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
+        w.CloseFault = id => id == onInvoice ? new TimeoutException("dataverse") : null;
+        ShouldBeUnavailable(await w.OverrideAsync());
+        w.CloseFault = _ => null;
+        w.FindFault = new DecisionRecordRefusedException(DecisionRecordRefusalReason.ReviewInvalid, "more than one record matches the key");
+        w.Log.Entries.Clear();
+
+        var repeat = await w.OverrideAsync();
+
+        repeat.Kind.Should().Be(BlockedDecisionKind.AlreadyDecided);
+        w.Log.Entries.Count(e => e.Level == LogLevel.Warning && e.Message.Contains("decision_review_invalid", StringComparison.Ordinal))
+            .Should().Be(1, "the refusal reason is logged once, not by the filter and again by the handler");
+    }
+
     [Theory(DisplayName = "105 F2: a clean close is unchanged: Decided, then a repeat is AlreadyDecided with every Signal closed once and no second record")]
     [InlineData("override")]
     [InlineData("return")]
@@ -2538,6 +2586,32 @@ public class SubmissionOverrideServiceTests
         result.StatusCode.Should().Be(409);
         result.ErrorCode.Should().Be(BlockedSubmissionErrors.RecordRefused);
         w.AssertNothingWritten();
+    }
+
+    [Theory(DisplayName = "#2455: an invoice naming two core records (never the first found) is refused with record_refused, and nothing is written")]
+    [InlineData("override")]
+    [InlineData("return")]
+    public async Task Decision_WhenTheInvoiceNamesTwoCoreRecords_AndThereAreSignals_IsRefused_AndNothingIsWritten(string verb)
+    {
+        var (w, _, _, _, _, _, _) = await SignalWorldAsync();
+        w.Invoice!["sprk_project"] = new EntityReference("sprk_project", Guid.NewGuid());
+
+        var result = await Decide(w, verb);
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.RecordRefused);
+        w.AssertNothingWritten();
+    }
+
+    [Fact(DisplayName = "#2455: control: an invoice naming exactly one core record is decided and its Signals closed as before")]
+    public async Task Decision_WhenTheInvoiceNamesOneCoreRecord_AndThereAreSignals_IsDecided()
+    {
+        var (w, _, onInvoice, _, _, _, _) = await SignalWorldAsync();
+
+        var result = await w.OverrideAsync();
+
+        result.Kind.Should().Be(BlockedDecisionKind.Decided);
+        w.ClosedBy.Should().ContainKey(onInvoice);
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════

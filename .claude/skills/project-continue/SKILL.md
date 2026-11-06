@@ -57,7 +57,7 @@ last-reviewed: 2026-05-16
 IDENTIFY project:
   - If user provides project name: Use that
   - If in a worktree: Extract project from worktree path
-  - If on a feature branch: Extract project from branch name (feature/{project-name})
+  - If on a feature branch: Extract project from branch name (work/{project-name}; older projects: work/{project-name})
   - If ambiguous: Ask user to specify
 
 VERIFY project folder exists:
@@ -77,7 +77,7 @@ IDENTIFY branch/worktree:
 **Output to User:**
 ```
 📁 Project: {project-name}
-🌿 Branch: feature/{project-name}
+🌿 Branch: work/{project-name}
 📍 Location: {path or worktree info}
 
 Checking sync status with master...
@@ -329,7 +329,7 @@ IF ready to work on a task:
 ✅ Project continuation ready!
 
 📁 Project: {project-name}
-🌿 Branch: feature/{project-name} (synced with master)
+🌿 Branch: work/{project-name} (synced with master)
 📋 PR: #{number} - CI {passing/failing}
 
 📌 Resume Point:
@@ -390,7 +390,7 @@ BEFORE starting any implementation work:
 | Situation | Response |
 |-----------|----------|
 | Project folder not found | "Project '{name}' not found. Run /project-pipeline to initialize." |
-| Not on feature branch | "You're on master. Checkout feature branch: git checkout feature/{name}" |
+| Not on feature branch | "You're on master. Checkout the project branch: git checkout work/{name}" |
 | Uncommitted changes | Offer stash/commit/skip options (Step 2) |
 | Merge conflicts | List conflicts, stop for manual resolution |
 | CI failing on PR | Warn user, offer to continue or address first |

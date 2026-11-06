@@ -22,8 +22,8 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Status codes (approve).</b> 200 approved or already approved (a second approve is a no-op); 401; 403 (route, not eligible by the
 /// caller's own contact or no contact (EB-D-171), identity unproven, or the rights to close the invoice's or the bulk accept's Signals); 404
 /// uniform; 409 (lines open with counts, held, not In Review, no or ambiguous approval portion, unknown approval status, already decided,
-/// approval changed or claimed by another approver, another person's unrecorded line decision, another decision in progress, totals or
-/// transition refused); 500 (no single core record, a decision the writer refuses); 503 <c>ebilling.disabled</c>,
+/// approval changed or claimed by another approver, another person's unrecorded line decision, another decision in progress, a correction
+/// that did not finish (<c>ebilling.approval.corrections_pending</c>), totals or transition refused); 500 (no single core record, a decision the writer refuses); 503 <c>ebilling.disabled</c>,
 /// <c>ebilling.approval.unavailable</c> (nothing changed) or <c>ebilling.approval.incomplete</c> (approve again to finish).</para>
 /// </remarks>
 public static class InvoiceApprovalEndpoints
@@ -58,7 +58,8 @@ public static class InvoiceApprovalEndpoints
             .WithName("ApproveInvoice")
             .WithSummary("Approve an invoice")
             .WithDescription(
-                "Any one eligible approver approves. Refused while a line is Pending or Flagged (409 with counts) or the invoice is held. Undecided " +
+                "Any one eligible approver approves. Refused while a line is Pending or Flagged (409 with counts), the invoice is held, or a saved " +
+                "correction did not finish (409, repeat it). Undecided " +
                 "Clean lines are accepted in bulk. Moves the invoice to Approved, freezes the approved total on the approval and records one " +
                 "Decision Record naming the approver. A second approve is a no-op.")
             .Produces<InvoiceApprovalResponse>(StatusCodes.Status200OK)

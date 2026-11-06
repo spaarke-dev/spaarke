@@ -257,11 +257,14 @@ public sealed class InvoiceLineDecisionServiceTests
                 });
         }
 
+        /// <summary>Task 152: the queue the service's re-index is submitted to.</summary>
+        public IndexQueueDouble Queue { get; } = new();
+
         public InvoiceLineDecisionService Service()
         {
             var recorder = new BillingDecisionRecorder(H.Writer, Identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
             var totals = new InvoiceTotalsService(Records.Object, Entities.Object, NullLogger<InvoiceTotalsService>.Instance);
-            return new InvoiceLineDecisionService(Entities.Object, totals, recorder, Locks, Ownership.Object, Probe.Object, CloseAsync, Log);
+            return new InvoiceLineDecisionService(Entities.Object, totals, recorder, Locks, Ownership.Object, Probe.Object, CloseAsync, Log, jobs: Queue.Submitter);
         }
 
         /// <summary>The app-identity close as the Signal writer behaves: Open/Acknowledged → Resolved Acted by the record; a repeat by the
@@ -374,6 +377,33 @@ public sealed class InvoiceLineDecisionServiceTests
         World w, LineDecisionAction action, IEnumerable<LineDecisionLine> lines, string? reason = null, Guid? decisionId = null, bool bulk = false) =>
         new(w.InvoiceId, decisionId ?? Guid.NewGuid(), action, reason, lines.ToList(), Decider, bulk, CallerToken);
 
+    /// <summary>
+    /// For the persister's end-to-end test (EB-D-175 / EB-D-176): puts a line row AS THE REAL PERSISTER WROTE IT into this service's in-memory
+    /// Dataverse (only its parent invoice is re-pointed at the world), accepts it through the real <see cref="InvoiceLineDecisionService"/>,
+    /// and returns the outcome, the row as stored after the decision and the Decision Records it wrote.
+    /// </summary>
+    internal static async Task<(LineDecisionStatus Status, Entity Line, IReadOnlyList<Entity> Records)> AcceptPersistedLineAsync(Entity persisted, decimal billedTotal)
+    {
+        var w = new World(billedTotal);
+        var row = new Entity(persisted.LogicalName, persisted.Id);
+        foreach (var attribute in persisted.Attributes)
+        {
+            row[attribute.Key] = attribute.Value;
+        }
+
+        row["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId);
+        row["versionnumber"] = 50L;
+        w.Lines.Add(row);
+        w.H.Rows[("sprk_billingevent", row.Id)] = new Entity("sprk_billingevent", row.Id)
+        {
+            ["sprk_project"] = new EntityReference("sprk_project", Core),
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+        };
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(row.Id)]), CancellationToken.None);
+        return (result.Status, w.Line(row.Id), w.H.Created.ToList());
+    }
+
     // ── Outcomes: the line, the totals, the ledger ──
 
     [Fact(DisplayName = "100: a Reduce stores status, approved amount, reason, reviewer and time, recomputes the approved total, and records one Decision Record on the line")]
@@ -399,6 +429,38 @@ public sealed class InvoiceLineDecisionServiceTests
         record.GetAttributeValue<string>("sprk_actioncode").Should().Be("reduce-line");
         record.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline").Id.Should().Be(line.Id, "D-75: the line is the subject");
         record.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Decider, "the decider is the authenticated user, passed by the endpoint");
+    }
+
+    [Fact(DisplayName = "152 FR-43: a decision queues the invoice's re-index once, keyed to the decision; a repeat reuses the key, a new decision has its own, and a failed enqueue never fails the decision")]
+    public async Task Decision_QueuesTheReindex_KeyedToTheDecision_AndAFailedEnqueueNeverFailsIt()
+    {
+        var w = new World(billedTotal: 1000m);
+        var line = w.AddLine(600m, InvoiceLineStatus.Flagged);
+        var second = w.AddLine(400m, InvoiceLineStatus.Flagged);
+        var command = Command(w, LineDecisionAction.Reduce, [new(line.Id, 450m)], Reason);
+
+        var result = await w.Service().DecideAsync(command, CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
+        var job = w.Queue.Sent.Should().ContainSingle().Subject;
+        job.JobType.Should().Be("InvoiceIndexing");
+        job.SubjectId.Should().Be(w.InvoiceId.ToString());
+        job.IdempotencyKey.Should().Be($"invoice-index-{w.InvoiceId:N}-d{command.DecisionId:N}");
+
+        // Another decision on the invoice has its own key (a fixed per-invoice key would drop every re-index after the first).
+        var other = Command(w, LineDecisionAction.Disallow, [new(second.Id)], "Block billing");
+        (await w.Service().DecideAsync(other, CancellationToken.None)).Status.Should().Be(LineDecisionStatus.Applied);
+        w.Queue.Sent.Select(j => j.IdempotencyKey).Should().Equal(
+            $"invoice-index-{w.InvoiceId:N}-d{command.DecisionId:N}", $"invoice-index-{w.InvoiceId:N}-d{other.DecisionId:N}");
+
+        // A queue outage is logged, not raised: the decision still answers Applied.
+        var w2 = new World(billedTotal: 1000m);
+        var line2 = w2.AddLine(600m, InvoiceLineStatus.Flagged);
+        w2.AddLine(400m, InvoiceLineStatus.Clean);
+        w2.Queue.Fault = new InvalidOperationException("service bus down");
+        var faulted = await w2.Service().DecideAsync(Command(w2, LineDecisionAction.Reduce, [new(line2.Id, 450m)], Reason), CancellationToken.None);
+        faulted.Status.Should().Be(LineDecisionStatus.Applied);
+        w2.ApprovedTotal.Should().Be(850m);
     }
 
     [Fact(DisplayName = "100: an Accept sets approved = billed, clears an earlier reason, and writes no correction rows on the single-line path")]
@@ -714,6 +776,94 @@ public sealed class InvoiceLineDecisionServiceTests
         result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
         w.LineWrites.Should().BeEmpty();
         w.H.Created.Should().BeEmpty();
+    }
+
+    // ── #2455: exactly one core record ──
+
+    private static void NoWrites(World w)
+    {
+        w.LineWrites.Should().BeEmpty("a refused decision writes nothing");
+        w.H.Created.Should().BeEmpty("no Decision Record");
+        w.Corrections.Should().BeEmpty("no correction row");
+        w.TotalsWrites.Should().BeEmpty("no totals");
+    }
+
+    [Fact(DisplayName = "#2455 SEEDED: an invoice naming TWO core records refuses a line decision (OwnerUnresolved) and writes nothing")]
+    public async Task TwoCores_RefuseTheDecision_AndWriteNothing()
+    {
+        var w = new World();
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
+        result.Code.Should().Be(LineDecisionCodes.OwnerUnresolved);
+        NoWrites(w);
+    }
+
+    [Fact(DisplayName = "#2455: an invoice naming NO core record is the stable OwnerUnresolved refusal, not a throw, on a single decision")]
+    public async Task NoCore_IsTheStableRefusal_OnADecision()
+    {
+        var w = new World();
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+        w.Invoice.Attributes.Remove("sprk_project");
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
+        result.Code.Should().Be(LineDecisionCodes.OwnerUnresolved);
+        NoWrites(w);
+    }
+
+    [Fact(DisplayName = "#2455: Accept all Clean on an invoice with no core record (lines with AI fields) is the stable refusal, not a throw from the correction rows")]
+    public async Task NoCore_AcceptAllClean_IsRefused_NotAThrow()
+    {
+        var w = new World();
+        w.AddLine(100m, InvoiceLineStatus.Clean, extraction: Extraction);
+        w.Invoice.Attributes.Remove("sprk_project");
+
+        var result = await w.Service().AcceptCleanAsync(w.InvoiceId, Guid.NewGuid(), Decider, CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
+        NoWrites(w);
+    }
+
+    [Fact(DisplayName = "#2455: Accept all Clean on an invoice naming two cores is refused with nothing written")]
+    public async Task TwoCores_AcceptAllClean_IsRefused()
+    {
+        var w = new World();
+        w.AddLine(100m, InvoiceLineStatus.Clean, extraction: Extraction);
+        w.Invoice["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", Guid.NewGuid());
+
+        var result = await w.Service().AcceptCleanAsync(w.InvoiceId, Guid.NewGuid(), Decider, CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
+        NoWrites(w);
+    }
+
+    [Fact(DisplayName = "#2455: the Unreviewed rows (103 D-72) on an invoice naming two cores are refused and no row is built")]
+    public async Task TwoCores_WriteUnreviewed_IsRefused()
+    {
+        var w = new World();
+        w.AddLine(100m, InvoiceLineStatus.Accepted, extraction: Extraction);
+        w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        var result = await w.Service().WriteUnreviewedAsync(w.InvoiceId, Guid.NewGuid(), Decider, "Approver", DateTime.UtcNow, CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.OwnerUnresolved);
+        w.Corrections.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "#2455: an invoice naming exactly one core still decides (the new check does not refuse the normal case)")]
+    public async Task OneCore_StillDecides()
+    {
+        var w = new World();
+        var line = w.AddLine(100m, InvoiceLineStatus.Flagged);
+
+        var result = await w.Service().DecideAsync(Command(w, LineDecisionAction.Accept, [new(line.Id)]), CancellationToken.None);
+
+        result.Status.Should().Be(LineDecisionStatus.Applied);
     }
 
     // ── Credit lines (D-128, D-129) ──

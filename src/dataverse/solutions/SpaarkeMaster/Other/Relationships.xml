@@ -570,6 +570,7 @@
   <EntityRelationship Name="sprk_chartdefinition_ReportingView_n1" />
   <EntityRelationship Name="sprk_communication_AssignedToExternal_contact" />
   <EntityRelationship Name="sprk_communication_AssignedToInternal_contact" />
+  <EntityRelationship Name="sprk_communication_billingexport_billingexport" />
   <EntityRelationship Name="sprk_communication_CommunicationThread_sprk_communicationthread" />
   <EntityRelationship Name="sprk_communication_RegardingAccount_account" />
   <EntityRelationship Name="sprk_communication_RegardingAnalysis_n1" />

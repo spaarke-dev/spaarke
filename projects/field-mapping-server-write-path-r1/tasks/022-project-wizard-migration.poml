@@ -13,7 +13,7 @@
     <parallel-group>W3-wizards</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Wizards migrate one at a time, each live-verified before the next (spec FR-16).</parallel-reason>
-    <deps>021</deps>
+    <deps>021, 041</deps>
     <tags>frontend, fluent-ui, security, field-mapping, deploy, testing</tags>
     <estimated-effort>6-8 hours</estimated-effort>
   </metadata>
@@ -112,7 +112,7 @@
     <criterion testable="true">`applyFieldMappings` no longer appears in CreateProjectWizard/projectService.ts; jest for the shared library and the host build pass; no existing test outside this wizard changes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-16, FR-15. UAC-r2 PR #2104 owns closure files. Secure-Project split recorded by task 020.</notes>
+  <notes>Spec FR-16, FR-15. UAC-r2 PR #2104 owns closure files. Secure-Project split recorded by task 020. FROM TASK 020 REVIEW: (#3) a project the user marks Secure that inherits nothing is created ordinary, then secured by /external-access/provision-project. The route refuses sprk_issecure, so between the two calls the project is visible to its BU team (pre-existing exposure). Settle here with UAC-r2: an isolate-on-create option or an accepted window. (#2) the same ReferenceLookupColumns / PostMappingDefaults gap as 021.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

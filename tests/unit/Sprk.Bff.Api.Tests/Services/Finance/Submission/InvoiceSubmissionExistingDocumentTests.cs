@@ -99,6 +99,27 @@ public sealed class InvoiceSubmissionExistingDocumentTests
         h.Deleted.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "191: a reader that is not set up is a 422 before step A, the create and the job; set up, the same confirm takes the normal path")]
+    public async Task ExistingDocument_TheReaderIsNotConfigured_Is422ReaderNotConfigured_NothingFiledTrackedOrCreated()
+    {
+        var h = NewHarness();
+        h.Reader.Endpoint = "";
+        var stepA = 0;
+        var request = Confirm() with { FileSourceBeforeWrite = _ => { stepA++; return Task.FromResult(true); } };
+
+        var outcome = await h.Build().SubmitExistingDocumentAsync(request, CancellationToken.None);
+
+        outcome.Should().Match<InvoiceSubmissionOutcome>(o => o.StatusCode == StatusCodes.Status422UnprocessableEntity
+            && o.ErrorCode == InvoiceSubmissionErrors.ReaderNotConfigured);
+        stepA.Should().Be(0, "a refused confirm never leaves a filing behind");
+        ShouldHaveWrittenNothing(h);
+        h.Writes.Should().Be(0);
+
+        h.Reader.Endpoint = "https://invoice-reader.test/";
+        (await h.Build().SubmitExistingDocumentAsync(request, CancellationToken.None)).Kind.Should().Be(InvoiceSubmissionOutcomeKind.Received);
+        stepA.Should().Be(1);
+    }
+
     [Fact(DisplayName = "050a: the writes ignore the caller's token once the checks have passed")]
     public async Task ExistingDocument_WritesRunUnderCancellationTokenNone()
     {

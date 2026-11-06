@@ -72,6 +72,21 @@ public static class StoredFileEndpoints
             return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
         }
 
+        var servedType = SafeContentType(file.ContentType);
+        return await StreamServableAsync(httpContext, file, service, logger, servedType, downloadName: null, ct);
+    }
+
+    /// <summary>
+    /// Opens a file the download rule decided to serve (pinned to the ETag it judged), writes the ONE audit event and streams it with the
+    /// hardening headers (<c>nosniff</c>, <c>no-store</c>, sandbox CSP). Shared by this route and the AP export batch download
+    /// (<c>ApExportEndpoints</c>, ebilling-r1 task 151a), so the two cannot differ. With <paramref name="downloadName"/> the response is
+    /// an attachment of that name (<c>Content-Disposition</c>) and <paramref name="servedType"/> is sent as given; without it the
+    /// allow-list rule applies (<see cref="OctetStream"/> is an attachment).
+    /// </summary>
+    internal static async Task<IResult> StreamServableAsync(
+        HttpContext httpContext, StoredFileServable file, StoredFileService service, ILogger logger, string servedType, string? downloadName,
+        CancellationToken ct)
+    {
         Stream? stream;
         try
         {
@@ -85,7 +100,7 @@ public static class StoredFileEndpoints
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // Any other fault (transport, credential, I/O): nothing served, a 503 the client can retry.
-            logger.LogError(ex, "Stored file {FileId}: opening the blob faulted (503)", fileId);
+            logger.LogError(ex, "Stored file {FileId}: opening the blob faulted (503)", file.FileId);
             return StoredFileAccessFilter.Unavailable(httpContext);
         }
 
@@ -102,7 +117,11 @@ public static class StoredFileEndpoints
         headers[HeaderNames.XContentTypeOptions] = "nosniff";
         headers[HeaderNames.CacheControl] = "no-store";
         headers[HeaderNames.ContentSecurityPolicy] = "sandbox; default-src 'none'";
-        var servedType = SafeContentType(file.ContentType);
+        if (downloadName is not null)
+        {
+            return Results.File(stream, servedType, downloadName);
+        }
+
         if (servedType == OctetStream)
         {
             // Not a type a client may render: a download, never inline content.

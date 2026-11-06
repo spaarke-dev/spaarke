@@ -1,7 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Azure.Core;
-using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Ai;
@@ -33,6 +33,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
     private readonly IFileIndexingService _fileIndexingService;
     private readonly BatchJobStatusStore _statusStore;
     private readonly IIdempotencyService _idempotencyService;
+    private readonly IDocumentDataverseService _documentService;
     private readonly ISearchIndexNameResolver _searchIndexNameResolver;
     private readonly RagTelemetry _telemetry;
     private readonly IConfiguration _configuration;
@@ -57,6 +58,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
         IFileIndexingService fileIndexingService,
         BatchJobStatusStore statusStore,
         IIdempotencyService idempotencyService,
+        IDocumentDataverseService documentService,
         ISearchIndexNameResolver searchIndexNameResolver,
         RagTelemetry telemetry,
         IConfiguration configuration,
@@ -67,6 +69,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _statusStore = statusStore ?? throw new ArgumentNullException(nameof(statusStore));
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
+        _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _searchIndexNameResolver = searchIndexNameResolver ?? throw new ArgumentNullException(nameof(searchIndexNameResolver));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
@@ -282,19 +285,8 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 );
             }
 
-
-            // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — resolve per-record
-            // sprk_searchindexname so bulk-reindexed documents land in the correct index
-            // (same precedence as single-document jobs: document → parent → BU). Bulk jobs
-            // do not have a payload-level SearchIndexName (they iterate many documents); the
-            // resolver is always consulted.
-            var resolvedSearchIndexName = await _searchIndexNameResolver.ResolveAsync(
-                doc.DocumentId,
-                parentEntity?.EntityType,
-                parentEntity?.EntityId,
-                ct);
-
-            // Build the file index request
+            // Build the file index request. It names no index (task 041, FR-40): every document lands in the content
+            // type's index; no record or business-unit index column is read.
             var request = new FileIndexRequest
             {
                 TenantId = payload.TenantId,
@@ -303,7 +295,6 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 FileName = doc.FileName,
                 DocumentId = doc.DocumentId,
                 ParentEntity = parentEntity,
-                SearchIndexName = resolvedSearchIndexName,
                 Metadata = new Dictionary<string, string>
                 {
                     ["source"] = "BulkIndexing",
@@ -320,24 +311,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
             };
 
             // Call FileIndexingService using app-only authentication.
-            // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — background-job
-            // default-fall-back: on INDEX_NOT_ALLOWED rejection, log WARN and retry the call
-            // with SearchIndexName=null so the document still gets indexed into the tenant
-            // default. Bulk jobs SHOULD NOT fail wholesale on a single stale per-record value.
-            FileIndexingResult result;
-            try
-            {
-                result = await _fileIndexingService.IndexFileAppOnlyAsync(request, ct);
-            }
-            catch (SdapProblemException ex) when (ex.Code == "INDEX_NOT_ALLOWED")
-            {
-                _logger.LogWarning(
-                    "Bulk RAG indexing rejected by AI Search allow-list: requested SearchIndexName={RejectedIndex} (DocumentId={DocumentId}, BatchJobId={BatchJobId}). Falling back to tenant default.",
-                    request.SearchIndexName ?? "(null)", doc.DocumentId, batchJob.JobId);
-
-                var fallbackRequest = request with { SearchIndexName = null };
-                result = await _fileIndexingService.IndexFileAppOnlyAsync(fallbackRequest, ct);
-            }
+            var result = await _fileIndexingService.IndexFileAppOnlyAsync(request, ct);
 
             if (!result.Success)
             {
@@ -373,6 +347,8 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 "Successfully indexed document {DocumentId} ({FileName}), {ChunksIndexed} chunks",
                 doc.DocumentId, doc.FileName, result.ChunksIndexed);
 
+            await StampSearchIndexAsync(doc.DocumentId, ct);
+
             return DocumentIndexOutcome.Success;
         }
         catch (Exception ex)
@@ -384,6 +360,47 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 ex.Message,
                 ct);
             return DocumentIndexOutcome.Failed;
+        }
+    }
+
+    /// <summary>
+    /// Task 041 (FR-40, AC3; review round 1 F1): stamp the index the file actually landed in, the single canonical default
+    /// (<see cref="ISearchIndexNameResolver.GetDefaultIndexName"/>), as <c>RagIndexingJobHandler</c> does. A document stamped
+    /// with another index before task 041 is re-stamped when it is re-indexed. A failed stamp is logged and never fails the
+    /// document: indexing succeeded.
+    /// </summary>
+    private async Task StampSearchIndexAsync(string documentId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(documentId))
+            return;
+
+        try
+        {
+            var completedAt = DateTime.UtcNow;
+            var stampedIndexName = _searchIndexNameResolver.GetDefaultIndexName();
+            var updateRequest = new UpdateDocumentRequest
+            {
+                // New canonical lifecycle marker (R3+)
+                SearchIndexCompletedOn = completedAt,
+                // Legacy dual-write (preserved during transition)
+                SearchIndexed = true,
+                SearchIndexedOn = completedAt,
+                // Index routing (canonical single setting per FR-26)
+                SearchIndexName = stampedIndexName
+            };
+
+            await _documentService.UpdateDocumentAsync(documentId, updateRequest, ct);
+
+            _logger.LogDebug(
+                "Updated Dataverse search index tracking for document {DocumentId}: SearchIndexCompletedOn={CompletedAt}, SearchIndexed=true (dual-write), IndexName={IndexName}",
+                documentId, completedAt, stampedIndexName);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - indexing succeeded, Dataverse update is non-critical
+            _logger.LogWarning(ex,
+                "Failed to update Dataverse search index tracking for document {DocumentId}: {Error}. Indexing was successful.",
+                documentId, ex.Message);
         }
     }
 

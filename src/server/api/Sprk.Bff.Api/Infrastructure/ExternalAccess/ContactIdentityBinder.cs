@@ -694,6 +694,14 @@ public sealed class ContactIdentityBinder
                 "be established (its removed marker's empty read is not proven). Retryable.",
                 decision.ReasonCode, decision.ContactId);
         }
+        else if (decision.ReasonCode == ContactBindingDecision.InviteWorkforceHomeContact)
+        {
+            // Not a collision; nothing is flagged. The contact already signs in with its organization's work account.
+            _logger.LogInformation(
+                "[ID-BIND] Invite REFUSED ({ReasonCode}) — contact {ContactId} already signs in with its organization's work "
+                + "account; not a collision, nothing flagged. Staff use Grant access",
+                decision.ReasonCode, decision.ContactId);
+        }
         else if (decision.Action == InviteContactAction.Refuse)
         {
             var known = new Dictionary<Guid, ContactBindingRow>();
@@ -936,6 +944,9 @@ public sealed class ContactIdentityBinder
             "This email belongs to a contact already bound to an employee's work identity. One contact carries one "
             + "sign-in, so an external account cannot be created for it. An administrator must resolve the identity "
             + "collision on the contact first.",
+        ContactBindingDecision.InviteWorkforceHomeContact =>
+            "This person already signs in with their organization's work account, so no invitation is needed. "
+            + "Use Grant access to give them access to this record.",
         ContactBindingDecision.InviteContactLinkedToInternalUser =>
             "This email belongs to the contact of an internal user. An external account cannot be attached to it. "
             + "An administrator must resolve the identity collision on the contact first.",

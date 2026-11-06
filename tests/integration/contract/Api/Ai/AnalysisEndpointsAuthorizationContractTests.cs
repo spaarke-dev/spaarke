@@ -26,6 +26,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
@@ -37,6 +38,9 @@ using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
+using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
+using Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using FinanceAuthz = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
 
@@ -429,6 +433,12 @@ public class AnalysisEndpointsAuthorizationContractTests
 
     private static HttpRequestMessage Create(object body) => Json(HttpMethod.Post, "/api/ai/analysis/create", body);
 
+    /// <summary>A bind of the service's create body as text (the service writes a bind as a string, or as a JSON string).</summary>
+    private static string? BindOf(IReadOnlyDictionary<string, object?> fields, string key) =>
+        fields.TryGetValue(key, out var value)
+            ? value as string ?? (value is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element ? element.GetString() : null)
+            : null;
+
     [Fact(DisplayName = "162 f1 create: with the Create privilege, Read+AppendTo on the document and Read on every scope row is 201, and the new row is anchored to the document")]
     public async Task Create_WithTheG5Rights_Is201AndAnchorsTheDocument()
     {
@@ -450,8 +460,16 @@ public class AnalysisEndpointsAuthorizationContractTests
         }));
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        host.Analysis.Verify(a => a.CreateAnalysisAsync(documentId, "Analysis - NDA.pdf", playbookId, null, It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
-            Times.Once, "the analysis created in a document's context records that document as its anchor");
+        // Task 031 (FR-19): the capture seam moved. The row is created by RecordCreationService (its ONE app-only create), so "the
+        // new row is anchored to the document" is read from that create's body - the document and playbook binds and the name -
+        // not from IAnalysisDataverseService.CreateAnalysisAsync, which this route no longer calls.
+        var (table, _, fields) = host.AppOnlyCreates.Should().ContainSingle("the analysis created in a document's context records that document as its anchor").Subject;
+        table.Should().Be("sprk_analysis");
+        BindOf(fields, "sprk_DocumentId@odata.bind").Should().Be($"/sprk_documents({documentId:D})");
+        BindOf(fields, "sprk_Playbook@odata.bind").Should().Be($"/sprk_analysisplaybooks({playbookId:D})");
+        host.Analysis.Verify(a => a.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(),
+            It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the direct create is gone from this route");
         host.Analysis.Verify(a => a.AssociateScopesAsync(It.IsAny<Guid>(),
             It.Is<IEnumerable<Guid>>(s => s.Single() == skill), It.Is<IEnumerable<Guid>>(k => k.Single() == knowledge),
             It.Is<IEnumerable<Guid>>(t => t.Single() == tool), It.IsAny<CancellationToken>()), Times.Once);
@@ -552,6 +570,222 @@ public class AnalysisEndpointsAuthorizationContractTests
         JsonNode.Parse(await response.Content.ReadAsStringAsync())!["detail"]!.GetValue<string>().Should().Be(detail);
         host.Access.Calls.Should().BeEmpty();
         host.Probe.Calls.Should().BeEmpty();
+        host.VerifyCreateWroteNothing();
+    }
+
+    // ---- Task 031 fix round 1 (F1; UAC-r2 conditions (a), (c), (g)): the playbook the filter authorised ----
+
+    [Fact(DisplayName = "031 fix round 1 (g): an ordinary user (Read, no AppendTo on the playbook) creates from a PUBLIC playbook - 201")]
+    public async Task Create_OrdinaryUser_PublicPlaybook_NoAppendToOnIt_Is201()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        var playbookId = host.PublicPlaybook();
+        host.Caller.Inner.TableRights[Playbooks].Should().Be("ReadAccess", "the shipped roles: Read on the playbook, no AppendTo");
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId, playbookId, skillIds = Array.Empty<Guid>(), knowledgeIds = Array.Empty<Guid>(), toolIds = Array.Empty<Guid>() }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var (_, _, fields) = host.AppOnlyCreates.Should().ContainSingle().Subject;
+        BindOf(fields, "sprk_Playbook@odata.bind").Should().Be($"/sprk_analysisplaybooks({playbookId:D})");
+    }
+
+    [Fact(DisplayName = "031 fix round 1 (c): a private playbook SHARED with the caller (Read on its row) is authorised by the filter - 201")]
+    public async Task Create_PrivatePlaybookSharedWithTheCaller_Is201()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        var playbookId = Guid.NewGuid();
+        host.SetPlaybook(playbookId, new PlaybookResponse { Id = playbookId, IsPublic = false });
+        host.Access.Grant(Playbooks, playbookId, AccessRights.Read);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId, playbookId, skillIds = Array.Empty<Guid>(), knowledgeIds = Array.Empty<Guid>(), toolIds = Array.Empty<Guid>() }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        host.Access.Calls.Should().Contain(new FinanceAuthz.AccessCall(FinanceAuthz.AccessPath.Record, Playbooks, playbookId, true));
+        host.AppOnlyCreates.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "031 fix round 1 (c)/(g): a private playbook NOT shared and one that does not exist get byte-identical refusals; the service is never reached")]
+    public async Task Create_PrivateUnsharedAndNonexistentPlaybook_AreTheSameRefusal_ServiceNotReached()
+    {
+        var bodies = new List<string>();
+        foreach (var exists in new[] { true, false })
+        {
+            await using var host = await AnalysisAuthHost.StartAsync();
+            var documentId = Guid.NewGuid();
+            host.Access.Grant(Documents, documentId, ReadAppendTo);
+            var playbookId = Guid.NewGuid();
+            host.SetPlaybook(playbookId, exists ? new PlaybookResponse { Id = playbookId, IsPublic = false } : null);
+
+            var response = await host.SendAsync(Create(new { name = "A", documentId, playbookId, skillIds = Array.Empty<Guid>(), knowledgeIds = Array.Empty<Guid>(), toolIds = Array.Empty<Guid>() }));
+
+            await AssertForbiddenAsync(response, "sdap.access.deny.insufficient_rights");
+            // UAC-r2 (2026-11-04): byte-identical means the status, the reason code and body, AND every header the route
+            // controls (all but Date and per-request correlation/trace ids).
+            var headers = response.Headers.Concat(response.Content.Headers)
+                .Where(h => !h.Key.Equals("Date", StringComparison.OrdinalIgnoreCase)
+                    && !h.Key.Contains("correlation", StringComparison.OrdinalIgnoreCase)
+                    && !h.Key.Contains("trace", StringComparison.OrdinalIgnoreCase)
+                    && !h.Key.Contains("request-id", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(h => $"{h.Key.ToLowerInvariant()}: {string.Join(",", h.Value)}");
+            bodies.Add(string.Join("\n", headers.Prepend(((int)response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture)))
+                + "\n" + await NormalizedBodyAsync(response));
+            host.VerifyCreateWroteNothing();
+        }
+
+        bodies.Distinct().Should().ContainSingle("nothing distinguishes a playbook that exists from one the caller may not use: status, headers and body");
+        bodies[0].Should().Contain("content-type: application/problem+json", "the comparison covers the route's headers, not an empty set");
+    }
+
+    [Fact(DisplayName = "031 fix round 1 (a): a body carrying routeAuthorizedLookups (any spelling) is ignored - the document's AppendTo is still asked and refuses")]
+    public async Task Create_BodyNamingRouteAuthorizedLookups_IsIgnored()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo); // the filter passes...
+        host.Caller.Inner.NoAppendToIn.Add((Documents, documentId)); // ...and the service, as the caller, finds no AppendTo
+        var playbookId = host.PublicPlaybook();
+
+        var response = await host.SendAsync(Create(new Dictionary<string, object>
+        {
+            ["name"] = "A",
+            ["documentId"] = documentId,
+            ["playbookId"] = playbookId,
+            ["skillIds"] = Array.Empty<Guid>(),
+            ["knowledgeIds"] = Array.Empty<Guid>(),
+            ["toolIds"] = Array.Empty<Guid>(),
+            ["routeAuthorizedLookupColumns"] = new[] { "sprk_documentid", "sprk_playbook" },
+            ["RouteAuthorizedLookupColumns"] = new[] { "sprk_documentid" },
+            ["routeAuthorizedLookups"] = new Dictionary<string, Guid> { ["sprk_documentid"] = documentId, ["sprk_playbook"] = playbookId },
+            ["RouteAuthorizedLookups"] = new Dictionary<string, Guid> { ["sprk_documentid"] = documentId },
+        }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, "the route's existing generic failure for a service refusal");
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["detail"]!.GetValue<string>().Should().Be("Failed to create analysis record.");
+        host.AppOnlyCreates.Should().BeEmpty("nothing a request carries can skip a caller check");
+        host.Analysis.Verify(a => a.AssociateScopesAsync(It.IsAny<Guid>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<IEnumerable<Guid>>(),
+            It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "031: a body that omits skillIds, knowledgeIds and toolIds is 201 with no scope association (omitted is empty, not a 500)")]
+    public async Task Create_BodyOmittingSkillKnowledgeAndToolIds_Is201_WithNoScopeAssociation()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        host.AppOnlyCreates.Should().ContainSingle();
+        host.Analysis.Verify(a => a.AssociateScopesAsync(It.IsAny<Guid>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<IEnumerable<Guid>>(),
+            It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()), Times.Never, "no scope ids were sent");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Task 043 (owner 2026-11-04): a Document to Analysis profile maps for a caller who can read the document. The REAL
+    // filter decides the body document (Read + AppendTo, then THE external document narrowing); the handler reuses that
+    // decision and the REAL service asks the caller's own Read on the document before mapping. A Default rule maps without
+    // an app read, so what is mapped is visible on the created row.
+    // ---------------------------------------------------------------------------------------------
+
+    private const string MappedDescription = "Filed from the document";
+
+    /// <summary>A Document to Analysis profile with one Default rule into sprk_description, and the caller's own Read on the
+    /// document as RetrievePrincipalAccess answers it (none unless <paramref name="callerReads"/>).</summary>
+    private static void DocumentToAnalysisProfile(AnalysisAuthHost host, Guid documentId, bool callerReads)
+    {
+        host.AppOnly
+            .Setup(a => a.GetFieldMappingProfileWithRulesAsync("sprk_document", "sprk_analysis", true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FieldMappingProfileEntity
+            {
+                Name = "Document to Analysis",
+                SourceEntity = "sprk_document",
+                TargetEntity = "sprk_analysis",
+                IsActive = true,
+                Rules =
+                [
+                    new FieldMappingRuleEntity
+                    {
+                        Name = "default to sprk_description",
+                        SourceField = string.Empty,
+                        TargetField = "sprk_description",
+                        TargetFieldType = Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.FieldTypeText,
+                        MappingType = Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.MappingTypeDefault,
+                        DefaultValue = MappedDescription,
+                        IsActive = true,
+                    },
+                ],
+            });
+        host.Probe.RecordRights = (set, id) => callerReads && set == Documents && id == documentId ? AccessRights.Read : AccessRights.None;
+    }
+
+    private static string? DescriptionOf(IReadOnlyDictionary<string, object?> fields) => BindOf(fields, "sprk_description");
+
+    [Theory(DisplayName = "043 AC1/AC3: a caller who can read the document (internal, or external with the document shown) gets the profile's value, and no warnings member")]
+    [InlineData(Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.Internal)]
+    [InlineData(Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External)]
+    public async Task Create_ADocumentTheCallerCanRead_MapsItsProfile_AndReturnsNoWarnings(
+        Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode caller)
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        host.CallerMode = caller;
+        var documentId = host.World.Document(Guid.NewGuid());
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        DocumentToAnalysisProfile(host, documentId, callerReads: true);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId }));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Created, body);
+        DescriptionOf(host.AppOnlyCreates.Should().ContainSingle().Subject.Fields).Should().Be(MappedDescription);
+        host.Probe.RecordRightsCalls.Should().Contain((Documents, documentId), "the service asks the caller's own Read on the document");
+        JsonNode.Parse(body)!.AsObject().Select(p => p.Key).Should().Equal(new[] { "analysisId" }, "AC6: no warnings, no member");
+    }
+
+    [Fact(DisplayName = "043 AC2/AC6: the route lets the caller through, but their own Read on the document is not there - 201, nothing mapped, the one warning in the body")]
+    public async Task Create_ADocumentTheCallerCannotRead_MapsNothing_AndReturnsTheOneWarning()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        DocumentToAnalysisProfile(host, documentId, callerReads: false);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId }));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Created, body);
+        host.AppOnlyCreates.Should().ContainSingle().Which.Fields.Should().NotContainKey("sprk_description");
+        var json = JsonNode.Parse(body)!.AsObject();
+        json["analysisId"]!.GetValue<Guid>().Should().Be(host.AppOnlyCreates.Single().Id);
+        json["warnings"]!.AsArray().Select(w => w!.GetValue<string>()).Should().Equal(
+            Sprk.Bff.Api.Services.Dataverse.FieldMapping.MappingSourceReadProbe.SourceUnavailableWarning);
+        body.Should().NotContain(documentId.ToString(), "the warning names no record");
+    }
+
+    [Theory(DisplayName = "043 AC3: an external caller the narrowing does not show the document to (hidden, or a narrowing fault) is the route's existing 403 - nothing created, nothing mapped")]
+    [InlineData("hidden")]
+    [InlineData("narrowing-faults")]
+    public async Task Create_AnExternalCallerTheNarrowingDoesNotShowTheDocumentTo_IsTheExisting403(string shape)
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        host.CallerMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        var documentId = host.World.Document(Guid.NewGuid(), permission: shape == "hidden" ? 100000002 : null); // Restricted
+        if (shape == "narrowing-faults")
+        {
+            host.World.Faults[Documents] = HttpStatusCode.ServiceUnavailable;
+        }
+
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        DocumentToAnalysisProfile(host, documentId, callerReads: true);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId }));
+
+        await AssertForbiddenAsync(response, "sdap.access.deny.insufficient_rights");
         host.VerifyCreateWroteNothing();
     }
 
@@ -1105,6 +1339,7 @@ public class AnalysisEndpointsAuthorizationContractTests
 
         host.Analysis.Verify(a => a.CreateAnalysisAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<Guid?>(),
             It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.AssertServiceNotReached();
         host.Orchestration.VerifyNoOtherCalls();
         host.VerifyNoRunSideEffect();
     }
@@ -1216,6 +1451,30 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
     public ChatSessionManager Sessions { get; private set; } = null!;
 
     /// <summary>
+    /// Field-mapping-server-write-path-r1 task 031 (FR-19): the caller's Dataverse client the REAL <see cref="Sprk.Bff.Api.Services.RecordCreation.RecordCreationService"/>
+    /// asks first (WhoAmI, its own as-caller checks and metadata). Every question is counted, so "the service was not reached when the
+    /// route filter denied" is asserted, not assumed.
+    /// </summary>
+    public CountingScriptedUserClient Caller { get; } = new(Guid.Parse(AnalysisAuthzTestAuthHandler.CallerObjectId));
+
+    /// <summary>Task 031: every app-only create the service makes (its upsert of a client-chosen id): table, id, Web API body.</summary>
+    public List<(string Table, Guid Id, Dictionary<string, object?> Fields)> AppOnlyCreates { get; } = new();
+
+    /// <summary>Task 031: the service's app-only writer (loose: reads answer nothing; its one create is captured).</summary>
+    public Mock<IFieldMappingDataverseService> AppOnly { get; } = new(MockBehavior.Loose);
+
+    /// <summary>
+    /// Task 031 (AC "service not invoked when the filter denies"): nothing the service does is visible anywhere - no owner question,
+    /// no question to the caller's Dataverse, no app-only write.
+    /// </summary>
+    public void AssertServiceNotReached()
+    {
+        Ownership.Requests.Should().BeEmpty("the route filter answered before the service was reached");
+        Caller.Calls.Should().Be(0, "the service asks the caller's Dataverse first; a denied request never gets there");
+        AppOnlyCreates.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// Task 188 round 4a: who the caller is for THE external document narrowing (default: a resolved internal systemuser,
     /// so the narrowing makes no call and these tests stay about the routes' own decisions) and what the BFF's app-only
     /// identity reads (<see cref="Sprk.Bff.Api.Tests.Services.Ai.Handlers.AppOnlyDocumentWorld"/>). Pointer:
@@ -1302,6 +1561,12 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
         builder.Services.AddSingleton<NotificationService>();
         builder.Services.AddSingleton<IChatDataverseRepository>(ChatRepo);
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
+        AppOnly.Setup(a => a.UpdateRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((table, id, fields, _, _) => AppOnlyCreates.Add((table, id, fields)))
+            .Returns(Task.CompletedTask);
+        builder.Services.AddSingleton<IDataverseUserClient>(Caller);
+        builder.Services.AddSingleton(RouteRecordCreation.Default(Ownership, AppOnly.Object));
         Sessions = new ChatSessionManager(
             cache: _cache,
             dataverseRepository: ChatRepo,
@@ -1400,6 +1665,9 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
             It.IsAny<AnalysisRegardingTarget?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
         Analysis.Verify(a => a.AssociateScopesAsync(It.IsAny<Guid>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<IEnumerable<Guid>>(),
             It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()), Times.Never);
+        // Task 031: the row is created by RecordCreationService now; a denied create must not have reached it (which would also
+        // mean it had written, or tried to write, the row).
+        AssertServiceNotReached();
     }
 
     public Task<ChatSession> SeedOwnSessionAsync(Guid? documentId) =>
@@ -1463,6 +1731,50 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
             await _app.StopAsync();
             await _app.DisposeAsync();
         }
+    }
+}
+
+/// <summary>
+/// Task 031: the harness's scripted caller Dataverse (<see cref="SecureChildOwnershipAiToolTests.ScriptedUserClient"/>) with every
+/// question counted - the create service asks it first, so a count of zero proves the service was never reached.
+/// </summary>
+internal sealed class CountingScriptedUserClient(Guid me) : IDataverseUserClient
+{
+    private readonly SecureChildOwnershipAiToolTests.ScriptedUserClient _inner = new(me);
+
+    /// <summary>Task 031 fix round 1: the scripted caller itself, to state its rights (counting is unaffected).</summary>
+    public SecureChildOwnershipAiToolTests.ScriptedUserClient Inner => _inner;
+
+    public int Calls { get; private set; }
+
+    public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return _inner.GetAsync(relativePath, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return _inner.PostAsync(absoluteApiPath, jsonBody, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, bool preferRepresentation, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return _inner.PostAsync(absoluteApiPath, jsonBody, preferRepresentation, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return _inner.PatchAsync(relativePath, jsonBody, cancellationToken);
+    }
+
+    public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken)
+    {
+        Calls++;
+        return _inner.DeleteAsync(relativePath, cancellationToken);
     }
 }
 

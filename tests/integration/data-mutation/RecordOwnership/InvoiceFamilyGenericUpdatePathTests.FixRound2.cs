@@ -82,13 +82,14 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     }
 
     [Fact]
-    public async Task ATableOutsideTheInvoiceFamily_KeepsTheUpsert()
+    public async Task ATableOutsideTheInvoiceFamily_IsWrittenUpdateOnly_Too()
     {
-        // #2081 is not widened in this round: the update-only write is for the two guarded tables only.
+        // The generic update paths update existing records only, on every table (the UpdateOnly part); the invoice family
+        // adds its guard and its own not-found codes.
         var outcome = await RunAsync(GenericPath.PlaybookUpdate, "sprk_todo", Invoice, NoLookups, RenameOnly, app: null);
 
         outcome.Code.Should().BeNull();
-        Sent().Should().ContainSingle().Which.Method.Should().Be(nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync));
+        Sent().Should().ContainSingle().Which.Method.Should().Be(nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync));
     }
 
     [Theory]

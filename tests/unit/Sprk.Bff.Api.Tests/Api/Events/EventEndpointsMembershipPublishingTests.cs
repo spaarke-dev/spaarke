@@ -159,14 +159,16 @@ public class EventEndpointsMembershipPublishingTests
             "task 146: the app-only create is owned by the team the resolver named");
         var evt = site.Publisher.Published.Should().ContainSingle().Subject;
         evt.EntityLogicalName.Should().Be("sprk_event");
-        evt.EntityRecordId.Should().Be(EventId, "the event is for the row this create wrote");
+        evt.EntityRecordId.Should().Be(site.CreatedId, "the event is for the row this create wrote");
         evt.PersonIdType.Should().Be(PersonIdentityType.Team);
         evt.PersonId.Should().Be(RecordOwnershipResolverDouble.DefaultTeamId,
             "the owner the create wrote — not a read-back, and never the caller");
         evt.SourceField.Should().Be("ownerid");
         evt.MutationType.Should().Be(MembershipMutationType.Added);
         evt.CorrelationId.Should().Be(Site.TraceId);
-        site.Dataverse.Verify(d => d.RetrieveAsync("sprk_event", EventId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+        // Task 031: the service reads the new row's autonumber back (sprk_eventnumber, step 12) - never its owner.
+        site.Dataverse.Verify(d => d.RetrieveAsync("sprk_event", site.CreatedId,
+                It.Is<string[]>(columns => columns.Any(c => c.StartsWith("owner", StringComparison.OrdinalIgnoreCase))), It.IsAny<CancellationToken>()),
             Times.Never, "the create path already holds the owner it wrote");
     }
 
@@ -219,6 +221,20 @@ public class EventEndpointsMembershipPublishingTests
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>The event as the one app-only create wrote it: the two values these tests read, parsed from the create body.</summary>
+    private sealed class CreatedEvent(Dictionary<string, object?> fields)
+    {
+        public Guid? AssignedToContactId => BindOf("sprk_AssignedTo@odata.bind");
+        public Guid? OwningTeamId => BindOf("ownerid@odata.bind");
+
+        private Guid? BindOf(string key) =>
+            fields.TryGetValue(key, out var value)
+            && (value as string ?? (value is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element ? element.GetString() : null)) is { } path
+            && Guid.TryParse(path[(path.IndexOf('(') + 1)..path.IndexOf(')')], out var id)
+                ? id
+                : null;
+    }
+
     private static int? StatusOf(IResult result) => (result as IStatusCodeHttpResult)?.StatusCode;
 
     /// <summary>The POST /api/v1/events site with boundary fakes; <see cref="RunAsync"/> executes the real handler.</summary>
@@ -237,11 +253,17 @@ public class EventEndpointsMembershipPublishingTests
             _publisher = publisher ?? Publisher;
             _callerOid = callerOid;
 
-            EventService.Setup(s => s.CreateEventAsync(It.IsAny<DataverseCreateEventRequest>(), It.IsAny<CancellationToken>()))
-                .Callback<DataverseCreateEventRequest, CancellationToken>((r, _) => Created = r)
-                .ReturnsAsync((EventId, DateTime.UtcNow));
+            // Task 031 (FR-19): the row is created by RecordCreationService, whose one app-only create lands here.
+            AppOnly.Setup(a => a.UpdateRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))
+                .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((_, id, fields, _, _) =>
+                {
+                    CreatedId = id;
+                    Created = new CreatedEvent(fields);
+                })
+                .Returns(Task.CompletedTask);
             EventService.Setup(s => s.CreateEventLogAsync(
-                    EventId, It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                    It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Guid.NewGuid());
 
             // A row owner the create did NOT write: were the handler to read it back, it would publish this user.
@@ -261,24 +283,31 @@ public class EventEndpointsMembershipPublishingTests
         public Mock<IIdentityNormalizationService> Identity { get; } = new(MockBehavior.Strict);
         public RecordingMembershipEventPublisher Publisher { get; } = new();
         public RecordOwnershipResolverDouble Ownership { get; } = new();
-        public DataverseCreateEventRequest? Created { get; private set; }
+        public CreatedEvent? Created { get; private set; }
+        public Guid CreatedId { get; private set; }
+        public Mock<IFieldMappingDataverseService> AppOnly { get; } = new(MockBehavior.Strict);
 
         // Task 159 added the regarding resolvers to the handler. These tests create an event with NO regarding, so
         // neither is reached: the strict record-type mock and the resolver over the strict Dataverse mock would fail
         // the test if either were.
         public Task<IResult> RunAsync() => EventEndpoints.CreateEventAsync(
             new ApiCreateEventRequest("Hearing prep"),
+            Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Over(
+                Ownership,
+                AppOnly.Object,
+                new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
+                Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard()
+                    .Synchronizer(new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
+                SecureRootFilingGateFixtures.NothingSecure(),
+                null,
+                _publisher,
+                Dataverse.Object),
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.SecureChildOwnershipAiToolTests.ScriptedUserClient(ActingSystemUserId),
             EventService.Object,
-            _publisher,
-            Ownership,
             Dataverse.Object,
             CallerResolver.Object,
             Identity.Object,
             new Mock<ICommunicationDataverseService>(MockBehavior.Strict).Object,
-            new Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver(
-                Dataverse.Object,
-                (_, _) => throw new InvalidOperationException("no regarding: the column probe must not be reached"),
-                NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance),
             HttpContextFor(_callerOid),
             NullLogger<Program>.Instance,
             CancellationToken.None);

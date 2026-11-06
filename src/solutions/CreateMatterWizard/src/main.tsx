@@ -4,6 +4,7 @@ import { FluentProvider } from "@fluentui/react-components";
 import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/themeStorage";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
+import { launchAssociationFromParams } from "@spaarke/ui-components/utils/launchAssociation";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
@@ -76,6 +77,14 @@ function App() {
     return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
   }, [handoff]);
 
+  // Task 195 (#2352): opened from a project's form command or its "New" on the Project <-> Matter subgrid
+  // (sprk_wizard_commands), the launch envelope names that project — pre-select it and lock the Associate-To step.
+  // Only the project table is taken; any other launch record, or none, leaves the step as it was.
+  const { initialAssociation, lockAssociation } = React.useMemo(
+    () => launchAssociationFromParams(params, "sprk_project"),
+    [params]
+  );
+
   const handleClose = React.useCallback(() => {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
@@ -146,6 +155,8 @@ function App() {
         tenantId={resolvedTenantId}
         initialFormValues={initialFormValues}
         initialFileRefs={initialFileRefs}
+        initialAssociation={initialAssociation}
+        lockAssociation={lockAssociation}
       />
     </FluentProvider>
   );

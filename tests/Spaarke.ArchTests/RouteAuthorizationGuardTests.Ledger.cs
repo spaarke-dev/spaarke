@@ -370,6 +370,14 @@ public partial class RouteAuthorizationGuardTests
             "GET /api/finance/invoices/{invoiceId}/context (ebilling-r1 task 106, FR-33) -- the Invoice Review context panel. The route carries "
             + "AddFinanceAuthorizationFilter(\"finance.read\", sprk_invoices, invoiceId): Read on the invoice as the caller, fail closed; the eBilling "
             + "kill switch runs after it. The firm and core record the sections are scoped to are read from that invoice, never from the request."),
+        new GovernedFile("Api/Finance/InvoiceCorrectionEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/invoices/{invoiceId}/lines/{lineId}/corrections, POST .../header/corrections and GET .../corrections (ebilling-r1 task "
+            + "101 part B1, FR-31, FR-22, D-64) -- reviewer corrections of extracted values and AI codes. Every route carries "
+            + "AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail closed: the list with \"finance.read\" (Read), the two "
+            + "corrections with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches the caller through the core record (013, ADR-034). "
+            + "The eBilling kill switch runs after it. The line must belong to the route's invoice (uniform 404) and a code must be in the line's "
+            + "recorded code set before anything is written; the body carries no outcome, role or reviewer (the reviewer is the caller's systemuserid "
+            + "from their own token) and a correction never touches a line's status, approved amount or decision."),
         new GovernedFile("Api/Finance/InvoiceLineReviewEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/review and POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision, .../lines/decisions, "
             + ".../lines/accept-clean (ebilling-r1 task 100, FR-31) -- the Invoice Review read model and the line decisions. Every route carries "
@@ -395,7 +403,9 @@ public partial class RouteAuthorizationGuardTests
             + "check), then the /office/save chain (OfficeAuth, EntityAccess entity.associate_document, rate limit, version-save "
             + "authorization), the kill switch and the idempotency filter bound to the submission key; firm_not_linked through "
             + "CheckFirmLinkAsync. And GET /api/finance/core-records/{entityType}/{entityId}/firms (finance.read on the core record, "
-            + "uniform 404), which lists only the record's active linked firms."),
+            + "uniform 404), which lists only the record's active linked firms. Task 097e adds GET /api/finance/invoices/{invoiceId}/correction-prefill "
+            + "(\"ebilling.invoice.decide\", Write on the invoice as the caller, uniform 404 for no Write, an unknown invoice, step 0 and a rights fault); "
+            + "its canCorrect is the Correction intake's own guard, and its optional replacedBy is put to the caller's own Read (finance.read) on the replacement."),
         new GovernedFile("Api/Finance/CodeSetMappingEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/code-set-mappings/* (ebilling-r1 task 048, FR-22) -- AI code-set proposals (GET) and the admin confirm that writes one "
             + "default code set (POST). Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, "
@@ -416,6 +426,26 @@ public partial class RouteAuthorizationGuardTests
             + "it. Approve additionally resolves the caller's eligibility LIVE from the invoice's core record inside InvoiceApprovalService on every "
             + "call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set never grants. The decider and the "
             + "decision id are derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/InvoiceRejectReturnEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/invoices/{invoiceId}/reject and POST /api/finance/invoices/{invoiceId}/return (ebilling-r1 task 104, FR-36, "
+            + "FR-11, D-43, D-122) -- an eligible approver rejects an invoice (final) or returns it to the firm. Each route carries "
+            + "AddFinanceAuthorizationFilter as the caller on the invoice named in the path (ebilling.invoice.decide: Write), fail closed; the "
+            + "eBilling kill switch runs after it. Both additionally resolve the caller's eligibility LIVE from the invoice's core record inside "
+            + "InvoiceRejectReturnService on every call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set "
+            + "never grants. The decider and the decision id are derived server-side, never taken from the request."),
+        new GovernedFile("Api/Finance/ApExportEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/export-batches/candidates, POST /api/finance/export-batches and GET /api/finance/export-batches/{batchId} (ebilling-r1 "
+            + "task 150, FR-41, EB-D-178, D-56) -- export a selection of Approved invoices to AP as one batch; plus, from task 151a (EB-D-181), "
+            + "GET /api/finance/export-batches/{batchId}/files/{format} (the stored CSV or JSON, Read on the batch in the path, uniform 404, served "
+            + "through 090's download pipeline) and POST /api/finance/invoices/{invoiceId}/mark-paid (FR-42: Sent to AP to Paid through "
+            + "InvoiceLifecycleService only; ApExportAuthorization.PaymentRouteTargets declares the decide right and finance.read on the invoice in "
+            + "the path, uniform 404). Step 0 on the group, then "
+            + "AddFinanceAuthorizationFilter on each route: the list and the export declare the caller's own Create privilege on sprk_billingexport "
+            + "(ApExportAuthorization.RouteTargets; 403 before the handler runs), the batch read declares Read on the batch named in the path "
+            + "(uniform 404); the eBilling kill switch runs after it. The per-invoice part of the rule (ebilling.invoice.decide: Write on EVERY "
+            + "selected invoice, asked of Dataverse as the caller, fail closed) cannot be declared on the route because the ids are in the body; "
+            + "ApExportService asks ApExportAuthorization.AuthorizeExportAsync, the ONE seam, before it reads or writes anything. The batch's "
+            + "caller, owner and file purpose are derived server-side, never taken from the request."),
         new GovernedFile("Api/Finance/StoredFileEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/files/{fileId}/content (ebilling-r1 task 090, EB-D-148, procedure-and-file-model 4.3) -- an internal caller downloads "
             + "a Stored File's bytes. AddStoredFileAccessFilter runs the download rule before the handler: step 0 (403 before any record read), "
@@ -458,7 +488,13 @@ public partial class RouteAuthorizationGuardTests
             + "creates and re-files (task 147 r1). The decision is in the handler, AS THE CALLER (IDataverseUserClient), because "
             + "the records to authorize are whatever the Web API payload binds: the table's Create/Append privilege, AppendTo "
             + "on EVERY bound record (an unappendable and a missing record answer the same 404), no field-secured or "
-            + "server-owned column; a re-file also needs the row readable (uniform 404) and F3 to leave a secure record."),
+            + "server-owned column; a re-file also needs the row readable (uniform 404) and F3 to leave a secure record. "
+            + "uac-r2 task 195: PATCH .../sprk_project/{id} takes the filing pair only and is decided by ProjectMatterFiling.FileAsync "
+            + "(the caller's read, Write+Append and AppendTo first; a move of an already filed project only with ?move=true; then the "
+            + "app-only, version-conditioned pair write). Field-mapping task 020 (FR-15): the create also takes sprk_matter and "
+            + "sprk_project (roots: the same caller checks, record-first owner, a project under a secure record created into "
+            + "isolation by the secure-create plan) and the optional mappingSourceEntity/mappingSourceId query, which authorizes "
+            + "nothing: the source is Read-probed AS THE CALLER in the service (FR-04), unreadable = no mapping + a warning."),
 
         // ---- Office add-in ----
         new GovernedFile("Api/Office/OfficeEndpoints.cs", Scope.RouteLevelGate,
@@ -1086,7 +1122,23 @@ public partial class RouteAuthorizationGuardTests
     //            denies 403). The uniform 404 covers no Read, an unknown id, a non-family table and a probe fault. Pinned
     //            through a minimal TestServer host (this endpoint mapped alone, probe and Dataverse substituted) by
     //            tests/integration/contract/Api/Records/RecordFamilyEndpointsContractTests.cs.
-    private const int ExpectedEndpointFileCount = 147;
+    //
+    // 147 -> 148 (2026-10-29, ebilling-r1 task 104, FR-36; written on the branch as 146 -> 147, reconciled at the merge into work). Net +1: Api/Finance/InvoiceRejectReturnEndpoints.cs ADDED -- POST
+    // /api/finance/invoices/{invoiceId}/reject and POST .../return. Classified by GovernedFiles (RouteLevelGate: step 0 on the group, then
+    // AddFinanceAuthorizationFilter as the caller on the route's invoice, ebilling.invoice.decide: Write; eligibility is asked inside the
+    // service on every call); .RequireEbillingEnabled is already in NotAuthorizationForms.
+    //
+    // 148 -> 149 (2026-10-30 at the merge into work; written on the branch as 146 -> 147), ebilling-r1 task 101 part B1, FR-31). Net +1: Api/Finance/InvoiceCorrectionEndpoints.cs ADDED -- POST
+    // /api/finance/invoices/{invoiceId}/lines/{lineId}/corrections, POST .../header/corrections and GET .../corrections. Classified by GovernedFiles
+    // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter as the caller on the route's invoice, finance.read /
+    // ebilling.invoice.decide); .RequireEbillingEnabled is already in NotAuthorizationForms. (Written on the branch as 146 -> 147; reconciled at
+    // the ebilling-r1 integration merge.)
+    //
+    // 149 -> 150 (2026-10-30 at the merge into work, ebilling-r1 task 150, FR-41, EB-D-178; written on the branch as 148 -> 149). Net +1: Api/Finance/ApExportEndpoints.cs ADDED --
+    // GET /api/finance/export-batches/candidates, POST /api/finance/export-batches, GET /api/finance/export-batches/{batchId}. Classified by GovernedFiles
+    // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter on each route; the per-invoice decide right is asked inside the service
+    // through the one authorization seam); .RequireEbillingEnabled is already in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 150;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -2297,13 +2349,24 @@ public partial class RouteAuthorizationGuardTests
             + "(CloseOpenSignalsAsync, :361): a refused write returns before the closure (:351-358)."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
-            + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "
-            + "caller's client (:243), then OwnedChildWrite.CreateAsync checks the table privilege and AppendTo on EVERY bound "
-            + "record before the app-only create (:258) — for a work assignment (task 046, D-113) with the secure-create plan."),
+            + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.RefusalResult, reached from ChildRecordEndpoints.cs:205 CreateAsync), the payload mapped with the "
+            + "caller's client, then the ONE server create (RecordCreationService.CreateAsync, since field-mapping task 017; "
+            + "it replaced OwnedChildWrite.CreateAsync, deleted in 017) checks the table privilege and AppendTo on EVERY bound "
+            + "record before the app-only create — for a work assignment (task 046, D-113) with the secure-create plan. "
+            + "Field-mapping task 020: a matter or project (the plan for a project) the same way; a named or inferred mapping "
+            + "source adds no decision to the handler (ADR-008 path A): CallerRecordAccessProbe asks Read on it as the caller "
+            + "inside the service, and a denied, missing or malformed source maps nothing, with a warning, never a refusal."),
         new HandlerDecision("PATCH /api/v1/child-records/{table}/{id:guid}", "RefileAsync", "IDataverseUserClient", Array.Empty<string>(),
-            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:432-433 → "
-            + "UpdateAsync, :448): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
-            + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :988)."),
+            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:410-412 → "
+            + "UpdateAsync, :569): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
+            + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :756). uac-r2 task 195: sprk_project is "
+            + "dispatched first (ChildRecordEndpoints.cs:407-408 → FileProjectAsync) to ProjectMatterFiling.FileAsync: the shape "
+            + "rule (the pair only, ProjectFilingShapeProblem :422, checked at :470) is a 400 before any I/O; the caller's read of "
+            + "the project is the uniform 404 (ProjectMatterFiling.cs:208); the caller's Write+Append on the project (:232) and "
+            + "AppendTo on the matter and the record-type row (:236) are asked as the caller (a missing and an unappendable "
+            + "record answer alike); then the secure-root gate (:256); a project already filed under another record is 409 "
+            + "project_filing.already_filed unless the request asks ?move=true (:264, the current record not named); the "
+            + "secure-matter refusal (:274); only then the app-only pair write, conditional on the version read (:321)."),
         new HandlerDecision("POST /api/memory/pins", "CreatePinAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-43): the matter a pin names is checked AppendTo (memory.pin_matter) AS THE CALLER through "
             + "CallerRecordAccessProbe before the repository write (PinnedMemoryEndpoints.cs:319-325, :725-760); unknown and "
@@ -2311,6 +2374,13 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("PUT /api/memory/pins/{pinId}", "UpdatePinAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-68): another user's pin is answered exactly as an unknown one (PinnedMemoryEndpoints.cs:432, "
             + ":443), then the NEW matter is checked AppendTo as the caller through CallerRecordAccessProbe (:448)."),
+        new HandlerDecision("POST /api/v1/documents", "CreateDocumentAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
+            "Task 166 (the former Pending UNOWNED-NEW waiver): before the app-only write (DataverseDocumentsEndpoints.cs:977) "
+            + "AuthorizeDocumentCreateAsync (:932, :1060) asks the caller's Create on sprk_document AS THE CALLER through "
+            + "CallerRecordAccessProbe.CallerHoldsPrivilegeAsync (:1074), then derives the caller's business-unit container "
+            + "server-side by RecordContainerResolver.ResolveForActingUserAsync (:1093; an enabled, internal user only) and "
+            + "requires the body's ContainerId to match it (:1120; the row does not store it). Not held and another "
+            + "container are one 403; an exception or timeout is a 403; no container is refused."),
         new HandlerDecision("POST /api/v1/field-mappings/push", "PushFieldMappingsAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-67): Read on the SOURCE record and the caller's systemuserid through CallerRecordAccessProbe "
             + "(FieldMappingEndpoints.cs:474, :776), then the source and the children are read and written impersonated as "
@@ -2734,7 +2804,8 @@ public partial class RouteAuthorizationGuardTests
         // rule 2's SECOND clause — "a create with no pre-existing resource" — not rule 4's forbidden
         // build-go-green move. The distinction matters, so state it plainly: there is no resource to
         // authorize because the record does not exist yet; that is the whole reason the route exists.
-        // It is the same reasoning the Permanent waiver on POST /api/v1/documents already carries.
+        // (POST /api/v1/documents once carried the same reasoning; it is now a handler decision that checks
+        // Create as the caller and requires the caller's business-unit container.)
         //
         // What makes it safe is NOT a filter, and pretending otherwise would be the dishonest version:
         //   - The route has NO container parameter, so a caller cannot name where bytes go. That is
@@ -2802,8 +2873,8 @@ public partial class RouteAuthorizationGuardTests
         // ---------- task 167: the two task-074 PERMANENT waivers on /api/v1/documents were NOT TRUE as written ----------
         //
         // "POST /api/v1/documents — CREATE, there is no pre-existing resource": the body REQUIRES a ContainerId (an existing
-        // container) and writes it with no caller-rights check, so the strict CreateWithNoPriorResource test fails. Now a
-        // Pending UNOWNED-NEW waiver (below). "GET /api/v1/documents — COLLECTION READ, result trimming": the sweep showed it
+        // container) and writes it with no caller-rights check, so the strict CreateWithNoPriorResource test fails. It was a
+        // Pending UNOWNED-NEW waiver; task 166 resolved it with an in-handler decision (HandlerDecisions). "GET /api/v1/documents — COLLECTION READ, result trimming": the sweep showed it
         // is a caller-chosen-container read, the ungated twin of the route task 078 gated — now Pending, owned by 166
         // (S-66). Converting Permanent to Pending is the allowed direction.
 
@@ -3055,11 +3126,6 @@ public partial class RouteAuthorizationGuardTests
         Pending("POST /api/compose/documents/{documentSpeId}/apply-template", "166", Gap.NoDecision,
             "[low] Resolves a caller-named template with an APP token (ComposeTemplateEndpoints.cs:95-106). "
             + "Safe only if every template is org-shared."),
-        Pending("POST /api/v1/documents", "166", Gap.NoDecision,
-            "[medium] The body's required ContainerId (Models.cs CreateDocumentRequest) is written with no "
-            + "caller-rights check; only the owner team is server-derived "
-            + "(DataverseDocumentsEndpoints.cs:571-597). The old Permanent 'CREATE' waiver was not true as "
-            + "written."),
         Pending("GET /api/resilience/circuits", "166", Gap.NoDecision,
             "[low] Operator diagnostics: every downstream circuit-breaker state to any signed-in user "
             + "(ResilienceEndpoints.cs:48-59). No admin policy."),
@@ -3220,7 +3286,7 @@ public partial class RouteAuthorizationGuardTests
             + "no other principal's record is read."),
         Permanent("GET /api/v1/external/me", PermanentBasis.CallerScopedOnly, "167",
             "The resolved caller principal's own access context: ExternalUserContextEndpoint.HandleAsync (the mapped handler) returns "
-            + "Handle's answer (ExternalUserContextEndpoint.cs:45, :74 — caller.ReadableProjects) plus the caller's own firms "
+            + "Handle's answer (ExternalUserContextEndpoint.cs:46, :75 — caller.ReadableProjects) plus the caller's own firms "
             + "(ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync: the caller contact's memberships only, id and name). "
             + "Takes no id."),
         Permanent("GET /api/v1/external/me/entitlements", PermanentBasis.CallerScopedOnly, "167",

@@ -269,6 +269,39 @@ public class InvoiceComplianceEvaluatorTests
         result.Refusals.Should().ContainSingle().Which.PolicyVersionId.Should().Be(broken.PolicyVersionId);
     }
 
+    // ── 101 B2a F2 review (ontology-r1): a refused version's scope drops a subject a same-key version judged (D-39) ──
+
+    [Fact]
+    public void ARefusedFirmVersion_WithNoClientDefaultOfItsKey_IsScopedToItsSubjects_FailsClosed_F2()
+    {
+        var firm = Version("FIRM-INCREMENT", RuleType.TimeIncrement, """{"type":"TimeIncrement","incrementHours":"x"}""", RuleSetScope.Firm);
+
+        var result = Evaluate(Request(Line(0, EarlyLine)), Loaded(firm));
+
+        var scope = result.RefusalScopes.Should().ContainSingle().Which;
+        scope.PolicyVersionId.Should().Be(firm.PolicyVersionId);
+        scope.RuleType.Should().Be(RuleType.TimeIncrement);
+        scope.AppliesToInvoice.Should().BeTrue();
+        scope.LineIndexes.Should().Equal(0);
+    }
+
+    [Fact]
+    public void ARefusedFirmVersion_WhoseClientDefaultOfTheSameTypeJudgedTheSubjects_LeavesNoSubjectUnchecked_D39_F2()
+    {
+        var clientDefault = Increment("CD-INCREMENT", "0.5");
+        var firm = Version("FIRM-INCREMENT", RuleType.TimeIncrement, """{"type":"TimeIncrement","incrementHours":"x"}""", RuleSetScope.Firm);
+
+        var result = Evaluate(Request(Line(0, EarlyLine)), Loaded(clientDefault, firm));
+
+        result.Findings.Should().ContainSingle(f => f.PolicyCode == "CD-INCREMENT", "the client default stays in force (D-39) and judged the line");
+        result.Refusals.Should().ContainSingle().Which.PolicyVersionId.Should().Be(firm.PolicyVersionId);
+        var scope = result.RefusalScopes.Should().ContainSingle("the scopes stay aligned 1:1 with the refusals").Which;
+        scope.PolicyVersionId.Should().Be(firm.PolicyVersionId);
+        scope.RuleType.Should().Be(RuleType.TimeIncrement);
+        scope.AppliesToInvoice.Should().BeFalse();
+        scope.LineIndexes.Should().BeEmpty();
+    }
+
     private static readonly AsyncLocal<Guid> MetricScope = new();
 
     [Fact]

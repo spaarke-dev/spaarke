@@ -1279,8 +1279,9 @@ former `scripts/Register-EntraAppRegistrations.ps1` path was retired by task 130
   Known limit (ISS-018 K1): an app registration H3 created before 2026-10-14 would keep a stale delegated entry with id `75359482-...` (the reconcile only adds); none exists, because H3 had never run live.
 
 **Office add-in and Teams sign-in redirects are NOT on the customer's registration.** The shared clients sign in with
-their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Add-in (Production)"), so `brk-multihub://<host>` and
-`https://<host>/auth-callback.html` are registered ONCE, on that client app, for the production site
+their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Add-in (Production)"), so `brk-multihub://<host>`,
+`brk-9199bf20-a13f-4107-85dc-02114787ef48://<host>` (the broker scheme for Outlook on the web and new Outlook; without
+it those users fall back to the popup) and `https://<host>/auth-callback.html` are registered ONCE, on that client app, for the production site
 (`addins.spaarke.com`) — never per customer. A customer BFF only pre-authorizes the client (above) and lists its origin in
 CORS (H4b). Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts).
 For the External Access Teams app (package build, customer-tenant install, Teams sign-in prerequisites and support), see

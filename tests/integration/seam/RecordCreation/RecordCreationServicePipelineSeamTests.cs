@@ -74,6 +74,9 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         .SecureRoot("sprk_matter", SecureMatter);
     private readonly RecordingPublisher _publisher;
     private readonly CapturingLogger _logger = new();
+
+    /// <summary>Task 042b: the share table the service's sharee mirror writes (empty unless a test seeds a sharee).</summary>
+    private readonly FakeRecordShareTable _shareTable = new();
     private Exception? _resolverFault;
     private Func<string, RecordTableRule?> _tableRules = RecordTableRules.Find;
 
@@ -112,7 +115,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
                 new Entity(table, id) { ["sprk_matternumber"] = "MAT-000013" });
 
         // Task 015 (step 8, FR-10): a search-indexed table's owner team is read for its business unit, and that unit for its
-        // search-index defaults — none set in this world, so nothing is filled (SearchIndexDefaultTests covers the fill).
+        // search-index defaults — none set in this world. Since task 041 step 8 fills nothing (SearchIndexDefaultTests).
         _readBack
             .Setup(e => e.RetrieveAsync("team", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
@@ -142,9 +145,9 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             (RecordCreationStep.CallerChecks, RecordCreationStepState.Ran),
             (RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran),
             (RecordCreationStep.Owner, RecordCreationStepState.Ran),
-            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp),
+            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp), // task 041: the index follows the content type
             (RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran),
-            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Deferred),
+            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Ran),
             (RecordCreationStep.Create, RecordCreationStepState.Ran),
             (RecordCreationStep.PostCreate, RecordCreationStepState.Ran));
         Journal().Should().Equal(
@@ -254,9 +257,9 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             (RecordCreationStep.CallerChecks, RecordCreationStepState.Skipped),
             (RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran),
             (RecordCreationStep.Owner, RecordCreationStepState.Ran),
-            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp),
+            (RecordCreationStep.SearchIndexDefault, RecordCreationStepState.NoOp), // task 041: the index follows the content type
             (RecordCreationStep.CreatorAndDefaults, RecordCreationStepState.Ran),
-            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Deferred),
+            (RecordCreationStep.StampAndInheritance, RecordCreationStepState.Ran),
             (RecordCreationStep.Create, RecordCreationStepState.Ran),
             (RecordCreationStep.PostCreate, RecordCreationStepState.Ran));
         Journal().Should().Equal("owner", "create", "restamp", "mirror", "membership");
@@ -540,6 +543,21 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         _creates.Should().ContainSingle().Which.Id.Should().Be(outcome.CreatedId!.Value);
     }
 
+    // #2515: an event's number is the platform's (EVT-{SEQNUM:6}), so a key-refused event create is retried on the same id, as a matter's.
+    [Fact]
+    public async Task CreateAsync_AnEventWhoseNumberIsTaken_IsRetriedOnTheSameId_AndCreatesOneRow()
+    {
+        _createFaults.Enqueue(NumberTaken());
+
+        var outcome = await Service().CreateAsync(
+            WebApiRequest("sprk_event", new { sprk_eventname = "Hearing", sprk_RegardingMatter_bind = $"/sprk_matters({OrdinaryMatter:D})" }),
+            AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _createAttempts.Should().HaveCount(2);
+        _createAttempts.Select(a => a.Id).Distinct().Should().ContainSingle();
+    }
+
     [Fact]
     public async Task CreateAsync_AMatterWhoseNumberIsTakenOnEveryAttempt_Is409NumberUnavailable_AndRunsNoPostCreateStep()
     {
@@ -576,7 +594,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         _createFaults.Enqueue(NumberTaken());
 
         var create = () => Service().CreateAsync(
-            WebApiRequest("sprk_event", new { sprk_eventname = "Hearing", sprk_RegardingMatter_bind = $"/sprk_matters({OrdinaryMatter:D})" }),
+            WebApiRequest("sprk_memo", new { sprk_name = "Note", sprk_RegardingMatter_bind = $"/sprk_matters({OrdinaryMatter:D})" }),
             AsCaller(), CancellationToken.None);
 
         await create.Should().ThrowAsync<HttpRequestException>();
@@ -651,17 +669,18 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     [Fact]
     public async Task CreateAsync_ANonReparentableRecordUnderASecureMatter_Is409NoOwnerSource_AndCreatesNothing()
     {
-        // sprk_signal is a registry table that is no ownership parent, so it may not take the Secure owner (the G5 core's
-        // second secure-filing refusal). The arm only — the Signal writer itself does not route through this service.
-        _scripted.Held.UnionWith(["prvCreatesprk_signal", "prvAppendsprk_signal"]);
+        // A task is a registry table that is no ownership parent, so it may not take the Secure owner (the G5 core's
+        // second secure-filing refusal). The arm only. Task 042c fix round 4: was sprk_signal, which the service now refuses
+        // before any check (created only by its writer, owner decision D-204); the arm is unchanged, so another of its tables
+        // pins it.
         var outcome = await Service().CreateAsync(
-            await MappedRequest("sprk_signal", new { sprk_name = "Deadline risk", sprk_matter = Lookup("sprk_matter", SecureMatter) }),
+            await MappedRequest("task", new { subject = "Deadline risk", regardingobjectid = Lookup("sprk_matter", SecureMatter) }),
             AsCaller(), CancellationToken.None);
 
         outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved, outcome.Refusal.Detail);
         outcome.Refusal.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
         outcome.Refusal.Detail.Should().Contain("cannot be filed under a secure record").And.Contain("NOT created");
-        Problem(outcome, "sprk_signal").Status.Should().Be(StatusCodes.Status409Conflict);
+        Problem(outcome, "task").Status.Should().Be(StatusCodes.Status409Conflict);
         _createAttempts.Should().BeEmpty();
     }
 
@@ -722,7 +741,11 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             });
         restampEntities
             .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
-            .Returns((string t, Guid id, Dictionary<string, object> f, CancellationToken ct) => Journaled("restamp", () => _stamps.Service.UpdateAsync(t, id, f, ct)));
+            .Returns((string t, Guid id, Dictionary<string, object> f, CancellationToken ct) => Journaled("restamp", async () =>
+            {
+                await _stamps.Service.UpdateAsync(t, id, f, ct);
+                ApplyToTheCreatedShareRow(t, id, f); // task 042b: one Dataverse, as the mirror after it reads the row
+            }));
         restampEntities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression q, CancellationToken ct) => Journaled("restamp", () => _stamps.Service.RetrieveMultipleAsync(q, ct)));
@@ -735,7 +758,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         {
             _journal.Add("mirror");
             return _shareWorld;
-        }, new FakeRecordShareTable());
+        }, _shareTable);
 
         return new RecordCreationService(
             resolver, _appOnly.Object, _readBack.Object, SecureRootFilingGateFixtures.NothingSecure(), restamper, shares,
@@ -862,7 +885,33 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
         _stamps.Row(table, id, [.. lookups]);
         if (SecureChildLineage.IsChild(table))
+        {
             _shareWorld.Add(table, id, [.. shareColumns]);
+            _createdShareRows[(table, id)] = shareColumns;
+        }
+    }
+
+    /// <summary>Task 042b: the share-world columns of each created child row, so a later app-only update lands there too.</summary>
+    private readonly Dictionary<(string Table, Guid Id), List<(string Column, object Value)>> _createdShareRows = [];
+
+    /// <summary>
+    /// Task 042b: the post-create re-derivation's update of a created child row, as the share world (the same Dataverse) sees
+    /// it: its lookup columns join the row the sharee mirror then reads (step 12 runs the restamp before the mirror).
+    /// </summary>
+    private void ApplyToTheCreatedShareRow(string table, Guid id, Dictionary<string, object> fields)
+    {
+        if (!_createdShareRows.TryGetValue((table, id), out var columns))
+            return;
+        foreach (var (column, value) in fields)
+        {
+            if (value is EntityReference)
+            {
+                columns.RemoveAll(c => c.Column == column);
+                columns.Add((column, value));
+            }
+        }
+
+        _shareWorld.Add(table, id, [.. columns]);
     }
 
     /// <summary>The caller's Dataverse, journaled by kind, with a WhoAmI failure and a thrown-fault switch.</summary>
@@ -872,12 +921,17 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
         public Func<string, Exception?>? ThrowOn { get; set; }
 
+        /// <summary>Answers a read itself (instead of the scripted Dataverse) when it returns a response; null lets it through.</summary>
+        public Func<string, DataverseUserResponse?>? RespondTo { get; set; }
+
         public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
         {
             var path = Uri.UnescapeDataString(relativePath);
             journal.Add(KindOf(path));
             if (ThrowOn?.Invoke(path) is { } fault)
                 throw fault;
+            if (RespondTo?.Invoke(path) is { } answer)
+                return Task.FromResult(answer);
             if (path == "WhoAmI()" && WhoAmIFailure is { } failure)
                 return Task.FromResult(failure);
             return inner.GetAsync(relativePath, cancellationToken);
