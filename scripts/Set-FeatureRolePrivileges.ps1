@@ -24,6 +24,17 @@
       -Remove (dry run), -Remove -Apply and -Remove -Verify work like the modes below, with "absent on the root role and on every
       business-unit copy" as the target. Plain -Verify checks the adds AND the removals.
 
+    ROLLBACK OF THE REMOVALS (-Restore)
+      Puts every privilege of the removals block back on its ROOT role at the block's expectedDepth (AddPrivilegesRole), the depth
+      -Remove required it to be held at before it removed it. -Remove refuses a privilege held at any other depth, so after a -Remove
+      -Apply whose dry run listed every entry as pending, -Restore -Apply restores exactly what was removed; the -Remove dry run says so,
+      or names the entries that were already absent. -Restore (dry run), -Restore -Apply and -Restore -Verify work like the modes below,
+      with "held at expectedDepth on the root role and every business-unit copy" as the target. A privilege held at another depth stops
+      the run (exit 1, nothing changed). After the write, nothing else on the root role may change. Never removes, never touches the adds.
+      -Gap limits -Remove and -Restore to the removals listed under the named gaps (for example -Gap R3). When an entry of the block is
+      already absent on an environment (an earlier removal applied there), the -Remove dry run prints the rollback with the -Gap that
+      makes it exact, so -Restore never puts back a privilege this run did not remove.
+
     MODES
       (default)  Dry run. Prints every change as role, privilege, old depth -> new depth, and the number of
                  business-unit copies that take it. Zero writes.
@@ -67,6 +78,21 @@
     Works on the config's "removals" block instead of its "changes": dry run by default, -Remove -Apply removes, -Remove -Verify
     checks. Never adds or raises.
 
+.PARAMETER Restore
+    The rollback of the removals: puts each privilege of the config's "removals" block back at its expectedDepth. Dry run by default,
+    -Restore -Apply restores, -Restore -Verify checks. Cannot be combined with -Remove.
+
+.PARAMETER Gap
+    With -Remove or -Restore only: works on the removals listed under these gaps (the entries' 'gap') and no others.
+
+.EXAMPLE
+    .\Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Remove
+    Dry run of the removals; it also prints the one-command rollback (-Restore -Apply, with -Gap when that makes it exact).
+
+.EXAMPLE
+    .\Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Restore -Gap R3
+    Dry run of the rollback of the R3 removals only.
+
 .EXAMPLE
     .\Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
     Dry run: the exact diff, with no writes.
@@ -89,6 +115,10 @@ param(
 
     [switch]$Remove,
 
+    [switch]$Restore,
+
+    [string[]]$Gap,
+
     [string]$ConfigPath = (Join-Path $PSScriptRoot '..' 'config' 'feature-role-privileges.json'),
 
     [string]$RolesXmlDir = (Join-Path $PSScriptRoot '..' 'src' 'dataverse' 'solutions' 'SpaarkeMaster' 'Roles')
@@ -97,10 +127,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 if ($Apply -and $Verify) { throw '-Apply and -Verify are separate modes; run -Apply first, then -Verify.' }
+if ($Remove -and $Restore) { throw '-Remove and -Restore are opposite modes; pass one.' }
+if ($Gap -and -not ($Remove -or $Restore)) { throw '-Gap limits -Remove or -Restore to the removals of the gaps named; pass one of them.' }
+$Gap = @($Gap | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$gapFlag = if ($Gap.Count) { "-Gap $($Gap -join ',') " } else { '' }
 $IsDryRun = (-not $Apply.IsPresent) -or $WhatIf.IsPresent
-# The adds are worked on unless -Remove; the removals are worked on with -Remove, and checked by every -Verify.
-$checkAdds = -not $Remove.IsPresent
-$checkRemovals = $Remove.IsPresent -or $Verify.IsPresent
+# The adds are worked on unless -Remove or -Restore; the removals are worked on with -Remove, and checked by every -Verify but
+# -Restore -Verify; -Restore works on the removals block as its rollback.
+$checkAdds = -not ($Remove.IsPresent -or $Restore.IsPresent)
+$checkRemovals = ($Remove.IsPresent -or $Verify.IsPresent) -and -not $Restore.IsPresent
+$checkRestores = $Restore.IsPresent
+$modeFlag = $(if ($Remove) { '-Remove ' } elseif ($Restore) { '-Restore ' } else { '' }) + $gapFlag
 $Api = "$EnvironmentUrl/api/data/v9.2"
 $DepthOrder = @('None', 'Basic', 'Local', 'Deep', 'Global')
 function Get-Rank([string]$Depth) {
@@ -159,10 +196,15 @@ foreach ($r in $removals) {
         throw "$($r.role) $($r.privilege): the role XML still holds it, the config removes it. The two must agree (FeatureRolePrivilegeGuardTests)."
     }
 }
-if ($Remove -and $removals.Count -eq 0) { throw 'The config declares no removal.' }
+if ($Gap.Count) {
+    $unknownGaps = @($Gap | Where-Object { $g = $_; -not @($removals | Where-Object { $_.gap -eq $g }).Count })
+    if ($unknownGaps.Count) { throw "-Gap: the removals block lists no entry under $($unknownGaps -join ', ')." }
+    $removals = @($removals | Where-Object { $Gap -contains $_.gap })
+}
+if (($Remove -or $Restore) -and $removals.Count -eq 0) { throw 'The config declares no removal.' }
 
 Write-Host "Environment : $EnvironmentUrl"
-Write-Host ("Mode        : {0}{1}" -f $(if ($Verify) { 'VERIFY (read-only)' } elseif ($IsDryRun) { 'DRY RUN (no writes)' } else { 'APPLY' }), $(if ($Remove) { ' - REMOVALS' } else { '' }))
+Write-Host ("Mode        : {0}{1}" -f $(if ($Verify) { 'VERIFY (read-only)' } elseif ($IsDryRun) { 'DRY RUN (no writes)' } else { 'APPLY' }), $(if ($Remove) { ' - REMOVALS' } elseif ($Restore) { ' - RESTORE (rollback of the removals)' } else { '' }))
 
 # ── Every read happens here, before any write. Fail closed: a failed read exits 1 and nothing is changed. ─────
 try {
@@ -204,7 +246,7 @@ try {
 
     # Roles: each name resolves to exactly one ROOT role; every business-unit copy is read too.
     $roleCache = @{}
-    $scope = @(); if ($checkAdds) { $scope += $changes }; if ($checkRemovals) { $scope += $removals }
+    $scope = @(); if ($checkAdds) { $scope += $changes }; if ($checkRemovals -or $checkRestores) { $scope += $removals }
     foreach ($name in @($scope.role | Sort-Object -Unique)) {
         # The quotes are doubled first, then the whole value is URL-encoded (a name with &, #, + or % must not alter the query).
         $escaped = [Uri]::EscapeDataString(($name -replace "'", "''"))
@@ -241,15 +283,19 @@ try {
     # decided here, before any write, so AddPrivilegesRole is never sent a depth the platform refuses half way through a run.
     $depthFlag = @{ Basic = 'canbebasic'; Local = 'canbelocal'; Deep = 'canbedeep'; Global = 'canbeglobal' }
     $allowedCache = @{}
-    foreach ($c in @($(if ($checkAdds) { $changes }))) {
+    # The adds at their 'depth'; with -Restore, the removals at their 'expectedDepth' (the depth the rollback writes).
+    $toWrite = @($(if ($checkAdds) { $changes | ForEach-Object { [pscustomobject]@{ Entry = $_; Depth = [string]$_.depth } } }))
+    if ($checkRestores) { $toWrite += @($removals | ForEach-Object { [pscustomobject]@{ Entry = $_; Depth = [string]$_.expectedDepth } }) }
+    foreach ($w in $toWrite) {
+        $c = $w.Entry
         $id = $c.PrivilegeRef.Id
         if (-not $allowedCache.ContainsKey($id)) {
             $allowedCache[$id] = Invoke-DvGet "privileges($id)?`$select=name,canbebasic,canbelocal,canbedeep,canbeglobal"
         }
-        $flag = $depthFlag[[string]$c.depth]
-        if (-not $flag) { throw "$($c.PrivilegeRef.Name): depth '$($c.depth)' is not one of Basic, Local, Deep, Global." }
+        $flag = $depthFlag[$w.Depth]
+        if (-not $flag) { throw "$($c.PrivilegeRef.Name): depth '$($w.Depth)' is not one of Basic, Local, Deep, Global." }
         if ($allowedCache[$id].$flag -ne $true) {
-            throw "Privilege '$($c.PrivilegeRef.Name)' ($($c.role)) cannot be held at depth '$($c.depth)' on this environment ($flag is not true). Fix the config."
+            throw "Privilege '$($c.PrivilegeRef.Name)' ($($c.role)) cannot be held at depth '$($w.Depth)' on this environment ($flag is not true). Fix the config."
         }
     }
 }
@@ -319,12 +365,38 @@ function Get-State {
         }
     }
 
+    # The rollback plan (-Restore): each listed privilege the root role does not hold is put back at its expectedDepth. A root role
+    # that holds it at another depth is a mismatch (the run stops, nothing changed); a copy that differs from a restored root is drift.
+    $restorePlan = [System.Collections.Generic.List[object]]::new()
+    $restoreMismatch = [System.Collections.Generic.List[string]]::new()
+    $restoreCopies = [System.Collections.Generic.List[string]]::new()
+    if ($checkRestores) {
+        foreach ($r in $removals) {
+            $role = $roleCache[$r.role]
+            $live = Get-Depth $role.Held $r.PrivilegeRef
+            if ($live -eq 'None') {
+                $restorePlan.Add([pscustomobject]@{ Role = $role; Privilege = $r.PrivilegeRef; Old = $live; New = [string]$r.expectedDepth; Gap = [string]$r.gap })
+            }
+            elseif ($live -ne [string]$r.expectedDepth) {
+                $restoreMismatch.Add(("{0,-36} {1,-34} held at {2}, the rollback restores {3} (not changed)" -f $role.Name, $r.PrivilegeRef.Name, $live, $r.expectedDepth))
+            }
+            else {
+                foreach ($copy in $role.Copies) {
+                    $copyDepth = Get-Depth $copy.Held $r.PrivilegeRef
+                    if ($copyDepth -ne $live) { $restoreCopies.Add(("{0,-36} {1,-34} copy {2} holds {3,-6} root holds {4}" -f $role.Name, $r.PrivilegeRef.Name, $copy.Id, $copyDepth, $live)) }
+                }
+            }
+        }
+    }
+
     $chosen = $plan
     if ($Remove) { $chosen = $removalPlan }
+    if ($Restore) { $chosen = $restorePlan }
     [pscustomobject]@{
         Plan = $chosen; AddPlan = $plan
         AboveDeclared = $aboveDeclared; CopyDrift = $copyDrift; FromDrift = $fromDrift
         RemovalPlan = $removalPlan; RemovalMismatch = $removalMismatch; RemovalCopies = $removalCopies
+        RestorePlan = $restorePlan; RestoreMismatch = $restoreMismatch; RestoreCopies = $restoreCopies
     }
 }
 
@@ -340,6 +412,11 @@ function Get-Reasons($State) {
         if ($State.RemovalPlan.Count -gt 0) { $reasons += "$($State.RemovalPlan.Count) removal(s) pending" }
         if ($State.RemovalMismatch.Count -gt 0) { $reasons += "$($State.RemovalMismatch.Count) privilege(s) held at a depth other than the config expects" }
         if ($State.RemovalCopies.Count -gt 0) { $reasons += "$($State.RemovalCopies.Count) business-unit copy still holding a removed privilege" }
+    }
+    if ($checkRestores) {
+        if ($State.RestorePlan.Count -gt 0) { $reasons += "$($State.RestorePlan.Count) restore(s) pending" }
+        if ($State.RestoreMismatch.Count -gt 0) { $reasons += "$($State.RestoreMismatch.Count) privilege(s) held at a depth other than the rollback restores" }
+        if ($State.RestoreCopies.Count -gt 0) { $reasons += "$($State.RestoreCopies.Count) business-unit copy difference(s) on a restored privilege" }
     }
     , $reasons
 }
@@ -386,6 +463,50 @@ function Write-Report($State) {
         Write-Host 'Business-unit copies that still hold a privilege the root role no longer holds (never edited here):'
         if ($State.RemovalCopies.Count -eq 0) { Write-Host '  none' }
         foreach ($d in $State.RemovalCopies) { Write-Host "  $d" -ForegroundColor DarkYellow }
+        if ($Remove -and -not $Verify) { Write-RollbackLine $State }
+    }
+    if ($checkRestores) {
+        if ($State.RestorePlan.Count -eq 0) { Write-Host 'Restores    : none pending.' -ForegroundColor Green }
+        else {
+            Write-Host "Restores    : $($State.RestorePlan.Count)"
+            foreach ($p in $State.RestorePlan | Sort-Object { $_.Role.Name }, { $_.Privilege.Name }) {
+                Write-Host ("  {0,-36} {1,-34} None   -> {2,-6} ({3}; root role, then every business-unit copy)" -f $p.Role.Name, $p.Privilege.Name, $p.New, $p.Gap) -ForegroundColor Cyan
+            }
+        }
+        Write-Host 'Held at a depth other than the rollback restores (never changed):'
+        if ($State.RestoreMismatch.Count -eq 0) { Write-Host '  none' }
+        foreach ($d in $State.RestoreMismatch) { Write-Host "  $d" -ForegroundColor DarkYellow }
+        Write-Host 'Business-unit copies that differ from their root role on a restored privilege (never edited here):'
+        if ($State.RestoreCopies.Count -eq 0) { Write-Host '  none' }
+        foreach ($d in $State.RestoreCopies) { Write-Host "  $d" -ForegroundColor DarkYellow }
+    }
+}
+
+# The rollback of a -Remove run, printed by its dry run and its apply: one command that puts back exactly the removals planned here.
+# Exact when every listed removal is pending. When some are already absent on the root role (an earlier removal applied here), the
+# command is limited with -Gap to the gaps of the planned removals, which is exact when no absent entry is under those gaps; otherwise
+# -Restore would add the absent entries as well, so they are named.
+$script:RollbackCommand = $null
+function Write-RollbackLine($State) {
+    $isPlanned = { param($r) @($State.RemovalPlan | Where-Object { $_.Role.Name -eq $r.role -and $_.Privilege.Id -eq $r.PrivilegeRef.Id }).Count -gt 0 }
+    $absent = @($removals | Where-Object { -not (& $isPlanned $_) })
+    $flag = $gapFlag
+    if ($absent.Count -gt 0 -and $State.RemovalPlan.Count -gt 0) {
+        $plannedGaps = @($State.RemovalPlan | ForEach-Object { $_.Gap } | Sort-Object -Unique)
+        if (-not @($absent | Where-Object { $plannedGaps -contains $_.gap }).Count) {
+            $flag = "-Gap $($plannedGaps -join ',') "
+            $absent = @()
+        }
+    }
+    $script:RollbackCommand = "pwsh scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl $EnvironmentUrl -Restore $($flag)-Apply"
+    Write-Host ''
+    Write-Host "Rollback    : $script:RollbackCommand" -ForegroundColor Cyan
+    if ($absent.Count -eq 0) {
+        Write-Host "              restores exactly the $($State.RemovalPlan.Count) removal(s) above, each at the depth listed (dry run first: -Restore$(if ($flag) { " $($flag.TrimEnd())" }))."
+    }
+    else {
+        Write-Host "              NOT exact: $($absent.Count) listed removal(s) are not pending here, and -Restore would add them as well:" -ForegroundColor DarkYellow
+        foreach ($a in $absent) { Write-Host ("                {0,-36} {1}" -f $a.role, $a.privilege) -ForegroundColor DarkYellow }
     }
 }
 
@@ -396,7 +517,10 @@ Write-Report $state
 # ── Verify ──────────────────────────────────────────────────────────────────────────────────────────────────
 $reasons = Get-Reasons $state
 if ($Verify) {
-    if ($reasons.Count -eq 0) { Write-Host "`nVERIFY PASS: the live roles hold the declared set$(if ($checkRemovals) { ' and none of the listed removals' })." -ForegroundColor Green; exit 0 }
+    if ($reasons.Count -eq 0) {
+        if ($checkRestores) { Write-Host "`nVERIFY PASS: the live roles hold every listed removal again, at its expectedDepth (the rollback is complete)." -ForegroundColor Green; exit 0 }
+        Write-Host "`nVERIFY PASS: the live roles hold the declared set$(if ($checkRemovals) { ' and none of the listed removals' })." -ForegroundColor Green; exit 0
+    }
     Write-Host "`nVERIFY FAIL: $($reasons -join '; ') (listed above)." -ForegroundColor Red
     exit 1
 }
@@ -406,15 +530,20 @@ if ($Remove -and $state.RemovalMismatch.Count -gt 0) {
     Write-Host "`nFAIL: $($state.RemovalMismatch.Count) privilege(s) held at a depth other than the config expects (listed above). Nothing was changed; fix the config or the role and re-run." -ForegroundColor Red
     exit 1
 }
+if ($Restore -and $state.RestoreMismatch.Count -gt 0) {
+    Write-Host "`nFAIL: $($state.RestoreMismatch.Count) privilege(s) held at a depth other than the rollback restores (listed above). Nothing was changed; fix the role and re-run." -ForegroundColor Red
+    exit 1
+}
+$noun = if ($Remove) { 'removal' } elseif ($Restore) { 'restore' } else { 'change' }
 if ($plan.Count -eq 0) {
-    # Nothing to add or raise (or remove). -Apply does not report success over a state it cannot fix: it exits 1 with the report -Verify prints.
+    # Nothing to add or raise (or remove, or restore). -Apply does not report success over a state it cannot fix: it exits 1 with the report -Verify prints.
     if (-not $IsDryRun -and $reasons.Count -gt 0) {
-        Write-Host "`nAPPLY: nothing to $(if ($Remove) { 'remove' } else { 'add or raise' }), but the live roles do not match the declared set: $($reasons -join '; ') (listed above). This script never lowers a depth or edits a copy; fix it in the environment and re-run -Verify." -ForegroundColor Red
+        Write-Host "`nAPPLY: nothing to $(if ($Remove) { 'remove' } elseif ($Restore) { 'restore' } else { 'add or raise' }), but the live roles do not match the declared set: $($reasons -join '; ') (listed above). This script never lowers a depth or edits a copy; fix it in the environment and re-run -Verify." -ForegroundColor Red
         exit 1
     }
     Write-Host "`nNothing to change." -ForegroundColor Green; exit 0
 }
-if ($IsDryRun) { Write-Host "`nDRY RUN: no writes. Re-run with $(if ($Remove) { '-Remove ' })-Apply to make the $($plan.Count) $(if ($Remove) { 'removal' } else { 'change' })(s) above." -ForegroundColor Cyan; exit 0 }
+if ($IsDryRun) { Write-Host "`nDRY RUN: no writes. Re-run with $($modeFlag)-Apply to make the $($plan.Count) $noun(s) above." -ForegroundColor Cyan; exit 0 }
 
 # ── Apply on each root role, then read back the root role and every business-unit copy ───────────────────────
 # Re-read until the test passes (role edits settle after a few seconds), at most $Tries times
@@ -473,19 +602,20 @@ try {
                 $now = Get-Depth $after $p.Privilege
                 if ($now -ne $p.New) { $failed += "$($role.Name) ($($t.Label)) $($p.Privilege.Name): expected $($p.New), read back $now" }
             }
-            if ($t.Label -eq 'root' -and $Remove) {
-                # Exactly the listed privileges went: nothing else on the root role changed depth, went missing or appeared.
+            if ($t.Label -eq 'root' -and ($Remove -or $Restore)) {
+                # Exactly the listed privileges went (or, with -Restore, came back): nothing else on the root role changed depth, went
+                # missing or appeared.
                 $removedIds = @($group.Group.Privilege.Id)
                 $collateral = @($role.Held.Keys | Where-Object { $removedIds -notcontains $_ -and (-not $after.ContainsKey($_) -or [string]$after[$_].Depth -ne [string]$role.Held[$_].Depth) })
-                $appeared = @($after.Keys | Where-Object { -not $role.Held.ContainsKey($_) })
+                $appeared = @($after.Keys | Where-Object { -not $role.Held.ContainsKey($_) -and $removedIds -notcontains $_ })
                 # Each reported privilege names its depth before and after, so the report says what the platform did.
                 foreach ($id in $collateral) {
                     $afterDepth = if ($after.ContainsKey($id)) { [string]$after[$id].Depth } else { 'None' }
-                    $failed += "$($role.Name) (root): $($role.Held[$id].PrivilegeName) is not in the removals block but changed or went missing (before $([string]$role.Held[$id].Depth), after $afterDepth)"
+                    $failed += "$($role.Name) (root): $($role.Held[$id].PrivilegeName) is not in the $(if ($Restore) { 'rollback' } else { 'removals block' }) but changed or went missing (before $([string]$role.Held[$id].Depth), after $afterDepth)"
                 }
-                foreach ($id in $appeared) { $failed += "$($role.Name) (root): $($after[$id].PrivilegeName) appeared during the removal (before None, after $([string]$after[$id].Depth))" }
+                foreach ($id in $appeared) { $failed += "$($role.Name) (root): $($after[$id].PrivilegeName) appeared during the $(if ($Restore) { 'rollback' } else { 'removal' }) (before None, after $([string]$after[$id].Depth))" }
             }
-            if ($t.Label -eq 'root' -and -not $Remove) {
+            if ($t.Label -eq 'root' -and -not ($Remove -or $Restore)) {
                 $unrequested = @($after.Keys | Where-Object { -not $role.Held.ContainsKey($_) -and -not ($group.Group.Privilege.Id -contains $_) })
                 if ($unrequested.Count -gt 0) {
                     Write-Host "WARNING: $($role.Name) also gained $($unrequested.Count) privilege(s) that were not requested (before None): $(($unrequested | ForEach-Object { "$($after[$_].PrivilegeName) after $([string]$after[$_].Depth)" }) -join ', '). Not removed here." -ForegroundColor Yellow
@@ -519,11 +649,16 @@ catch {
     foreach ($n in $notApplied) { Write-Host "  $($n.Role.Name) $($n.Privilege.Name) $($n.Old) -> $($n.New)" -ForegroundColor Red }
     if ($phase -eq 'read-back') { Write-Host 'Every write was sent; the read-back did not confirm all of them. Re-run -Verify to see what the live roles hold.' -ForegroundColor Red }
     elseif ($phase -eq 're-read') { Write-Host 'The writes were confirmed by the read-back; the final re-read of the written roles failed. Re-run -Verify to see what the live roles hold.' -ForegroundColor Red }
+    elseif ($Restore) { Write-Host 'Re-run -Restore -Apply to converge (the rollback only adds back the privileges the removals block lists). Re-run -Restore -Verify to see what is still pending.' -ForegroundColor Red }
     elseif ($Remove) { Write-Host 'Re-run -Remove -Apply to converge (the script only removes the privileges the removals block lists). Re-run -Remove -Verify to see what is still pending.' -ForegroundColor Red }
     else { Write-Host 'Re-run -Apply to converge (the script only adds or raises). Re-run -Verify to see what is still pending.' -ForegroundColor Red }
     throw
 }
-if ($Remove) { Write-Host "`nREMOVED and read back absent on the root role and every business-unit copy: $($plan.Count) removal(s)." -ForegroundColor Green }
+if ($Remove) {
+    Write-Host "`nREMOVED and read back absent on the root role and every business-unit copy: $($plan.Count) removal(s)." -ForegroundColor Green
+    Write-Host "Rollback    : $script:RollbackCommand (puts back the $($plan.Count) removal(s) above)" -ForegroundColor Cyan
+}
+elseif ($Restore) { Write-Host "`nRESTORED and read back on the root role and every business-unit copy: $($plan.Count) restore(s)." -ForegroundColor Green }
 else { Write-Host "`nAPPLIED and read back on every business-unit copy: $($plan.Count) change(s)." -ForegroundColor Green }
 if ($finalReasons.Count -gt 0) {
     # The writes held, but the roles still differ from the declared set in a way this script never fixes: not a success.

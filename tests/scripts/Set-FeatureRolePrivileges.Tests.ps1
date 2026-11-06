@@ -18,7 +18,11 @@
 #      platform changed or added is named with its depth before and after;
 #   8. with an empty AZURE_CONFIG_DIR and no stubs the dry run fails closed (exit 1, "Nothing was changed");
 #   9. (fix round 3) a successful -Apply or -Remove -Apply that leaves a live depth above the declared one, a copy that differs from its
-#      root role or a copy that still holds a removed privilege prints the same report -Verify prints and exits 1.
+#      root role or a copy that still holds a removed privilege prints the same report -Verify prints and exits 1;
+#  10. (task 046c) -Restore, the one-command rollback of the removals: the -Remove dry run and apply print it and say whether it is exact;
+#      dry run, -Restore -Apply (AddPrivilegesRole at expectedDepth, read back on every copy, nothing else changed on the root role)
+#      and -Restore -Verify; a depth other than expected, a depth the privilege cannot be held at, -Remove with -Restore, a copy that
+#      never receives it and a failed write all stop or fail.
 #
 # Pester 5 (CI pins 5.7.1):  Import-Module Pester -RequiredVersion 5.7.1 ; Invoke-Pester tests/scripts/Set-FeatureRolePrivileges.Tests.ps1
 # ---------------------------------------------------------------------------
@@ -57,7 +61,7 @@ BeforeAll {
     }
 
     # Runs the script whole. $RoleA lets a test rename the roles (the config and role XML follow the scenario's role names).
-    function Invoke-Frp([hashtable]$Scenario, [string[]]$ScriptArgs = @(), [switch]$RealAz, [string]$RoleA = 'Role A', [switch]$WithRemoval, [switch]$XmlHoldsRemoved, [switch]$AlsoAdded, [switch]$SecondRemoval) {
+    function Invoke-Frp([hashtable]$Scenario, [string[]]$ScriptArgs = @(), [switch]$RealAz, [string]$RoleA = 'Role A', [switch]$WithRemoval, [switch]$XmlHoldsRemoved, [switch]$AlsoAdded, [switch]$SecondRemoval, [string]$SecondGap = 'R2') {
         $script:N++
         $dir = Join-Path $script:Work "run$($script:N)"
         $rolesDir = Join-Path $dir 'Roles'
@@ -70,7 +74,7 @@ BeforeAll {
         if ($WithRemoval) {
             $doc.removals = @(@{ gap = 'R1'; role = 'Role C'; table = 'sprk_c'; privilege = 'prvAppendTosprk_c'; expectedDepth = 'Deep'; feature = 'f' })
             if ($SecondRemoval) {
-                $doc.removals += @{ gap = 'R2'; role = 'Role D'; table = 'sprk_d'; privilege = 'prvAppendTosprk_d'; expectedDepth = 'Deep'; feature = 'f' }
+                $doc.removals += @{ gap = $SecondGap; role = 'Role D'; table = 'sprk_d'; privilege = 'prvAppendTosprk_d'; expectedDepth = 'Deep'; feature = 'f' }
                 Set-Content -LiteralPath (Join-Path $rolesDir 'Role D.xml') -Encoding UTF8 -Value '<Role name="Role D"><RolePrivileges><RolePrivilege name="prvOtherstuff" level="Basic" /></RolePrivileges></Role>'
             }
             # A privilege both added and removed: the add is satisfied by the role XML (Role C holds it at Global there), so only the
@@ -397,6 +401,154 @@ Describe 'Set-FeatureRolePrivileges.ps1 (stubbed Dataverse)' {
             $r = Invoke-Frp (New-Scenario @{ removeAlsoSets = @{ px = 'Global' } }) @('-Remove', '-Apply') -WithRemoval
             $r.Exit | Should -Be 1
             $r.Out | Should -Match 'px appeared during the removal \(before None, after Global\)'
+        }
+    }
+
+    Context '-Restore: the one-command rollback of the removals (task 046c)' {
+        BeforeAll {
+            # After the removal: Role C's root and copy no longer hold pc (expectedDepth Deep); pz stays.
+            $script:removed = { param($extra = @{}) New-Scenario (@{ held = @{ ra = @{}; ra1 = @{}; rb = @{}; rb1 = @{}; rc = @{ pz = 'Basic' }; rc1 = @{ pz = 'Basic' } } } + $extra) }
+        }
+        It 'the -Remove dry run prints the rollback command and says it restores exactly the removals it lists' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove') -WithRemoval
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'Rollback\s+: pwsh scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://example.invalid -Restore -Apply'
+            $r.Out | Should -Match 'restores exactly the 1 removal\(s\) above'
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'the -Remove dry run names a listed removal that is not pending under the same gap, because -Restore would add it too' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove') -WithRemoval -SecondRemoval -SecondGap 'R1'
+            $r.Out | Should -Match 'NOT exact: 1 listed removal\(s\) are not pending here'
+            $r.Out | Should -Match 'Role D\s+prvAppendTosprk_d'
+            $r.Out | Should -Not -Match 'restores exactly'
+        }
+        It 'a listed removal not pending under another gap: the rollback is limited with -Gap to the planned gaps, and is exact' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove') -WithRemoval -SecondRemoval   # R1 pending (Role C); R2 already absent on Role D's root
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'Rollback\s+: pwsh scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://example.invalid -Restore -Gap R1 -Apply'
+            $r.Out | Should -Match 'restores exactly the 1 removal\(s\) above, each at the depth listed \(dry run first: -Restore -Gap R1\)'
+            $r.Out | Should -Not -Match 'NOT exact'
+        }
+        It '-Gap without -Remove or -Restore stops before anything is read' {
+            $r = Invoke-Frp (New-Scenario) @('-Gap', 'R1') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match '-Gap limits -Remove or -Restore'
+            $r.Requests.Count | Should -Be 0
+        }
+        It '-Gap naming no listed removal stops before anything is read' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Gap', 'R9') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'the removals block lists no entry under R9'
+            $r.Requests.Count | Should -Be 0
+        }
+        It '-Remove -Gap R1 works on R1 only: Role D is not read, and the re-run hint and rollback carry the -Gap' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Gap', 'R1') -WithRemoval -SecondRemoval
+            $r.Exit | Should -Be 0
+            @($r.Requests | Where-Object { $_.Uri -match '=rd|Role%20D|Role D|sprk_d' }).Count | Should -Be 0
+            $r.Out | Should -Match 'Re-run with -Remove -Gap R1 -Apply to make the 1 removal\(s\) above'
+            $r.Out | Should -Match 'Rollback\s+: .* -Restore -Gap R1 -Apply'
+            $r.Out | Should -Match 'restores exactly the 1 removal'
+        }
+        It '-Restore -Gap R1 -Apply puts back R1 only, not another gap''s removal that is also absent' {
+            $s = & $script:removed
+            $s.held['rd'] = @{}; $s.held['rd1'] = @{}   # Role D's R2 removal is absent on its root and copy too
+            $all = Invoke-Frp $s @('-Restore') -WithRemoval -SecondRemoval
+            $all.Out | Should -Match 'DRY RUN: no writes. Re-run with -Restore -Apply to make the 2 restore\(s\) above'
+            $r = Invoke-Frp $s @('-Restore', '-Gap', 'R1', '-Apply') -WithRemoval -SecondRemoval
+            $r.Exit | Should -Be 0
+            $r.Posts.Count | Should -Be 1
+            $r.Posts[0].Uri | Should -Match 'roles\(rc\)/Microsoft.Dynamics.CRM.AddPrivilegesRole$'
+            $r.Out | Should -Match 'RESTORED and read back on the root role and every business-unit copy: 1 restore'
+        }
+        It '-Remove -Apply prints the rollback command after the read-back' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'Rollback\s+: .* -Restore -Apply \(puts back the 1 removal\(s\) above\)'
+        }
+        It 'a dry run lists the restore at the expected depth and writes nothing' {
+            $r = Invoke-Frp (& $script:removed) @('-Restore') -WithRemoval
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'RESTORE \(rollback of the removals\)'
+            $r.Out | Should -Match 'prvAppendTosprk_c\s+None\s+-> Deep'
+            $r.Out | Should -Match 'DRY RUN: no writes. Re-run with -Restore -Apply to make the 1 restore\(s\) above'
+            $r.Posts.Count | Should -Be 0
+        }
+        It '-Restore -Apply puts back exactly the listed privilege at its expectedDepth on the root role and reads back every copy, exit 0' {
+            $r = Invoke-Frp (& $script:removed) @('-Restore', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 0
+            $r.Posts.Count | Should -Be 1
+            $r.Posts[0].Uri | Should -Match 'roles\(rc\)/Microsoft.Dynamics.CRM.AddPrivilegesRole$'
+            $r.Posts[0].Body | Should -Match '"PrivilegeId":\s*"pc"'
+            $r.Posts[0].Body | Should -Match '"Depth":\s*"Deep"'
+            $r.Posts[0].Body | Should -Not -Match 'pz'
+            @($r.Posts | Where-Object { $_.Uri -match 'RemovePrivilegeRole' }).Count | Should -Be 0
+            @($r.Requests | Where-Object { $_.Uri -match 'RetrieveRolePrivilegesRole\(RoleId=@p\)\?@p=rc1$' }).Count | Should -BeGreaterThan 1
+            $r.Out | Should -Match 'RESTORED and read back on the root role and every business-unit copy: 1 restore'
+        }
+        It '-Restore never touches the adds' {
+            $r = Invoke-Frp (& $script:removed) @('-Restore', '-Apply') -WithRemoval
+            @($r.Requests | Where-Object { $_.Uri -match 'sprk_a|sprk_b|=ra|=rb' }).Count | Should -Be 0
+        }
+        It '-Restore -Verify fails while the restore is pending and passes once root and copy hold it at the expected depth' {
+            $pending = Invoke-Frp (& $script:removed) @('-Restore', '-Verify') -WithRemoval
+            $pending.Exit | Should -Be 1
+            $pending.Out | Should -Match 'VERIFY FAIL: 1 restore\(s\) pending'
+            $done = Invoke-Frp (New-Scenario) @('-Restore', '-Verify') -WithRemoval   # the starting state: rc and rc1 hold pc at Deep
+            $done.Exit | Should -Be 0
+            $done.Out | Should -Match 'VERIFY PASS: the live roles hold every listed removal again'
+        }
+        It '-Restore -Verify fails when a copy differs from the restored root role' {
+            $r = Invoke-Frp (New-Scenario @{ held = @{ ra = @{}; ra1 = @{}; rb = @{}; rb1 = @{}; rc = @{ pc = 'Deep' }; rc1 = @{} } }) @('-Restore', '-Verify') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'copy rc1 holds None\s+root holds Deep'
+        }
+        It 'held at another depth than the rollback restores: nothing is changed, exit 1' {
+            $r = Invoke-Frp (New-Scenario @{ held = @{ ra = @{}; ra1 = @{}; rb = @{}; rb1 = @{}; rc = @{ pc = 'Global' }; rc1 = @{ pc = 'Global' } } }) @('-Restore', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'held at Global, the rollback restores Deep'
+            $r.Out | Should -Match 'Nothing was changed'
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'a depth the privilege cannot be held at stops the rollback before any write' {
+            $r = Invoke-Frp (& $script:removed @{ can = @{ pc = @{ canbedeep = $false } } }) @('-Restore', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match "prvAppendTosprk_c' \(Role C\) cannot be held at depth 'Deep'"
+            $r.Posts.Count | Should -Be 0
+        }
+        It '-Remove and -Restore together stop before anything is read' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Restore') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'opposite modes'
+            $r.Requests.Count | Should -Be 0
+        }
+        It 'a copy that never receives it: the summary is printed with the rollback re-run hint, exit 1' {
+            $r = Invoke-Frp (& $script:removed @{ noPropagate = @('rc1') }) @('-Restore', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'FAIL: read-back on'
+            $r.Out | Should -Match 'Role C \(copy rc1\) prvAppendTosprk_c: expected Deep, read back None'
+            $r.Out | Should -Match 'Applied in this run before the failure \(1\)'
+        }
+        It 'a failed AddPrivilegesRole: nothing applied, the -Restore re-run hint, exit 1' {
+            $r = Invoke-Frp (& $script:removed @{ failPostOn = 'rc' }) @('-Restore', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'FAIL: AddPrivilegesRole on'
+            $r.Out | Should -Match 'Re-run -Restore -Apply to converge'
+        }
+        It 'a platform that also adds another privilege (px) during the rollback fails the run, naming it' {
+            $r = Invoke-Frp (& $script:removed @{ addAlsoSets = @{ px = 'Global' } }) @('-Restore', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'px appeared during the rollback \(before None, after Global\)'
+        }
+        It 'a platform that also changes another privilege (pz) during the rollback fails the run, naming both depths' {
+            $r = Invoke-Frp (& $script:removed @{ addAlsoSets = @{ pz = 'Deep' } }) @('-Restore', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'pz is not in the rollback but changed or went missing \(before Basic, after Deep\)'
+        }
+        It 'nothing pending: -Restore -Apply exits 0 (control)' {
+            $r = Invoke-Frp (New-Scenario) @('-Restore', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'Nothing to change'
+            $r.Posts.Count | Should -Be 0
         }
     }
 
