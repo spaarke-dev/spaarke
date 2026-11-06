@@ -11,6 +11,12 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.Signals;
 /// among them would read as empty for that identity: the approved total would silently fall back to the billed total, and the others
 /// would read as 0 or as "not blocked". So none may be secured. Ontology's answer is to guard the columns, NOT to add
 /// <c>sprk_approvedtotal</c> to <c>PolicyVersionValidator.AuthorableColumns</c> (an author must not be able to name it).
+/// <para><b>One reviewed exception (ebilling-r1 task 166, EB-D-200; owner + uac-r2 option D).</b> <c>sprk_invoice.sprk_totalamount</c> and
+/// <c>sprk_invoice.sprk_approvedtotal</c> are field-secured on purpose: only the server writes them, and every user reads them. The evaluator
+/// (<c>SignalEvaluator</c>, DI singleton over the shared <c>IGenericEntityService</c>) reads both through the read grant of the profile that
+/// covers its identity. They are listed in <c>DerivedBaseColumnSecurityExceptions</c> (tests/integration/Shared, shared with the live guard) with
+/// that reason; every OTHER derived base column must still be unsecured, and a listed column must still be secured (a stale entry fails).
+/// A different evaluator identity would need the same read grant.</para>
 /// <para>This is the OFFLINE half: the SpaarkeMaster solution source (<c>Entities/{table}/Entity.xml</c> <c>IsSecured</c>), read as
 /// text like <see cref="FirmReasonFieldSecurityAgreementTests"/> (no network). The live half is
 /// <c>SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema</c>, which asks the live schema.</para>
@@ -23,6 +29,9 @@ public class DerivedBaseColumnsFieldSecurityTests
     /// column IS present (the entry is stale and the column must be checked), so a skip can never hide a column silently.</summary>
     private static readonly IReadOnlyDictionary<(string Entity, string Column), string> NotYetInSolution =
         new Dictionary<(string, string), string>();
+
+    /// <summary>The shared reviewed exception list (task 166, EB-D-200); the live guard reads the same one.</summary>
+    private static IReadOnlyDictionary<(string Entity, string Column), string> SecuredForTheBffWriters => DerivedBaseColumnSecurityExceptions.SecuredForTheBffWriters;
 
     [Fact]
     public void EveryDerivedBaseColumn_InTheSolutionSource_IsNotFieldSecured()
@@ -39,8 +48,17 @@ public class DerivedBaseColumnsFieldSecurityTests
             }
 
             NotYetInSolution.Should().NotContainKey((entity, column), $"{entity}.{column} IS in the solution source now: remove its skip and let it be checked");
-            IsSecured(attribute).Should().BeFalse(
-                $"{entity}.{column} is read org-wide by the derived Threshold's evaluator; a field-secured column would read as empty (approved total falls back to billed)");
+            if (SecuredForTheBffWriters.ContainsKey((entity, column)))
+            {
+                IsSecured(attribute).Should().BeTrue(
+                    $"{entity}.{column} is listed as secured for the BFF writers (EB-D-200); if it is no longer secured, remove the entry");
+            }
+            else
+            {
+                IsSecured(attribute).Should().BeFalse(
+                    $"{entity}.{column} is read org-wide by the derived Threshold's evaluator; a field-secured column would read as empty (approved total falls back to billed)");
+            }
+
             checkedColumns.Add($"{entity}.{column}");
         }
 
@@ -79,6 +97,13 @@ public class DerivedBaseColumnsFieldSecurityTests
         IsSecured(secured).Should().BeTrue();
         IsSecured(open).Should().BeFalse();
         IsSecured(absent).Should().BeFalse();
+    }
+
+    [Fact]
+    public void TheExceptionList_NamesOnlyDerivedBaseColumns()
+    {
+        // A listed column that is not a derived base column is a stale or wrong entry; the exception can never widen the guard silently.
+        SecuredForTheBffWriters.Keys.Should().OnlyContain(k => FinanceBaseValues.DerivedBaseColumns.Contains(k));
     }
 
     private static bool IsSecured(XElement attribute) => (string?)attribute.Element("IsSecured") == "1";

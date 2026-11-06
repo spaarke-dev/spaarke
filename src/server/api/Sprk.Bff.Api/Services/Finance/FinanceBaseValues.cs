@@ -110,8 +110,10 @@ public static class FinanceBaseValues
         new[] { SpendAmountPart.BilledWhereNoApprovedTotal, SpendAmountPart.ApprovedTotal };
 
     /// <summary>The columns the derived Threshold reads, as (entity, column), stated ONCE so a guard can check them all. The
-    /// evaluator reads these org-wide with its own identity, so none may be field-secured: a secured column would read as empty for
-    /// the evaluator and silently fall back (the approved total) or read as 0 (the others). Checked live by
+    /// evaluator reads these org-wide with its own identity, so a field-secured column would read as empty for it and silently fall
+    /// back (the approved total) or read as 0 (the others). None may be secured unless it is in the reviewed exception list
+    /// (<c>DerivedBaseColumnSecurityExceptions</c>, tests/integration/Shared), whose columns are secured on purpose and readable by the
+    /// evaluator's identity. Checked live by
     /// <c>SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema</c> and offline against the SpaarkeMaster
     /// Entity.xml by <c>DerivedBaseColumnsFieldSecurityTests</c>. The submission columns are the held anti-join pending spend reads.
     /// <para>It lists every attribute the grouped queries group by, filter on, sum or join on (except each table's primary key), the

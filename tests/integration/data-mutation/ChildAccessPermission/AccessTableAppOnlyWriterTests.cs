@@ -131,7 +131,12 @@ public class AccessTableAppOnlyWriterTests
         // ebilling-r1 095c-4 review fix + task 095c-5 (uac-r2 2026-11-04): an invoice's firm and its own field-secured firm hold. Neither decides
         // access; both decide whether the invoice can be approved and exported, and both have typed writers only (the persister; 095d's assign-firm).
         // ebilling-r1 082c-2 fix round 1 (uac-r2 F4): + its review detail, derived from the open hold reasons; typed writers only.
-        ["sprk_invoice"] = ["sprk_firmhold", "sprk_vendororg", "sprk_reviewdetail"],
+        // ebilling-r1 task 166 fix round (EB-D-200, adversarial review F1): + its billed total and five derived totals, field-secured and typed-writer only.
+        ["sprk_invoice"] =
+        [
+            "sprk_firmhold", "sprk_vendororg", "sprk_reviewdetail",
+            "sprk_totalamount", "sprk_feestotal", "sprk_expensestotal", "sprk_lineadjustmentstotal", "sprk_invoiceadjustmentstotal", "sprk_approvedtotal",
+        ],
 
         // UAC review F4 / DEF-043: a Signal's frozen core record and its invoice and invoice-line subjects.
         // uac-r2 re-check F1: + its regarding pair, which names the subject a Duplicate is judged by.
@@ -1069,6 +1074,60 @@ public class AccessTableAppOnlyWriterTests
         Code("sprk_billingevent", "sprk_reviewdetail").Should().BeNull("a line carries no review detail");
         Code(invoice, "sprk_reviewdetails").Should().BeNull("a neighbouring name");
         CallerCode(invoice, "sprk_reviewdetail").Should().BeNull("the caller's own privileges decide");
+    }
+
+    /// <summary>The six invoice amount columns field security does not protect from the app identity (EB-D-200, adversarial review F1).</summary>
+    public static TheoryData<string> InvoiceMoneyColumns() => new()
+    {
+        Sprk.Bff.Api.Services.Finance.InvoiceReviewService.InvTotalAmount,
+        Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceFeesTotal,
+        Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceExpensesTotal,
+        Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceLineAdjustmentsTotal,
+        Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceInvoiceAdjustmentsTotal,
+        Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceApprovedTotal,
+    };
+
+    [Theory]
+    [MemberData(nameof(InvoiceMoneyColumns))]
+    public async Task AnAppOnlyWriteOfAnInvoiceAmount_IsRefused_ByTheOutputMappingAndTheUpdateRecordNode(string column)
+    {
+        // ebilling-r1 task 166 fix round (EB-D-200, adversarial review F1): the billed total and the five derived totals are field-secured, but the BFF
+        // application user is a member of the Writers profile, so field security does not stop its generic writers. This refusal does. Their writers are
+        // typed (InvoiceTotalsService, the persister, InvoiceCorrectionService; InvoiceMoneyColumnsAppOnlyWriteGuardTests).
+        const string invoice = Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity;
+        foreach (var key in new[] { column, $" {column.ToUpperInvariant()} ", $"{column}@odata.bind", $"_{column}_value" })
+        {
+            Code(invoice, key).Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+
+            _writes.Invocations.Clear();
+            var mapping = () => Handler().UpdateAsync(
+                invoice, Row, new Dictionary<string, object?> { [key] = null },
+                ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+            (await mapping.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+
+            var node = () => Core().UpdateAsync(
+                new UpdateRecordActionInput(
+                    invoice, Row, FieldMappings: null,
+                    LegacyFields: new Dictionary<string, string?> { [key] = "1" }, Lookups: null),
+                CancellationToken.None);
+            (await node.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+                .Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, key);
+            _writes.Invocations.Should().BeEmpty(key);
+        }
+
+        // The ask Repair's per-rule gate makes (RecordCreationService.DocumentServerOwnedRefusal) is this same call over the one column.
+        InheritedAccessPermission.RefuseAppOnlyWrite(invoice, [column])!.Reason
+            .Should().StartWith($"{column} of a {invoice} ").And.Contain("decides no access").And.Contain("only typed writers derive it").And.NotContain("who may see");
+
+        // Must not fire: the same name on other tables, a neighbouring name, an ordinary invoice column, and the caller's own write.
+        Code("sprk_billingexport", column).Should().BeNull("only the invoice carries the amount columns here");
+        Code("sprk_billingevent", column).Should().BeNull("a line is not the invoice");
+        Code(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SubmissionEntity, column).Should().BeNull("the submission is not the invoice");
+        Code(invoice, column + "s").Should().BeNull("a neighbouring name");
+        Code(invoice, "sprk_description").Should().BeNull("an ordinary column");
+        CallerCode(invoice, column).Should().BeNull("the caller's own privileges (and field security) decide");
     }
 
     [Theory]
