@@ -106,6 +106,28 @@ public static class BlockedSubmissionErrors
 
     /// <summary>503: a read or the lock could not be done right now. Retry.</summary>
     public const string Unavailable = "ebilling.blocked.unavailable";
+
+    /// <summary>409 (task 095d-0, D-148; Override only): the invoice has no firm, is held for one, or its post-Set-firm re-run is pending, so no
+    /// Override (an ordinary release or a Procedure-hold release) is made. Return is not gated. Nothing was changed.</summary>
+    public const string FirmMissing = "ebilling.override.firm_missing";
+
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/> when the invoice names no firm.</summary>
+    public const string FirmMissingDetail = "This invoice has no firm. A reviewer must add the firm before the submission can be overridden.";
+
+    /// <summary>The sentence with <see cref="FirmMissing"/> when the invoice is held for its firm (a firm set outside the pipeline does not count).</summary>
+    public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned. The submission can be overridden once the firm is assigned.";
+
+    /// <summary>The sentence with <see cref="FirmMissing"/> while the re-run after Set firm has not completed.</summary>
+    public const string FirmRerunPendingDetail =
+        "This invoice's firm was just assigned and its billing rules are being checked again. Try again when the check finishes.";
+
+    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="gate"/> (<see cref="InvoiceFirmGateResult.Open"/> has none and gets the no-firm sentence).</summary>
+    public static string FirmDetailFor(InvoiceFirmGateResult gate) => gate switch
+    {
+        InvoiceFirmGateResult.HeldForFirm => FirmHeldDetail,
+        InvoiceFirmGateResult.RerunPending => FirmRerunPendingDetail,
+        _ => FirmMissingDetail,
+    };
 }
 
 /// <summary>The body of the override and return routes. The reason is required and is the only input: the decider is the authenticated caller.</summary>
@@ -846,6 +868,31 @@ public sealed class SubmissionOverrideService
         if (await AuthorizeCloseAsync(submissionId, invoiceId, invoice!, authSet, authSubjects, token, ct).ConfigureAwait(false) is { } denied)
         {
             return denied;
+        }
+
+        // ── Task 095d-0 (D-148, ontology-r1 2026-11-05): a firm comes first. Override only (Return stays open). After the rights (403 first), and BEFORE
+        //    the holds derivation, the set's store, the Decision Record and the Signal closes, so a refused request leaves nothing for a retry to
+        //    trip over. A read fault answers 503 with nothing written. ──
+        if (verb == Verb.Override)
+        {
+            InvoiceFirmGateResult gate;
+            try
+            {
+                gate = await InvoiceFirmGate.CheckAsync(_entities, invoice!, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogWarning("Submission {SubmissionId}: the firm gate of invoice {InvoiceId} could not be read ({ExceptionType}); nothing was written",
+                    submissionId, invoiceId, ex.GetType().Name);
+                return Unavailable(submissionId, invoiceId);
+            }
+
+            if (gate != InvoiceFirmGateResult.Open)
+            {
+                _logger.LogWarning("Override of submission {SubmissionId}: invoice {InvoiceId} is not open for decisions ({Gate}); nothing was written", submissionId, invoiceId, gate);
+                return BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict, BlockedSubmissionErrors.FirmMissing,
+                    BlockedSubmissionErrors.FirmDetailFor(gate), invoiceId);
+            }
         }
 
         // ── Task 114 (F4 review round; 114b order change): the holds that REMAIN are derived BEFORE any write (the set store, the Decision Record,

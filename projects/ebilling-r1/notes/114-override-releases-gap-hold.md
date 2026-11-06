@@ -75,7 +75,7 @@ Pass 2 K2: the re-hold obligation above is prose only; it is an acceptance crite
 Known limits (not fixed, reported):
 - **FR-20 held-submission test (pre-existing; DEF-053, #2571).** It reads two unsecured columns only (`FinanceBaseValues.HeldSubmissionConditions`).
   Not widened by 114. Fix direction in DEF-053 (ebilling-owned code).
-- The D-122 close marks the shared SubmissionIntegrity Signal Acted while a firm hold remains. 114 widens this to Internal gap + firm-missing.
+- **(Closed by 095d-0, D-148: an Override on an invoice with no firm, held for one or with the re-run pending is now refused 409.)** The D-122 close marks the shared SubmissionIntegrity Signal Acted while a firm hold remains. 114 widens this to Internal gap + firm-missing.
   Goes to ontology-r1.
 - `GET .../blocked` lists no entry for a Procedure hold. On SPA it shows Blocked/Accepted with zero findings and `Channel` "Other". UI follow-up.
 - An SPA gap that pre-empted a 073 rejection becomes approvable after Override. It is named in `blockingReasonCodes`. Owner awareness.
@@ -152,4 +152,12 @@ a fault there answers 503 before 403. The read discloses nothing.
 
 **095d-2 obligation.** Its re-run closes the left-open shared Signal as `ConditionCleared`, with the record id in the close facts, once every reason clears (`InvoiceOpenHolds` over every linked submission is empty). Not in this slice.
 
-**Not changed, noticed.** An ordinary override on an invoice whose firm is missing now also leaves the shared Signal open even if the Signal's own finding was a non-hold one (e.g. an invoice-number mismatch): the Signal cannot be split, so it fails toward open.
+**Not changed, noticed. SUPERSEDED by 095d-0 (D-148, see the last section): this can no longer happen.** An ordinary override on an invoice whose firm is missing used to also leave the shared Signal open even if the Signal's own finding was a non-hold one (e.g. an invoice-number mismatch): the Signal cannot be split, so it fails toward open.
+
+## 095d-0 (EB-D-148, 2026-11-05): no Override without a firm
+
+Full note: `notes/095d0-firm-gate.md`. Effect on this task:
+
+- **Every Override kind is refused** (409 `ebilling.override.firm_missing`) while the invoice has no firm, is held for one (`InvoiceFirmHold`), or a linked submission's stored `assignFirm.rulesRerun` is not `completed`. That includes this task's Procedure-hold release: a Procedure hold can no longer be overridden on a firmless invoice. The gate runs after `AuthorizeCloseAsync` (rights, then the gate, then the derivation), so an unauthorised caller still gets 403 first, and before the holds derivation, the Signal set's store, the Decision Record and the closes.
+- **The 114b "ordinary Override on a no-firm invoice leaves the shared Signal open" side effect cannot happen any more**: a firm hold means the Override is refused first. The 114b filter is NOT removed: it still serves the other hold reasons (another linked submission's gap or unresolved Procedures), and `InvoiceOpenHolds` still reads the firm hold for the approve and review-detail writers.
+- **Tests changed:** the two 114b firm-hold tests were flipped to assert the refusal (nothing stored, no Decision Record, no Signal closed); the tests whose "hold that remains" was the firm hold now use another linked submission's gap. List in the 095d-0 note.

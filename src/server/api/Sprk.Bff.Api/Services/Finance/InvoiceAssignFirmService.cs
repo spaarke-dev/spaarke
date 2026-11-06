@@ -294,6 +294,9 @@ public sealed class InvoiceAssignFirmService
 
     internal const string RulesRerunPending = "pending";
 
+    /// <summary>The stored <c>rulesRerun</c> once 095d-2's re-run for the assigned firm has finished (EB-D-150). 095d-2 writes it; <see cref="InvoiceFirmGate"/> reads it.</summary>
+    internal const string RulesRerunCompleted = "completed";
+
     /// <summary>The longest note kept (the line decision's reason length).</summary>
     public const int NoteMaxLength = InvoiceLineDecisionService.ReasonMaxLength;
 

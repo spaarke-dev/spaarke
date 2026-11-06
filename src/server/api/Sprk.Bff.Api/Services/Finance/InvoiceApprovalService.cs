@@ -78,6 +78,19 @@ public static class InvoiceApprovalCodes
     /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
     public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
 
+    /// <summary>Task 095d-0 (D-148): the sentence with <see cref="FirmMissing"/> while the re-run after Set firm has not completed
+    /// (<see cref="InvoiceFirmGateResult.RerunPending"/>).</summary>
+    public const string FirmRerunPendingDetail =
+        "This invoice's firm was just assigned and its billing rules are being checked again. Try again when the check finishes.";
+
+    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="gate"/> (<see cref="InvoiceFirmGateResult.Open"/> has none and gets the no-firm sentence).</summary>
+    public static string FirmDetailFor(InvoiceFirmGateResult gate) => gate switch
+    {
+        InvoiceFirmGateResult.HeldForFirm => FirmHeldDetail,
+        InvoiceFirmGateResult.RerunPending => FirmRerunPendingDetail,
+        _ => FirmMissingDetail,
+    };
+
     /// <summary>409 (ebilling-r1 082c-2, brief C11, C14): the invoice is held for its Procedures (<see cref="InvoiceProcedureHold"/>): a work date has
     /// no billing terms in force, or the terms could not be checked. Refused until a re-check clears it. Checked after the FR-20 and firm holds.</summary>
     public const string ProcedureHeld = "ebilling.approve.procedure_held";
@@ -339,7 +352,8 @@ public sealed class InvoiceApprovalService
         // 082c-2: a Procedure hold refuses approve, so the state shows it as held (canApprove false).
         var held = await IsHeldAsync(invoiceId, ct).ConfigureAwait(false)
             || (await InvoiceProcedureHold.ReasonsAsync(_entities, invoiceId, ct).ConfigureAwait(false)).Count > 0;
-        var firmNeeded = await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) != InvoiceFirmNeed.None;
+        // Task 095d-0 (D-148, EB-D-190): the page's Approve and Reject follow the same gate the routes refuse on (no firm, held, or the re-run pending).
+        var firmNeeded = await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) != InvoiceFirmGateResult.Open;
         var correctionsPending = (await InvoiceCorrectionReevaluation.ReadUnappliedAsync(_entities, invoiceId, lines, ct).ConfigureAwait(false)).Count > 0;
 
         EligibleApproverSet? set = null;
@@ -547,7 +561,8 @@ public sealed class InvoiceApprovalService
             }
 
             // ── Task 095c-4: no firm, or a stored "firm needed" hold (a firm set natively does not lift it). Before I-2, so zero lines are refused. ──
-            if (await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
+            //    Task 095d-0 (D-148): the same gate every decision uses (InvoiceFirmGate): no firm, held for one, or the post-Set-firm re-run pending. ──
+            if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var need)
             {
                 _logger.LogWarning("Approve of invoice {InvoiceId}: the invoice needs a firm ({Need}); nothing changed.", invoiceId, need);
                 return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.FirmMissing, InvoiceApprovalCodes.FirmDetailFor(need));
@@ -1256,7 +1271,7 @@ public sealed class InvoiceApprovalService
     {
         LineDecisionStatus.Forbidden => new(ApprovalOutcome.Forbidden, result.Code, result.Detail, FailedStep: step),
         LineDecisionStatus.Busy or LineDecisionStatus.Changed or LineDecisionStatus.TotalsRefused or LineDecisionStatus.NotInReview
-            or LineDecisionStatus.LineNotDecidable => new(ApprovalOutcome.Conflict, result.Code, result.Detail, FailedStep: step),
+            or LineDecisionStatus.LineNotDecidable or LineDecisionStatus.FirmRequired => new(ApprovalOutcome.Conflict, result.Code, result.Detail, FailedStep: step),
         LineDecisionStatus.InvoiceNotFound or LineDecisionStatus.LineNotFound => new(ApprovalOutcome.InvoiceNotFound, result.Code),
         LineDecisionStatus.OwnerUnresolved or LineDecisionStatus.InvalidRequest => new(ApprovalOutcome.Failed, result.Code, result.Detail, FailedStep: step),
         // The lines were written and a later line step failed: the caller's next approve completes the bulk accept (F2) before anything

@@ -447,6 +447,23 @@ describe('Approve', () => {
     expect(next(d)).toBeEnabled();
   });
 
+  it('disables Approve and Reject, and says why, while the invoice needs its firm (EB-D-148 / EB-D-190); Return to firm is not disabled here', async () => {
+    const decision = mockDecisionApi(approval({ canApprove: false, firmNeeded: true }));
+    renderDecisions(clean(), decision);
+    const d = await openWizard();
+    expect(radio(d, /^Approve/)).toBeDisabled();
+    expect(radio(d, /^Reject/)).toBeDisabled();
+    expect(radio(d, /^Return to firm/)).toBeEnabled();
+    expect(within(d).getAllByText(/needs its firm first/).length).toBe(2);
+    expect(next(d)).toBeDisabled();
+  });
+
+  it('keeps Reject enabled when the invoice does not need a firm (the field absent or false)', async () => {
+    renderDecisions(clean(), mockDecisionApi(approval({ firmNeeded: false })));
+    const d = await openWizard();
+    expect(radio(d, /^Reject/)).toBeEnabled();
+  });
+
   it('says that approving accepts the undecided clean lines as billed (D-72)', async () => {
     renderDecisions(clean(), mockDecisionApi(approval({ undecidedCleanLines: 2 })));
     const d = await openWizard();

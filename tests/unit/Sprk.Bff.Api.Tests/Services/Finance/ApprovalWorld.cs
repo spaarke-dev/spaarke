@@ -351,6 +351,20 @@ internal sealed class ApprovalWorld
         return id;
     }
 
+    /// <summary>Task 095d-0: a submission linked to the invoice that carries no hold but stores <paramref name="findingsJson"/> (the Set-firm decision's
+    /// <c>assignFirm</c> member, <see cref="InvoiceFirmGateTests.FindingsWithAssignFirm"/>): the firm is set and the re-run state is what the member says.</summary>
+    public Guid LinkSubmission(string findingsJson)
+    {
+        var id = Guid.NewGuid();
+        Put(new Entity("sprk_invoicesubmission", id)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_findingsjson"] = findingsJson,
+        });
+        return id;
+    }
+
     /// <summary>Task 095c-5: the invoice's own field-secured firm hold (<c>sprk_invoice.sprk_firmhold</c>), as the persister writes it with the held
     /// outcome. Read app-only by <see cref="InvoiceFirmHold"/>; this world is the app-only store.</summary>
     public void HoldInvoiceForFirm() => Rows[("sprk_invoice", InvoiceId)][InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;

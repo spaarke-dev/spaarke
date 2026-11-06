@@ -35,7 +35,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// written by the REAL <see cref="BillingDecisionRecorder"/> over the writer's test harness, so "exactly one Decision Record" is the
 /// writer's own exactly-once. Every refusal asserts that nothing changed (no record, no submission update, no invoice move, no notice).
 /// </summary>
-public class SubmissionOverrideServiceTests
+public partial class SubmissionOverrideServiceTests
 {
     private const string Reason = "Negotiated rate is not yet in the rate card.";
 
@@ -123,6 +123,15 @@ public class SubmissionOverrideServiceTests
 
         /// <summary>Thrown by the app-only reads of the invoice's holds (the derivation).</summary>
         public Exception? HoldReadFault { get; set; }
+
+        /// <summary>Task 095d-0: how many of the hold reads pass before <see cref="HoldReadFault"/> starts to throw. The firm gate (InvoiceFirmGate)
+        /// reads the same rows first (<see cref="FirmGateHoldReads"/> reads), so a test aimed at the DERIVATION's fault skips them.</summary>
+        public int HoldReadFaultAfter { get; set; }
+
+        /// <summary>The hold reads the firm gate makes: the invoice's own hold and the submissions (InvoiceFirmHold), then the submissions again for the stored Set-firm decision.</summary>
+        public const int FirmGateHoldReads = 3;
+
+        private int _holdReads;
 
         /// <summary>The invoice's stored review detail option; null = blank.</summary>
         public int? InvoiceDetail => Invoice?.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column)?.Value;
@@ -407,7 +416,7 @@ public class SubmissionOverrideServiceTests
                     // submissions linked to the invoice (this one as stored, and any other).
                     if (query.EntityName is "sprk_invoice" or FinanceBaseValues.SubmissionEntity)
                     {
-                        if (HoldReadFault is { } holdFault)
+                        if (HoldReadFault is { } holdFault && ++_holdReads > HoldReadFaultAfter)
                         {
                             return Task.FromException<EntityCollection>(holdFault);
                         }
@@ -3139,8 +3148,8 @@ public class SubmissionOverrideServiceTests
 
     public static TheoryData<string, int?> RemainingHolds => new()
     {
-        { "the invoice's own firm hold is still set", InvoiceReviewDetail.WaitingForFirm },
-        { "the invoice names no firm", InvoiceReviewDetail.WaitingForFirm },
+        // Task 095d-0 (D-148): "the invoice's own firm hold is still set" and "the invoice names no firm" are no longer reachable through an Override
+        // (it is refused 409 ebilling.override.firm_missing first, InvoiceFirmGateOverrideTests); the derivation itself is pinned in InvoiceOpenHoldsTests.
         { "another linked submission still holds a gap", InvoiceReviewDetail.WaitingForBillingTerms },
         { "another linked submission still could not be checked", InvoiceReviewDetail.BillingTermsNotChecked },
         { "another linked submission is itself released", null },
@@ -3154,12 +3163,6 @@ public class SubmissionOverrideServiceTests
         var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
         switch (remaining)
         {
-            case "the invoice's own firm hold is still set":
-                w.InvoiceOwnHold = FirmMissing;
-                break;
-            case "the invoice names no firm":
-                w.Invoice!.Attributes.Remove(InvoiceSubmissionPersister.InvoiceVendorOrg);
-                break;
             case "another linked submission still holds a gap":
                 w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.ProcedureGap, "{\"pipelineFindings\":[],\"lineFindings\":[]}"));
                 break;
@@ -3354,6 +3357,7 @@ public class SubmissionOverrideServiceTests
         var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Spa);
         var onInvoice = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
         w.HoldReadFault = new TimeoutException("a message that names row " + Guid.NewGuid());
+        w.HoldReadFaultAfter = World.FirmGateHoldReads; // the firm gate reads first; this proves the derivation's own fault
 
         var result = await w.OverrideAsync();
 
@@ -3397,24 +3401,27 @@ public class SubmissionOverrideServiceTests
         StoredSetIds(w).Should().NotContain(signal, "the stored set excludes it");
     }
 
-    [Fact(DisplayName = "114b must-fire (a): an Internal gap released while the firm hold remains leaves the shared SubmissionIntegrity Signal OPEN with no Decision Record; the record's resolved set and the stored set exclude it; the detail reads Waiting for the firm")]
-    public async Task Release_WhileTheFirmHoldRemains_LeavesTheSharedIntegritySignalOpen()
+    [Fact(DisplayName = "114b must-fire (a), FLIPPED by 095d-0 (D-148): an Internal gap Override while the firm hold remains is REFUSED 409 ebilling.override.firm_missing - no Decision Record, no stored set, no Signal closed (the shared SubmissionIntegrity Signal and the rule Signal stay Open), the detail unchanged")]
+    public async Task Release_WhileTheFirmHoldRemains_IsRefused_AndLeavesEverySignalOpen()
     {
         var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
         w.InvoiceOwnHold = FirmMissing;
-        var shared = AddSharedIntegritySignal(w);
-        var rule = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
+        AddSharedIntegritySignal(w);
+        w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
 
         var result = await w.OverrideAsync();
 
-        result.Kind.Should().Be(BlockedDecisionKind.Decided);
-        AssertLeftOpen(w, shared);
-        w.Recorded.Single().ResolvedSignalIds.Should().BeEquivalentTo([rule], "the rule Signal names no hold: it closes as before");
-        StoredSetIds(w).Should().BeEquivalentTo([rule]);
-        w.ClosedBy.Keys.Should().BeEquivalentTo([rule]);
-        w.InvoiceDetail.Should().Be(InvoiceReviewDetail.WaitingForFirm);
-        w.InvoiceDetail.Should().Be(659490002);
-        w.Code.Should().Be(SubmissionReasonCodes.Overridden, "the Procedure hold itself is released");
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.FirmMissing);
+        result.ErrorCode.Should().Be("ebilling.override.firm_missing");
+        w.RecordCreates.Should().Be(0, "no Decision Record");
+        w.Recorded.Should().BeEmpty();
+        w.Closes.Should().BeEmpty("no Signal closed");
+        w.ClosedBy.Should().BeEmpty();
+        w.SetStores.Should().BeEmpty("nothing stored in the findings for a retry to trip over");
+        w.Signals.Should().OnlyContain(s => s.GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value == SignalWriter.SignalStatusOpen);
+        w.InvoiceDetail.Should().BeNull("no review-detail write");
+        w.AssertNothingWritten();
     }
 
     [Fact(DisplayName = "114b must-fire (b): two linked submissions on one invoice, only A overridden - the shared Signal that carries B's gap stays Open and is not in A's resolved set; A's own Signals close as Acted")]
@@ -3456,20 +3463,31 @@ public class SubmissionOverrideServiceTests
         w.InvoiceDetail.Should().BeNull();
     }
 
-    [Theory(DisplayName = "114b: an ordinary override (no Procedure hold) leaves the shared Signal open while a firm hold stands, and closes everything else")]
-    [InlineData("the invoice's own firm hold is still set")]
-    [InlineData("another linked submission still holds a gap")]
-    public async Task OrdinaryOverride_WhileAHoldStands_LeavesTheSharedIntegritySignalOpen(string remaining)
+    [Fact(DisplayName = "114b, FLIPPED by 095d-0 (D-148): an ordinary override (no Procedure hold) on an invoice held for its firm is REFUSED 409 ebilling.override.firm_missing - it no longer leaves the shared Signal open with the rest closed: no Decision Record, no stored set, no Signal closed")]
+    public async Task OrdinaryOverride_WhileTheFirmHoldStands_IsRefused_AndClosesNothing()
     {
         var w = await World.CreateAsync();
-        if (remaining.StartsWith("another", StringComparison.Ordinal))
-        {
-            w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.ProcedureGap, OtherGapFindings));
-        }
-        else
-        {
-            w.InvoiceOwnHold = FirmMissing;
-        }
+        w.InvoiceOwnHold = FirmMissing;
+        AddSharedIntegritySignal(w);
+        w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
+
+        var result = await w.OverrideAsync();
+
+        result.StatusCode.Should().Be(409);
+        result.ErrorCode.Should().Be(BlockedSubmissionErrors.FirmMissing);
+        w.RecordCreates.Should().Be(0, "no Decision Record");
+        w.Recorded.Should().BeEmpty();
+        w.Closes.Should().BeEmpty("no Signal closed");
+        w.ClosedBy.Should().BeEmpty();
+        w.Signals.Should().OnlyContain(s => s.GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value == SignalWriter.SignalStatusOpen);
+        w.AssertNothingWritten();
+    }
+
+    [Fact(DisplayName = "114b: an ordinary override (no Procedure hold) leaves the shared Signal open while another linked submission's gap stands, and closes everything else")]
+    public async Task OrdinaryOverride_WhileAHoldStands_LeavesTheSharedIntegritySignalOpen()
+    {
+        var w = await World.CreateAsync();
+        w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.ProcedureGap, OtherGapFindings));
 
         var shared = AddSharedIntegritySignal(w);
         var rule = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
@@ -3481,13 +3499,13 @@ public class SubmissionOverrideServiceTests
         w.ClosedBy.Keys.Should().BeEquivalentTo([rule]);
     }
 
-    [Theory(DisplayName = "114b retry (d): a 409 or a 503 repeat gives the same filtered set - the shared Signal stays out of the record, the stored set and every close, even after the firm hold clears between attempts")]
+    [Theory(DisplayName = "114b retry (d): a 409 or a 503 repeat gives the same filtered set - the shared Signal stays out of the record, the stored set and every close, even after the other hold clears between attempts")]
     [InlineData("409")]
     [InlineData("503")]
     public async Task Release_Repeat_NamesTheSameFilteredSet(string failure)
     {
         var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
-        w.InvoiceOwnHold = FirmMissing;
+        w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.ProcedureGap, OtherGapFindings)); // 095d-0: the hold that remains is another submission gap (a firm hold now refuses the Override)
         var shared = AddSharedIntegritySignal(w);
         var rule = w.AddSignal("sprk_invoice", World.InvoiceId, "EB-AGE");
         if (failure == "409")
@@ -3514,7 +3532,7 @@ public class SubmissionOverrideServiceTests
         StoredSetIds(w).Should().BeEquivalentTo([rule], "the filtered set is stored before the record");
         w.OnUpdate = null;
         w.RecordFault = null;
-        w.InvoiceOwnHold = null; // the hold clears between attempts: the repeat still replays the stored set
+        w.OtherSubmissions.Clear(); // the other hold clears between attempts: the repeat still replays the stored set
 
         var repeat = await w.OverrideAsync();
 
@@ -3531,6 +3549,7 @@ public class SubmissionOverrideServiceTests
         var w = await World.CreateAsync();
         var shared = AddSharedIntegritySignal(w);
         w.HoldReadFault = new TimeoutException("dataverse");
+        w.HoldReadFaultAfter = World.FirmGateHoldReads; // the firm gate reads first; this proves the derivation's own fault
 
         var result = await w.OverrideAsync();
 
@@ -3543,11 +3562,11 @@ public class SubmissionOverrideServiceTests
 
     private static AccessRights ReadOnlyRights(string set, Guid id) => AccessRights.Read;
 
-    [Fact(DisplayName = "114b F1 must-fire: the shared Signal is the only open one and its firm hold remains (the filter empties the set) - the caller's rights are still asked on the invoice AND the core record")]
+    [Fact(DisplayName = "114b F1 must-fire: the shared Signal is the only open one and another submission gap remains (the filter empties the set) - the caller's rights are still asked on the invoice AND the core record")]
     public async Task Release_WhenTheFilterEmptiesTheSet_StillAsksTheCallersRights_OnTheInvoiceAndTheCore()
     {
         var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
-        w.InvoiceOwnHold = FirmMissing;
+        w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.ProcedureGap, OtherGapFindings)); // 095d-0
         var shared = AddSharedIntegritySignal(w);
 
         var result = await w.OverrideAsync();
@@ -3557,14 +3576,14 @@ public class SubmissionOverrideServiceTests
         w.Probe.RightsAsked.Should().BeEquivalentTo(
             [(World.Token, "sprk_matters", World.Matter), (World.Token, "sprk_invoices", World.InvoiceId)],
             "the filter leaves nothing to close, but the record is core-bound and the review detail is an invoice write");
-        w.InvoiceDetail.Should().Be(InvoiceReviewDetail.WaitingForFirm);
+        w.InvoiceDetail.Should().Be(InvoiceReviewDetail.WaitingForBillingTerms);
     }
 
     [Fact(DisplayName = "114b F1 must-fire: the same set, a caller without AppendTo on the core and Write on the invoice - 403, no Decision Record, no review-detail write, no close, no stored set")]
     public async Task Release_WhenTheFilterEmptiesTheSet_ACallerWithoutTheRights_Is403_AndNothingIsWritten()
     {
         var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
-        w.InvoiceOwnHold = FirmMissing;
+        w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.ProcedureGap, OtherGapFindings)); // 095d-0
         var shared = AddSharedIntegritySignal(w);
         w.Probe.Rights = ReadOnlyRights;
 
@@ -3602,7 +3621,7 @@ public class SubmissionOverrideServiceTests
     public async Task Release_Replay_OfAnEmptyStoredSet_StillAsksTheCallersRights()
     {
         var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal);
-        w.InvoiceOwnHold = FirmMissing;
+        w.OtherSubmissions.Add(OtherSubmission(SubmissionReasonCodes.ProcedureGap, OtherGapFindings)); // 095d-0
         var shared = AddSharedIntegritySignal(w);
         w.RecordFault = new TimeoutException("dataverse");
 

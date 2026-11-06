@@ -37,9 +37,17 @@ export function decisionAccess(review: Pick<InvoiceReview, 'header'>, approval: 
   return canWrite && approval.callerEligible ? 'decide' : 'none';
 }
 
+/** The words for why Approve and Reject are not available while the invoice needs its firm (EB-D-190), or null when it does not. */
+export function firmNeededBlocker(approval: ApprovalState): string | null {
+  return approval.firmNeeded === true
+    ? 'This invoice needs its firm first (or its billing rules are being checked again after the firm was set). Add the firm, then decide.'
+    : null;
+}
+
 /** The words for why Approve is not available now (I-2: open counts first), or null when it is available. */
 export function approveBlocker(approval: ApprovalState): string | null {
   if (approval.canApprove) return null;
+  if (approval.firmNeeded === true) return firmNeededBlocker(approval);
   const { pending, flagged } = approval.openLines;
   const open: string[] = [];
   if (flagged > 0) open.push(`${flagged} ${flagged === 1 ? 'line' : 'lines'} to decide`);

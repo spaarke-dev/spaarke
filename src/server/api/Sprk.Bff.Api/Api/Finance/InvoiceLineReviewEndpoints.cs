@@ -219,7 +219,7 @@ public static class InvoiceLineReviewEndpoints
         LineDecisionStatus.InvalidRequest => Refused(StatusCodes.Status400BadRequest, result.Code, result.Detail),
         LineDecisionStatus.InvoiceNotFound or LineDecisionStatus.LineNotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
         LineDecisionStatus.NotInReview or LineDecisionStatus.LineNotDecidable or LineDecisionStatus.TotalsRefused
-            or LineDecisionStatus.Busy or LineDecisionStatus.Changed => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
+            or LineDecisionStatus.Busy or LineDecisionStatus.Changed or LineDecisionStatus.FirmRequired => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
         LineDecisionStatus.OwnerUnresolved => Refused(StatusCodes.Status500InternalServerError, result.Code, result.Detail),
         LineDecisionStatus.Forbidden => Refused(StatusCodes.Status403Forbidden, result.Code, result.Detail),
         LineDecisionStatus.Incomplete => Results.Problem(

@@ -37,7 +37,7 @@ import {
   type AdjustmentMethod,
   type AdjustmentRule,
 } from '../../services/decisionApi';
-import { approveBlocker, INVOICE_OUTCOME_LABEL, outcomeOfApproval, type InvoiceOutcome } from '../../services/decisionModel';
+import { approveBlocker, firmNeededBlocker, INVOICE_OUTCOME_LABEL, outcomeOfApproval, type InvoiceOutcome } from '../../services/decisionModel';
 import { isAdjustment, isDecided, money, shortDate, signedMoney } from '../../services/reviewModel';
 import type { ReviewLine } from '../../services/invoiceReviewApi';
 import { adjustmentFormDirty, useWiz } from './wizardContext';
@@ -101,6 +101,8 @@ export function OutcomeStep({ handle }: { handle: IWizardShellHandle }) {
   const s = useStyles();
   const { form, approval, readOnly, review, onOutcome } = useWiz();
   const blocker = readOnly ? null : approveBlocker(approval);
+  // EB-D-190: Reject is refused (409) while the invoice needs its firm, exactly like Approve, so it is disabled the same way.
+  const rejectBlocker = readOnly ? null : firmNeededBlocker(approval);
   const approveDisabled = readOnly || !approval.canApprove;
   const option = (value: InvoiceOutcome, caption: string, disabled: boolean) => (
     <Radio
@@ -126,7 +128,7 @@ export function OutcomeStep({ handle }: { handle: IWizardShellHandle }) {
       >
         {option('approve', blocker ?? 'Every line has a decision.', approveDisabled)}
         {option('return', 'The firm corrects and resubmits. The resubmission becomes a new invoice linked to this one.', readOnly)}
-        {option('reject', 'Not payable. The firm cannot resubmit this invoice.', readOnly)}
+        {option('reject', rejectBlocker ?? 'Not payable. The firm cannot resubmit this invoice.', readOnly || rejectBlocker !== null)}
       </RadioGroup>
       {!readOnly && approval.undecidedCleanLines > 0 && approval.canApprove && (
         <Caption1 className={s.muted}>

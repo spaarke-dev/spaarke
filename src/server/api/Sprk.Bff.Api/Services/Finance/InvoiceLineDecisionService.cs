@@ -78,6 +78,10 @@ public enum LineDecisionStatus
     /// <summary>The decision closes Signals and the caller lacks AppendTo on the core record or Write on a decided line (FR-51, the commit
     /// route's rule); NOTHING was changed.</summary>
     Forbidden,
+
+    /// <summary>Task 095d-0 (D-148): the invoice has no firm, is held for one, or its post-Set-firm re-run is pending (<see cref="InvoiceFirmGate"/>);
+    /// 409, NOTHING was changed.</summary>
+    FirmRequired,
 }
 
 /// <summary>Stable ProblemDetails codes (ADR-019). Callers branch on these, never on a message.</summary>
@@ -106,6 +110,27 @@ public static class LineDecisionCodes
     /// <summary>101 fix round, part 3 (F-2): a correction of the line (for Accept all Clean, of the invoice) was saved but its follow-through has not
     /// finished; 409, nothing was changed. The detail names each correction by field and line and says to repeat it.</summary>
     public const string CorrectionsPending = "ebilling.line.corrections_pending";
+
+    /// <summary>409 (task 095d-0, D-148): no line is decided while the invoice has no firm, is held for one, or its post-Set-firm re-run is pending.</summary>
+    public const string FirmMissing = "ebilling.line_decision.firm_missing";
+
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/> when the invoice names no firm.</summary>
+    public const string FirmMissingDetail = "This invoice has no firm. A reviewer must add the firm before its lines can be decided.";
+
+    /// <summary>The sentence with <see cref="FirmMissing"/> when the invoice is held for its firm (a firm set outside the pipeline does not count).</summary>
+    public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned. Its lines can be decided once the firm is assigned.";
+
+    /// <summary>The sentence with <see cref="FirmMissing"/> while the re-run after Set firm has not completed.</summary>
+    public const string FirmRerunPendingDetail =
+        "This invoice's firm was just assigned and its billing rules are being checked again. Try again when the check finishes.";
+
+    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="gate"/> (<see cref="InvoiceFirmGateResult.Open"/> has none and gets the no-firm sentence).</summary>
+    public static string FirmDetailFor(InvoiceFirmGateResult gate) => gate switch
+    {
+        InvoiceFirmGateResult.HeldForFirm => FirmHeldDetail,
+        InvoiceFirmGateResult.RerunPending => FirmRerunPendingDetail,
+        _ => FirmMissingDetail,
+    };
 }
 
 /// <summary>A decided line as the caller needs it to update the screen without a second read.</summary>
@@ -182,7 +207,7 @@ public sealed class InvoiceLineDecisionService
 
     private static readonly string[] InvoiceColumns =
     [
-        "statuscode", InvoiceTotalsService.InvoiceBilledTotal,
+        "statuscode", InvoiceTotalsService.InvoiceBilledTotal, InvoiceSubmissionPersister.InvoiceVendorOrg, // 095d-0: the firm gate reads the firm column
         "sprk_matter", "sprk_project", "sprk_regardingworkassignment",
         CoreAncestorResolver.RegardingRecordTypeColumn, CoreAncestorResolver.RegardingRecordIdColumn,
         "sprk_regardingrecordname", "sprk_regardingrecordurl", "sprk_regardingrecordnumber",
@@ -664,6 +689,13 @@ public sealed class InvoiceLineDecisionService
             return denied;
         }
 
+        // ── Task 095d-0 (D-148): a firm comes first. After the caller's rights (403 first), before any write: no firm, held for one, or the
+        //    post-Set-firm re-run pending refuses (409). A read fault refuses (fail closed). ──
+        if (await FirmGateRefusalAsync(command, invoice, ct).ConfigureAwait(false) is { } firmRefused)
+        {
+            return firmRefused;
+        }
+
         // ── The recorder's no-I/O refusals, before our first write (074 obligation: refuse before you change anything). ──
         var decidedOn = _time.GetUtcNow();
         var decisions = proposals.Select(p => BuildDecision(command, p, decidedOn, signalSets.ByLine[p.Line.Id])).ToList();
@@ -1018,6 +1050,30 @@ public sealed class InvoiceLineDecisionService
                 return new LineDecisionResult(LineDecisionStatus.Forbidden, LineDecisionCodes.NotAuthorized,
                     "You do not have permission to record a decision on these lines.");
         }
+    }
+
+    /// <summary>Task 095d-0 (D-148): <see cref="LineDecisionStatus.FirmRequired"/> unless <see cref="InvoiceFirmGate"/> is open; a read fault is
+    /// <see cref="LineDecisionStatus.Unavailable"/> (nothing changed). Null when the decision may proceed.</summary>
+    private async Task<LineDecisionResult?> FirmGateRefusalAsync(LineDecisionCommand command, Entity invoice, CancellationToken ct)
+    {
+        InvoiceFirmGateResult gate;
+        try
+        {
+            gate = await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Line decision on invoice {InvoiceId}: the firm gate could not be read ({ExceptionType}); nothing changed.", command.InvoiceId, ex.GetType().Name);
+            return new LineDecisionResult(LineDecisionStatus.Unavailable, LineDecisionCodes.Unavailable, "The decision could not be checked; nothing was changed. Try again.");
+        }
+
+        if (gate == InvoiceFirmGateResult.Open)
+        {
+            return null;
+        }
+
+        _logger.LogWarning("Line decision on invoice {InvoiceId}: the invoice is not open for decisions ({Gate}); nothing changed.", command.InvoiceId, gate);
+        return new LineDecisionResult(LineDecisionStatus.FirmRequired, LineDecisionCodes.FirmMissing, LineDecisionCodes.FirmDetailFor(gate));
     }
 
     private sealed record CorrectionBuild(List<Entity> Rows, LineDecisionResult? Failure);
