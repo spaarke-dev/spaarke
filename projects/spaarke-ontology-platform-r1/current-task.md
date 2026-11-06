@@ -32,6 +32,8 @@ Q1 = A (an eligible internal user, or an onboarded external contact with a grant
 - **Ordinary moves on dev (uac-r2):** both switches on since 2026-10-30 19:53:19Z (owner approved in uac-r2's session). Ontology re-read: **PASS** (9 WA-core Signals root team → BU1, owner only; `notes/ordinary-moves-baseline-2026-10-30.md`).
 - **Commits in a fresh worktree:** lint-staged needs prettier: `export PATH="/c/code_files/spaarke-wt-spaarke-ontology-platform-r1/node_modules/.bin:$PATH"` (no junctions). Integration tests under `tests/integration/auth/**` compile into `tests/unit/Sprk.Bff.Api.Tests`; filter there.
 
+- **fm 044 (core pair FLS on sprk_signal/sprk_decisionrecord, 2026-11-06):** uac-r2 chose a NEW profile "Spaarke Ontology Writer Core Pair Writers" (4 columns R/C/U 4/4/4, member `# mi-ontology-writer-dev` only); D-136 profile stays sprk_createdbyperson-only. Ontology answered fm: writers only SignalWriter/DecisionRecordWriter; BFF app-identity reads (SignalReadService, evaluator, suppression, closure, commit 1c, executors, CoreAncestorResolver:542) survive only via SysAdmin; asked for a must-fire read AS the BFF identity in 044's verification and Read kept on the writer profile. Pending: 052 rewording (cite D-204) for our agreement when the 044 PR is up; dev apply via uac-r2 with owner go; re-read census + Worklist after.
+
 ## Next docs→master
 
 The last was PR #2463, merged as master `c8bb55d0cd` (2026-10-29): 168 and 173. Before the next: notices to R3, uac-r2 and word-add-in (name under "Peers"); merge master in; build, the filtered Signals tests and the full ArchTests (1858 now).
