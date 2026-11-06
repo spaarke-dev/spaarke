@@ -122,6 +122,7 @@ function New-ReviewDetailDef {
         DisplayName      = New-Label 'Review Detail'
         Description      = New-Label $Description
         RequiredLevel    = @{ Value = 'None' }
+        IsAuditEnabled   = @{ Value = $true }
         DefaultFormValue = -1
         OptionSet        = @{
             '@odata.type' = 'Microsoft.Dynamics.CRM.OptionSetMetadata'
