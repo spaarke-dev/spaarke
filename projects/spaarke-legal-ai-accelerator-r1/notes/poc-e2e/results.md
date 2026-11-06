@@ -148,6 +148,34 @@ Steps 1 and 2 (Word side) are with the owner. For step 2, Claude uploaded `kit-h
 - No skill rates a counterparty's markup against the playbook (gap #19). That is the next obvious Spaarke skill: "respond to markup".
 - The PDF path works, with a clear warning. The redline is built on a reconstruction, so formatting differs from the original.
 
+## Act 5: change a position (2026-11-06, Claude via Chrome; step 3 in Word is the owner's)
+
+### Step 1: replace the playbook in the library
+Done through the SharePoint REST API from a team-site tab:
+- created `Playbooks/NDA/Archive/`;
+- moved the three v1.0 files there (`MoveFileByPath`; nothing deleted);
+- uploaded the three v1.1 files from `kit-held/Act 5 - playbook v1.1/`.
+
+The only change from v1.0 is `nda.term`: Preferred goes from 3 years to 2, and the Fallback from 2 years to 18 months. The title and version line change too.
+
+### Step 2: re-run Cowork on the Brightwater NDA (148 credits; about 5 minutes)
+Prompt: "Review the Brightwater Mutual NDA in … Matters/Brightwater Systems/ against our current NDA playbook. Save the outputs to … Test/POC-Act5/. No cover email." We pre-created `POC-Act5` in the synced OneDrive.
+- **Drift handled:**
+  - The plan card says "against Spaarke NDA – Mutual v1.1, the current playbook in the team-site Playbooks/NDA folder. **v1.0 is now archived, even though your profile still names it.**"
+  - The provenance line in the dashboard and the redline reads **Spaarke NDA – Mutual v1.1**.
+  - So the skill takes the newest playbook in the folder and says the profile is stale. It does not fail, and it does not quietly use the archive.
+- **`nda.term`: GREEN**, as expected. The audit-pack note reads "Two-year disclosure period, two years per disclosure, open-ended trade-secret tail". In Act 3, under v1.0, it was YELLOW with a term edit. The plan now has **13 changes** and no term edit. The internal redline has 12 revisions (8 insertions, 4 deletions), 13 comments and 13 summary links. The external redline has the same revisions and no comments, and the clean copy has no revisions. Evidence: `evidence/act5/`.
+- **Against the v1.0 key, 10 of 13 match.** Two of the misses are expected or known:
+  - `nda.term` is GREEN under v1.1, which is the intended change.
+  - `nda.representatives` is RED again (gap #16).
+- **The third miss is new:** `nda.housekeeping` is GREEN, where Act 3 gave YELLOW. Both runs raise the same two comment-only items: the blank Effective Date and the Acme signatory. Only the rating changed (gap #29).
+- **The 0.1.3 audit-pack colours work in the tenant:**
+  - chart 1 has 4 per-bar colours (D03B3B, FAB219, 0CA30C, 8A8A86) and chart 2 has 3;
+  - the second chart is anchored under the first (rows 1 and 16, same column).
+  - The labels still say `v0.1.2-poc`, because the version constants in the skill and engines weren't bumped (gap #28).
+- **One approval** (upload), because the folder already existed (gap #24).
+- **Step 3 (Word picker still on the saved v1.0):** the owner's.
+
 ## Act 6: library review across 16 NDAs (2026-11-06, Claude via Chrome)
 
 ### 6a: Microsoft `compare-key-terms` (259 credits; about 25 minutes, about 10 of them waiting on an approval)
