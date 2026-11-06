@@ -1209,7 +1209,9 @@ public sealed class SecureRecordSetupProcedure
         if (problems.Count > 0)
         {
             return Refuse(FailureClass.Resumable,
-                ontologyNotHeld ? SecureRecordSetupRejectionCodes.OntologyServiceRoleNotHeld : SecureRecordSetupRejectionCodes.VerifyFailed,
+                ontologyNotHeld && problems.Count == 1
+                    ? SecureRecordSetupRejectionCodes.OntologyServiceRoleNotHeld
+                    : SecureRecordSetupRejectionCodes.VerifyFailed,
                 "The re-read state is not the codified one: " + string.Join("; ", problems) +
                 ". Dataverse may still be applying a write; resume re-runs every step (each reads first).");
         }

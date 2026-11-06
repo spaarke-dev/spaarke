@@ -79,8 +79,9 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
     /// 3 = T259: §6 T1/T3 — the customer's business unit is a direct child of the root and holds both BFF application users.
     /// 4 = ISS-020 / #1565: S19–S21, the standing-grant profile (BFF application users as members) and the task-154 role split.
     /// 5 = ISS-025 / #1803: S22, the lock on contact.sprk_externalinvitedon and (once present) sprk_externalinvitecodehash.
+    /// 6 = S23: the BFF's runtime application user holds "Spaarke Ontology Service"; no team or interactive user does.
     /// </remarks>
-    internal const string ProcedureVersion = "secure-setup-procedure=5";
+    internal const string ProcedureVersion = "secure-setup-procedure=6";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ISecureRecordSetupDataverse _dataverse;

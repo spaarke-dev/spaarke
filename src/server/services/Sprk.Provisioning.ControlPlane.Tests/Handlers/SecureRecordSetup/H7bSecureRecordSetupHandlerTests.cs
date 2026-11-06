@@ -303,6 +303,34 @@ public sealed class H7bSecureRecordSetupHandlerTests
     }
 
     [Fact]
+    public async Task ARunCompletedUnderProcedureVersion5_DoesNotShortCircuit_AndAssignsTheOntologyServiceRole()
+    {
+        // An environment H7b configured before S23: the run row records the phase under the v5 key.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        (await BuildHandler(new FakeRepository(BuildRun(dv)), dv).HandleAsync(Envelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Success>();
+        dv.UserRoles[dv.MiAppUser].Remove(dv.OntologyRoleId);
+        dv.Writes.Clear();
+        var v5Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            "secure-setup-procedure=5\n" + Set.RoleName + "\n" + Set.BusinessUnitName + "\n" + Set.SetHash()))).ToLowerInvariant();
+        var run = BuildRun(dv);
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H7b",
+            IdempotencyKey = H7bSecureRecordSetupHandler.BuildIdempotencyKey(CustomerId, v5Hash),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey.Should().NotContain(v5Hash);
+        dv.UserRoles[dv.MiAppUser].Should().Contain(dv.OntologyRoleId);
+        dv.Writes.Should().ContainSingle().Which.Should().StartWith("AssociateUserRole");
+    }
+
+    [Fact]
     public async Task DryRun_RecordsTheIdentityLinkMembershipsInThePlan()
     {
         var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);

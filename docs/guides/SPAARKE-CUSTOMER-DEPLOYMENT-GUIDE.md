@@ -1884,9 +1884,14 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
 - the BFF's two application users as members of the `Standing Grant Administrators` field-security profile (without
   it the platform hides `contact.sprk_standinggrant` from the BFF and every standing grant reads as not held; ISS-020 /
   #1565) — other members of that profile are never touched;
-- (S23) the BFF's runtime Dataverse identity (the managed identity's application user, by application id) holds
-  `Spaarke Ontology Service`, which it needs to read the ontology tables; no team or interactive user may hold that role.
-  H7b assigns the copy in the customer business unit, reads it back, and fails the step if it is missing. It refuses
+- (S23) the BFF's runtime Dataverse identity holds `Spaarke Ontology Service`; no team or interactive user may hold
+  that role. The identity is H10's `systemUserId`: the application user H10 resolved by the stamp managed identity's
+  application id, which is the identity `Graph__ManagedIdentity__ClientId` makes the BFF use for Dataverse. While that
+  user also holds System Administrator (H10, standing instruction) the role grants nothing extra; it is what the BFF
+  would need to read the ontology tables without System Administrator. It is **not** the Signal / Decision Record
+  writer identity (`Ontology:Writer:ManagedIdentityClientId`, a separate least-privileged managed identity), which no
+  stamp provisions yet. H7b assigns the copy in the user's own business unit, which must be the customer's, reads it
+  back, and fails the step if it is missing. It refuses
   `secure_setup.ontology_service_role_unresolved` (Resumable: import SpaarkeMaster, or H10's output is missing),
   `secure_setup.ontology_service_role_user_outside_customer_bu` or
   `secure_setup.ontology_service_role_human_or_team_holder` (QuarantineRequired), before writing anything; the
