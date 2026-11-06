@@ -132,6 +132,9 @@
       the partner view of a linked submission is withheld.</criterion>
     <criterion>uac-r2 condition 2: a failed re-run (dead-letter, row-version retries exhausted, Procedures unresolvable) leaves the submission held (pending withhold
       plus procedures_unresolved through InvoiceOpenHolds), never released. Test the dead-letter case.</criterion>
+    <criterion>uac-r2 2026-11-06 (2b-1 approval at `4f113d72e2`): if any channel ever sends an outcome back to the submitter (for example a
+      reply on the from-email channel), it respects the same withhold, keyed on the invoice's `sprk_firmhold` read app-only. Today no
+      such reply exists. A must-fire test goes with any reply that is added.</criterion>
     <criterion>uac-r2 2026-11-06 U1(a) (binding on 2b): when 2a-2 commits the procedures_unresolved hold on the final delivery and 2b lifts the
       partner withhold, the partner-visible projection of that submission shows only the neutral "could not be checked" reason: no Procedure
       names, rule ids or internal detail text. Test: assert the partner projection for this case (must fire if a Procedure name or rule id
