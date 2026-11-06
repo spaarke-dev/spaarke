@@ -31,7 +31,7 @@
     - G6: Office Add In gets Write on document (Deep);
     - G7/G8: Office Add In gets AppendTo on account and sprk_budget (Deep).
 
-    046b is on `task/fm-046b` (script `scripts/Set-FeatureRolePrivileges.ps1`; dry run = exactly G1, G2, G4, G6, G7, G8). **Hold -Apply until fm's Opus pass 2.** Owner rulings 2026-11-05 (decisions.md):
+    046b additions **APPLIED on dev 2026-11-05** from `98813dcaa2` (G1, G2, G4, G6, G7, G8; 8 changes on the root role + 5 BU copies; -Verify PASS; G5 was already live). Next: run fm's `-Remove` mode for the two removals once fm sends its head SHA. Owner rulings 2026-11-05 (decisions.md):
     - no standalone grants: Office and AI Analysis need Core User, and so does Console User;
     - removals, with the owner's go: Ontology Admin Create on budgetrevision, and Basic User AppendTo on reportcard (fm adds a removal step);
     - DONE: Office Add In User removed from the root default team "Spaarke" on dev (now Console User and Basic User only).
