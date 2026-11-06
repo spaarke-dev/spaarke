@@ -1,6 +1,6 @@
 {
   "release": "SpaarkeMaster 1.3.0.0",
-  "source": "customer-provisioning-orchestration-r1, 2026-11-06: role XML diff of the published 1.2.4.0 (a4b6459da3) to the 1.3.0.0 source. Cumulative: carries every 1.2.4.0 expectation (still true in the 1.3.0.0 source), because a stamp on 1.2.3.1 (ACME) upgrades straight to 1.3.0.0. New in 1.3.0.0: sprk_InvoiceLineItem is removed from the package (ebilling-r1 task 029), so its privileges leave Basic User, Core User and Ontology Service; Basic and Core User lose Read on sprk_ExternalServiceConfig and read AI/grid configuration at Global (#2474); the eBilling tables (#2591, ebilling-r1) are added to Basic, Core and Office Add In User; the new role Spaarke Billing Administrator (ebilling-r1 task 120, EB-D-162). Task 046c of field-mapping-server-write-path-r1 (owner ruling 2026-11-06): Spaarke Basic User is read-only on Spaarke tables, so the 80 privileges of removals gap R3 (config/feature-role-privileges.json) are absent on it; Spaarke Core User gains the three reference-table AppendTo privileges of gap G17.",
+  "source": "customer-provisioning-orchestration-r1, 2026-11-06: role XML diff of the published 1.2.4.0 (a4b6459da3) to the 1.3.0.0 source. Cumulative: carries every 1.2.4.0 expectation (still true in the 1.3.0.0 source), because a stamp on 1.2.3.1 (ACME) upgrades straight to 1.3.0.0. New in 1.3.0.0: sprk_InvoiceLineItem is removed from the package (ebilling-r1 task 029), so its privileges leave Basic User, Core User and Ontology Service; Basic and Core User lose Read on sprk_ExternalServiceConfig and read AI/grid configuration at Global (#2474); the eBilling tables (#2591, ebilling-r1) are added to Basic, Core and Office Add In User; the new role Spaarke Billing Administrator (ebilling-r1 task 120, EB-D-162). Task 046c of field-mapping-server-write-path-r1 (owner ruling 2026-11-06): Spaarke Basic User is read-only on Spaarke tables, so the 80 privileges of removals gap R3 (config/feature-role-privileges.json) are absent on it; Spaarke Core User gains the three reference-table AppendTo privileges of gap G17. The ruled changes of task 046b (G1, G2, G4 to G8) are in the present lists and removal R1 in the absent list, so every entry of config/feature-role-privileges.json is checked (FeatureRolePrivilegeGuardTests).",
   "note": "absent = must not be held at any depth. present = must be held at exactly this depth. Checked on the ROOT copy of each role (inherited copies report the root's set). Only a managed stage-and-upgrade removes privileges from a managed role; a leftover after a plain update import is an import-method error, and a privilege added by hand after the last import is drift.",
   "roles": {
     "Spaarke Console User": {
@@ -22,7 +22,7 @@
       }
     },
     "Spaarke Ontology Administrator": {
-      "absent": ["prvCreatesprk_DecisionRecord", "prvWritesprk_Signal"],
+      "absent": ["prvCreatesprk_DecisionRecord", "prvWritesprk_Signal", "prvCreatesprk_BudgetRevision"],
       "present": {
         "prvReadsprk_Policy": "Deep",
         "prvCreatesprk_Policy": "Deep",
@@ -162,7 +162,10 @@
         "prvReadsprk_GridConfiguration": "Global",
         "prvAppendTosprk_AgreementType": "Global",
         "prvAppendTosprk_OrganizationType_Ref": "Global",
-        "prvAppendTosprk_documenttype_ref": "Global"
+        "prvAppendTosprk_documenttype_ref": "Global",
+        "prvCreatesprk_ReportCard": "Deep",
+        "prvAppendsprk_ReportCard": "Deep",
+        "prvAppendTosprk_ReportCard": "Deep"
       }
     },
     "Spaarke Office Add In User": {
@@ -172,7 +175,12 @@
         "prvReadsprk_BillingEvent": "Deep",
         "prvReadsprk_billingexport": "Deep",
         "prvReadsprk_ebillingoverride": "Global",
-        "prvReadsprk_ebillingsetting": "Global"
+        "prvReadsprk_ebillingsetting": "Global",
+        "prvAppendTosprk_EventType_Ref": "Global",
+        "prvAppendToContact": "Deep",
+        "prvWritesprk_Document": "Deep",
+        "prvAppendToAccount": "Deep",
+        "prvAppendTosprk_Budget": "Deep"
       }
     },
     "Spaarke Ontology Service": {
@@ -193,7 +201,8 @@
         "prvWritesprk_ruleset": "Basic",
         "prvReadsprk_Policy": "Deep",
         "prvWritesprk_Policy": "Basic",
-        "prvReadsprk_PolicyVersion": "Deep"
+        "prvReadsprk_PolicyVersion": "Deep",
+        "prvReadsprk_procedure": "Deep"
       }
     }
   }

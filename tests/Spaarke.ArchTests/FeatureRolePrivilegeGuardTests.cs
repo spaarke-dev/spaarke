@@ -1650,6 +1650,138 @@ public class FeatureRolePrivilegeGuardTests
         return problems;
     }
 
+    // ── The release's role-privilege expectations carry the ruled set (task 046c fix round 2) ────────────────────────────────
+
+    internal sealed record RoleExpectation(IReadOnlySet<string> Absent, IReadOnlyDictionary<string, string> Present);
+
+    private static string ExpectationsDirectory => Path.Combine(SourceScan.RepoRoot, "scripts", "provisioning", "role-privilege-expectations");
+
+    /// <summary>The expectations file of the highest version (<c>spaarkemaster-{version}.json</c>, compared as versions, not as text). The files
+    /// are cumulative, so the newest one is the one a customer upgrade is checked against.</summary>
+    internal static string NewestExpectationsFile(string directory)
+    {
+        var files = Directory.Exists(directory) ? Directory.GetFiles(directory, "spaarkemaster-*.json") : [];
+        var versioned = files
+            .Select(f => (File: f, Ok: Version.TryParse(Path.GetFileNameWithoutExtension(f)["spaarkemaster-".Length..], out var v), Version: v))
+            .Where(x => x.Ok)
+            .OrderByDescending(x => x.Version)
+            .ToList();
+        if (versioned.Count == 0)
+            throw new InvalidOperationException($"No spaarkemaster-{{version}}.json expectations file in {directory}.");
+        return versioned[0].File;
+    }
+
+    internal static IReadOnlyDictionary<string, RoleExpectation> LoadExpectations(string path)
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        var result = new Dictionary<string, RoleExpectation>(StringComparer.Ordinal);
+        foreach (var role in doc.RootElement.GetProperty("roles").EnumerateObject())
+        {
+            var absent = role.Value.TryGetProperty("absent", out var a)
+                ? a.EnumerateArray().Select(x => x.GetString()!).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var present = role.Value.TryGetProperty("present", out var pr)
+                ? pr.EnumerateObject().ToDictionary(x => x.Name, x => x.Value.GetString()!, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            result[role.Name] = new RoleExpectation(absent, present);
+        }
+
+        return result;
+    }
+
+    /// <summary>What the expectations leave out of the ruled set: every removal must be in its role's <c>absent</c> list, and every change in
+    /// its role's <c>present</c> list at exactly its depth. Without them a managed upgrade that leaves a removed privilege behind (or misses
+    /// an added one) passes <c>Test-RolePrivilegeExpectations.ps1</c>.</summary>
+    internal static List<string> ExpectationProblems(
+        IReadOnlyList<Removal> removals, IReadOnlyList<RuledChange> changes, IReadOnlyDictionary<string, RoleExpectation> expectations)
+    {
+        var problems = new List<string>();
+        foreach (var r in removals)
+        {
+            if (!expectations.TryGetValue(r.Role, out var e)) problems.Add($"{r.Role}: no entry in the expectations file (removal {r.Gap} {r.Privilege})");
+            else if (!e.Absent.Contains(r.Privilege)) problems.Add($"{r.Role}: {r.Privilege} — removal {r.Gap} is not in the expectations' absent list");
+        }
+
+        foreach (var c in changes)
+        {
+            if (!expectations.TryGetValue(c.Role, out var e)) problems.Add($"{c.Role}: no entry in the expectations file (change {c.Gap} {c.Privilege})");
+            else if (!e.Present.TryGetValue(c.Privilege, out var depth)) problems.Add($"{c.Role}: {c.Privilege} — change {c.Gap} is not in the expectations' present list");
+            else if (!Same(depth, c.Depth)) problems.Add($"{c.Role}: {c.Privilege} — change {c.Gap} is expected at {depth}, the config declares {c.Depth}");
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "046c fix 2: every removal of config/feature-role-privileges.json is in the newest role-privilege expectations file's absent list, every change in its present list")]
+    public void NewestExpectationsFileCarriesTheRuledSet()
+    {
+        var removals = LoadRemovals(RuledChangesPath);
+        var changes = LoadRuledChanges(RuledChangesPath);
+        var file = NewestExpectationsFile(ExpectationsDirectory);
+        var expectations = LoadExpectations(file);
+
+        // must-not-fire: the repo as it is
+        Assert.Empty(ExpectationProblems(removals, changes, expectations));
+        Assert.True(removals.Count > 0 && changes.Count > 0, "the check is vacuous without removals and changes");
+
+        // must-fire: each removal dropped from absent, and each change dropped from present or moved to another depth, is reported
+        foreach (var r in removals)
+        {
+            var seeded = expectations.ToDictionary(x => x.Key, x => x.Value);
+            seeded[r.Role] = new RoleExpectation(expectations[r.Role].Absent.Where(a => !Same(a, r.Privilege)).ToHashSet(StringComparer.OrdinalIgnoreCase), expectations[r.Role].Present);
+            Assert.Contains(ExpectationProblems(removals, changes, seeded), p => p.StartsWith($"{r.Role}: {r.Privilege} — removal", StringComparison.Ordinal));
+        }
+
+        foreach (var c in changes)
+        {
+            var dropped = expectations[c.Role].Present.Where(x => !Same(x.Key, c.Privilege)).ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+            var seeded = expectations.ToDictionary(x => x.Key, x => x.Value);
+            seeded[c.Role] = new RoleExpectation(expectations[c.Role].Absent, dropped);
+            Assert.Contains(ExpectationProblems(removals, changes, seeded), p => p.StartsWith($"{c.Role}: {c.Privilege} — change", StringComparison.Ordinal) && p.Contains("not in the expectations' present list", StringComparison.Ordinal));
+
+            var moved = new Dictionary<string, string>(dropped, StringComparer.OrdinalIgnoreCase) { [c.Privilege] = Same(c.Depth, "Basic") ? "Deep" : "Basic" };
+            seeded[c.Role] = new RoleExpectation(expectations[c.Role].Absent, moved);
+            Assert.Contains(ExpectationProblems(removals, changes, seeded), p => p.StartsWith($"{c.Role}: {c.Privilege} — change", StringComparison.Ordinal) && p.Contains("is expected at", StringComparison.Ordinal));
+        }
+
+        // must-fire: a role with no entry at all
+        var noRole = expectations.Where(x => x.Key != removals[0].Role).ToDictionary(x => x.Key, x => x.Value);
+        Assert.Contains(ExpectationProblems(removals, changes, noRole), p => p.StartsWith($"{removals[0].Role}: no entry", StringComparison.Ordinal));
+
+        // must-not-fire: other casing, and entries the config does not list
+        var recased = expectations.ToDictionary(
+            x => x.Key,
+            x => new RoleExpectation(x.Value.Absent.Select(a => a.ToUpperInvariant()).ToHashSet(StringComparer.OrdinalIgnoreCase), x.Value.Present.ToDictionary(y => y.Key.ToLowerInvariant(), y => y.Value.ToUpperInvariant(), StringComparer.OrdinalIgnoreCase)));
+        Assert.Empty(ExpectationProblems(removals, changes, recased));
+        var extra = expectations.ToDictionary(
+            x => x.Key,
+            x => new RoleExpectation(x.Value.Absent.Append("prvReadsprk_NotInTheConfig").ToHashSet(StringComparer.OrdinalIgnoreCase), x.Value.Present.Append(new("prvReadsprk_AlsoNotInTheConfig", "Deep")).ToDictionary(y => y.Key, y => y.Value, StringComparer.OrdinalIgnoreCase)));
+        Assert.Empty(ExpectationProblems(removals, changes, extra));
+    }
+
+    [Fact(DisplayName = "046c fix 2: the newest expectations file is chosen by version, not by name; none is an error")]
+    public void NewestExpectationsFileIsChosenByVersion()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "frp-expect-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() => NewestExpectationsFile(dir));
+            foreach (var v in new[] { "1.2.4.0", "1.10.0.0", "1.3.0.0" })
+                File.WriteAllText(Path.Combine(dir, $"spaarkemaster-{v}.json"), "{}");
+            File.WriteAllText(Path.Combine(dir, "spaarkemaster-notes.json"), "{}");
+            Assert.Equal("spaarkemaster-1.10.0.0.json", Path.GetFileName(NewestExpectationsFile(dir)));
+            Assert.Throws<InvalidOperationException>(() => NewestExpectationsFile(Path.Combine(dir, "missing")));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+
+        // the real folder resolves to a file whose name carries a version
+        Assert.Matches(@"^spaarkemaster-\d+\.\d+\.\d+\.\d+\.json$", Path.GetFileName(NewestExpectationsFile(ExpectationsDirectory)));
+    }
+
     // ── Basic User is read-only on Spaarke tables (task 046c) ──────────────────────────────────────────────────────────────
 
     /// <summary>Owner ruling 2026-11-06 (projects/field-mapping-server-write-path-r1/notes/decisions.md, "Basic User is read-only on
