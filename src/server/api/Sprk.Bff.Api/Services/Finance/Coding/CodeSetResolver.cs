@@ -104,11 +104,7 @@ public sealed class CodeSetResolver
         }
 
         // 1. The firm's own task codes (skipped for an invoice with no firm, task 095c-3).
-        var firmSetId = includeFirmCodes
-            ? await FindSetContainingAllAsync(DistinctFirmTaskCodes(lines), cancellationToken).ConfigureAwait(false)
-            : null;
-        if (firmSetId is { } fromFirm
-            && await LoadAsync(fromFirm, CodeSetSource.FirmCodes, cancellationToken).ConfigureAwait(false) is { } firm)
+        if (includeFirmCodes && await ResolveFirmCodesAsync(lines, cancellationToken).ConfigureAwait(false) is { } firm)
         {
             return firm;
         }
@@ -175,6 +171,20 @@ public sealed class CodeSetResolver
         LoadAsync(codeSetId, source, cancellationToken);
 
     // ── Step 1 ──────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// FR-22 step 1 alone: the set that holds every task code the firm billed on <paramref name="lines"/>, or <c>null</c> when none does (or
+    /// the firm billed none). <see cref="ResolveAsync(CodingCoreRecord, IReadOnlyList{InvoiceLineToCode}, bool, CancellationToken)"/> runs it
+    /// first. Ebilling-r1 task 095d-2a-1 (EB-D-186): the re-run after Set firm asks only this step, because it is the only step the firm
+    /// changes; steps 2-5 gave the same set at intake, so no AI suggestion (step 4) is asked to decide whether a line is re-coded.
+    /// </summary>
+    internal async Task<ResolvedCodeSet?> ResolveFirmCodesAsync(IReadOnlyList<InvoiceLineToCode> lines, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        return await FindSetContainingAllAsync(DistinctFirmTaskCodes(lines), cancellationToken).ConfigureAwait(false) is { } fromFirm
+            ? await LoadAsync(fromFirm, CodeSetSource.FirmCodes, cancellationToken).ConfigureAwait(false)
+            : null;
+    }
 
     private static List<string> DistinctFirmTaskCodes(IReadOnlyList<InvoiceLineToCode> lines)
     {

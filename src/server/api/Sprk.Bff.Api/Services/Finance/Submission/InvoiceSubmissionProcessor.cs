@@ -121,6 +121,55 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             return Log(SubmissionEvaluationOutcome.Failed(snapshot.SubmissionId, ex.ErrorCode, snapshot));
         }
 
+        return await EvaluateStepsAsync(snapshot, read, finalDelivery, _coding, verified: null, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 095d-2a-1: steps 1c-5 (the D-91 check, resolve, code, evaluate, decide) on a read already in hand, through the same code
+    /// <see cref="EvaluateAsync"/> runs after its step 1 (one pipeline, not a copy). The re-run after Set firm calls it with the read rebuilt
+    /// from the stored rows (<see cref="StoredSubmissionRead"/>); it never reads the document. Writes nothing. Not on
+    /// <see cref="IInvoiceSubmissionProcessor"/>: only the re-run calls it.
+    /// </summary>
+    /// <param name="snapshot">The submission as read now (with the firm Set firm wrote).</param>
+    /// <param name="read">The invoice as the analyzer read it.</param>
+    /// <param name="finalDelivery">As <see cref="EvaluateAsync"/>.</param>
+    /// <param name="coding">The coding step; null is the processor's own <see cref="ILineCodingService"/>. The re-run passes
+    /// <see cref="RerunLineCoding"/>, which codes through that service only the lines whose code set changes (EB-D-186).</param>
+    /// <param name="verified">The fields a reviewer corrected or confirmed, by line index in <paramref name="read"/> (null for the header):
+    /// the rules judge each at confidence 1.0, as <c>InvoiceCorrectionReevaluation</c> does (<see cref="BuildEvaluationRequest"/>). Null is none.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>As <see cref="EvaluateAsync"/>; a flag that is off is a Failed outcome.</returns>
+    public Task<SubmissionEvaluationOutcome> EvaluateFromReadAsync(
+        SubmissionSnapshot snapshot,
+        ExtractedInvoice read,
+        bool finalDelivery,
+        ILineCodingService? coding = null,
+        IReadOnlySet<(int? LineIndex, string Field)>? verified = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(read);
+
+        // ADR-018: the flag first, as EvaluateAsync.
+        if (!_ebilling.CurrentValue.Enabled)
+        {
+            return Task.FromResult(Log(SubmissionEvaluationOutcome.Failed(snapshot.SubmissionId, SubmissionReasonCodes.EbillingDisabled, snapshot)));
+        }
+
+        return EvaluateStepsAsync(snapshot, read, finalDelivery, coding ?? _coding, verified, ct);
+    }
+
+    /// <summary>
+    /// Steps 1c-5 on a read already in hand: the D-91 check, resolve, code, evaluate, decide. The ONE copy of this logic (task 095d-2a-1):
+    /// <see cref="EvaluateAsync"/> calls it after step 1, and the re-run after Set firm calls it on the read rebuilt from the stored rows.
+    /// <paramref name="codingStep"/> is the coding step: the processor's own <see cref="ILineCodingService"/> for intake, or the re-run's, which
+    /// codes through that same service only the lines whose code set changes (EB-D-186). <paramref name="verified"/> is null for intake (no
+    /// reviewer has seen it) and the re-run's corrected or confirmed fields otherwise.
+    /// </summary>
+    private async Task<SubmissionEvaluationOutcome> EvaluateStepsAsync(
+        SubmissionSnapshot snapshot, ExtractedInvoice read, bool finalDelivery, ILineCodingService codingStep,
+        IReadOnlySet<(int? LineIndex, string Field)>? verified, CancellationToken ct)
+    {
         // Step 1c: D-91. A difference holds for review; it never rejects and never changes the tracking number.
         var numberCheck = InvoiceNumberCheck.Compare(snapshot.FirmInvoiceNumber, read.Header.FirmInvoiceNumber);
         IReadOnlyList<SubmissionPipelineFinding> pipelineFindings = numberCheck.Result == InvoiceNumberMatch.Mismatch
@@ -160,7 +209,7 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         string? codingHold = null;
         try
         {
-            coding = await _coding.CodeLinesAsync(BuildCodingRequest(snapshot, read), ct).ConfigureAwait(false);
+            coding = await codingStep.CodeLinesAsync(BuildCodingRequest(snapshot, read), ct).ConfigureAwait(false);
         }
         catch (FeatureDisabledException ex)
         {
@@ -194,7 +243,7 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         }
 
         // Step 4: evaluate (072), on the core record and received date of this same submission read.
-        var request = BuildEvaluationRequest(snapshot, read, resolution, coding) with
+        var request = BuildEvaluationRequest(snapshot, read, resolution, coding, verified) with
         {
             ReplacedInvoiceId = await ReplacedInvoiceAsync(snapshot, ct).ConfigureAwait(false),
             SubmittedFirmInvoiceNumber = snapshot.FirmInvoiceNumber,
@@ -449,8 +498,23 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
 
     // ── 043 + 046 + 047 → 072 ──
 
+    /// <summary>
+    /// The line fields a reviewer can correct or confirm (<c>InvoiceCorrectionService</c>'s specs), as <c>InvoiceCorrectionReevaluation</c>
+    /// lists them when it judges a verified one at confidence 1.0.
+    /// </summary>
+    internal static readonly string[] VerifiableLineFieldNames =
+    [
+        ResolutionFieldNames.Hours, ResolutionFieldNames.Rate, ResolutionFieldNames.Amount, BillingFieldNames.Narrative,
+        BillingFieldNames.TaskCode, BillingFieldNames.ActivityCode, BillingFieldNames.ExpenseCode,
+        ResolutionFieldNames.Date, ResolutionFieldNames.TimekeeperAsBilled,
+    ];
+
+    /// <param name="verified">The fields a reviewer corrected or confirmed (095d-2a-1 V2; null for intake): each is judged at confidence 1.0,
+    /// exactly as <c>InvoiceCorrectionReevaluation</c> does (its header loop over <see cref="ExtractionProvenance.HeaderFieldNames"/> and its line
+    /// loop over <see cref="VerifiableLineFieldNames"/>), on the combined confidence the rules read, so no cap or weight of 046 lowers it.</param>
     internal static BillingEvaluationRequest BuildEvaluationRequest(
-        SubmissionSnapshot snapshot, ExtractedInvoice read, InvoiceResolutionResult resolution, InvoiceCodingResult? coding)
+        SubmissionSnapshot snapshot, ExtractedInvoice read, InvoiceResolutionResult resolution, InvoiceCodingResult? coding,
+        IReadOnlySet<(int? LineIndex, string Field)>? verified = null)
     {
         // Task 095c-3: the rules are never judged without a firm (EvaluateAsync skips steps 4 and 5); a null here is a caller defect.
         if (snapshot.FirmId is not { } firmId)
@@ -497,7 +561,7 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
                 BilledActivityCode = line.ActivityCodeAsBilled.Value,
                 BilledExpenseCode = line.ExpenseCodeAsBilled.Value,
                 Observations = coded?.Observations ?? [],
-                FieldConfidence = LineConfidence(resolved, coded),
+                FieldConfidence = Verified(LineConfidence(resolved, coded), index, VerifiableLineFieldNames, verified),
             });
         }
 
@@ -517,16 +581,33 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             Currency = header.Currency.Value,
 
             // 046's combined confidence per header field, under the BillingFieldNames spellings (currency under exactly "Currency").
-            HeaderConfidence = resolution.HeaderFields.ToDictionary(f => f.Key, f => f.Value.Combined, StringComparer.Ordinal),
+            HeaderConfidence = Verified(
+                resolution.HeaderFields.ToDictionary(f => f.Key, f => f.Value.Combined, StringComparer.Ordinal), null, ExtractionProvenance.HeaderFieldNames, verified),
             Lines = lines,
         };
+    }
+
+    /// <summary>
+    /// <paramref name="confidence"/> with each of <paramref name="names"/> a reviewer corrected or confirmed on this subject
+    /// (<paramref name="lineIndex"/>, null for the header) at 1.0, as <c>InvoiceCorrectionReevaluation</c> sets it
+    /// (<c>confidence[name] = 1m</c>, its header and line loops).
+    /// </summary>
+    private static Dictionary<string, decimal> Verified(
+        Dictionary<string, decimal> confidence, int? lineIndex, IEnumerable<string> names, IReadOnlySet<(int? LineIndex, string Field)>? verified)
+    {
+        foreach (var name in names.Where(n => verified?.Contains((lineIndex, n)) == true))
+        {
+            confidence[name] = 1m;
+        }
+
+        return confidence;
     }
 
     /// <summary>
     /// A line's confidences as the handlers read them: 046's combined confidence per field; the coding confidence (the model's own) under
     /// TaskCode / ActivityCode / ExpenseCode; each observation kind's own confidence (the highest of that kind) under Observation.*.
     /// </summary>
-    private static IReadOnlyDictionary<string, decimal> LineConfidence(ResolvedInvoiceLine resolved, LineCodingResult? coded)
+    private static Dictionary<string, decimal> LineConfidence(ResolvedInvoiceLine resolved, LineCodingResult? coded)
     {
         var confidence = resolved.Fields.ToDictionary(f => f.Key, f => f.Value.Combined, StringComparer.Ordinal);
         if (coded is null)

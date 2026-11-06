@@ -310,6 +310,32 @@ public sealed class InvoiceReviewReadServiceTests
 
     // -- ebilling-r1 task 092 (model 9.2): the invoice PDF the review page loads is the invoice's Servable Stored File --
 
+    [Fact(DisplayName = "095d-2a-1 (X2) must-not-fire: the Invoice Review response never carries the stored re-run facts (a summary-only timekeeper name, an observation quote) from the findings provenance")]
+    public async Task TheReviewResponse_NeverCarriesTheStoredRerunFacts()
+    {
+        const string NameSentinel = "NAMESENTINEL Quartermaine";
+        const string QuoteSentinel = "QUOTESENTINEL attention";
+        var findings = JsonNode.Parse(FindingsJson())!.AsObject();
+        findings[ExtractionProvenance.Member] = new JsonObject
+        {
+            [ExtractionProvenance.AnalyzerIdMember] = "prebuilt-invoice-spaarke",
+            [ExtractionProvenance.ApiVersionMember] = "2025-05-01",
+            [ExtractionProvenance.SectionTotalsMember] = new JsonObject { ["FeesTotal"] = new JsonObject { ["value"] = 777.125, ["confidence"] = 0.9 } },
+            [ExtractionProvenance.TimekeeperSummaryMember] = new JsonArray(NameSentinel),
+            [ExtractionProvenance.ObservationsMember] = new JsonArray(new JsonObject { ["line"] = 0, ["type"] = "BlockBilling", ["quotedText"] = QuoteSentinel }),
+            [ExtractionProvenance.LineCountMember] = 1,
+        };
+        var w = new World { Submission = SubmissionRow(findings.ToJsonString()) };
+        w.AddLine(1, InvoiceLineStatus.Flagged, extraction: Extraction);
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
+
+        review.Should().NotBeNull();
+        review!.Lines.Single().Findings.Should().NotBeEmpty("the setup: the stored findings are read and returned");
+        var json = JsonSerializer.Serialize(review);
+        json.Should().NotContain("NAMESENTINEL").And.NotContain("QUOTESENTINEL").And.NotContain("777.125");
+    }
+
     [Fact(DisplayName = "092: the review carries the id of the invoice's Servable Invoice PDF Stored File, asked by invoice, purpose and status, newest first")]
     public async Task InvoicePdfFileId_IsTheServableInvoicePdf()
     {

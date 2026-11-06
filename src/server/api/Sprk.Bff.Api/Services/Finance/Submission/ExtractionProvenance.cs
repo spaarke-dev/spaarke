@@ -18,6 +18,12 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// correction and a later correction of the same field must still name what the AI read.</para>
 /// <para>Values are invariant text and never logged (ADR-015). A line or submission stored before EB-D-170 has no <c>provenance</c> member;
 /// the parsers return null for it, and the correction service refuses an extracted-field correction there with a stable 409.</para>
+/// <para><b>Re-run facts (task 095d-2a-1, EB-D-189 option A).</b> For a submission that can be re-run after Set firm (held for its firm,
+/// <see cref="InvoiceSubmissionPersister.StoresRerunFacts"/>) the submission's <c>provenance</c> also carries the section totals and total due
+/// with their confidences, the timekeeper summary names, the observation quotes and the line count; each of its lines' extraction JSON carries
+/// the exact numbers read (<c>fields.&lt;name&gt;.exact</c>). Every line carries a <c>dateMissing</c> flag. With the stored rows they rebuild the
+/// read for the re-run (<see cref="StoredSubmissionRead"/>), so the document is never re-read. Names and quotes are written only into the
+/// field-secured findings JSON, never into the line column (numbers and flags only), never logged and never indexed.</para>
 /// </summary>
 internal static class ExtractionProvenance
 {
@@ -49,11 +55,14 @@ internal static class ExtractionProvenance
         return node;
     }
 
-    /// <summary>The submission-level object: the pair, the Action pair when coded, and the header fields as read.</summary>
-    internal static JsonObject ForSubmission(ExtractedInvoice read, bool coded, InvoiceResolutionResult? resolution)
+    /// <summary>
+    /// The submission-level object: the pair, the Action pair when coded, the header fields as read, and (task 095d-2a-1, EB-D-189), when
+    /// <paramref name="rerunFacts"/>, the AI facts the re-run after Set firm rebuilds the read from (<see cref="RerunFacts"/>).
+    /// </summary>
+    internal static JsonObject ForSubmission(ExtractedInvoice read, InvoiceCodingResult? coding, InvoiceResolutionResult? resolution, bool rerunFacts)
     {
         var node = Source(read);
-        AddAction(node, coded);
+        AddAction(node, coding is not null);
         var header = read.Header;
         var fields = new JsonObject
         {
@@ -65,7 +74,180 @@ internal static class ExtractionProvenance
             [ResolutionFieldNames.TotalDue] = Field(Text(header.TotalDue.Value), header.TotalDue.Confidence, resolution, ResolutionFieldNames.TotalDue),
         };
         node[HeaderMember] = fields;
+        if (rerunFacts)
+        {
+            AddRerunFacts(node, read, coding);
+        }
+
         return node;
+    }
+
+    // ── Task 095d-2a-1 (EB-D-189, option A): the AI facts the re-run after Set firm needs and the rows do not hold ──
+
+    /// <summary>The header section totals and total due as read: <c>{ FeesTotal | ExpensesTotal | AdjustmentsTotal | TotalDue: { value,
+    /// confidence } }</c>, exact numbers only (the header's <c>TotalDue</c> entry is "0.00" text). The arithmetic check (046) reads them.</summary>
+    internal const string SectionTotalsMember = "sectionTotals";
+
+    /// <summary>The number of lines intake read and stored (fee and expense rows, sequence 1..N); the rebuild requires exactly that many.</summary>
+    internal const string LineCountMember = "lineCount";
+
+    /// <summary>The member of a line's <c>fields.&lt;name&gt;</c> that holds the exact number read (the columns hold two decimals).</summary>
+    internal const string ExactMember = "exact";
+
+    /// <summary>The line fields whose exact number is stored (<see cref="ExactMember"/>): the ones the 2-decimal columns round.</summary>
+    internal static readonly string[] ExactLineFieldNames =
+        [ResolutionFieldNames.Hours, ResolutionFieldNames.Rate, ResolutionFieldNames.Quantity, ResolutionFieldNames.UnitCost, ResolutionFieldNames.Amount];
+
+    /// <summary>The invoice's timekeeper summary names, as read (the non-blank ones, in document order). The roster match (046) reads them.</summary>
+    internal const string TimekeeperSummaryMember = "timekeeperSummary";
+
+    /// <summary>The AI observation quotes: <c>[{ line, type, quotedText }]</c>, one per kept observation (047's guard keeps one per type per line).
+    /// Their type and confidence stay on the line (<c>coding.observations</c>); the quote is text, so it lives here only.</summary>
+    internal const string ObservationsMember = "observations";
+
+    /// <summary>The flag on a line's <c>sprk_extractionconfidence</c>: the read gave the line no date (its <c>sprk_eventdate</c> holds the invoice
+    /// date, FR-04), so the re-run gives the resolution and the rules no date, as intake did. A flag, never a value.</summary>
+    internal const string LineDateMissingMember = "dateMissing";
+
+    /// <summary>The section totals' names (and the total due), under the resolution spellings.</summary>
+    internal static readonly string[] SectionTotalNames =
+        [ResolutionFieldNames.FeesTotal, ResolutionFieldNames.ExpensesTotal, ResolutionFieldNames.AdjustmentsTotal, ResolutionFieldNames.TotalDue];
+
+    /// <summary>
+    /// Adds the three re-run members to the submission's provenance. Names and quotes are text, so they are written ONLY here, in the
+    /// field-secured <c>sprk_findingsjson</c>; the line column carries the date flag only (uac-r2, EB-D-189). Never logged: callers log counts.
+    /// </summary>
+    private static void AddRerunFacts(JsonObject node, ExtractedInvoice read, InvoiceCodingResult? coding)
+    {
+        var header = read.Header;
+        node[SectionTotalsMember] = new JsonObject
+        {
+            [ResolutionFieldNames.FeesTotal] = Total(header.FeesTotal),
+            [ResolutionFieldNames.ExpensesTotal] = Total(header.ExpensesTotal),
+            [ResolutionFieldNames.AdjustmentsTotal] = Total(header.AdjustmentsTotal),
+            [ResolutionFieldNames.TotalDue] = Total(header.TotalDue),
+        };
+
+        node[LineCountMember] = read.Lines.Count;
+        node[TimekeeperSummaryMember] = new JsonArray(TimekeeperSummaryNamesOf(read).Select(name => (JsonNode)JsonValue.Create(name)!).ToArray());
+
+        var observations = new JsonArray();
+        foreach (var line in coding?.Lines ?? [])
+        {
+            if (!int.TryParse(line.LineKey, NumberStyles.None, CultureInfo.InvariantCulture, out var index))
+            {
+                continue;
+            }
+
+            foreach (var observation in line.Observations)
+            {
+                observations.Add(new JsonObject
+                {
+                    ["line"] = index,
+                    ["type"] = observation.Type.ToString(),
+                    ["quotedText"] = observation.QuotedText,
+                });
+            }
+        }
+
+        node[ObservationsMember] = observations;
+    }
+
+    /// <summary>The timekeeper summary names the resolution reads (<c>InvoiceSubmissionProcessor.BuildResolutionInput</c>): non-blank, in order.</summary>
+    internal static IReadOnlyList<string> TimekeeperSummaryNamesOf(ExtractedInvoice read) =>
+        read.TimekeeperSummary.Select(row => row.Name.Value).Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name!).ToList();
+
+    private static JsonObject Total(ExtractedInvoiceField<decimal?> field) => new()
+    {
+        // A JSON number, not the "0.00" text the header uses: the arithmetic check compares the exact value read.
+        ["value"] = field.Value,
+        ["confidence"] = field.Confidence,
+    };
+
+    /// <summary>One section total as read.</summary>
+    internal sealed record SectionTotal(decimal? Value, decimal? Confidence);
+
+    /// <summary>One stored observation quote. Its <see cref="object.ToString"/> never prints the quoted text (ADR-015: a record is easy to log).</summary>
+    internal sealed record ObservationQuote(int Line, InvoiceLineObservationType Type, string QuotedText)
+    {
+        private bool PrintMembers(System.Text.StringBuilder builder)
+        {
+            builder.Append("Line = ").Append(Line.ToString(CultureInfo.InvariantCulture)).Append(", Type = ").Append(Type)
+                .Append(", QuotedText = [").Append(QuotedText.Length.ToString(CultureInfo.InvariantCulture)).Append(" characters]");
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// The re-run facts of a submission (task 095d-2a-1): present only on a submission persisted with them. Its <see cref="object.ToString"/>
+    /// prints counts only, never a name or a quote.
+    /// </summary>
+    internal sealed record RerunFacts(
+        IReadOnlyDictionary<string, SectionTotal> SectionTotals, IReadOnlyList<string> TimekeeperSummaryNames, IReadOnlyList<ObservationQuote> Observations,
+        int LineCount)
+    {
+        private bool PrintMembers(System.Text.StringBuilder builder)
+        {
+            builder.Append("SectionTotals = ").Append(SectionTotals.Count.ToString(CultureInfo.InvariantCulture))
+                .Append(", TimekeeperSummaryNames = ").Append(TimekeeperSummaryNames.Count.ToString(CultureInfo.InvariantCulture))
+                .Append(", Observations = ").Append(Observations.Count.ToString(CultureInfo.InvariantCulture))
+                .Append(", LineCount = ").Append(LineCount.ToString(CultureInfo.InvariantCulture));
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// The re-run facts in the findings JSON's <c>provenance</c>, or null when any of the three members is missing or unreadable (a submission
+    /// stored before task 095d-2a-1): the re-run then refuses fail-closed, it never guesses a fact.
+    /// </summary>
+    internal static RerunFacts? ParseRerunFacts(string? findingsJson)
+    {
+        if (ReadMember(findingsJson) is not { } element
+            || !element.TryGetProperty(SectionTotalsMember, out var totalsElement) || totalsElement.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty(TimekeeperSummaryMember, out var namesElement) || namesElement.ValueKind != JsonValueKind.Array
+            || !element.TryGetProperty(ObservationsMember, out var quotesElement) || quotesElement.ValueKind != JsonValueKind.Array
+            || Int(element, LineCountMember) is not { } lineCount || lineCount < 0)
+        {
+            return null;
+        }
+
+        var totals = new Dictionary<string, SectionTotal>(StringComparer.Ordinal);
+        foreach (var name in SectionTotalNames)
+        {
+            if (!totalsElement.TryGetProperty(name, out var total) || total.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            totals[name] = new SectionTotal(Decimal(total, "value"), Decimal(total, "confidence"));
+        }
+
+        var names = new List<string>();
+        foreach (var name in namesElement.EnumerateArray())
+        {
+            if (name.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            names.Add(name.GetString()!);
+        }
+
+        var quotes = new List<ObservationQuote>();
+        foreach (var quote in quotesElement.EnumerateArray())
+        {
+            if (quote.ValueKind != JsonValueKind.Object
+                || Int(quote, "line") is not { } line
+                || !Enum.TryParse<InvoiceLineObservationType>(Text(quote, "type"), out var type) || !Enum.IsDefined(type)
+                || Text(quote, "quotedText") is not { } text)
+            {
+                return null;
+            }
+
+            quotes.Add(new ObservationQuote(line, type, text));
+        }
+
+        return new RerunFacts(totals, names, quotes, lineCount);
     }
 
     private static JsonObject Source(ExtractedInvoice read) => new()
