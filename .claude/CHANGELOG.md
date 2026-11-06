@@ -16,6 +16,7 @@ On 2026-11-04, 123 sub-agent copies under the main checkout's `.claude\worktrees
 - **`.claude/settings.json`**: the `post-edit-lint.sh` and `task-quality-gate.sh` hooks now `cd "${CLAUDE_PROJECT_DIR}"` first. They used repo-relative paths, so they failed (`No such file or directory`, exit 127) whenever a session's working directory was not the repo root.
 - **Test fix**: `tests/scripts/Remove-WorktreeSafe.Tests.ps1` "validates every path first" passed two paths through `pwsh -File`, which binds one string `"a,b"`, so it tested a single missing path. It now uses `-Command` and asserts the refusal names the real path.
 - **`.claude/FAILURE-MODES.md`**: G-25.
+- **Follow-up fix (same day)**: idle time now uses the newest reflog *entry's* timestamp, not the `logs/HEAD` file time. `git gc` rewrites every reflog file in the repo, so after a gc every copy looked active and nothing was removed (44 kept, 0 removed on the first real run; 21 removable after the fix).
 
 ---
 ###### 2026-11-03 — Skill authoring standard: 500-line cap, conditional branches in `references/`, length guard

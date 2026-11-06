@@ -437,7 +437,9 @@ least as strict as the matter.
   `teamName` the setup script creates from `config/restricted-content-owner-role.json`. Set one without the other and no
   team is found: every ordinary hard-deny write is refused (`OwnerTeamNotFound`, fail closed). The reconciler's ordinary
   pass leaves an author-owned row, or one owned by a non-default team, where it is and reports it, without refusing it; a
-  hard-deny row owned by a non-default team other than the restricted-content team is always reported, by id.
+  hard-deny row owned by a non-default team other than the restricted-content team is always reported, by id. A mirrored
+  share on a hard-deny row (a Secure root's sharee on its `sprk_policy` or `sprk_policyversion` child) carries Read only,
+  whatever the root share carries (#2560); the share reconcile narrows a wider one and logs `HardDenyRowShareWiderThanRead`.
 - **A Decision Record** is also filed under the subject of every Signal it resolved (the ids its `sprk_steps` lists). A
   Secure pass reaches it through those Signals even when it lies outside the record's own family, so it moves into
   isolation, or out, with them.

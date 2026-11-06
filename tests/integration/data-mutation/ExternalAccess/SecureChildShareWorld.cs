@@ -640,9 +640,11 @@ internal sealed class SecureChildShareWorld
 
     private static EntityReference TeamRef(Guid id) => new("team", id);
 
-    /// <summary>The REAL synchronizer over this world and the given share table.</summary>
-    public SecureChildShareSynchronizer Synchronizer(FakeRecordShareTable shares, SecureShareNoAccessGuard? noAccessGuard = null)
-        => SynchronizerOver(() => this, shares, noAccessGuard);
+    /// <summary>The REAL synchronizer over this world and the given share table (and, when given, a logger to read).</summary>
+    public SecureChildShareSynchronizer Synchronizer(
+        FakeRecordShareTable shares, SecureShareNoAccessGuard? noAccessGuard = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? logger = null)
+        => SynchronizerOver(() => this, shares, noAccessGuard, logger);
 
     /// <summary>
     /// The REAL synchronizer over whichever world <paramref name="current"/> answers at query time — for a shared host
@@ -650,9 +652,10 @@ internal sealed class SecureChildShareWorld
     /// by default one that walls nobody (<see cref="NobodyWalled"/>).
     /// </summary>
     public static SecureChildShareSynchronizer SynchronizerOver(
-        Func<SecureChildShareWorld> current, IDataverseRecordShareService shares, SecureShareNoAccessGuard? noAccessGuard = null)
+        Func<SecureChildShareWorld> current, IDataverseRecordShareService shares, SecureShareNoAccessGuard? noAccessGuard = null,
+        Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? logger = null)
         => new(EntitiesOver(current).Object, shares, noAccessGuard ?? NobodyWalled(), Configuration(),
-            NullLogger<SecureChildShareSynchronizer>.Instance);
+            logger ?? NullLogger<SecureChildShareSynchronizer>.Instance);
 
     /// <summary>
     /// Task 143's REAL guard over flags that call every record NOT secure — so it answers

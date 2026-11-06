@@ -25,23 +25,31 @@ BeforeAll {
 
     # One agent copy with one commit of its own (unless -NoCommit). -MergeInto names the branch that "harvests" it.
     function New-AgentCopy { param($f, [string]$Name, [string]$MergeInto, [string]$From, [switch]$Detached, [switch]$NoCommit,
-                                   [switch]$Lock, [switch]$Dirty, [switch]$Junction, [switch]$OldCommit, [switch]$OldReflog, [string]$Under)
+                                   [switch]$Lock, [switch]$Dirty, [switch]$Junction, [switch]$OldCommit, [switch]$OldReflog,
+                                   [switch]$FreshEntry, [string]$Under)
+        # -OldCommit: the commit (and its reflog entry) is dated 2020. -OldReflog: the worktree's creation entry is too,
+        # so every reflog ENTRY is old; the logs/HEAD file is then touched to now, as `git gc` does when it rewrites
+        # reflogs. -FreshEntry: a real-time `reset` entry after the commit (recent activity on an old commit).
         $parent = if ($Under) { $Under } else { $f.Base }
         $p = Join-Path $parent $Name
         $add = if ($Detached) { @('worktree', 'add', '-q', '--detach', $p) } else { @('worktree', 'add', '-q', '-b', "task/$Name", $p) }
         if ($From) { $add += $From }
-        Invoke-Git $f.Main $add | Out-Null
-        if (-not $NoCommit) {
-            Set-Content -Path (Join-Path $p "$Name.txt") -Value $Name
-            Invoke-Git $p @('add', '-A') | Out-Null
-            if ($OldCommit) { $env:GIT_COMMITTER_DATE = '2020-01-01T00:00:00Z'; $env:GIT_AUTHOR_DATE = '2020-01-01T00:00:00Z' }
-            try { Invoke-Git $p @('commit', '-q', '-m', "work $Name") | Out-Null }
-            finally { Remove-Item Env:GIT_COMMITTER_DATE, Env:GIT_AUTHOR_DATE -ErrorAction SilentlyContinue }
+        try {
+            if ($OldReflog) { $env:GIT_COMMITTER_DATE = '2020-01-01T00:00:00Z'; $env:GIT_AUTHOR_DATE = '2020-01-01T00:00:00Z' }
+            Invoke-Git $f.Main $add | Out-Null
+            if (-not $NoCommit) {
+                Set-Content -Path (Join-Path $p "$Name.txt") -Value $Name
+                Invoke-Git $p @('add', '-A') | Out-Null
+                if ($OldCommit) { $env:GIT_COMMITTER_DATE = '2020-01-01T00:00:00Z'; $env:GIT_AUTHOR_DATE = '2020-01-01T00:00:00Z' }
+                Invoke-Git $p @('commit', '-q', '-m', "work $Name") | Out-Null
+            }
         }
+        finally { Remove-Item Env:GIT_COMMITTER_DATE, Env:GIT_AUTHOR_DATE -ErrorAction SilentlyContinue }
+        if ($FreshEntry) { Invoke-Git $p @('reset', '-q', '--soft', 'HEAD') | Out-Null }
         if ($MergeInto) { Invoke-Git $f.Main @('branch', '-f', $MergeInto, (Get-Sha $p)) | Out-Null }
         if ($OldReflog) {
             $gd = (Invoke-Git $p @('rev-parse', '--path-format=absolute', '--git-dir')) | Select-Object -Last 1
-            (Get-Item -LiteralPath (Join-Path ($gd -replace '/', '\') 'logs\HEAD')).LastWriteTimeUtc = [DateTime]::UtcNow.AddDays(-3)
+            (Get-Item -LiteralPath (Join-Path ($gd -replace '/', '\') 'logs\HEAD')).LastWriteTimeUtc = [DateTime]::UtcNow
         }
         if ($Junction) { New-Item -ItemType Junction -Path (Join-Path $p 'node_modules') -Target $f.Victim | Out-Null }
         if ($Dirty) { Set-Content -Path (Join-Path $p 'wip.txt') -Value 'wip' }
@@ -130,21 +138,21 @@ Describe 'Clean-AgentWorktrees.ps1' {
         }
     }
 
-    Context 'idle time is the newest of the commit and the reflog' {
+    Context 'idle time is the newest of the commit and the newest reflog entry' {
         BeforeAll {
             $script:F = New-Fixture
             $script:Old = New-AgentCopy $script:F 'agent-old' -MergeInto 'harvest/old' -OldCommit -OldReflog
-            $script:Backdated = New-AgentCopy $script:F 'agent-backdated' -MergeInto 'harvest/backdated' -OldCommit
+            $script:Backdated = New-AgentCopy $script:F 'agent-backdated' -MergeInto 'harvest/backdated' -OldCommit -FreshEntry
             $script:R = Invoke-Clean $script:F -MinIdleHours 12
         }
         AfterAll { Remove-Fixture $script:F }
 
-        It 'removes a copy whose commit and reflog are both old' {
+        It 'removes a copy whose commit and reflog entries are old, even though gc just rewrote the reflog file' {
             $script:R.Code | Should -Be 0 -Because $script:R.Out
             Test-Path -LiteralPath $script:Old | Should -BeFalse
         }
 
-        It 'keeps a copy with an old commit but a fresh reflog (checked out or reset recently)' {
+        It 'keeps a copy with an old commit but a fresh reflog entry (checked out or reset recently)' {
             Test-Path -LiteralPath $script:Backdated | Should -BeTrue
             $script:R.Out | Should -Match 'agent-backdated : active'
         }
