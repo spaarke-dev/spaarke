@@ -31,7 +31,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// evaluator and the real code-set and timekeeper resolution. The route's rights and step 0 are the contract tests
 /// (<c>InvoiceLineReviewEndpointsAuthorizationContractTests</c>).
 /// </summary>
-public sealed class InvoiceLineAddServiceTests
+public sealed partial class InvoiceLineAddServiceTests
 {
     private static readonly Guid RequestId = Guid.Parse("16400000-0000-4000-8000-000000000001");
     private static readonly BillingRuleCandidate Cap = Kit.Version("BILL-CAP", RuleType.DailyHoursCap); // 12 hours a day
@@ -160,7 +160,7 @@ public sealed class InvoiceLineAddServiceTests
         private Entity? RowOf(Entity target) => target.LogicalName switch
         {
             "sprk_invoice" => World.Invoice,
-            "sprk_invoicesubmission" => World.Submission,
+            "sprk_invoicesubmission" => World.Submission?.Id == target.Id ? World.Submission : World.OtherSubmissions.SingleOrDefault(s => s.Id == target.Id),
             _ => World.Lines.SingleOrDefault(l => l.Id == target.Id),
         };
 

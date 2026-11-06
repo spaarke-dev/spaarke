@@ -33,7 +33,10 @@ internal sealed class CorrectionWorld
     public static readonly Guid Core = Guid.Parse("10100000-0000-4000-8000-0000000000c0");
     public static readonly Guid Firm = Guid.Parse("10100000-0000-4000-8000-0000000000f1");
     public static readonly Guid CodeSetId = Guid.Parse("10100000-0000-4000-8000-0000000000d1");
-    public static readonly Guid InvoiceId = Guid.Parse("10100000-0000-4000-8000-0000000000a1");
+    /// <summary>Task 165a: the invoice's own submission; the invoice's id derives from it (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), as the
+    /// persister creates it, so the readers that take only the invoice's own submission find this one.</summary>
+    public static readonly Guid SubmissionId = Guid.Parse("10100000-0000-4000-8000-0000000000a9");
+    public static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
     public static readonly Guid FeeLineId = Guid.Parse("10100000-0000-4000-8000-0000000000b1");
     public static readonly Guid ExpenseLineId = Guid.Parse("10100000-0000-4000-8000-0000000000b2");
     public static readonly DateTime T0 = new(2026, 10, 29, 9, 0, 0, DateTimeKind.Utc);
@@ -69,6 +72,10 @@ internal sealed class CorrectionWorld
     public readonly List<Entity> Lines = [];
     public readonly List<Entity> Corrections = [];
     public Entity? Submission { get; set; }
+
+    /// <summary>164a fix round F1: other submission rows that link the invoice (<c>sprk_invoice</c>) but are not the one its id derives from. Returned
+    /// BEFORE <see cref="Submission"/>, as a newer row comes first in a creation-descending read.</summary>
+    public readonly List<Entity> OtherSubmissions = [];
     public readonly List<Entity> CodeSets = [];
     public readonly List<Entity> Codes = [];
 
@@ -145,7 +152,7 @@ internal sealed class CorrectionWorld
         };
         Lines.Add(FeeLine());
         Lines.Add(ExpenseLine());
-        Submission = new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        Submission = new Entity("sprk_invoicesubmission", SubmissionId)
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
             ["sprk_findingsjson"] = HeaderFindingsJson,
@@ -189,7 +196,7 @@ internal sealed class CorrectionWorld
                         "sprk_invoice" => [Invoice],
                         "sprk_billingevent" => Lines,
                         "sprk_invoicecorrection" => Corrections,
-                        "sprk_invoicesubmission" => Submission is null ? [] : [Submission],
+                        "sprk_invoicesubmission" => OtherSubmissions.Concat(Submission is null ? [] : [Submission]),
                         "sprk_billingcodeset" => CodeSets,
                         "sprk_billingcode" => Codes,
                         "sprk_signal" => Signals,
@@ -270,7 +277,7 @@ internal sealed class CorrectionWorld
     private Entity RowOf(Entity target) => target.LogicalName switch
     {
         "sprk_invoice" => Invoice,
-        "sprk_invoicesubmission" => Submission!,
+        "sprk_invoicesubmission" => Submission is { } own && own.Id == target.Id ? own : OtherSubmissions.Single(s => s.Id == target.Id),
         _ => Lines.Single(l => l.Id == target.Id),
     };
 

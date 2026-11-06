@@ -103,7 +103,8 @@ public sealed class InvoiceCorrectionEndToEndTests
     private static Entity Submission(ApprovalWorld w, JsonObject root, InvoiceSubmissionStatus status, string reasonCode)
     {
         root["invoiceId"] = w.InvoiceId.ToString("D");
-        var submission = new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        // Task 165a: the invoice's own submission (its id derives the invoice's), as the persister links it.
+        var submission = new Entity("sprk_invoicesubmission", w.OwnSubmissionId)
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
             ["sprk_findingsjson"] = root.ToJsonString(),

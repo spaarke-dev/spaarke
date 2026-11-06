@@ -47,7 +47,10 @@ internal sealed class ApprovalWorld
     /// <summary>Task 095c-4: the invoice's firm (an invoice with no firm cannot be approved or returned; <see cref="WithoutFirm"/>).</summary>
     public static readonly Guid FirmId = Guid.Parse("03000000-0000-4000-8000-0000000000f1");
 
-    public readonly Guid InvoiceId = Guid.NewGuid();
+    /// <summary>The submission the invoice was created from: its id derives the invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), so the
+    /// readers that take only the invoice's own submission (164a fix round F1; task 165a) find a submission a test links under this id.</summary>
+    public readonly Guid OwnSubmissionId = Guid.NewGuid();
+    public readonly Guid InvoiceId;
     public readonly Guid ApprovalId = Guid.NewGuid();
     public readonly Guid CoreId = Guid.NewGuid();
     public readonly string CoreEntity;
@@ -112,6 +115,7 @@ internal sealed class ApprovalWorld
     public ApprovalWorld(string coreEntity = "sprk_project", int invoiceStatus = InvoiceStatusCodes.InReview)
     {
         CoreEntity = coreEntity;
+        InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(OwnSubmissionId);
         var invoiceCoreColumn = coreEntity == "sprk_workassignment" ? "sprk_regardingworkassignment" : coreEntity;
 
         Put(new Entity("sprk_invoice", InvoiceId)

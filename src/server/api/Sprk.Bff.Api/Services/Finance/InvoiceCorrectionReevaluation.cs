@@ -993,18 +993,22 @@ public sealed class InvoiceCorrectionReevaluation
 
     private Task<Entity?> ReadSubmissionAsync(Guid invoiceId, CancellationToken ct) => ReadSubmissionAsync(_entities, invoiceId, ct);
 
-    /// <summary>The invoice's latest submission (its findings JSON, version and administrator text), read app-only.</summary>
+    /// <summary>
+    /// The invoice's OWN submission (its findings JSON, version and administrator text), read app-only: among the submissions linked to the invoice,
+    /// the one whose id derives the invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), never another linked row, however recent
+    /// (164a fix round F1). Null when it is not linked: every caller (the correction's follow-through, Add line's steps 1 and 9, the unapplied-correction
+    /// read) then writes nothing and fails closed. Task 165a has the same rule for the display readers; the two are consolidated at merge.
+    /// </summary>
     internal static async Task<Entity?> ReadSubmissionAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
     {
         var query = new QueryExpression(InvoiceReviewReadService.SubmissionEntity)
         {
             ColumnSet = new ColumnSet(InvoiceSubmissionPersister.SubmissionFindingsJson, InvoiceTotalsService.VersionNumber, InvoiceSubmissionPersister.SubmissionAdminAttention, "createdon"),
             Criteria = new FilterExpression(LogicalOperator.And),
-            TopCount = 1,
         };
         query.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
-        query.AddOrder("createdon", OrderType.Descending);
-        return (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        return (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
+            .FirstOrDefault(s => s.Id != Guid.Empty && InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoiceId);
     }
 
     /// <summary>
