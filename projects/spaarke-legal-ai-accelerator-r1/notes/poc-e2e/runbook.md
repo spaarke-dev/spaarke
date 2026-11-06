@@ -121,7 +121,13 @@ The policy follows §7.2a of `playbook-library-and-grounding.md`:
 **Setup.**
 - Open `Matters/Brightwater Systems/Brightwater Mutual NDA.docx` from the team site, in **Word desktop**.
 - The library holds v1.1 in `Legal Knowledge/Playbooks/NDA/`, with v1.0 in `Archive/`.
-- **The four-column template (backlog X2) is built (2026-11-06).** It copies Cowork's `create-playbook` file: a Title-style name, one scope paragraph, one table (Topic | Instructions | Example Text | Compromise Positions), and no ids. Its v1.1 copies are in OneDrive `Documents/Cowork/Test/POC-Act2/` and in `kit-held/Act 2 - Word copy template v2/`. The library still holds the older table file from 11-05.
+- **The four-column template (backlog X2) is built (2026-11-06).** It copies Cowork's `create-playbook` file: a Title-style name, one scope paragraph, one table (Topic | Instructions | Example Text | Compromise Positions), and no ids. Its v1.1 copies are in OneDrive `Documents/Cowork/Test/POC-Act2/` and in `kit-held/Act 2 - Word copy template v2/`. The team-site library now holds the same new file. The 11-05 table file was moved to `Playbooks/NDA/Archive/` as "… v1.1 (table, 2026-11-05 layout).docx".
+
+**Clean-up before the Word tests (2026-11-06; moves only, nothing deleted):**
+- Word's two earlier `Documents/Copilot/Created/mutual-nda-review-playbook*.docx` files were moved to `Created/_before-Act2/`, so R4 sees only what Word creates now.
+- `Cowork/Test/for-T-07` and `for-T-12-desktop` were moved to `Cowork/Test/_parked-2026-11-05/`.
+- The Cowork profile names "Spaarke NDA – Mutual, the newest version in the playbook folder", with no version number.
+- **Owner, before R1:** screenshot the `/Review contract` playbook picker. Keep the saved v1.0 until R6, then delete old saved cards.
 
 | # | Steps | Log |
 |---|---|---|
