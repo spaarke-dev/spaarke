@@ -109,6 +109,9 @@
 - [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization = primary .onmicrosoft.com
 
 ## AI platform / models / competitors
+- [Federated connector vs plugin vs DA for MCP widget+writes (2026-11-05)](federated-connector-widgets-writes-2026-11-05.md) — connector = no context switch, writes GA Oct 2026 w/ approval card; widgets documented only for DA (Chat) + plugin (Cowork); one server, 3 registrations; SSO home-tenant ≠ Model 1 guest oid → OAuth
+- [Copilot entry points: @, /, suggested prompts (2026-11-05)](copilot-entry-points-mention-slash-prompts-2026-11-05.md) — @=agents(+skills per RM569213); / in Cowork (and Chat via MC1493223) picks plugin skills, commands/ unsupported; no @connector; org prompts admin-published (pin 4, autosuggest, CSV, no group targeting); starters DA-only; Learn: name the source
+- [Opal (Frontier) computer-use agent (2026-11-05)](opal-frontier-computer-use-agent-2026-11-05.md) — browser-only CUA on W365 for Agents Cloud PC; allowlist default now ALLOW-ALL; billing/retention UNKNOWN
 - [Legal enablement-kit deploy paths (2026-10-29)](copilot-legal-enablement-kit-deployment-paths-2026-10-29.md) — users upload/share Cowork skills+plugins (Claude auto-convert, MCP) w/o admin; Word legal not extensible; store 4-6 wks
 - [Copilot for Legal + Cowork + plugin registry (2026-10-29)](ms-copilot-for-legal-cowork-registry-2026-10-29.md) — legal plugins GA 10-15, Legal Agent retired; .docx playbooks only; ISV MCP plugin path; Business-apps plugin writes Dataverse
 - [Foundry + Work IQ delta (2026-10-29)](foundry-work-iq-delta-2026-10-29.md) — Foundry IQ unchanged; GPT-6 GA; Routines GA; Work IQ `retrieve` (SPE, preview); Dataverse-in-Work-IQ deprioritised; AF 1.26
@@ -142,3 +145,5 @@
 - [Dataverse duplicate detection API (2026-10-15)](dataverse-duplicate-detection-api-default-2026-10-15.md) — suppressed by default
 - [xms_edov claim (2026-10-23)](entra-xms-edov-claim-2026-10-23.md) — needs email claim; absent vs false undocumented
 - [A9 dev Entra setup (2026-10-19)](entra-multitenant-api-a9-dev-setup-2026-10-19.md) — v2 token delta; AzureAd:Audience risk
+- [MCP server in .NET BFF + Copilot DA widget (2026-11-05)](mcp-server-dotnet-bff-copilot-widget-2026-11-05.md) — C# SDK 2.3.1 + official Extensions.Apps (experimental MCPEXP003); stateless default; Entra SSO setup; no .NET Entra+widget MS sample; Dataverse MCP now 16 tools (invoke_api)
+- [Copilot as Spaarke surface + Frontier (2026-11-05)](copilot-as-spaarke-surface-and-frontier-2026-11-05.md) — MCP Apps = summary+handoff not workspace (UX guide says no whole-SaaS); OpenUrlDialog preview; 3 MCP registration models; Frontier = tenant opt-in, NOT an ISV program; 9 tenant tests
