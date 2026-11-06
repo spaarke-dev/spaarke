@@ -810,3 +810,23 @@ Numbering note (2026-11-04): the "task 043" planned on 2026-11-02 for the `sprk_
 **Finding:** task 021's live timing (notes/task-021-live.md): the Create Matter create p95 rose by +2634 ms (budget +500 ms). Server medians: CallerChecks 983 ms (sequential AppendTo per bound record), PostCreate 1331 ms (the I-12 L1 assigned-access grant and the membership event inside the request), TableRules 302, Owner 261, FieldMapping 176, Create 136.
 
 **Decision (owner, this session):** speed up the server rather than raise the budget: run the per-record caller checks concurrently, and move the assigned-access grant (and membership event) out of the request so it completes within seconds after the record is returned. UAC-r2 reviews the grant timing. Then create the Project to Matter profile on dev (owner approved 2026-11-05) and re-measure. The 021 wizard deploy waits for that. Task 049.
+
+## 2026-11-05 — Role rulings on task 046's gaps (owner, given in UAC-r2's session)
+
+| Gap | Ruling |
+|---|---|
+| G1 Report Card | Spaarke Core User: Create, Append and AppendTo on `sprk_reportcard` at Deep (AppendTo also files a KPI assessment under a report card) |
+| G2 Event type | Spaarke Office Add In User: AppendTo on `sprk_eventtype_ref` Deep → Global |
+| G3 Office save to a contact (Basic User) | Not applied; Spaarke Basic User is unchanged. Office Add In User carries it (G4) |
+| G4 Office quick create with an assignee | Spaarke Office Add In User: AppendTo on `contact` Basic → Deep |
+| G5 Procedure override | Spaarke Billing Administrator: Read on `sprk_procedure` at Deep (already on dev; the file aligns) |
+| G6 Office version save | Spaarke **Office Add In User**: Write on `sprk_document` at Deep |
+| G7 / G8 Event regarding an account / a budget | Spaarke Office Add In User: AppendTo on `account` and on `sprk_budget` at Deep |
+| Office To Do; the Console Do lane | Stay Core-only |
+| New Billing Event (no role creates it) | Not decided here; passed to ebilling as a ribbon question |
+
+**Role model (owner):** add-on roles are **standalone**: an add-on may be held without a base role, so each add-on must meet its own features alone. Task 046b extends the matrix and guard to check each add-on alone, and sends the resulting gap list to UAC-r2 for one owner decision before any of it is applied.
+
+**Writer-only tables at role level:** no person role holds Create, Write or Delete on `sprk_signal`, `sprk_decisionrecord` or `sprk_budgetrevision`, except Spaarke Ontology Administrator, the designated cleanup role (ontology D-160). Task 046b's guard pins that rule.
+
+**How it is applied:** task 046b builds the role-file changes and an apply script (`-WhatIf`, `-Apply`, `-Verify`; edits the root role through the Web API and reads back every business-unit copy). UAC-r2 reviews it and runs `-Apply` on dev in its session under the owner's go.
