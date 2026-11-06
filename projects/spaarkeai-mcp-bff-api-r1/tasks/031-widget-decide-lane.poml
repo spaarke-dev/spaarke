@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>Widget Decide lane over MCP shims</title>
+    <phase>C Widget</phase>
+    <gate>after 022 and 030</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include frontend; modifies .ts/.tsx in the shared lib and the widget</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuses WorklistLanePanel, buildLaneView and WorklistService over the 030 shim with explicit FR-12 behaviour and Console reference mount</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns shared-lib Worklist component edits and the widget lane files; 025 touches none</parallel-reason>
+    <deps>022, 030</deps>
+    <tags>frontend, react, typescript, fluent-ui</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Render the Decide lane in the widget by reusing WorklistLanePanel (deep import) with buildLaneView and createWorklistService over the MCP fetch shim — header, category cards, rows grouped by matter, Start review across all pages — with billing Work Items shown only as a link out to Invoice Review and the Console's own worklist unchanged.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React, Fluent UI v9 and extending shared component libraries without breaking existing consumers.</role>
+  <goal>The widget shows the Decide lane with Console-equal counts, paging through the app-only page tool; billing rows link out with 'Finding' wording and no decide action; any shared-lib change is an optional seam and every existing Console worklist test passes unchanged.</goal>
+
+  <context>
+    <background>Spec FR-12, FR-05 (Start review walks the whole lane), D-208 ('Finding' only for billing link-outs). Gotchas: WorklistLanePanel is not exported from the Worklist barrel (deep import + buildLaneView; fallback a single-lane prop on WorklistWidget); openInvoiceReview.ts calls Xrm navigateTo and cannot run here — reuse buildInvoiceReviewLaunch(...).pageInput.data and encode once more inside a URL opened with the host's openLink; the live Console mounts the worklist through worklist.registration.ts.</background>
+    <relevant-files>
+      <file role="new">src/client/widgets/spaarke-decisions/src/lane/DecideLane.tsx</file>
+      <file role="new">src/client/widgets/spaarke-decisions/src/lane/billingLinkOut.ts</file>
+      <file role="new">src/client/widgets/spaarke-decisions/src/__tests__/DecideLane.test.tsx</file>
+      <file role="new">src/client/widgets/spaarke-decisions/src/__tests__/billingLinkOut.test.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Worklist/WorklistLanePanel.tsx (ONLY if needed: optional paging seam, e.g. hasMore/onLoadMore)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Worklist/WorklistWidget.tsx (ONLY if standalone mount fails: optional single-lane prop; props L76-102)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/Worklist/worklistView.ts (buildLaneView)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/Worklist/laneCountFilters.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/Worklist/openInvoiceReview.ts (buildInvoiceReviewLaunch L33; data rules only)</file>
+      <file role="canonical-reference">src/solutions/LegalWorkspace/src/sections/worklist.registration.ts:94-114 (how the Console injects fetch)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/Worklist/__tests__/WorklistInvoiceReview.test.tsx (billing behaviour to mirror)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="022" status="pending">spaarke_show_decisions and the paging tool (incl. consoleBaseUrl)</dependency>
+      <dependency task="030" status="pending">Widget scaffold and shims</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">This task reuses @spaarke/ui-components by deep import of source modules (not the barrel); it creates no per-project copy of a shared component; any shared-lib change is an optional prop or seam that leaves the Console's LegalWorkspace worklist mount (worklist.registration.ts) unchanged.</constraint>
+    <constraint source="project">Shared-lib changes are optional props with defaults that reproduce today's behaviour; LegalWorkspace's worklist.registration.ts, Spaarke.AI.Widgets' WorklistWorkspaceWidget and Spaarke.DailyBriefing's worklist section are not edited, and their tests pass unchanged.</constraint>
+    <constraint source="project">Billing Work Items (item.invoiceReview present) render only a link to the Invoice Review page sprk_invoicereviewpage built from consoleBaseUrl with data = 'invoiceId=' + bare lower-case guid (+ '&amp;lineId=' + guid only when present), that data string URL-encoded once in the link, opened via the host openLink; the row says 'Finding', offers no decide action, never opens the wizard and is skipped by Start review (EB-D-194, D-208).</constraint>
+    <constraint source="project">The widget uses no openLookup, openRecord or Xrm call, disables the narrative briefing, and keeps lane open/closed state in localStorage wrapped in try/catch so it degrades safely.</constraint>
+    <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hex, rgb or inline colour), supports host light and dark themes, and is operable by keyboard (NFR-07).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/widget-design/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/embedded-widget-sizing.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-host-visual-fit.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>knowledge/mcp-apps/NOTES.md</file>
+      <file>knowledge/mcp-apps/trey-research/src/mcpserver/widgets/src/hooks/useMcpApp.tsx</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/pre-pipeline-context.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Console worklist mount" location="src/solutions/LegalWorkspace/src/sections/worklist.registration.ts">Lines 94-114 show how fetch and openers are injected; mirror with MCP shims.</pattern>
+      <pattern name="GUID case" location=".claude/FAILURE-MODES.md">AP-3: GUID case mismatch; the Invoice Review link uses bare lower-case guids (cleanGuid in openInvoiceReview.ts).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Try mounting WorklistLanePanel standalone via deep import with buildLaneView and createWorklistService({ fetch: mcpFetch }); if it cannot mount, add the optional single-lane prop to WorklistWidget instead; record which in notes/decisions.md.</step>
+    <step order="2">Wire paging: first page from spaarke_show_decisions, later pages from the paging tool through the shim; add an optional paging seam to WorklistLanePanel only if needed.</step>
+    <step order="3">Implement billingLinkOut.ts from buildInvoiceReviewLaunch(...).pageInput.data and consoleBaseUrl; render billing rows with 'Finding' wording and no decide action; exclude them from Start review.</step>
+    <step order="4">Emit an openWizard(signalId) event for non-billing rows (032 consumes it).</step>
+    <step order="5">Write the widget tests; run the shared-lib, LegalWorkspace, AI.Widgets and DailyBriefing worklist tests unchanged; run the bundle-size check.</step>
+    <step order="6">Run the ui-tests against a local MCP Apps host with seeded data.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="8">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any existing Console worklist test would need an edit, STOP and escalate: the Console must be unchanged (FR-12).</trigger>
+    <trigger>If consoleBaseUrl is missing from 022's structuredContent, STOP and raise it against 022 rather than hard-coding a URL.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>WorklistWidget.tsx and WorklistLanePanel.tsx in the shared lib render the Decide lane for the Console; openInvoiceReview.ts (buildInvoiceReviewLaunch L33) opens Invoice Review through Xrm navigateTo.</existing>
+    <extension>Yes for rendering: the lane reuses WorklistLanePanel, buildLaneView and createWorklistService unchanged; the only new files are the frame adapter DecideLane.tsx and billingLinkOut.ts, needed because openInvoiceReview.ts calls Xrm navigateTo, which does not exist in the Copilot frame.</extension>
+    <cost-of-doing-nothing>The widget shows no Work Items (FR-12), and billing rows would either fail (no Xrm) or offer a decision that must stay in Invoice Review (EB-D-194).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Decide lane renders with Console counts">
+      <url>http://localhost:{basic-host-port}/?server={local-bff}/mcp/legal-operations</url>
+      <steps>
+        <step>Seed a user with 70 Decide-lane items across 3 matters, including 2 billing items</step>
+        <step>Load the widget through spaarke_show_decisions</step>
+        <step>Verify header 'Decide', the count and 'Items that need your decision'</step>
+        <step>Verify category cards (All, Invoice decisions, work types, Other) show count, oldest age and done today, and clicking one filters the rows</step>
+        <step>Check the browser console for JavaScript errors</step>
+      </steps>
+      <expected>Counts equal the Console's Decide lane for the same user; no console errors</expected>
+    </test>
+    <test name="Billing row links out only">
+      <steps>
+        <step>Find a billing Work Item row</step>
+        <step>Verify it reads 'Finding', has no decide action, and its link opens sprk_invoicereviewpage with invoiceId (and lineId when present)</step>
+        <step>Click Start review and verify billing rows are skipped</step>
+      </steps>
+      <expected>The wizard never opens for a billing row</expected>
+    </test>
+    <test name="Start review walks all pages">
+      <steps>
+        <step>Click Start review</step>
+        <step>Advance through items and verify the position label ('2 of 70')</step>
+        <step>Verify the last item is reached across page boundaries</step>
+      </steps>
+      <expected>Every non-billing item is reachable</expected>
+    </test>
+    <test name="Loading, empty and error states">
+      <steps>
+        <step>Delay the tool response and verify a loading state</step>
+        <step>Return zero items and verify the empty state</step>
+        <step>Return an isError result and verify the error state with the server message</step>
+      </steps>
+      <expected>Each state renders with Fluent components</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host (Cowork or the local MCP Apps host) to dark theme</step>
+        <step>Verify backgrounds adapt (no white surface in dark mode) and text adapts (no black text in dark mode)</step>
+        <step>Verify icons use currentColor</step>
+        <step>Switch back to light theme and verify the widget follows without reload</step>
+      </steps>
+      <expected>All colours come from Fluent v9 semantic tokens driven by host context (ADR-021); nothing is stored</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Install (npm install --legacy-peer-deps --no-audit --no-fund), build and test TypeScript projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/widgets/spaarke-decisions/src/lane/DecideLane.tsx</output>
+    <output type="code">src/client/widgets/spaarke-decisions/src/lane/billingLinkOut.ts</output>
+    <output type="test">src/client/widgets/spaarke-decisions/src/__tests__/DecideLane.test.tsx</output>
+    <output type="test">src/client/widgets/spaarke-decisions/src/__tests__/billingLinkOut.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The lane renders the header ('Decide', count, 'Items that need your decision'), category cards with count, oldest age and done today (click filters rows), and rows grouped by matter with reason and age.</criterion>
+    <criterion testable="true">The lane's counts equal spaarke_show_decisions' per-category counts for the same mocked data.</criterion>
+    <criterion testable="true">Start review walks every non-billing item across pages with a 'n of N' label and reaches item 200 in a 200-item mock.</criterion>
+    <criterion testable="true">Clicking a non-billing row emits openWizard(signalId).</criterion>
+    <criterion testable="true">A billing row renders 'Finding', a link to sprk_invoicereviewpage whose data is invoiceId={lower-case guid} plus &amp;lineId={lower-case guid} only when present, encoded once in the URL; it has no decide action and never opens the wizard.</criterion>
+    <criterion testable="true">Negative: a billing item with no invoiceId renders no link and no decide action (unit test).</criterion>
+    <criterion testable="true">Loading, empty and error states render; an isError result shows the server's message.</criterion>
+    <criterion testable="true">Existing shared-lib Worklist tests (including WorklistInvoiceReview and laneCountFilters), LegalWorkspace, AI.Widgets and DailyBriefing worklist tests pass with no edits.</criterion>
+    <criterion testable="true">No hex or inline colour in the widget source (grep); lane and rows are keyboard-operable; dist/index.html stays under 3 MB.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-12 acceptance 'in Cowork, /spaarke-decisions renders the lane' is verified live in 042. 'Finding' is the user word only for billing link-outs (D-208); generic rows say 'Work Item'.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

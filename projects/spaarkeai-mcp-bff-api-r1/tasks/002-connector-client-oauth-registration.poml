@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>A10 connector client, OAuth and connector registration</title>
+    <phase>0 Platform spike</phase>
+    <gate>after 001 (spike deployed to dev with the owner's per-SHA go)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates new files (runbook draft, registration facts) under explicit ADR-028 constraints; no code files</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth-sensitive (tags auth, oauth): A10 client registration, public vs confidential client choice and client-secret handling under root CLAUDE.md §9</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owner-run admin steps plus notes files only; shares no file with 012</parallel-reason>
+    <deps>001</deps>
+    <tags>auth, oauth, azure, config</tags>
+    <estimated-effort>2-4 hours (elapsed time depends on the owner)</estimated-effort>
+  </metadata>
+
+  <prompt>Prepare and, with the owner running every admin-center step, complete the dev-tenant registration that T5 needs: the A10 OAuth client 'Spaarke Copilot Connector – dev', the Teams Developer Portal OAuth registration at the Spaarke-tenant authority, and the federated Copilot connector 'Spaarke' pointing at the spike's /mcp/legal-operations; then run T5 with a licensed non-admin user.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Entra ID app registrations, OAuth 2.0 authorization code + PKCE, and Microsoft 365 Copilot connector administration.</role>
+  <goal>A runbook draft exists for every registration step; the owner has executed them; notes/phase0-registration-facts.md records the non-secret registration facts and the dated T5 outcome.</goal>
+
+  <context>
+    <background>ADR-028 A10 (owner-approved 2026-11-05) defines the Copilot/Cowork connector client plane: OAuth at the Spaarke-tenant authority, aud = BFF app, scope user_impersonation, never the connector's Entra SSO option on Model 1. Spec FR-16 and design §13 T5 (gates everything). The owner is Global Admin and runs admin-center steps (O-20).</background>
+    <relevant-files>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r1/notes/drafts/connector-registration-runbook.md</file>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r1/notes/phase0-registration-facts.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-028-spaarke-auth-architecture.md (A10 section)</file>
+      <file role="canonical-reference">.claude/constraints/provisioning.md ('KV credential lifecycle')</file>
+      <file role="canonical-reference">docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md (April agent registration; reference only)</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/notes/coordination/2026-11-06-copilot-naming-and-ownership.md §1 (client and connector names)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite task; startable in Wave 1.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">The connector's OAuth configuration uses the Spaarke-tenant authority, aud = the BFF app and scope api://{bffAppId}/user_impersonation; the connector's Entra SSO option is never selected (A10).</constraint>
+    <constraint source="ADR-028">Client type: try a public client with PKCE first; only if the Developer Portal rejects it, use one confidential client whose secret lives only in Microsoft's registration (A10).</constraint>
+    <constraint source="project">Any client-secret creation, Key Vault secret write or credential-order change in this task requires the human's explicit confirmation in-session before it happens (root CLAUDE.md §9, .claude/constraints/provisioning.md 'KV credential lifecycle'); no secret value is written to any file in the repo.</constraint>
+    <constraint source="project">The owner (Global Admin) runs every admin-center and Developer Portal step (O-20); this task prepares the steps, records results and verifies, and never runs an admin-center step itself.</constraint>
+    <constraint source="project">Names follow the naming note exactly: OAuth client 'Spaarke Copilot Connector – dev'; connector display name 'Spaarke'; never 'Spaarke Copilot' or 'Spaarke Connect' for the connector.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>knowledge/m365-copilot</file>
+      <file>docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/agent-memory/researcher/federated-connector-widgets-writes-2026-11-05.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/coordination/2026-11-06-copilot-naming-and-ownership.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/design.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read ADR-028 A10 and .claude/constraints/provisioning.md 'KV credential lifecycle'.</step>
+    <step order="2">Write notes/drafts/connector-registration-runbook.md: (a) Entra app 'Spaarke Copilot Connector – dev' as a public client with PKCE, delegated permission api://{bffAppId}/user_impersonation, redirect URIs taken from the Developer Portal; (b) Teams Developer Portal OAuth client registration with the Spaarke-tenant authority; (c) Microsoft 365 admin center › Copilot › Connectors › 'Connect to MCP server', display name 'Spaarke', URL = the spike's {devBffUrl}/mcp/legal-operations; (d) a licensed non-admin user connects in Settings › Sources.</step>
+    <step order="3">Hand the runbook to the owner; the owner executes (a)–(c); record each result.</step>
+    <step order="4">If the Developer Portal rejects a public client, STOP for the human's confirmation before any client-secret creation; then follow the confidential-client branch with the secret held only in Microsoft's registration.</step>
+    <step order="5">With the owner, run T5: a licensed non-admin user connects, calls spike_whoami through the connector; record the decoded claim names (aud, scp, tid, oid present/absent) and the returned systemuserid.</step>
+    <step order="6">Record in notes/phase0-registration-facts.md: client app id, display name, client type and why, redirect URIs, scope, authority tenant, connector display name, whether each step is scriptable, the T5 result with date and evidence — no secret values.</step>
+    <step order="7">Run a repo-wide grep for the client id's secret prefix and 'clientSecret' in the changed files to prove no secret was written.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="9">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before any client-secret creation or Key Vault secret write, STOP and get the human's explicit confirmation (root CLAUDE.md §9).</trigger>
+    <trigger>If the Developer Portal or connector cannot use a Spaarke-tenant authority, or the connector only offers Entra SSO, STOP: T5 fails; record it and escalate per FR-19 (stop the project and raise a follow-up ADR-028 amendment).</trigger>
+    <trigger>If any step needs an admin role the owner does not hold, STOP and ask the owner to designate a second admin rather than working around it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>A8 workforce client and A9 SPA client (ADR-028); the April 'Spaarke Copilot Agent client' (copilotAgentClientAppId) used by src/solutions/CopilotAgent/.</existing>
+    <extension>No: A10 requires a separate client with its own consent, redirect URIs and revocable credential; reusing A8/A9 would mix planes and break revocation.</extension>
+    <cost-of-doing-nothing>The connector cannot obtain a Spaarke-tenant token, so T5 cannot run, FR-16 fails and guests would fail on Model 1.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">Run shell commands (grep, wc, git diff)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/notes/drafts/connector-registration-runbook.md</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/notes/phase0-registration-facts.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/phase0-registration-facts.md lists the client app id, display name exactly 'Spaarke Copilot Connector – dev', client type with reason, redirect URIs, scope api://{bffAppId}/user_impersonation, Spaarke-tenant authority, connector display name 'Spaarke', and for each step whether it is scriptable.</criterion>
+    <criterion testable="true">The connector's OAuth uses the Spaarke-tenant authority and not the Entra SSO option (recorded with the owner's confirmation).</criterion>
+    <criterion testable="true">Negative: no secret value appears in any repo file (grep evidence in the task notes); no Key Vault secret was written without a recorded human confirmation.</criterion>
+    <criterion testable="true">T5 is recorded with a date: pass = a licensed non-admin user's call through the connector returned that user's systemuserid via OBO and aud/scp/tid/oid were present; fail = the reason.</criterion>
+    <criterion testable="true">Every admin-center step was run by the owner, not by the agent (stated per step in the runbook draft).</criterion>
+  </acceptance-criteria>
+
+  <notes>The runbook draft is finalised into docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md by task 042 after the connector is re-pointed at the real endpoint. T5 gates everything (FR-19): task 003 owns the stop decision if it failed.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. This task is owner-driven: pause at each admin step and wait for the owner's confirmation.</protocol>
+  </execution>
+</task>

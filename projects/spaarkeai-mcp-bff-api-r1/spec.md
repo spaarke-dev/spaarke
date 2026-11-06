@@ -222,7 +222,7 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
       - clicking a row opens that Work Item's wizard;
       - loading, empty and error states render;
       - the Console's own worklist is unchanged (its tests pass, with no visual change).
-      - billing Work Items (invoice decisions) render only as a link out to the Invoice Review page (`sprk_invoicereviewpage`; the raw `data` value is `invoiceId={guid}` plus `&lineId={guid}` only when the item has a line, with bare lower-case guids, URL-encoded once in the link. These are the rules of #2579's `openInvoiceReview.ts`, which itself calls Xrm `navigateTo` and can't be used in the widget. `lineId` is ignored today and turns on line focus when EB-D-194's optional parameter lands, as confirmed by ontology and ebilling on 2026-11-06). A billing row offers **no decide action**, and the wizard never opens for it, built from the item's `invoiceReview` member. They are never completed in Copilot (EB-D-194). Until ontology #2580 is on master, those items are omitted or shown without a link.
+      - billing Work Items (invoice decisions) render only as a link out to the Invoice Review page (`sprk_invoicereviewpage`; the raw `data` value is `invoiceId={guid}` plus `&lineId={guid}` only when the item has a line, with bare lower-case guids, URL-encoded once in the link. These are the rules of #2579's `openInvoiceReview.ts`, which itself calls Xrm `navigateTo` and can't be used in the widget. `lineId` is ignored today and turns on line focus when EB-D-194's optional parameter lands, as confirmed by ontology and ebilling on 2026-11-06). A billing row offers **no decide action**, and the wizard never opens for it, built from the item's `invoiceReview` member. They are never completed in Copilot (EB-D-194). #2580's `invoiceReview` member is on this branch (merged 2026-11-06), so the link is always built.
 
 13. **FR-13 — Widget: the Decision wizard.** `DecisionWizardHost` / `DecisionItemWizard` run through a `ResponseFetchFn` shim mapped onto FR-06, FR-07 and FR-08.
     - The flow is: What was found → one step per planned action → Next steps → Confirm.
@@ -431,7 +431,7 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
   1. **No dev BFF deploy from this branch until ontology's pair has deployed** (it waits for ebilling task 112). Phase 0 live tests (T0–T14, E1–E5) therefore run from a **separate spike branch cut from master**, deployed through the owner's per-SHA go in uac-r2's session. If this branch must deploy sooner, back the merge out first.
   2. The D-207 order and replay guard stay unchanged. The MCP commit goes through the same `DecisionCommitService` entry, never a second route that skips 1c-billing.
   3. Ontology's pair merges to master first. If either branch gets new commits, re-merge (they merge, never rebase).
-- **Sequencing with ontology-platform (agreed 2026-11-06):** B-1, B-2 and B-5 start after PR #2580 (D-207; it adds the `ontology.decision.decided_in_invoice_review` 409 and `invoiceReview` on worklist items) reaches master. B-3, B-4 and the MCP foundation can start now. B-5's `WorklistItemSummary` must keep `invoiceReview`.
+- **Sequencing with ontology-platform (agreed 2026-11-06):** B-1, B-2 and B-5 build on the PR #2580 code now on this branch (merged 2026-11-06; D-207, it adds the `ontology.decision.decided_in_invoice_review` 409 and `invoiceReview` on worklist items) rather than waiting for master. B-3, B-4 and the MCP foundation can start now. B-5's `WorklistItemSummary` must keep `invoiceReview`.
 - **Reviews:**
   - ontology-platform reviews every PR touching `Services/Signals/**`, `Api/Signals/**` or the worklist route;
   - unified-access-control-r2 reviews every auth diff (FR-02 conditions);
@@ -491,7 +491,7 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
 - [ ] **`WorklistLanePanel` standalone mount:** can it mount outside `WorklistWidget`? - Blocks: FR-12 approach (fallback: a single-lane prop on `WorklistWidget`).
 - [ ] **Widget init budget:** does the shimmed wizard (with Lexical `EmailComposer`) fit 3 MB and an acceptable init time? - Blocks: FR-13 approach (fallback: `decisionDraft.ts` re-render).
 - [ ] **Billing review in Copilot (next slice):** EB-D-194 / D-207 keep invoice decisions in the Invoice Review app - Blocks: nothing in v1; needs an owner decision before the billing slice.
-- [ ] **PR #2580 timing:** held until ebilling task 112 deploys Invoice Review to dev - Blocks: B-1, B-2 and B-5 start; billing link-outs in the list.
+- [x] **PR #2580 timing:** held until ebilling task 112 deploys Invoice Review to dev - Blocks: B-1, B-2 and B-5 start; billing link-outs in the list. Resolved 2026-11-06: merged into this branch; only the deploy gate remains (Dependencies, condition 1).
 - [ ] **Connector creation by script:** is there an API or script for creating connectors? - Blocks: nothing in v1; it informs later customer provisioning.
 
 ---

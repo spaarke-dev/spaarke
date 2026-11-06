@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>B-3 decision lookup search and REST route</title>
+    <phase>A BFF rework</phase>
+    <gate>after 013</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api and authorization; new service and endpoint (.cs)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security boundary (authorization tag): the server must stop a client widening a search (plan-driven entity, D-18 matter scoping, caller record access, fail closed)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns IDecisionLookupSearch.cs, DecisionLookupSearch.cs, SignalsModule.cs and DecisionPlanEndpoints.cs in its wave; 014 and 021 touch none</parallel-reason>
+    <deps>013</deps>
+    <tags>bff-api, api, endpoints, authorization, unit-test, integration-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add IDecisionLookupSearch, a plan-driven workforce lookup that searches contacts, matter-scoped budgets and organisations as the caller, and expose it at GET /api/v1/signals/{signalId}/lookup?parameterCode=&amp;query= in the existing decision-plan route group, failing closed and never using the external-plane policy.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in secure server-side query construction over Dataverse OData and ASP.NET Core authorization.</role>
+  <goal>IDecisionLookupSearch and DecisionLookupSearch exist and are registered; the REST route returns capped, scoped results for every lookup parameter of the six action types; the negatives in FR-07 hold.</goal>
+
+  <context>
+    <background>Spec FR-07, design §8 B-3: D-18 ('a budget belongs to the matter') is enforced today only by the Console's browser picker (Spaarke.AI.Widgets/src/widgets/workspace/worklistLookup.ts:54-74; DecisionActionExecutors.cs:380-381). The external SPA's /fetch (ExternalModuleDataEndpoints.cs, guard L897, scope injection L301-356) shows the server-built, scoped, fail-closed pattern on the external plane; copy the pattern, not the plane. The Console keeps its browser picker in v1 (spec Assumptions).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionLookupSearch.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionLookupSearch.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SignalsModule.cs (AddScoped IDecisionLookupSearch)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionPlanEndpoints.cs (new group.MapGet("/{signalId:guid}/lookup") in the existing /api/v1/signals group)</file>
+      <file role="new">tests/unit/domain/Signals/DecisionLookupSearchTests.cs</file>
+      <file role="new">tests/integration/auth/Signals/DecisionLookupRouteAuthTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Signals/DecisionLookupRouteContractTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs (guard L897, scope injection L301-356): pattern only</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionParameterSources.cs (plan parameter sources)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs:380-381 (budget belongs to the matter)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/worklistLookup.ts:54-74 (current client-side rule)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">IDecisionCapability.GetPlanAsync supplies the plan that drives the lookup</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">The lookup entity and scoping rule come only from the Signal's decision plan for the given parameterCode; the client supplies only signalId, parameterCode and query text, and cannot name an entity, column or filter.</constraint>
+    <constraint source="ADR-028">Every lookup read runs as the caller through IDataverseUserClient (OBO); no app-only read returns lookup results; an unpopulated ICallerContext returns UserContextRequired.</constraint>
+    <constraint source="ADR-008">No endpoint or MCP tool added or changed by this task carries the ExternalCollaboration policy or the external access guard; workforce routes use .RequireAuthorization() on the default workforce scheme plus existing policies.</constraint>
+    <constraint source="project">The query text is escaped as an OData string literal before use; no user text is concatenated into a filter unescaped; results are capped at 25 per call.</constraint>
+    <constraint source="ADR-002">Fail closed: an unreadable Signal returns the same uniform refusal the plan route returns; an unknown parameterCode returns ontology.decision.invalid_parameter; a Dataverse fault returns a failure, never a partial or unscoped list.</constraint>
+    <constraint source="project">The route lives in the existing /api/v1/signals group in DecisionPlanEndpoints.cs (so EndpointMappingExtensions.cs is not edited) and inherits that group's authorization.</constraint>
+    <constraint source="ADR-015">Every log statement or telemetry property this task adds records identifiers, sizes, timings and outcome/reason codes only: no bearer token, claim value, record text or tool argument (NFR-05).</constraint>
+    <constraint source="project">Every PR from this task that touches Services/Signals/**, Api/Signals/** or the worklist route is reviewed by spaarke-ontology-platform-r1 before merge (project CLAUDE.md §4); run /conflict-check before opening it.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>.claude/patterns/auth/dataverse-obo.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/design.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read ExternalModuleDataEndpoints.cs (L301-356, L897) for the scoped-query pattern and DecisionParameterSources for how the plan declares lookup parameters.</step>
+    <step order="2">Define IDecisionLookupSearch.SearchAsync(signalId, parameterCode, query, ct) and implement: load the plan as the caller; resolve the parameter's LookupEntity and scope (budget → filtered to the Signal's matter; contact; organisation); build the OData query server-side with the escaped query text; read as the caller; cap at 25.</step>
+    <step order="3">Register it in SignalsModule.cs and map GET /{signalId:guid}/lookup in DecisionPlanEndpoints.cs, returning results or DecisionResultMapper.ToHttp failures.</step>
+    <step order="4">Write unit tests per action type (revise-budget, reassign, add-todo, assign-work, assign-task, inquiry outside firm) and the negatives; write auth and contract tests for the route.</step>
+    <step order="5">Run the Signals suites and ArchTests (RouteAuthorizationGuardTests must cover the new route); measure the publish-size delta; open the PR for ontology review.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="7">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an action type's lookup parameter has no scoping rule in the plan that the server can apply, STOP and list it rather than inventing a rule.</trigger>
+    <trigger>If the route would need any policy beyond the plan route group's existing authorization, STOP and escalate (auth diff; unified-access-control-r2 reviews).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Console browser lookup Spaarke.AI.Widgets/src/widgets/workspace/worklistLookup.ts (Xrm.WebApi); external-plane ExternalModuleDataEndpoints.cs POST /api/v1/external/api/dataverse/fetch.</existing>
+    <extension>No: a browser Xrm helper cannot run on the server, and the external route's dual-scheme policy and external access guard must not serve workforce callers.</extension>
+    <cost-of-doing-nothing>Six action types (revise-budget, reassign, add-todo, assign-work, assign-task, inquiry outside firm) cannot be completed outside the Console, and D-18 stays enforced only in the browser.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionLookupSearch.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionLookupSearch.cs</output>
+    <output type="test">tests/unit/domain/Signals/DecisionLookupSearchTests.cs</output>
+    <output type="test">tests/integration/auth/Signals/DecisionLookupRouteAuthTests.cs</output>
+    <output type="test">tests/integration/contract/Api/Signals/DecisionLookupRouteContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For each lookup parameter of the six action types, the search returns contacts, budgets of the Signal's matter, or organisations as the plan declares, at most 25 per call.</criterion>
+    <criterion testable="true">Negative: a parameterCode not in the plan returns ontology.decision.invalid_parameter (REST: the mapped ProblemDetails).</criterion>
+    <criterion testable="true">Negative: a budget belonging to another matter never appears, even when the query text matches it exactly.</criterion>
+    <criterion testable="true">Negative: a record the caller cannot read never appears (as-caller read; test with a caller lacking read on a seeded record).</criterion>
+    <criterion testable="true">Negative: a Signal the caller cannot read returns the same refusal as the decision-plan route; an anonymous call returns 401.</criterion>
+    <criterion testable="true">Negative: query text containing a single quote or OData operators does not error and does not widen the result set.</criterion>
+    <criterion testable="true">The route's endpoint metadata carries no ExternalCollaboration policy (test) and RouteAuthorizationGuardTests passes.</criterion>
+    <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE) and the ontology review.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>The 25-result cap and the route path /api/v1/signals/{signalId}/lookup are this task's concrete choices for 'capped' and 'a REST route' in FR-07; record them in notes/decisions.md. A seeding proof is requested for the other-matter-budget negative (a widened search is a data-exposure outcome).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
