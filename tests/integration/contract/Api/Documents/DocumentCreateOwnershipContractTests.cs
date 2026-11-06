@@ -99,9 +99,12 @@ public class DocumentCreateOwnershipContractTests
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
+        // The request carries the client's container; the row does not store it (the server derives and checks it).
         factory.CreatedRequests.Should().ContainSingle().Which.ContainerId.Should().Be(TestActingUserBusinessUnit.ContainerId);
         factory.PrivilegesAsked.Should().Equal(new[] { "prvCreatesprk_Document" },
             "the app-only create is allowed only for a caller who could create a document themselves");
+        factory.TokensPassed.Should().Equal(new[] { DocumentCreateTestWebAppFactory.CallerToken },
+            "the privilege is asked with the CALLER's own token, never the app's or none");
         factory.Ownership.Requests.Should().ContainSingle("the owner team is still resolved exactly as before");
     }
 
@@ -170,7 +173,9 @@ public class DocumentCreateOwnershipContractTests
     }
 
     [Fact]
-    public async Task PostDocument_WhenThePrivilegeCheckThrows_Is403SystemFailure_AndWritesNothing()
+    // Defence in depth: the real probe answers a Dataverse fault as "not held" (the insufficient-rights 403, pinned by the
+    // no-privilege test); an unexpected exception from it, or a timeout, still denies with the system-failure code.
+    public async Task PostDocument_WhenThePrivilegeProbeThrowsUnexpectedly_Is403SystemFailure_AndWritesNothing()
     {
         using var factory = new DocumentCreateTestWebAppFactory { HoldsCreate = null };
 
@@ -222,11 +227,18 @@ public class DocumentCreateOwnershipContractTests
         /// <summary>Every table privilege the endpoint asked about, in order.</summary>
         public List<string> PrivilegesAsked { get; } = new();
 
+        /// <summary>The bearer token the probe was given for each question: it must be the caller's own.</summary>
+        public List<string?> TokensPassed { get; } = new();
+
+        /// <summary>The caller's bearer token, sent by <see cref="CallerClient"/>.</summary>
+        public const string CallerToken = "caller-token-under-test";
+
         /// <summary>A client signed in as <see cref="TestSessionOwner.Oid"/>, the caller the Dataverse double knows.</summary>
         public HttpClient CallerClient()
         {
             var client = CreateClient();
             client.DefaultRequestHeaders.Add("X-Test-Oid", TestSessionOwner.Oid);
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", CallerToken);
             return client;
         }
 
@@ -245,8 +257,9 @@ public class DocumentCreateOwnershipContractTests
                     var probe = ComposeServiceCollaborators.Probe();
                     probe.Setup(p => p.CallerHoldsPrivilegeAsync(
                             It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                        .Returns((string? _, string privilege, CancellationToken _) =>
+                        .Returns((string? token, string privilege, CancellationToken _) =>
                         {
+                            TokensPassed.Add(token);
                             PrivilegesAsked.Add(privilege);
                             return HoldsCreate is { } holds
                                 ? Task.FromResult(holds)

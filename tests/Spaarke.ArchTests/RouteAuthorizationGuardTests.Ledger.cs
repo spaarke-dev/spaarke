@@ -2376,10 +2376,11 @@ public partial class RouteAuthorizationGuardTests
             + ":443), then the NEW matter is checked AppendTo as the caller through CallerRecordAccessProbe (:448)."),
         new HandlerDecision("POST /api/v1/documents", "CreateDocumentAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (the former Pending UNOWNED-NEW waiver): before the app-only write (DataverseDocumentsEndpoints.cs:977) "
-            + "AuthorizeDocumentCreateAsync (:932, :1057) asks the caller's Create on sprk_document AS THE CALLER through "
-            + "CallerRecordAccessProbe.CallerHoldsPrivilegeAsync (:1071), then requires the body's ContainerId to be the "
-            + "caller's business-unit container, derived server-side by RecordContainerResolver.ResolveForActingUserAsync "
-            + "(:1090, :1117). Not held and another container are one 403; a fault is a 403; no container is refused."),
+            + "AuthorizeDocumentCreateAsync (:932, :1060) asks the caller's Create on sprk_document AS THE CALLER through "
+            + "CallerRecordAccessProbe.CallerHoldsPrivilegeAsync (:1074), then derives the caller's business-unit container "
+            + "server-side by RecordContainerResolver.ResolveForActingUserAsync (:1093; an enabled, internal user only) and "
+            + "requires the body's ContainerId to match it (:1120; the row does not store it). Not held and another "
+            + "container are one 403; an exception or timeout is a 403; no container is refused."),
         new HandlerDecision("POST /api/v1/field-mappings/push", "PushFieldMappingsAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-67): Read on the SOURCE record and the caller's systemuserid through CallerRecordAccessProbe "
             + "(FieldMappingEndpoints.cs:474, :776), then the source and the children are read and written impersonated as "

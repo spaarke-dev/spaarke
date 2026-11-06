@@ -1048,8 +1048,11 @@ public static class DataverseDocumentsEndpoints
     /// </summary>
     /// <remarks>
     /// Fails closed: a privilege not held and a container that is not the caller's are the same 403
-    /// (<see cref="FinanceAuthorizationFilter.InsufficientRightsReasonCode"/>, <see cref="DocumentCreateDeniedDetail"/>);
-    /// a fault in either check is a 403 <see cref="FinanceAuthorizationFilter.SystemFailureReasonCode"/>. A business
+    /// (<see cref="FinanceAuthorizationFilter.InsufficientRightsReasonCode"/>, <see cref="DocumentCreateDeniedDetail"/>).
+    /// The probe answers a Dataverse fault as "not held" (a limit it shares with its other callers), so that fault is the
+    /// insufficient-rights 403; an exception from either check is a 403 <see cref="FinanceAuthorizationFilter.SystemFailureReasonCode"/>,
+    /// a timeout included. The body's container is not stored on the row; comparing it confirms the client and the
+    /// server agree, and deriving it applies the resolver's eligibility rule (an enabled, internal user). A business
     /// unit with no container is refused (409, as the record-less upload route refuses it), and the resolver's own typed
     /// refusals (a caller with no usable Dataverse user) are returned as they are. The body's container is never
     /// replaced: a mismatch is refused.
@@ -1071,7 +1074,7 @@ public static class DataverseDocumentsEndpoints
             holdsCreate = await accessProbe.CallerHoldsPrivilegeAsync(
                 Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(context), CreateDocumentPrivilege, ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             logger.LogError(ex, "Document create: the {Privilege} check faulted; refusing (fail closed)", CreateDocumentPrivilege);
             return DocumentCreateCheckFaulted(traceId);
@@ -1097,7 +1100,7 @@ public static class DataverseDocumentsEndpoints
                 statusCode: ex.StatusCode, title: ex.Title, detail: ex.Detail,
                 extensions: new Dictionary<string, object?> { ["code"] = ex.Code, ["traceId"] = traceId });
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             logger.LogError(ex, "Document create: deriving the caller's business-unit container faulted; refusing (fail closed)");
             return DocumentCreateCheckFaulted(traceId);
