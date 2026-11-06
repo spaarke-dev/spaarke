@@ -159,7 +159,9 @@
         (i) a linked submission's own line (`line.Id == InvoiceSubmissionPersister.LineIdFor(submissionId, sequence - 1)` for a submission
         linked to this invoice), nor (ii) the subject of an `add-line` Decision Record that names THIS invoice and THIS line id and was written
         by the BFF Add line service (app-only).
-      - The reviewer-added marker in `sprk_extractionconfidence` is NOT an exemption.
+      - The reviewer-added marker in `sprk_extractionconfidence` is NOT an exemption. An added line's id is
+        `AddedLineIdFor(decisionId)` (164a-2 fix round), and (ii) also requires `line.Id == AddedLineIdFor(record's decision id)`.
+        The service creates the row with that id, which also gives the Q3 idempotency.
       - (ii) must be unforgeable. In the notes and the PR, cite the writer-only or append-only refusal of a user-created or user-updated
         `sprk_decisionrecord` through the generic BFF paths, and the role privileges on the table that close the direct path.
       - The line set is re-checked inside the approval's own row-version or lock scope. If it can't be, record a known limit stating what still holds.
