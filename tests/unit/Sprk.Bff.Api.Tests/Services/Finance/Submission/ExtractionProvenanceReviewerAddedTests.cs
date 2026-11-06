@@ -14,11 +14,15 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 public sealed class ExtractionProvenanceReviewerAddedTests
 {
     private static readonly Guid DecisionId = Guid.Parse("a164a200-0000-4000-8000-0000000000d1");
+    private static readonly Guid InvoiceId = Guid.Parse("a164a200-0000-4000-8000-0000000000a1");
+    private static readonly Guid OtherInvoiceId = Guid.Parse("a164a200-0000-4000-8000-0000000000a2");
 
-    private static Entity Row(Guid id, string? extraction)
+    /// <summary>A line row on <paramref name="invoice"/> (default <see cref="InvoiceId"/>; <see cref="Guid.Empty"/>: no invoice lookup).</summary>
+    private static Entity Row(Guid id, string? extraction, Guid? invoice = null)
     {
         var row = new Entity("sprk_billingevent", id);
         if (extraction is not null) row["sprk_extractionconfidence"] = extraction;
+        if ((invoice ?? InvoiceId) is var on && on != Guid.Empty) row["sprk_invoice"] = new EntityReference("sprk_invoice", on);
         return row;
     }
 
@@ -43,20 +47,32 @@ public sealed class ExtractionProvenanceReviewerAddedTests
             "no analyzer pair: an extracted-field correction of an added line is refused (brief K1)");
     }
 
-    [Fact(DisplayName = "164a-2 F1 must-not-fire: a row whose id is AddedLineIdFor(decisionId) and whose marker names that decision reads reviewer-added")]
+    [Fact(DisplayName = "164a-2 F1 must-not-fire: a row on its invoice whose id is AddedLineIdFor(invoice, decisionId) and whose marker names that decision reads reviewer-added")]
     public void AnAddedRow_ReadsTrue()
     {
-        var row = Row(ExtractionProvenance.AddedLineIdFor(DecisionId), ExtractionProvenance.ForReviewerAddedLine(DecisionId));
+        var row = Row(ExtractionProvenance.AddedLineIdFor(InvoiceId, DecisionId), ExtractionProvenance.ForReviewerAddedLine(DecisionId));
 
         ExtractionProvenance.IsReviewerAdded(row).Should().BeTrue();
     }
 
-    [Fact(DisplayName = "164a-2 F1: the added line id is derived from the decision id alone: stable, distinct per decision, and apart from the intake line ids")]
+    [Fact(DisplayName = "164a-2 F1: the added line id is derived from the invoice and the decision id: stable, distinct per decision and per invoice, and apart from the intake line ids")]
     public void TheAddedLineId_IsDeterministic_AndApartFromIntakeIds()
     {
-        ExtractionProvenance.AddedLineIdFor(DecisionId).Should().Be(ExtractionProvenance.AddedLineIdFor(DecisionId));
-        ExtractionProvenance.AddedLineIdFor(DecisionId).Should().NotBe(ExtractionProvenance.AddedLineIdFor(Guid.Parse("a164a200-0000-4000-8000-0000000000d2")));
-        ExtractionProvenance.AddedLineIdFor(DecisionId).Should().NotBe(InvoiceSubmissionPersister.LineIdFor(DecisionId, 0));
+        ExtractionProvenance.AddedLineIdFor(InvoiceId, DecisionId).Should().Be(ExtractionProvenance.AddedLineIdFor(InvoiceId, DecisionId));
+        ExtractionProvenance.AddedLineIdFor(InvoiceId, DecisionId).Should().NotBe(ExtractionProvenance.AddedLineIdFor(InvoiceId, Guid.Parse("a164a200-0000-4000-8000-0000000000d2")));
+        ExtractionProvenance.AddedLineIdFor(InvoiceId, DecisionId).Should().NotBe(ExtractionProvenance.AddedLineIdFor(OtherInvoiceId, DecisionId));
+        ExtractionProvenance.AddedLineIdFor(InvoiceId, DecisionId).Should().NotBe(InvoiceSubmissionPersister.LineIdFor(DecisionId, 0));
+    }
+
+    [Fact(DisplayName = "164a fix round K2 must-fire: an added row moved to another invoice reads false there (an ordinary line); with no invoice it reads false")]
+    public void AnAddedRow_MovedToAnotherInvoice_ReadsFalse()
+    {
+        var id = ExtractionProvenance.AddedLineIdFor(InvoiceId, DecisionId);
+        var marker = ExtractionProvenance.ForReviewerAddedLine(DecisionId);
+
+        ExtractionProvenance.IsReviewerAdded(Row(id, marker, OtherInvoiceId)).Should().BeFalse("the id derives from the invoice it was added on, not the one it is on");
+        ExtractionProvenance.IsReviewerAdded(Row(id, marker, Guid.Empty)).Should().BeFalse("no invoice on the row proves nothing");
+        ExtractionProvenance.IsReviewerAdded(Row(id, marker, InvoiceId)).Should().BeTrue("must-not-fire: back on its own invoice");
     }
 
     [Fact(DisplayName = "164a-2 F1 must-fire: an INTAKE line (any other id) carrying a valid-looking reviewer marker reads false, whatever decision id it names")]
@@ -71,7 +87,7 @@ public sealed class ExtractionProvenanceReviewerAddedTests
     [Fact(DisplayName = "164a-2 F1 must-fire: a genuine added row whose marker names another decision reads false (the decision id does not match the id)")]
     public void AnAddedRow_WhoseMarkerNamesAnotherDecision_ReadsFalse()
     {
-        var row = Row(ExtractionProvenance.AddedLineIdFor(DecisionId), ExtractionProvenance.ForReviewerAddedLine(Guid.Parse("a164a200-0000-4000-8000-0000000000d2")));
+        var row = Row(ExtractionProvenance.AddedLineIdFor(InvoiceId, DecisionId), ExtractionProvenance.ForReviewerAddedLine(Guid.Parse("a164a200-0000-4000-8000-0000000000d2")));
 
         ExtractionProvenance.IsReviewerAdded(row).Should().BeFalse();
     }
@@ -100,7 +116,7 @@ public sealed class ExtractionProvenanceReviewerAddedTests
     public void AnythingElse_IsNotReviewerAdded(string? json)
     {
         // Even on the id that WOULD match the decision in the column, the rest of the marker must hold.
-        ExtractionProvenance.IsReviewerAdded(Row(ExtractionProvenance.AddedLineIdFor(DecisionId), json)).Should().BeFalse();
+        ExtractionProvenance.IsReviewerAdded(Row(ExtractionProvenance.AddedLineIdFor(InvoiceId, DecisionId), json)).Should().BeFalse();
     }
 
     [Fact(DisplayName = "164a-2: the marker is found beside the intake members (source, decision id and id are what decide)")]
@@ -108,7 +124,7 @@ public sealed class ExtractionProvenanceReviewerAddedTests
     {
         var json = $$$"""{"fields":{},"provenance":{"source":"reviewer","analyzerId":"x","decisionId":"{{{DecisionId:D}}}"}}""";
 
-        ExtractionProvenance.IsReviewerAdded(Row(ExtractionProvenance.AddedLineIdFor(DecisionId), json)).Should().BeTrue();
+        ExtractionProvenance.IsReviewerAdded(Row(ExtractionProvenance.AddedLineIdFor(InvoiceId, DecisionId), json)).Should().BeTrue();
         ExtractionProvenance.IsReviewerAdded(Row(Guid.NewGuid(), json)).Should().BeFalse();
     }
 }

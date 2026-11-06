@@ -41,7 +41,7 @@ public sealed class InvoiceTotalsServiceTests
     private static Entity Line(InvoiceLineCostType type, decimal amount, InvoiceLineStatus? status = null, decimal? approved = null,
         InvoiceAdjustmentMethod? method = null, decimal? value = null)
     {
-        var line = new Entity("sprk_billingevent", Guid.NewGuid());
+        var line = new Entity("sprk_billingevent", Guid.NewGuid()) { ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId) }; // as the query returns it (164a fix round K2)
         line["sprk_costtype"] = new OptionSetValue((int)type);
         line["sprk_amount"] = new Money(amount);
         if (status is not null) line["sprk_linestatus"] = new OptionSetValue((int)status.Value);
@@ -102,7 +102,7 @@ public sealed class InvoiceTotalsServiceTests
         GivenInvoice(1000L, version: 5L);
         var added = Line(InvoiceLineCostType.Fee, 200m, InvoiceLineStatus.Accepted, approved: 200m);
         // F1: a row Add line created has the id derived from its decision (0d0d0d0d-...-001 in the markers above).
-        added.Id = ExtractionProvenance.AddedLineIdFor(Guid.Parse("0d0d0d0d-0000-4000-8000-000000000001"));
+        added.Id = ExtractionProvenance.AddedLineIdFor(InvoiceId, Guid.Parse("0d0d0d0d-0000-4000-8000-000000000001"));
         if (extraction is not null) added["sprk_extractionconfidence"] = extraction;
         QueryExpression? query = null;
         _entities
@@ -119,6 +119,7 @@ public sealed class InvoiceTotalsServiceTests
         var result = await CreateService().RecalculateAsync(InvoiceId);
 
         query!.ColumnSet.Columns.Should().Contain("sprk_extractionconfidence", "the marker lives there; without it an added line would be counted as billed");
+        query.ColumnSet.Columns.Should().Contain("sprk_invoice", "164a fix round K2: the reviewer-added rule reads the line's invoice");
         result.IsRefused.Should().BeFalse();
         if (reviewerAdded)
         {

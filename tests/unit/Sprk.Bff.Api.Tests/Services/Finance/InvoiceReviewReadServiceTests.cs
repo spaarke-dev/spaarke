@@ -104,7 +104,7 @@ public sealed class InvoiceReviewReadServiceTests
                     return query.EntityName switch
                     {
                         "sprk_invoice" => new EntityCollection(Invoice is null ? [] : [Invoice]),
-                        "sprk_billingevent" => new EntityCollection(Lines.ToList()),
+                        "sprk_billingevent" => new EntityCollection(Lines.Select(l => Requested(l, query.ColumnSet)).ToList()), // 164a fix round K2: as returned
                         "sprk_invoicesubmission" => new EntityCollection(Submission is null ? [] : [Requested(Submission, query.ColumnSet)]),
                         "sprk_decisionrecord" => new EntityCollection(History.ToList()),
                         "sprk_timekeeper" => new EntityCollection(Roster.ToList()),
@@ -172,6 +172,7 @@ public sealed class InvoiceReviewReadServiceTests
         {
             var line = new Entity("sprk_billingevent", LineId(sequence))
             {
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
                 ["sprk_name"] = $"Line {sequence}",
                 ["sprk_linesequence"] = sequence,
                 ["sprk_costtype"] = new OptionSetValue((int)InvoiceLineCostType.Fee),
@@ -411,7 +412,7 @@ public sealed class InvoiceReviewReadServiceTests
     {
         var w = new World();
         // F1: the row Add line created has the id derived from its decision (0d0d0d0d-...-001 in the markers above).
-        w.AddLine(1, InvoiceLineStatus.Flagged, extraction: extraction).Id = ExtractionProvenance.AddedLineIdFor(Guid.Parse("0d0d0d0d-0000-4000-8000-000000000001"));
+        w.AddLine(1, InvoiceLineStatus.Flagged, extraction: extraction).Id = ExtractionProvenance.AddedLineIdFor(InvoiceId, Guid.Parse("0d0d0d0d-0000-4000-8000-000000000001"));
 
         var line = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.Lines.Single();
 
@@ -424,7 +425,7 @@ public sealed class InvoiceReviewReadServiceTests
         var w = new World();
         w.AddLine(1, InvoiceLineStatus.Clean, extraction: Extraction);
         var decision = Guid.Parse("0d0d0d0d-0000-4000-8000-000000000001");
-        w.AddLine(2, InvoiceLineStatus.Flagged, extraction: ExtractionProvenance.ForReviewerAddedLine(decision)).Id = ExtractionProvenance.AddedLineIdFor(decision);
+        w.AddLine(2, InvoiceLineStatus.Flagged, extraction: ExtractionProvenance.ForReviewerAddedLine(decision)).Id = ExtractionProvenance.AddedLineIdFor(InvoiceId, decision);
         // F1 must-fire: an intake line (3) copying the same valid-looking marker is not marked.
         w.AddLine(3, InvoiceLineStatus.Flagged, extraction: ExtractionProvenance.ForReviewerAddedLine(decision));
 

@@ -21,7 +21,7 @@ public sealed partial class InvoiceLineDecisionServiceTests
     {
         var w = new World(billedTotal: 1000m);
         w.AddLine(1000m, InvoiceLineStatus.Accepted, approved: 1000m);
-        var added = w.AddLine(200m, InvoiceLineStatus.Flagged, extraction: ReviewerMarker, rowId: ExtractionProvenance.AddedLineIdFor(AddDecision));
+        var added = w.AddLine(200m, InvoiceLineStatus.Flagged, extraction: ReviewerMarker, rowId: ExtractionProvenance.AddedLineIdFor(w.InvoiceId, AddDecision));
 
         var result = await w.Service().DecideAsync(
             Command(w, action, [new(added.Id, approved is null ? null : (decimal)approved)], action == LineDecisionAction.Accept ? null : Reason),
@@ -68,20 +68,24 @@ public sealed partial class InvoiceLineDecisionServiceTests
     [Fact(DisplayName = "164a-2: InvoiceAdjustmentService.ToInput (used by adjustments and the correction dry run) carries the marker; a row without it is an intake line")]
     public void TheAdjustmentServicesInputBuilder_CarriesTheMarker()
     {
-        var added = new Entity("sprk_billingevent", ExtractionProvenance.AddedLineIdFor(AddDecision))
+        var invoice = new EntityReference("sprk_invoice", Guid.Parse("a164a200-0000-4000-8000-0000000000a1"));
+        var added = new Entity("sprk_billingevent", ExtractionProvenance.AddedLineIdFor(invoice.Id, AddDecision))
         {
+            ["sprk_invoice"] = invoice,
             ["sprk_costtype"] = new OptionSetValue((int)InvoiceLineCostType.Fee),
             ["sprk_amount"] = new Money(200m),
             ["sprk_extractionconfidence"] = ReviewerMarker,
         };
         var intake = new Entity("sprk_billingevent", Guid.NewGuid())
         {
+            ["sprk_invoice"] = invoice,
             ["sprk_costtype"] = new OptionSetValue((int)InvoiceLineCostType.Fee),
             ["sprk_amount"] = new Money(200m),
         };
 
         var copied = new Entity("sprk_billingevent", Guid.NewGuid())
         {
+            ["sprk_invoice"] = invoice,
             ["sprk_costtype"] = new OptionSetValue((int)InvoiceLineCostType.Fee),
             ["sprk_amount"] = new Money(200m),
             ["sprk_extractionconfidence"] = ReviewerMarker,

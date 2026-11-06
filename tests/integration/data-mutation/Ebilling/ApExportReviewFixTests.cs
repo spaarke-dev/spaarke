@@ -128,7 +128,7 @@ public sealed class ApExportReviewFixTests
         var decision = Guid.Parse("a164a200-0000-4000-8000-0000000000d1");
         var added = world.AddLine(
             invoice, Fee, 200m, sequence: 2, status: status, approvedAmount: approvedAmount is { } a ? a : null,
-            id: ExtractionProvenance.AddedLineIdFor(decision), extraction: ExtractionProvenance.ForReviewerAddedLine(decision));
+            id: ExtractionProvenance.AddedLineIdFor(invoice.Id, decision), extraction: ExtractionProvenance.ForReviewerAddedLine(decision));
 
         var calculation = InvoiceTotalsCalculator.Calculate(1000m,
         [

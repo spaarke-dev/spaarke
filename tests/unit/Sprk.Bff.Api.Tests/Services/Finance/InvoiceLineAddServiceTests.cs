@@ -209,7 +209,7 @@ public sealed class InvoiceLineAddServiceTests
             "Prepare witness outline", "Work done but not billed", W.Reviewer);
 
     private static Guid ExpectedLineId(Guid? requestId = null) =>
-        ExtractionProvenance.AddedLineIdFor(InvoiceLineAddService.DecisionIdFor(W.InvoiceId, requestId ?? RequestId));
+        ExtractionProvenance.AddedLineIdFor(W.InvoiceId, InvoiceLineAddService.DecisionIdFor(W.InvoiceId, requestId ?? RequestId));
 
     // =========================================================================================
     // The id contract and the committed row (164a-2, EB-D-198)

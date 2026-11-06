@@ -1027,7 +1027,8 @@ public sealed class ApExportService
                 ColumnSet = new ColumnSet(
                     "sprk_eventdate", "sprk_costtype", "sprk_timekeeper", "sprk_quantity", "sprk_rate", "sprk_amount", "sprk_approvedamount", "sprk_linestatus",
                     "sprk_linesequence", "sprk_taskcode", "sprk_activitycode", "sprk_expensecode", "sprk_taskcodeasbilled", "sprk_activitycodeasbilled",
-                    "sprk_expensecodeasbilled", InvoiceTotalsService.LineState, InvoiceSubmissionPersister.LineExtractionConfidence),
+                    "sprk_expensecodeasbilled", InvoiceTotalsService.LineState, InvoiceSubmissionPersister.LineExtractionConfidence,
+                    InvoiceTotalsService.LineInvoiceLookup), // the reviewer-added rule reads the line's invoice (164a fix round K2)
                 Criteria = new FilterExpression(LogicalOperator.And),
                 PageInfo = new PagingInfo { PageNumber = 1, Count = ReadLimit },
             };

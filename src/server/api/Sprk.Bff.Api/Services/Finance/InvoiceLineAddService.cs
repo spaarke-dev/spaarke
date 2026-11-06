@@ -146,7 +146,7 @@ public sealed record AddLineResult(
 /// the add touched (conditioned on its version) and a version-only update of the invoice (conditioned on its version). From the commit on the request's
 /// cancellation no longer applies.</para>
 /// <para><b>The id contract (164a-2, EB-D-198).</b> The decision id is derived from (invoice, request id); the row id is
-/// <see cref="ExtractionProvenance.AddedLineIdFor"/> of the decision id, and the row's <c>sprk_extractionconfidence</c> carries
+/// <see cref="ExtractionProvenance.AddedLineIdFor"/> of the invoice and the decision id, and the row's <c>sprk_extractionconfidence</c> carries
 /// <see cref="ExtractionProvenance.ForReviewerAddedLine"/> of the same id, so <see cref="ExtractionProvenance.IsReviewerAdded"/> reads it as reviewer-added
 /// and a retry addresses the same row (one line, one record).</para>
 /// <para><b>The rules.</b> Only through <see cref="InvoiceFindingsDiff"/> (an added-line <see cref="InvoiceFindingsDiff.RequestBasis"/>) and the pure
@@ -529,7 +529,7 @@ public sealed class InvoiceLineAddService
     private async Task<AddLineResult> ApplyAsync(AddLineCommand command, Shape shape, CancellationToken ct)
     {
         var decisionId = DecisionIdFor(command.InvoiceId, command.RequestId);
-        var lineId = ExtractionProvenance.AddedLineIdFor(decisionId);
+        var lineId = ExtractionProvenance.AddedLineIdFor(command.InvoiceId, decisionId);
 
         // ── Step 1: the reads, app-only. Each refusal writes nothing. ──
         Reads reads;

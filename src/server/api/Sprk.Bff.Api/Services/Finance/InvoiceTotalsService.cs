@@ -185,7 +185,7 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
         {
             ColumnSet = new ColumnSet(
                 LineCostType, LineAmount, LineApprovedAmount, LineStatus, LineAdjustmentMethod, LineAdjustmentValue, LineState,
-                InvoiceSubmissionPersister.LineExtractionConfidence),
+                InvoiceSubmissionPersister.LineExtractionConfidence, LineInvoiceLookup), // the invoice: the reviewer-added rule reads it (164a fix round K2)
             Criteria = new FilterExpression(LogicalOperator.And),
             PageInfo = new PagingInfo { PageNumber = 1, Count = PageSize },
         };

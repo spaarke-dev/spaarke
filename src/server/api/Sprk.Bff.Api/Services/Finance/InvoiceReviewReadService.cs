@@ -371,6 +371,8 @@ public sealed class InvoiceReviewReadService
         InvoiceTotalsService.LineStatus, InvoiceTotalsService.LineApprovedAmount, LineReason, LineReviewedBy, LineReviewedOn,
         InvoiceTotalsService.LineAdjustmentMethod, InvoiceTotalsService.LineAdjustmentValue,
         InvoiceTotalsService.VersionNumber,
+        // 164a fix round K2: the reviewer-added rule (ExtractionProvenance.IsReviewerAdded) reads the line's invoice.
+        InvoiceTotalsService.LineInvoiceLookup,
     ];
 
     private static readonly string[] SubmissionColumns =
