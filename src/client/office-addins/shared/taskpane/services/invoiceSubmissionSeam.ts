@@ -30,6 +30,16 @@ import type {
 export type InvoiceCoreRecordType = Extract<EntityType, 'Matter' | 'Project' | 'WorkAssignment'>;
 export const INVOICE_CORE_RECORD_TYPES: InvoiceCoreRecordType[] = ['Matter', 'Project', 'WorkAssignment'];
 
+/**
+ * §6 (ebilling task 192): the one other core record a 409 `document_core_record_mismatch` says the email is filed under.
+ * The server sends it only when the caller can Read that record and it is not secure.
+ */
+export interface InvoiceFiledUnder {
+  entityType: InvoiceCoreRecordType;
+  entityId: string;
+  name: string;
+}
+
 const CORE_TYPE_BY_LOGICAL_NAME: Readonly<Record<string, InvoiceCoreRecordType>> = {
   sprk_matter: 'Matter',
   sprk_project: 'Project',
@@ -53,6 +63,22 @@ export function invoiceFiledRecord(identity: DocumentIdentityState | undefined):
     logicalName: record.entityType,
     name,
     ...(record.number && record.number !== name ? { displayInfo: record.number } : {}),
+  };
+}
+
+const LOGICAL_NAME_BY_CORE_TYPE: Readonly<Record<InvoiceCoreRecordType, string>> = {
+  Matter: 'sprk_matter',
+  Project: 'sprk_project',
+  WorkAssignment: 'sprk_workassignment',
+};
+
+/** The record a refusal's `filedUnder` names, as the core record picker holds it (the view's "Use {name}" switch). */
+export function filedUnderRecord(filedUnder: InvoiceFiledUnder): EntitySearchResult {
+  return {
+    id: filedUnder.entityId,
+    entityType: filedUnder.entityType,
+    logicalName: LOGICAL_NAME_BY_CORE_TYPE[filedUnder.entityType],
+    name: filedUnder.name,
   };
 }
 
@@ -119,7 +145,8 @@ export interface InvoiceSubmitAttempt {
  */
 export type InvoiceSubmissionOutcome = (
   | { kind: 'success'; message?: string; trackingNumber?: string }
-  | { kind: 'refused'; message: string }
+  /** `filedUnder`: the record the email is filed under (task 192), which the view offers to switch to. */
+  | { kind: 'refused'; message: string; filedUnder?: InvoiceFiledUnder }
   | { kind: 'retryable'; message: string }
   | { kind: 'permanent'; message: string }
   | { kind: 'ended'; status: 'Rejected' | 'Failed'; message: string; trackingNumber?: string }
@@ -138,6 +165,100 @@ export interface InvoiceFirmOption {
 
 /** The firms linked to a core record (contract §8; `invoiceSubmissionService.loadInvoiceFirms`). */
 export type LoadInvoiceFirms = (target: InvoiceSubmissionTarget) => Promise<InvoiceFirmOption[]>;
+
+/**
+ * What a correction of an invoice must keep, and whether it can be made (contract §10, ebilling 097e). A correction is
+ * sent with the invoice's own firm, core record and firm invoice number; `canCorrect` is the intake's own guard.
+ */
+export interface InvoiceCorrectionPrefill {
+  invoiceId: string;
+  firm: { id: string; name: string };
+  coreRecord: InvoiceFiledUnder;
+  /** The lifecycle status name (`InReview`, `SentToAp`, `Superseded`, ...), or null when the server doesn't know it. */
+  invoiceStatus: string | null;
+  trackingNumber: string | null;
+  firmInvoiceNumber: string;
+  canCorrect: boolean;
+  /** Why not, when `canCorrect` is false: `invoice_status`, `no_submission`, `submission_in_progress` (or a newer one). */
+  reason: string | null;
+  /** A Superseded invoice's replacement, when the caller can open it. */
+  replacedBy: { invoiceId: string; name: string } | null;
+}
+
+/**
+ * The correction prefill of an invoice (`invoiceSubmissionService.loadCorrectionPrefill`). Any failure THROWS with a
+ * sentence for the user, as {@link LoadInvoiceFirms} does.
+ */
+export type LoadCorrectionPrefill = (invoiceId: string) => Promise<InvoiceCorrectionPrefill>;
+
+/**
+ * The open email's latest invoice submission the caller can read (contract §11, ebilling 095a), as the view shows it at
+ * the top: when, as what tracking number, by whom, and where it stands. `message` is already in words (the service maps
+ * the outcome codes, so the view never reads one).
+ */
+export interface InvoicePreviousSubmission {
+  submissionId: string;
+  /** The §3 status URL, followed while the submission is still Received or Processing. */
+  statusUrl: string;
+  trackingNumber: string | null;
+  status: 'Received' | 'Processing' | 'Accepted' | 'Rejected' | 'Failed';
+  /** The sentence for a final status (a held or replaced Accepted, or why it Failed / was Rejected); else null. */
+  message: string | null;
+  /** The invoice the submission created, when it has one (offered for a correction once Accepted). */
+  invoiceId: string | null;
+  /** ISO 8601 (UTC), or null when the server sent none. */
+  submittedOn: string | null;
+  /** The submitter's name, or null when none is recorded. */
+  submittedBy: string | null;
+  isCorrection: boolean;
+}
+
+/**
+ * Reads the open email's latest submission (`invoiceSubmissionService.createPreviousSubmissionLoader`). Resolves null when
+ * there is none to show (none, not readable, the email has no Message-ID, or eBilling is off); THROWS with a sentence
+ * when Spaarke could not decide.
+ */
+export type LoadPreviousSubmission = (signal?: AbortSignal) => Promise<InvoicePreviousSubmission | null>;
+
+/**
+ * Follows a Received / Processing submission to its final status. Resolves with it updated (still Processing when the
+ * answer is not known in time), or null when the view went away.
+ */
+export type FollowPreviousSubmission = (
+  submission: InvoicePreviousSubmission,
+  signal?: AbortSignal
+) => Promise<InvoicePreviousSubmission | null>;
+
+const PREVIOUS_TITLES: Record<InvoicePreviousSubmission['status'], string> = {
+  Received: "This email's invoice is being processed",
+  Processing: "This email's invoice is being processed",
+  Accepted: "This email's invoice was already submitted",
+  Rejected: "This email's invoice was rejected",
+  Failed: "This email's invoice could not be processed",
+};
+
+/** The banner's title for an earlier submission. */
+export function previousSubmissionTitle(submission: InvoicePreviousSubmission): string {
+  return PREVIOUS_TITLES[submission.status];
+}
+
+/**
+ * "Submitted on 3 Nov 2026, 10:04 as INV-012.2 by Ana Diaz." — each part only when known; the date in the user's own
+ * locale and time zone. `locale` is for tests.
+ */
+export function describeSubmittedLine(submission: InvoicePreviousSubmission, locale?: string): string {
+  const when = submission.submittedOn ? new Date(submission.submittedOn) : null;
+  const date =
+    when && !Number.isNaN(when.getTime())
+      ? when.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
+      : null;
+  return (
+    `${submission.isCorrection ? 'A correction was submitted' : 'Submitted'}` +
+    `${date ? ` on ${date}` : ''}` +
+    `${submission.trackingNumber ? ` as ${submission.trackingNumber}` : ''}` +
+    `${submission.submittedBy ? ` by ${submission.submittedBy}` : ''}.`
+  );
+}
 
 /** The contract's `firmInvoiceNumber` bound: trimmed, 1-100 characters. */
 export const FIRM_INVOICE_NUMBER_MAX = 100;

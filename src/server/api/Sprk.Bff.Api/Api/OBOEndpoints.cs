@@ -272,9 +272,10 @@ public static class OBOEndpoints
         // AUTHORIZATION. There is deliberately no per-resource filter: there is no resource yet to
         // authorize against. The decision this route can actually make is "is the caller a resolvable
         // Dataverse principal", and `ResolveForActingUserAsync` makes it — throwing a typed 403
-        // (`acting_user_not_resolvable`) rather than falling back to a shared container. Same shape as
-        // the Permanent waiver on `POST /api/v1/documents` ("CREATE. There is no pre-existing resource
-        // to authorize"). Its waiver is Permanent for that reason, NOT to make a build go green.
+        // (`acting_user_not_resolvable`) rather than falling back to a shared container. Its waiver is
+        // Permanent because there is no pre-existing resource to authorize, NOT to make a build go green.
+        // (`POST /api/v1/documents`, which once carried the same reasoning, is now a handler decision: it
+        // checks Create as the caller and requires the caller's business-unit container.)
         app.MapPut("/api/obo/me/files/{*path}", async (
             string path, HttpRequest req, HttpContext ctx,
             [FromServices] Sprk.Bff.Api.Services.Documents.UploadAttribution uploadAttribution,

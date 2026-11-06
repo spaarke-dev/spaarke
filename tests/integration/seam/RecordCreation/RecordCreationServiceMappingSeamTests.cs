@@ -53,6 +53,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     private static readonly Guid OrdinaryMatter = Guid.Parse("a0140000-0000-4000-8000-000000000001");
     private static readonly Guid MissingMatter = Guid.Parse("a0140000-0000-4000-8000-000000000002");
     private static readonly Guid SecureMatter = Guid.Parse("a0140000-0000-4000-8000-000000000003");
+    private static readonly Guid BusinessUnitOfEveryTeam = Guid.Parse("a0140000-0000-4000-8000-0000000000bb");
     private static readonly Guid DeniedMatter = Guid.Parse("a0140000-0000-4000-8000-000000000004");
     private static readonly Guid SourceProject = Guid.Parse("a0140000-0000-4000-8000-000000000005");
     private static readonly Guid OtherProject = Guid.Parse("a0140000-0000-4000-8000-000000000006");
@@ -154,6 +155,24 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
             {
+                // Task 039 (FR-38): step 8 now runs on event / work assignment / invoice too and reads the owning team's business
+                // unit (and that unit's index defaults) through the same app reader. Those two reads are not mapping-source reads:
+                // answer them, unjournaled, with a unit that has no default index (the usual customer state).
+                if (table == "team")
+                {
+                    var team = new Entity(table, id);
+                    team["businessunitid"] = new EntityReference("businessunit", BusinessUnitOfEveryTeam);
+                    return Task.FromResult(team);
+                }
+
+                if (table == "businessunit")
+                    return Task.FromResult(new Entity(table, id));
+
+                // #2515: step 12's number read-back (an event has a platform autonumber, as a budget does) is not a mapping-source read
+                // either: answer it, unjournaled, with a number, so the create carries no "record_number_unassigned" warning.
+                if (table == "sprk_event" && columns.SequenceEqual(["sprk_eventnumber"]))
+                    return Task.FromResult(new Entity(table, id) { ["sprk_eventnumber"] = "EVT-000001" });
+
                 _journal.Add("source-read");
                 _sourceReads.Add((table, id, columns));
                 if (!_sources.TryGetValue((table, id), out var row))
@@ -250,6 +269,26 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         StringOf(fields, "sprk_location").Should().Be("Courtroom 4");
         outcome.MappingWarnings.Should().BeEmpty();
         _scripted.Posts.Should().BeEmpty("the row is never created as the caller");
+    }
+
+    /// <summary>
+    /// Task 049 (NFR-02 Part C): a mapped row's step 5 checks the caller's own values, then the merged row — each pass read
+    /// the table's privilege names again. Step 5 now reads each table-metadata path once, and still asks every access
+    /// question (AppendTo on the matter, once per pass) of Dataverse: no access answer is kept (ADR-009).
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_AMappedRow_ReadsEachTableMetadataOnce_ButAsksEveryAccessQuestion()
+    {
+        MatterToEventProfile();
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _user.Paths.Count(p => p == "EntityDefinitions(LogicalName='sprk_event')?$select=LogicalName,Privileges")
+            .Should().Be(1, "step 5's passes read the table's privilege names once");
+        _user.Paths.Count(p => p.Contains("RetrievePrincipalAccess", StringComparison.Ordinal)
+                               && p.Contains(OrdinaryMatter.ToString("D"), StringComparison.Ordinal))
+            .Should().BeGreaterThan(1, "AppendTo on the matter is asked in each pass, never remembered");
     }
 
     [Fact]
@@ -516,34 +555,6 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         outcome.Steps[^1].Should().Be(new RecordCreationStepRecord(
             RecordCreationStep.CallerChecks, RecordCreationStepState.Refused, RecordCreationRefusal.ServerSetFilingLookupCode));
         _creates.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task CreateAsync_ACitationLookupMarkedServerSet_IsNotAFilingLookup_AndPassesTheGuard()
-    {
-        // A Signal CITES its rule (RecordOwnershipResolver.IsCitation): the owner decision files nothing under it, so it is
-        // no filing lookup, server-set or not (must not fire).
-        var policy = Guid.NewGuid();
-        var item = new DataverseWriteItemMapper.MappedItem(
-            JsonSerializer.Serialize(new Dictionary<string, object?>
-            {
-                ["sprk_name"] = "Spend over budget",
-                ["sprk_Policy@odata.bind"] = $"/sprk_policies({policy:D})",
-            }),
-            ["sprk_name", "sprk_policy"])
-        {
-            Lookups = [new DataverseWriteItemMapper.MappedLookup("sprk_policy", "sprk_policy", "sprk_policies", policy)],
-        };
-        var request = new RecordCreationRequest("sprk_signal", new RecordCreationPayload.Mapped(item))
-        {
-            CorrelationId = FixedCorrelation,
-            ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_policy" },
-        };
-
-        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
-
-        outcome.Refusal?.Code.Should().NotBe(RecordCreationRefusal.ServerSetFilingLookupCode);
-        _journal.Should().Contain("user:check", "the create went past the guard to step 5's checks");
     }
 
     [Fact]

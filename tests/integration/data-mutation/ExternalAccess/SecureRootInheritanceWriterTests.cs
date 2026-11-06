@@ -140,10 +140,10 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
     {
         var service = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
         service
-            .Setup(s => s.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>((t, id, f, _, _) => ApplyFiling(t, id, f))
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((t, id, f, _, _) => ApplyFiling(t, id, f))
             .Returns(Task.CompletedTask);
         return service;
     }
@@ -1276,7 +1276,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             .Should().Be(matterType);
         ShouldBeSecure(workAssignment, "re-filed under a secure matter");
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(
-            RecordShareLevels.ChildMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)),
+            RecordShareLevels.InheritedRootMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)),
             "the secure matter's sharee is mirrored — nothing is held");
     }
 
@@ -1657,7 +1657,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
         fields["sprk_issecure"].Should().Be(true, "flagged in the create itself");
         ShouldBeSecure(created, $"created under a {table} of a secure {parentTable}");
         _fixture.ShareMaskOf(created, Colleague).Should().Be(
-            RecordShareLevels.ChildMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)),
+            RecordShareLevels.InheritedRootMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)),
             "the secure parent's sharee, as if filed directly under it");
     }
 
@@ -1763,7 +1763,7 @@ public partial class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixt
             .Should().Be(secureInvoice.ToString("D"), "the pair moves with the invoice lookup it repeated");
         ShouldBeSecure(workAssignment, "re-filed under an invoice of a secure matter");
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(
-            RecordShareLevels.ChildMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)));
+            RecordShareLevels.InheritedRootMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)));
     }
 
     /// <summary>

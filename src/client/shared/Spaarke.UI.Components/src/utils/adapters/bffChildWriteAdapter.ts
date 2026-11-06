@@ -34,6 +34,11 @@ import { isApiError, problemOf } from '../thrownFetchError';
  * `sprk_workassignment` (spaarke-ontology-platform-r1 task 046, D-21; unified-access-control-r2's answer D-113) is a ROOT,
  * not a child, created through the same route: the server decides its owner and, under a secure matter or project, creates
  * it secure.
+ * `sprk_matter` and `sprk_project` (field-mapping-server-write-path-r1 task 020, spec FR-15) are ROOTS created through the
+ * same route: the server decides the owner, applies field mapping (fill-only) and, for a project filed under a secure
+ * record, creates it secure. The Matter and Project wizards move onto it in tasks 021 and 022.
+ * Pinned to the server's `ChildRecordEndpoints.CreateTables` by `ChildRecordCreateTablesAgreementTests` (the server also
+ * creates three ribbon-only tables this client set does not hold).
  */
 export const BFF_CHILD_CREATE_TABLES: ReadonlySet<string> = new Set([
   'sprk_todo',
@@ -44,7 +49,48 @@ export const BFF_CHILD_CREATE_TABLES: ReadonlySet<string> = new Set([
   'sprk_analysis',
   'sprk_document',
   'sprk_workassignment',
+  'sprk_matter',
+  'sprk_project',
 ]);
+
+/**
+ * The record a create copies its mapped fields from (task 020, spec FR-03), when it is not the record the new row is
+ * filed under. The server resolves it and reads it AS THE CALLER: one the caller cannot read gives no mapped values and a
+ * warning, never an error. Sent as the query parameters `mappingSourceEntity` and `mappingSourceId`; the body stays the
+ * caller's own Web API payload.
+ */
+export interface IBffMappingSource {
+  /** The source table's logical name (e.g. `sprk_matter`). */
+  entity: string;
+  /** The source record's id. */
+  id: string;
+}
+
+/** Options of a BFF create. */
+export interface IBffCreateOptions {
+  /** The explicit mapping source; omit it to let the server infer the source from what the row is filed under. */
+  mappingSource?: IBffMappingSource;
+  /**
+   * Task 049 fix round 2: the record is created secure from creation (`secure=true`; a project or a work assignment
+   * only — the server answers 400 for any other table). The server first asks the caller's own Write and Share rights,
+   * as provisioning does.
+   */
+  secure?: boolean;
+}
+
+/** The create route's query string: the mapping source when the caller named one, and the secure intent; else nothing. */
+function createQuery(options?: IBffCreateOptions): string {
+  const parts: string[] = [];
+  const source = options?.mappingSource;
+  if (source) {
+    parts.push(
+      `mappingSourceEntity=${encodeURIComponent(source.entity.trim().toLowerCase())}`,
+      `mappingSourceId=${encodeURIComponent(cleanId(source.id))}`
+    );
+  }
+  if (options?.secure === true) parts.push('secure=true');
+  return parts.length === 0 ? '' : `?${parts.join('&')}`;
+}
 
 /** The BFF re-file route for each table a browser writer re-files (one route per table). */
 const REFILE_ROUTES: Readonly<Record<string, (id: string) => string>> = {
@@ -181,38 +227,45 @@ async function failureOf(response: Response, fallback: string): Promise<ChildRec
 /**
  * Creates a child record through the BFF (G5). `payload` is the Dataverse Web API payload the writer would have passed to
  * `Xrm.WebApi.createRecord` (column values and `@odata.bind` lookups). Resolves to the new record's id; rejects with a
- * {@link ChildRecordWriteError} carrying the server's message — nothing was created.
+ * {@link ChildRecordWriteError} carrying the server's message — nothing was created. `options.mappingSource` names the
+ * record to copy mapped fields from ({@link IBffMappingSource}); it adds nothing to `payload`.
  */
 export async function createChildRecordViaBff(
   authenticatedFetch: AuthenticatedFetch,
   bffBaseUrl: string,
   table: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  options?: IBffCreateOptions
 ): Promise<string> {
-  return (await createRecordViaBffWithWarnings(authenticatedFetch, bffBaseUrl, table, payload)).id;
+  return (await createRecordViaBffWithWarnings(authenticatedFetch, bffBaseUrl, table, payload, options)).id;
 }
 
 /**
  * {@link createChildRecordViaBff}, also returning the server's non-fatal `warnings` (ontology task 046: a work assignment
  * created secure whose securing is not yet complete). Same contract otherwise: rejects with a {@link ChildRecordWriteError}
- * carrying the server's message — nothing was created.
+ * carrying the server's message — nothing was created. Task 020: a field-mapping warning (a source that could not be
+ * read or determined, a mapped value that was not written) arrives in `warnings` too.
  */
 export async function createRecordViaBffWithWarnings(
   authenticatedFetch: AuthenticatedFetch,
   bffBaseUrl: string,
   table: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  options?: IBffCreateOptions
 ): Promise<{ id: string; warnings: string[] }> {
   const entity = (table ?? '').toLowerCase();
   if (!isBffChildCreateTable(entity)) {
     throw new ChildRecordWriteError(`'${table}' records are not created through the BFF child-record route.`, 0);
   }
 
-  const response = await authenticatedFetch(joinUrl(bffBaseUrl, `/api/v1/child-records/${entity}`), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload ?? {}),
-  });
+  const response = await authenticatedFetch(
+    joinUrl(bffBaseUrl, `/api/v1/child-records/${entity}${createQuery(options)}`),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload ?? {}),
+    }
+  );
   if (!response.ok) {
     throw await failureOf(response, 'The record could not be created');
   }

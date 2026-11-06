@@ -1,71 +1,47 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-10-29 (by context-handoff). Recovery: read Quick Recovery first.
-> **Done on master**: 001–006, 010–016, 018, 037, 038, 070, 071, 072, 073, 074. The work branch was merged to master as #2435 (6b0c1e2fed); later doc commits are on the work branch.
-> **Live on dev:** BFF 136568cf70 (UAC gate passed). SpaarkeMaster 1.2.4.0 is published but not imported anywhere yet. Check that the BU→Matter index map is gone after the model1-prod upgrade or the next provisioning run (H6).
+> **Last updated**: 2026-11-06 ~05:40Z (main session checkpoint). Recovery: read Quick Recovery first.
+> **Done on master**: 001–006, 010–016, 017, 018, 037, 039, 038, 070–074, 043 + 046 (#2573, 0f6618094b), 048, 042c.
+> **Live on dev:** BFF master 0f53e053bf (042c + 048). 046b role additions (from 98813dcaa2, 2026-11-05) and removal R1 (from e6c0c94fa3, 2026-11-06 02:35Z) are applied by UAC-r2, and VERIFY PASS. Gate G-8 (`JobRevokeOnChangeEnabled`) has been ON on dev since 2026-11-06 04:02Z (#2574); the watch passed. The thread filing sweep dry run found 0 threads to reassign, so the apply was skipped.
+> **Next dev deploy:** one combined deploy of master with 049, plus the code pages Spaarke.UI.Components → LegalWorkspace, SpaarkeAi, AI.Widgets (CreateProjectWizard optional), BFF first. It needs the owner's go in uac-r2's session. The gate covers the 043 additions (analysis create 0 5xx; push with an unchanged 409 rate on non-analysis targets; child-records create 0 5xx).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active** | **076 waiting on the dev BFF deploy.** We OK'd R3's candidate c91b99e575 (contains W7; Router green; 266 related tests + live dev schema check for the new ebilling family rows; full ArchTests 1857/1858, the 1 = flaky ISS-005 wall-clock guard, filed #2469). R3 has the deploy ON HOLD: word-add-in blocking finding #2468 (UAC 194b, unfiled Outlook save ownership); the owner is choosing hold-for-fix vs deploy. A new SHA needs our re-OK. |
-| **Next Action** | 1) **Start 017 via task-execute** (opus/high, FULL): ebilling #1911 MERGED 2026-10-29 21:35, so 017 is unblocked. First item of 017: the ebilling reconcile commit (invoice-family PreWriteRule in RecordTableRules for sprk_invoice/sprk_billingevent, F2 PreWriteRefusal kind, F4 test, retire the 013 ratchet baseline; ebilling reviews), then the other BLOCKING criteria in the POML (DI-004/#2188 field-security on mapped source columns; 015 K1/K3; 014 R3-1), then re-point the four callers. /conflict-check first. 2) In parallel (doc, main session): FR-38/W3 scope procedure (spec amendment → task-create → TASK-INDEX → owner approval). 3) 076 waits on R3 (deploy on hold for #2468; owner choosing); re-OK any new SHA. |
-| **Owner decisions today** | Q1 drop; Q2 (B), seeding the 7 canonical index rows per customer, team-owned, no BU defaults. Depth cap counted from the TOP (exception to UAC C4; design §12.11, quoted on #2442; UAC adopted it). WA owning unit follows its matter (UAC #2451). |
-| **#2399** | Live part FIXED: the owner re-tested the WA create as Test User 1 on 2026-10-29 (saves, with number and Assigned To). Open for the durable fix: FR-38/W3 still need the scope procedure (spec amendment → task-create → TASK-INDEX → owner approval); FR-39 and the index rows are provisioning's #2429. |
-| **Open PRs** | #2387 (075, HOLD, ships with 040). |
-| **Issues** | #2444 (UAC: shared reads-agnostic ordering helper). #2413 (known limit). #2429 (provisioning H7c team + H12b index-row seed + H4b allow-list; I review the PR). #2469 (flaky ISS-005 ArchTest, not ours). |
-| **Waiting on** | UAC 195 → 040 (UAC 2026-10-29: 194b merged, 195 queued next after its two owner-ruling branches; UAC sends the wizard-write SHA and the dev-backfill notice). Provisioning's #2429 PR. ebilling #1911 merged → 017 unblocked. |
-| **Owner to do** | Leftover locked worktree agent-aec6d06ca99a5a9f6 (075): end of project. |
-
-## 017: IN PROGRESS (FULL, opus/high, directional) — started 2026-10-30
-
-Work branch merged up to master (cd8f0a58b5). /conflict-check: no open PR touches 017's files; #2471 (UAC, RecordOwnershipResolver) is adjacent only.
-BLOCKING status: ebilling reconcile = TODO (phase 1); DI-004/#2188 = done for Create (mask, issue closed); 015 K1/K3 = done in 018; 014 R3-1 = TODO (phase 2, route now sets ServerSetLookupColumns); UAC 013 items 2a-2d decided (decisions.md:260-302) = land with the re-point; 037 K2 = TODO (phase 2).
-Plan: phase 1 = Opus implementer on task/fm-017a (reconcile commit; ebilling reviews). Phase 2 = route+decision parity (017b) and chat/email/budget (017c) in parallel, then remove OwnedChildWrite create half, then adversarial review, quality gates, publish delta.
+| **Active** | uac-r2: `spaarke-wt-unified-access-control-r2-20`; ontology: `spaarke-wt-spaarke-ontology-platform-r1-38`; ebilling: `spaarke-wt-ebilling-r1-c7`.
+- **046b → PR #2592** (work branch head ad40add283 = 046b d7ab6de7dc + master 1f1c319480), auto-merge on. Verified: ArchTests 1973/1973, filtered comm tests 779/779, Pester 39/39. After merge: tell uac-r2 the SHA. Set TASK-INDEX 046b ✅ (done after merge, so the PR CI isn't re-triggered). Ebilling merge-second rule: whoever merges second takes 089e's ProcedureRolePrivilegeGuardTests.cs and Deploy-EbillingBillingAdminRole.ps1 in full and keeps one copy of the G5 privilege (ebilling told).
+- **049** (task/fm-049b, worktree agent-ab6391bd0d308344f, tip 598805e9ac + fix round 3 in progress): Parts A, B (secure-from-creation, D1 shared DelegationRuleFilter.RefusalFor, D2 already_provisioned) and C (scans) are merged. verify-suites 6890/0/7; publish delta +15,331 B (39.22 MB, 191/191), no CVE. Opus pass 2 done; **fix round 3 agent running** (items 1–9; item 10 = Basic doesn't cover a team-owned target, UAC-approved, invert the 2 new tests; item 11 = drop the stale "27 of 35" from the CommunicationThreadFilingSweepJob remarks). Then: a scoped re-check, then the **history rewrite** of task/fm-049b (one squashed commit from the merge base; old notes :508-513 text about a race must not survive) and deletion of remote task/fm-049c. **ASK THE USER before the force-push/delete.** Then the head SHA → uac-r2, merge into the work branch, PR, combined dev deploy, Project→Matter profile on dev, 021 re-measure.
+- **046c** (Basic User read-only on sprk_*; POML on the work branch, with uac-r2's pre-apply evidence, rollback and window conditions): starts after 046b merges.
+- **021**: wizard deploy waits on 049's re-measure (task/fm-021 d6dc73e9f6).
+- **033 must be re-scoped before it runs** (D-204).
+- **Private:** uac-r2 by message only. |
+| **Next Action** | 1. On the 049 fix round 3 report: scoped re-check → ask the user about the 049b rewrite + 049c delete → SHA to uac-r2.
+2. Watch PR #2592 → merge SHA to uac-r2 → TASK-INDEX 046b ✅ → start 046c.
+3. Owner open: live checks on dev (042c/048 refusals, 043) need the owner's go in THIS session; inactive playbook at analysis start; Family 1.0.56; 076; #2556. |
+| **Owner rulings 2026-11-06** (decisions.md) | R2 not applied; communication send/re-file needs Core User (G11/G12 not granted); Basic User is read-only on sprk_* (046c); G13 is not a gap (thread Read stays Basic, capped by a guard). |
+| **Open PRs** | #2592 (046b). #2387 (075, HOLD, ships with 040). |
+| **Issues** | #2574 (G-8, flipped on dev), #2590 (uac: root-BU project create), #2444, #2413, #2429, #2469, #1948. |
+| **Owner to do** | 076 live check. Leftover locked worktrees agent-aec6d06ca99a5a9f6 (075), agent-a7ed21b81867c4e2e (039): end of project via Remove-WorktreeSafe. Worktrees in use: agent-ae68466fd18cb8df3 (046b), agent-ab6391bd0d308344f (049b), agent-a3d88f8312b09e715 (049c), agent-a7d775a1f12d2a061 (043, done), agent-ada15efbfe379567a (046, done). |
 
 ## How wave-2 agents are run (lessons)
 
 - `isolation: worktree` cuts from **origin/master**. Every brief starts with `git switch -c task/fm-NNN <tip>`.
-- Launch adversarial-reviewer passes from the main session (one Opus per change set; a scoped Sonnet re-check per fix
-  round). Resume an implementer with SendMessage for its fix rounds.
-- **After ANY master merge, run the full ArchTests AND the related suites.** Rebuild ArchTests first; a stale DLL gives
-  false failures.
-- **Never run the unfiltered `Sprk.Bff.Api.Tests`** in an agent (the host reaches ~8 GB). Use the filtered set in
-  `projects/field-mapping-server-write-path-r1/scripts/verify-suites.sh <repo> <log-dir>`. Publish-size delta + CVE:
-  `scripts/publish-delta.ps1 -wt <worktree> -MasterSha <sha> -BranchSha <sha>` (same folder).
-- Call `Remove-WorktreeSafe.ps1` through PowerShell. If the delete is partial it leaves an unregistered folder; report it.
-- CI: the required checks are `Router` + `Client lint (type-aware ratchet)`. Router reports only after the slow Tier 2
-  unit shards finish (~25 min). The Tier 2 ADR job may be CANCELLED by its 5-min timeout after passing (#2224); read
-  the log before merging.
-
-## Open items for the owner
-
-**Owner answers 2026-10-27:** group 3 (016 Repair) waits on UAC-r2's build review. #2137 approved → implementer on
-`fix/fm-2137-timing-equalise` (review before merge). #2224 approved → PR #2328 (auto-merge). Leftover folders: clean
-up at project end. 4a–4d: owner asked UAC-r2 for its recommendation (sent 2026-10-27; owner: no per-BU search except Secure Records). 5b drop HIPC DEV 2; 5c/5d done (read-only, see task-006 notes and item 6). Owner stated policy for 4b/4c: a mapping copy is not
-user-scoped (not yet applied; it reverses 014's AppendTo/field-security checks on mapped values and needs UAC-r2).
-Dev reads: 0 of 64 matters have an empty `sprk_issecure`; 40 active Copy rules (4 Manual Refresh, 16 One-time,
-20 empty); documents point at several indexes (537 none, 76 knowledge-index-v2, 1 spaarke-file-index).
-
-1. **016 Repair questions:** cross-BU re-own (skip for now); whether Repair re-owns roots; SYSTEM/INTEGRATION-owned
-   unfiled rows.
-2. ~~017 decisions~~: all decided 2026-10-22/23 (decisions.md).
-3. **Live smoke of #2191 on dev** (Office Project-from-Matter quick-create, mapped values, a secured column stays empty).
-4. **005 `-Apply` on dev**, then `-Verify`.
-5. **014:** confirm the 403 for a mapped filing lookup that fails field security. **015:** index precedence notes.
-6. ~~#2137~~ (PR #2331); ~~HIPC DEV 2~~ (owner: out of scope); **model1-prod** map check after the next managed release (checked 2026-10-27: still there, expected); ~~prod null `sprk_issecure`~~ (2026-10-27: prod has 0 matters/projects/WAs, flag defaults to No) before a
-   prod #2191 deploy.
-7. **#2224:** OK to raise the Tier 2 ADR job timeout.
+- Launch adversarial-reviewer passes from the main session (one Opus per change set, two for security; a scoped Sonnet re-check per fix round). After an idle pause, start a fresh implementer.
+- **After ANY master merge, run the full ArchTests AND the related suites.** Rebuild ArchTests first; a stale DLL gives false failures.
+- **Never run the unfiltered `Sprk.Bff.Api.Tests`.** Use `scripts/verify-suites.sh <repo> <log-dir>`. Publish delta + CVE: `scripts/publish-delta.ps1 -wt <worktree> -MasterSha <sha> -BranchSha <sha>` (main session only).
+- A reviewer must not build in a worktree where verify-suites is running (file locks). Give it read-only scope or its own detached worktree.
+- Public repo: notes, POMLs, commits and PR bodies state rules and gaps only. A description of an open access condition on a pushed branch needs a history rewrite (uac-r2 2026-11-06).
+- Call `Remove-WorktreeSafe.ps1` through PowerShell after `cd`-ing every shell out of the worktree; then `git worktree prune`.
+- CI: the required checks are `Router` + `Client lint (type-aware ratchet)`; Router reports after the Tier 2 shards (~25 min).
 
 ## Cross-project obligations
 
-- **UAC-r2:** reviews 018b and 017 on condition (b); holds #2190 and #2169; batches deploy candidates for R3.
-- **ebilling-r1:** #1911 + reconcile before 017. Task 096 removes the Office Invoice leg. 016/040 call
-  `CheckGenericUpdateAsync` once #1911 lands (016 has a `TODO(#1911)` seam).
-- **R3:** deploys master to dev only on a batched candidate from UAC-r2, with the owner's go in R3's session.
-- **ontology-r1:** 033 needs a design-note review first. 033 also carries the app-only metadata reader and the IsSecured
-  skip; 052 is hard-blocked on 033.
+- **UAC-r2:** reviews and runs every live role or app-setting change and every dev deploy, with the owner's go in its session.
+- **ebilling-r1:** 164a makes sprk_billingevent create-only refused (not full writer-only; D-96 updates must keep working). It edits RecordTableRules, ChildRecordEndpoints (CreateTables) and the ribbon JS. Whoever merges second of 164a and 049b resolves ChildRecordEndpoints.
+- **ontology-r1:** 174 touches Signals files only (no overlap). 033 needs a design-note review first; 052 is hard-blocked on 033.
+- **R3:** deploys only batched candidates from UAC-r2.
 
 ## Next tasks
 
-019 once 017 lands. 017 once unblocked. Then 033 (before 052), 040 (needs 005, 019), 050 (needs 019).
+049 → PR, then 046c, then 021's deploy. Then 019, 033 (before 052), 040, 050.

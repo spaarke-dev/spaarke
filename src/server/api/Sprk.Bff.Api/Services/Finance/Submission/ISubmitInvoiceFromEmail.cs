@@ -106,6 +106,13 @@ internal sealed record FromEmailSubmitInput
     /// <summary>The invoice a Correction replaces; null for New.</summary>
     public Guid? InvoiceId { get; init; }
 
+    /// <summary>
+    /// Task 097b: the earlier submission a Correction replaces (the invoice's own submission, which the intake's
+    /// <see cref="InvoiceSubmissionService.CheckCorrectionAsync"/> found); written to the new submission's
+    /// <see cref="InvoiceSubmissionService.ResubmissionOfColumn"/>. Null for New.
+    /// </summary>
+    public Guid? ResubmissionOf { get; init; }
+
     /// <summary>The caller's systemuser (the submission's creator person, OP-5).</summary>
     public required Guid CallerSystemUserId { get; init; }
 

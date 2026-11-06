@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
@@ -145,6 +146,49 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     }
 
     [Fact]
+    public async Task EventRoute_WhenTheTablesMetadataCannotBindTheDerivedStamp_KeepsTheRoutes500RegardingStampFailed()
+    {
+        // Task 031 fix round 1 (F1-low): the same real refusal as above, rendered by POST /api/v1/events' adapter. Before task
+        // 031 that route answered every stamp it could not make with 500 events.regarding_stamp_failed (NFR-07): the service's
+        // generic Undecided must not lose that code. Told apart by the step that refused it, never by the code alone.
+        WithParentEventUnderTheOrdinaryMatter();
+        _user.RespondTo = path => IsTheStampBindsMetadataRead(path)
+            ? DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { ManyToOneRelationships = Array.Empty<object>() }))
+            : null;
+        var outcome = await Service().CreateAsync(EventUnderTheParentEvent(), AsCaller(), CancellationToken.None);
+        var http = new DefaultHttpContext { TraceIdentifier = "trace-stamp" };
+
+        var result = Sprk.Bff.Api.Api.Events.EventEndpoints.RefusalResult(outcome.Refusal!, outcome.Steps, http);
+
+        var problem = result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions.Should().ContainKey("errorCode")
+            .WhoseValue.Should().Be(Sprk.Bff.Api.Api.Events.EventEndpoints.RegardingStampFailedErrorCode);
+        problem.ProblemDetails.Detail.Should().Be(
+            "The event's regarding record could not be resolved for access inheritance, so nothing was written.");
+        _createAttempts.Should().BeEmpty("nothing is written");
+    }
+
+    [Theory]
+    [InlineData(nameof(RecordCreationStep.CallerChecks))]
+    [InlineData(nameof(RecordCreationStep.Owner))]
+    public void EventRoute_TheGenericNoDecisionRefusalAtAnyOtherStep_StaysTheRoutesGeneric500WithoutAnErrorCode(string stepName)
+    {
+        var step = Enum.Parse<RecordCreationStep>(stepName);
+        // Must not fire: the same code from any other step is not a stamp failure, so it keeps the route's generic 500.
+        var refusal = new RecordCreationRefusal(RecordCreationRefusalKind.Undecided, RecordCreationRefusal.NoDecisionCode, "The event was not created.");
+
+        var result = Sprk.Bff.Api.Api.Events.EventEndpoints.RefusalResult(
+            refusal, [new RecordCreationStepRecord(step, RecordCreationStepState.Refused, RecordCreationRefusal.NoDecisionCode)],
+            new DefaultHttpContext());
+
+        var problem = result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Detail.Should().Be("An error occurred while creating the event");
+        problem.ProblemDetails.Extensions.Should().NotContainKey("errorCode");
+    }
+
+    [Fact]
     public async Task CreateAsync_WhenDataverseDoesNotAnswerTheStampBindsMetadataRead_StaysThe503StampUnavailable()
     {
         // The other branch, unchanged: the metadata read itself failed at Dataverse, which a retry may clear.
@@ -190,6 +234,43 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         _stamps.Lookup("sprk_event", id, "sprk_regardingmatter").Should().Be(OrdinaryMatter,
             "the post-create re-derivation (step 12) writes it");
     }
+
+    /// <summary>
+    /// Task 042b (FR-41, #2483 / DI-009 closed) INVERTS task 042a's A3 (design.md section 15.6), formerly
+    /// <c>CreateAsync_AsTheSystem_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheEventsOrdinaryTeam_DI009Window</c>, the
+    /// system-principal twin of the route's window. Step 6½ derives the stamp for every principal before the owner, so the
+    /// event is owned by <see cref="Directory.SecureNamedTeam"/> and the Secure matter's sharee mirror is written at create;
+    /// a system principal still carries no stamp in the create body and binds it after the create (DI-007).
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_AsTheSystem_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheSecureTeam_WithTheShareeMirrorAtCreate()
+    {
+        _world.WithRecord("sprk_event", ParentEvent, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter) });
+        _stamps.Row("sprk_event", ParentEvent, [("sprk_regardingmatter", "sprk_matter", SecureMatter)]);
+        _shareWorld.OrdinaryChild("sprk_event", ParentEvent, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        _shareTable.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.User(SecureMatterSharee), CollaborateMask);
+        var request = await MappedRequest("sprk_event", new { sprk_eventname = "Follow-up", sprk_regardingevent = Lookup("sprk_event", ParentEvent) });
+
+        var outcome = await Service().CreateAsync(
+            request, RecordCreationPrincipal.ForSystem(RecordRequester.Of(Caller, CallerOid)), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var (_, id, fields) = _creates.Should().ContainSingle().Subject;
+        Owner(fields).Should().Be(Directory.SecureNamedTeam,
+            "#2483 closed: step 7 asks over the event and the root step 6½ derived, for a system principal too");
+        fields.Should().NotContainKey(MatterStampBind, "a system principal's derived stamp is bound after the create, not in the body");
+        _stamps.Lookup("sprk_event", id, "sprk_regardingmatter").Should().Be(SecureMatter,
+            "the post-create re-derivation (step 12) binds the Secure matter");
+        _shareTable.MaskOf("sprk_event", id, DataversePrincipalRef.User(SecureMatterSharee)).Should().Be(CollaborateMask,
+            "the Secure matter's sharee mirror is written at create");
+    }
+
+    /// <summary>A user the Secure matter is shared with (task 042b's A3).</summary>
+    private static readonly Guid SecureMatterSharee = Guid.Parse("a0130000-0000-4000-8000-0000000004b1");
+
+    /// <summary>Collaborate on the record, as a Manage Access share writes it (Read|Write|Append|AppendTo, no Share).</summary>
+    private const int CollaborateMask = 1 | 2 | 4 | 16;
 
     // =====================================================================================
     // 3. I-16: set before the create when it resolves; a null never refuses

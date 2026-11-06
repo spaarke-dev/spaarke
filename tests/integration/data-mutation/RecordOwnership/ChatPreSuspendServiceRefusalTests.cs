@@ -58,6 +58,7 @@ public sealed class ChatPreSuspendServiceRefusalTests : TypedToolHandlerTestFixt
         { "sprk_matter", "sprk_matternumber" },
         { "sprk_project", "sprk_projectnumber" },
         { "sprk_budget", "sprk_budgetnumber" },
+        { "sprk_event", "sprk_eventnumber" }, // #2515: EVT-{SEQNUM:6}
         { "sprk_matter", "sprk_containerid" },
         { "sprk_matter", SecurableEntityRegistry.SecurityBusinessUnitAttribute },
         { "sprk_project", Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column },

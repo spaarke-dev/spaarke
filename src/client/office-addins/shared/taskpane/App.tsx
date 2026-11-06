@@ -17,7 +17,10 @@ import { CreateTodoView } from './components/views/CreateTodoView';
 import { InvoiceView } from './components/views/InvoiceView';
 import {
   createInvoiceSubmitHandler,
+  createPreviousSubmissionFollower,
+  createPreviousSubmissionLoader,
   hostAdapterInvoiceEmailSource,
+  loadCorrectionPrefill,
   loadInvoiceFirms,
 } from './services/invoiceSubmissionService';
 import { invoiceFiledRecord, type InvoiceSubmissionTarget } from './services/invoiceSubmissionSeam';
@@ -191,7 +194,8 @@ export interface AppProps {
    * Initial action discriminator read from the host's URL / launch context.
    * 'createTodo' (from the ribbon `?action=createTodo` deep-link) selects the
    * Create To Do tab on open. 'submitInvoice' (task 133, the Outlook ribbon's
-   * `?action=submitInvoice`) opens the Invoice view — the ONLY way to reach it.
+   * `?action=submitInvoice`) opens the Invoice tab. Package 1.1.4 removed both ribbon
+   * buttons (owner UAT 2026-11-03); these stay for a cached older manifest.
    * Default: undefined → the default `initialTab`.
    */
   initialAction?: InitialAction;
@@ -688,6 +692,23 @@ export const App: React.FC<AppProps> = ({
       loadInvoiceFirms(target, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
     [apiBaseUrl, getInvoiceAccessToken]
   );
+  const loadPrefill = useCallback(
+    (invoiceId: string) => loadCorrectionPrefill(invoiceId, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
+    [apiBaseUrl, getInvoiceAccessToken]
+  );
+  // The open email's earlier submission, shown at the top of the view (contract §11, ebilling 095a).
+  const loadPreviousInvoiceSubmission = useMemo(
+    () =>
+      createPreviousSubmissionLoader({
+        config: { apiBaseUrl, getAccessToken: getInvoiceAccessToken },
+        adapter: hostAdapter,
+      }),
+    [apiBaseUrl, getInvoiceAccessToken, hostAdapter]
+  );
+  const followPreviousInvoiceSubmission = useMemo(
+    () => createPreviousSubmissionFollower({ config: { apiBaseUrl, getAccessToken: getInvoiceAccessToken } }),
+    [apiBaseUrl, getInvoiceAccessToken]
+  );
   // The record the open email is already filed to (task 120's lookup — the Save tab's "Filed to"): the view starts there.
   const invoiceFiledTo = useMemo(() => invoiceFiledRecord(documentIdentity), [documentIdentity]);
 
@@ -744,7 +765,11 @@ export const App: React.FC<AppProps> = ({
   const canSendEmail = sendEmailAffordance === 'outlook-native';
 
   // Task 096: capability-gated tabs (NFR-10). Word reports `canEmailFromPane` → the Email tab; Outlook does not.
-  const tabCapabilities = { canEmailFromPane: hostAdapter.getCapabilities().canEmailFromPane };
+  // Task 133: `canGetAttachments` (Outlook read mode) → the Invoice tab.
+  const tabCapabilities = {
+    canEmailFromPane: hostAdapter.getCapabilities().canEmailFromPane,
+    canGetAttachments: hostAdapter.getCapabilities().canGetAttachments,
+  };
 
   // Task 077: what Find calls the pane's item. From the `canGetSender` CAPABILITY (NFR-10), never
   // `hostType` — an item that has a sender IS an email, so this is the exact semantic, not a proxy.
@@ -898,18 +923,23 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {/* Task 133: the Outlook "Submit Invoice" view — reached only from the ribbon (`?action=submitInvoice`), never
-            from a tab. The submission and the firm list are ebilling's from-email contract (invoiceSubmissionService);
-            corrections stay off (`correctionAvailable`) until ebilling 097. */}
-        {currentTab === 'invoice' && (
+        {/* Task 133: the Outlook "Submit Invoice" view — the Invoice tab (package 1.1.4; a cached older manifest's
+            ribbon `?action=submitInvoice` still opens it). The submission and the firm list are ebilling's from-email contract (invoiceSubmissionService);
+            corrections are on: ebilling 097b/c/e (#2507) is on master and dev, and the view prepares each one from
+            the invoice's correction prefill. The email's earlier submission shows at the top (§11). */}
+        {currentTab === 'invoice' && tabCapabilities.canGetAttachments && (
           <InvoiceView
             hostAdapter={hostAdapter}
             apiBaseUrl={apiBaseUrl}
             getAccessToken={getInvoiceAccessToken}
             onSubmit={submitInvoice}
             loadFirms={loadFirms}
+            correctionAvailable
+            loadCorrectionPrefill={loadPrefill}
             onBusyChange={setInvoiceBusy}
             filedRecord={invoiceFiledTo}
+            loadPreviousSubmission={loadPreviousInvoiceSubmission}
+            followPreviousSubmission={followPreviousInvoiceSubmission}
           />
         )}
 

@@ -1,0 +1,25 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="sprk_procedurestatus" localizedName="Procedure Status" description="Lifecycle of a Procedure. A custom choice, not statecode, so it can be field-secured (model 3.2)." xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.2.3.1</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <displaynames>
+    <displayname description="Procedure Status" languagecode="1033" />
+  </displaynames>
+  <Descriptions>
+    <Description description="Lifecycle of a Procedure. A custom choice, not statecode, so it can be field-secured (model 3.2)." languagecode="1033" />
+  </Descriptions>
+  <options>
+    <option value="100000000" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Active" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000001" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Retired" languagecode="1033" />
+      </labels>
+    </option>
+  </options>
+</optionset>

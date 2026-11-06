@@ -29,6 +29,8 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
 
@@ -133,6 +135,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const int CostTypeFee = 100000000;
     internal const int CostTypeExpense = 100000001;
     internal const int LineStatusPending = 100000000;
+    internal const int LineStatusClean = 100000001;
     internal const int LineStatusFlagged = 100000002;
     internal const int ApprovalStatusPending = 100000000;
 
@@ -145,6 +148,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     internal const string TooManyLinesCode = "ebilling.submission.too_many_lines";
     internal const string FindingsTooLargeCode = "ebilling.submission.findings_too_large";
     internal const string OwnerUnresolvedCode = "ebilling.submission.owner_unresolved";
+    internal const string SupersedesReadFailedCode = "ebilling.submission.supersedes_read_failed";
     internal const string SubmitterMissingCode = "ebilling.submission.submitter_missing";
 
     /// <summary>
@@ -174,6 +178,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     private readonly StoredFileService _files;
     private readonly SubmissionCommitGate _gate;
     private readonly ILogger<InvoiceSubmissionPersister> _logger;
+    private readonly JobSubmissionService? _jobs;
 
     /// <summary>
     /// Task 094: the step-3 source check could not read the source's isolation or flags (nothing committed; the job retries). The string
@@ -190,7 +195,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         ExistingDocumentIsolationCheck isolation,
         StoredFileService files,
         SubmissionCommitGate gate,
-        ILogger<InvoiceSubmissionPersister> logger)
+        ILogger<InvoiceSubmissionPersister> logger,
+        JobSubmissionService? jobs = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _recordTypes = recordTypes ?? throw new ArgumentNullException(nameof(recordTypes));
@@ -201,6 +207,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _jobs = jobs; // Task 097c: the old invoice's re-index; null only in a test seam (the DI path always supplies the singleton).
     }
 
     /// <summary>The submission columns the persister re-reads: the snapshot's (core record, link, status), the correlation id and the submitters.</summary>
@@ -517,6 +524,46 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             invoice[InvoiceSubmittedBy] = new EntityReference(ContactEntity, contactId);
         }
 
+        // Task 097c (model 9.1 "Existing invoice", step 4; EB-D-179): a Correction names the invoice it replaces (sprk_resubmissionof, written
+        // by the intake after its guard). That explicit target REPLACES 104's automatic lookup below: the new invoice links to it, and the old
+        // invoice closes Superseded in this same transaction, guarded on the version read here. As for 104, an automatic rejection is not
+        // accepted: it links nothing and supersedes nothing, so the old invoice stays In Review for the next correction.
+        SupersedeTarget? supersede = null;
+        if (outcome.Kind != SubmissionEvaluationKind.AutoRejected && outcome.Submission!.ResubmissionOfSubmissionId is not null)
+        {
+            var (targetRefusal, target) = await CheckCorrectionTargetAsync(outcome, core, ct).ConfigureAwait(false);
+            if (targetRefusal is not null)
+            {
+                return targetRefusal;
+            }
+
+            supersede = target;
+            invoice[InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn] = new EntityReference(InvoiceReviewService.InvoiceEntity, target!.InvoiceId);
+        }
+
+        // Task 104 (FR-36, D-43): an ACCEPTED resubmission of a Returned to Firm invoice is linked to the invoice it replaces. An automatic
+        // rejection is not accepted and is never linked. A fault reading the predecessor is a Retry (a missed link would be permanent).
+        // Task 097c: a New submission only (a Correction's target is explicit, above).
+        if (outcome.Kind != SubmissionEvaluationKind.AutoRejected && outcome.Submission!.ResubmissionOfSubmissionId is null)
+        {
+            Guid? superseded;
+            try
+            {
+                superseded = await FindSupersededInvoiceAsync(submissionId, invoiceId, outcome.Submission!, core, ct).ConfigureAwait(false);
+            }
+            catch (Exception readFault) when (readFault is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the earlier invoice for its firm and invoice number could not be read ({Fault}); retry",
+                    submissionId, readFault.GetType().Name);
+                return Result(SubmissionPersistStatus.Retry, submissionId, SupersedesReadFailedCode);
+            }
+
+            if (superseded is { } supersededId)
+            {
+                invoice[InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn] = new EntityReference(InvoiceReviewService.InvoiceEntity, supersededId);
+            }
+        }
+
         var initial = outcome.Kind == SubmissionEvaluationKind.AutoRejected ? InvoiceLifecycleStatus.Rejected : InvoiceLifecycleStatus.InReview;
         var create = _lifecycle.BuildInvoiceCreateRequest(invoice, initial);
         if (!create.Succeeded)
@@ -593,6 +640,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             requests.Add(new CreateRequest { Target = approval });
         }
 
+        if (supersede is not null)
+        {
+            // Task 097c: the old invoice's close, as 097a's lifecycle built it (the status pair at the version read above, IfRowVersionMatches).
+            // A change since that read (an approval, a decision, any edit) faults this request and the whole transaction rolls back.
+            requests.Add(supersede.Request);
+        }
+
         var guardIndex = -1;
         var guardedSource = sourceDocument ? documentId : fromEmail?.SourceDocumentId;
         if (guardedSource is not null)
@@ -663,6 +717,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 return refusedNow;
             }
 
+            // Task 097c (model 9.1 step 4): the old invoice is read again. Approved, Sent to AP or Paid since the check: the correction can never
+            // commit, so the submission ends Failed with the intake's reason. Anything else (a row-version race, a transient fault, a read fault)
+            // is the transaction's ordinary Retry, and the next delivery's check decides.
+            if (supersede is not null && await RecheckSupersedeTargetAsync(submissionId, supersede.InvoiceId, ct).ConfigureAwait(false) is { } decidedNow)
+            {
+                return decidedNow;
+            }
+
             if (guardedSource is not null && ex.FailedRequestIndex == guardIndex)
             {
                 // A from-email submission has no job-staged copy, so the job retries the delivery and step 3 reads the .eml again.
@@ -676,6 +738,17 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
         _logger.LogInformation("Invoice submission {SubmissionId}: committed invoice {InvoiceId} ({Kind}) with {LineCount} lines in {RequestCount} requests",
             submissionId, invoiceId, outcome.Kind, lines.Count, requests.Count);
+
+        if (supersede is not null)
+        {
+            // Task 097c (task 152): the OLD invoice's index document must show it Superseded, keyed to the version the close replaced, as
+            // InvoiceLifecycleService.TransitionAsync keys a move. Queued right after the commit, before the gate: the document is built from the
+            // old invoice's own row (nothing of the new submission or its source), and Superseded is terminal, so a re-index lost to a gate
+            // fault (a resume never comes back here) would leave it stale for good. If the gate undoes the commit, the undo's reopen queues its
+            // own re-index (SubmissionCommitGate.CompensateAsync), and each job reads the row as it then is. Best effort.
+            await InvoiceIndexingJobHandler.TryEnqueueAsync(
+                _jobs, _logger, supersede.InvoiceId, $"v{supersede.RowVersion.ToString(CultureInfo.InvariantCulture)}").ConfigureAwait(false);
+        }
 
         // Model 9.1 steps 5-6 (tasks 092, 094): the commit gate, immediately after the commit and before the totals and every after-step, on
         // every channel: the source re-run, then the flip. A fault throws (the job retries; the submission now links its invoice, so the retry
@@ -935,6 +1008,218 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         }
     }
 
+    /// <summary>
+    /// D-43 and EB-D-174 (task 104): the invoice this submission's invoice supersedes. Walking back from the MOST RECENT earlier invoice (by created on, then
+    /// id) for the same firm and firm invoice number, AUTOMATIC rejections are skipped (049 creates them Rejected with no approval row: nobody
+    /// decided them, and they must not hide the Returned invoice the firm is correcting); the first invoice that is not one is the predecessor,
+    /// and only when it is Returned to Firm. A human-Rejected (a Rejected invoice that has its approval row), or any other, most-recent invoice
+    /// is never linked: EB-D-174 skips automatic rejections only, and a rejection by a person ends the chain. The two invoices must regard the same single core record (<see cref="InvoiceFamilyCoreRecordGuard"/>
+    /// refuses a supersedes link across core records), else no link. Read app-only: a firm resubmitting must not be able to learn, from a
+    /// refusal, that an invoice it cannot read exists. Throws on a read fault (the caller retries).
+    /// </summary>
+    internal async Task<Guid?> FindSupersededInvoiceAsync(
+        Guid submissionId, Guid invoiceId, SubmissionSnapshot submission, InvoiceCoreRecord core, CancellationToken ct)
+    {
+        var number = submission.FirmInvoiceNumber?.Trim();
+        if (string.IsNullOrEmpty(number) || submission.FirmId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var query = new QueryExpression(InvoiceReviewService.InvoiceEntity)
+        {
+            ColumnSet = new ColumnSet(["statuscode", "createdon", .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewService.InvoiceEntity)]),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(InvoiceVendorOrg, ConditionOperator.Equal, submission.FirmId);
+        query.Criteria.AddCondition(InvoiceReviewService.InvInvoiceNumber, ConditionOperator.Equal, number);
+        query.AddOrder("createdon", OrderType.Descending);
+        query.AddOrder(InvoiceReviewService.InvoiceEntity + "id", OrderType.Descending);
+
+        var earlier = (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Where(e => e.Id != invoiceId).ToList();
+
+        // The Rejected ones are told apart in ONE read: a human rejection (104) keeps its approval row, an automatic one (049) never had one.
+        var rejected = earlier.Where(e => StatusOfInvoice(e) == InvoiceStatusCodes.Rejected).Select(e => e.Id).ToList();
+        var withApproval = rejected.Count == 0 ? [] : await ReadInvoicesWithApprovalAsync(rejected, ct).ConfigureAwait(false);
+        var previous = earlier.FirstOrDefault(e => StatusOfInvoice(e) != InvoiceStatusCodes.Rejected || withApproval.Contains(e.Id));
+        if (previous is null || StatusOfInvoice(previous) != InvoiceStatusCodes.ReturnedToFirm)
+        {
+            return null;
+        }
+
+        if (EligibleApproverResolver.SingleCoreOf(InvoiceReviewService.InvoiceEntity, previous) is not { } previousCore
+            || !string.Equals(previousCore.Entity, core.EntityLogicalName, StringComparison.OrdinalIgnoreCase)
+            || previousCore.Id != core.RecordId)
+        {
+            _logger.LogWarning(
+                "Invoice submission {SubmissionId}: the Returned to Firm invoice {PreviousId} for its firm and invoice number is filed under another core record; no supersedes link",
+                submissionId, previous.Id);
+            return null;
+        }
+
+        return previous.Id;
+    }
+
+    private static int? StatusOfInvoice(Entity invoice) => invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value;
+
+    // ── Task 097c: a Correction supersedes the invoice it replaces (model 9.1 "Existing invoice", step 4) ──
+
+    /// <summary>The old invoice's close in this commit: its id, the version it was read at and 097a's request built at that version.</summary>
+    internal sealed record SupersedeTarget(Guid InvoiceId, long RowVersion, UpdateRequest Request);
+
+    /// <summary>What the commit-time check reads of the old invoice in ONE read: the intake guard's columns and the row version.</summary>
+    internal static readonly string[] SupersedeTargetColumns = [.. InvoiceSubmissionService.CorrectionInvoiceColumns, InvoiceReviewService.VersionNumber];
+
+    /// <summary>The statuses a correction can never replace once reached (model 9.1: a credit or an adjustment instead).</summary>
+    private static bool IsDecidedForPayment(int? statusCode) =>
+        statusCode is InvoiceStatusCodes.Approved or InvoiceStatusCodes.SentToAp or InvoiceStatusCodes.Paid;
+
+    /// <summary>
+    /// Task 097c: the commit-time re-check of a Correction's target (the intake's check, <see cref="InvoiceSubmissionService.CheckCorrectionAsync"/>,
+    /// is not a lock). The target is resolved from the submission's <c>sprk_resubmissionof</c> (<see cref="SubmissionSnapshot.ReadCorrectedInvoiceAsync(IGenericEntityService, CancellationToken)"/>),
+    /// then the old invoice is read ONCE (status, firm, core lookups, row version) and must still be In Review, this firm's and filed under
+    /// <paramref name="core"/> alone. Its own submission (the one <c>sprk_resubmissionof</c> names) is re-read too and must carry this
+    /// submission's firm invoice number and have finished (task 097 second review F2, F1). The close is 097a's <see cref="IInvoiceLifecycleService.BuildSupersedeRequest"/> at that version; a refused
+    /// build is a stop, never a send. Refusals are permanent (Failed with the intake's reason as one stored code); a read fault is a Retry.
+    /// Reads only; nothing is written.
+    /// </summary>
+    private async Task<(SubmissionPersistResult? Refusal, SupersedeTarget? Target)> CheckCorrectionTargetAsync(
+        SubmissionEvaluationOutcome outcome, InvoiceCoreRecord core, CancellationToken ct)
+    {
+        var submissionId = outcome.SubmissionId;
+        Entity old;
+        Entity earlier;
+        try
+        {
+            var target = await outcome.Submission!.ReadCorrectedInvoiceAsync(_entities, ct).ConfigureAwait(false);
+            if (target.CorrectedInvoiceId is not { } oldId)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the invoice its correction replaces no longer resolves from submission {Earlier}; nothing persisted",
+                    submissionId, target.ResubmissionOfSubmissionId);
+                return (Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.CorrectionTargetUnavailable), null);
+            }
+
+            old = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, oldId, SupersedeTargetColumns, ct).ConfigureAwait(false);
+
+            // Task 097 second review (F1, F2): the old invoice's own submission, re-read here because the intake's check is not a lock and
+            // sprk_resubmissionof is an ordinary column: it must have finished, and carry this submission's firm invoice number.
+            earlier = await _entities.RetrieveAsync(FinanceBaseValues.SubmissionEntity, target.ResubmissionOfSubmissionId!.Value,
+                InvoiceSubmissionService.CorrectionTargetSubmissionColumns, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice its correction replaces, or that invoice's submission, no longer exists; nothing persisted", submissionId);
+            return (Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.CorrectionTargetUnavailable), null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice its correction replaces could not be read ({Fault}); retry",
+                submissionId, ex.GetType().Name);
+            return (Result(SubmissionPersistStatus.Retry, submissionId, SupersedesReadFailedCode), null);
+        }
+
+        string? refusal = null;
+        var state = old.GetAttributeValue<OptionSetValue>("statecode")?.Value;
+        var status = StatusOfInvoice(old);
+        if (old.GetAttributeValue<EntityReference>(InvoiceVendorOrg)?.Id is not { } firm || firm != outcome.Submission!.FirmId)
+        {
+            refusal = SubmissionReasonCodes.CorrectionDifferentFirm;
+        }
+        else if (EligibleApproverResolver.SingleCoreOf(InvoiceReviewService.InvoiceEntity, old) is not { } oldCore
+            || !string.Equals(oldCore.Entity, core.EntityLogicalName, StringComparison.Ordinal) || oldCore.Id != core.RecordId)
+        {
+            refusal = SubmissionReasonCodes.CorrectionDifferentCoreRecord;
+        }
+        else if (state != InvoiceStatusCodes.StateActive || status != InvoiceStatusCodes.InReview)
+        {
+            // Every status but In Review, as the intake refuses it (owner 2026-10-21: an Inactive invoice is not changeable either).
+            refusal = SubmissionReasonCodes.CorrectionInvoiceStatus;
+        }
+        else if (!InvoiceSubmissionService.SameFirmInvoiceNumber(
+            earlier.GetAttributeValue<string>(TrackingNumberAllocator.FirmInvoiceNumberColumn), outcome.Submission!.FirmInvoiceNumber))
+        {
+            // Second review F2 (D-37, EB-D-179 item 3): an edited sprk_resubmissionof cannot point at an invoice of another number.
+            refusal = SubmissionReasonCodes.CorrectionDifferentInvoiceNumber;
+        }
+        else if (!InvoiceSubmissionService.CorrectionTargetSubmissionFinished(earlier))
+        {
+            // Second review F1: Failed, not Retry; the earlier submission may run for a long time (097c's refusals end the same way).
+            refusal = SubmissionReasonCodes.CorrectionSubmissionInProgress;
+        }
+
+        if (refusal is not null)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice {OldInvoiceId} its correction replaces is refused at commit ({Code}; statuscode {Status}); nothing persisted",
+                submissionId, old.Id, refusal, status);
+            return (Result(SubmissionPersistStatus.Refused, submissionId, refusal), null);
+        }
+
+        var read = old.GetAttributeValue<long?>(InvoiceReviewService.VersionNumber)
+            ?? (StoredFileSourceVersion.TryParseRowVersion(old.RowVersion, out var rowVersion) ? rowVersion : (long?)null);
+        if (read is not { } version || version <= 0)
+        {
+            // The close could not be conditional: never sent blind.
+            _logger.LogWarning("Invoice submission {SubmissionId}: the row version of invoice {OldInvoiceId} could not be read; retry", submissionId, old.Id);
+            return (Result(SubmissionPersistStatus.Retry, submissionId, SupersedesReadFailedCode), null);
+        }
+
+        // The status as read (In Review by the check above) goes to the builder, so the lifecycle's own matrix judges it too.
+        var built = InvoiceStatusCodes.TryFromStatusCode(status!.Value, out var current)
+            ? _lifecycle.BuildSupersedeRequest(old.Id, current, version)
+            : null;
+        if (built is not { Succeeded: true })
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the lifecycle refused the close of invoice {OldInvoiceId} ({Reason}); nothing persisted",
+                submissionId, old.Id, built?.Reason ?? InvoiceTransitionReasons.StatusUnknown);
+            return (Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.CorrectionInvoiceStatus), null);
+        }
+
+        return (null, new SupersedeTarget(old.Id, version, built.Request!));
+    }
+
+    /// <summary>
+    /// Task 097c: after a rolled-back transaction, the old invoice read again. A refusal (<see cref="SubmissionReasonCodes.CorrectionInvoiceStatus"/>)
+    /// only when it is now Approved, Sent to AP or Paid; null for anything else, a read fault included (the caller's ordinary Retry).
+    /// </summary>
+    private async Task<SubmissionPersistResult?> RecheckSupersedeTargetAsync(Guid submissionId, Guid oldInvoiceId, CancellationToken ct)
+    {
+        try
+        {
+            var old = await _entities.RetrieveAsync(InvoiceReviewService.InvoiceEntity, oldInvoiceId, SupersedeTargetColumns, ct).ConfigureAwait(false);
+            if (!IsDecidedForPayment(StatusOfInvoice(old)))
+            {
+                return null;
+            }
+
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice {OldInvoiceId} its correction replaces was decided (statuscode {Status}) before the commit; nothing persisted",
+                submissionId, oldInvoiceId, StatusOfInvoice(old));
+            return Result(SubmissionPersistStatus.Refused, submissionId, SubmissionReasonCodes.CorrectionInvoiceStatus);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the invoice {OldInvoiceId} could not be read again after the failed transaction ({Fault}); retry",
+                submissionId, oldInvoiceId, ex.GetType().Name);
+            return null;
+        }
+    }
+
+    /// <summary>The ids among <paramref name="invoiceIds"/> that have an approval row (one read). A fault throws (the caller retries).</summary>
+    private async Task<HashSet<Guid>> ReadInvoicesWithApprovalAsync(IReadOnlyList<Guid> invoiceIds, CancellationToken ct)
+    {
+        var query = new QueryExpression(ApprovalEntity)
+        {
+            ColumnSet = new ColumnSet(ApprovalInvoice),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(ApprovalInvoice, ConditionOperator.In, invoiceIds.Cast<object>().ToArray());
+        return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
+            .Select(a => a.GetAttributeValue<EntityReference>(ApprovalInvoice)?.Id ?? Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .ToHashSet();
+    }
+
     private async Task<Entity?> ReadSubmissionAsync(Guid submissionId, CancellationToken ct)
     {
         try
@@ -1025,6 +1310,10 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             .Select(f => f.Subject.LineIndex!.Value)
             .ToHashSet();
 
+        // F2: a rule version the gate or its handler refused produced no finding, but its check did not run on the lines it applies to: those lines are
+        // Flagged (the same principle as EB-D-175: a check that did not run is not Clean).
+        var notChecked = RulesNotChecked(outcome.Evaluation, read.Lines.Count);
+
         var rows = new List<Entity>(read.Lines.Count);
         for (var index = 0; index < read.Lines.Count; index++)
         {
@@ -1105,9 +1394,11 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             }
 
             var flagged = flaggedByFinding.Contains(index)
+                || notChecked.ContainsKey(index)
                 || coding is { RefusedCodes.Count: > 0 }
-                || coding is { HasFirmCodeMismatch: true };
-            row[InvoiceTotalsService.LineStatus] = new OptionSetValue(flagged ? LineStatusFlagged : LineStatusPending);
+                || coding is { HasFirmCodeMismatch: true }
+                || LineFindingCodeFor(line.Narrative.Value, coding) is not null; // EB-D-175 / EB-D-176
+            row[InvoiceTotalsService.LineStatus] = new OptionSetValue(LineStatusFor(flagged, coded: coding is not null));
 
             var confidence = BuildExtractionConfidence(line, resolution, coding, outcome);
             if (confidence.Length <= ExtractionConfidenceMaxLength)
@@ -1127,6 +1418,93 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
 
         return rows;
     }
+
+    /// <summary>
+    /// The line status a persisted line starts in (103 Q2: nothing used to write Clean, so no invoice could ever be approved, I-2). A line a
+    /// finding, a refused code, a firm-code mismatch, a line the coding Action did not return (EB-D-175), a line with no description (EB-D-176) or a
+    /// line a refused rule version should have checked (F2) flagged is Flagged. Any other line of a CODED invoice is Clean: no check that can flag
+    /// a line was left unrun (a refused rule is flagged above, so it does not count as run). A line of an UNCODED invoice (D-126: coding was unavailable, so a hold finding stands) stays Pending, shown as
+    /// Processing (D-58): its codes are still owed, and a Pending line is neither decidable nor approvable.
+    /// </summary>
+    internal static int LineStatusFor(bool flagged, bool coded) => flagged ? LineStatusFlagged : coded ? LineStatusClean : LineStatusPending;
+
+    /// <summary>The finding code of a line the AI did not check because the coding Action returned nothing usable for it (EB-D-175).</summary>
+    internal const string LineFindingNotReturned = "coding.not_returned";
+
+    /// <summary>The finding code of a line with a blank narrative (EB-D-176): it has no description to code or to read.</summary>
+    internal const string LineFindingNoDescription = "line.no_description";
+
+    /// <summary>The finding code of a line a refused rule version should have checked (F2): the check did not run, so the line is not Clean.</summary>
+    internal const string LineFindingRulesNotChecked = "rules.not_checked";
+
+    /// <summary>
+    /// The lines on which a refused rule version left a check unrun (F2), each with its reviewer-facing message naming the rule type(s), never a rule id.
+    /// A refusal is tied to its lines through <see cref="BillingEvaluationResult.RefusalScopes"/>: the lines the version was selected for, or every line when
+    /// the invoice subject selected it. A refusal with no scope (it cannot be tied to particular lines) flags every line.
+    /// </summary>
+    internal static IReadOnlyDictionary<int, string> RulesNotChecked(BillingEvaluationResult? evaluation, int lineCount)
+    {
+        var result = new Dictionary<int, string>();
+        if (evaluation is null || evaluation.Refusals.Count == 0)
+        {
+            return result;
+        }
+
+        var typesByLine = new SortedDictionary<int, SortedSet<string>>();
+        var unnamedLines = new HashSet<int>();
+        foreach (var refusal in evaluation.Refusals)
+        {
+            var scope = evaluation.RefusalScopes.FirstOrDefault(s => s.PolicyVersionId == refusal.PolicyVersionId);
+            var lines = scope is null || scope.AppliesToInvoice
+                ? Enumerable.Range(0, lineCount)
+                : scope.LineIndexes.Where(i => i >= 0 && i < lineCount);
+            foreach (var line in lines)
+            {
+                if (scope?.RuleType is { } type)
+                {
+                    if (!typesByLine.TryGetValue(line, out var set))
+                    {
+                        typesByLine[line] = set = new SortedSet<string>(StringComparer.Ordinal);
+                    }
+
+                    set.Add(type.ToString());
+                }
+                else
+                {
+                    unnamedLines.Add(line);
+                }
+
+                typesByLine.TryAdd(line, new SortedSet<string>(StringComparer.Ordinal));
+            }
+        }
+
+        foreach (var (line, types) in typesByLine)
+        {
+            result[line] = types.Count switch
+            {
+                0 => "A billing rule could not be checked on this line.",
+                1 when !unnamedLines.Contains(line) => $"The {types.Min} rule could not be checked on this line.",
+                _ => $"These rules could not be checked on this line: {string.Join(", ", types)}{(unnamedLines.Contains(line) ? ", and another rule" : string.Empty)}.",
+            };
+        }
+
+        return result;
+    }
+
+    /// <summary>The findings JSON member listing the lines flagged for being unchecked or undescribed: <c>[{ line, code, message }]</c>, no values.</summary>
+    internal const string LineFindingsMember = "lineFindings";
+
+    /// <summary>
+    /// The finding a line carries for lacking a check, or null (owner decisions EB-D-175 and EB-D-176: such a line is Flagged, not Clean, so a
+    /// reviewer must accept or correct it before approval). A blank narrative (a coded line that was never sent, <see cref="LineCodingStatus.NoNarrative"/>,
+    /// or any line of an uncoded invoice) is <see cref="LineFindingNoDescription"/>; a line sent to the model that came back unusable
+    /// (<see cref="LineCodingStatus.NotReturned"/>) is <see cref="LineFindingNotReturned"/>. The firm's codes are kept either way. These are
+    /// reviewer-facing findings stored in <c>sprk_findingsjson</c>; they raise no Signal, and a Flagged line is decided by status alone.
+    /// </summary>
+    internal static string? LineFindingCodeFor(string? narrative, LineCodingResult? coding) =>
+        string.IsNullOrWhiteSpace(narrative) || coding is { Status: LineCodingStatus.NoNarrative } ? LineFindingNoDescription
+        : coding is { Status: LineCodingStatus.NotReturned } ? LineFindingNotReturned
+        : null;
 
     internal static Entity BuildApproval(
         SubmissionEvaluationOutcome outcome, Guid invoiceId, InvoiceCoreRecord core, IReadOnlyDictionary<string, object> resolverFields,
@@ -1264,7 +1642,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             };
         }
 
-        return new JsonObject { ["fields"] = fields, ["coding"] = codingJson }.ToJsonString(Json);
+        // EB-D-170: the analyzer and API version that read the line, and the Action and version that coded it, so a correction names its source.
+        return new JsonObject
+        {
+            ["fields"] = fields,
+            ["coding"] = codingJson,
+            [ExtractionProvenance.Member] = ExtractionProvenance.ForLine(outcome.Read!, coding is { Status: not LineCodingStatus.NoNarrative }),
+        }.ToJsonString(Json);
     }
 
     private static JsonObject FieldJson<T>(ExtractedInvoiceField<T> field, ResolvedInvoiceLine resolution, string name)
@@ -1331,49 +1715,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             var f = findings[i];
             var scrub = withheldGroups.Contains((f.PolicyId, f.Subject));
             decisions.TryGetValue(i, out var decided);
-            var entry = new JsonObject
-            {
-                ["index"] = i,
-                ["ruleType"] = f.RuleType.ToString(),
-                ["policyId"] = f.PolicyId.ToString("D"),
-                ["policyCode"] = f.PolicyCode,
-                ["policyVersionId"] = f.PolicyVersionId.ToString("D"),
-                ["clause"] = f.ClauseReference,
-                ["clauseLocation"] = f.ClauseLocation,
-                ["subject"] = f.Subject.Kind.ToString(),
-                ["line"] = f.Subject.LineIndex,
-                ["reasonCode"] = f.ReasonCode,
-                ["detailWithheld"] = f.DetailWithheld || scrub,
-                ["consequence"] = decided?.Consequence?.ToString(),
-                ["rejects"] = decided?.Rejects ?? false,
-                ["heldBecause"] = decided?.HeldBecause,
-            };
-            if (!scrub)
-            {
-                entry["valuesRead"] = new JsonArray(f.ValuesRead.Select(v => (JsonNode)new JsonObject
-                {
-                    ["name"] = v.Name,
-                    ["value"] = v.Value,
-                    ["line"] = v.ExtractedField?.LineIndex,
-                    ["field"] = v.ExtractedField?.Field,
-                    ["confidence"] = v.Confidence,
-                    ["belowReliabilityThreshold"] = v.BelowReliabilityThreshold,
-                }).ToArray());
-
-                // Task 100 (the Invoice Review read model, FR-31): the adjustment the rule suggests, for the reviewer's "apply suggestion"
-                // click. An additive member of the stored copy (schema 1 readers ignore it); a reviewer decision applies it, never a handler.
-                // Left out of a scrubbed group with the rest of the detail (D-112), and when the rule suggests none.
-                if (f.SuggestedAdjustment is { } suggestion)
-                {
-                    entry["suggestedAdjustment"] = new JsonObject
-                    {
-                        ["kind"] = suggestion.Kind.ToString(),
-                        ["amount"] = suggestion.Amount,
-                    };
-                }
-            }
-
-            findingsJson.Add(entry);
+            findingsJson.Add(FindingEntryJson(i, f, decided, scrub));
         }
 
         var pipeline = new JsonArray(outcome.PipelineFindings.Select(p =>
@@ -1410,6 +1752,27 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             });
         }
 
+        // EB-D-175 / EB-D-176: the lines left Flagged for lacking a check or a description, each with a stable code. Additive (schema 1 readers
+        // ignore it); no Signal, no value: the reviewer decides the line from its Flagged status.
+        var codedByKey = outcome.Coding?.Lines.ToDictionary(l => l.LineKey, StringComparer.Ordinal);
+        var notChecked = RulesNotChecked(outcome.Evaluation, outcome.Read!.Lines.Count);
+        var lineFindings = new JsonArray();
+        for (var index = 0; index < outcome.Read!.Lines.Count; index++)
+        {
+            LineCodingResult? lineCoding = null;
+            codedByKey?.TryGetValue(index.ToString(CultureInfo.InvariantCulture), out lineCoding);
+            if (LineFindingCodeFor(outcome.Read.Lines[index].Narrative.Value, lineCoding) is { } lineCode)
+            {
+                lineFindings.Add(LineFindingEntryJson(index, lineCode));
+            }
+
+            // F2: a line a refused rule version should have checked (no rule id, no value: the type only).
+            if (notChecked.TryGetValue(index, out var notCheckedMessage))
+            {
+                lineFindings.Add(LineFindingEntryJson(index, LineFindingRulesNotChecked, notCheckedMessage));
+            }
+        }
+
         var root = new JsonObject
         {
             ["schema"] = 1,
@@ -1438,22 +1801,29 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             ["findings"] = findingsJson,
             ["pipelineFindings"] = pipeline,
             ["codingFindings"] = coding,
+            [LineFindingsMember] = lineFindings,
             ["invoiceName"] = InvoiceNameFor(outcome),
             ["invoiceNumberReadConfidence"] = outcome.InvoiceNumber?.ReadConfidence,
             ["signalPlan"] = SignalPlanJson(outcome, invoiceId, out planRefusals),
+
+            // EB-D-170: the header's home for provenance: the pair, and the header fields as read (a correction of one still names what the AI read).
+            [ExtractionProvenance.Member] = ExtractionProvenance.ForSubmission(outcome.Read!, outcome.Coding is not null, outcome.Resolution),
         };
         if (planRefusals.Count > 0)
         {
-            root[SignalPlanRefusalsMember] = new JsonArray(planRefusals.Select(r => (JsonNode)new JsonObject
-            {
-                ["policyCode"] = r.PolicyCode,
-                ["subject"] = new JsonObject { ["entity"] = r.SubjectEntity, ["id"] = r.SubjectId.ToString("D") },
-                ["code"] = r.Code,
-            }).ToArray());
+            root[SignalPlanRefusalsMember] = new JsonArray(planRefusals.Select(r => (JsonNode)SignalPlanRefusalEntryJson(r)).ToArray());
         }
 
         return root.ToJsonString(Json);
     }
+
+    /// <summary>One <see cref="SignalPlanRefusalsMember"/> entry (task 101 B2b-2: the corrections re-evaluation records a refused replacement the same way).</summary>
+    internal static JsonObject SignalPlanRefusalEntryJson(SignalPlanRefusal r) => new()
+    {
+        ["policyCode"] = r.PolicyCode,
+        ["subject"] = new JsonObject { ["entity"] = r.SubjectEntity, ["id"] = r.SubjectId.ToString("D") },
+        ["code"] = r.Code,
+    };
 
     /// <summary>
     /// The Signal plan (notes section 5; part D): the billing findings mapped by <see cref="BillingFindingSignalMapper.MapAll(BillingEvaluationResult, BillingSignalSubjects, IReadOnlyList{FindingDecision}, SubmissionEvaluationKind?)"/>
@@ -1491,46 +1861,115 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                 continue;
             }
 
-            var facts = new JsonObject();
-            foreach (var (name, value) in request.FactValues)
-            {
-                facts[name] = value?.ToString();
-            }
-
-            plan.Add(new JsonObject
-            {
-                ["policyId"] = request.PolicyId.ToString("D"),
-                ["policyCode"] = request.PolicyCode,
-                ["policyVersionId"] = request.PolicyVersionId.ToString("D"),
-                ["subjectEntity"] = request.SubjectEntityLogicalName,
-                ["subjectId"] = request.SubjectId.ToString("D"),
-                ["subjectName"] = request.SubjectDisplayName,
-                ["headline"] = request.ShortHeadline,
-                ["lane"] = request.Lane,
-                ["severity"] = request.Severity,
-                ["template"] = request.MessageTemplate,
-                ["facts"] = facts,
-                ["sentence"] = SignalWriter.RenderSentence(request.MessageTemplate, request.FactValues),
-                ["evidence"] = new JsonArray((request.EvidenceRefs ?? []).Select(e => (JsonNode)new JsonObject
-                {
-                    ["kind"] = e.Kind,
-                    ["ref"] = e.Ref,
-                    ["tier"] = e.Tier,
-                    ["confidence"] = e.Confidence,
-                    ["text"] = e.Text,
-                    ["source"] = e.Source,
-                    ["asOf"] = e.AsOf,
-                    ["clause"] = e.Clause,
-                }).ToArray()),
-                ["reasonCodes"] = new JsonArray(mapping.ReasonCodes.Select(c => (JsonNode)JsonValue.Create(c)!).ToArray()),
-                ["consequence"] = mapping.Consequence.ToString(),
-                ["fingerprint"] = mapping.Fingerprint,
-                ["decision"] = mapping.Decision.ToString(),
-            });
+            plan.Add(SignalPlanEntryJson(mapping));
         }
 
         return plan;
     }
+
+    /// <summary>
+    /// One <c>signalPlan[]</c> entry from a mapped (policy, subject) group (B2a: a per-entry builder so a correction's re-evaluation can replace ONE entry
+    /// of the stored plan). The caller has already passed the request through <see cref="SignalWriter.PreflightRefusal"/>.
+    /// </summary>
+    internal static JsonObject SignalPlanEntryJson(BillingSignalMapping mapping)
+    {
+        var request = mapping.Request;
+        var facts = new JsonObject();
+        foreach (var (name, value) in request.FactValues)
+        {
+            facts[name] = value?.ToString();
+        }
+
+        return new JsonObject
+        {
+            ["policyId"] = request.PolicyId.ToString("D"),
+            ["policyCode"] = request.PolicyCode,
+            ["policyVersionId"] = request.PolicyVersionId.ToString("D"),
+            ["subjectEntity"] = request.SubjectEntityLogicalName,
+            ["subjectId"] = request.SubjectId.ToString("D"),
+            ["subjectName"] = request.SubjectDisplayName,
+            ["headline"] = request.ShortHeadline,
+            ["lane"] = request.Lane,
+            ["severity"] = request.Severity,
+            ["template"] = request.MessageTemplate,
+            ["facts"] = facts,
+            ["sentence"] = SignalWriter.RenderSentence(request.MessageTemplate, request.FactValues),
+            ["evidence"] = new JsonArray((request.EvidenceRefs ?? []).Select(e => (JsonNode)new JsonObject
+            {
+                ["kind"] = e.Kind,
+                ["ref"] = e.Ref,
+                ["tier"] = e.Tier,
+                ["confidence"] = e.Confidence,
+                ["text"] = e.Text,
+                ["source"] = e.Source,
+                ["asOf"] = e.AsOf,
+                ["clause"] = e.Clause,
+            }).ToArray()),
+            ["reasonCodes"] = new JsonArray(mapping.ReasonCodes.Select(c => (JsonNode)JsonValue.Create(c)!).ToArray()),
+            ["consequence"] = mapping.Consequence.ToString(),
+            ["fingerprint"] = mapping.Fingerprint,
+            ["decision"] = mapping.Decision.ToString(),
+        };
+    }
+
+    /// <summary>
+    /// One <c>findings[]</c> entry (B2a: a per-entry builder so a correction's re-evaluation can patch ONE entry of the stored copy). <paramref name="scrub"/>
+    /// is D-112: the (policy, subject) group holds a withheld finding, so this entry carries no values read and no suggestion.
+    /// </summary>
+    internal static JsonObject FindingEntryJson(int index, BillingFinding f, FindingDecision? decided, bool scrub)
+    {
+        var entry = new JsonObject
+        {
+            ["index"] = index,
+            ["ruleType"] = f.RuleType.ToString(),
+            ["policyId"] = f.PolicyId.ToString("D"),
+            ["policyCode"] = f.PolicyCode,
+            ["policyVersionId"] = f.PolicyVersionId.ToString("D"),
+            ["clause"] = f.ClauseReference,
+            ["clauseLocation"] = f.ClauseLocation,
+            ["subject"] = f.Subject.Kind.ToString(),
+            ["line"] = f.Subject.LineIndex,
+            ["reasonCode"] = f.ReasonCode,
+            ["detailWithheld"] = f.DetailWithheld || scrub,
+            ["consequence"] = decided?.Consequence?.ToString(),
+            ["rejects"] = decided?.Rejects ?? false,
+            ["heldBecause"] = decided?.HeldBecause,
+        };
+        if (!scrub)
+        {
+            entry["valuesRead"] = new JsonArray(f.ValuesRead.Select(v => (JsonNode)new JsonObject
+            {
+                ["name"] = v.Name,
+                ["value"] = v.Value,
+                ["line"] = v.ExtractedField?.LineIndex,
+                ["field"] = v.ExtractedField?.Field,
+                ["confidence"] = v.Confidence,
+                ["belowReliabilityThreshold"] = v.BelowReliabilityThreshold,
+            }).ToArray());
+
+            // Task 100 (the Invoice Review read model, FR-31): the adjustment the rule suggests, for the reviewer's "apply suggestion"
+            // click. An additive member of the stored copy (schema 1 readers ignore it); a reviewer decision applies it, never a handler.
+            // Left out of a scrubbed group with the rest of the detail (D-112), and when the rule suggests none.
+            if (f.SuggestedAdjustment is { } suggestion)
+            {
+                entry["suggestedAdjustment"] = new JsonObject
+                {
+                    ["kind"] = suggestion.Kind.ToString(),
+                    ["amount"] = suggestion.Amount,
+                };
+            }
+        }
+
+        return entry;
+    }
+
+    /// <summary>One <c>lineFindings[]</c> entry (EB-D-175 / EB-D-176; B2a: a per-entry builder). <paramref name="code"/> is <see cref="LineFindingCodeFor"/>'s.</summary>
+    internal static JsonObject LineFindingEntryJson(int lineIndex, string code, string? message = null) => new()
+    {
+        ["line"] = lineIndex,
+        ["code"] = code,
+        ["message"] = message ?? (code == LineFindingNotReturned ? "The line was not checked by the AI." : "The line has no description."),
+    };
 
     // ── Helpers ──
 

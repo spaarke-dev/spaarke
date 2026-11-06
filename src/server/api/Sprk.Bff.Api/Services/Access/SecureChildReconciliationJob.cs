@@ -2213,14 +2213,14 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             if (team.TeamId is not { } secureTeamId)
                 return new RecentChanges(0, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null); // no record can be secure
 
-            // Each changed row comes back with its lineage lookups and owner, so the upward walk starts from it with no
-            // second read of the row.
+            // Each changed row comes back with its lineage columns (its lookups and, on a Signal or Decision Record, its core
+            // record pair) and owner, so the upward walk starts from it with no second read of the row.
             var changed = new List<Entity>();
             foreach (var table in SecureChildLineage.Children.Values.OrderBy(t => t.LogicalName, StringComparer.Ordinal))
             {
                 var query = new QueryExpression(table.LogicalName)
                 {
-                    ColumnSet = new ColumnSet(table.Lookups.Keys.Append("owningteam").Append("owninguser").ToArray()),
+                    ColumnSet = new ColumnSet(table.LineageColumns.Append("owningteam").Append("owninguser").ToArray()),
                     NoLock = true,
                     PageInfo = new PagingInfo { Count = PageSize, PageNumber = 1 },
                 };
@@ -2255,7 +2255,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     continue;
                 var query = new QueryExpression(table.LogicalName)
                 {
-                    ColumnSet = new ColumnSet(table.Lookups.Keys.Append("owningteam").Append("owninguser").ToArray()),
+                    ColumnSet = new ColumnSet(table.LineageColumns.Append("owningteam").Append("owninguser").ToArray()),
                     NoLock = true,
                 };
                 query.Criteria.AddCondition(table.IdColumn, ConditionOperator.In, group.Select(r => (object)r.Id).ToArray());

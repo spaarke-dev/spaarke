@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>The regarding pair is always complete and reaches every related row that should carry it (inventory and design first; owner 2026-11-04)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>042c and 044 merged; part B gated on the owner's approval of the part A design note</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Part B modifies .cs on every server create and update path that writes the ADR-024 pair or its derived values (bff-api, security); 6+ steps; depends on 042c and 044.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting: an inventory across every table and writer that carries the regarding or its derived values, then a design with UAC-r2 implications (the pair decides filing and ownership).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Part B edits CallerWriteAuthorization.cs, OwnedChildWrite.cs and RecordCreationService*.cs, which 042c and 044 also edit; runs after both.</parallel-reason>
+    <deps>042c, 044</deps>
+    <tags>bff-api, security, field-mapping, dataverse, testing</tags>
+    <estimated-effort>Part A 4-6 hours; part B per the approved design</estimated-effort>
+  </metadata>
+
+  <prompt>Part A: inventory every table and relationship that carries the ADR-024 regarding pair (sprk_regardingrecordtype + sprk_regardingrecordid) or a value derived from it, find every way a related row can end without the value it should carry, and write a design note that closes each one; then STOP for the owner. Part B (after approval): on every server create and update path, the pair is written whole (a type with no id is filled from the row's typed filing lookup, else the type is cleared with a warning, the 042c pattern; never a refusal), and every related row gets its regarding values in the same request.</prompt>
+  <role>SPAARKE platform architect and developer, .NET 10 BFF, ADR-024 regarding resolution, I-1 core-ancestor stamps and record families. Security fails closed. Follow ADRs strictly.</role>
+  <goal>Part A: an approved design note that lists every carrier, every gap and how each gap is closed. Part B: no server path writes an incomplete regarding pair, and every related row the design names gets its regarding values in the create request that makes it, with a guard that keeps it so.</goal>
+
+  <context>
+    <background>Owner decision 4 of 2026-11-04 (notes/decisions.md): "where there is a regarding set, there should not be the case where any related row that should carry the regarding value does not get it — make it not possible." 042c (core pair) and 044 (core pair outside the server) give the pattern. Known windows: design.md §15.4 rows 11 and 12 (the restamp windows), and §15.5. Re-file restamps children (FR-23, SecureChildReconciler.AfterRefileAsync). Line numbers are at master 0d4aa87ee0; re-grep.</background>
+    <relevant-files>
+      <file role="new">projects/field-mapping-server-write-path-r1/notes/task-045-regarding-propagation-design.md (part A: inventory and design note)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/CallerWriteAuthorization.cs (PairTargetAsync ~:182, its no-id branch ~:187; the pair is completed or cleared BEFORE it is asked, so the check sees the pair that is written)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (the create path: the same fill-or-clear point 042c uses for the core pair)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs (KeepPairInStepAsync ~:385, the update path; PairDisplayColumns ~:490)</file>
+      <file role="modify">Further files only as the approved design names them</file>
+      <file role="canonical-reference">042c's core-pair fill-or-clear in RecordCreationService (as merged): copy its warning shape and its place in the step order</file>
+      <file role="canonical-reference">OwnedChildWrite.KeepPairInStepAsync (~:385): already completes a BFF-managed pair's missing half and keeps a work assignment's pair in step with its typed filing lookup on update</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs, CoreAncestorRestamper.cs (PlanStampOfRowAsync), CoreAncestorStampReconciliationJob.cs: the I-1 sprk_regarding{core} stamps, derived and restamped</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureRootInheritance.cs (TypedFilingColumns, TypedLookupsOf, BffManagedPairTables ~:484): which typed lookup files each table</file>
+      <file role="canonical-reference">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md I-1 (core-ancestor stamp) and §5 registry</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="042c" status="required">The fill-or-clear pattern for a pair (core pair) and its warning.</dependency>
+      <dependency task="044" status="required">The column-security pattern for a server-written pair outside the server.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §6 gotcha 2026-10-20">Brief line 1: `git switch -c task/fm-045 &lt;tip of work/field-mapping-server-write-path-r1&gt;` (must contain 042c's and 044's merges), then confirm this POML exists on the branch.</constraint>
+    <constraint source="owner 2026-11-04">Part A is read-only (code, solution XML, a read-only MCP query on dev). No src/ change before the owner approves the design note; the approval and its date are recorded in notes/decisions.md.</constraint>
+    <constraint source="owner 2026-11-04 / 042c">An incomplete pair is never a refusal: a type with no id is filled from the row's typed filing lookup when one names a record of that type, else the type is cleared and one warning is returned; an id with no type keeps PairTargetAsync's existing agreement rule. The caller's AppendTo is asked on the pair as it will be written.</constraint>
+    <constraint source="NFR-07">Every existing refusal keeps its code, status and words; no new refusal kind, code or enum member.</constraint>
+    <constraint source="ADR-002 / FR-25">Gaps outside the server are closed by field security (the 044 pattern; UAC-r2 owns profiles and any change goes to it) or by the forward-only repair pass (052), never by a plugin, business rule or flow.</constraint>
+    <constraint source="UAC-r2">The pair decides filing and ownership: the design note and the part B diff go to UAC-r2 for review before merge; any field security change follows 044's gate (the owner's go in UAC-r2's session).</constraint>
+    <constraint source="confidentiality (repo is public)">The design note and commits state each gap as a carrier and the mechanism that keeps it complete ("the server writes the pair whole"); they do not describe how a gap could be used.</constraint>
+    <constraint source="ADR-038">KEEP paths only (tests/integration/**, tests/Spaarke.ArchTests/**); no new file under tests/unit/Sprk.Bff.Api.Tests/**.</constraint>
+    <constraint source="CLAUDE.md §10">Placement and publish delta: see notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/field-mapping-server-write-path-r1/design.md (§15.3, §15.4 rows 11-12, §15.5)</file>
+      <file>projects/field-mapping-server-write-path-r1/notes/decisions.md (2026-11-04 sections)</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md (set-regarding)</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Branch (constraint 1); declare FULL rigor.</step>
+    <step order="1">Part A inventory, in the design note, one table per section: (a) every table carrying the pair, its display trio (sprk_regardingrecordname, sprk_regardingrecordnumber, sprk_regardingrecordurl), the I-1 sprk_regarding{core} stamps, or another value derived from the regarding, with the writer and file:line where each is set; (b) every relationship along which those values should reach a related row (child, attachment, family member), and where that happens today; (c) every gap: the §15.4 rows 11 and 12 windows, rows with two sources, direct Dataverse creates and updates, and any server path that sets the values after the create request.</step>
+    <step order="2">Part A design: for each gap, how it is closed: by construction on server paths (same request), by field security or the repair pass on direct paths, and by an ArchTest guard; with the tests part B adds and which tasks (if any) the work splits into.</step>
+    <step order="3">STOP: send the design note to the owner and UAC-r2. Record the owner's decision in notes/decisions.md. Part B starts only after approval.</step>
+    <step order="4">Part B: write the tests failing first; implement the pair fill-or-clear on every server create and update path, then the propagation the design approved.</step>
+    <step order="5">Build; verify-suites.sh and ArchTests; publish delta; CVE. Two adversarial passes; UAC-r2 review. Fix every finding.</step>
+    <step order="6">After merge: TASK-INDEX `✅ [done]`; run scripts/check-task-status-drift.ps1.</step>
+  </steps>
+
+  <escalation>
+    <trigger>After step 2, STOP for the owner's decision on the design note (owner 2026-11-04). Do not start part B on an assumed approval.</trigger>
+    <trigger>If the approved design is larger than one reviewable change (more than one PR's worth), STOP and propose follow-up tasks (045b, 045c) rather than growing this one.</trigger>
+    <trigger>If closing a gap needs a change to roles or field security profiles, STOP: it goes to UAC-r2 (044's gate). If it needs a change to SecureChildReconciler or the restamp jobs' schedules, STOP and escalate to UAC-r2.</trigger>
+    <trigger>If any existing refusal would change, STOP and escalate (NFR-07).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>KeepPairInStepAsync (OwnedChildWrite.cs:385) completes a pair on update; 042c's fill-or-clear does it for the core pair on create; CoreAncestorRestamper derives the I-1 stamps.</existing>
+    <extension>Yes: part B extends those three; any new surface the design proposes carries its own three answers in the design note.</extension>
+    <cost-of-doing-nothing>The owner rule "every related row that should carry the regarding value gets it" has no single owner, and a row whose pair is incomplete is filed under nothing by the pair's readers.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="docs">projects/field-mapping-server-write-path-r1/notes/task-045-regarding-propagation-design.md (part A)</output>
+    <output type="code">Part B: the files in relevant-files and those the approved design names</output>
+    <output type="test">Part B: tests under tests/integration/data-mutation/** and an ArchTest under tests/Spaarke.ArchTests/**</output>
+    <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-045-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (part A): the design note lists every carrier table and value with its writer and file:line, every propagation relationship, and every gap (including §15.4 rows 11 and 12, two-source rows and direct Dataverse writes), each with its closing mechanism and guard; UAC-r2's comments and the owner's approval are recorded.</criterion>
+    <criterion testable="true">AC2 (part B, create): a server create that sends sprk_regardingrecordtype without sprk_regardingrecordid gets the id from the row's typed filing lookup naming a record of that type; with no such lookup the type is cleared and one warning is returned; the created row never holds one half of the pair; the caller's AppendTo is asked on the pair as written.</criterion>
+    <criterion testable="true">AC3 (part B, update): the same on every server update path that part A lists as writing the pair (candidates to confirm: the child-records PATCH, the events and communications filing routes, the documents PUT, the chat update tool, the push re-file), asserted per path.</criterion>
+    <criterion testable="true">AC4 (part B, propagation): for each relationship the approved design names, the related row created in the request carries the regarding values when the request completes (no later job needed); a re-file restamps the children the design names, as AfterRefileAsync does today.</criterion>
+    <criterion testable="true">AC5 (part B, guard): an ArchTest fails when a server writer sets the pair's type without its id (must-fire on a seeded writer) and passes on a writer that sets both or neither (must-not-fire); known exceptions, if any, are a ratchet baseline with reasons.</criterion>
+    <criterion testable="true">AC6 (must-not-fire): a whole pair, an empty pair and an id-only pair keep today's outcomes; every existing refusal keeps its code, status and words (existing suites green with unchanged assertions).</criterion>
+    <criterion testable="true">AC7: BFF build 0 errors, 0 warnings; verify-suites.sh and ArchTests pass; publish delta and CVE recorded; UAC-r2's verdict line is in the PR.</criterion>
+    <criterion testable="true">Test scope: AC2-AC6 plus the tests the approved design lists; anything beyond needs a one-line reason in the notes. One seeding proof for the AC5 guard (recorded, reverted).</criterion>
+  </acceptance-criteria>
+
+  <notes>Placement Justification (CLAUDE.md §10): part B modifies the BFF's existing write path (CallerWriteAuthorization, RecordCreationService, OwnedChildWrite), where the pair and the stamps are written today; no new endpoint, package or background work expected; publish delta measured against a fresh master build; CVE check run.
+Covered values to start from: the pair, its display trio, the I-1 sprk_regarding{core} stamps, sprk_regardingrecordnumber; the inventory adds what else it finds.
+Added 2026-11-04 from owner decision 4.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

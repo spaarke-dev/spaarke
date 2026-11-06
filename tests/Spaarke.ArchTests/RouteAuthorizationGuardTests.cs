@@ -6884,7 +6884,10 @@ public partial class RouteAuthorizationGuardTests
         Assert.Equal(PermanentBasis.ReferenceData, WaiverOf("GET /api/office/search/{list}")!.Basis);
         Assert.Null(WaiverOf("GET /api/office/search/matter-types"));
         Assert.Equal(PermanentBasis.CallerScopedOnly, WaiverOf("GET /api/office/quickcreate/defaults")!.Basis);
-        Assert.Equal("166", WaiverOf("POST /api/v1/documents")!.OwningTask);
+        // Task 166: the document create's Pending waiver is resolved by its in-handler decision (Create on sprk_document as
+        // the caller, and the body's container must be the caller's business-unit container).
+        Assert.Equal(Credit.HandlerDecision, byKey["POST /api/v1/documents"].Credit);
+        Assert.Null(WaiverOf("POST /api/v1/documents"));
         foreach (var key in new[]
                  {
                      "GET /api/office/communications/by-message-id/{internetMessageId}",

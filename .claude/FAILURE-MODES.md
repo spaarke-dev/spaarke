@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-10-09 (added G-19: sub-agent fan-out cost and out-of-memory crashes; earlier 2026-10-08 added G-18: a shared git stash popped by another session; earlier 2026-09-03 added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
+> **Last Updated**: 2026-11-05 (added G-25: sub-agent worktrees pile up in the main checkout); 2026-10-09 (added G-19: sub-agent fan-out cost and out-of-memory crashes; earlier 2026-10-08 added G-18: a shared git stash popped by another session; earlier 2026-09-03 added G-16: grep silently returns 0 for non-BMP characters; earlier 2026-09-02 added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
 
 ---
 
@@ -60,6 +60,8 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-21: In jsdom, a Fluent v9 dialog can be `aria-hidden`, so role queries cannot find its contents](#g-21-in-jsdom-a-fluent-v9-dialog-can-be-aria-hidden-so-role-queries-cannot-find-its-contents)
 - [G-22: `python3` on Windows is the Store alias stub and hangs on stdin scripts](#g-22-python3-on-windows-is-the-store-alias-stub-and-hangs-on-stdin-scripts)
 - [G-23: A narrowed Exchange role entry refuses `-ErrorAction` — and the module calls it a "server side error"](#g-23-a-narrowed-exchange-role-entry-refuses--erroraction--and-the-module-calls-it-a-server-side-error)
+- [G-24: A full test run on a shared machine reports load failures as defects](#g-24-a-full-test-run-on-a-shared-machine-reports-load-failures-as-defects)
+- [G-25: Sub-agent worktrees pile up in the main checkout and hang sessions opened there](#g-25-sub-agent-worktrees-pile-up-in-the-main-checkout-and-hang-sessions-opened-there)
 
 ---
 
@@ -1251,6 +1253,42 @@ the deployment guide §4.2.1 step 5.
 
 **Evidence**: `projects/customer-provisioning-orchestration-r1/notes/t186-acme-run-log.md` L62 ·
 `projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md` §5 (M4 correction, M8).
+
+---
+
+### G-24: A full test run on a shared machine reports load failures as defects
+
+> **Added 2026-11-03** (spaarke-SPA-external-access-platform-r3, task 090). **Class**: environment trap.
+
+**What happens.** Several sessions share one machine. When another worktree runs a full BFF suite (`testhost.exe`) or a build at the same time, a full `Sprk.Bff.Api.Tests` run fails host-based tests in every area. Real-clock waits (`WaitAsync(TimeSpan.FromSeconds(30))`) expire while the test host is starved of threads. SPA vitest runs fail with `Test timed out in 60000ms` and `Unable to find an element`. Occurrences:
+- 2026-10-11: 7 false failures in an R3 run that took 47 minutes instead of 26;
+- 2026-11-03: 255 of 39,388 BFF tests failed in a 1 h 48 m run while two other full suites ran. The failing classes re-run in isolation passed 3,444 / 3,445 and 380 / 380. The last one passed 5 / 5 alone (#2543). The SPA failed 28 of 1,292; the failing files re-run with 2 workers passed 465 / 465.
+
+**Rule.** Before treating a failure as a defect:
+1. See who else is testing: `Get-CimInstance Win32_Process -Filter "Name like 'testhost%'"` shows each test host's worktree path.
+2. Re-run the failing classes in isolation, with a `trx` logger so the cause is recorded (`-v q` records only names).
+3. Treat as real only what still fails. A test that fails only under load is filed to its owner as a reliability item, or registered `TimingSensitive` in `tests/.reliability-registry.json`.
+
+Never call a run green or red from a loaded full run alone.
+
+**Enforced by:** prose only. Whether a run was loaded depends on what other sessions do at run time, so no build or lint step can see it. A hook cannot refuse a test run without blocking legitimate parallel work.
+
+---
+
+### G-25: Sub-agent worktrees pile up in the main checkout and hang sessions opened there
+
+> **Added 2026-11-05** (main-checkout cleanup session). **Class**: shared mutable state between parallel sessions (the file system).
+
+**What happens.** Every sub-agent launched with worktree isolation gets a full repo copy at `<main checkout>\.claude\worktrees\agent-<id>`, whichever worktree its parent session runs in, so the copies of every project land in `C:\code_files\spaarke`. Claude Code removes a copy only when the agent made no changes; its periodic sweep keeps any copy with unpushed commits, and agent task branches are merged locally into `work/<project>`, never pushed. The sweep also uses `cleanupPeriodDays`, which is 3650 on the owner's machine to keep transcripts for AI-spend reporting. By 2026-11-04 there were 123 copies (about 3 million files with `node_modules`). VS Code and Claude sessions opened in the main checkout hung, because VS Code watched and git-scanned every copy. Sessions opened in other worktrees were fine. A bulk removal stopped part-way left 55 folders, 12 of them half-deleted: `git worktree remove` deletes in name order and gives up when a file is held open.
+
+**Rule.**
+- Remove finished copies with `pwsh scripts/worktree/Clean-AgentWorktrees.ps1` (`-WhatIf` to preview). It removes a copy only when it is unlocked (Claude Code locks it while the agent runs), idle 12 h or more, clean, and its commits are on a branch that is not another agent copy's. It goes through `Remove-WorktreeSafe.ps1` one path per call and keeps the branch. It runs `git worktree prune` only when nothing outside `.claude\worktrees` is prunable: a repo-wide prune would also drop a project worktree whose folder is briefly missing, and for a detached one its only ref.
+- At archive time `/devops-project-archive` Step 5.5 runs it with `-Project <slug>` after an explicit yes: only copies merged into `work/<slug>` and not already on master, and no repo-wide housekeeping.
+- Do not lower `cleanupPeriodDays` to fix this: the sweep would still keep copies with unmerged commits, and the setting also deletes session transcripts.
+- Exclude `**/.claude/worktrees` in the main checkout's `.vscode/settings.json` (`files.watcherExclude`, `search.exclude`, `files.exclude`, `git.repositoryScanIgnoredFolders`). That folder is gitignored, so set it on each machine.
+- Call PowerShell scripts that take `[string[]]` with `-Command "& script -Path @('a','b')"` or in-process, never `pwsh -File script -Path a,b`: `-File` binds the one string `"a,b"`, and every path is refused as missing.
+
+**Enforced by:** `scripts/worktree/Clean-AgentWorktrees.ps1`, with controls in `tests/scripts/Clean-AgentWorktrees.Tests.ps1` (CI `agent-guard-tests`), run by `/devops-project-archive` Step 5.5. Prose for the VS Code exclusion, because `.vscode/settings.json` is per machine and not in git.
 
 ---
 

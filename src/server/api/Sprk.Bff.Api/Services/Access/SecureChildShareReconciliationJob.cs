@@ -95,12 +95,14 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
             result.IsComplete ? LogLevel.Information : LogLevel.Warning,
             "[SECURE-CHILD-SHARES] heartbeat status={Status} inScope={InScope} updated={Updated} unchanged={Unchanged} " +
             "notUpdated={NotUpdated} held={Held} outsideSecureRoots={Outside} granted={Granted} changed={Changed} " +
-            "revoked={Revoked} detail={Detail} attempt={Attempt} durationMs={DurationMs} trigger={Trigger} runId={RunId} " +
-            "correlationId={CorrelationId}",
+            "revoked={Revoked} hardDenyWiderThanRead={HardDenyWiderThanRead} hardDenyUnchecked={HardDenyUnchecked} " +
+            "hardDenyNarrowFailed={HardDenyNarrowFailed} detail={Detail} attempt={Attempt} durationMs={DurationMs} " +
+            "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             result.Status, result.ChildrenInScope, result.ChildrenUpdated, result.ChildrenUnchanged,
             result.ChildrenNotUpdated, result.ChildrenHeld, result.ChildrenOutsideSecureRoots, result.SharesGranted,
-            result.SharesChanged, result.SharesRevoked, result.Detail, context.Attempt, (long)duration.TotalMilliseconds,
-            context.Trigger, context.RunId, context.CorrelationId);
+            result.SharesChanged, result.SharesRevoked, result.HardDenyWiderThanRead, result.HardDenyUnchecked,
+            result.HardDenyNarrowFailed, result.Detail,
+            context.Attempt, (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
         if (result.Status == SecureChildShareSyncStatus.Failed)
         {
@@ -113,7 +115,12 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
             Success: result.IsComplete,
             ErrorMessage: result.IsComplete
                 ? null
-                : $"{result.ChildrenNotUpdated} child(ren) not updated and {result.ChildrenHeld} held; the next run retries.",
+                : $"{result.ChildrenNotUpdated} child(ren) not updated and {result.ChildrenHeld} held"
+                  + (result.HardDenyNarrowFailed > 0 || result.HardDenyUnchecked > 0
+                      ? $"; {result.HardDenyNarrowFailed} hard-deny row(s) not narrowed to Read and " +
+                        $"{result.HardDenyUnchecked} unchecked"
+                      : "")
+                  + "; the next run retries.",
             ProcessedItems: result.ChildrenInScope,
             Duration: duration,
             ResultJson: JsonSerializer.Serialize(new
@@ -128,6 +135,9 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
                 granted = result.SharesGranted,
                 changed = result.SharesChanged,
                 revoked = result.SharesRevoked,
+                hardDenyWiderThanRead = result.HardDenyWiderThanRead,
+                hardDenyUnchecked = result.HardDenyUnchecked,
+                hardDenyNarrowFailed = result.HardDenyNarrowFailed,
                 detail = result.Detail,
                 attempt = context.Attempt,
             }));

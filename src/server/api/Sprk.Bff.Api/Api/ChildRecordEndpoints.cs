@@ -1,9 +1,12 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
@@ -74,7 +77,32 @@ public static class ChildRecordEndpoints
         // a ROOT, not a child: the secure-create plan decides how it is made (filed under a secure matter or project → INTO
         // isolation, task 158 r1) and the service completes it (its post-create step).
         "sprk_workassignment",
+        // field-mapping-server-write-path-r1 task 020 (spec FR-15): the Matter and Project wizards' create. Both are ROOTS:
+        // a project filed under a secure matter or project is created INTO isolation by the same secure-create plan as a work
+        // assignment; a matter is owned record-first (FR-09). Field mapping is the server's (FR-02, FR-03): see
+        // InferMappingSourceTables.
+        "sprk_matter", "sprk_project",
     };
+
+    /// <summary>
+    /// Task 020 (spec FR-03, FR-15): the create tables whose create asks the service for field mapping when the caller names
+    /// no <c>mappingSource</c> — the source is then inferred from what the row is filed under (the regarding pair, else the
+    /// single typed parent; none is a silent no-op). Only tables whose browser writers no longer map on the client: the Matter
+    /// and Project wizards create here only once they stop (tasks 021, 022). Every other create table asks for mapping only
+    /// when the caller names a source, so a create with no <c>mappingSource</c> is exactly what it was before task 020.
+    /// Tasks 023-029 add their table HERE (this one set is the switch) when their wizard moves off the client mapping engine.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> InferMappingSourceTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_matter", "sprk_project",
+    };
+
+    /// <summary>
+    /// Task 020: the entity a malformed <c>mappingSource</c> is passed to the resolver as when only an unreadable id was named
+    /// — not a logical name, so the source is "named but undetermined" (no mapping, one warning), never "not named" (which
+    /// would infer some other record).
+    /// </summary>
+    internal const string MalformedMappingSourceEntity = "?";
 
     /// <summary>
     /// The tables a browser writer re-files through <c>PATCH /api/v1/child-records/{table}/{id}</c> (note §2b). An event
@@ -104,6 +132,16 @@ public static class ChildRecordEndpoints
 
     /// <summary>The payload is not a Web API payload this route accepts.</summary>
     internal const string InvalidPayloadCode = "child_record.invalid_payload";
+
+    /// <summary>
+    /// Task 049 fix round 2: the <c>secure</c> query parameter is not <c>true</c> or <c>false</c>, or asks for a table whose
+    /// create cannot be made secure (only a project or a work assignment can be). Nothing is read or written.
+    /// </summary>
+    internal const string SecureIntentInvalidCode = "child_record.secure_intent_invalid";
+
+    /// <summary>Task 049 fix round 2: the tables a create can ask to be secure from creation.</summary>
+    internal static readonly IReadOnlySet<string> SecureIntentTables =
+        new HashSet<string>(StringComparer.Ordinal) { "sprk_project", "sprk_workassignment" };
 
     /// <summary>The caller's own rights refused the write (a table privilege, a field-secured or server-owned column).</summary>
     internal const string DeniedCode = "child_record.denied";
@@ -169,11 +207,18 @@ public static class ChildRecordEndpoints
         // the resolver's team. Authorization is decided in the handler, as the caller, on every record the body binds.
         group.MapPost("/{table}", CreateAsync)
             .WithName("CreateChildRecord")
-            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment, billing event) or a work assignment")
+            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment, billing event), a work assignment, a matter or a project")
             .WithDescription("Takes the Dataverse Web API payload a browser writer would have sent. Checks AS THE CALLER " +
                 "that they could create it (table privilege, AppendTo on every record it binds, no owner or field-secured " +
                 "column), then the application creates it owned by the team the ownership rule names (the Secure Record " +
-                "Owners team under a secure record) and records the caller as its creator person.")
+                "Owners team under a secure record) and records the caller as its creator person. The optional query " +
+                "parameters mappingSourceEntity and mappingSourceId name the record to copy mapped fields from (fill-only; " +
+                "read as the caller: one the caller cannot read gives no mapped values and a warning, never an error). " +
+                "Without them a matter or project infers the source from what it is filed under; other tables map nothing. " +
+                "The optional query parameter secure=true (sprk_project and sprk_workassignment only) creates the record " +
+                "secure from creation: the caller first needs Write and the table's Share privilege on the record as an " +
+                "ordinary create would make it (the provision-project delegation rule, refused in its 403 shape), and the " +
+                "record is created owned by the Secure Record Owners team and shared to the caller before anything else.")
             .Produces(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -206,8 +251,18 @@ public static class ChildRecordEndpoints
     /// AppendTo, the pre-write rules, the secure-create plan), the owner, the app-only create and every post-create step (the
     /// root's completion, the "Assigned *" grants, the I-1 re-stamp, I-16, the sharee mirror, the membership event) run
     /// there, once (ADR-008 path A). The route keeps its own accept-list and renders the service's refusal in its own
-    /// contract (<see cref="RefusalResult"/>, NFR-07). No field mapping is asked for here: the browser writers still map on
-    /// the client until their wizard moves (FR-15/FR-16, tasks 020-029).
+    /// contract (<see cref="RefusalResult"/>, NFR-07).
+    /// <para><b>Field mapping (task 020, FR-03, FR-15).</b> Asked for only when the caller names a source
+    /// (<paramref name="mappingSourceEntity"/> + <paramref name="mappingSourceId"/>, query parameters so the body stays the
+    /// Web API payload), or when the table infers one (<see cref="InferMappingSourceTables"/>). The named source is never trusted
+    /// on its own: the service's resolver decides it, and the caller's own Read on it is probed before it is read (FR-04) —
+    /// a missing, unreadable or malformed source is one outcome, no mapped value and one warning, never a refusal. With no
+    /// source named, every other table's create is exactly what it was: no mapping is asked for (its browser writers still
+    /// map on the client until their wizard moves, tasks 023-029).</para>
+    /// <para><b>Secure from creation (task 049 fix round 2).</b> <paramref name="secure"/> = <c>true</c> asks for the record to
+    /// be secure from creation (<see cref="RecordCreationRequest.SecureFromCreation"/>); only <see cref="SecureIntentTables"/>
+    /// accept it, and a value that is not <c>true</c> or <c>false</c> is 400 <see cref="SecureIntentInvalidCode"/>. The
+    /// caller's rights refusal is rendered in the delegation filter's own shape (<see cref="DelegationRuleFilter.DenyResult"/>).</para>
     /// </remarks>
     internal static async Task<IResult> CreateAsync(
         string table,
@@ -216,16 +271,42 @@ public static class ChildRecordEndpoints
         [FromServices] RecordCreationService recordCreation,
         HttpContext httpContext,
         ILogger<Program> logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? mappingSourceEntity = null,
+        [FromQuery] string? mappingSourceId = null,
+        [FromQuery] string? secure = null)
     {
         var entity = (table ?? string.Empty).Trim().ToLowerInvariant();
         if (!CreateTables.Contains(entity))
             return Problem(StatusCodes.Status400BadRequest, UnsupportedTableCode, $"'{table}' records are not created here.");
 
+        var secureIntent = SecureIntentOf(entity, secure, out var secureProblem);
+        if (secureProblem is not null)
+            return secureProblem;
+
+        RecordCreationMapping? mapping = null;
+        if (MappingSourceOf(entity, mappingSourceEntity, mappingSourceId) is { } source)
+        {
+            // Resolved here, only when a mapping is built (task 020 review #7): a create that maps nothing never asks for it.
+            var callerAccess = httpContext.RequestServices?.GetService<CallerRecordAccessProbe>();
+            if (callerAccess is null)
+            {
+                // Fail closed: without the probe the source cannot be read AS THE CALLER (FR-04), and a create that silently
+                // dropped the mapping it was asked for would be wrong without a word.
+                logger.LogError("[CHILD-RECORD] create of {Entity}: field mapping was asked for, but no caller-access probe is registered", entity);
+                return Problem(StatusCodes.Status500InternalServerError, NoDecisionCode, "The record was not created.");
+            }
+
+            mapping = RecordCreationMapping.ForCaller(
+                callerAccess, TokenHelper.ExtractBearerTokenOrNull(httpContext), source.Table, source.Id);
+        }
+
         var outcome = await recordCreation.CreateAsync(
                 new RecordCreationRequest(entity, new RecordCreationPayload.WebApi(body))
                 {
                     CorrelationId = httpContext.TraceIdentifier,
+                    Mapping = mapping,
+                    SecureFromCreation = secureIntent,
                 },
                 RecordCreationPrincipal.ForCaller(user, CallerObjectId(httpContext)),
                 ct)
@@ -249,6 +330,53 @@ public static class ChildRecordEndpoints
             entity, id, outcome.Isolated, outcome.Warnings.Count);
         return Results.Created($"/api/v1/child-records/{entity}/{id:D}",
             outcome.Warnings.Count == 0 ? new { id } : (object)new { id, warnings = outcome.Warnings });
+    }
+
+    /// <summary>
+    /// Task 020 (FR-03): whether a create of <paramref name="entity"/> asks for field mapping and, if the caller named one,
+    /// the source to pass on — <c>null</c> when no mapping is asked for. No I/O, and no validation beyond the shape: the
+    /// resolver decides the source (a half-named pair, or a table that is not a logical name, is its "undetermined" — no
+    /// mapping, one warning), so this never refuses and never says anything about a record.
+    /// </summary>
+    internal static (string? Table, Guid? Id)? MappingSourceOf(string entity, string? sourceEntity, string? sourceId)
+    {
+        var namesEntity = !string.IsNullOrWhiteSpace(sourceEntity);
+        var namesId = !string.IsNullOrWhiteSpace(sourceId);
+        if (!namesEntity && !namesId)
+            return InferMappingSourceTables.Contains(entity) ? (null, null) : null;
+
+        Guid? id = namesId && Guid.TryParse(sourceId!.Trim(), out var parsed) && parsed != Guid.Empty ? parsed : null;
+        // Only an id was named and it is not one: still a NAMED source — undetermined, never a cue to infer another record.
+        var table = namesEntity ? sourceEntity!.Trim() : id is null ? MalformedMappingSourceEntity : null;
+        return (table, id);
+    }
+
+    /// <summary>
+    /// Task 049 fix round 2: the <c>secure</c> query parameter. Absent or empty is no intent; <c>true</c> / <c>false</c>
+    /// (any case) are the intent; anything else, or <c>true</c> for a table outside <see cref="SecureIntentTables"/>, is a
+    /// 400 <see cref="SecureIntentInvalidCode"/> in <paramref name="problem"/>. No I/O.
+    /// </summary>
+    internal static bool SecureIntentOf(string entity, string? secure, out IResult? problem)
+    {
+        problem = null;
+        if (string.IsNullOrWhiteSpace(secure))
+            return false;
+
+        if (!bool.TryParse(secure.Trim(), out var asked))
+        {
+            problem = Problem(StatusCodes.Status400BadRequest, SecureIntentInvalidCode,
+                "The 'secure' query parameter must be 'true' or 'false'. Nothing was created.");
+            return false;
+        }
+
+        if (asked && !SecureIntentTables.Contains(entity))
+        {
+            problem = Problem(StatusCodes.Status400BadRequest, SecureIntentInvalidCode,
+                $"A {Noun(entity)} cannot be created secure: only a project or a work assignment can be. Nothing was created.");
+            return false;
+        }
+
+        return asked;
     }
 
     /// <summary>The route's code for a create that ended without a decision.</summary>
@@ -289,6 +417,11 @@ public static class ChildRecordEndpoints
             { Kind: RecordCreationRefusalKind.BlockedColumn } => Problem(StatusCodes.Status403Forbidden, DeniedCode, refusal.Detail),
             { Kind: RecordCreationRefusalKind.Forbidden, Code: RecordCreationRefusal.DeniedCode } =>
                 Problem(StatusCodes.Status403Forbidden, DeniedCode, refusal.Detail),
+            // Task 049 fix round 2 (UAC-r2 D1): the secure-from-creation create's rights refusal is the delegation filter's,
+            // in the filter's own shape.
+            { Kind: RecordCreationRefusalKind.Forbidden, Code: DelegationRuleFilter.DenyWriteRequired
+                    or DelegationRuleFilter.DenyShareRequired or DelegationRuleFilter.DenyCheckFailed } =>
+                DelegationRuleFilter.DenyResult(refusal.Code, refusal.Detail, traceId),
             { Kind: RecordCreationRefusalKind.Invalid, Code: RecordCreationRefusal.InvalidPayloadCode } =>
                 Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, refusal.Detail),
             { Kind: RecordCreationRefusalKind.Invalid, Code: RecordCreationRefusal.TableUnsupportedCode } =>
@@ -583,6 +716,21 @@ public static class ChildRecordEndpoints
         if (filingOnly && FilingShapeProblem(body, entity) is { } shape)
             return shape;
 
+        // The core record pair is fixed after create on BFF update paths (RecordTableRule.FixedAfterCreateColumns): asked on the
+        // body's shape alone, before any read or write, so the contract holds for any table a caller of this core passes.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(
+                entity, body.ValueKind == JsonValueKind.Object ? body.EnumerateObject().Select(p => p.Name) : []) is { } fixedRefusal)
+        {
+            return Problem(StatusCodes.Status403Forbidden, DeniedCode, $"The {Noun(entity)} was not saved: {fixedRefusal.Reason}.");
+        }
+
+        // Task 048 fix round 1 (K1): a Signal, a Decision Record and a Budget Revision are changed only by their writers
+        // (RecordTableRule.CreatedOnlyByItsWriter). Asked here, on the table alone, before any read or write, so the contract holds
+        // for any table a caller of this core passes (the browser re-file routes, the chat re-file and the decision executors'
+        // in-process update), whatever that caller checks first. Nothing is written.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(entity) is { } writerOnly)
+            return Problem(StatusCodes.Status403Forbidden, DeniedCode, writerOnly.Reason!);
+
         var meta = await user.GetAsync(
             $"EntityDefinitions(LogicalName='{entity}')?$select=EntitySetName,PrimaryIdAttribute", ct).ConfigureAwait(false);
         if (!meta.IsSuccess)
@@ -601,6 +749,17 @@ public static class ChildRecordEndpoints
                 ? Problem(StatusCodes.Status404NotFound, NotFoundCode, $"The {Noun(entity)} was not found.")
                 : CallerFailure(row, entity);
         }
+
+        // Task 039 (FR-38): on a search-indexed table (an invoice, here) both index columns are the SERVER's — step 8 of the create
+        // writes them from the owning business unit — so a body that names either has it dropped, never refused, and the
+        // row's index stays as it is. Review R2 (NFR-07: drop, never refuse): a body that held ONLY the index is left with nothing to
+        // write, and answers its normal success with nothing written (as it did before 039); a body that was empty to begin with
+        // keeps the mapper's empty-update refusal.
+        var indexDrop = RecordTableRules.DropSearchIndexFromUpdate(
+            entity, id, body, RecordTableRules.SearchIndexOriginCaller, logger, httpContext.TraceIdentifier);
+        body = indexDrop.Body;
+        if (indexDrop.Emptied)
+            return Results.NoContent();
 
         var mapped = await DataverseWriteItemMapper.MapWebApiPayloadAsync(user, entity, body, ct).ConfigureAwait(false);
         if (mapped.ValidationError is { } invalid)
@@ -648,7 +807,8 @@ public static class ChildRecordEndpoints
             return outcome switch
             {
                 { ClientFailure: { } failure } => CallerFailure(failure, entity),
-                { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, pairInvalid),
+                { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode,
+                    $"The {Noun(entity)} was not saved: {pairInvalid}"),
                 { ParentUnavailable: true } => ParentNotFound(entity),
                 { InvoiceFamilyRefusal: { } family } => InvoiceFamilyRefused(family, entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
@@ -734,6 +894,7 @@ public static class ChildRecordEndpoints
         "sprk_billingevent" => "billing event",
         "sprk_workassignment" => "work assignment",
         "sprk_project" => "project",
+        "sprk_matter" => "matter",
         _ => "record",
     };
 

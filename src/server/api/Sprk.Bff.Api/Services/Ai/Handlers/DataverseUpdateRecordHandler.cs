@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -183,11 +184,29 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (string.IsNullOrWhiteSpace(context.TenantId))
             return ToolValidationResult.Failure("TenantId is required.");
 
-        if (!TryParseArgs(context.ToolArgumentsJson, out _, out _, out _, out var error))
+        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out _, out var error))
             return ToolValidationResult.Failure(error!);
+
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers. Refused here too, as the create tool refuses them, so the gate shows the refusal and
+        // never a confirm dialog; ExecuteChatAsync asks again.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(tablename) is not null)
+            return ToolValidationResult.Failure(ChangedOnlyByItsWriterChatMessage(tablename));
 
         return ToolValidationResult.Success();
     }
+
+    /// <summary>The chat tool's wording of <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/> (model-facing, as the create
+    /// tool's <c>CreatedOnlyByItsWriterCreateBlockedMessage</c>); every other path answers with
+    /// <see cref="RecordTableRules.ChangedOnlyByItsWriterMessage"/>, a plain sentence.</summary>
+    internal static string ChangedOnlyByItsWriterChatMessage(string tablename) =>
+        ChatMessageFor(RecordTableRules.Find(tablename)?.Table ?? tablename);
+
+    private static string ChatMessageFor(string tablename) =>
+        $"'{tablename}' records can't be changed from chat — this update was REJECTED and nothing was written. They are changed " +
+        "only by Spaarke itself: a signal by its evaluation and its lifecycle, a decision record or a budget revision when a " +
+        $"decision is committed. Do NOT retry this update — {tablename} is blocked on every general update unconditionally and no " +
+        $"argument change makes it valid; work from the signal or its decision instead ({RecordTableRules.ChangedOnlyByItsWriterReasonCode}).";
 
     /// <inheritdoc />
     public async Task<ToolResult> ExecuteChatAsync(
@@ -201,6 +220,26 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out var recordId, out var item, out var parseError))
         {
             return Error(tool, parseError!, ToolErrorCodes.ValidationFailed, startedAt);
+        }
+
+        // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths
+        // (RecordTableRule.FixedAfterCreateColumns): an item of a Signal or a Decision Record that names either column is refused
+        // whole, on its shape alone, before any read, re-file, index step or write. Nothing is written.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(tablename, item.EnumerateObject().Select(p => p.Name)) is { } fixedRefusal)
+        {
+            return LogOutcome(context, tablename, recordId,
+                Error(tool, $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).",
+                    fixedRefusal.RefusalCode!, startedAt),
+                stopwatch);
+        }
+
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter, the list the create tool refuses). Refused whole,
+        // for any item and record, before any read, re-file, index step or write; ValidateChat already refuses it. Nothing is written.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(tablename) is { } writerOnly)
+        {
+            return LogOutcome(context, tablename, recordId,
+                Error(tool, ChangedOnlyByItsWriterChatMessage(tablename), writerOnly.RefusalCode!, startedAt), stopwatch);
         }
 
         try
@@ -221,6 +260,29 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId,
                     Error(tool, $"Table '{tablename}' has no entity-set name.", ToolErrorCodes.InternalError, startedAt),
                     stopwatch);
+            }
+
+            // Task 039 (FR-38): on a search-indexed table both index columns are the SERVER's (step 8 of the create writes them from
+            // the owning business unit), so an item that names either has it dropped — never refused — and the row's index stays
+            // as it is. Review R2 (NFR-07: drop, never refuse): an item that held ONLY the index is left with nothing to write and
+            // answers a success that says so, with nothing written; an item that was empty to begin with keeps the mapper's
+            // empty-update refusal.
+            var indexDrop = RecordTableRules.DropSearchIndexFromUpdate(
+                tablename, recordId, item, RecordTableRules.SearchIndexOriginCaller, _logger, context.DecisionId.ToString("N"));
+            item = indexDrop.Body;
+            if (indexDrop.Emptied)
+            {
+                // Round 2 (S1): no PATCH is sent, so the row is read as the caller first — a missing or unreadable row
+                // gets the tool error a normal update of that id gets, never "nothing to update".
+                var rowRead = await _dataverse.GetAsync(
+                    $"{entitySetName}({recordId:D})" + (primaryIdAttribute is null ? string.Empty : $"?$select={primaryIdAttribute}"),
+                    cancellationToken).ConfigureAwait(false);
+                if (!rowRead.IsSuccess)
+                {
+                    return LogOutcome(context, tablename, recordId, MapClientError(tool, rowRead, startedAt), stopwatch);
+                }
+
+                return LogOutcome(context, tablename, recordId, NothingToWrite(tool, tablename, recordId, startedAt), stopwatch);
             }
 
             var mapped = await DataverseWriteItemMapper.MapAsync(_dataverse, tablename, item, cancellationToken).ConfigureAwait(false);
@@ -504,6 +566,24 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
         return Updated(tool, tablename, recordId, item, startedAt);
     }
+
+    /// <summary>Review R2: the success result for an update whose only columns were the search index, which the server sets (FR-38) —
+    /// nothing was written, and the model is told why.</summary>
+    private ToolResult NothingToWrite(AnalysisTool tool, string tablename, Guid recordId, DateTimeOffset startedAt) =>
+        ToolResult.Ok(
+            HandlerId, tool.Id, tool.Name,
+            data: new
+            {
+                tool = DataverseToolNames.UpdateRecord,
+                tablename,
+                recordId = recordId.ToString("D"),
+                path = DataverseRecordCitations.RecordPath(tablename, recordId),
+                columnsUpdated = Array.Empty<string>(),
+                columnCount = 0
+            },
+            summary: $"Nothing to update on record {recordId:D} in '{tablename}': the search index is set by the server, so it was left as it is.",
+            confidence: 1.0,
+            execution: Timed(startedAt));
 
     /// <summary>The tool's success result for an update that was written.</summary>
     private ToolResult Updated(

@@ -760,6 +760,24 @@ public sealed class StoredFileService
     }
 
     /// <summary>
+    /// ebilling-r1 task 150: the compensation of a FAILED export batch. Withdraws the file <paramref name="fileId"/> (status Removed, under the row's own
+    /// version, through <see cref="WithdrawForUndoAsync"/>) and then deletes its blob (<see cref="DeleteBlobForUndoAsync"/>), so a file of a batch that
+    /// never completed is never served and no payment file exists for it. A row already gone is done; a changed row or any fault throws (the caller
+    /// logs it and reports an incomplete compensation). Called only by <see cref="ApExportService"/>, only for files it wrote itself.
+    /// </summary>
+    internal async Task WithdrawExportFileAsync(Guid fileId, CancellationToken ct)
+    {
+        var row = await ReadRowAsync(fileId, ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            return;
+        }
+
+        await WithdrawForUndoAsync([row], ct).ConfigureAwait(false);
+        await DeleteBlobForUndoAsync(row, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// ebilling-r1 task 094: every Stored File row whose parent is the invoice <paramref name="invoiceId"/>, as the store's rules read them
     /// (whatever their channel: an upload, a Submit Invoice copy or a from-email part). At most <paramref name="max"/>; a fault throws.
     /// </summary>

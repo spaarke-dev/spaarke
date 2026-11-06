@@ -63,3 +63,135 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | K: no caller sends a case variant today |
 | **Owner task** | 018b (optional; criterion added), else a follow-up |
 | **Failure** | Step 2 is skipped for system-principal items, so a case-variant `ownerid@odata.bind`, creator-person bind or `sprk_issecure` would sit beside the server's own key. The fix is the K3 approach |
+
+## DI-007 — A system-principal create gets its I-1 stamp only after the create
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 part 2d-1 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2479 |
+| **Class** | K: no system-principal creator exists (owner decision 2d) |
+| **Owner task** | 033 (first system creator) |
+| **Failure** | The caller principal gets the stamp in the create payload (decision 2a). The system principal still gets it from the post-create re-derivation, because binding needs nav-property names only a caller can read. Fix: app-only metadata read or a test-verified nav-property map |
+
+## DI-008 — The repair pass must not re-own task, contact and account
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 part 2d-2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2480 |
+| **Class** | Deferred: RepairAsync has no production caller yet |
+| **Owner task** | 052 |
+| **Failure** | Registering the three chat tables (owner, 2026-10-30) makes RepairAsync accept them, so the scheduled pass would re-own user-created rows to a team. Exclude them in 052, or ask the owner |
+
+## DI-009 — The owner decision does not see a secure root reached only through the derived stamp
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 adversarial review (finding 3) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2483 |
+| **Class** | K2: the same as the deleted core for the route and chat; email.draft keeps its stamp in the item (a′) |
+| **Owner task** | Follow-up after 017; needs UAC-r2 (changes owner decisions) |
+| **Status** | **Closed 2026-11-04** by task 042b, PR #2562 (0d4aa87ee0); #2483 closed |
+| **Failure** | Step 7 decides the owner from the item, and step 10 binds the derived stamp only into the create body. A child of a team-owned invoice in the reconcile window, whose secure matter is reachable only through that stamp, is owned without secure-if-any. Fix: derive the stamp before step 7 and add its root to the owner question |
+
+## DI-010 — Budget inquiry preflight is looser than the create it precedes
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 adversarial review (finding 4) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2484 |
+| **Class** | K3: rare (a service request is filed directly under a matter); not a regression |
+| **Owner task** | Follow-up (a decide-only mode on RecordCreationService) |
+| **Failure** | `PreflightAsync` asks through `OwnedChildWrite.OwnershipOf` (no pair parent, intermediates or stamp). The service can then refuse at step 7 or 10 after the decision is committed, so the decision is recorded with no service request |
+
+## DI-011 — An unregistered owned table is refused only after the chat user confirms
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-10-30, task 017 adversarial review (finding 2, the part the round-1 fix left) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2485 |
+| **Class** | Deferred: it fails closed (nothing is created); the fix needs new interface surface beyond 017's scope |
+| **Owner task** | Follow-up (chat / AIR2-034 owner) |
+| **Failure** | `ValidateChat` is sync with no I/O, and only a metadata read tells an Owned table from an org-owned (RunAsUser) one, so `table_unsupported` comes after confirmation. Fix: an async pre-suspend hook on `IToolHandler` that reads `OwnershipType`, or a tool description that names the creatable tables |
+
+## DI-012 — `rag/index-file` lets a client choose a document's search index
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-01, task 039 adversarial review (finding 10) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2502 |
+| **Class** | Out of scope, pre-existing: 039 covers record create/update payloads; search trims by live Read (design §13.3b), so routing, not disclosure |
+| **Owner task** | Task 041 (FR-40). **Closed 2026-11-03** by PR #2541 (249809ce0b): index-file ignores `searchIndexName`; the index follows the content type |
+| **Failure** | `POST /api/ai/rag/index-file` passes a client, allow-listed `searchIndexName` to `FileIndexingService` (`:140`, `:224`, `:272`), so the chunks land in the index the client named, not the record's server-owned one |
+
+## DI-013 — The multi-container backfill scripts contradict FR-40
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 041 implementer (backfill inventory in `task-041-notes.md`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2538 |
+| **Class** | Out of scope, pre-existing: the scripts are run by hand and have not been run under 041 |
+| **Owner task** | Unassigned; the runbook note goes in task 062 |
+| **Failure** | `Backfill-MultiContainerMultiIndex-Documents.ps1` stamps the literal `spaarke-files-index`, which is wrong wherever `KnowledgeIndexName` differs. `…-ParentRecords.ps1` writes record index columns that FR-40 says have no writer |
+
+## DI-014 — The DeliverToIndex playbook node reports an index it never uses
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 041 adversarial review (finding 8) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2539 |
+| **Class** | Out of scope, pre-existing (F1, user-visible text): outside 041's diff, and it touches the JPS node config contract |
+| **Owner task** | Unassigned (AI playbook owners) |
+| **Failure** | `DeliverToIndexNodeExecutor` requires `indexName` and reports it in its output, but the enqueued payload carries no index. Under FR-40 the file always goes to `KnowledgeIndexName`, so the output names the wrong index |
+
+## DI-015 — Ribbon-only BFF create tables are not in the client set
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 020 implementer |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2540 |
+| **Class** | Out of scope: changing the client routing of three tables needs its own decision, and billingevent is in ebilling-r1's area |
+| **Owner task** | Unassigned; ebilling-r1 must agree to the billingevent part |
+| **Failure** | `CreateTables` has sprk_budget, sprk_kpiassessment and sprk_billingevent; `BFF_CHILD_CREATE_TABLES` does not, so a wrapped client create of these tables bypasses the BFF. Pinned as `RibbonOnlyCreateTables` in `ChildRecordCreateTablesAgreementTests` |
+
+## DI-016 — Dev BFF logger provider throws BadImageFormatException
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, main session, post-deploy check of d763dc120e (in passing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2549 |
+| **Class** | Out of scope, pre-existing: seen 2026-10-28 before this project's #2541 deployed; not this project's code |
+| **Owner task** | Unassigned (BFF platform / deploy owners) |
+| **Failure** | `Logger.ThrowLoggingError` → BadImageFormatException at instance startup (4× 2026-11-03 22:26:37Z) and in a 2026-10-28 burst (14×). Log entries in those windows are lost; no 5xx followed |
+
+## DI-017 — The server to-do regarding map lacks sprk_reportcard, which the client writes
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 042b implementer (Q1, proposed DI-P1) and correctness review (finding 5), in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2556 |
+| **Class** | Out of scope, pre-existing: fixing it changes `TodoRegardingBuilder`, outside `OwnerQuestionOf` / `ForRow`. Needs an owner decision |
+| **Owner task** | Unassigned; owner decision, then UAC-r2 review |
+| **Failure** | A to-do with a report-card pair is owned by the matter's team, not the report card's (create and reconciler agree; 042b AC3's second half cannot hold). `AllRegardingLookups` does not clear a set report-card lookup |
+
+## DI-018 — A communication's thread filing is ignored by chat create and the service's OwnershipException check
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-03, task 042b security review (finding 4) and correctness review (findings 2, 6), in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2557 |
+| **Class** | Out of scope, pre-existing: the chat path (`OwnedChildWrite.PathFor`, `DataverseCreateRecordHandler`) is outside 042b's two files, and the service check is an ownership refusal (NFR-07) |
+| **Owner task** | Unassigned; UAC-r2 review |
+| **Failure** | Under a Secure matter's thread, a thread-only communication is either created caller-owned (chat; the reconciler moves it 2–4 min later) or refused 409 `ownership_exception` (service). A missing thread gives a retryable-looking 503 |
+
+## DI-019 — The service's create of a Signal or Decision Record ignores its core record in the owner question
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-04, task 042b fix round 1 (review item 3), by inspection, in passing |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2561 |
+| **Class** | **F (UAC-r2, 2026-11-04)**: a real path (chat). Pre-existing; 042b did not change it and is not held |
+| **Owner task** | Task 042c (POML written 2026-11-04), straight after 042b. The fix is option 1: in step 7, read the catalog and put the core first in the owner question. It adds the caller's AppendTo on the core record (the same refusal shape, an unresolvable type fails closed). No create path checks that today: only lookups and the regarding pair (`OwnedChildWrite.PairOf`). Tests: Signal and DR, each with a secure core, no AppendTo on the core, and an agreeing core |
+| **Failure** | Chat `dataverse.create_record` of a Signal or DR naming a core pair: the create asks lookups only (`ForRow`), the reconciler asks the core record first (`ForExistingRowAsync`), so the owner can differ until the reconciler re-owns it; under a Secure core with an ordinary subject the row is ordinary-team owned for that window. The ontology writers are not affected |
+| **Status** | **Closed 2026-11-05** by task 042c, PR #2569: by owner decision D-204 the general create (the service and chat) refuses Signal, Decision Record and Budget Revision, so no general create asks this owner question; #2561 closed |

@@ -1,7 +1,7 @@
 # sprk_ebillingsetting (eBilling Settings)
 
 > **Project**: ebilling-r1, task 025 (FR-48, D-47, D-54, D-56, D-59, D-69)
-> **Last Updated**: 2026-10-15
+> **Last Updated**: 2026-11-01 (task 151c-1a: `sprk_apexportemail`)
 > **Script**: `scripts/ebilling/Deploy-EbillingSettingsSchema.ps1` (idempotent, additive; a second run changes nothing)
 > **Solution**: `SpaarkeMaster` (unmanaged, in dev). Solution source and the admin form are synced by task 029.
 > **BFF reader**: `Services/Finance/IEbillingSettingsReader.cs` -> `EbillingSettingsReader.cs` (typed `EbillingSettings`, 30 s cache)
@@ -39,6 +39,7 @@ Entity Key eBilling Settings singleton violated. A record with the same value fo
 | `sprk_relatedwindowdays` | Whole number | 0 .. 90 | 7 | Days either side of a line date for the related-work panel (FR-34). Named `sprk_relatedwindowdays`, not the task text's `sprk_relatedworkwindowdays` (see "Deviations"). |
 | `sprk_codingchunksize` | Whole number | 1 .. 200 | 25 | Lines per call to the coding Action (FR-22). |
 | `sprk_apexportmapping` | Multiline text (100,000) | JSON | the D-56 column set | See "AP export mapping". |
+| `sprk_apexportemail` | Text (320), Email format ("AP export email") | optional; added by `scripts/ebilling/Deploy-EbillingApExportEmailColumn.ps1` (task 151c-1a, EB-D-181; idempotent, refuses a same-name column of another type, format or a length under 320) | empty | The one address Email to AP sends a batch's CSV and JSON to. Empty: `POST /api/finance/export-batches/{batchId}/email` answers 409 `ebilling.export.ap_email_not_configured`. On the settings main form, AP export section. |
 | `sprk_firmnoticeaienabled` | Two options | default Yes | Yes | Off: firm notices use the template only (FR-50, D-60). |
 | `sprk_defaultcodeset` | Lookup -> `sprk_billingcodeset` | optional, delete RemoveLink (relationship `sprk_ebillingsetting_defaultcodeset_billingcodeset`) | UTBMS Litigation | Code-set resolution step 5 (FR-22). |
 

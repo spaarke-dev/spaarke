@@ -5,13 +5,13 @@ techStack: [react, typescript, webpack, vite, dataverse]
 appliesTo: ["**/code-pages/**", "**/solutions/**", "deploy code page", "deploy web resource", "build webresource", "deploy wizard"]
 alwaysApply: false
 exemplar: src/client/code-pages/DocumentRelationshipViewer/
-last-reviewed: 2026-05-16
+last-reviewed: 2026-11-03
 ---
 
 # Code Page Deploy
 
 > **Category**: Operations (Tier 3)
-> **Last Reviewed**: 2026-05-16
+> **Last Reviewed**: 2026-11-03
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
 > **Exemplar rationale**: `DocumentRelationshipViewer` is the canonical Code Page (React 18 standalone dialog) — well-structured, current with the May 2026 auth bootstrap, and named throughout this skill's body.
 
@@ -76,6 +76,18 @@ src/client/code-pages/{PageName}/
 
 ---
 
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Recompile shared libraries first if `@spaarke/ui-components` or `@spaarke/auth` changed
+- [ ] Clear build cache, then build (Two Build Pipelines: Webpack or Vite)
+- [ ] Verification After Build: expected string found in the built output
+- [ ] Deployment: Option A (build, inline) or Option B (manual upload, publish)
+- [ ] Confirm the page loads in Dataverse (Option B step 3, Verify)
+```
+
 ## 🚨 Critical: Clear Build Cache Before EVERY Build (MANDATORY)
 
 **Vite and Webpack cache resolved dependencies. If a shared library (`@spaarke/ui-components`, `@spaarke/auth`) was modified, the build cache will contain STALE code. The deployed bundle will silently use old code even though the source files are correct.**
@@ -127,6 +139,8 @@ grep -oP '.{10}your_expected_string.{10}' out/sprk_{pagename}.html
 ```
 
 **If the string is NOT found, the cache was stale. Clear and rebuild.**
+
+If verification fails: fix the cause, redeploy, and re-run verification; do not report success until it passes.
 
 ---
 

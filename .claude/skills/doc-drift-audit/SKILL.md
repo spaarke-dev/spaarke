@@ -34,7 +34,7 @@ Detect documentation drift — stale file paths, deleted class references, broke
 - Explicitly invoked with `/doc-drift-audit`
 
 ### Auto-Trigger Integration
-- `project-pipeline` Step 0.7: Run on docs changed since last project
+- New project iteration: run it before `project-pipeline` Step 2 on docs changed since the last project (manual; the pipeline does not call it)
 - `project-continue` when resuming after a long gap
 
 ## Distinct from other skills
@@ -212,7 +212,7 @@ A successful audit:
 
 | Skill | Integration |
 |---|---|
-| `project-pipeline` | Can invoke as Step 0.7 (after master staleness check) |
+| `project-pipeline` | Run manually before its Step 2 on a new iteration (the pipeline has no step that calls it) |
 | `project-continue` | Can invoke when resuming after >1 month gap |
 | `merge-to-master` | Can invoke before merge to catch drift early |
 | `adr-check` | Complementary — adr-check validates code, this validates docs |

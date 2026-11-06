@@ -22,9 +22,9 @@ using Directory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
-/// field-mapping-server-write-path-r1 task 016 (spec FR-14, FR-25, NFR-03) — Repair mode: steps 3 (mapping), 7 (owner), 8
-/// (search-index default) and 10 (I-1 stamp) of the unified create, applied to an EXISTING row, fill-only, against its
-/// current values, in at most ONE conditional update and as the system principal.
+/// field-mapping-server-write-path-r1 task 016 (spec FR-14, FR-25, NFR-03) — Repair mode: steps 3 (mapping), 7 (owner) and 10
+/// (I-1 stamp) of the unified create, applied to an EXISTING row, fill-only, against its current values, in at most ONE
+/// conditional update and as the system principal. Since task 041 (FR-40) Repair writes no search-index column.
 /// </summary>
 /// <remarks>
 /// Only the Dataverse module boundary is doubled: the row store is <see cref="Directory"/> (whole-row reads, the conditional
@@ -139,7 +139,7 @@ public sealed class RecordRepairModeTests
     public async Task ATeamOwnedRow_KeepsItsOwner_EvenOneTheRuleWouldNotGive()
     {
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
-            owner: new EntityReference("team", Directory.GeneralTeam), owningUnit: Directory.GeneralBu);
+            owner: new EntityReference("team", Directory.GeneralTeam), owningUnit: Directory.GeneralBu, indexed: true);
 
         var outcome = await _world.RepairAsync("sprk_event", id);
 
@@ -163,7 +163,7 @@ public sealed class RecordRepairModeTests
     }
 
     [Fact]
-    public async Task AnUnresolvableOwner_IsLeftUnchanged_WithATypedRefusal_AndNoSearchIndexIsFilled()
+    public async Task AnUnresolvableOwner_IsLeftUnchanged_WithATypedRefusal()
     {
         // An APPLICATION-owned document filed under nothing: there is no person to act (I-6), so no owner can be decided —
         // and it is never given the application user's own team.
@@ -174,12 +174,7 @@ public sealed class RecordRepairModeTests
         outcome.OwnerRefusal.Should().NotBeNull();
         outcome.OwnerRefusal!.Code.Should().Be(RecordOwnerRefusal.NoOwnerSource);
         Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Refused);
-        // UAC-r2 condition (b) F2-1: the owner refused, so the search index is not filled from the row's current unit.
         _world.Writes.Should().BeEmpty();
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").ReasonCode
-            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_ai_search_index").ReasonCode
-            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
         _world.Directory.Row("sprk_document", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.AppUser));
     }
@@ -207,28 +202,10 @@ public sealed class RecordRepairModeTests
     }
 
     [Fact]
-    public async Task AnOwnerKeptInItsUnitByTheBusinessUnitSkip_GetsNoSearchIndex()
+    public async Task AUserOwnedRowReOwnedInThisPatch_GetsNoSearchIndex_NotEvenItsNewOwnersUnits()
     {
-        // UAC-r2 condition (b) F2-1: a user-owned document in the GENERAL unit, filed under the matter of the CHILD unit — the
-        // move is refused (trigger 2), so the owner is not settled and the general unit's index is never written.
-        var id = _world.RowOf("sprk_document", Directory.GeneralBu, new Dictionary<string, object>
-        {
-            ["ownerid"] = new EntityReference("systemuser", Directory.CallerUserId),
-            ["sprk_matter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
-        });
-
-        var outcome = await _world.RepairAsync("sprk_document", id);
-
-        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
-        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["sprk_searchindexname", "sprk_ai_search_index"]);
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").ReasonCode
-            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
-    }
-
-    [Fact]
-    public async Task AUserOwnedRowReOwnedInThisPatch_GetsTheSearchIndexOfItsNewOwnersUnit()
-    {
-        // Must not fire (F2-1): the owner is settled on a team in this same patch.
+        // Task 041 (FR-40) must-fire 6: the owner is settled on a team in this same patch, and that team's unit has an index —
+        // the index follows the content type, so neither column is in the patch.
         var id = _world.RowOf("sprk_document", Directory.ChildBu, new Dictionary<string, object>
         {
             ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
@@ -239,8 +216,7 @@ public sealed class RecordRepairModeTests
 
         var write = _world.Writes.Should().ContainSingle().Subject;
         write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.ChildTeam));
-        write.Fields["sprk_searchindexname"].Should().Be(RepairWorld.ChildIndexName);
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").State.Should().Be(RecordRepairFieldState.Repaired);
+        AssertNoIndexKey(outcome);
     }
 
     [Fact]
@@ -256,22 +232,42 @@ public sealed class RecordRepairModeTests
         Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
     }
 
-    // =====================================================================================
-    // Search-index default (FR-10) and the I-1 stamp, fill-only
-    // =====================================================================================
-
     [Fact]
-    public async Task TheSearchIndexDefault_IsFilledOnlyWhereUnset()
+    public async Task ADocumentOwnedInAnotherBusinessUnit_IsNotWritten_EscalationTrigger2()
     {
-        var id = _world.DocumentUnderTheMatter(indexName: "kept-index", index: null);
+        // Restored as owner-only (task 041, UAC-r2 NOTE 1): the trigger-2 guard runs per table (IsOwnershipParent), so the
+        // document needs its own case. A user-owned document in the GENERAL unit, filed under the matter of the CHILD unit:
+        // the move is refused and nothing is written.
+        var id = _world.RowOf("sprk_document", Directory.GeneralBu, new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", Directory.CallerUserId),
+            ["sprk_matter"] = new EntityReference("sprk_matter", RepairWorld.Matter),
+        });
 
         var outcome = await _world.RepairAsync("sprk_document", id);
 
-        var write = _world.Writes.Should().ContainSingle().Subject;
-        write.Fields.Should().NotContainKey("sprk_searchindexname");
-        write.Fields["sprk_ai_search_index"].Should().Be(new EntityReference("sprk_aisearchindex", RepairWorld.ChildIndex));
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").State.Should().Be(RecordRepairFieldState.Present);
-        _world.Directory.Row("sprk_document", id).GetAttributeValue<string>("sprk_searchindexname").Should().Be("kept-index");
+        _world.Writes.Should().BeEmpty();
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
+    }
+
+    // =====================================================================================
+    // Search index (task 041, FR-40: Repair writes none) and the I-1 stamp, fill-only
+    // =====================================================================================
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("kept-index")]
+    public async Task ARowMissingTheIndexColumns_WithItsOwnerSettled_GetsNoIndexKeyInThePatch(string? heldName)
+    {
+        // Task 041 (FR-40) must-fire 6: the row's owning team's unit has an index; nothing copies it, and a held value is
+        // left as it is.
+        var id = _world.DocumentUnderTheMatter(indexName: heldName, index: null);
+
+        var outcome = await _world.RepairAsync("sprk_document", id);
+
+        AssertNoIndexKey(outcome);
+        _world.Directory.Row("sprk_document", id).GetAttributeValue<string>("sprk_searchindexname").Should().Be(heldName);
+        _world.Directory.Row("sprk_document", id).GetAttributeValue<EntityReference>("sprk_ai_search_index").Should().BeNull();
     }
 
     [Fact]
@@ -296,6 +292,96 @@ public sealed class RecordRepairModeTests
         _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain("sprk_regardingmatter");
         _world.Directory.Row("sprk_event", id).GetAttributeValue<EntityReference>("sprk_regardingmatter").Id
             .Should().Be(RepairWorld.OtherMatter, "a stale copy is the reconciliation job's, never Repair's");
+    }
+
+    // ── field-mapping-server-write-path-r1 task 042b (FR-41, #2483; UAC-r2 condition (c)): the stamp is planned before the owner ──
+
+    [Fact]
+    public async Task AUserOwnedToDoMissingItsStampUnderATeamOwnedInvoiceOfASecureMatter_IsReOwnedToSecureAndStamped_InOneUpdate()
+    {
+        // The to-do sits in the Secure Record unit already (a same-unit re-own; a cross-unit one is the escalation below).
+        var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.SecureBu);
+
+        var outcome = await _world.RepairAsync("sprk_todo", id);
+
+        var write = _world.Writes.Should().ContainSingle("the owner and the stamp land in the one update").Subject;
+        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.SecureNamedTeam),
+            "the owner question includes the root the missing stamp names");
+        write.Fields["sprk_regardingmatter"].Should().Be(new EntityReference("sprk_matter", RepairWorld.SecureMatter));
+        Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Repaired);
+        Field(outcome, RecordRepairPart.CoreAncestorStamp, "sprk_regardingmatter").State.Should().Be(RecordRepairFieldState.Repaired);
+    }
+
+    [Fact]
+    public async Task AUserOwnedToDoInAnotherUnitUnderATeamOwnedInvoiceOfASecureMatter_IsNeverReOwnedToTheOrdinaryTeam_AndIsStamped()
+    {
+        // Before 042b the owner was decided over the invoice alone: the child unit's ordinary team, same unit, written. Now the
+        // answer is the Secure team, a move to another unit, which task 016's escalation does not write on a to-do.
+        var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.ChildBu);
+
+        var outcome = await _world.RepairAsync("sprk_todo", id);
+
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit);
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields.Should().NotContainKey("ownerid", "never re-owned to the ordinary team (#2483)");
+        write.Fields["sprk_regardingmatter"].Should().Be(new EntityReference("sprk_matter", RepairWorld.SecureMatter));
+    }
+
+    // ── 042b fix round 1 (F1, owner decision A'; security finding 6): a HELD stamp that disagrees with the source's root ──
+
+    [Fact]
+    public async Task AUserOwnedToDoHoldingAStaleStampUnderATeamOwnedInvoiceOfASecureMatter_IsReOwnedToSecure_AndItsStampIsKept()
+    {
+        // Before the fix the owner question held the stale ordinary matter, which ranks above the invoice in the to-do's
+        // lineage order: the to-do was re-owned to an ordinary team, then the reconciliation job's restamp left it there.
+        var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.SecureBu, heldMatterStamp: RepairWorld.OtherMatter);
+
+        var outcome = await _world.RepairAsync("sprk_todo", id);
+
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields["ownerid"].Should().Be(new EntityReference("team", Directory.SecureNamedTeam),
+            "the owner question holds the root the row ends under (the invoice's Secure matter), not the stale stamp");
+        write.Fields.Should().NotContainKey("sprk_regardingmatter",
+            "Repair is fill-only: a held stamp, even a stale one, is the reconciliation job's to replace");
+        Field(outcome, RecordRepairPart.Owner, "ownerid").State.Should().Be(RecordRepairFieldState.Repaired);
+    }
+
+    [Fact]
+    public async Task AUserOwnedToDoInAnotherUnitHoldingAStaleStampUnderATeamOwnedInvoiceOfASecureMatter_IsNeverReOwnedToTheOrdinaryTeam()
+    {
+        var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.ChildBu, heldMatterStamp: RepairWorld.OtherMatter);
+
+        var outcome = await _world.RepairAsync("sprk_todo", id);
+
+        Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerMovesBusinessUnit,
+            "the answer is the Secure team, a move to another unit that task 016's escalation does not write on a to-do");
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["ownerid", "sprk_regardingmatter"]);
+        _world.Directory.Row("sprk_todo", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild), "never re-owned to the ordinary team");
+    }
+
+    [Fact]
+    public async Task WhenTheMissingStampCannotBePlanned_TheOwnerIsKept_ReportedStampUnavailable_AndLoggedWithTheRowId()
+    {
+        var id = _world.ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Directory.ChildBu);
+        _world.InvoiceStampReadFaults();
+
+        var outcome = await _world.RepairAsync("sprk_todo", id);
+
+        var owner = Field(outcome, RecordRepairPart.Owner, "ownerid");
+        owner.State.Should().Be(RecordRepairFieldState.Skipped);
+        owner.ReasonCode.Should().Be(RecordRepairReason.StampUnavailable, "never re-owned over the lookups alone");
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.CoreAncestorStamp
+            && f.State == RecordRepairFieldState.Skipped && f.ReasonCode == RecordRepairReason.StampUnavailable);
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+                && f.State == RecordRepairFieldState.Skipped && f.ReasonCode == RecordRepairReason.MappingFilingUndecided,
+            "fix round 1: an unplanned stamp leaves the filing undecided, so nothing is copied from it (it could be secure)");
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["ownerid", "sprk_regardingmatter"]);
+        _world.Directory.Row("sprk_todo", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+        _world.Log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+            && e.Message.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase)
+            && e.Message.Contains(RecordRepairReason.StampUnavailable, StringComparison.Ordinal));
     }
 
     // =====================================================================================
@@ -361,18 +447,15 @@ public sealed class RecordRepairModeTests
     [Theory]
     [InlineData(true)]
     [InlineData(null)]
-    public async Task AUserOwnedSecureFlaggedRoot_KeepsItsOwner_AndGetsNoSearchIndexUntilItsOwnerIsSettled(bool? flag)
+    public async Task AUserOwnedSecureFlaggedRoot_KeepsItsOwner(bool? flag)
     {
         var id = _world.MatterOwnedBy(RepairWorld.PersonInChild, flag);
 
         var outcome = await _world.RepairAsync("sprk_matter", id);
 
         Field(outcome, RecordRepairPart.Owner, "ownerid").ReasonCode.Should().Be(RecordRepairReason.OwnerRootSecure);
-        // A secure root is provisioned by task 144, never re-owned (owner S6); UAC-r2 condition (b) F2-1: with its owner
-        // unsettled, its search index is not filled either.
+        // A secure root is provisioned by task 144, never re-owned (owner S6).
         _world.Writes.Should().BeEmpty();
-        Field(outcome, RecordRepairPart.SearchIndex, "sprk_searchindexname").ReasonCode
-            .Should().Be(RecordRepairReason.SearchIndexOwnerUnsettled);
         _world.Directory.Row("sprk_matter", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
         _world.Evictions.Should().BeEmpty();
@@ -433,7 +516,7 @@ public sealed class RecordRepairModeTests
     public async Task ATemplateThatYieldsABlankString_IsNeverWritten_TwoRepairsWriteNothing()
     {
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
-            owner: new EntityReference("team", Directory.ChildTeam), owningUnit: Directory.ChildBu);
+            owner: new EntityReference("team", Directory.ChildTeam), owningUnit: Directory.ChildBu, indexed: true);
         _world.MapABlankTemplateOntoTheEvent();
 
         var first = await _world.RepairAsync("sprk_event", id);
@@ -506,7 +589,7 @@ public sealed class RecordRepairModeTests
     [InlineData(false)]
     public async Task AMappingFault_MapsNothing_AndTheOwnerIsStillRepaired(bool profileUnreadable)
     {
-        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null, indexed: true);
         _world.MappingFault = profileUnreadable ? RepairWorld.MappingFaultKind.ProfileUnreadable : RepairWorld.MappingFaultKind.RuleFaults;
 
         var outcome = await _world.RepairAsync("sprk_event", id);
@@ -904,6 +987,33 @@ public sealed class RecordRepairModeTests
             .Should().Be(InheritedAccessPermission.AppOnlyCreatorWriteReasonCode);
     }
 
+    /// <summary>
+    /// Review R3 (FR-38), as amended by task 041 (FR-40): a mapping rule that targets either search-index column of a
+    /// search-indexed table is never applied by Repair, so the parent's index is not copied — and Repair writes no index of
+    /// its own either.
+    /// </summary>
+    [Fact]
+    public async Task AMappingRuleTargetingTheSearchIndex_IsNeverApplied_AndRepairWritesNoIndex()
+    {
+        var matter = _world.Directory.Row("sprk_matter", RepairWorld.Matter);
+        matter["sprk_searchindexname"] = RepairWorld.GeneralIndexName;
+        matter["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", RepairWorld.GeneralIndex);
+        _world.Map("sprk_matter", "sprk_event",
+            RepairWorld.Expression(CreateTimeFieldMapping.MappingTypeTemplate, "{sprk_clientname}", "sprk_clientname", 1),
+            RepairWorld.Expression(CreateTimeFieldMapping.MappingTypeTemplate, "{sprk_searchindexname}", "sprk_searchindexname", 2),
+            RepairWorld.CopyLookup("sprk_ai_search_index", "sprk_ai_search_index", 3));
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields["sprk_clientname"].Should().Be(RepairWorld.MatterClient, "the other rules still map");
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping
+            && (f.Column == "sprk_searchindexname" || f.Column == "sprk_ai_search_index")
+            && f.State == RecordRepairFieldState.Repaired, "a mapping rule never repairs the index");
+        AssertNoIndexKey(outcome);
+    }
+
     // =====================================================================================
     // UAC-r2 condition (b) F1-1: columns that decide access or filing are never mapped, on any table
     // =====================================================================================
@@ -997,7 +1107,7 @@ public sealed class RecordRepairModeTests
     public async Task AConcatThatYieldsOnlyASpace_IsNeverWritten_TwoRepairsWriteNothing()
     {
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent",
-            owner: new EntityReference("team", Directory.ChildTeam), owningUnit: Directory.ChildBu);
+            owner: new EntityReference("team", Directory.ChildTeam), owningUnit: Directory.ChildBu, indexed: true);
         _world.Map("sprk_matter", "sprk_event",
             RepairWorld.Expression(CreateTimeFieldMapping.MappingTypeConcat, "{sprk_nosuch1} {sprk_nosuch2}", "sprk_eventdescription", 1));
 
@@ -1091,6 +1201,14 @@ public sealed class RecordRepairModeTests
 
     private static RecordRepairField Field(RecordRepairOutcome outcome, RecordRepairPart part, string column) =>
         outcome.Fields.Should().ContainSingle(f => f.Part == part && f.Column == column).Subject;
+
+    /// <summary>Task 041: no search-index column is in any patch, and no part reports one as repaired.</summary>
+    private void AssertNoIndexKey(RecordRepairOutcome outcome)
+    {
+        _world.Writes.SelectMany(w => w.Fields.Keys).Should().NotContain(["sprk_searchindexname", "sprk_ai_search_index"]);
+        outcome.Fields.Should().NotContain(f => (f.Column == "sprk_searchindexname" || f.Column == "sprk_ai_search_index")
+            && f.State == RecordRepairFieldState.Repaired);
+    }
 }
 
 /// <summary>
@@ -1217,7 +1335,8 @@ internal sealed class RepairWorld
     // ── Rows ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     public Guid EventUnderTheMatter(
-        string? clientName, string? practiceArea, string? priority, EntityReference? owner = null, Guid? owningUnit = null)
+        string? clientName, string? practiceArea, string? priority, EntityReference? owner = null, Guid? owningUnit = null,
+        bool indexed = false)
     {
         var id = Guid.NewGuid();
         var extra = new Dictionary<string, object>
@@ -1225,6 +1344,13 @@ internal sealed class RepairWorld
             ["ownerid"] = owner ?? new EntityReference("systemuser", PersonInChild),
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Matter),
         };
+        if (indexed)
+        {
+            // Task 039 (FR-38): an event is search-indexed now, so Repair fills its two index columns where unset. A test about
+            // something else gives the row both values already, so its owner/mapping assertions stay about the owner/mapping.
+            extra["sprk_searchindexname"] = ChildIndexName;
+            extra["sprk_ai_search_index"] = new EntityReference("sprk_aisearchindex", ChildIndex);
+        }
         if (owner is { LogicalName: "team" })
             extra["owningteam"] = owner;
         if (clientName is not null)
@@ -1279,6 +1405,39 @@ internal sealed class RepairWorld
         Directory.WithRecord("sprk_document", id, Directory.ChildBu, owningTeam: Directory.ChildTeam, extra: extra);
         return id;
     }
+
+    /// <summary>Task 042b: an invoice team-owned by the child unit's team (not yet reached by Make Secure), under the secure matter.</summary>
+    public static readonly Guid TeamOwnedInvoice = Guid.Parse("a0160000-0000-4000-8000-0000000004b1");
+
+    /// <summary>
+    /// Task 042b: a to-do in <paramref name="owningUnit"/>, owned by the person in the child unit, filed under
+    /// <see cref="TeamOwnedInvoice"/> of the isolated <see cref="SecureMatter"/>, and missing its I-1 stamp — or, fix round 1,
+    /// holding <paramref name="heldMatterStamp"/> as a stale one.
+    /// </summary>
+    public Guid ToDoMissingItsStampUnderATeamOwnedInvoiceOfTheSecureMatter(Guid owningUnit, Guid? heldMatterStamp = null)
+    {
+        Directory.WithSecureRoot("sprk_matter", SecureMatter)
+            .WithRecord("sprk_invoice", TeamOwnedInvoice, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+                extra: new Dictionary<string, object> { ["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter) });
+        _stamps.Row("sprk_matter", SecureMatter)
+            .Row("sprk_invoice", TeamOwnedInvoice, [("sprk_matter", "sprk_matter", SecureMatter)]);
+        var id = Guid.NewGuid();
+        var extra = new Dictionary<string, object>
+        {
+            ["ownerid"] = new EntityReference("systemuser", PersonInChild),
+            ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", TeamOwnedInvoice),
+        };
+        if (heldMatterStamp is { } held)
+            extra["sprk_regardingmatter"] = new EntityReference("sprk_matter", held);
+        Directory.WithRecord("sprk_todo", id, owningUnit, extra: extra);
+        return id;
+    }
+
+    /// <summary>Task 042b: reading the invoice to derive the to-do's stamp faults (the plan cannot be made).</summary>
+    public void InvoiceStampReadFaults() => _stamps.FailRead("sprk_invoice", TeamOwnedInvoice);
+
+    /// <summary>Task 042b: what the service logged.</summary>
+    public Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<RecordCreationService> Log { get; } = new();
 
     /// <summary>A natively created invoice filed under the matter, owned by the person in the child unit.</summary>
     public Guid InvoiceUnderTheMatter()
@@ -1523,7 +1682,7 @@ internal sealed class RepairWorld
             SecureRootFilingGateFixtures.Over(entities),
             new CoreAncestorRestamper(_stamps.Service, _stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance),
             SecureChildShareWorld.SynchronizerOver(ShareWorld, new FakeRecordShareTable()),
-            scopes, new Mock<IMembershipEventPublisher>().Object, NullLogger<RecordCreationService>.Instance);
+            scopes, new Mock<IMembershipEventPublisher>().Object, Log);
     }
 
     /// <summary>

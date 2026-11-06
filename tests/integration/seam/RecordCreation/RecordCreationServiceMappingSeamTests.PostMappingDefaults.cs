@@ -389,16 +389,18 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     [Fact]
     public async Task PostMappingDefault_OnATableFieldMappingDoesNotApplyTo_IsAnArgumentError()
     {
+        // Task 042c fix round 4: was sprk_signal, which the service now refuses before it reads the defaults (created only by
+        // its writer, owner decision D-204); a task is another table field mapping does not apply to.
         var item = new Sprk.Bff.Api.Services.Dataverse.DataverseWriteItemMapper.MappedItem(
-            "{\"sprk_sentence\":\"A sentence\"}", ["sprk_sentence"]);
-        var request = new RecordCreationRequest("sprk_signal", new RecordCreationPayload.Mapped(item))
+            "{\"subject\":\"A task\"}", ["subject"]);
+        var request = new RecordCreationRequest("task", new RecordCreationPayload.Mapped(item))
         {
-            PostMappingDefaults = new Dictionary<string, object?> { ["sprk_description"] = "x" },
+            PostMappingDefaults = new Dictionary<string, object?> { ["description"] = "x" },
         };
 
         var act = () => Service().CreateAsync(request, AsCaller(), CancellationToken.None);
 
-        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("OntologyContentIsNotMapped");
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("ChatPlatformTableIsNotMapped");
         _creates.Should().BeEmpty();
     }
 

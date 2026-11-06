@@ -1,5 +1,9 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using SearchIndexColumns = Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver;
 
 namespace Sprk.Bff.Api.Services.RecordCreation;
 
@@ -16,7 +20,10 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// <see cref="OwnedChildWrite.ServerOwnedColumns"/> and <see cref="OwnedChildWrite.ForPersonColumns"/>,
 /// <c>ChildRecordEndpoints.RootServerOwnedColumns</c>, and the Office <c>RecordCreationService</c>'s
 /// <c>MatterProtectedAttributes</c> / <c>ProjectProtectedAttributes</c>. Tasks 013, 014 and 018 switch the consumers to
-/// the registry and delete the views.</para>
+/// the registry and delete the views. The one exception to "data plus lookups" is the FR-38 search-index drop toolkit (task 039):
+/// the registry also owns the helpers that answer "does this table own its search index" and that remove and log a client
+/// value for it, in one clearly marked block at the end of this file (a second <c>partial</c> declaration), because the
+/// <see cref="RecordTableRule.SearchIndexed"/> flag and the one drop every path shares must not be able to drift apart.</para>
 /// <para><b>Per-table differences are kept, not merged.</b> Each value is what the old list held for that table, scoped
 /// as the old list was scoped. "Protected columns" (FR-11) are two different policies today and stay two properties:
 /// <see cref="RecordTableRule.TableServerOwnedColumns"/> (a CALLER's payload naming one is refused) and
@@ -38,7 +45,7 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// protected and server-owned columns keep drifting between create paths (they already differ per core), and task 013
 /// has no single place to read per-table policy, search-index and mapping applicability.</para>
 /// </remarks>
-internal static class RecordTableRules
+internal static partial class RecordTableRules
 {
     /// <summary>
     /// Columns the server owns on EVERY app-only create, whatever the table: a caller's payload that sets one is refused,
@@ -132,6 +139,16 @@ internal static class RecordTableRules
         SecurableEntityRegistry.SecurityBusinessUnitAttribute,
     ];
 
+    /// <summary>
+    /// The core record pair of a Signal and a Decision Record (<see cref="RecordTableRule.FixedAfterCreateColumns"/>): the record
+    /// type lookup and the record id, set at create (the ontology writers, or the unified create) and fixed after it.
+    /// Compile-time constants only, so declaring them here cannot create a static-initialisation cycle. Declared before
+    /// <see cref="All"/>.
+    /// </summary>
+    private static readonly IReadOnlySet<string> CoreRecordPairColumns = Columns(
+        Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn,
+        Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordIdColumn);
+
     /// <summary>Every registered table, in declaration order.</summary>
     internal static IReadOnlyList<RecordTableRule> All { get; } =
     [
@@ -159,7 +176,10 @@ internal static class RecordTableRules
                     "RecordCreationService, tasks 100 and 152)."),
                 ChatCallerIsTheForPerson("sprk_assignedtointernal"),
             ],
-            // Office RecordCreationService.ApplyBusinessUnitDefaultsAsync fills sprk_searchindexname / sprk_ai_search_index.
+            // SearchIndexed makes sprk_searchindexname / sprk_ai_search_index the server's (FR-38, task 039), and since task 041
+            // (FR-40) nothing on the create and client paths writes them: the index follows the content type (step 8 is a no-op).
+            // The indexing pipeline's stamps (RagEndpoints, the RAG indexing jobs) record where a file was indexed and are left
+            // alone. The Office core's ApplyBusinessUnitDefaultsAsync that used to fill them is deleted (018c).
             // Task 017 (#1608, decision 2b): refused in a caller's payload on every path, as on a work assignment.
             TableServerOwnedColumns = RootServerOwnedColumns,
             SearchIndexed = true,
@@ -200,6 +220,8 @@ internal static class RecordTableRules
         {
             Table = "sprk_workassignment",
             Kind = RecordTableKind.Root,
+            // FR-38 (owner, 2026-10-31, before task 039): server-owned search index. #2399 was a Work Assignment create.
+            SearchIndexed = true,
             // Was ChildRecordEndpoints.RootServerOwnedColumns (ontology task 046, D-113 / task 175): its own SPE
             // container, the secure business unit it is isolated in, and its Access Permission. None is field-secured.
             // Task 017 (#1608, decision 2b): refused at step 2 of RecordCreationService on every path, the same set as a
@@ -243,6 +265,12 @@ internal static class RecordTableRules
         {
             Table = "sprk_event",
             Kind = RecordTableKind.Child,
+            // FR-38 (owner, 2026-10-31, before task 039): server-owned search index.
+            SearchIndexed = true,
+            // #2515 (owner, 2026-11-02): EVT-{SEQNUM:6}, set on the attribute in SpaarkeMaster Entities/sprk_Event/Entity.xml, as the
+            // budget's (task 167, D-193). The platform fills it; no code sets it, and a field-mapping rule may not either.
+            MappingProtectedColumns = Columns("sprk_eventnumber"),
+            AutonumberColumn = "sprk_eventnumber",
             ForPerson = new ForPersonLookup(AssignedToDefaults.AssignedToAttribute, "contact"),
             ServerDefaults =
             [
@@ -260,6 +288,8 @@ internal static class RecordTableRules
         {
             Table = "sprk_invoice",
             Kind = RecordTableKind.Child,
+            // FR-38 (owner, 2026-10-31, before task 039): server-owned search index (ebilling-r1 reviews this flag).
+            SearchIndexed = true,
             // Task 014 (ebilling-r1's review of 013, item 3): a fill-only mapping that filled a second core lookup would fail
             // a valid create with multiple_core_records. The core record is the caller's to name.
             MappingProtectedColumns = InvoiceFamilyCoreLookupsOf("sprk_invoice"),
@@ -271,8 +301,9 @@ internal static class RecordTableRules
         {
             Table = "sprk_document",
             Kind = RecordTableKind.Child,
-            // OWNER REVIEW: in no old list. Spec FR-10's acceptance names Document with Matter and Project; no create
-            // path fills a document's search index today (grep sprk_searchindexname: only the Office Matter/Project create).
+            // OWNER REVIEW: in no old list. Spec FR-10's acceptance names Document with Matter and Project. No create path fills a
+            // record's search index (task 041, FR-40: the Office Matter/Project create no longer does either); a document's
+            // sprk_searchindexname is the indexing pipeline's app-only stamp of where its file landed.
             SearchIndexed = true,
             // Task 014 (unified-access-control-r2 D7 / #2169, 2026-10-21): the document's access record — the inherited
             // floor and the document's own narrowing — is written by the BFF only, never by a field-mapping rule (the push
@@ -376,24 +407,35 @@ internal static class RecordTableRules
         new RecordTableRule { Table = "account", Kind = RecordTableKind.Child, MappingExclusion = ChatPlatformTableIsNotMapped },
 
         // ── Ontology writers' tables: never mapped (spaarke-ontology-platform-r1 §0.3) ──────────────────────────────
+        // Field-mapping-server-write-path-r1 task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): created only by
+        // their writers (SignalWriter, DecisionRecordWriter, the decision action executors), never by this service. A create of
+        // any of the three is refused at the start of the pipeline (CreatedOnlyByItsWriter), for the caller and the system
+        // principal alike; the chat create tool refuses them before it is asked (DataverseCreateRecordHandler).
 
         new RecordTableRule
         {
             Table = "sprk_signal",
             Kind = RecordTableKind.Child,
             MappingExclusion = OntologyContentIsNotMapped,
+            CreatedOnlyByItsWriter = true,
+            // The core record pair is fixed after create on BFF update paths (update only: the create still takes it).
+            FixedAfterCreateColumns = CoreRecordPairColumns,
         },
         new RecordTableRule
         {
             Table = "sprk_decisionrecord",
             Kind = RecordTableKind.Child,
             MappingExclusion = OntologyContentIsNotMapped,
+            CreatedOnlyByItsWriter = true,
+            // The core record pair is fixed after create on BFF update paths (update only: the create still takes it).
+            FixedAfterCreateColumns = CoreRecordPairColumns,
         },
         new RecordTableRule
         {
             Table = "sprk_budgetrevision",
             Kind = RecordTableKind.Child,
             MappingExclusion = OntologyContentIsNotMapped,
+            CreatedOnlyByItsWriter = true,
         },
     ];
 
@@ -407,6 +449,100 @@ internal static class RecordTableRules
     /// <summary>The rule of <paramref name="table"/>; throws when the registry has no entry (a view over a known table).</summary>
     internal static RecordTableRule Get(string table) =>
         Find(table) ?? throw new KeyNotFoundException($"The record table rules registry has no entry for '{table}'.");
+
+    /// <summary>
+    /// The reason code when a BFF update path's payload names a column of <see cref="RecordTableRule.FixedAfterCreateColumns"/>
+    /// (<see cref="RefuseFixedAfterCreateColumns"/>). Nothing is written.
+    /// </summary>
+    internal const string FixedAfterCreateReasonCode = "record_update.fixed_after_create";
+
+    /// <summary>
+    /// The ONE update-side check of <see cref="RecordTableRule.FixedAfterCreateColumns"/>: the refusal when an UPDATE of
+    /// <paramref name="table"/> names one of its fixed-after-create columns, or <c>null</c> when the update may proceed. Every
+    /// BFF update path that takes a caller-, model- or configuration-supplied payload asks it before anything is read or written:
+    /// the chat update tool (<c>DataverseUpdateRecordHandler</c>), the Update Record node and the action seam
+    /// (<c>UpdateRecordActionCore</c>), a playbook's output mapping (<c>DataverseUpdateHandler</c>) and the field-mapping push
+    /// (per rule). Each maps the answer to its own refusal. Shape only: it reads nothing, so it answers the same for any record.
+    /// The table is matched trimmed and in any case; a key in any form a writer sends (any case, <c>{nav}@odata.bind</c>,
+    /// <c>_{column}_value</c>) is matched by its column (<see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn"/>).
+    /// Never asked by a create: the create paths take these columns (<see cref="RecordTableRule.TableServerOwnedColumns"/> is the
+    /// create-side refusal).
+    /// </summary>
+    /// <param name="table">The table the update names.</param>
+    /// <param name="keys">The payload's keys, in any form a writer sends.</param>
+    internal static RecordOwnerResolution? RefuseFixedAfterCreateColumns(string? table, IEnumerable<string> keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (Find(table) is not { FixedAfterCreateColumns.Count: > 0 } rule)
+            return null;
+
+        // Trimmed after the normalization too, so a space before the '@' of a bind key ("sprk_corerecordtype @odata.bind")
+        // still names its column.
+        var named = keys.Select(k => Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k).Trim())
+            .FirstOrDefault(rule.FixedAfterCreateColumns.Contains);
+        return named is null
+            ? null
+            : RecordOwnerResolution.Refused(FixedAfterCreateReasonCode,
+                $"{named} of a {rule.Table} is set when the record is created and cannot be changed");
+    }
+
+    /// <summary>
+    /// The reason code when a generic BFF update path is asked to change a row of a table only its writer changes
+    /// (<see cref="RefuseWriterOnlyTableUpdate"/>). Nothing is written.
+    /// </summary>
+    internal const string ChangedOnlyByItsWriterReasonCode = "record_update.changed_only_by_its_writer";
+
+    /// <summary>
+    /// The ONE update-side check of <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> (field-mapping-server-write-path-r1 task
+    /// 048; owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are changed
+    /// only by their writers, so a generic update of one is refused whole, or <c>null</c> when the table's update may proceed.
+    /// It reads the same flag the create refusals read (<see cref="RecordCreationService"/>, the chat create tool), so create
+    /// and update refuse one list. The generic update paths ask it after their shape-only refusals and before any row is read
+    /// or written: the chat update tool (<c>DataverseUpdateRecordHandler</c>, validate and execute), the Update Record node and
+    /// the action seam (<c>UpdateRecordActionCore</c>), a playbook's output mapping (<c>DataverseUpdateHandler</c>), the
+    /// field-mapping push (its request check) and the work-product persister. Each maps the answer to its own refusal, with
+    /// <see cref="RecordOwnerResolution.Reason"/> as the message. Table only: it reads nothing, so it answers the same for any
+    /// record, payload, identity and write mode (update or upsert). The writers never reach these paths
+    /// (<c>WriterOnlyTablesWritersGuardTests</c>). The table is matched trimmed and in any case.
+    /// </summary>
+    /// <param name="table">The table the update names.</param>
+    internal static RecordOwnerResolution? RefuseWriterOnlyTableUpdate(string? table) =>
+        Find(table) is { CreatedOnlyByItsWriter: true } rule
+            ? RecordOwnerResolution.Refused(ChangedOnlyByItsWriterReasonCode, ChangedOnlyByItsWriterMessage(rule.Table))
+            : null;
+
+    /// <summary>The reason code when a generic BFF delete path is asked to remove a row of a table only its writer changes
+    /// (<see cref="RefuseWriterOnlyTableDelete"/>). Nothing is removed.</summary>
+    internal const string RemovedOnlyByItsWriterReasonCode = "record_delete.changed_only_by_its_writer";
+
+    /// <summary>
+    /// The delete-side check of <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> (field-mapping-server-write-path-r1 task 048
+    /// fix round 2; owner decision 2026-11-05, D-204 extended to the general delete path): a Signal, a Decision Record and a Budget
+    /// Revision are changed only by their writers, so a generic delete of one is refused whole, or <c>null</c> when the table's
+    /// delete may proceed. It reads the same flag the create and update refusals read, so the three paths refuse one list. Table
+    /// only: it reads nothing, so it answers the same for any record, identity and approval. The table is matched trimmed and in any
+    /// case. The only generic delete whose table a caller chooses is the chat delete tool (<c>DataverseDeleteRecordHandler</c>, validate
+    /// and execute); every other delete names a fixed table (<c>WriterOnlyTablesUpdateGuardTests</c> lists them).
+    /// </summary>
+    /// <param name="table">The table the delete names.</param>
+    internal static RecordOwnerResolution? RefuseWriterOnlyTableDelete(string? table) =>
+        Find(table) is { CreatedOnlyByItsWriter: true } rule
+            ? RecordOwnerResolution.Refused(RemovedOnlyByItsWriterReasonCode, ChangedOnlyByItsWriterDeleteMessage(rule.Table))
+            : null;
+
+    /// <summary>The plain refusal message for a delete of a <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> table (the chat
+    /// delete tool words the same refusal for the model: <c>DataverseDeleteRecordHandler.ChangedOnlyByItsWriterChatMessage</c>).</summary>
+    internal static string ChangedOnlyByItsWriterDeleteMessage(string table) =>
+        $"'{table}' records are changed only by Spaarke itself and can't be removed by this operation; nothing was removed. " +
+        $"({RemovedOnlyByItsWriterReasonCode})";
+
+    /// <summary>The refusal message for an update of a <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> table on every path a
+    /// person reads it on (the Update Record node, a playbook's output mapping, the work-product persister, the field-mapping push,
+    /// the child-records update): a plain sentence. The chat update tool words the same refusal for the model
+    /// (<c>DataverseUpdateRecordHandler.ChangedOnlyByItsWriterChatMessage</c>), as the chat create tool does for a create.</summary>
+    internal static string ChangedOnlyByItsWriterMessage(string table) =>
+        $"'{table}' records are changed only by Spaarke itself and can't be changed by this update; nothing was written. " +
+        $"({ChangedOnlyByItsWriterReasonCode})";
 
     /// <summary>
     /// Task 037 (FR-36): what <paramref name="rule"/>'s copied defaults (<see cref="ServerDefault.CopiedFrom"/>) come to on
@@ -455,6 +591,322 @@ internal static class RecordTableRules
 
     private static IReadOnlySet<string> Columns(params string[] columns) =>
         new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// The FR-38 search-index drop toolkit (field-mapping-server-write-path-r1 task 039): ONE block, in the registry's own file, that
+/// owns the answer to "does this table own its search index" and the removal and log of a client value for it. A second
+/// declaration of the same static class (<c>partial</c>), so every call site keeps its <c>RecordTableRules.X</c> name and no
+/// new file or type is added (ADR-010). Everything the create and every BFF update path shares about the index lives here.
+/// </summary>
+internal static partial class RecordTableRules
+{
+    // ── FR-38: the search index is server-owned (task 039) ──────────────────────────────────────────────────────────
+    // ONE column check and ONE removal, shared by the unified create (RecordCreationService) and every BFF update path, so
+    // they cannot drift. A drop, never a refusal; nothing writes either column on the create and client paths since task 041
+    // (FR-40: the index follows the content type; the indexing pipeline's own stamps record where a file was indexed and are
+    // left alone).
+
+    /// <summary>Where a dropped search-index value came from: the caller's payload (or a server writer's item).</summary>
+    internal const string SearchIndexOriginCaller = "caller";
+
+    /// <summary>Where a dropped search-index value came from: a field-mapping rule (step 3, or a push).</summary>
+    internal const string SearchIndexOriginMapping = "mapping";
+
+    /// <summary>Where a dropped search-index value came from: an adapter's post-mapping default (step 3½).</summary>
+    internal const string SearchIndexOriginDefault = "default";
+
+    private const string BindSuffix = "@odata.bind";
+
+    /// <summary>
+    /// FR-38: whether <paramref name="table"/> has a SERVER-OWNED search index, i.e. its registry entry is
+    /// <see cref="RecordTableRule.SearchIndexed"/>. The one question every create and update path asks before it drops.
+    /// </summary>
+    internal static bool OwnsSearchIndex(string? table) => Find(table)?.SearchIndexed == true;
+
+    /// <summary>
+    /// FR-38: the index column a payload key names, or <c>null</c> for any other key. Matches the lookup
+    /// (<c>sprk_ai_search_index</c>, its navigation property <c>sprk_AI_Search_Index</c> and either one's
+    /// <c>@odata.bind</c>, in any case) and the legacy text column (<c>sprk_searchindexname</c>). The canonical logical
+    /// name is returned.
+    /// </summary>
+    internal static string? SearchIndexColumnOf(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return null;
+
+        var name = key.Trim();
+        if (name.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase))
+            name = name[..^BindSuffix.Length].TrimEnd();
+
+        if (string.Equals(name, SearchIndexColumns.LookupColumn, StringComparison.OrdinalIgnoreCase))
+            return SearchIndexColumns.LookupColumn;
+        return string.Equals(name, SearchIndexColumns.LegacyTextColumn, StringComparison.OrdinalIgnoreCase)
+            ? SearchIndexColumns.LegacyTextColumn
+            : null;
+    }
+
+    /// <summary>
+    /// FR-38: removes the server-owned search-index columns from a Web API body or a chat tool's <c>item</c> (a JSON object
+    /// keyed by column or <c>{nav}@odata.bind</c>), whatever the key's case, and records what was dropped. Returns
+    /// <paramref name="body"/> itself when it names neither. Never a refusal: a malformed value is dropped like any other.
+    /// </summary>
+    internal static JsonElement WithoutSearchIndex(JsonElement body, string origin, ICollection<DroppedSearchIndexValue> dropped)
+    {
+        if (body.ValueKind != JsonValueKind.Object || !body.EnumerateObject().Any(p => SearchIndexColumnOf(p.Name) is not null))
+            return body;
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in body.EnumerateObject())
+            {
+                if (SearchIndexColumnOf(property.Name) is { } column)
+                    RecordDropped(dropped, column, origin, property.Value);
+                else
+                    property.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    /// <summary>
+    /// FR-38: the same removal on a mapped item (<see cref="DataverseWriteItemMapper.MappedItem"/>): its body keys, its
+    /// columns, its lookups and its clears. Returns <paramref name="item"/> itself when it names neither column.
+    /// </summary>
+    internal static DataverseWriteItemMapper.MappedItem WithoutSearchIndex(
+        DataverseWriteItemMapper.MappedItem item, string origin, ICollection<DroppedSearchIndexValue> dropped)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        using var body = JsonDocument.Parse(item.JsonBody);
+        var bodyNamesIt = body.RootElement.ValueKind == JsonValueKind.Object
+                          && body.RootElement.EnumerateObject().Any(p => SearchIndexColumnOf(p.Name) is not null);
+        if (!bodyNamesIt
+            && !item.Columns.Any(c => SearchIndexColumnOf(c) is not null)
+            && !item.Lookups.Any(l => SearchIndexColumnOf(l.Column) is not null)
+            && !item.ClearedColumns.Any(c => SearchIndexColumnOf(c) is not null))
+        {
+            return item;
+        }
+
+        // The body first (it holds the value as sent); a lookup it does not carry in a readable form is read from the item's lookups.
+        var json = bodyNamesIt ? WithoutSearchIndex(body.RootElement, origin, dropped).GetRawText() : item.JsonBody;
+        foreach (var lookup in item.Lookups.Where(l => SearchIndexColumnOf(l.Column) is not null))
+            RecordDropped(dropped, SearchIndexColumns.LookupColumn, origin, lookup.RecordId);
+
+        foreach (var column in item.Columns.Concat(item.ClearedColumns).Select(SearchIndexColumnOf).OfType<string>())
+            RecordDropped(dropped, column, origin, null);
+
+        return item with
+        {
+            JsonBody = json,
+            Columns = item.Columns.Where(c => SearchIndexColumnOf(c) is null).ToList(),
+            Lookups = item.Lookups.Where(l => SearchIndexColumnOf(l.Column) is null).ToList(),
+            ClearedColumns = item.ClearedColumns.Where(c => SearchIndexColumnOf(c) is null).ToList(),
+        };
+    }
+
+    /// <summary>
+    /// FR-38: the same removal, in place, on an update payload that is a dictionary of column (or <c>{nav}@odata.bind</c>) to
+    /// value (a playbook output mapping, a confirmed proposal, a field-mapping push). Returns how many keys were removed.
+    /// </summary>
+    internal static int RemoveSearchIndex(IDictionary<string, object?> fields, string origin, ICollection<DroppedSearchIndexValue> dropped)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        var keys = fields.Keys.Where(k => SearchIndexColumnOf(k) is not null).ToArray();
+        foreach (var key in keys)
+        {
+            RecordDropped(dropped, SearchIndexColumnOf(key)!, origin, fields[key]);
+            fields.Remove(key);
+        }
+
+        return keys.Length;
+    }
+
+    /// <summary>
+    /// FR-38, round 3 (G3): the ONE sequence the BFF UPDATE paths run on a payload that is a dictionary of column to value (a
+    /// playbook output mapping, the Update Record node and a confirmed proposal, the field-mapping push's final payload): on a
+    /// search-indexed table, remove both index columns IN PLACE, log what was dropped (<see cref="LogSearchIndexDropped"/>, the
+    /// table name lower-cased, no applied value because an update leaves the row's index as it is), and say whether the drop
+    /// left nothing to write. <c>DroppedAny</c> is false, and <c>Emptied</c> is false, for a table that does not own its index,
+    /// for a payload that never named an index column, and for a payload that was already empty before any drop: such a payload
+    /// keeps whatever its caller did with it before 039 (an empty update is the mapper's refusal, not this helper's).
+    /// <c>Emptied</c> is true only when the drop itself removed the last column, so the caller can skip the write.
+    /// </summary>
+    internal static (bool DroppedAny, bool Emptied) DropSearchIndexFromUpdate(
+        string? table, Guid? recordId, IDictionary<string, object?> fields, string origin, ILogger logger, string? correlationId = null)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        ArgumentNullException.ThrowIfNull(logger);
+        if (!OwnsSearchIndex(table))
+            return (false, false);
+
+        var dropped = new List<DroppedSearchIndexValue>();
+        RemoveSearchIndex(fields, origin, dropped);
+        return LogUpdateDrop(table!, recordId, dropped, fields.Count == 0, logger, correlationId);
+    }
+
+    /// <summary>
+    /// The same sequence for an update payload that is a JSON object (a Web API PATCH body, a chat tool's <c>item</c>): returns
+    /// the body without the index columns (the same element when it named none), and the same two flags.
+    /// </summary>
+    internal static (JsonElement Body, bool DroppedAny, bool Emptied) DropSearchIndexFromUpdate(
+        string? table, Guid? recordId, JsonElement body, string origin, ILogger logger, string? correlationId = null)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        if (!OwnsSearchIndex(table))
+            return (body, false, false);
+
+        var dropped = new List<DroppedSearchIndexValue>();
+        var rest = WithoutSearchIndex(body, origin, dropped);
+        var (droppedAny, emptied) = LogUpdateDrop(
+            table!, recordId, dropped, rest.ValueKind == JsonValueKind.Object && !rest.EnumerateObject().Any(), logger, correlationId);
+        return (rest, droppedAny, emptied);
+    }
+
+    private static (bool DroppedAny, bool Emptied) LogUpdateDrop(
+        string table, Guid? recordId, List<DroppedSearchIndexValue> dropped, bool nothingLeft, ILogger logger, string? correlationId)
+    {
+        if (dropped.Count == 0)
+            return (false, false);
+
+        LogSearchIndexDropped(logger, table.Trim().ToLowerInvariant(), recordId, dropped, applied: null, correlationId);
+        return (true, nothingLeft);
+    }
+
+    /// <summary>One dropped value: the column, where it came from, and the index it named (the id for the lookup, the name for the text column).</summary>
+    internal sealed record DroppedSearchIndexValue(string Column, string Origin, Guid? IndexId, string? IndexName);
+
+    private static void RecordDropped(ICollection<DroppedSearchIndexValue> dropped, string column, string origin, object? value)
+    {
+        var isLookup = string.Equals(column, SearchIndexColumns.LookupColumn, StringComparison.Ordinal);
+        var id = isLookup ? IndexIdOf(value) : null;
+        var name = isLookup ? null : IndexNameOf(value);
+
+        var existing = dropped.FirstOrDefault(d => d.Column == column && d.Origin == origin);
+        if (existing is null)
+        {
+            dropped.Add(new DroppedSearchIndexValue(column, origin, id, name));
+        }
+        else if ((id is not null && existing.IndexId is null) || (name is not null && existing.IndexName is null))
+        {
+            // The same column named twice (two spellings): keep whichever carried a value.
+            dropped.Remove(existing);
+            dropped.Add(existing with { IndexId = existing.IndexId ?? id, IndexName = existing.IndexName ?? name });
+        }
+    }
+
+    /// <summary>The catalog row a dropped lookup value named: a bind string, a lookup object, an <see cref="EntityReference"/> or a Guid.</summary>
+    private static Guid? IndexIdOf(object? value)
+    {
+        static Guid? FromText(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return null;
+
+            var trimmed = text.Trim();
+            var open = trimmed.LastIndexOf('(');
+            var close = trimmed.LastIndexOf(')');
+            var candidate = open >= 0 && close > open ? trimmed[(open + 1)..close] : trimmed;
+            return Guid.TryParse(candidate, out var id) && id != Guid.Empty ? id : null;
+        }
+
+        return value switch
+        {
+            Guid guid => guid == Guid.Empty ? null : guid,
+            EntityReference reference => reference.Id == Guid.Empty ? null : reference.Id,
+            string text => FromText(text),
+            JsonElement { ValueKind: JsonValueKind.String } json => FromText(json.GetString()),
+            JsonElement { ValueKind: JsonValueKind.Object } json
+                when json.TryGetProperty("recordId", out var recordId) && recordId.ValueKind == JsonValueKind.String =>
+                FromText(recordId.GetString()),
+            _ => null,
+        };
+    }
+
+    /// <summary>The index name a dropped text value named (trimmed; none when blank or not text).</summary>
+    private static string? IndexNameOf(object? value)
+    {
+        var text = value switch
+        {
+            string s => s,
+            JsonElement { ValueKind: JsonValueKind.String } json => json.GetString(),
+            _ => null,
+        };
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
+    private static readonly Regex IndexNameShape = new(
+        @"\A[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?\z", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+
+    /// <summary>
+    /// Review R1 (UAC-r2 condition 4): the ONE way an index name reaches a log. A name is logged only when it has the shape of
+    /// an Azure AI Search index name (<c>\A[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?\z</c>; known limit: lowercase-hyphen free text has this shape); anything else is a client's free text
+    /// (an email, a sentence) and is logged as <c>&lt;not an index name&gt; (length N)</c>. <c>null</c> stays none.
+    /// </summary>
+    internal static string? LoggableIndexName(string? name)
+    {
+        if (name is null)
+            return null;
+
+        try
+        {
+            return IndexNameShape.IsMatch(name) ? name : $"<not an index name> (length {name.Length})";
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return $"<not an index name> (length {name.Length})";
+        }
+    }
+
+    /// <summary>
+    /// FR-38 (UAC-r2 condition 4): logs <c>client_search_index_dropped</c>, ids only, for each dropped value that differs from
+    /// what was applied. <paramref name="applied"/> is what a new record was given (both none since task 041, FR-40: nothing
+    /// writes either column), or <c>null</c> on an update, where the value is "unchanged" and so never equal. Equal means:
+    /// both none, the same id, or the same name compared trimmed and ordinal-ignore-case. The text column's entry also carries
+    /// the dropped and applied index NAME (catalog configuration, not personal data); nothing else textual is logged.
+    /// Information level until the clients stop sending the columns (task 041, UAC-r2: every create that sends one now logs);
+    /// task 035 returns it to Warning.
+    /// </summary>
+    internal static void LogSearchIndexDropped(
+        ILogger logger, string table, Guid? recordId, IEnumerable<DroppedSearchIndexValue> dropped,
+        (Guid? IndexId, string? IndexName)? applied, string? correlationId = null)
+    {
+        foreach (var drop in dropped)
+        {
+            var isLookup = string.Equals(drop.Column, SearchIndexColumns.LookupColumn, StringComparison.Ordinal);
+            if (applied is { } now
+                && (isLookup
+                    ? drop.IndexId == now.IndexId
+                    : string.Equals(drop.IndexName ?? string.Empty, now.IndexName?.Trim() ?? string.Empty,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            const string unchanged = "unchanged";
+            if (isLookup)
+            {
+                logger.LogInformation(
+                    "[RECORD-WRITE] client_search_index_dropped: table={Table} record={RecordId} column={Column} origin={Origin} " +
+                    "droppedIndexId={DroppedIndexId} appliedIndexId={AppliedIndexId} correlationId={CorrelationId}",
+                    table, recordId, drop.Column, drop.Origin, drop.IndexId, applied is { } a ? a.IndexId : unchanged, correlationId);
+            }
+            else
+            {
+                logger.LogInformation(
+                    "[RECORD-WRITE] client_search_index_dropped: table={Table} record={RecordId} column={Column} origin={Origin} " +
+                    "droppedIndexName={DroppedIndexName} appliedIndexName={AppliedIndexName} correlationId={CorrelationId}",
+                    table, recordId, drop.Column, drop.Origin, LoggableIndexName(drop.IndexName),
+                    applied is { } b ? LoggableIndexName(b.IndexName) : unchanged, correlationId);
+            }
+        }
+    }
 }
 
 /// <summary>Whether a table's rows are roots (filed under nothing they inherit security from) or children.</summary>
@@ -611,6 +1063,24 @@ internal sealed record RecordTableRule
     /// </summary>
     public IReadOnlySet<string> MappingProtectedColumns { get; init; } = NoColumns;
 
+    /// <summary>
+    /// Columns of THIS table that are set at create and fixed after it: the create paths take them, and every BFF UPDATE path
+    /// that takes a caller-, model- or configuration-supplied payload refuses a payload naming one
+    /// (<see cref="RecordTableRules.RefuseFixedAfterCreateColumns"/>). Today the core record pair of a Signal and a Decision
+    /// Record. Update only, so not in <see cref="TableServerOwnedColumns"/> (which refuses on create too). Empty when the table
+    /// has none.
+    /// </summary>
+    /// <remarks>
+    /// <b>Component justification (CLAUDE.md §11).</b> Existing — <see cref="TableServerOwnedColumns"/> refuses a caller's
+    /// columns on create; <c>InheritedAccessPermission.AccessColumns</c> holds a Signal's pair, but asks it of the app-only
+    /// playbook writers only and holds no Decision Record. Extension — the first would refuse the pair on the create that sets
+    /// it, and the second is an access-input set whose identity rule leaves the chat tool and a confirmed proposal unasked, so an
+    /// update-only per-table set beside them in this registry is the narrow fit. Cost of doing nothing — the core record pair
+    /// stays changeable after create through the chat update tool, a confirmed proposal, the field-mapping push and, for a
+    /// Decision Record, the playbook writers.
+    /// </remarks>
+    public IReadOnlySet<string> FixedAfterCreateColumns { get; init; } = NoColumns;
+
     /// <summary>The column the platform autonumber fills (the create leaves it empty and retries on its alternate key).</summary>
     public string? AutonumberColumn { get; init; }
 
@@ -620,7 +1090,14 @@ internal sealed record RecordTableRule
     /// <summary>Values the server fills on create when the request leaves them empty (fill-only).</summary>
     public IReadOnlyList<ServerDefault> ServerDefaults { get; init; } = [];
 
-    /// <summary>Whether the owning business unit's search-index default is filled on create (FR-10, I-5).</summary>
+    /// <summary>
+    /// Whether the table's search index is SERVER-OWNED (FR-38, amending FR-10, I-5; FR-40): no create or client path writes
+    /// either column (<c>sprk_ai_search_index</c> and the legacy text <c>sprk_searchindexname</c>) since task 041 — the index
+    /// follows the content type — and a client value is dropped on every BFF create and update path that takes a client-, model- or playbook-shaped body
+    /// (<see cref="RecordTableRules.SearchIndexColumnOf"/>, <see cref="RecordTableRules.OwnsSearchIndex"/>). The indexing
+    /// pipeline's own stamps (<c>RagEndpoints</c> and the RAG indexing jobs) record WHERE a file was indexed and are deliberately
+    /// left alone.
+    /// </summary>
     public bool SearchIndexed { get; init; }
 
     /// <summary>
@@ -644,4 +1121,16 @@ internal sealed record RecordTableRule
 
     /// <summary>Table-keyed rules on the row as it will be written (see <see cref="PreWriteRule"/>). Empty when none.</summary>
     public IReadOnlyList<PreWriteRule> PreWriteRules { get; init; } = [];
+
+    /// <summary>
+    /// Whether the table's rows are created only by the table's own writer, never by <see cref="RecordCreationService"/>
+    /// (field-mapping-server-write-path-r1 task 042c fix round 4; owner decision 2026-11-04, ontology D-204). The service refuses
+    /// such a create at the start of its pipeline, before any read, mapping, check or write, for the caller and the system
+    /// principal alike, exactly as it refuses a table it does not create (<see cref="RecordCreationRefusal.TableUnsupportedCode"/>).
+    /// The entry stays registered for what the registry declares beyond the create (its mapping exclusion).
+    /// Task 048 (owner decision 2026-11-04, D-204 extended to updates): the same flag says the rows are CHANGED only by the
+    /// writer too; every generic update path refuses such a table through <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/>,
+    /// so create and update read one list.
+    /// </summary>
+    public bool CreatedOnlyByItsWriter { get; init; }
 }

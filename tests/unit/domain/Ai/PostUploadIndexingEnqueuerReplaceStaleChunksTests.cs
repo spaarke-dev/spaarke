@@ -50,7 +50,8 @@ public sealed class PostUploadIndexingEnqueuerReplaceStaleChunksTests
     private readonly Mock<IDocumentDataverseService> _documentServiceMock = new();
     private readonly Mock<ILogger<PostUploadIndexingEnqueuer>> _loggerMock = new();
     private readonly PostUploadIndexingOptions _options = new();
-    private readonly AnalysisOptions _analysisOptions = new() { SharedIndexName = "spaarke-files-index" };
+    private readonly ISearchIndexNameResolver _indexNames =
+        Mock.Of<ISearchIndexNameResolver>(r => r.GetDefaultIndexName() == "spaarke-files-index");
 
     public PostUploadIndexingEnqueuerReplaceStaleChunksTests()
     {
@@ -74,7 +75,7 @@ public sealed class PostUploadIndexingEnqueuerReplaceStaleChunksTests
             _jobSubmissionMock.Object,
             _documentServiceMock.Object,
             TestDocumentIndexParentResolver.Over(),
-            Options.Create(_analysisOptions),
+            _indexNames,
             Options.Create(_options),
             _loggerMock.Object);
 
@@ -90,7 +91,6 @@ public sealed class PostUploadIndexingEnqueuerReplaceStaleChunksTests
             ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             DocumentId: "doc-guid-048",
             ParentEntity: null,
-            SearchIndexName: null,
             Source: "TestSource",
             CorrelationId: "corr-id-048",
             VersionDiscriminator: versionDiscriminator);

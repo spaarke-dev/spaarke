@@ -145,6 +145,7 @@ public class RecordTableRulesTests
     [InlineData("sprk_matter", "sprk_matternumber")]
     [InlineData("sprk_project", "sprk_projectnumber")]
     [InlineData("sprk_budget", "sprk_budgetnumber")] // task 167 (D-193): BUD-{SEQNUM:6}
+    [InlineData("sprk_event", "sprk_eventnumber")] // #2515: EVT-{SEQNUM:6}
     public void AutonumberColumn_IsTheNumberingSchemaColumn_AndIsProtectedFromMapping(string table, string column)
     {
         var rule = RecordTableRules.Get(table);
@@ -158,6 +159,7 @@ public class RecordTableRulesTests
     [InlineData("sprk_Matter", "sprk_matternumber", "MAT-{SEQNUM:6}")]
     [InlineData("sprk_Project", "sprk_projectnumber", "PRJ-{SEQNUM:6}")]
     [InlineData("sprk_Budget", "sprk_budgetnumber", "BUD-{SEQNUM:6}")]
+    [InlineData("sprk_Event", "sprk_eventnumber", "EVT-{SEQNUM:6}")] // #2515
     public void AutonumberColumn_IsDeclaredWithItsSeqnumFormat_InTheSolutionSource(string folder, string column, string format)
     {
         var entityXml = System.Xml.Linq.XDocument.Load(Path.Combine(
@@ -213,6 +215,8 @@ public class RecordTableRulesTests
     {
         RecordTableRules.All.Where(r => r.MappingProtectedColumns.Count > 0).Select(r => r.Table)
             .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_invoice", "sprk_billingevent", "sprk_document", "sprk_budget",
+                // #2515: the event's platform number (EVT-{SEQNUM:6}).
+                "sprk_event",
                 // Task 017 (coordinator item 8): the other four invoice-family tables protect their core lookups too.
                 "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection");
     }
@@ -285,6 +289,23 @@ public class RecordTableRulesTests
     }
 
     [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    [InlineData("sprk_budgetrevision")]
+    public void CreatedOnlyByItsWriter_OntologyWriterTables_AreFlagged(string table)
+    {
+        // Task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): created only by their writers; the service refuses them.
+        RecordTableRules.Get(table).CreatedOnlyByItsWriter.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CreatedOnlyByItsWriter_IsTheThreeOntologyWriterTablesOnly()
+    {
+        RecordTableRules.All.Where(r => r.CreatedOnlyByItsWriter).Select(r => r.Table)
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision");
+    }
+
+    [Theory]
     [InlineData("task")]
     [InlineData("contact")]
     [InlineData("account")]
@@ -315,10 +336,109 @@ public class RecordTableRulesTests
     }
 
     [Fact]
-    public void SearchIndexed_IsMatterProjectAndDocumentOnly()
+    public void SearchIndexed_IsTheSixIndexedTablesOnly()
     {
+        // Task 039 (FR-38): work assignment, event and invoice join matter, project and document (was: the last three only).
         RecordTableRules.All.Where(r => r.SearchIndexed).Select(r => r.Table)
-            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_document");
+            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_document", "sprk_workassignment", "sprk_event", "sprk_invoice");
+    }
+
+    /// <summary>Round 2 (S3): the name shape is anchored with \A...\z, so a trailing newline (which "$" accepts) is not an index name.</summary>
+    [Theory]
+    [InlineData("spaarke-files-index\n")]
+    [InlineData("spaarke-files-index\r\n")]
+    [InlineData("a\nb")]
+    public void LoggableIndexName_ANameWithALineBreak_IsNotAnIndexName(string name)
+    {
+        RecordTableRules.LoggableIndexName(name).Should().Be($"<not an index name> (length {name.Length})");
+    }
+
+    [Theory]
+    [InlineData("spaarke-files-index")]
+    [InlineData("a")]
+    public void LoggableIndexName_AnIndexName_IsLoggedAsIs(string name)
+    {
+        RecordTableRules.LoggableIndexName(name).Should().Be(name);
+    }
+
+    // ── Round 3 (G3): the one update-path drop sequence ──────────────────────────────────────────────────────────────
+
+    private static readonly Guid UpdatedRowId = Guid.Parse("a0390000-0000-4000-8000-0000000000c1");
+
+    private static Dictionary<string, object?> Fields(params string[] keys) => keys.ToDictionary(k => k, _ => (object?)"v");
+
+    [Fact]
+    public void DropSearchIndexFromUpdate_OnlyTheIndex_EmptiesTheDictionary_AndLogsOncePerColumn()
+    {
+        var log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<object>();
+        var fields = Fields("sprk_searchindexname", "sprk_AI_Search_Index@odata.bind");
+
+        var result = RecordTableRules.DropSearchIndexFromUpdate(
+            " SPRK_Event ", UpdatedRowId, fields, RecordTableRules.SearchIndexOriginMapping, log);
+
+        result.Should().Be((true, true));
+        fields.Should().BeEmpty();
+        log.Messages.Should().HaveCount(2).And.OnlyContain(m => m.Contains("table=sprk_event") && m.Contains($"record={UpdatedRowId}")
+            && m.Contains("origin=mapping") && m.Contains("unchanged"), "the table name is logged trimmed and lower-cased");
+    }
+
+    [Fact]
+    public void DropSearchIndexFromUpdate_WithOtherColumns_RemovesTheIndex_AndDoesNotEmpty()
+    {
+        var log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<object>();
+        var fields = Fields("sprk_description", "sprk_searchindexname");
+
+        var result = RecordTableRules.DropSearchIndexFromUpdate(
+            "sprk_workassignment", UpdatedRowId, fields, RecordTableRules.SearchIndexOriginCaller, log);
+
+        result.Should().Be((true, false));
+        fields.Keys.Should().Equal("sprk_description");
+    }
+
+    [Theory]
+    [InlineData("sprk_todo")]
+    [InlineData(null)]
+    public void DropSearchIndexFromUpdate_ATableThatDoesNotOwnItsIndex_ChangesNothing(string? table)
+    {
+        var log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<object>();
+        var fields = Fields("sprk_searchindexname");
+
+        RecordTableRules.DropSearchIndexFromUpdate(table, UpdatedRowId, fields, RecordTableRules.SearchIndexOriginCaller, log)
+            .Should().Be((false, false));
+        fields.Keys.Should().Equal("sprk_searchindexname");
+        log.Messages.Should().BeEmpty();
+    }
+
+    /// <summary>The rule lives inside the helper: a payload empty BEFORE the drop is not "emptied" (its caller keeps its own refusal).</summary>
+    [Fact]
+    public void DropSearchIndexFromUpdate_APayloadEmptyBeforeAnyDrop_IsNotEmptied_AndLogsNothing()
+    {
+        var log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<object>();
+        var fields = new Dictionary<string, object?>();
+
+        RecordTableRules.DropSearchIndexFromUpdate("sprk_event", UpdatedRowId, fields, RecordTableRules.SearchIndexOriginCaller, log)
+            .Should().Be((false, false));
+        log.Messages.Should().BeEmpty();
+
+        var json = System.Text.Json.JsonDocument.Parse("{}").RootElement;
+        var body = RecordTableRules.DropSearchIndexFromUpdate("sprk_event", UpdatedRowId, json, RecordTableRules.SearchIndexOriginCaller, log);
+        (body.DroppedAny, body.Emptied).Should().Be((false, false));
+        log.Messages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void DropSearchIndexFromUpdate_AJsonBody_IsHandledLikeADictionary()
+    {
+        var log = new Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.CapturingLog<object>();
+        var onlyIndex = System.Text.Json.JsonDocument.Parse("{\"sprk_searchindexname\":\"x\",\"sprk_ai_search_index@odata.bind\":\"/sprk_aisearchindexes(a0390000-0000-4000-8000-0000000000c2)\"}").RootElement;
+        var mixed = System.Text.Json.JsonDocument.Parse("{\"sprk_description\":\"d\",\"sprk_searchindexname\":\"x\"}").RootElement;
+
+        var first = RecordTableRules.DropSearchIndexFromUpdate("sprk_invoice", UpdatedRowId, onlyIndex, RecordTableRules.SearchIndexOriginCaller, log);
+        var second = RecordTableRules.DropSearchIndexFromUpdate("sprk_invoice", UpdatedRowId, mixed, RecordTableRules.SearchIndexOriginCaller, log);
+
+        (first.DroppedAny, first.Emptied).Should().Be((true, true));
+        (second.DroppedAny, second.Emptied).Should().Be((true, false));
+        second.Body.EnumerateObject().Select(p => p.Name).Should().Equal("sprk_description");
     }
 
     // ── Named rules carry a rationale ────────────────────────────────────────────────────────────────────────────────
@@ -552,4 +672,59 @@ public class RecordTableRulesTests
         RecordTableRules.CopiedDefaultsFor(RecordTableRules.Find(table), Row([ContactIn("sprk_assignedtointernal", Internal)]))
             .Should().BeEmpty();
     }
+
+    // ── The core record pair is fixed after create on BFF update paths (update only) ─────────────────────────────────
+
+    [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    public void FixedAfterCreateColumns_ASignalAndADecisionRecord_HoldTheCoreRecordPair_AndNotTheCreateRefusal(string table)
+    {
+        var rule = RecordTableRules.Get(table);
+        rule.FixedAfterCreateColumns.Should().BeEquivalentTo("sprk_corerecordtype", "sprk_corerecordid");
+        rule.TableServerOwnedColumns.Should().NotContain(rule.FixedAfterCreateColumns, "the create still takes the pair");
+    }
+
+    [Theory]
+    [InlineData("sprk_signal", "sprk_corerecordid")]
+    [InlineData("sprk_signal", "sprk_corerecordtype")]
+    [InlineData(" SPRK_Signal ", "SPRK_CoreRecordId")]
+    [InlineData("sprk_decisionrecord", "sprk_CoreRecordType@odata.bind")]
+    [InlineData("sprk_decisionrecord", "_sprk_corerecordtype_value")]
+    [InlineData("sprk_decisionrecord", " Sprk_CoreRecordId ")]
+    public void RefuseFixedAfterCreateColumns_ACorePairKeyInAnyForm_IsRefused(string table, string key)
+    {
+        var refusal = RecordTableRules.RefuseFixedAfterCreateColumns(table, ["sprk_name", key]);
+
+        refusal.Should().NotBeNull();
+        refusal!.RefusalCode.Should().Be(RecordTableRules.FixedAfterCreateReasonCode);
+        refusal.Reason.Should().EndWith("cannot be changed").And.NotContain("not written");
+    }
+
+    [Theory]
+    [InlineData("sprk_signal", "sprk_corerecordtype @odata.bind")]
+    [InlineData("sprk_decisionrecord", "Sprk_CoreRecordType  @odata.bind")]
+    public void RefuseFixedAfterCreateColumns_ABindKeyWithASpaceBeforeTheAt_NamesItsColumn(string table, string key)
+    {
+        var refusal = RecordTableRules.RefuseFixedAfterCreateColumns(table, [key]);
+
+        refusal.Should().NotBeNull();
+        refusal!.RefusalCode.Should().Be(RecordTableRules.FixedAfterCreateReasonCode);
+        refusal.Reason.Should().StartWith("sprk_corerecordtype of a ");
+    }
+
+    [Theory]
+    [InlineData("sprk_signal", "sprk_name")]
+    [InlineData("sprk_decisionrecord", "sprk_regardingrecordid")]
+    [InlineData("sprk_todo", "sprk_corerecordid")]
+    [InlineData("sprk_matter", "sprk_corerecordtype")]
+    [InlineData("not_registered", "sprk_corerecordid")]
+    [InlineData(null, "sprk_corerecordid")]
+    public void RefuseFixedAfterCreateColumns_AnotherColumn_OrAnotherTable_IsNotRefused(string? table, string key) =>
+        RecordTableRules.RefuseFixedAfterCreateColumns(table, [key]).Should().BeNull();
+
+    [Fact]
+    public void FixedAfterCreateColumns_NoOtherTable_DeclaresAny() =>
+        RecordTableRules.All.Where(r => r.FixedAfterCreateColumns.Count > 0).Select(r => r.Table)
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord");
 }

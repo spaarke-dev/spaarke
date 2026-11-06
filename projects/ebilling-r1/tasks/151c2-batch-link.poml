@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="151c-2" project="ebilling-r1">
+  <metadata>
+    <title>Batch link on the AP email: a plain sprk_billingexport reference on sprk_communication</title>
+    <phase>6 Export and index (WP6) - wave W6-2 (split from 151c, EB-D-182)</phase>
+    <gate>startable after 151c-1a</gate>
+    <status>done</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a Dataverse relationship whose cascade is an access requirement (agreed with unified-access-control-r2), touches the shared communication send path and adds an ArchTest guard over the family, lineage and ownership registries.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Pattern-following: the 151c-1a column scripts, the sprk_invoice.sprk_billingexport lookup (Add-Lookup), the ServerSendOptions internal-option pattern, the RecordFamilyEdges guard style.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>151c-1a</deps>
+    <tags>bff-api, auth, ebilling, communication, dataverse-schema, archtest</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Link each AP email (sprk_communication) to its export batch (sprk_billingexport) with a plain lookup, without making it a filing: schema script (no cascade), SpaarkeMaster source, "AP emails" subgrid on the batch form, the reference written in the same create as the email, a guard that keeps it out of every family, lineage and resolver registry.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the BFF communication send path, Dataverse schema scripts and ArchTest guards.</role>
+
+  <goal>Every AP export email created by Email to AP carries sprk_billingexport = its batch, in the same create as the row; the batch form lists its AP emails; the relationship cascades nothing; no registry that files, orders or isolates a communication learns of the column.</goal>
+
+  <context>
+    <background>
+      Read first: notes/151c1a-email-route.md ("No regarding link", "Access"), EB-D-182 and EB-D-184 in notes/decisions-log.md, scripts/ebilling/Deploy-EbillingApExportEmailColumn.ps1 and Deploy-EbillingSentToApDateColumn.ps1, EbillingSchema.psm1 (Add-Lookup), docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md, docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md, .claude/constraints/bff-extensions.md.
+      Binding design (agreed with unified-access-control-r2): the column is named exactly sprk_billingexport, is NOT a sprk_regarding column and NOT a filing, and stays out of RecordFamilyEdges, the lineage and record-family code, every association or regarding resolver, field-mapping and set-regarding tables, RegardingFieldMap, RegardingLookupMap and the communication filing fields. The relationship has no cascade on Assign, Share, Unshare, Reparent and Merge and RemoveLink on Delete (not Restrict): a cascading assign or share on the batch must never change who owns or can read the email.
+    </background>
+    <relevant-files>
+      <file role="new">scripts/ebilling/Deploy-EbillingCommunicationBatchLink.ps1</file>
+      <file role="modify">scripts/ebilling/Deploy-EbillingFormsViews.ps1 (the AP emails subgrid on the batch form)</file>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster: Entities/sprk_Communication/Entity.xml, Other/Relationships/sprk_billingexport.xml, Other/Relationships.xml, Entities/sprk_billingexport/FormXml/main (plain and managed)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Models/ServerSendOptions.cs, Services/Communication/CommunicationService.cs, Services/Finance/ApExportDeliveryService.cs</file>
+      <file role="new">tests/Spaarke.ArchTests/CommunicationBatchLinkNotFilingGuardTests.cs</file>
+      <file role="modify">src/client/webresources/js/sprk_secure_child_ribbon.js and its mirror src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/secure_child_ribbon.js; src/client/shared/Spaarke.UI.Components/src/utils/adapters/__tests__/secureChildRibbonScript.test.ts</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceServerSendTests.cs, tests/integration/auth/Finance/ApExportDeliveryTests.cs</file>
+      <file role="modify">docs/data-model/sprk_billingexport.md, docs/data-model/sprk_communication.md</file>
+      <file role="new">projects/ebilling-r1/notes/151c2-batch-link.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="uac-r2">Plain lookup sprk_billingexport on sprk_communication, display name "Export Batch". Not sprk_regarding*, not a filing. Out of RecordFamilyEdges, lineage, association and regarding resolvers, field-mapping and set-regarding tables, RegardingFieldMap, RegardingLookupMap and the communication filing fields.</constraint>
+    <constraint source="uac-r2 (access)">Relationship cascade: Assign, Share, Unshare, Reparent, Merge NoCascade; Delete RemoveLink. The script sets them explicitly, verifies them on every run and refuses an existing relationship whose cascade differs (exit 2).</constraint>
+    <constraint source="EB-D-182, EB-D-184">The reference is carried in the internal [JsonIgnore] ServerSendOptions, written in the SAME create as the row (not a later update), only for server sends that carry it. Every other send path is unchanged. A BFF deployed before the column still records the email.</constraint>
+    <constraint source="CLAUDE.md section 11">Three-question justification for the column in the notes.</constraint>
+    <constraint source="scope">Do not run any schema script live (-WhatIf against dev only). Do not edit TASK-INDEX.md, current-task.md or .claude/. Publish is entity-scoped, never tenant-wide.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Deploy-EbillingCommunicationBatchLink.ps1 is idempotent, supports -WhatIf, adds the column to SpaarkeMaster, publishes sprk_communication only, sets all seven cascade members explicitly and stops (exit 2) on a conflicting column, a second lookup to the batch, or an existing relationship with another cascade or another name.</criterion>
+    <criterion>The send sets sprk_billingexport in the create (one create, no follow-up update); the owner is still the batch's team; the email carries no sprk_regarding* column and the owner resolver is asked only about the batch.</criterion>
+    <criterion>A JSON body cannot set the reference under any spelling; a send without a batch id, and a normal send, create the row without the column.</criterion>
+    <criterion>A create that faults because the column does not exist yet is retried once without it and the email is recorded; any other fault, and any row that does not carry the reference, is not retried.</criterion>
+    <criterion>An ArchTest guard fails if the column on sprk_communication, or the batch table as an ownership parent or regarding target, appears in any family-edge, lineage, ownership or regarding registry, or if code in the registry folders names the batch link; it ships with must-fire and must-not-fire controls and a seeding proof.</criterion>
+    <criterion>The batch main form has an "AP emails" subgrid on the new relationship (plain and managed source); the subgrid offers no New (ribbon NO_NEW_HOSTS, script and mirror identical); Add Existing is left on and recorded as K1 in the notes; the forms script stops before writing if the relationship does not exist.</criterion>
+  </acceptance-criteria>
+
+  <deploy-order>
+    1. Deploy-EbillingCommunicationBatchLink.ps1 -WhatIf, then without it (after notices).
+    2. Deploy-EbillingFormsViews.ps1 -FormsOnly -WhatIf, then without it (adds the subgrid; needs step 1).
+    3. The BFF, after steps 1 and 2 (before step 1 no email is lost, but each AP email logs an Error plus the fallback Warning).
+  </deploy-order>
+</task>

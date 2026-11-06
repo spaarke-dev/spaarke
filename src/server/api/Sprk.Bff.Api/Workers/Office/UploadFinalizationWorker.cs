@@ -1429,7 +1429,6 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             ContentType: null,
             DocumentId: documentId.ToString(),
             ParentEntity: null,
-            SearchIndexName: null, // handler runs the ISearchIndexNameResolver chain
             Source: "OfficeAddin",
             CorrelationId: correlationId,
             VersionDiscriminator: versionSaveJobId?.ToString("N"));

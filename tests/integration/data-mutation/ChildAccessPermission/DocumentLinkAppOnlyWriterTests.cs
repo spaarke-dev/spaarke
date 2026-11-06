@@ -95,11 +95,11 @@ public class DocumentLinkAppOnlyWriterTests
                 Lookups: new[] { new RenderedLookup("sprk_contact", "contact", Target.ToString()) }),
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_document", Row,
             It.Is<Dictionary<string, object?>>(f =>
                 f.ContainsKey("sprk_documentdescription") && f.ContainsKey("sprk_parentfilename") && f.ContainsKey("sprk_contact@odata.bind")),
-            It.IsAny<CancellationToken>(), null), Times.Once);
+            null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -114,8 +114,8 @@ public class DocumentLinkAppOnlyWriterTests
                 Lookups: null),
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), It.IsAny<CancellationToken>(), null),
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), null, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -157,10 +157,10 @@ public class DocumentLinkAppOnlyWriterTests
             new Dictionary<string, object?> { ["sprk_documentdescription"] = "x", ["sprk_parentfilename"] = "mail.eml" },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_document", Row,
             It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_documentdescription") && f.ContainsKey("sprk_parentfilename")),
-            It.IsAny<CancellationToken>(), null), Times.Once);
+            null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -172,8 +172,8 @@ public class DocumentLinkAppOnlyWriterTests
             table, Row, new Dictionary<string, object?> { [column] = "x" },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), It.IsAny<CancellationToken>(), null),
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), null, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -194,10 +194,10 @@ public class DocumentLinkAppOnlyWriterTests
 
         (updated, failed, skipped).Should().Be((1, 0, 0));
         errors.Should().BeEmpty();
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_document", Row,
             It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_documentdescription")),
-            It.IsAny<CancellationToken>(), Caller), Times.Once);
+            Caller, It.IsAny<CancellationToken>()), Times.Once);
         results.Should().ContainSingle(r => r.TargetField == target)
             .Which.Should().Match<FieldMappingResultDto>(r =>
                 r.Status == FieldMappingStatus.Skipped && r.ErrorMessage!.Contains("set by Spaarke"));
@@ -221,8 +221,8 @@ public class DocumentLinkAppOnlyWriterTests
         var (updated, failed, _, _, results) = await Push(table, Rule("sprk_name", target));
 
         (updated, failed).Should().Be((1, 0));
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(target)), It.IsAny<CancellationToken>(), Caller),
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(target)), Caller, It.IsAny<CancellationToken>()),
             Times.Once);
         results.Should().ContainSingle().Which.Status.Should().Be(FieldMappingStatus.Mapped);
     }

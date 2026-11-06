@@ -718,7 +718,8 @@ internal static class OwnedChildWrite
         /// <summary>A question or the PATCH, asked as the caller, failed at Dataverse — the caller's own error.</summary>
         public DataverseUserResponse? ClientFailure { get; init; }
 
-        /// <summary>The ADR-024 pair the update leaves disagrees with itself (<see cref="Outcome.Invalid"/>) — nothing written.</summary>
+        /// <summary>The ADR-024 pair the update leaves disagrees with itself (<see cref="Outcome.Invalid"/>), or the update names a
+        /// column fixed after create (<c>RecordTableRule.FixedAfterCreateColumns</c>) — nothing written.</summary>
         public string? Invalid { get; init; }
 
         /// <summary>
@@ -765,6 +766,17 @@ internal static class OwnedChildWrite
         CancellationToken ct,
         IGenericEntityService? appOnlyEntities = null)
     {
+        // The core record pair is fixed after create on BFF update paths (RecordTableRule.FixedAfterCreateColumns): asked on the
+        // item's shape alone, before any read or write, so the re-file core holds it for any table a caller passes. Nothing written.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseFixedAfterCreateColumns(table, item.Columns) is { } fixedRefusal)
+            return new RefileOutcome { Invalid = $"{fixedRefusal.Reason} ({fixedRefusal.RefusalCode})" };
+
+        // Task 048 fix round 1 (K1): a Signal, a Decision Record and a Budget Revision are changed only by their writers
+        // (RecordTableRule.CreatedOnlyByItsWriter); asked on the table alone, before any read or write, so the re-file core
+        // holds it for any table a caller passes. Nothing written.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate(table) is { } writerOnly)
+            return new RefileOutcome { Invalid = writerOnly.Reason };
+
         // ebilling-r1 FR-05 (ISS-010, #1973; unified-access-control-r2): BEFORE anything else — re-file or ordinary update —
         // an update that sets or clears an invoice-family row's guarded lookups is decided on the stored lookups overlaid
         // with the change (read as the caller, once). A refusal writes nothing. D-96: an invoice's lines are counted with
