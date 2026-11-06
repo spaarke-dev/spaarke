@@ -10,7 +10,7 @@ last-reviewed: 2026-11-05
 # devops-project-archive
 
 > **Category**: DevOps / Portfolio
-> **Tier**: Non-destructive — closes Issue state only. Worktree preserved.
+> **Tier**: Closes Issue state; the project folder and worktree are preserved. One destructive step, gated by an explicit yes: Step 5.5 removes the project's finished **sub-agent** copies.
 > **Last Reviewed**: 2026-11-05 (Step 5.5: remove the project's finished sub-agent copies; the project worktree is still kept); 2026-10-12 (final AI spend captured at close-out, Step 3); 2026-06-25 (worktree-deletion behavior REMOVED per operator workflow change)
 
 ## What this skill does (and doesn't)
@@ -37,7 +37,7 @@ Close out a project cleanly:
 2. Set `Closed Date` field (from PR merge date if provided, else today)
 3. Capture final `Task Count` / `Tasks Completed` values (via `/devops-project-sync`)
 4. Close the GitHub Issue with appropriate state (`Status=Done` or label `cancelled`)
-5. **Retain** `projects/{name}/` folder + worktree (no destructive operations). **Never rename or move the folder** — no `x-` prefix, no `projects/_archive/`. A rename breaks every link to the project (the Issue's Quick Links, the board's Project Folder field, links from other projects and skills) and makes history tools see a new project on archive day. "Archived" is the `.archived` marker plus board Status, not the folder name. The 37 older `x-` folders keep their names (renaming them back would break the links that now point at them). Enforced by: the pre-commit hook and the `projects-layout-guard` workflow (both run `scripts/quality/check-project-archive-prefix.sh` on added or renamed paths, so the PR that renames is the one that fails), and `tests/Spaarke.ArchTests/ProjectFolderArchivePrefixGuardTests.cs` over the whole tree when Arch Tests run. A `projects/`-only PR counts as docs-only and skips Arch Tests, which is why the first two exist.
+5. **Retain** `projects/{name}/` folder + worktree (never deleted, moved or renamed; the only removal is Step 5.5's finished sub-agent copies, after an explicit yes). **Never rename or move the folder** — no `x-` prefix, no `projects/_archive/`. A rename breaks every link to the project (the Issue's Quick Links, the board's Project Folder field, links from other projects and skills) and makes history tools see a new project on archive day. "Archived" is the `.archived` marker plus board Status, not the folder name. The 37 older `x-` folders keep their names (renaming them back would break the links that now point at them). Enforced by: the pre-commit hook and the `projects-layout-guard` workflow (both run `scripts/quality/check-project-archive-prefix.sh` on added or renamed paths, so the PR that renames is the one that fails), and `tests/Spaarke.ArchTests/ProjectFolderArchivePrefixGuardTests.cs` over the whole tree when Arch Tests run. A `projects/`-only PR counts as docs-only and skips Arch Tests, which is why the first two exist.
 6. Write `.archived` marker file with archive date + final status + closing PR # (if any) + note that worktree is intentionally preserved
 
 Remote branch is preserved — branch history stays on GitHub for audit.
@@ -53,7 +53,7 @@ Optional:
 - `--pr-number <#M>` — closing PR # (auto-detected via `gh pr list --head <branch>` if not provided)
 - `--folder <projects/{name}>` — defaults to current folder
 
-(No `--force` flag — the skill is non-destructive, so there's nothing to force past.)
+(No `--force` flag. The one destructive step, Step 5.5, always asks first.)
 
 ### Step 1: Discover Project Issue
 
@@ -69,11 +69,12 @@ About to ARCHIVE project (close-out only — worktree preserved):
   Issue:     #N                       (will be closed)
   Status:    {Completed|Cancelled}
   PR:        #M                       (closing PR reference)
+  Agent copies: finished sub-agent copies of this project will be listed in Step 5.5 and removed only after a separate yes
 
 Proceed? [Y/n]
 ```
 
-Default: Y (non-destructive). Operator can still N to cancel.
+Default: Y (this confirmation changes Issue state only). Operator can still N to cancel. Step 5.5 asks again before removing anything.
 
 ### Step 3: Final field sync
 
@@ -121,12 +122,11 @@ The folder + `.archived` mark this project as closed. The worktree remains usabl
 
 Sub-agents launched with worktree isolation get a full repo copy under the **main checkout's** `.claude\worktrees\`, whichever worktree the session ran in, and Claude Code's own sweep keeps every copy whose task branch was merged locally but never pushed (FAILURE-MODES G-25). Archive is the last point at which this project's copies are known to be finished. These are throwaway agent copies, **not** the project worktree, which stays.
 
-```powershell
-pwsh scripts/worktree/Clean-AgentWorktrees.ps1 -Project {slug} -WhatIf   # show what would go
-pwsh scripts/worktree/Clean-AgentWorktrees.ps1 -Project {slug}           # remove them
-```
+1. Preview: `pwsh scripts/worktree/Clean-AgentWorktrees.ps1 -Project {slug} -WhatIf`. Exit 2 means there is no `work/{slug}` branch: check the slug, do not guess another.
+2. Show the operator the "would remove" and "kept" lines and ask: `Remove these {N} finished agent copies? [y/N]`. Default **No**. Skip the step if the list is empty.
+3. Only on an explicit yes: `pwsh scripts/worktree/Clean-AgentWorktrees.ps1 -Project {slug}`.
 
-It removes a copy only when it is unlocked, idle 12 h or more, clean, and its commits are in `work/{slug}`; it removes through `Remove-WorktreeSafe.ps1` and keeps the copy's branch. Report the "removed / kept" line in Step 6. Anything it keeps (locked, dirty, unmerged) is listed with the reason: leave it, and mention it to the operator.
+It removes a copy only when it is unlocked, idle 12 h or more, clean, and its commits are in `work/{slug}` but not already on master (so another project's copies are never taken); it removes through `Remove-WorktreeSafe.ps1` and keeps the copy's branch. With `-Project` it does no repo-wide housekeeping (no empty-folder removal, no `git worktree prune`). Exit 1 means a removal was refused: the FAILED line gives the reason; leave that copy and tell the operator. Anything it keeps (locked, dirty, unmerged) is listed with the reason: leave it, and mention it in Step 6.
 
 ### Step 6: Report
 
@@ -143,7 +143,7 @@ Archived project: projects/{name}/
 
 - `projects/{name}/.archived` marker file (worktree path noted as preserved)
 - Issue #N closed with Status=Completed or Cancelled + Closed Date set
-- Folder + worktree both untouched on local filesystem
+- Folder + worktree both untouched on local filesystem; only finished sub-agent copies the operator approved in Step 5.5 are removed
 - 1 line confirmation
 
 ## Failure Modes
@@ -166,6 +166,6 @@ Archived project: projects/{name}/
 ## Reference
 
 - Spec: FR-14 (close-out semantics) + F3 (explicit gate, NOT auto-archive on merge)
-- **Spec override (2026-06-25)**: D-18 and NFR-09 in `spec.md` originally called for worktree deletion on archive. This skill no longer deletes the worktree — operator workflow keeps worktrees as long-lived dev environments. If a future use case requires worktree removal, build a separate `/devops-worktree-cleanup` skill rather than re-coupling here.
+- **Spec override (2026-06-25)**: D-18 and NFR-09 in `spec.md` originally called for worktree deletion on archive. This skill no longer deletes the worktree — operator workflow keeps worktrees as long-lived dev environments. If a future use case requires removing the project worktree, build a separate `/devops-worktree-cleanup` skill rather than re-coupling here. Step 5.5 (2026-11-05) is not that: it removes only throwaway sub-agent copies under `.claude\worktrees`, never the project worktree.
 - Idempotency: re-running on archived project is no-op
 - Sub-Agent Write Boundary: writes to `projects/<name>/.archived` — main session only (touches local filesystem)

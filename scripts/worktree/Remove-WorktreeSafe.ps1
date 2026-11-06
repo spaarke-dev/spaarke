@@ -33,7 +33,8 @@
     pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -Path C:\wt094
 
 .EXAMPLE
-    pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -Path C:\wt094, C:\wt096 -Force
+    pwsh -Command "& scripts/worktree/Remove-WorktreeSafe.ps1 -Path 'C:\wt094','C:\wt096' -Force"
+    # Several paths: use -Command (or call it in-process). `pwsh -File ... -Path a,b` binds ONE string "a,b" (G-25).
 
 .EXAMPLE
     pwsh scripts/worktree/Remove-WorktreeSafe.ps1 -Path C:\wt094 -WhatIf   # lists the links and the git call; changes nothing
