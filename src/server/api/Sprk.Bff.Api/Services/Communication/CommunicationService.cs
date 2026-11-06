@@ -188,7 +188,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             var recordRef = !string.IsNullOrWhiteSpace(regarding.EntityName)
                 ? regarding.EntityName!
-                : $"{regarding.EntityType} {regarding.EntityId}";
+                : "a Spaarke record"; // never the logical name or the id
 
             var footerText = settings.MessageTemplate
                 .Replace("{record-ref}", recordRef, StringComparison.Ordinal)
