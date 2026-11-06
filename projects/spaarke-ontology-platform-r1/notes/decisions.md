@@ -779,3 +779,11 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Where:** Invoice Review, billing contexts in the Console (the Invoice decisions card keeps its owner-chosen label) and Copilot's billing link-outs. Everywhere else, and generically, the row is a **Work Item**.
 - **Not:** an entity or code name (same rule as Work Item, §3.1). The pipeline's stored results (`pipelineFindings`, `sprk_findingsjson`) are the engineering source of a Finding.
 - **Recorded in** `ontology-component-model.md` §3. Told ebilling and spaarkeai-mcp-bff-api-r1.
+
+## D-209 — Playbook: one concept, several formats (owner, 2026-11-06; relayed from spaarke-legal-ai-accelerator-r1)
+
+- **Owner (relayed):** a JPS playbook and a Copilot/Microsoft legal playbook are "conceptually the same; the difference is in the format, which is not differentiating in their purpose to our solution."
+- **Concept:** the artifact that describes how a legal procedure or protocol is carried out (positions, steps, model wording, fallbacks, escalation); not limited to contracts or document review.
+- **Formats:** JPS playbook (`sprk_analysisplaybook`, JSON, executed) · legal playbook (Markdown master, read by Copilot/Cowork Agent Skills) · contract-review playbook (Microsoft's four-column subtype).
+- **Writing rule:** qualify by format where the format matters. **Changed text:** the §3 Internal Standard row no longer says a reviewer's handbook is "not a JPS AI playbook". **Unchanged:** §4.11 (a Policy is a predicate, never a playbook's control flow); a one-line note says that section means the JPS format.
+- **Recorded in** `ontology-component-model.md` §3. Told legal-ai-accelerator and spaarkeai-mcp-bff-api-r1.
