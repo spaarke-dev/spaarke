@@ -1359,7 +1359,7 @@ public sealed class InvoiceCorrectionReevaluation
     }
 
     /// <summary>The writer's permanent refusals, in 049's <see cref="InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember"/> shape, once each.</summary>
-    private static void RecordWriteRefusals(JsonObject root, IReadOnlyList<(SignalWriteRequest Request, string Code)> refused)
+    internal static void RecordWriteRefusals(JsonObject root, IReadOnlyList<(SignalWriteRequest Request, string Code)> refused)
     {
         if (refused.Count == 0)
         {
