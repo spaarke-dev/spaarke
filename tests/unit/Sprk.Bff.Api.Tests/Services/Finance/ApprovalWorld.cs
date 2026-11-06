@@ -369,6 +369,15 @@ internal sealed class ApprovalWorld
     /// outcome. Read app-only by <see cref="InvoiceFirmHold"/>; this world is the app-only store.</summary>
     public void HoldInvoiceForFirm() => Rows[("sprk_invoice", InvoiceId)][InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;
 
+    /// <summary>EB-D-185 R1/R2/R3: the invoice exactly as Set firm (095d-1) leaves it - the firm is on the invoice, its own hold is the rerun-pending
+    /// marker, and the linked submission still stores the firm_missing reason with the stored <c>assignFirm</c> decision (<paramref name="rulesRerun"/>,
+    /// naming the invoice's firm). Returns the submission id (to re-point or unlink it).</summary>
+    public Guid AfterSetFirm(string rulesRerun = "pending")
+    {
+        Rows[("sprk_invoice", InvoiceId)][InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceRerunPendingValue;
+        return HoldForFirm(findingsJson: InvoiceFirmGateTests.FindingsWithAssignFirm(rulesRerun, FirmId));
+    }
+
     /// <summary>Task 095c-5: columns this environment does not have (a script not yet run): a query that names one faults, as Dataverse does.</summary>
     public readonly HashSet<string> MissingColumns = new(StringComparer.OrdinalIgnoreCase);
 

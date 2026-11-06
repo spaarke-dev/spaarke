@@ -43,7 +43,8 @@ public enum InvoiceFirmNeed
 /// API (the form controls are read-only, a convenience only), and that write runs none of the pipeline: no resolution, no firm codes, no rule.
 /// So a firm set natively must neither clear the hold nor unlock a step.</para>
 /// <para><b>Task 095c-5: the invoice's own hold.</b> <see cref="InvoiceHoldColumn"/> (<c>sprk_invoice.sprk_firmhold</c>) is set by the persister in
-/// the same transaction as the held outcome, and cleared only by 095d's assign-firm through its typed writer. It is field-secured ("Spaarke
+/// the same transaction as the held outcome, REPLACED by <see cref="InvoiceRerunPendingValue"/> when 095d's Set firm sets the firm (EB-D-185), and
+/// cleared only by the completed re-run (095d-2), all through typed writers. It is field-secured ("Spaarke
 /// BFF-Managed Field Writers" read / create / update, "Spaarke BFF-Managed Field Readers" read) and refused to the generic writers
 /// (<c>InheritedAccessPermission.AccessColumns</c>), so unlinking, repointing or deleting a submission cannot lift the hold. It is read
 /// <b>app-only</b> here (the <see cref="IGenericEntityService"/> the callers pass), never from the invoice row a caller hands in: a read on a
@@ -73,6 +74,24 @@ public static class InvoiceFirmHold
 
     /// <summary>The value the persister writes to <see cref="InvoiceHoldColumn"/> with the held outcome.</summary>
     public const string InvoiceHoldValue = SubmissionReasonCodes.FirmMissing;
+
+    /// <summary>EB-D-185 (uac-r2 R3): the value Set firm writes to <see cref="InvoiceHoldColumn"/> in place of <see cref="InvoiceHoldValue"/>: the
+    /// firm is set but the billing-rules re-run for it (095d-2) has not completed. It is still a hold (any non-blank value holds); only the
+    /// completed re-run clears it. <see cref="InvoiceFirmGate"/> answers "re-run pending" from it alone.</summary>
+    public const string InvoiceRerunPendingValue = "ebilling.submission.rerun_pending";
+
+    /// <summary>What the invoice's own <see cref="InvoiceHoldColumn"/> says (<see cref="InvoiceHoldStateAsync"/>).</summary>
+    public enum InvoiceHoldState
+    {
+        /// <summary>Blank, or the invoice row was not returned: the column holds nothing.</summary>
+        None,
+
+        /// <summary>Exactly <see cref="InvoiceRerunPendingValue"/>: Set firm ran and its re-run has not completed.</summary>
+        RerunPending,
+
+        /// <summary><see cref="InvoiceHoldValue"/> or ANY other non-blank value (fail closed: an unrecognised value holds).</summary>
+        Held,
+    }
 
     private static readonly string[] SubmissionColumns =
     [
@@ -144,6 +163,51 @@ public static class InvoiceFirmHold
         }
 
         return held;
+    }
+
+    /// <summary>The state of the invoice's own <see cref="InvoiceHoldColumn"/>, read app-only through <paramref name="entities"/>: blank is
+    /// <see cref="InvoiceHoldState.None"/>, exactly <see cref="InvoiceRerunPendingValue"/> is <see cref="InvoiceHoldState.RerunPending"/>, anything
+    /// else non-blank is <see cref="InvoiceHoldState.Held"/> (fail closed). Throws on a read fault.</summary>
+    public static async Task<InvoiceHoldState> InvoiceHoldStateAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        var invoices = new QueryExpression(FinanceBaseValues.InvoiceEntity)
+        {
+            ColumnSet = new ColumnSet(InvoiceHoldColumn),
+            Criteria = new FilterExpression(LogicalOperator.And),
+        };
+        invoices.Criteria.AddCondition(FinanceBaseValues.InvoiceKeyColumn, ConditionOperator.Equal, invoiceId);
+        var state = InvoiceHoldState.None;
+        foreach (var invoice in (await entities.RetrieveMultipleAsync(invoices, ct).ConfigureAwait(false)).Entities)
+        {
+            var one = StateOf(invoice);
+            if (one == InvoiceHoldState.Held)
+            {
+                return InvoiceHoldState.Held;
+            }
+
+            if (one == InvoiceHoldState.RerunPending)
+            {
+                state = one;
+            }
+        }
+
+        return state;
+    }
+
+    /// <summary>The <see cref="InvoiceHoldState"/> of an invoice row read app-only (pure). Consistent with <see cref="IsInvoiceHeld"/>: it is
+    /// <see cref="InvoiceHoldState.None"/> exactly when that is false.</summary>
+    public static InvoiceHoldState StateOf(Entity invoice)
+    {
+        ArgumentNullException.ThrowIfNull(invoice);
+        if (!IsInvoiceHeld(invoice))
+        {
+            return InvoiceHoldState.None;
+        }
+
+        return invoice[InvoiceHoldColumn] is string text && string.Equals(text, InvoiceRerunPendingValue, StringComparison.Ordinal)
+            ? InvoiceHoldState.RerunPending
+            : InvoiceHoldState.Held;
     }
 
     /// <summary>True when an invoice row read app-only carries its own hold (<see cref="InvoiceHoldColumn"/> non-blank; pure).</summary>

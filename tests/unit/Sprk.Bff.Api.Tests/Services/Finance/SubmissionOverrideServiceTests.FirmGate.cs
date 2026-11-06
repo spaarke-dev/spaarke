@@ -9,13 +9,16 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance;
 
-// ebilling-r1 task 095d-0 (EB-D-148; ontology-r1 2026-11-05): no Override without a firm. The Override verb is refused 409 ebilling.override.firm_missing while
+// ebilling-r1 task 095d-0 (EB-D-185; ontology-r1 2026-11-05): no Override without a firm. The Override verb is refused 409 ebilling.override.firm_missing while
 // the invoice has no firm, is held for one, or its post-Set-firm re-run is pending (InvoiceFirmGate) - an ordinary release and the 114 Procedure-hold release
 // alike - BEFORE the holds derivation, the Signal set's store, the Decision Record and every Signal close, and AFTER the caller's rights (403 first).
 // Return is not gated.
 public partial class SubmissionOverrideServiceTests
 {
-    public enum GateState { NoFirm, HeldOwnColumn, HeldBySubmission, RerunPending, RerunUnreadable }
+    // AfterSetFirm is the row Set firm really leaves (EB-D-185 R2/R3): the invoice's own hold is the rerun-pending marker and the overridden
+    // submission stores a pending assignFirm; AfterSetFirmMarkerOnly is the marker alone (the submission link removed or re-pointed, so nothing of
+    // the re-run is found through it); UnknownOwnValue is an unrecognised word in the invoice's own hold (fail closed).
+    public enum GateState { NoFirm, HeldOwnColumn, HeldBySubmission, RerunPending, RerunUnreadable, AfterSetFirm, AfterSetFirmMarkerOnly, UnknownOwnValue }
 
     public enum OverrideKind { Ordinary, ProcedureHoldInternal, ProcedureHoldSpa }
 
@@ -36,7 +39,7 @@ public partial class SubmissionOverrideServiceTests
     private static InvoiceFirmGateResult ExpectedGate(GateState state) => state switch
     {
         GateState.NoFirm => InvoiceFirmGateResult.NoFirm,
-        GateState.HeldOwnColumn or GateState.HeldBySubmission => InvoiceFirmGateResult.HeldForFirm,
+        GateState.HeldOwnColumn or GateState.HeldBySubmission or GateState.UnknownOwnValue => InvoiceFirmGateResult.HeldForFirm,
         _ => InvoiceFirmGateResult.RerunPending,
     };
 
@@ -45,7 +48,7 @@ public partial class SubmissionOverrideServiceTests
     {
         Func<JsonObject, JsonObject>? edit = state switch
         {
-            GateState.RerunPending => json => InvoiceFirmGateTests.WithAssignFirm(json, InvoiceAssignFirmService.RulesRerunPending),
+            GateState.RerunPending or GateState.AfterSetFirm => json => InvoiceFirmGateTests.WithAssignFirm(json, InvoiceAssignFirmService.RulesRerunPending),
             GateState.RerunUnreadable => json =>
             {
                 json[InvoiceAssignFirmService.StoredDecisionMember] = "not a decision";
@@ -69,6 +72,13 @@ public partial class SubmissionOverrideServiceTests
                 break;
             case GateState.HeldBySubmission:
                 w.OtherSubmissions.Add(OtherSubmission(FirmMissing, "{\"pipelineFindings\":[],\"lineFindings\":[]}"));
+                break;
+            case GateState.AfterSetFirm:
+            case GateState.AfterSetFirmMarkerOnly:
+                w.InvoiceOwnHold = InvoiceFirmHold.InvoiceRerunPendingValue;
+                break;
+            case GateState.UnknownOwnValue:
+                w.InvoiceOwnHold = "ebilling.submission.something_new";
                 break;
         }
 

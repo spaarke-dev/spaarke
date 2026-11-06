@@ -436,9 +436,10 @@ public sealed class InvoiceRejectReturnService
             }
 
             // Task 095c-4: Return to Firm hands the invoice to its firm (the firm notice, the firm's correction); with no firm, or a stored
-            // "firm needed" hold, there is no firm to hand it to.
+            // "firm needed" hold, there is no firm to hand it to. EB-D-185 (R1): after Set firm the invoice has its firm and the re-run is pending;
+            // that is not "needs a firm", so Return proceeds when every firm_missing hold is matched by a stored Set-firm naming the invoice's firm.
             if (verb.Kind == InvoiceDecisionKind.Return
-                && await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
+                && await InvoiceFirmGate.CheckForReturnAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
             {
                 _logger.LogWarning("Return of invoice {InvoiceId}: the invoice needs a firm ({Need}); nothing changed.", invoiceId, need);
                 return new InvoiceDecisionResult(InvoiceDecisionOutcome.Held, InvoiceRejectReturnCodes.FirmMissing, InvoiceRejectReturnCodes.FirmDetailFor(need));

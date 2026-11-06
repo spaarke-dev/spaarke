@@ -382,6 +382,41 @@ public sealed partial class InvoiceAssignFirmServiceTests
         approval.Writes.Should().Be(0, "a refused approve writes nothing");
     }
 
+    [Fact(DisplayName = "EB-D-185 R1/R2/R3: over the state Set firm REALLY leaves (its marker, the unchanged firm_missing reason, its stored assignFirm), the gate, approve and Reject answer re-run pending and Return to Firm proceeds")]
+    public async Task OverTheStateSetFirmLeaves_TheGateIsRerunPending_AndReturnProceeds()
+    {
+        var w = new World();
+        (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
+        var apply = Update(w.Applied!, "sprk_invoice", InvoiceId).Target;
+        var marker = apply.GetAttributeValue<string>(InvoiceFirmHold.InvoiceHoldColumn);
+        var findings = (string)w.Applied!.SubmissionFields![InvoiceSubmissionPersister.SubmissionFindingsJson];
+
+        ApprovalWorld Left()
+        {
+            var left = new ApprovalWorld();
+            left.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+            left.SetFirmNatively(Firm);
+            left.Rows[("sprk_invoice", left.InvoiceId)][InvoiceFirmHold.InvoiceHoldColumn] = marker;
+            var submission = left.HoldForFirm(findingsJson: findings); // the reason code stays firm_missing until 095d-2
+            left.Rows[("sprk_invoicesubmission", submission)]["sprk_outcomereasoncode"] = SubmissionReasonCodes.FirmMissing;
+            return left;
+        }
+
+        var approve = Left();
+        var approved = await approve.ApproveAs(ApprovalWorld.AliceUser);
+        approved.Outcome.Should().Be(ApprovalOutcome.Held);
+        approved.Detail.Should().Be(InvoiceApprovalCodes.FirmRerunPendingDetail);
+        approve.Writes.Should().Be(0);
+
+        var reject = Left();
+        var rejected = await reject.RejectAs(ApprovalWorld.AliceUser);
+        rejected.Code.Should().Be(InvoiceRejectReturnCodes.FirmMissing);
+        rejected.Detail.Should().Be(InvoiceRejectReturnCodes.RejectFirmRerunPendingDetail);
+        reject.Writes.Should().Be(0);
+
+        (await Left().ReturnAs(ApprovalWorld.AliceUser)).Outcome.Should().Be(InvoiceDecisionOutcome.Decided, "Return to Firm stays available: the firm is known");
+    }
+
     [Fact(DisplayName = "082c-2 fix round 3 (F1, must fire): the firm comes before a Procedure gap that is also stored (D-205 priority)")]
     public async Task ReviewDetail_SetFirm_FirmMarkerAndGapStored_IsWaitingForTheFirm()
     {
@@ -392,38 +427,44 @@ public sealed partial class InvoiceAssignFirmServiceTests
         DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForFirm);
     }
 
-    [Fact(DisplayName = "082c-2 fix round 3 (F1, must not fire): with the firm markers cleared and no other hold, Set firm blanks the review detail in the same invoice update")]
-    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_NoOtherHold_IsBlank()
+    // EB-D-185 (uac-r2 R3): Set firm now REPLACES the invoice's own hold with the rerun-pending marker (still a hold), so approval keeps refusing
+    // the invoice on the firm until 095d-2's re-run clears it. The review detail is derived from the same holds, so with the stored markers
+    // cleared it is still "Waiting for the firm" (the firm comes before every Procedure reason, D-205 priority); it is blank, or a Procedure
+    // reason, only once the re-run clears the marker (095d-2). These four were "blank / waiting for billing terms / billing terms not checked"
+    // while Set firm cleared the hold.
+
+    [Fact(DisplayName = "EB-D-185 R3 (was 082c-2 F1): with the firm markers cleared and no other hold, Set firm leaves the review detail 'Waiting for the firm' - the rerun-pending marker still holds the invoice")]
+    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_NoOtherHold_StaysWaitingForTheFirm()
     {
         var w = WithFirmMarkersCleared(Findings());
 
         (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
 
-        Update(w.Applied!, "sprk_invoice", InvoiceId).Target.Attributes.Should().ContainKey(InvoiceReviewDetail.Column).WhoseValue.Should().BeNull();
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForFirm);
     }
 
-    [Fact(DisplayName = "082c-2 fix round 3 (F1, must not fire): with the firm markers cleared and a Procedure gap open, the detail is 'Waiting for billing terms', not blank")]
-    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_GapStillOpen_IsWaitingForBillingTerms()
+    [Fact(DisplayName = "EB-D-185 R3 (was 082c-2 F1): with the firm markers cleared and a Procedure gap open, the detail is 'Waiting for the firm' (the marker comes first), not the gap")]
+    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_GapStillOpen_FirmComesFirst()
     {
         var w = WithFirmMarkersCleared(Findings(lines: LineCause(SubmissionReasonCodes.ProcedureGap)));
 
         (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
 
-        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForBillingTerms);
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForFirm);
     }
 
-    [Fact(DisplayName = "082c-2 fix round 3 (F1, must not fire): with the firm markers cleared and the terms unresolved, the detail is 'Billing terms could not be checked'")]
-    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_Unresolved_IsBillingTermsNotChecked()
+    [Fact(DisplayName = "EB-D-185 R3 (was 082c-2 F1): with the firm markers cleared and the terms unresolved, the detail is 'Waiting for the firm' (the marker comes first)")]
+    public async Task ReviewDetail_SetFirm_FirmMarkersCleared_Unresolved_FirmComesFirst()
     {
         var w = WithFirmMarkersCleared(Findings(pipeline: "{\"reasonCode\":\"" + SubmissionReasonCodes.ProceduresUnresolved + "\",\"values\":{}}"));
 
         (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
 
-        DetailOf(w).Should().Be(InvoiceReviewDetail.BillingTermsNotChecked);
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForFirm);
     }
 
-    [Fact(DisplayName = "082c-2 fix round 3 (F1): a Procedure hold stored on another submission linked to the invoice is read too, as approval reads it")]
-    public async Task ReviewDetail_SetFirm_AnotherLinkedSubmissionHoldsAGap_IsWaitingForBillingTerms()
+    [Fact(DisplayName = "EB-D-185 R3 (was 082c-2 F1): a Procedure hold stored on another submission linked to the invoice is read too, but the firm marker still comes first")]
+    public async Task ReviewDetail_SetFirm_AnotherLinkedSubmissionHoldsAGap_FirmComesFirst()
     {
         var w = WithFirmMarkersCleared(Findings());
         w.Submissions.Add(new Entity(TrackingNumberAllocator.SubmissionEntity, Guid.Parse("095d1b00-0000-4000-8000-000000000002"))
@@ -435,7 +476,7 @@ public sealed partial class InvoiceAssignFirmServiceTests
 
         (await w.Assign()).Outcome.Should().Be(AssignFirmOutcome.Assigned);
 
-        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForBillingTerms);
+        DetailOf(w).Should().Be(InvoiceReviewDetail.WaitingForFirm);
     }
 
     [Fact(DisplayName = "082c-2 (mismatch): where the column does not exist yet, Set firm still applies and leaves the column out")]
@@ -448,7 +489,7 @@ public sealed partial class InvoiceAssignFirmServiceTests
         Update(w.Applied!, "sprk_invoice", InvoiceId).Target.Attributes.Should().NotContainKey(InvoiceReviewDetail.Column);
     }
 
-    [Fact(DisplayName = "095d-1b: a linked firm on a held no-firm invoice is assigned in ONE apply - the firm and the new number everywhere, the hold cleared, the decision stored")]
+    [Fact(DisplayName = "095d-1b: a linked firm on a held no-firm invoice is assigned in ONE apply - the firm and the new number everywhere, the hold replaced by the rerun-pending marker, the decision stored")]
     public async Task Assigned_TheOneApply_CarriesTheFirmTheNumberTheHoldClearAndTheStoredDecision()
     {
         var w = new World();
@@ -471,7 +512,8 @@ public sealed partial class InvoiceAssignFirmServiceTests
         var invoice = Update(apply, "sprk_invoice", InvoiceId);
         invoice.Target.GetAttributeValue<EntityReference>("sprk_vendororg").Id.Should().Be(Firm);
         invoice.Target.GetAttributeValue<string>("sprk_trackingnumber").Should().Be("INV-7.1");
-        invoice.Target.Attributes.Should().ContainKey(InvoiceFirmHold.InvoiceHoldColumn).WhoseValue.Should().BeNull("the hold is cleared");
+        invoice.Target.Attributes.Should().ContainKey(InvoiceFirmHold.InvoiceHoldColumn).WhoseValue.Should().Be("ebilling.submission.rerun_pending",
+            "EB-D-185 R3: the hold is REPLACED by the rerun-pending marker in the same commit (only the 095d-2 re-run clears it)");
         invoice.Target.RowVersion.Should().Be("5");
         invoice.ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches);
 
@@ -619,7 +661,7 @@ public sealed partial class InvoiceAssignFirmServiceTests
         new TrackingScopePhaseCache(TimeProvider.System),
         NullLogger<TrackingNumberAllocator>.Instance);
 
-    [Fact(DisplayName = "095d-1b (seed proof): with the REAL allocator the ONE transaction renumbers the submission, clears sprk_firmhold and stores the decision")]
+    [Fact(DisplayName = "095d-1b (seed proof): with the REAL allocator the ONE transaction renumbers the submission, replaces sprk_firmhold with the rerun-pending marker and stores the decision")]
     public async Task RealAllocator_TheOneTransaction_ClearsTheHold_AndCarriesTheStoredDecision()
     {
         var w = new World();
@@ -639,7 +681,8 @@ public sealed partial class InvoiceAssignFirmServiceTests
         AssignFirmStoredDecision.Read(findings)!.TrackingNumber.Should().Be("INV-7.1");
 
         var invoice = sent.OfType<UpdateRequest>().Should().ContainSingle(r => r.Target.LogicalName == "sprk_invoice").Which;
-        invoice.Target.Attributes.Should().ContainKey(InvoiceFirmHold.InvoiceHoldColumn).WhoseValue.Should().BeNull("the apply clears the invoice's own hold");
+        invoice.Target.Attributes.Should().ContainKey(InvoiceFirmHold.InvoiceHoldColumn).WhoseValue.Should().Be("ebilling.submission.rerun_pending",
+            "EB-D-185 R3: the apply replaces the invoice's own hold with the rerun-pending marker");
         invoice.ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches);
         sent.Should().HaveCount(1 + 1 + 2 + 1 + 2);
     }

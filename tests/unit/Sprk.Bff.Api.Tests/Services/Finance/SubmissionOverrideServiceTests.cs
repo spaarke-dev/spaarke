@@ -128,10 +128,14 @@ public partial class SubmissionOverrideServiceTests
         /// reads the same rows first (<see cref="FirmGateHoldReads"/> reads), so a test aimed at the DERIVATION's fault skips them.</summary>
         public int HoldReadFaultAfter { get; set; }
 
-        /// <summary>The hold reads the firm gate makes: the invoice's own hold and the submissions (InvoiceFirmHold), then the submissions again for the stored Set-firm decision.</summary>
-        public const int FirmGateHoldReads = 3;
+        /// <summary>The hold reads the firm gate makes on an open invoice: the invoice's own hold, then the submissions (their reason, findings and
+        /// stored Set-firm decision) - EB-D-185 R2 folded the gate's two submission reads into one.</summary>
+        public const int FirmGateHoldReads = 2;
 
         private int _holdReads;
+
+        /// <summary>The hold reads counted so far (counted only while <see cref="HoldReadFault"/> is set).</summary>
+        public int HoldReads => _holdReads;
 
         /// <summary>The invoice's stored review detail option; null = blank.</summary>
         public int? InvoiceDetail => Invoice?.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column)?.Value;
@@ -3351,6 +3355,15 @@ public partial class SubmissionOverrideServiceTests
         InvoiceProcedureHold.ReasonsOf(w.Submission).Should().BeEmpty();
     }
 
+    /// <summary>EB-D-185 R4: proves the 503 came from the holds DERIVATION and not from the firm gate that reads first. The gate's own fault logs
+    /// "the firm gate of invoice ... could not be read" and would have stopped at its own reads; here the gate passed (no such log) and the
+    /// derivation made its first read (one past the gate's) and faulted on it.</summary>
+    private static void AssertTheDerivationFaulted(World w)
+    {
+        w.Log.Entries.Should().NotContain(e => e.Message.Contains("firm gate", StringComparison.Ordinal), "the firm gate passed; the fault is the derivation's");
+        w.HoldReads.Should().Be(World.FirmGateHoldReads + 1, "the gate's reads passed, and the derivation's first read faulted");
+    }
+
     [Fact(DisplayName = "114 fail closed (F4): a fault reading the holds that remain is 503 BEFORE anything is written - no Decision Record, no stored set, no Signal closed - and the repeat decides with one record")]
     public async Task Release_WhenTheRemainingHoldsCannotBeRead_IsUnavailable_BeforeAnyWrite_AndTheRepeatFinishes()
     {
@@ -3369,6 +3382,7 @@ public partial class SubmissionOverrideServiceTests
         w.ClosedBy.Should().NotContainKey(onInvoice);
         w.AssertNothingWritten();
         w.Log.Entries.Should().NotContain(e => e.Message.Contains("names row", StringComparison.Ordinal), "the log names the exception type, never its message (C16)");
+        AssertTheDerivationFaulted(w);
 
         w.HoldReadFault = null;
         (await w.OverrideAsync()).Kind.Should().Be(BlockedDecisionKind.Decided);
@@ -3558,6 +3572,7 @@ public partial class SubmissionOverrideServiceTests
         w.Closes.Should().BeEmpty();
         w.ClosedBy.Should().NotContainKey(shared);
         w.AssertNothingWritten();
+        AssertTheDerivationFaulted(w);
     }
 
     private static AccessRights ReadOnlyRights(string set, Guid id) => AccessRights.Read;

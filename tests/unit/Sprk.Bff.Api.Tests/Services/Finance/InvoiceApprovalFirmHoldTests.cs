@@ -200,6 +200,10 @@ public sealed class InvoiceApprovalFirmHoldTests
     [InlineData("held-submission")]
     [InlineData("rerun-pending")]
     [InlineData("rerun-unreadable")]
+    [InlineData("after-set-firm")]
+    [InlineData("after-set-firm-unlinked")]
+    [InlineData("after-set-firm-repointed")]
+    [InlineData("after-set-firm-no-marker")]
     public async Task Reject_WithoutAnOpenFirmGate_Is409_AndNothingIsWritten(string state)
     {
         var w = new ApprovalWorld();
@@ -208,6 +212,27 @@ public sealed class InvoiceApprovalFirmHoldTests
         InvoiceFirmGateResult gate;
         switch (state)
         {
+            case "after-set-firm":
+            case "after-set-firm-unlinked":
+            case "after-set-firm-repointed":
+            case "after-set-firm-no-marker":
+                // EB-D-185 R2/R3: the REAL row Set firm leaves (its own hold is the rerun-pending marker; the submission keeps the firm_missing reason).
+                var submission = w.AfterSetFirm();
+                if (state == "after-set-firm-unlinked")
+                {
+                    w.Rows[("sprk_invoicesubmission", submission)].Attributes.Remove("sprk_invoice");
+                }
+                else if (state == "after-set-firm-repointed")
+                {
+                    w.Rows[("sprk_invoicesubmission", submission)]["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid());
+                }
+                else if (state == "after-set-firm-no-marker")
+                {
+                    w.Rows[("sprk_invoice", w.InvoiceId)].Attributes.Remove(InvoiceFirmHold.InvoiceHoldColumn);
+                }
+
+                gate = InvoiceFirmGateResult.RerunPending;
+                break;
             case "no-firm":
                 w.WithoutFirm();
                 gate = InvoiceFirmGateResult.NoFirm;
@@ -251,13 +276,75 @@ public sealed class InvoiceApprovalFirmHoldTests
         (await plain.RejectAs(AliceUser)).Outcome.Should().Be(InvoiceDecisionOutcome.Decided);
     }
 
-    [Fact(DisplayName = "095d-0 must-not-fire: Return to Firm proceeds while the Set-firm re-run is pending (the firm is known); Set firm is not gated by this service")]
+    [Fact(DisplayName = "095d-0 R1 must-not-fire: Return to Firm proceeds on the REAL row Set firm leaves (firm set, marker, the submission still firm_missing with a pending assignFirm naming the firm); Set firm is not gated by this service")]
     public async Task Return_WhileTheRerunIsPending_Proceeds()
     {
         var w = new ApprovalWorld();
-        w.LinkSubmission(InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunPending));
+        w.AfterSetFirm();
 
         (await w.ReturnAs(AliceUser)).Outcome.Should().Be(InvoiceDecisionOutcome.Decided);
+    }
+
+    [Fact(DisplayName = "095d-0 R1 must-fire: Return stays refused when the firm was set natively (a firm_missing submission with no assignFirm naming the firm) or Set firm named another firm")]
+    public async Task Return_AfterANativeFirmOrAnotherFirm_StaysRefused()
+    {
+        var native = new ApprovalWorld();
+        native.HoldForFirm();
+        (await native.ReturnAs(AliceUser)).Code.Should().Be(InvoiceRejectReturnCodes.FirmMissing);
+
+        var another = new ApprovalWorld();
+        another.AfterSetFirm();
+        another.SetFirmNatively(Guid.NewGuid()); // after Set firm, the column is written to a different firm
+        var refused = await another.ReturnAs(AliceUser);
+        refused.Code.Should().Be(InvoiceRejectReturnCodes.FirmMissing);
+        another.Writes.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "095d-0 R2/R3 must-fire: approve on the REAL row Set firm leaves is 409 with the RE-RUN sentence (not the held sentence), also with the submission link removed or re-pointed, or the marker absent; nothing written, its Signal open")]
+    [InlineData("marker")]
+    [InlineData("unlinked")]
+    [InlineData("repointed")]
+    [InlineData("no-marker")]
+    public async Task AfterSetFirm_ApproveIs409_WithTheRerunSentence(string how)
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        var signal = w.AddInvoiceSignal(BillingRuleCatalogue.SystemPolicyCode);
+        var submission = w.AfterSetFirm();
+        if (how == "unlinked")
+        {
+            w.Rows[("sprk_invoicesubmission", submission)].Attributes.Remove("sprk_invoice");
+        }
+        else if (how == "repointed")
+        {
+            w.Rows[("sprk_invoicesubmission", submission)]["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid());
+        }
+        else if (how == "no-marker")
+        {
+            w.Rows[("sprk_invoice", w.InvoiceId)].Attributes.Remove(InvoiceFirmHold.InvoiceHoldColumn);
+        }
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Held);
+        result.Detail.Should().Be(InvoiceApprovalCodes.FirmRerunPendingDetail);
+        AssertNothingWritten(w);
+        w.Rows[("sprk_signal", signal)].GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value.Should().Be(SignalWriter.SignalStatusOpen);
+        (await w.GetAs(AliceUser))!.Should().Match<InvoiceApprovalStateDto>(s => s.FirmNeeded && !s.CanApprove);
+    }
+
+    [Fact(DisplayName = "095d-0 R3 must-fire (uac-r2 condition 1): an unrecognised value in the invoice's own hold is HELD (fail closed) - approve is 409 with the held sentence")]
+    public async Task UnknownOwnHoldValue_ApproveIsHeld()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        w.Rows[("sprk_invoice", w.InvoiceId)][InvoiceFirmHold.InvoiceHoldColumn] = "ebilling.submission.something_new";
+
+        var result = await w.ApproveAs(AliceUser);
+
+        result.Outcome.Should().Be(ApprovalOutcome.Held);
+        result.Detail.Should().Be(InvoiceApprovalCodes.FirmHeldDetail);
+        AssertNothingWritten(w);
     }
 
     [Fact(DisplayName = "095d-0 order: a caller who is not an eligible approver, on a firmless invoice, gets NotEligible (403), not the firm 409")]

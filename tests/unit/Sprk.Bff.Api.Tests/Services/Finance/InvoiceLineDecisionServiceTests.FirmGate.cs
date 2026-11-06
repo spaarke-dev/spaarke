@@ -13,12 +13,15 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance;
 
-// ebilling-r1 task 095d-0 (EB-D-148): no line decision without a firm. Accept, Reduce and Disallow - the single-line route, the multi-line route and
+// ebilling-r1 task 095d-0 (EB-D-185): no line decision without a firm. Accept, Reduce and Disallow - the single-line route, the multi-line route and
 // Accept all Clean - are refused 409 ebilling.line_decision.firm_missing while the invoice has no firm, is held for one, or its post-Set-firm re-run is
 // pending (InvoiceFirmGate), after the caller's rights (403 first) and before any write.
 public sealed partial class InvoiceLineDecisionServiceTests
 {
-    public enum GateState { NoFirm, HeldOwnColumn, HeldBySubmission, RerunPending, RerunUnreadable }
+    // AfterSetFirm* are the REAL row Set firm leaves (EB-D-185 R2/R3): the invoice's own hold is the rerun-pending marker and the submission still
+    // stores the firm_missing reason beside a pending assignFirm; the link to the submission is then intact, removed, or re-pointed.
+    // UnknownOwnValue is an unrecognised word in the invoice's own hold (fail closed).
+    public enum GateState { NoFirm, HeldOwnColumn, HeldBySubmission, RerunPending, RerunUnreadable, AfterSetFirm, AfterSetFirmUnlinked, AfterSetFirmRepointed, UnknownOwnValue }
 
     public enum Route { SingleLine, MultiLine, AcceptAllClean }
 
@@ -39,7 +42,7 @@ public sealed partial class InvoiceLineDecisionServiceTests
     private static InvoiceFirmGateResult ExpectedGate(GateState state) => state switch
     {
         GateState.NoFirm => InvoiceFirmGateResult.NoFirm,
-        GateState.HeldOwnColumn or GateState.HeldBySubmission => InvoiceFirmGateResult.HeldForFirm,
+        GateState.HeldOwnColumn or GateState.HeldBySubmission or GateState.UnknownOwnValue => InvoiceFirmGateResult.HeldForFirm,
         _ => InvoiceFirmGateResult.RerunPending,
     };
 
@@ -75,6 +78,25 @@ public sealed partial class InvoiceLineDecisionServiceTests
                 break;
             case GateState.RerunUnreadable:
                 w.Submissions.Add(LinkedSubmission(w, InvoiceFirmGateTests.FindingsWithUnreadableAssignFirm()));
+                break;
+            case GateState.UnknownOwnValue:
+                w.Invoice["sprk_firmhold"] = "ebilling.submission.something_new";
+                break;
+            case GateState.AfterSetFirm:
+            case GateState.AfterSetFirmUnlinked:
+            case GateState.AfterSetFirmRepointed:
+                w.Invoice["sprk_firmhold"] = InvoiceFirmHold.InvoiceRerunPendingValue;
+                var left = LinkedSubmission(w, InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunPending), SubmissionReasonCodes.FirmMissing);
+                if (state == GateState.AfterSetFirmUnlinked)
+                {
+                    left.Attributes.Remove("sprk_invoice");
+                }
+                else if (state == GateState.AfterSetFirmRepointed)
+                {
+                    left["sprk_invoice"] = new EntityReference("sprk_invoice", Guid.NewGuid());
+                }
+
+                w.Submissions.Add(left);
                 break;
         }
 

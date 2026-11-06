@@ -8,8 +8,10 @@
 .DESCRIPTION
     WHY (095c-5). Task 095c-4 finds the firm_missing hold through the submissions linked to an invoice (sprk_invoicesubmission.sprk_invoice).
     That link is not field-secured, so a direct write that removes or repoints it, or a delete of the submission, hides the hold. The hold
-    now also lives on the invoice: the persister sets sprk_firmhold in the same create as the held outcome, 095d's assign-firm is the only
-    clearer (typed writer), and the BFF reads it app-only (InvoiceFirmHold). Held = the invoice's own hold OR any linked submission's.
+    now also lives on the invoice: the persister sets sprk_firmhold in the same create as the held outcome, 095d's assign-firm (Set firm)
+    replaces it with ebilling.submission.rerun_pending (EB-D-185 / uac-r2 R3: the firm is set but the rules re-run is not complete), only the
+    completed re-run (095d-2) clears it (typed writer), and the BFF reads it app-only (InvoiceFirmHold). Held = the invoice's own hold OR any
+    linked submission's.
 
     THE COLUMN. sprk_invoice.sprk_firmhold, Single line of text (100), optional, audited. It stores the reason code
     (ebilling.submission.firm_missing); any non-blank value holds (fail closed). A reason-code string rather than Two Options: it names
@@ -342,7 +344,7 @@ elseif ($PSCmdlet.ShouldProcess("$Table.$Column", 'Create the column')) {
         '@odata.type'  = 'Microsoft.Dynamics.CRM.StringAttributeMetadata'
         SchemaName     = $ColumnSchemaName
         DisplayName    = & $label 'Firm Hold'
-        Description    = & $label 'Set by Spaarke when the invoice was submitted without a firm (the reason code ebilling.submission.firm_missing). While set, the invoice cannot be approved, returned to a firm, corrected or exported. Only Spaarke sets or clears it (field-secured).'
+        Description    = & $label 'Set by Spaarke when the invoice was submitted without a firm (ebilling.submission.firm_missing), and replaced by ebilling.submission.rerun_pending when a firm is set and the rules re-run is still pending. While set (any non-empty value), the invoice cannot be approved, decided, corrected, adjusted or exported. Only Spaarke sets or clears it (field-secured); only the completed re-run clears it.'
         RequiredLevel  = @{ Value = 'None' }
         MaxLength      = $ColumnMaxLength
         FormatName     = @{ Value = 'Text' }

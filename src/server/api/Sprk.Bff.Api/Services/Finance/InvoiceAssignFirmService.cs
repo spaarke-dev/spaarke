@@ -4,7 +4,7 @@
 // Component Justification (CLAUDE.md §11):
 //   (1) Existing — TrackingNumberAllocator.RenumberSubmissionAsync (095d-1a) moves a no-firm submission into a firm's scope in one transaction,
 //       but decides nothing about the invoice; InvoiceApprovalService and SubmissionOverrideService decide an invoice but never set its firm;
-//       InvoiceFirmHold reads the hold and nothing clears it (grep: no writer of sprk_firmhold but the persister's create).
+//       InvoiceFirmHold reads the hold and nothing replaces it (grep: no writer of sprk_firmhold but the persister's create).
 //   (2) Extension — the allocator is the number columns' only writer (D-37) and must stay ignorant of invoices, lines and files; the approval
 //       and override services each own another decision's order and recovery (ADR-002: one owner per invariant). Setting a firm is its own
 //       decision with its own refusals, stored decision and repeat rule, so it is its own service that hands its apply to the allocator.
@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// <summary>The outcome class of a Set-firm call (task 095d-1b). The endpoint renders <see cref="AssignFirmResult.Status"/> and <see cref="AssignFirmResult.Code"/>.</summary>
 public enum AssignFirmOutcome
 {
-    /// <summary>This call applied the firm: the one transaction committed (renumber, firm everywhere, hold cleared, decision stored).</summary>
+    /// <summary>This call applied the firm: the one transaction committed (renumber, firm everywhere, hold replaced by the rerun-pending marker, decision stored).</summary>
     Assigned,
 
     /// <summary>The submission's stored decision already names this firm: this call applied nothing (a repeat, or the loser of a race for the
@@ -258,7 +258,7 @@ internal sealed record AssignFirmStoredDecision(
 /// <para><b>The apply (16.4 condition 2; 16.7).</b> One transaction, conditioned on the submission's and the invoice's row versions: the
 /// submission's firm, scope, sequence, number and previous sequence (the allocator's), its findings with the new <c>trackingNumber</c> and the
 /// stored decision (<see cref="StoredDecisionMember"/>: the firm, note, previous and new number, the firm_missing Signal set and its read time,
-/// the decider, the old-to-new name mapping and <c>rulesRerun</c> "pending"); the invoice's firm, number and <c>sprk_firmhold</c> cleared;
+/// the decider, the old-to-new name mapping and <c>rulesRerun</c> "pending"); the invoice's firm and number, and its <c>sprk_firmhold</c> set to <see cref="InvoiceFirmHold.InvoiceRerunPendingValue"/> (EB-D-185: only the completed re-run clears it);
 /// each line's firm and name; the approval's name; each stored file's name (<c>sprk_storedfile.sprk_name</c> only). The builder runs once per
 /// attempt with that attempt's number, so every name matches the number written.</para>
 /// <para><b>Repeats (1a review K3).</b> The stored decision is written only by the apply, so a submission that carries one was applied. A request
@@ -1001,12 +1001,16 @@ public sealed class InvoiceAssignFirmService
             var renamed = new List<AssignFirmRename>();
             var requests = new List<OrganizationRequest>();
 
-            // The invoice: its firm, its number and its own hold cleared, conditioned on the version read (16.4 condition 2).
+            // The invoice: its firm, its number and its own hold REPLACED by the rerun-pending marker, conditioned on the version read (16.4
+            // condition 2). EB-D-185 / uac-r2 R3: the firm is set but the rules re-run for it has not completed, so the invoice stays held and
+            // the firm gate (InvoiceFirmGate) answers "re-run pending" from this field-secured marker alone, whatever the submission link says.
+            // TODO(095d-2 / 2a-2): the COMPLETED re-run is the only writer that clears the marker (a failed re-run leaves it in place). Nothing in
+            // Set firm or the gate clears or downgrades it.
             var invoice = new Entity(InvoiceReviewReadService.InvoiceEntity, InvoiceId)
             {
                 [InvoiceSubmissionPersister.InvoiceVendorOrg] = firm,
                 [InvoiceReviewService.InvTrackingNumber] = number,
-                [InvoiceFirmHold.InvoiceHoldColumn] = null,
+                [InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceRerunPendingValue,
             };
 
             // (The review detail, 082c-2 ontology D-205 writer 3, is set below, once the findings this apply stores are built.)
@@ -1072,16 +1076,16 @@ public sealed class InvoiceAssignFirmService
 
             // 082c-2 (ontology D-205 writer 3), fix round 3 (ontology F1): the review detail is recomputed from the holds that REMAIN after this
             // write, in this same write, through the one derivation approval's holds agree with (InvoiceOpenHolds). The apply sets the firm and
-            // clears the invoice's own hold, but it keeps every findings member except the number and the decision, and leaves the stored outcome
-            // reason: so a firm_missing marker the findings or the reason still carry still holds the invoice (approval refuses it until 095d-2's
-            // re-run clears the markers), and the detail stays "Waiting for the firm". It is blank only when nothing is held. Left out where the
+            // replaces the invoice's own hold with the rerun-pending marker (non-blank, so it holds), keeps every findings member except the number
+            // and the decision, and leaves the stored outcome reason: so the invoice stays held (approval refuses it until 095d-2's re-run clears
+            // the markers), and the detail stays "Waiting for the firm". It is blank only when nothing is held. Left out where the
             // column does not exist yet. (An In Review invoice only: the service refuses any other status above.)
             if (WriteReviewDetail)
             {
                 invoice[InvoiceReviewDetail.Column] = InvoiceReviewDetail.ValueOf(InvoiceReviewDetail.ReviewDetailOf(
                     InvoiceOpenHolds.ReasonsOf(
                         invoiceHasNoFirm: false, // the firm is set in this write
-                        invoiceHoldSet: false, // its own hold is cleared in this write
+                        invoiceHoldSet: true, // its own hold is replaced by the rerun-pending marker in this write (non-blank: held)
                         [new InvoiceOpenHolds.StoredSubmission(SubmissionReasonCode, json), .. OtherSubmissions])));
             }
 
