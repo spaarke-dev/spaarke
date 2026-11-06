@@ -1,5 +1,7 @@
 # Spaarke in Microsoft Copilot and Cowork: MCP Server in the BFF (r1)
 
+> **Portfolio**: [Project #2608](https://github.com/spaarke-dev/spaarke/issues/2608) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Epic [#421](https://github.com/spaarke-dev/spaarke/issues/421) — _registered 2026-11-06 by /project-pipeline Step 4.2_
+
 > **Last Updated**: 2026-11-06
 >
 > **Status**: In Progress (project pipeline: artifacts generated, task decomposition next)
