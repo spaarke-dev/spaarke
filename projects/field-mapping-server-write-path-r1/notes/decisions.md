@@ -861,3 +861,9 @@ The ruling above rested on a wrong premise. Core User is not raised. Direct thre
 ## 2026-11-06 — G13 is not a gap (closes "G13 grant withdrawn")
 
 The send/reply thread read needs Basic. Record threads are owned by their record's team at creation (`ThreadResolver`), and a member reads them at Basic. Threads anchored to a party, and Direct threads, are read through ownership and shares, by the privacy rule. Core User and Basic User both hold Basic, so no role changes. Task 046b, `5d079d1508`.
+
+## 2026-11-06 — Task 032 becomes a design task (owner, in fm's session)
+
+- **Finding (task 032 agent, `task/fm-032` 96769b68bf):** since ebilling-r1 task 050a (D-134), invoice review creates no invoice. The only invoice creator is ebilling's `InvoiceSubmissionPersister`, which writes the invoice, lines, approval, Stored File rows and submission link in one transaction with fixed ids, inside a background job with no caller token. `RecordCreationService` creates one row per call with a new id and refuses mapping for a system principal.
+- **Options put to the owner:** drop 032 and name the persister as an exception; a new design task; or a mapping-only step inside the persister.
+- **Ruling:** a new Opus-tier design task. The create service gains a fixed-id, multi-row transactional create and a way to map under a system principal (for example the submitter as the recorded caller). UAC-r2 and ebilling-r1 review it. Task 032's POML is re-scoped before it runs; the single-creator rule holds (no second creator).
