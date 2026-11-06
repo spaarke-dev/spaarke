@@ -151,6 +151,7 @@
     <criterion>ontology 2026-11-05 (D-201 82aaf456dd), part 2b:
       (1) When re-coding changes a line Signal's reason set, Superseded plus episode n+1. When it's unchanged, the same Signal stays open and only sprk_lastevaluated is refreshed. Test both.
       (2) A new hold raises its Signal through SignalWriter with the D-13 key. A would-be auto-reject turned hold must NOT claim a Decision Record on its Signal, because no decision was made.</criterion>
+    <criterion>EB-D-189 (owner: option A) + uac-r2 conditions: intake stores the section totals with confidences, the timekeeper summary names, a "line had no date" flag and the observation quotes; names and quotes ONLY in sprk_findingsjson (sprk_extractionconfidence numbers and flags only); never returned on external routes and still unfilterable (pinning test); never indexed or logged (counts only); submissions without the stored facts refuse the re-run fail-closed (hold stays, Permanent=true); the field-mapping push item on sprk_findingsjson is closed before this ships (MappingProtectedColumns honoured for it, or every push read/write proven impersonated; if a change to field-mapping code is needed, notify the field-mapping session first and keep the change minimal).</criterion>
     <criterion>Wording: commits, PR and notes describe the change, never a sequence of who could see what when.</criterion>
   </acceptance-criteria>
 
