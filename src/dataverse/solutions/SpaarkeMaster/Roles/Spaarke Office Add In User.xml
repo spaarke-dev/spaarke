@@ -59,7 +59,7 @@
     <RolePrivilege name="prvAppendsprk_Project" level="Deep" />
     <RolePrivilege name="prvAppendsprk_WorkAssignment" level="Deep" />
     <RolePrivilege name="prvAppendSyncError" level="Basic" />
-    <RolePrivilege name="prvAppendToAccount" level="Basic" />
+    <RolePrivilege name="prvAppendToAccount" level="Deep" />
     <RolePrivilege name="prvAppendToActionCard" level="Global" />
     <RolePrivilege name="prvAppendToActivity" level="Basic" />
     <RolePrivilege name="prvAppendToArticleTemplate" level="Global" />
@@ -68,7 +68,7 @@
     <RolePrivilege name="prvAppendtoCategory" level="Global" />
     <RolePrivilege name="prvAppendToChannelPropertyGroup" level="Global" />
     <RolePrivilege name="prvAppendToConnection" level="Global" />
-    <RolePrivilege name="prvAppendToContact" level="Basic" />
+    <RolePrivilege name="prvAppendToContact" level="Deep" />
     <RolePrivilege name="prvAppendToConvertRule" level="Global" />
     <RolePrivilege name="prvAppendToCustomerRelationship" level="Basic" />
     <RolePrivilege name="prvAppendToEmailServerProfile" level="Global" />
@@ -105,9 +105,10 @@
     <RolePrivilege name="prvAppendToSLAKPIInstance" level="Basic" />
     <RolePrivilege name="prvAppendToSocialProfile" level="Basic" />
     <RolePrivilege name="prvAppendTosprk_AttachmentArtifact" level="Basic" />
+    <RolePrivilege name="prvAppendTosprk_Budget" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_EmailArtifact" level="Basic" />
     <RolePrivilege name="prvAppendTosprk_Event" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_EventType_Ref" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_EventType_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Invoice" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Matter" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_MatterSubtype_Ref" level="Global" />
@@ -534,6 +535,7 @@
     <RolePrivilege name="prvWriteSharePointDocumentLocation" level="Basic" />
     <RolePrivilege name="prvWriteSocialProfile" level="Basic" />
     <RolePrivilege name="prvWritesprk_AttachmentArtifact" level="Basic" />
+    <RolePrivilege name="prvWritesprk_Document" level="Deep" />
     <RolePrivilege name="prvWritesprk_EmailArtifact" level="Basic" />
     <RolePrivilege name="prvWritesprk_Event" level="Deep" />
     <RolePrivilege name="prvWritesprk_Invoice" level="Deep" />

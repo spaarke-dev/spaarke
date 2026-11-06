@@ -575,36 +575,12 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         }
     }
 
-    public async Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        // Refuses (throws) before anything is sent when the request carries no owner (task 146, in the builder).
-        var payload = BuildCreateEventPayload(request);
-
-        _logger.LogInformation("Creating event: {Name}", request.Name);
-
-        var response = await SendPostAsJsonAsync("sprk_events", payload, ct);
-        response.EnsureSuccessStatusCode();
-
-        var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
-        if (entityIdHeader != null)
-        {
-            var idString = entityIdHeader.Split('(', ')')[1];
-            var id = Guid.Parse(idString);
-            var createdOn = DateTime.UtcNow;
-
-            _logger.LogInformation("Event created: {Id}", id);
-            return (id, createdOn);
-        }
-
-        throw new InvalidOperationException("Failed to extract entity ID from create response");
-    }
-
     /// <summary>
-    /// The Web API body <see cref="CreateEventAsync"/> POSTs to <c>sprk_events</c>. Internal (InternalsVisibleTo the
-    /// BFF unit tests) so the payload — including the unified-access-control-r2 task 152 <c>sprk_AssignedTo</c> bind —
-    /// is asserted without intercepting the HTTP transport (ADR-038 bans <c>Mock&lt;HttpMessageHandler&gt;</c>).
+    /// The Web API body the deleted <c>CreateEventAsync</c> POSTed to <c>sprk_events</c>. No production caller since
+    /// field-mapping-server-write-path-r1 task 031 (POST /api/v1/events creates through RecordCreationService, and its
+    /// payload is <c>EventEndpoints.BuildCreatePayload</c>); kept only because five BFF unit-test files still pin its
+    /// shapes (date-only, status, regarding write set, Assigned To). Follow-up: re-point them at
+    /// <c>EventEndpoints.BuildCreatePayload</c> and delete this builder with <c>AddRegardingWriteSet</c>.
     /// </summary>
     /// <exception cref="InvalidOperationException">The request carries no <see cref="CreateEventRequest.OwningTeamId"/>
     /// (unified-access-control-r2 task 146): no payload without an owner is ever built.</exception>

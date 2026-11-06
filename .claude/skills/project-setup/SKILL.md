@@ -5,41 +5,19 @@ techStack: [all]
 appliesTo: ["projects/*/", "create artifacts", "generate project files"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-16
+last-reviewed: 2026-11-03
 ---
 
 # project-setup
 
-> **Last Reviewed**: 2026-05-16
+> **Last Reviewed**: 2026-11-03
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-B — flipped frontmatter above H1; extracted CLAUDE.md template to references/)
 > **Exemplar rationale**: Project artifacts are per-project; the template patterns are what's reusable. See `references/claudemd-template.md`.
 > **Developer note**: This is a COMPONENT skill — typically called BY `project-pipeline`. For most users, invoke `/project-pipeline` instead.
 
 ## Prerequisites
 
-### Claude Code Extended Context Configuration
-
-**IMPORTANT**: Before running this skill, ensure Claude Code is configured with extended context settings:
-
-```bash
-CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
-```
-
-**Why Extended Context is Required**:
-- Loads and processes detailed `spec.md` files (typically 1500-3000 words)
-- Generates comprehensive `plan.md` with WBS (Work Breakdown Structure)
-- Creates context-rich `CLAUDE.md` with technical constraints
-- Often called by `project-pipeline` which performs additional resource discovery
-
-**Verify settings before proceeding**:
-```bash
-# Windows PowerShell
-echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
-
-# Should output: 64000
-```
-
-For full context on adaptive thinking and effort tuning, see root [`CLAUDE.md`](../../../CLAUDE.md). Note: `MAX_THINKING_TOKENS=50000` is **obsolete on Opus 4.6+** — adaptive thinking applies. Only `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000` remains load-bearing; invoke this skill on Opus with effort `high` or `max`.
+Run on Opus at effort `high`. This skill writes long files (`plan.md` with a WBS, a context-rich project `CLAUDE.md`); if a file comes back cut off mid-output, set `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000` and re-run.
 
 ---
 
@@ -177,8 +155,8 @@ Use `project-README.template.md` structure:
   - `tasks/TASK-INDEX.md`
   - `spec.md`
 - **Overview**: High-level summary (2-3 sentences extracted from spec)
-- **Problem Statement**: Direct copy from design spec "Problem" or "Background" section
-- **Proposed Solution**: High-level approach from spec "Solution" or "Approach" section
+- **Problem Statement**: From the spec's Executive Summary (or a "Problem"/"Background" section, if the spec has one)
+- **Proposed Solution**: From the spec's Executive Summary and Technical Constraints (or a "Solution"/"Approach" section, if present)
 - **Scope**:
   - In-scope items (bulleted list from spec)
   - Out-of-scope items (bulleted list from spec)

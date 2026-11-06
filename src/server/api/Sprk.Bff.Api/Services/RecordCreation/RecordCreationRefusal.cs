@@ -66,7 +66,8 @@ internal sealed record RecordCreationRefusal
     /// <summary>The payload is not a Dataverse Web API payload this service accepts.</summary>
     internal const string InvalidPayloadCode = "record_creation.invalid_payload";
 
-    /// <summary>The table has no entry in <see cref="RecordTableRules"/>: this service does not create it.</summary>
+    /// <summary>The table has no entry in <see cref="RecordTableRules"/>, or its entry is
+    /// <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> (task 042c fix round 4): this service does not create it.</summary>
     internal const string TableUnsupportedCode = "record_creation.table_unsupported";
 
     /// <summary>A check before the create faulted (an exception or timeout): nothing was created (NFR-01).</summary>

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Create path within NFR-02: concurrent caller checks, assigned-access grant after the response (owner 2026-11-05)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>Part B (grant move) waits on UAC-r2's written conditions in the notes; the live re-measure waits on a dev deploy (owner's go in UAC-r2's session)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes RecordCreationService's step order and timing on every create path (.cs, bff-api) and moves an access grant onto background work (security-adjacent, ADR-004/ADR-052).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Concurrency in an authorization step and a move of access-grant work out of the request; fail-closed reasoning across chat, Office, routes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordCreationService and CallerWriteAuthorization, which 044 and 045 also touch.</parallel-reason>
+    <deps>021 (measurement), 042c</deps>
+    <tags>bff-api, performance, security, background-jobs, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Bring the server create path within NFR-02 (the Create Matter create p95 may rise at most +500 ms over the old direct create). Live baseline (notes/task-021-live.md, 2026-11-05): +2634 ms; server medians CallerChecks 983 ms (AppendTo per bound record, sequential), PostCreate 1331 ms (AssignedAccessMaterializer.RunAfterWriteAsync and the membership event, inside the request), TableRules 302, Owner 261, FieldMapping 176, Create 136. Part A: run the caller's per-record checks concurrently (same answers, same refusal precedence). Part B: move the post-create assigned-access grant and membership event out of the request onto an ADR-004 job, under UAC-r2's conditions. Part C: cheap wins in TableRules/Owner/FieldMapping if a read is repeated or cacheable under ADR-009. Then measure again (unit-level timing locally; the live re-measure after a dev deploy, under a Project to Matter mapping profile the owner approved).</prompt>
+  <role>SPAARKE platform developer, BFF write path performance. Security fails closed. Follow ADRs strictly.</role>
+  <goal>Every create through RecordCreationService returns the same answers and refusals as today, faster; the assigned-access grant still happens (within seconds) with a repair backstop; the live p95 delta is within +500 ms, or the residue is measured and escalated.</goal>
+
+  <context>
+    <background>Owner decision 2026-11-05 (notes/decisions.md "NFR-02 exceeded ... speed up the server"). Applies to every create through the service (child records, events, analysis, chat, Office), not only matters. The 021 wizard deploy waits for this task's re-measure. The I-12 L1 grant (AssignedAccessMaterializer, Services/ExternalAccess) is UAC-r2's surface; it is also called from chat update, the Update Record node, the field-mapping push and the chat create handler: only the create service's post-create call moves in this task unless UAC-r2 says otherwise.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (step 5 CallerChecks, PostCreate ~:1804-1809)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/CallerWriteAuthorization.cs (the per-lookup AppendTo loop)</file>
+      <file role="new">A job handler under src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/ for the post-create grant (ADR-004 IJobHandler; copy an existing handler's shape)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs and an existing handler (e.g. DocumentProcessingJobHandler.cs)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/task-021-live.md (baseline and method); tasks/052-repair-pass-scheduled-job.poml (backstop)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project CLAUDE.md §6 gotcha 2026-10-20">Brief line 1: `git switch -c task/fm-049 &lt;tip of work/field-mapping-server-write-path-r1&gt;`, then confirm this POML exists on the branch.</constraint>
+    <constraint source="NFR-07">No refusal's status, code or wording changes; when several caller checks would refuse, the same one answers as today (deterministic precedence, not first-to-finish).</constraint>
+    <constraint source="UAC-r2 (pending)">Part B starts only after UAC-r2's conditions are recorded in notes/task-049-notes.md (job identity, idempotency, ordering against re-assign, membership-event lag, surfaces that must not see the window). Without them, do Part A and C only.</constraint>
+    <constraint source="ADR-052 / ADR-004">Background work goes through IJobHandler on the existing queue; no fire-and-forget Task.Run and no new hand-rolled BackgroundService. An enqueue failure falls back to today's inline grant.</constraint>
+    <constraint source="security">Fail closed: while the job is pending the assignee has no extra access; the creator's own access is unchanged.</constraint>
+    <constraint source="ADR-009">Any cache is Redis or request-scoped per ADR-009, with a stated invalidation; no cache of an authorization answer across callers.</constraint>
+    <constraint source="ADR-038">KEEP paths only; no new file under tests/unit/Sprk.Bff.Api.Tests/**.</constraint>
+    <constraint source="CLAUDE.md §10/§11">Placement Justification for the job handler; publish delta; CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; /conflict-check (RecordCreationService, CallerWriteAuthorization).</step>
+    <step order="1">Part A: concurrent caller checks with deterministic refusal precedence; tests proving the same refusal wins as today for every combination the existing suites cover, plus a timing test with a delayed double.</step>
+    <step order="2">Part C: profile TableRules/Owner/FieldMapping reads; remove repeats; record what was and was not changed.</step>
+    <step order="3">Part B (after UAC-r2's conditions): enqueue the post-create grant; job handler; inline fallback on enqueue failure; tests (enqueued once, idempotent re-run, failure falls back, nothing granted before the job).</step>
+    <step order="4">Build; verify-suites.sh and ArchTests; publish delta; CVE; one Opus adversarial pass (two if Part B landed: security tag). Send the diff to UAC-r2.</step>
+    <step order="5">After merge and a dev deploy (owner's go in UAC-r2's session): create the Project to Matter profile on dev (owner approved 2026-11-05), re-run the 021 timing method, record the result in task-021-live.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the live p95 delta is still above +500 ms after Parts A-C, STOP and report the step medians to the owner.</trigger>
+    <trigger>If UAC-r2 rejects moving the grant, do Parts A and C and escalate the residue.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>RecordCreationService's existing steps; the ADR-004 job queue and its handlers.</existing>
+    <extension>Part A and C modify existing steps. Part B adds one job handler, because the queue is the ADR-mandated home for work moved out of a request.</extension>
+    <cost-of-doing-nothing>NFR-02 fails: every create through the service takes 3.5-4 s, and the wizard migrations (021-029) cannot ship within budget.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: existing suites pass with unchanged assertions; refusal precedence among caller checks is unchanged (tested).</criterion>
+    <criterion testable="true">AC2: caller checks run concurrently (a timing test with N delayed doubles completes in about one delay, not N).</criterion>
+    <criterion testable="true">AC3 (if Part B): the create returns before the grant; the grant job runs once, is idempotent, and an enqueue failure grants inline; nothing is granted to the assignee before the job.</criterion>
+    <criterion testable="true">AC4: live re-measure on dev under a Project to Matter profile: p95 delta within +500 ms, or escalated with step medians.</criterion>
+    <criterion testable="true">AC5: build 0 warnings; verify-suites.sh and ArchTests pass; publish delta and CVE recorded; UAC-r2's verdict in the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>Added 2026-11-05 from the owner's NFR-02 decision.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -677,3 +677,187 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
      - those three append-only tables stay out of repair.
    - **Task 052** must design the family cascade.
 3. **The 019 live-check rows are approved.** They are created once R3's batch is live on dev. The test rows carry the `FMSWP-019` prefix, and their ids are recorded so the owner can delete them.
+
+### 2026-11-02 — UAC-r2: a server create that files a project under a matter also writes the `sprk_Project_Matter_nn` link (new scope item, ours)
+
+- **Found by:** 019 live check B. Office quick-create project `1cccf07d-0e0a-43f9-8ea0-f40533d5d691` got its matter pair but no N:N link row. UAC-r2's census reported "1 project filed under a matter with no link row".
+- **Who writes the link today:** no BFF path writes it, now or before W2. Only the CreateMatter and CreateProject wizards do, through a client `$ref`.
+- **UAC-r2's ruling (task 195):**
+  - The pair is the only filing root. The N:N link grants nothing, and no server code reads it.
+  - The matter's Projects subgrid lists projects through the link, and the census counts "pair but no link" as drift.
+  - So a server path that files a project under a matter must also write the link. After W3 the server is its only writer.
+- **Ownership:**
+  - **Create path (ours):** `RecordCreationService` step 12, for `sprk_project` with a matter pair.
+  - **Re-file path (UAC-r2):** task 195's core, reached from the chat update tool, has the same gap. UAC-r2 fixes it.
+- **UAC-r2's rules** (they review our diff):
+  1. The link is written app-only, after the pair is written and the caller's AppendTo on the matter has passed.
+  2. It is idempotent: an existing link is not an error.
+  3. A failed link write logs a Warning and does not fail the create (still 201).
+  4. Only a matter pair gets a link.
+  5. On a re-file, the earlier matter's link stays (195 §2.3).
+  6. Tests: one link for a matter pair; none otherwise; a failed write still returns 201 and logs the Warning.
+- **Issue:** #2524 (filed by UAC-r2), covering both paths.
+- **Next on the scope path:** a design note (UAC-r2 has already reviewed it through these rules), then a spec amendment, task-create for task 043, TASK-INDEX, and owner approval.
+- **Project `1cccf07d`:** it gets its link from the backfill, or by hand after the fix. Its access needs no change.
+
+## 2026-11-03 — Task 019 closed (W2 gate passed); 042a closed
+
+- **Gate result:**
+  - two adversarial passes with no open F-class finding (#2514, #2520);
+  - live checks A, B and C pass;
+  - the negative check passes as `# UAC Child BU Test User`. The child-records 404 and the Office 403 `OFFICE_009` are byte-identical to a nonexistent parent; no row was created.
+- **Clauses moved to task 020:**
+  - check A's "mapped fields";
+  - the negative criterion's "denied mapping source → no mapped values + one warning". It cannot be reached live while every route's mapping source is also its filing parent; an explicit `mappingSource` arrives with 020. Unit tests cover it today.
+- **Deviation:** the deploy was R3's batched dev deploy (5796774091), not a bff-deploy run from this session (standing rule).
+- **Check C:** the owner supplied the name and parent when the Assistant asked. That is correct behaviour. Event `6d1563bb-…` stays (owner: do not delete).
+- **Chat tool description:** re-seeded on dev (row `18b3531f-…`) so the model knows that `sprk_eventnumber` is set by the server.
+- **042a:** done in #2521 (merged 2026-11-02T19:28Z); the index is now ✅.
+- **Next:** 041 and 042b, **in sequence, not in parallel** (TASK-INDEX: both edit `RecordCreationService*.cs`). 041 goes first because W3 waits on it. 020 depends only on 019 and may run beside 041. UAC-r2 reviews the 041 diff (scoped) and the 042b diff (full) before merge.
+
+## 2026-11-03 — Task 041: review and UAC-r2 verdict
+
+- **Opus adversarial review.** Over c58ea58faf. 0 High, and no authorization bypass, existence oracle or data-loss path. Two findings were F-class:
+  - F4: the bulk handler and the Office worker did not stamp the index. Fixed in round 1.
+  - F3: the MF7 test proved nothing. Fixed in round 1.
+  - K4 items 3–5 were also fixed in round 1.
+- **Scoped Sonnet re-check.** Over b087022071. All five findings fixed, and nothing F-class new. N1 (a scoped service held by the Office worker), N3 and N4 were fixed in round 2 (bdadc2a3b9). N2 (the Office worker's stamp has no harness) is a disclosed known limit.
+- **Filed.**
+  - DI-013 #2538: the backfill scripts.
+  - DI-014 #2539: the DeliverToIndex node reports an index it does not use.
+  - The P2-5 note in task-019 is corrected: a malformed client index is dropped but no longer logged (K4).
+- **UAC-r2 verdict (AC17).** "PASSES WITH NOTES; nothing blocks the PR."
+  - Only write-time routing was removed, and no retrieval trim or search-time selection moved.
+  - The drops are intact at all nine sites.
+  - The AC9 exceptions are as listed, and no drop, refusal or authorization assertion was weakened.
+  - NOTE 1: restore the document trigger-2 Repair test as owner-only. Done in round 3.
+  - NOTE 2: the removed `ResolveAsync` Verify in Issue1510 is correct, so no action.
+- **UAC-r2 on task 020 F-1.** No objection to refusing a caller-supplied `sprk_issecure` on a Matter create in the service with `sdap.access.secure_flag_transition_only`, exactly as for Project, with explicit false and null treated as the Project rule treats them. UAC-r2 sees the diff before merge.
+
+## 2026-11-03 — Task 020 secure-flag refusal: UAC-r2 verdict; 005 applied on dev
+
+- **UAC-r2 on 020 F-1/F-2** (3c4941bec5..2b6920e009): "OK WITH NOTES, merge when CI is green."
+  - F-1: a Matter create that names `sprk_issecure` is refused in the service (plan code, text and 403; true, false and null; every principal).
+  - F-2 is a real fix: `MappedItem.Columns` keeps null keys.
+  - Running the helper before `PlanCreateAsync` changes no answer and adds no existence signal.
+  - Note 1 (cosmetic): align the access-record refusal text with the plan's "…so the {noun} was not created". This goes into the 020 review fix round.
+  - Note 2: UAC-r2 will make `SecureRootFilingGate.CheckAsync` and `PlanCreateAsync` read named columns, nulls included, as its own follow-up. Those update writers feed `WritesOf(item)` (`DataverseUpdateRecordHandler:299`, `ProjectMatterFiling:256`). Nothing more is needed in 020.
+- **005 `-Apply` on dev**, with the owner's OK given in this session:
+  - 40 Copy rules, all created by the owner, the newest 2026-10-22;
+  - 36 migrated (20 empty, 16 One-time), 0 failed, VERIFY PASS;
+  - a second pass found 0 to migrate.
+  - Detail is in task-005-notes.
+
+## 2026-11-03 — 042b F1: a caller-sent stamp is replaced by the derived one in the owner question (owner: A')
+
+**Finding:** both 042b adversarial passes independently found the same F1 (the correctness pass confirmed it with a probe). Step 6½ is fill-only, so a caller-sent `sprk_regardingmatter` that disagrees with the intermediate's root is used for the owner decision. The step-12 restamp then overwrites it, which leaves the #2483 state for 2–4 minutes. This predates 042b.
+
+**UAC-r2 (2026-11-03):** A with one change, "replace, not add": step 7 asks over the values the row ends with. The derived value replaces a disagreeing held stamp, and an agreeing stamp is kept unchanged. "Add" gets the reverse case wrong (a sent secure matter would make its owner briefly own a row stamped with an ordinary root). B (a new 400) is not recommended. C is not acceptable.
+
+**Owner (2026-11-03, in this session): A' (replace).**
+- The bind stays fill-only.
+- The derived root is never probed as the caller, and no refusal changes.
+- `CoreAncestorRestamper.PlanMissingStampAsync` (or a sibling) returns the full plan. That is one file outside 042b's two-file scope, justified in the task notes.
+- AC12 is amended: a sent stamp that agrees changes nothing; one that disagrees is replaced in the owner question.
+- Repair gets the same fix (security finding 6).
+- Tests cover both directions plus the agreeing case.
+
+Also agreed with UAC-r2: Signal / Decision Record under a team-owned intermediate of a Secure root refuse 409 `NoOwnerSource` (fail closed). This is K1 and gets a §15.4 row. #2556 (DI-017) and #2557 (DI-018) are filed for the owner.
+
+## 2026-11-04 — 042c: a chat-created Signal or Decision Record with a Secure core is refused (owner)
+
+**Decision (owner, this session, 2026-11-04): Accept.** After 042c, chat can no longer create a Signal or Decision Record whose core record (`sprk_corerecordtype` + `sprk_corerecordid`) is Secure. The request is refused with 409 `NoOwnerSource`, using the same code, status and words as design §15.4 row 8. Before 042c, chat created the row team-owned with the ordinary owner, until the reconciler moved it to the Secure team.
+
+- **Unchanged:** `OwnerDecided` and the ontology writers (`SignalWriter`, `DecisionRecordWriter`).
+- **Ordering:** a caller without AppendTo on the core gets the uniform AppendTo refusal, never the 409, so the refusal does not reveal that the core is Secure.
+- **Approvals:** UAC-r2 OK'd the AC2 amendment with four conditions:
+  1. ordering, plus a faulted catalog read gives the existing 503;
+  2. the 409 is returned only when the caller holds AppendTo on the core;
+  3. the must-not-fire tests;
+  4. the parity of an ordinary core in Y with a subject in X.
+- **Release notes:** list this change.
+- **Rejected alternatives:**
+  - giving Signal and Decision Record a Secure owner at create, which would change the 042b rule;
+  - refusing all chat creates of these tables, which needs ontology-r1's agreement.
+
+## 2026-11-04 — Owner decisions after the 031 review and on half-written pairs (owner, this session)
+
+1. **031, playbook and event-type AppendTo:** exempt them in code. The route filter already authorises the lookup for this caller, so step 5 does not ask the caller for AppendTo on it. The scope is narrow (a request option; a filing or ownership-parent lookup is refused as an argument error), and UAC-r2 reviews it. Also: security roles must be aligned with the permissions each feature requires. This becomes task 046.
+2. **Document as a mapping source:** if the user can read the document and may create or update the analysis, the document's values map. This becomes task 043.
+3. **042c, a core type with no id: no refusal**, because a refused chat create is a dead end for the user. The server fills the id from the derived root, or clears the stray type, with a visible warning. A half core pair must never be written on any path. Task 044 covers the paths outside the server: field security plus a repair-pass backstop.
+4. **Regarding pair:** where a regarding is set, every related row that should carry the regarding value gets it. Make the opposite impossible. This becomes task 045: an inventory first, then the design for the owner.
+
+Numbering note (2026-11-04): the "task 043" planned on 2026-11-02 for the `sprk_Project_Matter_nn` link (#2524) was never written. 043 is now the Document mapping-source task. #2524 gets the next free number (047) when its POML is written.
+
+## 2026-11-04 — Signal, Decision Record and Budget Revision rows are created only by their writers (owner; ontology D-204)
+
+**Decision (owner, this session):** the general create path (`RecordCreationService` and the chat `dataverse.create_record` tool) refuses `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision` as whole tables, for the caller and for the system principal, before anything is written. Only the dedicated writers create these rows (`SignalWriter`, `DecisionRecordWriter`, the decision action executors); they do not use the general create and are unchanged. Chat keeps creating every other table.
+
+**Why:** these rows are append-only evidence with one server-side owner each (ontology D-204), and the writers keep the lineage columns that downstream readers rely on consistent. Ontology confirmed on master `7c7d24a3b7` that no BFF code creates these tables through `RecordCreationService`, and that ordinary roles hold no Create on them, so no first-party user flow changes.
+
+**Effect on 042c:** this replaces the fill-or-clear choice of 2026-11-04 (decision 3) for these tables: with the tables refused, step 6¾ is not reachable for them. 042c is reworked to the refusal; UAC-r2 and ontology review the diff. Task 044 is re-scoped to the writers' paths (no service create of the pair to keep working).
+
+## 2026-11-04 — The generic update tools do not change Signal, Decision Record or Budget Revision rows (owner; D-204 extended)
+
+**Decision (owner, this session):** chat's update-record tool, the playbook Update Record node and (subject to ontology's answer) playbook output mapping refuse to change `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision`. These rows are changed only by their own processes (the Signal lifecycle and evaluation, the decision commit, the budget revision executor), which are unchanged. Requested by ontology; UAC-r2 classifies it as an integrity rule. Read-only census on dev: none of the 93 configured playbook nodes targets these tables. Task 048.
+
+## 2026-11-05 — Chat delete honours D-204 (owner)
+
+**Decision (owner, this session):** the general delete path (chat `dataverse.delete_record`, and any other generic delete of a caller- or config-chosen table) refuses `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision`, reading the same `CreatedOnlyByItsWriter` flag. Admin privileges in the model-driven app are unchanged; person-role Delete privileges are task 046's question. Ontology and UAC-r2 agree. Added to task 048.
+
+## 2026-11-05 — NFR-02 exceeded on the server create path: speed up the server (owner)
+
+**Finding:** task 021's live timing (notes/task-021-live.md): the Create Matter create p95 rose by +2634 ms (budget +500 ms). Server medians: CallerChecks 983 ms (sequential AppendTo per bound record), PostCreate 1331 ms (the I-12 L1 assigned-access grant and the membership event inside the request), TableRules 302, Owner 261, FieldMapping 176, Create 136.
+
+**Decision (owner, this session):** speed up the server rather than raise the budget: run the per-record caller checks concurrently, and move the assigned-access grant (and membership event) out of the request so it completes within seconds after the record is returned. UAC-r2 reviews the grant timing. Then create the Project to Matter profile on dev (owner approved 2026-11-05) and re-measure. The 021 wizard deploy waits for that. Task 049.
+
+## 2026-11-05 — Role rulings on task 046's gaps (owner, given in UAC-r2's session)
+
+| Gap | Ruling |
+|---|---|
+| G1 Report Card | Spaarke Core User: Create, Append and AppendTo on `sprk_reportcard` at Deep (AppendTo also files a KPI assessment under a report card) |
+| G2 Event type | Spaarke Office Add In User: AppendTo on `sprk_eventtype_ref` Deep → Global |
+| G3 Office save to a contact (Basic User) | Not applied; Spaarke Basic User is unchanged. Office Add In User carries it (G4) |
+| G4 Office quick create with an assignee | Spaarke Office Add In User: AppendTo on `contact` Basic → Deep |
+| G5 Procedure override | Spaarke Billing Administrator: Read on `sprk_procedure` at Deep (already on dev; the file aligns) |
+| G6 Office version save | Spaarke **Office Add In User**: Write on `sprk_document` at Deep |
+| G7 / G8 Event regarding an account / a budget | Spaarke Office Add In User: AppendTo on `account` and on `sprk_budget` at Deep |
+| Office To Do; the Console Do lane | Stay Core-only |
+| New Billing Event (no role creates it) | Not decided here; passed to ebilling as a ribbon question |
+
+**Role model (owner):** add-on roles are **standalone**: an add-on may be held without a base role, so each add-on must meet its own features alone. Task 046b extends the matrix and guard to check each add-on alone, and sends the resulting gap list to UAC-r2 for one owner decision before any of it is applied.
+
+**Writer-only tables at role level:** no person role holds Create, Write or Delete on `sprk_signal`, `sprk_decisionrecord` or `sprk_budgetrevision`, except Spaarke Ontology Administrator, the designated cleanup role (ontology D-160). Task 046b's guard pins that rule.
+
+**How it is applied:** task 046b builds the role-file changes and an apply script (`-WhatIf`, `-Apply`, `-Verify`; edits the root role through the Web API and reads back every business-unit copy). UAC-r2 reviews it and runs `-Apply` on dev in its session under the owner's go.
+
+## 2026-11-05 — Standalone add-on rulings, two role removals, and secure-from-creation wizard projects (owner, given in UAC-r2's session; UAC-r2 decisions.md 51793949a0)
+
+- **Not standalone, by ruling:** Office Add In User and AI Analysis User are not standalone; neither is meant to be held alone, so no gap is opened for either alone (G9 dropped). Console User needs Core User. The guard and §5.1 record each as a ruled exception with that reason.
+- **Two removals (task 046b):** Ontology Administrator loses Create on `sprk_budgetrevision` and keeps Write and Delete. Basic User loses AppendTo on `sprk_reportcard`, provided no §5.1 feature needs it on Basic User. The apply script gets an explicit removal step with the same fail-closed reads and read-back of every business-unit copy. UAC-r2 applies it on dev.
+- **Secure from creation (task 049):** a project the wizard creates as secure is secure from creation. The wizard's create declares the intent in one optional field, validated on the server. RecordCreationService handles it like an isolated create, and provisioning does only what is left.
+- **049 backstop:** the record-busy answer on `/no-access/enforce` and `/assigned-access/sync` stays a 500 ProblemDetails with a message and trace id. The restricted-root and ledger-root scans take the ordered read and the recent-change window, like the first scan. Removals by the reconciliation job stay report-only until UAC-r2's gate G-8 (#2574).
+
+## 2026-11-06 — Removal R2 is not applied (under the 2026-11-05 ruling's own condition)
+
+Basic User keeps AppendTo on `sprk_reportcard`. The ruling removed it only if no §5.1 feature needed it on Basic User. Communication send, reply and re-file ask that privilege as the caller when a report card is a regarding record (`CommunicationRecordAuthorizationFilter`), so the condition fails. Task 046b adds matrix rows for those routes. Removal R1 (Ontology Administrator loses Create on `sprk_budgetrevision`) proceeds. Recorded by fm and UAC-r2; the owner was informed through UAC-r2.
+
+## 2026-11-06 — Communication send, reply and re-file need Core User (owner, in fm's session)
+
+Basic User is not raised for communication send, reply or re-file (task 046b gaps G11 and G12). These features need Core User, like the other add-on rulings of 2026-11-05. A caller who holds Basic User only is refused the way each route already refuses: a 403 ProblemDetails, or the uniform 404 where the route does not reveal the target (re-file). The gaps stay in the guard's baseline, marked "owner ruled: not granted", so any change to them is a deliberate one. Removal R1 was applied on dev on 2026-11-06 (UAC-r2, from `e6c0c94fa3`).
+
+## 2026-11-06 — Basic User is read-only on Spaarke tables (owner, in fm's session)
+
+On every Spaarke table (`sprk_*`), Spaarke Basic User holds Read only. Creating, updating, deleting, filing, assigning or sharing Spaarke records needs Core User. Platform privileges that Dataverse needs for any user are not affected. Task 046c applies the rule: the role file, a removal through the reviewed `-Remove` step (run by UAC-r2 under the owner's go), and a guard.
+
+## 2026-11-06 — Core User reads communication threads at Deep (owner, in fm's session)
+
+Sending into a communication thread asks Read on `sprk_communicationthread` as the caller, and that table is user-owned. Core User gets that Read at Deep, so a Core user can reply into threads across their business-unit tree, like Core User's other reads (task 046b gap G13). For Basic User the gap stays "owner ruled: not granted" under the read-only ruling. UAC-r2 applies it through the reviewed add step.
+
+## 2026-11-06 — G13 grant withdrawn (supersedes "Core User reads communication threads at Deep")
+
+The ruling above rested on a wrong premise. Core User is not raised. Direct threads are private by ownership and explicit shares, so the depth of Read on `sprk_communicationthread` is part of their privacy rule and stays Basic. Record threads are owned by the owner of the record they are filed to, normally a team, and a member reads them at Basic. Task 046b sets the send/reply row to match. G13 stays open only if a record thread can remain owned by its creator. The owner was told in fm's session.
+
+## 2026-11-06 — G13 is not a gap (closes "G13 grant withdrawn")
+
+The send/reply thread read needs Basic. Record threads are owned by their record's team at creation (`ThreadResolver`), and a member reads them at Basic. Threads anchored to a party, and Direct threads, are read through ownership and shares, by the privacy rule. Core User and Basic User both hold Basic, so no role changes. Task 046b, `5d079d1508`.

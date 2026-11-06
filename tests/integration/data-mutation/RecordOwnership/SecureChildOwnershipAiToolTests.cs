@@ -723,6 +723,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["team"] = "teams", ["businessunit"] = "businessunits",
             // #2084 round 2: a Signal and the rule it cites.
             ["sprk_signal"] = "sprk_signals", ["sprk_policy"] = "sprk_policies",
+            // Task 042c fix round 4: a Create Budget decision binds the budget's currency.
+            ["transactioncurrency"] = "transactioncurrencies",
+            // The core record pair is fixed after create on BFF update paths: a Decision Record is driven through the chat update.
+            ["sprk_decisionrecord"] = "sprk_decisionrecords",
             // #2110: a communication's thread.
             ["sprk_communicationthread"] = "sprk_communicationthreads",
             // Field mapping task 017 (item 8): an invoice-family table filed by the regarding trio.
@@ -735,6 +739,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["account"] = "accounts",
             // Task 039 (FR-38): the AI search index catalog the six search-indexed tables look up.
             ["sprk_aisearchindex"] = "sprk_aisearchindexes",
+            // Task 031 (FR-19): the typed analysis route's playbook lookup target.
+            ["sprk_analysisplaybook"] = "sprk_analysisplaybooks",
+            // Task 031 fix round 1 (F3): the typed event route's event-type lookup target (user-owned live: Deep Read grants).
+            ["sprk_eventtype_ref"] = "sprk_eventtype_refs",
         };
 
         /// <summary>
@@ -742,7 +750,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// 2026-10-07: the ADR-024 record-type catalog and the matter-type / practice-area reference tables. Dataverse
         /// refuses RetrievePrincipalAccess on these (400 0x80040800); appending to one costs the table's AppendTo PRIVILEGE.
         /// </summary>
-        private static readonly HashSet<string> OrganizationOwned = new() { "sprk_mattertype_ref", "sprk_recordtype_ref", "sprk_practicearea_ref" };
+        private static readonly HashSet<string> OrganizationOwned = new() { "sprk_mattertype_ref", "sprk_recordtype_ref", "sprk_practicearea_ref", "transactioncurrency" };
 
         /// <summary>
         /// Ontology task 126 (#1399): the tables whose metadata declares BUSINESS ownership — live, spaarkedev1 2026-10-08 and
@@ -782,6 +790,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 // Owner decision 2026-10-29: a To Do filed under a work assignment (live navigation property, as TodoRegardingUpdateBuilder binds it).
                 ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                // Field mapping task 042b (change 1): a To Do filed under a report card (live navigation property, TodoRegardingUpdateBuilder).
+                ("sprk_regardingreportcard", "sprk_reportcard", "sprk_RegardingReportCard"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("ownerid", "systemuser", "ownerid"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"), // task 146 c1-r1 schema step
@@ -868,6 +878,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 // Ontology task 126: a caller-chosen systemuser lookup (live navigation property, spaarkedev1 2026-10-16).
                 ("sprk_reviewerby", "systemuser", "sprk_ReviewerBy"),
+                // Field mapping task 042b fix round 1: the analysis's invoice filing (CoreAncestorResolver.StampSourceColumns),
+                // for WriterBuilderOwnershipParityTests' caller-principal cases.
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                // Field mapping task 031: the typed analysis route's anchor and playbook (live navigation properties).
+                ("sprk_documentid", "sprk_document", "sprk_DocumentId"),
+                ("sprk_playbook", "sprk_analysisplaybook", "sprk_Playbook"),
             },
             // Task 147 r1c (E2, the live inventory of every main form; read-only metadata, spaarkedev1, 2026-10-04): the
             // KPI assessment's and the billing event's lookups. The billing event's matter navigation property is
@@ -911,6 +927,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+                // Field mapping task 042b fix round 1: the memo's invoice filing (CoreAncestorResolver.StampSourceColumns), for
+                // WriterBuilderOwnershipParityTests' caller-principal cases (live navigation-property casing: the schema name).
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
             },
             ["sprk_event"] = new[]
             {
@@ -924,6 +943,15 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 017 (Phase 2d-1): an event filed under another event, an intermediate, so its I-1 stamp
                 // is derived (live navigation property: Spaarke.Dataverse.Models GetEventNavigationProperty).
                 ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
+                // Field mapping task 031: the typed event route's analysis regarding and event type (live navigation properties:
+                // Spaarke.Dataverse.Models GetEventNavigationProperty, DataverseWebApiService.BuildCreateEventPayload).
+                ("sprk_regardinganalysis", "sprk_analysis", "sprk_RegardingAnalysis"),
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_regardingbudget", "sprk_budget", "sprk_RegardingBudget"),
+                ("sprk_regardingaccount", "account", "sprk_RegardingAccount"),
+                ("sprk_regardingcontact", "contact", "sprk_RegardingContact"),
+                ("sprk_eventtype_ref", "sprk_eventtype_ref", "sprk_EventType_Ref"),
             },
             // #2084 round 2: a Signal's core matter (sprk_signal.sprk_matter) and the rule it CITES (sprk_signal.sprk_policy).
             ["sprk_signal"] = new[]
@@ -936,6 +964,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
+                // Task 042c fix round 4: the currency a Create Budget decision binds (CreateBudgetExecutor.ExtendColumnsAsync).
+                ("transactioncurrencyid", "transactioncurrency", "transactioncurrencyid"),
             },
         };
 
@@ -952,9 +982,25 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             "prvCreatesprk_kpiassessment", "prvAppendsprk_kpiassessment", "prvCreatesprk_billingevent", "prvAppendsprk_billingevent",
             // The organization-owned reference tables' AppendTo privileges (what a lookup onto one of their rows costs).
             "prvAppendTosprk_recordtype_ref", "prvAppendTosprk_mattertype_ref", "prvAppendTosprk_practicearea_ref",
+            "prvAppendTotransactioncurrency", // task 042c fix round 4: a Create Budget decision's currency
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();
+
+        /// <summary>
+        /// Task 031 fix round 1 (F3): the caller's rights on EVERY row of a configuration table the typed routes bind, by entity
+        /// set, as the SHIPPED roles grant them (<c>src/dataverse/solutions/SpaarkeMaster/Roles</c>), so a missing AppendTo is
+        /// not hidden by a default of "every right on every record". <c>sprk_analysisplaybook</c>: Spaarke Core, Basic and AI
+        /// Analysis User hold <c>prvReadsprk_analysisplaybook</c> (Global) and no AppendTo — only AI Analysis Admin does. The
+        /// other configuration targets these routes send keep full rights because the fixture's caller is a Core User: Core
+        /// holds <c>prvAppendTosprk_EventType_Ref</c> (Global; Basic does not — the review's K1, pinned in
+        /// <c>TypedRouteCreateInvariantsTests</c> by setting it here) and <c>prvAppendTosprk_RecordType_Ref</c> (organization
+        /// owned: asked by privilege, <see cref="Held"/>). A test that needs another role sets its table here.
+        /// </summary>
+        public Dictionary<string, string> TableRights { get; } = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_analysisplaybooks"] = "ReadAccess",
+        };
 
         /// <summary>Ontology task 126: the business unit a grant is anchored at unless <see cref="Anchors"/> or
         /// <see cref="Grants"/> say otherwise — the caller's own (a role assigned to them; the fixture's caller sits in the
@@ -1042,6 +1088,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         public Func<string, DataverseUserResponse?>? GetOverride { get; set; }
 
         public int PatchStatus { get; set; } = 204;
+
+        /// <summary>The message a refused PATCH (<see cref="PatchStatus"/> 400 and above) carries; set it to Dataverse's own text to script the real refusal.</summary>
+        public string PatchRefusalMessage { get; set; } = "Denied.";
 
         /// <summary>The status the caller's POST answers with; 400 and above is a refusal (nothing is created).</summary>
         public int PostStatus { get; set; } = 201;
@@ -1178,7 +1227,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                     return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Does not exist.");
                 var rights = NoAppendTo.Contains(id) || NoAppendToIn.Contains((targetSet, id))
                     ? "ReadAccess,WriteAccess"
-                    : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
+                    : TableRights.TryGetValue(targetSet, out var shipped)
+                        ? shipped
+                        : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
                 return Ok(new { AccessRights = FullAccessOn.Contains(id) ? rights + ",DeleteAccess" : rights });
             }
 
@@ -1360,7 +1411,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             if (MissingRow(Uri.UnescapeDataString(relativePath)) is { } absent)
                 return Task.FromResult(absent);
             if (PatchStatus >= 400)
-                return Task.FromResult(DataverseUserResponse.Fail(PatchStatus, DataverseUserClientErrorCodes.AccessDenied, "Denied."));
+                return Task.FromResult(DataverseUserResponse.Fail(PatchStatus, DataverseUserClientErrorCodes.AccessDenied, PatchRefusalMessage));
             if (RefuseUndeclared(relativePath, jsonBody) is { } refused)
                 return Task.FromResult(refused);
             if (RefuseSecuredColumn(jsonBody) is { } secured)

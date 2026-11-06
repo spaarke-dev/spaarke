@@ -76,6 +76,7 @@
     <RolePrivilege name="prvAppendsprk_notificationoutbox" level="Deep" />
     <RolePrivilege name="prvAppendsprk_Project" level="Deep" />
     <RolePrivilege name="prvAppendsprk_Report" level="Deep" />
+    <RolePrivilege name="prvAppendsprk_ReportCard" level="Deep" />
     <RolePrivilege name="prvAppendsprk_ServiceRequest" level="Deep" />
     <RolePrivilege name="prvAppendsprk_Todo" level="Deep" />
     <RolePrivilege name="prvAppendsprk_WorkAssignment" level="Deep" />
@@ -156,6 +157,7 @@
     <RolePrivilege name="prvAppendTosprk_ProjectType_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_RecordType_Ref" level="Global" />
     <RolePrivilege name="prvAppendTosprk_Report" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_ReportCard" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_ServiceRequest" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Todo" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_WorkAssignment" level="Deep" />
@@ -297,6 +299,7 @@
     <RolePrivilege name="prvCreatesprk_notificationoutbox" level="Deep" />
     <RolePrivilege name="prvCreatesprk_Project" level="Deep" />
     <RolePrivilege name="prvCreatesprk_Report" level="Deep" />
+    <RolePrivilege name="prvCreatesprk_ReportCard" level="Deep" />
     <RolePrivilege name="prvCreatesprk_ServiceRequest" level="Deep" />
     <RolePrivilege name="prvCreatesprk_Todo" level="Deep" />
     <RolePrivilege name="prvCreatesprk_WorkAssignment" level="Deep" />

@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using System.Web;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -8,6 +9,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -16,6 +18,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.RecordCreation;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -148,10 +151,23 @@ public static class AnalysisEndpoints
     /// Create a new analysis record and associate N:N scope items.
     /// POST /api/ai/analysis/create
     /// </summary>
-    private static async Task<IResult> CreateAnalysis(
+    /// <remarks>
+    /// <para>Field-mapping-server-write-path-r1 task 031 (FR-19): the row create is the ONE server create,
+    /// <see cref="RecordCreationService"/>, as the caller. The route filter (<c>AddAnalysisCreateAuthorizationFilter</c>:
+    /// the Create privilege, Read + AppendTo on the document, the playbook-use decision, Read on each scope row) is
+    /// unchanged and runs first (ADR-008); the payload-dependent checks, the record-first owner (the document's team — the
+    /// named Secure team for a document of a secure record), the I-1 stamp and I-16 Access Permission, the creator person
+    /// and field mapping (when the table's profile applies) run in the service (path A).</para>
+    /// <para>The N:N scope association is not a create-time column and stays here, after a SUCCESSFUL create only
+    /// (NFR-01). Refusals keep their status and words (NFR-07): the owner refusal is the 409 it was
+    /// (<see cref="AnalysisOwnerRefusal"/>); any other refusal is a kind this route never gave before and fails closed to
+    /// the route's existing generic 500, with the service's kind and code in the log only.</para>
+    /// </remarks>
+    internal static async Task<IResult> CreateAnalysis(
         CreateAnalysisRequest request,
+        [FromServices] RecordCreationService recordCreation,
+        [FromServices] IDataverseUserClient user,
         IAnalysisDataverseService dataverseService,
-        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<AnalysisOrchestrationService> logger,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -163,50 +179,88 @@ public static class AnalysisEndpoints
             return invalid;
         }
 
+        // An omitted skillIds, knowledgeIds or toolIds binds as null: it means "none", as the filter already reads it.
+        var skillIds = request.SkillIds ?? [];
+        var knowledgeIds = request.KnowledgeIds ?? [];
+        var toolIds = request.ToolIds ?? [];
+
         logger.LogInformation(
             "Creating analysis '{Name}' for document {DocumentId} with {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
             request.Name, request.DocumentId,
-            request.SkillIds.Length, request.KnowledgeIds.Length, request.ToolIds.Length);
+            skillIds.Length, knowledgeIds.Length, toolIds.Length);
 
         try
         {
-            // Task 146: the analysis is a child of its document — owned by the document's team (the named Secure team
-            // for a document of a secure record). A refusal creates nothing and is a 409 with a stable reason code.
-            var owner = await ownership.ResolveOwnerAsync(
-                Sprk.Bff.Api.Services.Ai.AppOnlyAnalysisService.OwnershipOfNewAnalysis(request.DocumentId)
-                    with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
+            // Step 1: Create the sprk_analysis record (the ONE server create; the analysis is a child of its document).
+            var outcome = await recordCreation.CreateAsync(
+                new RecordCreationRequest(
+                    AnalysisTable,
+                    new RecordCreationPayload.WebApi(
+                        JsonSerializer.SerializeToElement(BuildCreatePayload(request))))
+                {
+                    CorrelationId = httpContext.TraceIdentifier,
+                    // FR-19 / FR-03: the mapping profile of the document the analysis is filed under, if one exists; read as
+                    // the caller first (FR-04). No profile: a silent no-op. Fill-only: every value of the request wins.
+                    // Task 043 (owner 2026-11-04): a Document to Analysis profile maps when the caller can read the document. The
+                    // service asks the caller's Read on it; the external document narrowing is the route filter's decision on the
+                    // body document, reused here (MappingDocumentDecisionOf), so it is not asked twice.
+                    Mapping = Sprk.Bff.Api.Api.Events.EventEndpoints.CallerMappingOf(
+                        httpContext, logger, MappingDocumentDecisionOf(httpContext)),
+                    // Task 031 fix round 1 (F1, owner 2026-11-04; UAC-r2 2026-11-04): the route filter's playbook-use decision
+                    // (public, or the caller's Read on the row) authorised ONE playbook id, so the service asks no AppendTo on
+                    // that record (only Spaarke AI Analysis Admin holds it). The id is the filter's, not the body's: the service
+                    // exempts the payload's playbook only when it is that record. Set only when the filter recorded a decision.
+                    RouteAuthorizedLookups =
+                        Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizedPlaybookId(httpContext) is { } authorisedPlaybook
+                            ? new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase) { [PlaybookColumn] = authorisedPlaybook }
+                            : null,
+                },
+                RecordCreationPrincipal.ForCaller(
+                    user,
+                    Guid.TryParse(CallerResolution.ResolveObjectId(httpContext.User), out var oid) && oid != Guid.Empty ? oid : null),
                 cancellationToken);
-            if (!owner.IsOwned)
+
+            if (outcome.Refusal is { } refusal)
             {
+                // Task 146: a refusal creates nothing; no owner is a 409 with a stable reason code.
                 logger.LogWarning(
-                    "Refused analysis create for document {DocumentId}: {Code} {Reason}",
-                    request.DocumentId, owner.RefusalCode, owner.Reason);
-                return AnalysisOwnerRefusal(owner);
+                    "Refused analysis create for document {DocumentId}: {Kind} {Code} (correlationId={CorrelationId})",
+                    request.DocumentId, refusal.Kind, refusal.Code, outcome.CorrelationId);
+                return refusal switch
+                {
+                    { Kind: RecordCreationRefusalKind.OwnerUnresolved, OwnerDecision: { } decision } => AnalysisOwnerRefusal(decision),
+                    { Kind: RecordCreationRefusalKind.OwnerUnresolved } =>
+                        Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(refusal.Code, refusal.Detail, "analysis"),
+                    _ => CreateAnalysisFailure(),
+                };
             }
 
-            // Step 1: Create the sprk_analysis record
-            var analysisId = await dataverseService.CreateAnalysisAsync(
-                request.DocumentId,
-                request.Name,
-                playbookId: request.PlaybookId,
-                owningTeamId: owner.OwningTeamId,
-                createdByPersonId: owner.CreatedByPerson, // task 146 c1-r1 — the caller, recorded on the app-only create
-                ct: cancellationToken);
+            if (outcome.CreatedId is not { } analysisId)
+            {
+                // Neither a row nor a refusal: never a 201 (fail closed, NFR-01).
+                logger.LogError("Analysis create ended without a decision (correlationId={CorrelationId})", outcome.CorrelationId);
+                return CreateAnalysisFailure();
+            }
 
             // Step 2: Associate N:N scope items (skills, knowledge, tools)
-            if (request.SkillIds.Length > 0 || request.KnowledgeIds.Length > 0 || request.ToolIds.Length > 0)
+            if (skillIds.Length > 0 || knowledgeIds.Length > 0 || toolIds.Length > 0)
             {
                 await dataverseService.AssociateScopesAsync(
                     analysisId,
-                    request.SkillIds,
-                    request.KnowledgeIds,
-                    request.ToolIds,
+                    skillIds,
+                    knowledgeIds,
+                    toolIds,
                     cancellationToken);
             }
 
             logger.LogInformation("Created analysis {AnalysisId} for document {DocumentId}", analysisId, request.DocumentId);
 
-            return Results.Created($"/api/ai/analysis/{analysisId}", new CreateAnalysisResponse(analysisId));
+            // Task 043: the create's warnings (for example, a mapping source the caller cannot read) go back to the caller,
+            // as on the child-record create; none, no member.
+            return Results.Created($"/api/ai/analysis/{analysisId}", new CreateAnalysisResponse(analysisId)
+            {
+                Warnings = outcome.Warnings.Count == 0 ? null : outcome.Warnings,
+            });
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("scope item"))
         {
@@ -221,12 +275,62 @@ public static class AnalysisEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to create analysis for document {DocumentId}", request.DocumentId);
-            return Results.Problem(
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Internal Server Error",
-                detail: "Failed to create analysis record.",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+            return CreateAnalysisFailure();
         }
+    }
+
+    /// <summary>
+    /// Task 043: the external document narrowing's answer for the analysis create's field mapping: the document the route
+    /// filter's Document check allowed for this caller (<see cref="Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizedDocumentId"/>)
+    /// is shown, and any other document is not. <c>null</c> when the filter recorded none, so a document source maps nothing.
+    /// </summary>
+    internal static Func<Guid, CancellationToken, Task<bool>>? MappingDocumentDecisionOf(HttpContext httpContext) =>
+        Sprk.Bff.Api.Api.Filters.AnalysisAuthorizationFilter.AuthorizedDocumentId(httpContext) is { } allowed
+            ? (documentId, _) => Task.FromResult(documentId == allowed)
+            : null;
+
+    /// <summary>The route's existing generic failure for a create that did not complete (NFR-07).</summary>
+    private static IResult CreateAnalysisFailure() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: "Internal Server Error",
+            detail: "Failed to create analysis record.",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+
+    /// <summary>The <c>sprk_analysis</c> table.</summary>
+    internal const string AnalysisTable = "sprk_analysis";
+
+    /// <summary><c>sprk_analysis.sprk_playbook</c>: the playbook that produced the analysis (a lookup to sprk_analysisplaybook).</summary>
+    internal const string PlaybookColumn = "sprk_playbook";
+
+    /// <summary>
+    /// The Web API payload of the new analysis, in column logical names (what <c>CreateAnalysisAsync</c> wrote, minus the
+    /// owner and the creator person, which the service owns): the name, Active (statuscode 1), the document it is anchored
+    /// to and the playbook when one was named.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildCreatePayload(CreateAnalysisRequest request)
+    {
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["sprk_name"] = request.Name,
+            ["statuscode"] = 1, // Active
+            ["sprk_documentid"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["relatedTable"] = "sprk_document",
+                ["recordId"] = request.DocumentId.ToString("D"),
+            },
+        };
+
+        if (request.PlaybookId is { } playbookId)
+        {
+            payload[PlaybookColumn] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["relatedTable"] = "sprk_analysisplaybook",
+                ["recordId"] = playbookId.ToString("D"),
+            };
+        }
+
+        return payload;
     }
 
     /// <summary>
@@ -994,7 +1098,6 @@ public static class AnalysisEndpoints
             ContentType: null,
             DocumentId: documentId.ToString(),
             ParentEntity: parentEntity,
-            SearchIndexName: null,
             Source: "LinearDocumentProfile",
             CorrelationId: httpContext.TraceIdentifier);
 

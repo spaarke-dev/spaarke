@@ -500,13 +500,17 @@ public static class InviteExternalUserEndpoint
     /// <summary>
     /// The 409 ProblemDetails for a refused invite (both <c>/invite</c> and <c>/invite-and-grant</c>). C5: titled by reason
     /// code, as the grant core titles its refusals: a person whose external access an administrator removed is "External
-    /// access removed", never an identity collision; every other refusal keeps "Identity collision".
+    /// access removed", never an identity collision; a contact that already signs in with its organization's work account
+    /// (WorkforceHome plane) is "Already signs in with a work account", also not a collision; every other refusal keeps
+    /// "Identity collision".
     /// </summary>
     internal static IResult RefusalResult(InviteRefusal refusal, HttpContext httpContext)
         => Results.Problem(
             statusCode: StatusCodes.Status409Conflict,
             title: refusal.ReasonCode == ContactBindingDecision.InviteContactRemovedAdminReinstate
                 ? "External access removed"
+                : refusal.ReasonCode == ContactBindingDecision.InviteWorkforceHomeContact
+                ? "Already signs in with a work account"
                 : "Identity collision",
             detail: refusal.Message,
             extensions: new Dictionary<string, object?>

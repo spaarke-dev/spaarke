@@ -184,11 +184,29 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (string.IsNullOrWhiteSpace(context.TenantId))
             return ToolValidationResult.Failure("TenantId is required.");
 
-        if (!TryParseArgs(context.ToolArgumentsJson, out _, out _, out _, out var error))
+        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out _, out var error))
             return ToolValidationResult.Failure(error!);
+
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers. Refused here too, as the create tool refuses them, so the gate shows the refusal and
+        // never a confirm dialog; ExecuteChatAsync asks again.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(tablename) is not null)
+            return ToolValidationResult.Failure(ChangedOnlyByItsWriterChatMessage(tablename));
 
         return ToolValidationResult.Success();
     }
+
+    /// <summary>The chat tool's wording of <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/> (model-facing, as the create
+    /// tool's <c>CreatedOnlyByItsWriterCreateBlockedMessage</c>); every other path answers with
+    /// <see cref="RecordTableRules.ChangedOnlyByItsWriterMessage"/>, a plain sentence.</summary>
+    internal static string ChangedOnlyByItsWriterChatMessage(string tablename) =>
+        ChatMessageFor(RecordTableRules.Find(tablename)?.Table ?? tablename);
+
+    private static string ChatMessageFor(string tablename) =>
+        $"'{tablename}' records can't be changed from chat — this update was REJECTED and nothing was written. They are changed " +
+        "only by Spaarke itself: a signal by its evaluation and its lifecycle, a decision record or a budget revision when a " +
+        $"decision is committed. Do NOT retry this update — {tablename} is blocked on every general update unconditionally and no " +
+        $"argument change makes it valid; work from the signal or its decision instead ({RecordTableRules.ChangedOnlyByItsWriterReasonCode}).";
 
     /// <inheritdoc />
     public async Task<ToolResult> ExecuteChatAsync(
@@ -202,6 +220,26 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out var recordId, out var item, out var parseError))
         {
             return Error(tool, parseError!, ToolErrorCodes.ValidationFailed, startedAt);
+        }
+
+        // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths
+        // (RecordTableRule.FixedAfterCreateColumns): an item of a Signal or a Decision Record that names either column is refused
+        // whole, on its shape alone, before any read, re-file, index step or write. Nothing is written.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(tablename, item.EnumerateObject().Select(p => p.Name)) is { } fixedRefusal)
+        {
+            return LogOutcome(context, tablename, recordId,
+                Error(tool, $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).",
+                    fixedRefusal.RefusalCode!, startedAt),
+                stopwatch);
+        }
+
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter, the list the create tool refuses). Refused whole,
+        // for any item and record, before any read, re-file, index step or write; ValidateChat already refuses it. Nothing is written.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(tablename) is { } writerOnly)
+        {
+            return LogOutcome(context, tablename, recordId,
+                Error(tool, ChangedOnlyByItsWriterChatMessage(tablename), writerOnly.RefusalCode!, startedAt), stopwatch);
         }
 
         try

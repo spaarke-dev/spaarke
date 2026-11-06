@@ -95,7 +95,7 @@ BEFORE writing any code:
 | Caching | `.claude/constraints/data.md` | `.claude/patterns/caching/` | ADR-009 |
 | AI Features | `.claude/constraints/ai.md` | `.claude/patterns/ai/` | ADR-013, 014, 015, 016 |
 | Background Jobs | `.claude/constraints/jobs.md` | — | ADR-052, 004, 036, 017 |
-| Testing | `.claude/constraints/testing.md` | `.claude/patterns/testing/` | ADR-022 |
+| Testing | `.claude/constraints/testing.md` | `.claude/patterns/testing/` | ADR-038 (`docs/adr/ADR-038-testing-strategy.md`) |
 
 ### Rule 3: ADR Constraint Comments
 

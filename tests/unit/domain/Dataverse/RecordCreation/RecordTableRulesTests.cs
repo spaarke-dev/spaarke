@@ -292,6 +292,23 @@ public class RecordTableRulesTests
     }
 
     [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    [InlineData("sprk_budgetrevision")]
+    public void CreatedOnlyByItsWriter_OntologyWriterTables_AreFlagged(string table)
+    {
+        // Task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): created only by their writers; the service refuses them.
+        RecordTableRules.Get(table).CreatedOnlyByItsWriter.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CreatedOnlyByItsWriter_IsTheThreeOntologyWriterTablesOnly()
+    {
+        RecordTableRules.All.Where(r => r.CreatedOnlyByItsWriter).Select(r => r.Table)
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision");
+    }
+
+    [Theory]
     [InlineData("task")]
     [InlineData("contact")]
     [InlineData("account")]
@@ -658,4 +675,59 @@ public class RecordTableRulesTests
         RecordTableRules.CopiedDefaultsFor(RecordTableRules.Find(table), Row([ContactIn("sprk_assignedtointernal", Internal)]))
             .Should().BeEmpty();
     }
+
+    // ── The core record pair is fixed after create on BFF update paths (update only) ─────────────────────────────────
+
+    [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    public void FixedAfterCreateColumns_ASignalAndADecisionRecord_HoldTheCoreRecordPair_AndNotTheCreateRefusal(string table)
+    {
+        var rule = RecordTableRules.Get(table);
+        rule.FixedAfterCreateColumns.Should().BeEquivalentTo("sprk_corerecordtype", "sprk_corerecordid");
+        rule.TableServerOwnedColumns.Should().NotContain(rule.FixedAfterCreateColumns, "the create still takes the pair");
+    }
+
+    [Theory]
+    [InlineData("sprk_signal", "sprk_corerecordid")]
+    [InlineData("sprk_signal", "sprk_corerecordtype")]
+    [InlineData(" SPRK_Signal ", "SPRK_CoreRecordId")]
+    [InlineData("sprk_decisionrecord", "sprk_CoreRecordType@odata.bind")]
+    [InlineData("sprk_decisionrecord", "_sprk_corerecordtype_value")]
+    [InlineData("sprk_decisionrecord", " Sprk_CoreRecordId ")]
+    public void RefuseFixedAfterCreateColumns_ACorePairKeyInAnyForm_IsRefused(string table, string key)
+    {
+        var refusal = RecordTableRules.RefuseFixedAfterCreateColumns(table, ["sprk_name", key]);
+
+        refusal.Should().NotBeNull();
+        refusal!.RefusalCode.Should().Be(RecordTableRules.FixedAfterCreateReasonCode);
+        refusal.Reason.Should().EndWith("cannot be changed").And.NotContain("not written");
+    }
+
+    [Theory]
+    [InlineData("sprk_signal", "sprk_corerecordtype @odata.bind")]
+    [InlineData("sprk_decisionrecord", "Sprk_CoreRecordType  @odata.bind")]
+    public void RefuseFixedAfterCreateColumns_ABindKeyWithASpaceBeforeTheAt_NamesItsColumn(string table, string key)
+    {
+        var refusal = RecordTableRules.RefuseFixedAfterCreateColumns(table, [key]);
+
+        refusal.Should().NotBeNull();
+        refusal!.RefusalCode.Should().Be(RecordTableRules.FixedAfterCreateReasonCode);
+        refusal.Reason.Should().StartWith("sprk_corerecordtype of a ");
+    }
+
+    [Theory]
+    [InlineData("sprk_signal", "sprk_name")]
+    [InlineData("sprk_decisionrecord", "sprk_regardingrecordid")]
+    [InlineData("sprk_todo", "sprk_corerecordid")]
+    [InlineData("sprk_matter", "sprk_corerecordtype")]
+    [InlineData("not_registered", "sprk_corerecordid")]
+    [InlineData(null, "sprk_corerecordid")]
+    public void RefuseFixedAfterCreateColumns_AnotherColumn_OrAnotherTable_IsNotRefused(string? table, string key) =>
+        RecordTableRules.RefuseFixedAfterCreateColumns(table, [key]).Should().BeNull();
+
+    [Fact]
+    public void FixedAfterCreateColumns_NoOtherTable_DeclaresAny() =>
+        RecordTableRules.All.Where(r => r.FixedAfterCreateColumns.Count > 0).Select(r => r.Table)
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord");
 }

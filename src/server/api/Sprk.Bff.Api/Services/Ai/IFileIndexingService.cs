@@ -145,21 +145,8 @@ public sealed record FileIndexRequest
     /// </remarks>
     public ParentEntityContext? ParentEntity { get; init; }
 
-    /// <summary>
-    /// multi-container-multi-index-r1 indexer-routing-fix (FR-BFF-07 / FR-PCF-02 / NFR-02) — optional
-    /// explicit Azure AI Search index name to target for this indexing operation. When provided
-    /// (non-null / non-whitespace), the BFF write boundary
-    /// <see cref="IRagService.IndexDocumentsBatchAsync(IEnumerable{KnowledgeDocument}, string?, System.Threading.CancellationToken)"/>
-    /// routes via the 3-argument <see cref="IKnowledgeDeploymentService.GetSearchClientAsync(string, string?, System.Threading.CancellationToken)"/>
-    /// overload which validates the value against <c>AiSearchOptions.AllowedIndexes</c>
-    /// (rejecting non-allow-listed values with <c>INDEX_NOT_ALLOWED</c> → 400 per FR-BFF-02 /
-    /// NFR-08). When null or whitespace, the resolver falls through to the existing 2-tier
-    /// chain (<c>sprk_aiknowledgedeployment</c> Dataverse entity → <c>AiSearchOptions.KnowledgeIndexName</c>
-    /// fallback) — byte-for-byte backward-compatible with all existing callers (FR-BFF-04 /
-    /// NFR-02). Routes per-record `sprk_searchindexname` end-to-end across all three document-
-    /// creation routes (Wizard OBO, Email-to-Document, Office Add-in).
-    /// </summary>
-    public string? SearchIndexName { get; init; }
+    // No index name (field-mapping-server-write-path-r1 task 041, FR-40): the index follows the content type, so a request
+    // cannot name one. A JSON body or queued payload that still carries "searchIndexName" binds and the value is ignored.
 
     /// <summary>
     /// Task 029 (spaarkeai-word-add-in-r1, owner decision 2026-09-15): when true, after ALL new chunks are written
@@ -245,21 +232,7 @@ public sealed record ContentIndexRequest
     /// </remarks>
     public ParentEntityContext? ParentEntity { get; init; }
 
-    /// <summary>
-    /// multi-container-multi-index-r1 indexer-routing-fix (FR-BFF-07 / FR-PCF-02 / NFR-02) — optional
-    /// explicit Azure AI Search index name to target for this indexing operation. When provided
-    /// (non-null / non-whitespace), the BFF write boundary
-    /// <see cref="IRagService.IndexDocumentsBatchAsync(IEnumerable{KnowledgeDocument}, string?, System.Threading.CancellationToken)"/>
-    /// routes via the 3-argument <see cref="IKnowledgeDeploymentService.GetSearchClientAsync(string, string?, System.Threading.CancellationToken)"/>
-    /// overload which validates the value against <c>AiSearchOptions.AllowedIndexes</c>
-    /// (rejecting non-allow-listed values with <c>INDEX_NOT_ALLOWED</c> → 400 per FR-BFF-02 /
-    /// NFR-08). When null or whitespace, the resolver falls through to the existing 2-tier
-    /// chain (<c>sprk_aiknowledgedeployment</c> Dataverse entity → <c>AiSearchOptions.KnowledgeIndexName</c>
-    /// fallback) — byte-for-byte backward-compatible with all existing callers (FR-BFF-04 /
-    /// NFR-02). Routes per-record `sprk_searchindexname` end-to-end for pre-extracted content
-    /// (e.g., email body) — same routing surface as the file-based entry points.
-    /// </summary>
-    public string? SearchIndexName { get; init; }
+    // No index name (task 041, FR-40): as for FileIndexRequest, the index follows the content type.
 }
 
 /// <summary>

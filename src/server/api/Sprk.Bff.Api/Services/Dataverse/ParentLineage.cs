@@ -1047,10 +1047,11 @@ internal static class InheritedAccessPermission
     /// mapping, a Duplicate would be judged against another invoice. All six are the Signal's typed-writer-only columns: they are
     /// written once, at create, by the Signal writer (<c>SignalWriter.WriteAsync</c>; the subject lookup and the pair through
     /// <c>TodoRegardingBuilder.ApplySubjectLookupAndPairAsync</c>) through the ontology writer's dedicated client
-    /// (<c>OntologyWriterDataverseClient</c>), and never updated; the closure and commit updates write neither, the core-ancestor
-    /// restamper moves only the stamp lookups, and no generic path writes a Signal (it is never mapped:
-    /// <c>RecordTableRules</c>, <c>OntologyContentIsNotMapped</c>). Its lane and its other subject lookups are not listed yet
-    /// (<c>AccessTableReaderScanTests</c>).</item>
+    /// (<c>OntologyWriterDataverseClient</c>), and never updated; the closure and commit updates write neither, and the core-ancestor
+    /// restamper moves only the stamp lookups. Generic BFF update paths can write a Signal's other columns; the core record
+    /// pair is fixed after create on them (<see cref="RecordCreation.RecordTableRules.RefuseFixedAfterCreateColumns"/>). A
+    /// Signal is excluded from field mapping (<c>RecordTableRules</c>, <c>OntologyContentIsNotMapped</c>). Its lane and its
+    /// other subject lookups are not listed yet (<c>AccessTableReaderScanTests</c>).</item>
     /// <item>ebilling-r1 task 095d-1c (uac-r2 final review F4-1). <c>sprk_invoicesubmission</c>: the stored findings
     /// (<c>sprk_findingsjson</c>, <see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson"/>).
     /// They decide no access, but since 1c their <c>assignFirm</c> member decides the immutable Decision Record's decider, note and date

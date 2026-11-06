@@ -4,7 +4,7 @@
     <title>FR-41: derive the I-1 stamp before the owner decision, so a create's owner sees the root (#2483, DI-009)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
     <gate>042a merged to master; 019 complete; owner approval of this task (requested 2026-11-02)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api (RecordCreationService create and Repair); changes the owner decision on secure families (tags security, bff-api); NFR-01 lists FR-41 as security-sensitive.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -620,8 +620,33 @@ public sealed record RecordOwnershipContext
         "a Signal's or a Decision Record's filing is written only by its own writer, whose ownership question covers the core "
         + "record and the Signals it resolved; a generic re-file does not ask that question, so nothing was written (194b A5)";
 
-    private const string CoreRecordTypeColumn = "sprk_corerecordtype";
-    private const string CoreRecordIdColumn = "sprk_corerecordid";
+    internal const string CoreRecordTypeColumn = "sprk_corerecordtype";
+    internal const string CoreRecordIdColumn = "sprk_corerecordid";
+
+    /// <summary>A row's core record pair as it holds it (<see cref="CorePairOf"/>).</summary>
+    /// <param name="TypeRef">The <c>sprk_recordtype_ref</c> catalog row <c>sprk_corerecordtype</c> names, or <c>null</c>.</param>
+    /// <param name="CoreId">The id <c>sprk_corerecordid</c> holds, when it is a real GUID; otherwise <c>null</c>.</param>
+    /// <param name="Malformed">One half without the other, or an id that is not a GUID.</param>
+    internal readonly record struct CoreRecordPair(Guid? TypeRef, Guid? CoreId, bool Malformed)
+    {
+        /// <summary>Both halves, well formed.</summary>
+        public bool IsWhole => !Malformed && TypeRef is not null && CoreId is not null;
+    }
+
+    /// <summary>
+    /// THE reading of a Signal's or Decision Record's core record pair, shared by the ownership question
+    /// (<see cref="ForExistingRowAsync"/>) and the secure-child lineage (<c>SecureChildLineage.CorePairParent</c>), so the two
+    /// never disagree about which pair is whole: both halves, and an id that parses as a non-empty GUID.
+    /// </summary>
+    internal static CoreRecordPair CorePairOf(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        var typeRef = row.GetAttributeValue<EntityReference>(CoreRecordTypeColumn)?.Id is { } t && t != Guid.Empty ? t : (Guid?)null;
+        var coreText = row.GetAttributeValue<string>(CoreRecordIdColumn)?.Trim();
+        Guid? coreId = Guid.TryParse(coreText, out var parsed) && parsed != Guid.Empty ? parsed : null;
+        var malformed = (typeRef is null) != (coreId is null) || (!string.IsNullOrWhiteSpace(coreText) && coreId is null);
+        return new CoreRecordPair(typeRef, coreId, malformed);
+    }
 
     /// <summary>
     /// UAC task 194b: the ownership question for an EXISTING row, with the parents in the order its writer asks them, so the
@@ -663,10 +688,8 @@ public sealed record RecordOwnershipContext
             return new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly, ChildEntityLogicalName = row.LogicalName });
 
         var undetermined = new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly, ChildEntityLogicalName = row.LogicalName });
-        var typeRef = row.GetAttributeValue<EntityReference>(CoreRecordTypeColumn)?.Id is { } t && t != Guid.Empty ? t : (Guid?)null;
-        var coreText = row.GetAttributeValue<string>(CoreRecordIdColumn)?.Trim();
-        Guid? coreId = Guid.TryParse(coreText, out var parsed) && parsed != Guid.Empty ? parsed : null;
-        if ((typeRef is null) != (coreId is null) || (!string.IsNullOrWhiteSpace(coreText) && coreId is null))
+        var (typeRef, coreId, malformed) = CorePairOf(row);
+        if (malformed)
             return undetermined with { Undetermined = "its core record pair is malformed" };
 
         var subject = Guid.TryParse(row.GetAttributeValue<string>(CoreAncestorResolver.RegardingRecordIdColumn)?.Trim(), out var pairId)
