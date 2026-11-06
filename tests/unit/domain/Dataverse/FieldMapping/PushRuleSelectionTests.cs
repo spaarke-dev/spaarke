@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.FieldMappings;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using Xunit;
 
@@ -42,7 +43,7 @@ public class PushRuleSelectionTests
     {
         var untouched = new FieldMappingRuleEntity { Name = "r", SourceField = "s", TargetField = "t", IsActive = true };
 
-        var selected = PushRuleSelection.Select([untouched], Target, includeAssignedTo: false, null);
+        var selected = PushRuleSelection.Select([untouched], Target, includeAssignedTo: false, AssignedTo);
 
         selected.Rules.Should().BeEmpty();
         selected.SkippedCount.Should().Be(1);
@@ -104,5 +105,69 @@ public class PushRuleSelectionTests
         FieldMappingEndpoints.PushMayWrite("sprk_event", "sprk_clientreference").Should().BeTrue();
         FieldMappingEndpoints.PushMayWrite("sprk_matter", "sprk_accesspermission").Should().BeTrue(
             "the push runs as its caller, who may edit a matter's access permission through the form anyway");
+    }
+
+    // ───────────────────── the one classifier (task 040 fix round 1) ─────────────────────
+
+    /// <summary>Every table of the registry, not only the three roots: an event, an invoice, a to-do, an analysis.</summary>
+    [Theory]
+    [InlineData("sprk_matter", "sprk_assignedattorney1")]
+    [InlineData("sprk_project", "sprk_assignedlawfirm1")]
+    [InlineData("sprk_workassignment", "sprk_assignedto")]
+    [InlineData("sprk_event", "sprk_assignedattorney1")]
+    [InlineData("sprk_event", "sprk_assignedto2")]
+    [InlineData("sprk_invoice", "sprk_assignedtoattorney1")]
+    [InlineData("sprk_todo", "sprk_assignedto")]
+    [InlineData("sprk_analysis", "sprk_assignedparalegal2")]
+    [InlineData("SPRK_EVENT", " sprk_AssignedAttorney1 ")]
+    [InlineData("sprk_event", "sprk_assignedattorney1@odata.bind")]
+    public void TheClassifier_ReadsTheRegistryForAnyTable(string table, string column)
+    {
+        PushRuleSelection.AssignedToColumnsOf(Bound())(table, column).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("sprk_event", "sprk_clientreference")]
+    [InlineData("sprk_reportcard", "sprk_assignedattorney1")] // the registry lists no report card column
+    [InlineData("sprk_invoice", "sprk_assignedattorney1")]    // the invoice's columns are named sprk_assignedto*
+    public void TheClassifier_AnswersNo_ForAColumnTheRegistryDoesNotList(string table, string column)
+    {
+        PushRuleSelection.AssignedToColumnsOf(Bound())(table, column).Should().BeFalse();
+    }
+
+    [Fact]
+    public void AnOperatorRegistry_IsTheAnswer_NotTheCanonicalSeed()
+    {
+        var registry = new AccessConferringRegistry();
+        registry.Entities["sprk_event"] = [new AccessConferringColumn { Field = "sprk_custom", IdentityType = "Contact" }];
+
+        var classify = PushRuleSelection.AssignedToColumnsOf(registry);
+
+        classify("sprk_event", "sprk_custom").Should().BeTrue();
+        classify("sprk_event", "sprk_assignedattorney1").Should().BeFalse("an operator registry replaces the seed cleanly");
+    }
+
+    [Fact]
+    public void AnUnboundRegistry_ReadsAsTheCanonicalOne_NeverAsNone()
+    {
+        PushRuleSelection.AssignedToColumnsOf(new AccessConferringRegistry())("sprk_event", "sprk_assignedattorney1").Should().BeTrue();
+        PushRuleSelection.AssignedToColumnsOf(null)("sprk_invoice", "sprk_assignedto1").Should().BeTrue();
+    }
+
+    [Fact]
+    public void AnEntryWithAnUnknownIdentityType_StillCounts_SoAColumnIsNeverPlainDataByAccident()
+    {
+        var registry = new AccessConferringRegistry();
+        registry.Entities["sprk_event"] = [new AccessConferringColumn { Field = "sprk_assignedx", IdentityType = "Team" }];
+
+        PushRuleSelection.AssignedToColumnsOf(registry)("sprk_event", "sprk_assignedx").Should().BeTrue();
+    }
+
+    /// <summary>The registry as the BFF binds it: empty, then seeded by the defaults' post-configure.</summary>
+    private static AccessConferringRegistry Bound()
+    {
+        var options = new MembershipOptions();
+        new MembershipOptionsDefaults().PostConfigure(null, options);
+        return options.AccessConferringRoles;
     }
 }

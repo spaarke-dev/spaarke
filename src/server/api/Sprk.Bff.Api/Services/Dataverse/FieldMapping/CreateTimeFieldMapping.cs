@@ -155,6 +155,8 @@ internal static class CreateTimeFieldMapping
     /// <param name="warnings">Receives one warning per refused or failed rule (no exception text).</param>
     /// <param name="logger">Receives a faulting rule's detail.</param>
     /// <param name="mappedColumns">When given, every target column a rule WROTE (the rule's trimmed target field).</param>
+    /// <param name="faultedColumns">When given, every target column whose rule THREW (logged to <paramref name="logger"/>), so a
+    /// caller can tell a fault from a refusal.</param>
     /// <returns>How many rules were NOT Copy rules and so were not applied.</returns>
     internal static int ApplyCopyOverwrite(
         IEnumerable<FieldMappingRuleEntity> rules,
@@ -163,7 +165,8 @@ internal static class CreateTimeFieldMapping
         IReadOnlySet<string> protectedAttributes,
         List<string> warnings,
         ILogger logger,
-        ISet<string>? mappedColumns = null)
+        ISet<string>? mappedColumns = null,
+        ISet<string>? faultedColumns = null)
     {
         var notCopy = 0;
         var copyRules = new List<FieldMappingRuleEntity>();
@@ -176,7 +179,7 @@ internal static class CreateTimeFieldMapping
         }
 
         ApplyAll(copyRules, target, source, protectedAttributes, warnings, logger, moneyAttributes: null,
-            callerSupplied: new HashSet<string>(StringComparer.OrdinalIgnoreCase), written: mappedColumns);
+            callerSupplied: new HashSet<string>(StringComparer.OrdinalIgnoreCase), written: mappedColumns, faulted: faultedColumns);
         return notCopy;
     }
 
@@ -189,7 +192,8 @@ internal static class CreateTimeFieldMapping
         ILogger logger,
         IReadOnlySet<string>? moneyAttributes,
         IReadOnlySet<string> callerSupplied,
-        ISet<string>? written)
+        ISet<string>? written,
+        ISet<string>? faulted = null)
     {
         foreach (var rule in rules.OrderBy(r => r.ExecutionOrder))
         {
@@ -205,6 +209,7 @@ internal static class CreateTimeFieldMapping
                     "[RECORD-CREATE] Field-mapping rule {RuleId} ({SourceField} -> {TargetField}) threw; skipped.",
                     rule.Id, rule.SourceField, rule.TargetField);
                 warnings.Add($"Field-mapping rule \"{rule.SourceField}\" -> \"{rule.TargetField}\" failed and was skipped.");
+                faulted?.Add(rule.TargetField?.Trim() ?? string.Empty);
             }
         }
     }

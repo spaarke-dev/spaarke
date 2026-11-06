@@ -21,6 +21,8 @@ namespace Sprk.Bff.Api.Api.FieldMappings;
 /// regarding pair of a project under a matter), read AS THE CALLER, a child listed only when the source is its PRIMARY parent,
 /// and a detail table never. The server re-derives the children itself and intersects them with the confirmed ids; an id the
 /// caller's own walk did not derive is refused per id and never written.</para>
+/// <para>A confirmed id the walk did not derive is never previewed: the preview returns it in <c>refusedChildIds</c>, so the
+/// person is told it will not be updated (the apply refuses it per id with <see cref="ChildNotInPushMessage"/>).</para>
 /// <para><b>Preview.</b> Nothing is written. Each child the caller may write, and each column a rule would change, is listed
 /// with what it holds now and would hold, and the Assigned-To policies the change meets. A child the caller cannot write is
 /// counted, not listed. Values are read AS THE CALLER, so a field-secured value reads as empty.</para>
@@ -28,18 +30,11 @@ namespace Sprk.Bff.Api.Api.FieldMappings;
 /// </remarks>
 internal static class FieldMappingPushFamily
 {
-    /// <summary>The one family kind a push uses (ontology 3b: Push and Update Assigned To are Filing-only).</summary>
-    internal const string FilingKindName = "Filing";
-
     /// <summary>The fixed text of a confirmed id the caller's own walk did not derive. Names no table and no id.</summary>
     internal const string ChildNotInPushMessage = "This record is not one of the records this push updates; it was left unchanged.";
 
     /// <summary>The most children one request asks Dataverse about at a time (keeps the OData URL short).</summary>
     private const int IdsPerQuery = 50;
-
-    /// <summary>Whether <paramref name="kind"/> asks for the Filing family (absent means Filing).</summary>
-    internal static bool IsSupportedKind(string? kind) =>
-        string.IsNullOrWhiteSpace(kind) || string.Equals(kind.Trim(), FilingKindName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The confirmed children: what the caller's own walk derived, intersected with <paramref name="confirmed"/>. An id the walk
@@ -65,7 +60,8 @@ internal static class FieldMappingPushFamily
         Dictionary<string, object?> SourceValues,
         IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan> LookupBinds,
         int SkippedRuleCount,
-        Func<string, string, bool>? IsAssignedToColumn);
+        Func<string, string, bool> IsAssignedToColumn,
+        IReadOnlyList<Guid>? RefusedChildIds = null);
 
     /// <summary>One value a rule would write: the same for every child, so computed once.</summary>
     private sealed record PlannedChange(FieldMappingRuleDto Rule, object? Wire, string To, Guid? LookupId, bool IsAssignedTo);
@@ -82,9 +78,10 @@ internal static class FieldMappingPushFamily
         IImpersonatedCommunicationQuery impersonatedQuery,
         IGenericEntityService entityService,
         EffectiveFlagsReader? effectiveFlags,
-        CancellationToken ct)
+        CancellationToken ct,
+        Microsoft.Extensions.Logging.ILogger? logger = null)
     {
-        var planned = Plan(input);
+        var planned = Plan(input, logger);
         var changes = new List<PushPreviewChange>();
         var skippedNoWrite = 0;
 
@@ -152,6 +149,7 @@ internal static class FieldMappingPushFamily
             SkippedNoWriteCount = skippedNoWrite,
             Truncated = input.Truncated,
             SkippedRuleCount = input.SkippedRuleCount,
+            RefusedChildIds = [.. input.RefusedChildIds ?? []],
         };
     }
 
@@ -185,7 +183,7 @@ internal static class FieldMappingPushFamily
     }
 
     /// <summary>The values the rules would write, decided once: the source value is the same for every child.</summary>
-    private static List<PlannedChange> Plan(PreviewInput input)
+    private static List<PlannedChange> Plan(PreviewInput input, Microsoft.Extensions.Logging.ILogger? logger)
     {
         var result = new List<PlannedChange>();
         foreach (var rule in input.Rules.OrderBy(r => r.Priority))
@@ -194,14 +192,14 @@ internal static class FieldMappingPushFamily
                 continue;
 
             var scratch = new Dictionary<string, object?>();
-            if (FieldMappingEndpoints.ApplyMappingRule(rule, input.SourceValues, scratch, input.LookupBinds).Status != FieldMappingStatus.Mapped
+            if (FieldMappingEndpoints.ApplyMappingRule(rule, input.SourceValues, scratch, input.LookupBinds, logger).Status != FieldMappingStatus.Mapped
                 || scratch.Count != 1)
             {
                 continue;
             }
 
             var (key, wire) = scratch.Single();
-            var assignedTo = input.IsAssignedToColumn?.Invoke(input.TargetEntity, rule.TargetField) ?? false;
+            var assignedTo = input.IsAssignedToColumn(input.TargetEntity, rule.TargetField);
             if (key.EndsWith("@odata.bind", StringComparison.Ordinal))
             {
                 input.SourceValues.TryGetValue(rule.SourceField, out var source);

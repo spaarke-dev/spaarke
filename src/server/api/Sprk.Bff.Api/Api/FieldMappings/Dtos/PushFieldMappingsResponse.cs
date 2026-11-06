@@ -85,6 +85,12 @@ public record PushFieldMappingsResponse
     /// Manual Refresh). Skipped and counted, never an error.
     /// </summary>
     public int? SkippedRuleCount { get; init; }
+
+    /// <summary>
+    /// Task 040 (FR-34), preview only: the confirmed ids (<c>childIds</c>) the server did not derive as children of the source
+    /// for the caller. They are not previewed, and an apply refuses them per id; the client says they will not be updated.
+    /// </summary>
+    public Guid[]? RefusedChildIds { get; init; }
 }
 
 /// <summary>

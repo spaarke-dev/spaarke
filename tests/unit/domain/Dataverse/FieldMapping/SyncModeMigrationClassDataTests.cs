@@ -45,12 +45,43 @@ public class SyncModeMigrationClassDataTests
     private static string Render(IDictionary<string, string[]> table) =>
         string.Join(Environment.NewLine, table.Select(kv => $"    '{kv.Key}' = @({string.Join(", ", kv.Value.Select(c => $"'{c}'"))})"));
 
+    /// <summary>The registry as the BFF binds it (empty, then seeded by the defaults' post-configure): what the push's one
+    /// Assigned-To classifier, <c>PushRuleSelection.AssignedToColumnsOf</c>, reads.</summary>
+    private static AccessConferringRegistry BoundRegistry()
+    {
+        var options = new MembershipOptions();
+        new MembershipOptionsDefaults().PostConfigure(null, options);
+        return options.AccessConferringRoles;
+    }
+
     private static SortedDictionary<string, string[]> ExpectedAssignedTo()
     {
         var expected = new SortedDictionary<string, string[]>(StringComparer.Ordinal);
-        foreach (var (table, columns) in MembershipOptionsDefaults.CanonicalAccessConferringRegistry)
+        foreach (var (table, columns) in BoundRegistry().Entities)
             expected[table.ToLowerInvariant()] = columns.Select(c => c.Field.ToLowerInvariant()).Distinct().OrderBy(c => c, StringComparer.Ordinal).ToArray();
         return expected;
+    }
+
+    /// <summary>
+    /// task 040 fix round 1: the script's Assigned-To table is the push's classifier, both ways — every column in the script is
+    /// one the classifier calls Assigned-To, and every Assigned-To column of the registry is in the script. A script that used a
+    /// different list (fewer tables, or a root-only list) fails here.
+    /// </summary>
+    [Fact]
+    public void TheAssignedToTable_IsExactlyWhatThePushClassifierCallsAssignedTo()
+    {
+        var classify = Sprk.Bff.Api.Api.FieldMappings.PushRuleSelection.AssignedToColumnsOf(BoundRegistry());
+        var script = Block(ScriptText(), "assigned-to");
+
+        var notAssignedTo = script.SelectMany(kv => kv.Value.Select(c => (kv.Key, c))).Where(x => !classify(x.Key, x.c)).ToList();
+        var missing = BoundRegistry().Entities
+            .SelectMany(kv => kv.Value.Select(c => (Table: kv.Key.ToLowerInvariant(), Column: c.Field.ToLowerInvariant())))
+            .Where(x => !script.TryGetValue(x.Table, out var cols) || !cols.Contains(x.Column))
+            .ToList();
+
+        notAssignedTo.Should().BeEmpty("every column of the script's Assigned-To table must be one the push treats as Assigned-To");
+        missing.Should().BeEmpty("every Assigned-To column the push classifies must be in the script's table");
+        script.Keys.Should().Contain(["sprk_event", "sprk_invoice"], "the classifier covers every table of the registry, not only the roots");
     }
 
     private static SortedDictionary<string, string[]> ExpectedFiling()

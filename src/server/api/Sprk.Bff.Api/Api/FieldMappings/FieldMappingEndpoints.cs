@@ -453,9 +453,7 @@ public static class FieldMappingEndpoints
     /// <remarks>
     /// <para><b>Children.</b> An ordinary request finds them as it always has (the one lookup the target holds to the source). A
     /// request that previews, or names the children it confirmed, finds them through the family
-    /// (<see cref="FieldMappingPushFamily"/>): a Filing edge, the source their primary parent. Optional services
-    /// (<paramref name="familyReader"/>, <paramref name="participations"/>, <paramref name="assignedAccess"/>) are resolved only
-    /// when the request needs them.</para>
+    /// (<see cref="FieldMappingPushFamily"/>): a Filing edge, the source their primary parent.</para>
     /// <para><b>Assigned To.</b> <c>includeAssignedTo</c> adds the rules that fill the target's Assigned-To columns and needs
     /// Write on the SOURCE; without Write it is a 403 and nothing is read.</para>
     /// </remarks>
@@ -473,11 +471,11 @@ public static class FieldMappingEndpoints
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct,
-        // Task 040: needed only by a request that previews or confirms children (family), or that reads Assigned-To policy.
-        // Optional, so a host that does not register them still serves an ordinary push.
-        [FromServices] Sprk.Bff.Api.Services.Dataverse.RecordFamilyReader? familyReader = null,
-        [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService? participations = null,
-        [FromServices] Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer? assignedAccess = null)
+        // Task 040: the family (preview, confirmed children), the Assigned-To policy flags of a preview, and the registry the
+        // Assigned-To classifier reads. Required: a host without them fails the request (500) instead of pushing without them.
+        [FromServices] Sprk.Bff.Api.Services.Dataverse.RecordFamilyReader familyReader,
+        [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
+        [FromServices] Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Services.Ai.Membership.MembershipOptions> membership)
     {
         logger.LogInformation(
             "Pushing field mappings. SourceEntity={SourceEntity}, SourceRecordId={SourceRecordId}, TargetEntity={TargetEntity}, "
@@ -556,10 +554,8 @@ public static class FieldMappingEndpoints
             }
 
             // Task 040 (FR-23): a push applies Copy rules set to Manual Refresh, through the canonical engine; the rest are
-            // counted and skipped. The Assigned-To columns are the registry's (never a list kept here).
-            Func<string, string, bool>? isAssignedToColumn = assignedAccess is null
-                ? null
-                : (table, column) => assignedAccess.TouchesRegistry(table, [column]);
+            // counted and skipped. The Assigned-To columns are the bound registry's, for any table (the one classifier).
+            var isAssignedToColumn = PushRuleSelection.AssignedToColumnsOf(membership.Value.AccessConferringRoles);
             var selection = PushRuleSelection.Select(profileRules, request.TargetEntity, request.IncludeAssignedTo, isAssignedToColumn);
             var rules = selection.Rules.Select(MapRuleEntityToDto).ToArray();
             if (rules.Length == 0)
@@ -658,13 +654,7 @@ public static class FieldMappingEndpoints
             {
                 // Task 040 (FR-34): through the family — a Filing edge (a typed lookup, or the regarding pair), the source the
                 // child's primary parent. The server derives the children itself, as the caller; confirmed ids are intersected.
-                if (familyReader is null)
-                {
-                    throw new InvalidOperationException("The family reader is not available to the push.");
-                }
-
-                if (!FieldMappingPushFamily.IsSupportedKind(request.Kind)
-                    || !RecordFamilyReader.HasListedEdge(
+                if (!RecordFamilyReader.HasListedEdge(
                         RecordFamilyEdges.FamilyKind.Filing, request.SourceEntity, request.TargetEntity))
                 {
                     logger.LogWarning(
@@ -696,11 +686,6 @@ public static class FieldMappingEndpoints
                     return SourceRecordNotFound();
                 }
 
-                if (family.Truncated && !request.Preview && request.ChildIds is null)
-                {
-                    return TooManyChildren(MaxChildRecordsPerPush + 1);
-                }
-
                 var (confirmed, refused) = FieldMappingPushFamily.Confirm(family.Children, request.ChildIds);
                 familyChildren = confirmed;
                 familyTruncated = family.Truncated;
@@ -724,14 +709,15 @@ public static class FieldMappingEndpoints
                 return TypedResults.Ok(await FieldMappingPushFamily.PreviewAsync(
                     new FieldMappingPushFamily.PreviewInput(
                         request.TargetEntity, familyChildren, familyTruncated, rules, sourceValues, lookupBinds,
-                        selection.SkippedCount, isAssignedToColumn),
+                        selection.SkippedCount, isAssignedToColumn, refusedChildIds),
                     TokenHelper.ExtractBearerTokenOrNull(httpContext),
                     callerSystemUserId.Value,
                     probe,
                     impersonatedQuery,
                     entityService,
-                    participations is null ? null : participations.GetEffectiveRootRecordFlagsAsync,
-                    ct));
+                    participations.GetEffectiveRootRecordFlagsAsync,
+                    ct,
+                    logger));
             }
 
             var refusals = refusedChildIds
@@ -895,12 +881,6 @@ public static class FieldMappingEndpoints
             // are changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter). A push aimed at one is refused on the
             // request, before the source is authorized and before any profile, row or child is read or written.
             errors["targetEntity"] = [writerOnly.Reason!];
-        }
-
-        // Task 040 (FR-34): Push and Update Assigned To are Filing-only (ontology 3b); a detail table is never pushed to.
-        if (!FieldMappingPushFamily.IsSupportedKind(request.Kind))
-        {
-            errors["kind"] = ["Only the Filing family is supported."];
         }
 
         if (request.ChildIds is { } childIds && (childIds.Length > MaxChildRecordsPerPush || childIds.Any(id => id == Guid.Empty)))
@@ -1406,7 +1386,7 @@ public static class FieldMappingEndpoints
                         // Round 3 (G6): ApplyMappingRule only READS lookupBinds (an IReadOnlyDictionary: TryGetValue) and writes only to the
                         // payload it is given, so this call adds nothing to the shared lookupBinds and the scratch payload is never written.
                         var scratch = new Dictionary<string, object?>();
-                        ApplyMappingRule(rule, sourceValues, scratch, lookupBinds);
+                        ApplyMappingRule(rule, sourceValues, scratch, lookupBinds, logger);
                         Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DropSearchIndexFromUpdate(
                             targetEntity, childRecordId, scratch, Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, logger);
                         recordFieldResults.Add(new FieldMappingResultDto
@@ -1419,7 +1399,7 @@ public static class FieldMappingEndpoints
                         continue;
                     }
 
-                    var fieldResult = ApplyMappingRule(rule, sourceValues, updatePayload, lookupBinds);
+                    var fieldResult = ApplyMappingRule(rule, sourceValues, updatePayload, lookupBinds, logger);
                     recordFieldResults.Add(fieldResult);
                 }
 
@@ -1448,11 +1428,13 @@ public static class FieldMappingEndpoints
                                 : null;
                         if (refusal is not null)
                         {
+                            // #1437: the code only; the reason can name records the caller has not read, so it is logged.
+                            LogRefileRefusal(logger, "root filing check", targetEntity, childRecordId, refusal);
                             failed++;
                             errors.Add(new PushFieldMappingsError
                             {
                                 RecordId = childRecordId,
-                                Error = $"Not written: {refusal.Reason} ({refusal.RefusalCode})."
+                                Error = RefileRefusedMessage(refusal.RefusalCode),
                             });
                             continue;
                         }
@@ -1567,11 +1549,13 @@ public static class FieldMappingEndpoints
                                 ct);
                             if (reparent.IsRefused)
                             {
+                                // #1437: the code only; the reason can name records the caller has not read, so it is logged.
+                                LogRefileRefusal(logger, "re-file", targetEntity, childRecordId, reparent);
                                 failed++;
                                 errors.Add(new PushFieldMappingsError
                                 {
                                     RecordId = childRecordId,
-                                    Error = $"Not written: {reparent.Reason} ({reparent.RefusalCode}).",
+                                    Error = RefileRefusedMessage(reparent.RefusalCode),
                                 });
                                 continue;
                             }
@@ -1675,7 +1659,7 @@ public static class FieldMappingEndpoints
                 errors.Add(new PushFieldMappingsError
                 {
                     RecordId = childRecordId,
-                    Error = $"Not written: this record could not be re-filed, so nothing was written for it ({unresolved.RefusalCode}).",
+                    Error = RefileRefusedMessage(unresolved.RefusalCode),
                 });
             }
             catch (Exception ex)
@@ -1698,6 +1682,24 @@ public static class FieldMappingEndpoints
         }
 
         return (updated, failed, skipped, errors.ToArray(), fieldResults.ToArray());
+    }
+
+    /// <summary>
+    /// The text of a child whose re-file was refused (#1437, ADR-019): a fixed sentence and the STABLE refusal code. The
+    /// resolver's reason can name records the caller has not read, so it is logged (<see cref="LogRefileRefusal"/>), never returned.
+    /// </summary>
+    internal static string RefileRefusedMessage(string? refusalCode) =>
+        $"Not written: this record could not be re-filed, so nothing was written for it ({refusalCode}).";
+
+    /// <summary>Logs a refused re-file's reason with a correlation id; the response carries the code only.</summary>
+    private static void LogRefileRefusal(
+        ILogger logger, string step, string targetEntity, Guid childRecordId, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution refusal)
+    {
+        var correlationId = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
+        logger.LogWarning(
+            "Field-mapping push: the {Step} refused the child. TargetEntity={TargetEntity}, RecordId={RecordId}, "
+            + "RefusalCode={RefusalCode}, Reason={Reason}, CorrelationId={CorrelationId}",
+            step, targetEntity, childRecordId, refusal.RefusalCode, refusal.Reason, correlationId);
     }
 
     /// <summary>The fixed text of a child whose update faulted (#1437, ADR-019): nothing of the fault is put in the response.</summary>
@@ -1723,8 +1725,10 @@ public static class FieldMappingEndpoints
         FieldMappingRuleDto rule,
         Dictionary<string, object?> sourceValues,
         Dictionary<string, object?> updatePayload,
-        IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null)
+        IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null,
+        ILogger? logger = null)
     {
+        logger ??= Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
         FieldMappingResultDto Result(string status, string? message = null) => new()
         {
             SourceField = rule.SourceField,
@@ -1786,9 +1790,24 @@ public static class FieldMappingEndpoints
             var typedTarget = new Entity("target");
             var engineWarnings = new List<string>();
             var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            CreateTimeFieldMapping.ApplyCopyOverwrite(
-                [engineRule], typedTarget, typedSource, EmptyProtectedColumns, engineWarnings,
-                Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance, written);
+            var faulted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var correlationId = CorrelationId();
+            using (logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
+            {
+                CreateTimeFieldMapping.ApplyCopyOverwrite(
+                    [engineRule], typedTarget, typedSource, EmptyProtectedColumns, engineWarnings, logger, written, faulted);
+            }
+
+            if (faulted.Count > 0)
+            {
+                // #1437 (task 040 fix round 1, F2): an engine fault is an Error, never a skip. The engine logged the exception
+                // inside the correlation scope above; this entry ties the rule to the same id.
+                logger.LogError(
+                    "Field-mapping push: the rule {SourceField} -> {TargetField} faulted in the mapping engine and was not copied. "
+                    + "CorrelationId={CorrelationId}",
+                    rule.SourceField, rule.TargetField, correlationId);
+                return Result(FieldMappingStatus.Error, RuleFailedMessage);
+            }
 
             if (written.Count == 0 || !typedTarget.Attributes.TryGetValue(engineRule.TargetField.Trim(), out var mapped))
             {
@@ -1822,12 +1841,19 @@ public static class FieldMappingEndpoints
             updatePayload[rule.TargetField] = wire;
             return Result(FieldMappingStatus.Mapped);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // #1437: the detail of a faulting rule is never put in the response.
+            // #1437: the detail of a faulting rule is never put in the response; it is logged with a correlation id.
+            logger.LogError(ex,
+                "Field-mapping push: the rule {SourceField} -> {TargetField} faulted and was not copied. CorrelationId={CorrelationId}",
+                rule.SourceField, rule.TargetField, CorrelationId());
             return Result(FieldMappingStatus.Error, RuleFailedMessage);
         }
     }
+
+    /// <summary>The id a log entry is found by: the request's trace id, else a fresh one.</summary>
+    private static string CorrelationId() =>
+        System.Diagnostics.Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
 
     /// <summary>
     /// Whether a rule's target column is one a push may write at all: the table is not writer-only, the column is not set by

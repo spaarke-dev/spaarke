@@ -41,6 +41,9 @@ public class FieldMappingPushFamilyContractTests
 
     private const string Column = "sprk_clientreference";
 
+    /// <summary>An Assigned-To column of sprk_event in the canonical registry.</summary>
+    private const string EventAssignedTo = "sprk_assignedattorney1";
+
     // ───────────────────────── preview ─────────────────────────
 
     [Fact]
@@ -91,6 +94,23 @@ public class FieldMappingPushFamilyContractTests
             .Should().Equal([ChildB.ToString("D")], "a child the server did not derive is never previewed");
     }
 
+    [Fact]
+    public async Task Preview_ReturnsTheConfirmedIdsItRefused_SoThePersonIsToldTheyWillNotBeUpdated()
+    {
+        await using var world = await World.StartAsync(writable: [ChildA, ChildB, ChildC]);
+
+        var response = await world.PostAsync(new
+        {
+            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", preview = true, childIds = new[] { ChildB, Stranger },
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        JsonNode.Parse(body)!["refusedChildIds"]!.AsArray().Select(id => id!.GetValue<string>())
+            .Should().Equal([Stranger.ToString("D")], "a ticked id the server will not update is reported, not dropped");
+        world.Host.Writes.Should().BeEmpty();
+    }
+
     // ───────────────────────── confirmed children ─────────────────────────
 
     [Fact]
@@ -127,32 +147,7 @@ public class FieldMappingPushFamilyContractTests
         world.Dataverse.Queries.Should().ContainSingle().Which.Should().Contain("$select=sprk_eventid&$top=501", "the ordinary request asks as it always has");
     }
 
-    // ───────────────────────── kind, edge, Assigned To ─────────────────────────
-
-    [Theory]
-    [InlineData("Lineage")]
-    [InlineData("Secure")]
-    public async Task AKindOtherThanFiling_Is400_AndNothingIsAsked(string kind)
-    {
-        await using var world = await World.StartAsync(writable: [ChildA]);
-
-        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", preview = true, kind });
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errors"]!["kind"].Should().NotBeNull();
-        world.Host.ProbedSources.Should().BeEmpty();
-        world.Dataverse.Queries.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task TheFilingKind_IsMatchedWithoutRegardToCase()
-    {
-        await using var world = await World.StartAsync(writable: [ChildA]);
-
-        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", preview = true, kind = "FILING" });
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-    }
+    // ───────────────────────── edge, Assigned To ─────────────────────────
 
     [Fact]
     public async Task APreviewToATableNoFilingEdgeJoins_Is409_AndReadsNoChild()
@@ -186,10 +181,17 @@ public class FieldMappingPushFamilyContractTests
         world.Host.Writes.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// The opt-in is what writes an Assigned-To column: the rule is left at One-time, so nothing but <c>includeAssignedTo</c>
+    /// (through the real classifier) can select it. If the opt-in did nothing, nothing would be written.
+    /// </summary>
     [Fact]
-    public async Task IncludeAssignedTo_WithWriteOnTheSource_IsPushedLikeAnyOtherRequest()
+    public async Task IncludeAssignedTo_WithWriteOnTheSource_WritesTheAssignedToColumn()
     {
-        await using var world = await World.StartAsync(writable: [ChildA, ChildB], sourceRights: AccessRights.Read | AccessRights.Write);
+        var assigned = PushHost.Rule(Column, 0, EventAssignedTo, 0);
+        assigned.SyncMode = SyncMode.OneTime;
+        await using var world = await World.StartAsync(
+            writable: [ChildA, ChildB], sourceRights: AccessRights.Read | AccessRights.Write, rules: [assigned]);
 
         var response = await world.PostAsync(new
         {
@@ -197,7 +199,59 @@ public class FieldMappingPushFamilyContractTests
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        world.Host.Writes.Should().NotBeEmpty();
+        world.Host.Writes.Should().NotBeEmpty().And.OnlyContain(w => w.Payload.ContainsKey(EventAssignedTo));
+    }
+
+    // ───────────────────── the one Assigned-To classifier (the bound registry, any table) ─────────────────────
+
+    /// <summary>An event's Assigned-To column (the registry lists sprk_event): not written by an ordinary push, whatever the
+    /// rule's sync mode; written when the request opts in.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnEventAssignedToRule_IsWrittenOnlyWithIncludeAssignedTo(bool includeAssignedTo)
+    {
+        var assigned = PushHost.Rule(Column, 0, EventAssignedTo, 0); // Manual Refresh: only the class keeps it out
+        var ordinary = PushHost.Rule(Column, 0, Column, 0);
+        await using var world = await World.StartAsync(writable: [ChildA, ChildB], rules: [assigned, ordinary]);
+
+        var response = await world.PostAsync(new
+        {
+            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", includeAssignedTo,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        world.Host.Writes.Should().NotBeEmpty().And.OnlyContain(w => w.Payload.ContainsKey(Column));
+        if (includeAssignedTo)
+            world.Host.Writes.Should().OnlyContain(w => w.Payload.ContainsKey(EventAssignedTo));
+        else
+            world.Host.Writes.Should().NotContain(w => w.Payload.ContainsKey(EventAssignedTo), "an ordinary push leaves Assigned To alone");
+    }
+
+    /// <summary>A root's Assigned-To column (a project under the matter): the same rule as any other table.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ARootAssignedToRule_IsWrittenOnlyWithIncludeAssignedTo(bool includeAssignedTo)
+    {
+        var assigned = PushHost.Rule(Column, 0, "sprk_assignedattorney1", 0);
+        var ordinary = PushHost.Rule(Column, 0, Column, 0);
+        await using var world = await World.StartAsync(
+            writable: [ChildA, ChildB], target: "sprk_project", targetSet: "sprk_projects", rules: [assigned, ordinary]);
+
+        var response = await world.PostAsync(new
+        {
+            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_project", includeAssignedTo,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        world.Host.Writes.Should().NotBeEmpty().And.OnlyContain(w => w.Payload.ContainsKey(Column));
+        if (includeAssignedTo)
+            world.Host.Writes.Should().OnlyContain(w => w.Payload.ContainsKey("sprk_assignedattorney1"));
+        else
+            world.Host.Writes.Should().NotContain(w => w.Payload.ContainsKey("sprk_assignedattorney1"));
     }
 
     [Fact]

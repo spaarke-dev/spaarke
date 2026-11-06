@@ -7,9 +7,10 @@ namespace Sprk.Bff.Api.Api.FieldMappings.Dtos;
 /// <remarks>
 /// This endpoint supports the "Update Related" sync mode where changes to a parent record
 /// can be pushed to all associated child records based on configured field mapping profiles.
-/// <para>Task 040 (FR-34) adds four OPTIONAL members; a request that sends none of them behaves as before (apart from the
-/// rules it applies, FR-23): <see cref="Preview"/>, <see cref="IncludeAssignedTo"/>, <see cref="ChildIds"/> and
-/// <see cref="Kind"/>.</para>
+/// <para>Task 040 (FR-34) adds three OPTIONAL members; a request that sends none of them behaves as before (apart from the
+/// rules it applies, FR-23): <see cref="Preview"/>, <see cref="IncludeAssignedTo"/> and <see cref="ChildIds"/>. The children
+/// are always found through the Filing family (ontology 3b: Push and Update Assigned To are Filing-only); no other family is
+/// offered, so the request names none.</para>
 /// </remarks>
 public record PushFieldMappingsRequest
 {
@@ -46,10 +47,4 @@ public record PushFieldMappingsRequest
     /// list; any other id is refused per id. When absent every child the caller can read is a candidate, as before.
     /// </summary>
     public Guid[]? ChildIds { get; init; }
-
-    /// <summary>
-    /// The family kind the children are found through. Absent or "Filing" is the only supported value (ontology 3b: Push and
-    /// Update Assigned To are Filing-only); anything else is refused.
-    /// </summary>
-    public string? Kind { get; init; }
 }

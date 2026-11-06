@@ -218,17 +218,82 @@ public class PushCopyParityTests
         message.Should().Contain("record_owner_parent_unresolved").And.NotContain("sprk_secretcolumn").And.NotContain("04000000");
     }
 
+    /// <summary>
+    /// A rule that really throws inside the engine (the source value cannot be rendered as text): an Error with the fixed text,
+    /// never a skip and never the exception's text; the exception and a correlation id are in the log.
+    /// </summary>
     [Fact]
-    public void ARuleThatFaults_ReportsAFixedString_NeverTheExceptionText()
+    public void ARuleThatFaultsInTheEngine_IsAnError_WithTheFixedText_AndIsLoggedWithACorrelationId()
     {
-        // A value the engine cannot take must not put its detail in the field result.
-        var dto = Dto("DateTime", "DateTime");
+        var log = new CapturingLogger();
         var payload = new Dictionary<string, object?>();
 
-        var result = FieldMappingEndpoints.ApplyMappingRule(dto, new() { ["sprk_source"] = new object() }, payload);
+        var result = FieldMappingEndpoints.ApplyMappingRule(
+            Dto("Text", "Text"), new() { ["sprk_source"] = new ThrowsWhenRendered() }, payload, logger: log);
 
-        result.Status.Should().NotBe(FieldMappingStatus.Mapped);
-        (result.ErrorMessage ?? string.Empty).Should().NotContain("System.Object");
+        result.Status.Should().Be(FieldMappingStatus.Error, "an engine fault is a failure, not a skip");
+        result.ErrorMessage.Should().Be(FieldMappingEndpoints.RuleFailedMessage);
+        payload.Should().BeEmpty();
+        log.Entries.Should().Contain(e => e.Exception != null && e.Exception.Message == ThrowsWhenRendered.Detail,
+            "the engine's fault is logged through the push's logger");
+        log.Entries.Should().Contain(e => e.Message.Contains("CorrelationId=") && e.Message.Contains("sprk_target"));
+        log.Entries.Should().NotContain(e => e.Message.Contains(ThrowsWhenRendered.Detail) && e.Exception == null,
+            "the detail rides on the exception, never in a message a response could copy");
+    }
+
+    /// <summary>A rule that throws in the push's own gates (a rule with no source field) goes through the method's catch.</summary>
+    [Fact]
+    public void ARuleThatThrowsInThePushsOwnGates_IsAnError_WithTheFixedText_AndIsLogged()
+    {
+        var log = new CapturingLogger();
+        var rule = Dto("Text", "Text") with { SourceField = null! };
+
+        var result = FieldMappingEndpoints.ApplyMappingRule(rule, new() { ["sprk_source"] = "x" }, [], logger: log);
+
+        result.Status.Should().Be(FieldMappingStatus.Error);
+        result.ErrorMessage.Should().Be(FieldMappingEndpoints.RuleFailedMessage);
+        log.Entries.Should().ContainSingle(e => e.Exception is ArgumentNullException)
+            .Which.Message.Should().Contain("CorrelationId=");
+    }
+
+    /// <summary>The per-child loop hands its logger to each rule: a faulting rule on a push leaves a trace.</summary>
+    [Fact]
+    public async Task AFaultingRuleOnAPush_IsAnErrorFieldResult_AndIsInThePushsLog()
+    {
+        var writes = new Mock<IFieldMappingDataverseService>();
+        var log = new CapturingLogger();
+
+        var (_, _, _, _, fieldResults) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            writes.Object, new StampWorld().Restamper, [Dto("Text", "Text")],
+            new Dictionary<string, object?> { ["sprk_source"] = new ThrowsWhenRendered() }, "sprk_event", [ChildId], CallerId,
+            log, CancellationToken.None);
+
+        fieldResults.Should().ContainSingle().Which.Status.Should().Be(FieldMappingStatus.Error);
+        log.Entries.Should().Contain(e => e.Exception != null && e.Exception.Message == ThrowsWhenRendered.Detail);
+    }
+
+    // ───────────────────────── parity: a money target ─────────────────────────
+
+    /// <summary>
+    /// A currency column: the create path knows it as money (<c>moneyAttributes</c>) and writes the amount; the push reads the
+    /// source amount as the OData number and writes it as is. Both write the same amount.
+    /// </summary>
+    [Fact]
+    public void ACopyIntoAMoneyTarget_GivesTheSameAmount_OnACreateAndOnAPush()
+    {
+        var source = new Entity("sprk_matter") { ["sprk_source"] = new Money(1234.56m) };
+        var target = new Entity("sprk_event");
+        CreateTimeFieldMapping.ApplyFillOnly(
+            [Rule(Number, Number)], target, source, NoProtected, [], NullLogger.Instance,
+            moneyAttributes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_target" });
+        var created = RecordCreationService.ToItemValue(target["sprk_target"], null);
+
+        var payload = new Dictionary<string, object?>();
+        FieldMappingEndpoints.ApplyMappingRule(Dto("Number", "Number"), new() { ["sprk_source"] = 1234.56d }, payload)
+            .Status.Should().Be(FieldMappingStatus.Mapped);
+
+        Normalize(JsonSerializer.SerializeToElement(payload["sprk_target"])).Should().Be(Normalize(created!.Value));
+        Normalize(created.Value).Should().Be("1234.56");
     }
 
     // ───────────────────────── helpers ─────────────────────────
@@ -280,6 +345,14 @@ public class PushCopyParityTests
     private static string Normalize(JsonElement element) => element.ValueKind == JsonValueKind.Number
         ? element.GetDecimal().ToString(CultureInfo.InvariantCulture)
         : element.GetRawText();
+
+    /// <summary>A source value whose text form throws: a real fault inside the engine's Copy into a text target.</summary>
+    private sealed class ThrowsWhenRendered
+    {
+        public const string Detail = "sprk_secretcolumn of 04000000 could not be rendered";
+
+        public override string ToString() => throw new InvalidOperationException(Detail);
+    }
 
     private sealed class CapturingLogger : ILogger
     {

@@ -519,4 +519,35 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         failed.Should().Be(0);
         _h.Grants.ActiveRowsOf(project, contact).Should().ContainSingle();
     }
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 040 (FR-34, apply side): a push that writes an Assigned-To column of a SECURE
+    /// child suggests the assignee (pending confirmation) and grants nothing (owner answer A3).
+    /// </summary>
+    [Fact]
+    public async Task FieldMappingPush_ThatWritesAnAssignedColumnOfASecureChild_SuggestsIt_AndGrantsNothing()
+    {
+        var project = Guid.NewGuid();
+        var contact = _h.Contact();
+        _h.Participations.Flags[project] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        _h.Store.Assign(ExternalGrantRootType.Project, project, Attorney1, contact);
+        var dataverse = new Mock<IFieldMappingDataverseService>();
+
+        var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            dataverse.Object,
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
+            new[] { new FieldMappingRuleDto { SourceField = Attorney1, TargetField = Attorney1, SourceFieldType = "Text", TargetFieldType = "Text" } },
+            new Dictionary<string, object?> { [Attorney1] = contact.ToString("D") },
+            "sprk_project",
+            new[] { project },
+            Guid.Parse("0000c166-0000-0000-0000-00000000ca11"),
+            NullLogger.Instance,
+            CancellationToken.None,
+            Scopes());
+
+        (updated, failed).Should().Be((1, 0));
+        _h.Grants.ActiveRowsOf(project, contact).Should().BeEmpty("a secure record is never granted by a push");
+        _h.Store.RowsOf(project, contact).Should().ContainSingle(r => r.SourceField == Attorney1)
+            .Which.State.Should().Be(AssignedAccessState.PendingConfirmation, "the assignee is suggested");
+    }
 }
