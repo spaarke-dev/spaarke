@@ -106,7 +106,7 @@ export function InvoiceDecisionWizard(props: InvoiceDecisionWizardProps) {
             id,
             label: 'Decision',
             renderContent: handle => <OutcomeStep handle={handle} />,
-            canAdvance: () => live.current.readOnly || (live.current.form.outcome !== undefined && (live.current.form.outcome !== 'approve' || live.current.approval.canApprove)),
+            canAdvance: () => live.current.readOnly || (live.current.form.outcome !== undefined && (live.current.form.outcome !== 'approve' || live.current.approval.canApprove) && (live.current.form.outcome !== 'reject' || live.current.approval.firmNeeded !== true)),
           };
         case 'adjust':
           return {

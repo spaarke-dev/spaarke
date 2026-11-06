@@ -53,8 +53,9 @@ public enum AdjustmentStatus
     /// <summary>The adjustment row was written (or deactivated) but the totals step did not finish. Repeating the same request finishes it.</summary>
     Incomplete,
 
-    /// <summary>Task 095c-4: the invoice has no firm, so it has no rules to list or cite (409, nothing written). An adjustment that cites no rule
-    /// is still allowed.</summary>
+    /// <summary>Task 095c-4: the invoice has no firm, so it has no rules to list or cite (409, nothing written). Task 095d-0 (EB-D-197): an add
+    /// or a remove of an adjustment - rule-less or rule-cited - is refused with this status too, while the invoice has no firm, is held for one,
+    /// or its Set-firm re-run is pending (<see cref="InvoiceFirmGate"/>).</summary>
     FirmMissing,
 }
 
@@ -91,6 +92,23 @@ public static class AdjustmentCodes
 
     /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
     public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
+
+    /// <summary>EB-D-197: the sentence with <see cref="FirmMissing"/> when an adjustment (rule-less or rule-cited) is added or removed on an invoice with no firm.</summary>
+    public const string AdjustFirmMissingDetail = "This invoice has no firm. Add the firm before adjusting it; nothing was changed.";
+
+    /// <summary>EB-D-197: as <see cref="AdjustFirmMissingDetail"/>, for an invoice held for its firm.</summary>
+    public const string AdjustFirmHeldDetail = "This invoice is waiting for its firm to be assigned. It can be adjusted once the firm is assigned; nothing was changed.";
+
+    /// <summary>EB-D-197: as <see cref="AdjustFirmMissingDetail"/>, while the Set-firm re-run is pending (the same sentence the line decisions give).</summary>
+    public const string AdjustFirmRerunPendingDetail = "This invoice's firm was just assigned and its billing rules are being checked again. Try again when the check finishes; nothing was changed.";
+
+    /// <summary>EB-D-197: the <see cref="FirmMissing"/> sentence of an add or a remove for <paramref name="gate"/> (<see cref="InvoiceFirmGateResult.Open"/> has none and gets the no-firm sentence).</summary>
+    public static string AdjustFirmDetailFor(InvoiceFirmGateResult gate) => gate switch
+    {
+        InvoiceFirmGateResult.HeldForFirm => AdjustFirmHeldDetail,
+        InvoiceFirmGateResult.RerunPending => AdjustFirmRerunPendingDetail,
+        _ => AdjustFirmMissingDetail,
+    };
 }
 
 /// <summary>An Adjustment line as the reviewer needs it to update the screen without a second read.</summary>
@@ -467,6 +485,15 @@ public sealed class InvoiceAdjustmentService
                 return new AdjustmentResult(AdjustmentStatus.NotInReview, AdjustmentCodes.NotInReview, "Adjustments can be changed only while the invoice is In Review.");
             }
 
+            // Task 095d-0 (EB-D-197, owner): a firm comes first for an adjustment too - rule-less or rule-cited, exactly as for a line decision.
+            // No firm, held for one, or the Set-firm re-run pending is 409 (the route's 403 came first), before any read of the lines and every
+            // write. It is read once, app-only (InvoiceFirmGate; a fault is Unavailable below), and it also means the firm copied onto the line is
+            // always a CONFIRMED one.
+            if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var gate)
+            {
+                return new AdjustmentResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.AdjustFirmDetailFor(gate));
+            }
+
             lineRows = await InvoiceReviewReadService.ReadPagedAsync(_entities, InvoiceReviewReadService.LineQuery(command.InvoiceId), ct).ConfigureAwait(false);
             existing = await ReadRowAsync(lineId, ct).ConfigureAwait(false);
         }
@@ -489,27 +516,9 @@ public sealed class InvoiceAdjustmentService
                 .ConfigureAwait(false);
         }
 
-        // Task 095c-5 review K2: the invoice's firm need is read once, app-only (a fault is Unavailable), and serves both uses below: a cited rule
-        // is one of the firm's (none for a no-firm or a held invoice, whatever its firm column says now), and (pass-2 review) the firm copied onto
-        // the line is only a CONFIRMED firm, so a rule-less adjustment (allowed by design) on a held invoice carries none.
-        InvoiceFirmNeed need;
-        try
-        {
-            need = await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return ReadFailed(command.InvoiceId, ex);
-        }
-
-        // ── F-8 / D-74: a cited rule must be one of this invoice's options. ──
+        // ── F-8 / D-74: a cited rule must be one of this invoice's options (the firm gate above already proved the invoice has a confirmed firm). ──
         if (command.RuleId is { } ruleId)
         {
-            if (need != InvoiceFirmNeed.None)
-            {
-                return new AdjustmentResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.FirmDetailFor(need));
-            }
-
             IReadOnlyList<AdjustmentRuleOptionDto> options;
             try
             {
@@ -546,7 +555,7 @@ public sealed class InvoiceAdjustmentService
 
         var reviewedOn = _time.GetUtcNow();
         var nextSequence = lineRows.Select(r => r.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0).DefaultIfEmpty(0).Max() + 1;
-        var row = BuildRow(command, lineId, method, value, reason, dryRun.AdjustmentLineAmounts[lineId], nextSequence, reviewedOn.UtcDateTime, invoice, core.Value, copyFirm: need == InvoiceFirmNeed.None);
+        var row = BuildRow(command, lineId, method, value, reason, dryRun.AdjustmentLineAmounts[lineId], nextSequence, reviewedOn.UtcDateTime, invoice, core.Value);
 
         // UAC 194b R3b-2: the line's question is built from the row itself (RecordOwnershipContext.ForChild: its invoice, its core record and
         // the other lookups it holds, in sprk_billingevent's primary order), the question the secure-child reconciler asks the written row.
@@ -643,7 +652,7 @@ public sealed class InvoiceAdjustmentService
 
     private static Entity BuildRow(
         AddAdjustmentCommand command, Guid lineId, InvoiceAdjustmentMethod method, decimal value, string reason, decimal amount, int sequence,
-        DateTime reviewedOnUtc, Entity invoice, (string Entity, Guid Id) core, bool copyFirm)
+        DateTime reviewedOnUtc, Entity invoice, (string Entity, Guid Id) core)
     {
         var row = new Entity(InvoiceReviewReadService.LineEntity, lineId)
         {
@@ -667,9 +676,9 @@ public sealed class InvoiceAdjustmentService
             row[LineRule] = new EntityReference(PolicyVersionEntity, ruleId);
         }
 
-        // 095c-5 pass-2 review: an invoice held for its firm may show a firm written to its column directly; that firm is not confirmed, so the
-        // line does not carry it (the line is not a second place the unconfirmed firm can be read from).
-        if (copyFirm && invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg) is { } firm && firm.Id != Guid.Empty)
+        // 095c-5 pass-2 review, EB-D-197: only a CONFIRMED firm is copied onto the line. The firm gate has proven the invoice is not held for one
+        // (a firm written to the column directly while held is refused above), so the firm on the invoice is the confirmed one.
+        if (invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg) is { } firm && firm.Id != Guid.Empty)
         {
             row[LineVendorOrg] = new EntityReference("sprk_organization", firm.Id);
         }
@@ -729,6 +738,12 @@ public sealed class InvoiceAdjustmentService
             if (invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value != InvoiceStatusCodes.InReview)
             {
                 return new AdjustmentResult(AdjustmentStatus.NotInReview, AdjustmentCodes.NotInReview, "Adjustments can be changed only while the invoice is In Review.");
+            }
+
+            // Task 095d-0 (EB-D-197): removing an adjustment is a change to a reviewer's adjustment too - "only Return and Set firm stay available".
+            if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var gate)
+            {
+                return new AdjustmentResult(AdjustmentStatus.FirmMissing, AdjustmentCodes.FirmMissing, AdjustmentCodes.AdjustFirmDetailFor(gate));
             }
 
             row = await ReadRowAsync(command.LineId, ct).ConfigureAwait(false);

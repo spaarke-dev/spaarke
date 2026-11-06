@@ -39,6 +39,7 @@ import {
   type PdfBytes,
 } from '@spaarke/ui-components';
 import {
+  isFirmFirst,
   isIncomplete,
   loadFailureMessage,
   newDecisionId,
@@ -53,6 +54,7 @@ import {
 import {
   CORE_ENTITY,
   CORE_KIND_LABEL,
+  FIRM_FIRST_WORDS,
   buildLineCountCards,
   fieldLabel,
   filterLines,
@@ -200,6 +202,12 @@ export interface InvoiceReviewPageProps {
   openRecord?: (entityName: string, id: string) => void;
   /** Re-read interval while any line is Processing. Default 5 s. */
   pollIntervalMs?: number;
+  /**
+   * The invoice needs its firm first (the approval state's `firmNeeded`; EB-D-185 / EB-D-197): Accept, Reduce, Disallow, Accept all clean, the
+   * rule-group suggestions and the corrections are disabled and say why. The server refuses them (409) either way; this keeps the buttons it
+   * would refuse off the screen. Default false (the page alone has no approval state).
+   */
+  firmNeeded?: boolean;
   paneTabs?: PaneTabSlot[];
   headerExtras?: (ctx: ReviewSlotContext) => React.ReactNode;
   banners?: (ctx: ReviewSlotContext) => React.ReactNode;
@@ -265,7 +273,7 @@ function Stat({ label, value, big, testId }: { label: string; value: string; big
 }
 
 export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
-  const { invoiceId, api, openRecord, pollIntervalMs = 5000, paneTabs = [], headerExtras, banners, invoiceActions } = props;
+  const { invoiceId, api, openRecord, pollIntervalMs = 5000, firmNeeded = false, paneTabs = [], headerExtras, banners, invoiceActions } = props;
   const s = useStyles();
 
   const [review, setReview] = React.useState<InvoiceReview | null>(null);
@@ -433,8 +441,11 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
       if (!alive.current) return false;
       setBusy(false);
       // An ordinary refusal stays in its form so nothing is lost. A 409 (the invoice or line changed) cannot be fixed in the form: the page
-      // notice offers Reload instead.
-      if (opts.inDialog && !incomplete && f.status !== 403 && f.status !== 409) {
+      // notice offers Reload instead. EB-D-185: a 409 firm_missing is an ordinary refusal - nothing changed, so there is nothing to reload: the
+      // dialog stays open with what the reviewer typed and shows the server's sentence, and the page notice (a decision made in the pane)
+      // shows it with no Reload.
+      const firmFirst = isFirmFirst(f);
+      if (opts.inDialog && !incomplete && f.status !== 403 && (f.status !== 409 || firmFirst)) {
         setDialogError(text);
         return false;
       }
@@ -442,7 +453,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
       const again = opts.repeatCall ? opts.repeatCall(f) : call;
       const action: Notice['action'] = incomplete
         ? { label: 'Repeat', run: () => void runWrite(again, { ...opts, inDialog: false }) }
-        : f.status === 409
+        : f.status === 409 && !firmFirst
           ? { label: 'Reload', run: () => void reload() }
           : undefined;
       setNotice({ intent: 'error', text, action });
@@ -652,7 +663,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           </div>
         </div>
         {canWrite && (
-          <Button size="small" appearance="subtle" onClick={openHeaderCorrect} disabled={busy} data-testid="correct-header">
+          <Button size="small" appearance="subtle" onClick={openHeaderCorrect} disabled={busy || firmNeeded} data-testid="correct-header">
             Correct an invoice value…
           </Button>
         )}
@@ -660,6 +671,11 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
 
       <div className={s.banners}>
         {banners?.(slotCtx)}
+        {canWrite && firmNeeded && (
+          <MessageBar intent="warning" data-testid="firm-first-notice">
+            <MessageBarBody>{FIRM_FIRST_WORDS}</MessageBarBody>
+          </MessageBar>
+        )}
         {access.reason && (
           <MessageBar intent="info" data-testid="readonly-notice">
             <MessageBarBody>{access.reason}</MessageBarBody>
@@ -722,7 +738,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
                 onSelect={onSelect}
               />
             ) : (
-              <RuleGroups lines={shown} canWrite={canWrite} busy={busy} onSelectLine={id => onSelect(id, null)} onApply={openApply} />
+              <RuleGroups lines={shown} canWrite={canWrite} busy={busy || firmNeeded} onSelectLine={id => onSelect(id, null)} onApply={openApply} />
             )}
           </div>
         </div>
@@ -744,6 +760,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
                   invoiceFindings={review.invoiceFindings}
                   canWrite={canWrite}
                   busy={busy}
+                  firmNeeded={firmNeeded}
                   corrections={selectedLine ? corrections.filter(c => c.lineId === selectedLine.id) : []}
                   toDecideCount={toDecideCount}
                   onStart={() => {
@@ -768,10 +785,10 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         {canWrite && checkedIds.length > 0 ? (
           <>
             <Text weight="semibold">{checkedIds.length} selected</Text>
-            <Button onClick={() => openBulk('accept')} disabled={busy} data-testid="bulk-accept">
+            <Button onClick={() => openBulk('accept')} disabled={busy || firmNeeded} data-testid="bulk-accept">
               Accept…
             </Button>
-            <Button onClick={() => openBulk('disallow')} disabled={busy} data-testid="bulk-disallow">
+            <Button onClick={() => openBulk('disallow')} disabled={busy || firmNeeded} data-testid="bulk-disallow">
               Disallow…
             </Button>
             <Button appearance="subtle" onClick={() => setChecked(new Set())}>
@@ -779,7 +796,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
             </Button>
           </>
         ) : canWrite ? (
-          <Button disabled={busy || cleanCount === 0} onClick={acceptClean} data-testid="accept-clean">
+          <Button disabled={busy || firmNeeded || cleanCount === 0} onClick={acceptClean} data-testid="accept-clean">
             Accept all clean lines ({cleanCount})
           </Button>
         ) : null}

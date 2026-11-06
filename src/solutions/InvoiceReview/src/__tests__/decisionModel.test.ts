@@ -4,6 +4,7 @@ import {
   correctionTitle,
   historyItems,
   approveBlocker,
+  firmNeededBlocker,
   awaitingLine,
   decisionAccess,
   invoiceDecisionRecord,
@@ -59,6 +60,13 @@ describe('approveBlocker', () => {
   it('names the open counts first (I-2)', () => {
     expect(approveBlocker(approval({ canApprove: false, openLines: { pending: 0, flagged: 2 } }))).toBe('Not yet: 2 lines to decide.');
     expect(approveBlocker(approval({ canApprove: false, openLines: { pending: 1, flagged: 1 } }))).toBe('Not yet: 1 line to decide, 1 still processing.');
+  });
+
+  it('names the firm first when the invoice needs one (EB-D-190), ahead of the open counts', () => {
+    expect(approveBlocker(approval({ canApprove: false, firmNeeded: true, openLines: { pending: 0, flagged: 2 } }))).toContain('needs its firm first');
+    expect(firmNeededBlocker(approval({ firmNeeded: true }))).toContain('needs its firm first');
+    expect(firmNeededBlocker(approval({ firmNeeded: false }))).toBeNull();
+    expect(firmNeededBlocker(approval())).toBeNull();
   });
 
   it('then the hold, the missing approver, and a generic server refusal', () => {

@@ -88,18 +88,36 @@ public static class InvoiceRejectReturnCodes
     public const string Held = "ebilling.invoice.held";
 
     /// <summary>409 (task 095c-4): Return to Firm needs a firm to return the invoice to. The invoice has none, or a submission of it is held
-    /// "firm needed" (<see cref="InvoiceFirmHold"/>; a firm set natively does not lift it). Reject stays allowed: it is final and needs no firm.</summary>
+    /// "firm needed" (<see cref="InvoiceFirmHold"/>; a firm set natively does not lift it). Task 095d-0 (EB-D-190): Reject is refused with this same
+    /// code in the same states and also while the Set-firm re-run is pending (<see cref="InvoiceFirmGate"/>); the route family has one firm code.</summary>
     public const string FirmMissing = "ebilling.invoice.firm_missing";
 
     /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/> when the invoice names no firm (<see cref="InvoiceFirmNeed.NoFirm"/>).</summary>
-    public const string FirmMissingDetail = "This invoice has no firm to return it to. Add the firm first, or reject the invoice.";
+    public const string FirmMissingDetail = "This invoice has no firm to return it to. Add the firm first.";
 
     /// <summary>095c-4 review K1: the sentence with <see cref="FirmMissing"/> when the invoice shows a firm but is held for one
     /// (<see cref="InvoiceFirmNeed.Held"/>).</summary>
-    public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned, so it cannot be returned to a firm yet. Reject it, or return it once the firm is assigned.";
+    public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned, so it cannot be returned to a firm yet. Return it once the firm is assigned.";
 
-    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
+    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/> (Return to Firm).</summary>
     public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
+
+    /// <summary>Task 095d-0 (EB-D-190): the Reject sentences with <see cref="FirmMissing"/>, one per gate state.</summary>
+    public const string RejectFirmMissingDetail = "This invoice has no firm. A reviewer must add the firm before the invoice can be rejected.";
+
+    /// <summary>The Reject sentence while the invoice is held for its firm.</summary>
+    public const string RejectFirmHeldDetail = "This invoice is waiting for its firm to be assigned. It can be rejected once the firm is assigned.";
+
+    /// <summary>The Reject sentence while the re-run after Set firm has not completed.</summary>
+    public const string RejectFirmRerunPendingDetail = "This invoice's firm was just assigned and its billing rules are being checked again. Try again when the check finishes.";
+
+    /// <summary>The <see cref="FirmMissing"/> sentence of a Reject for <paramref name="gate"/> (<see cref="InvoiceFirmGateResult.Open"/> has none and gets the no-firm sentence).</summary>
+    public static string RejectFirmDetailFor(InvoiceFirmGateResult gate) => gate switch
+    {
+        InvoiceFirmGateResult.HeldForFirm => RejectFirmHeldDetail,
+        InvoiceFirmGateResult.RerunPending => RejectFirmRerunPendingDetail,
+        _ => RejectFirmMissingDetail,
+    };
 
     /// <summary>409: 014 refused the transition.</summary>
     public const string TransitionRefused = "ebilling.invoice.decision_refused";
@@ -418,12 +436,23 @@ public sealed class InvoiceRejectReturnService
             }
 
             // Task 095c-4: Return to Firm hands the invoice to its firm (the firm notice, the firm's correction); with no firm, or a stored
-            // "firm needed" hold, there is no firm to hand it to. Reject is final and needs none.
+            // "firm needed" hold, there is no firm to hand it to. EB-D-185 (R1): after Set firm the invoice has its firm and the re-run is pending;
+            // that is not "needs a firm", so Return proceeds when every firm_missing hold is matched by a stored Set-firm naming the invoice's firm.
             if (verb.Kind == InvoiceDecisionKind.Return
-                && await InvoiceFirmHold.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
+                && await InvoiceFirmGate.CheckForReturnAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmNeed.None and var need)
             {
                 _logger.LogWarning("Return of invoice {InvoiceId}: the invoice needs a firm ({Need}); nothing changed.", invoiceId, need);
                 return new InvoiceDecisionResult(InvoiceDecisionOutcome.Held, InvoiceRejectReturnCodes.FirmMissing, InvoiceRejectReturnCodes.FirmDetailFor(need));
+            }
+
+            // Task 095d-0 (EB-D-190, owner): a firm comes first for Reject too - exactly as for approve. No firm, held for one, or the Set-firm
+            // re-run pending refuses (409, same code as Return's firm refusal), after the 403s above and before the Signals read, the claim and every
+            // write. Return (which has the check above) and Set firm are the ways out.
+            if (verb.Kind == InvoiceDecisionKind.Reject
+                && await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var gate)
+            {
+                _logger.LogWarning("Reject of invoice {InvoiceId}: the invoice is not open for decisions ({Gate}); nothing changed.", invoiceId, gate);
+                return new InvoiceDecisionResult(InvoiceDecisionOutcome.Held, InvoiceRejectReturnCodes.FirmMissing, InvoiceRejectReturnCodes.RejectFirmDetailFor(gate));
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
