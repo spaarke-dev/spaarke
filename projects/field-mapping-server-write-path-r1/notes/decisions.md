@@ -844,8 +844,12 @@ Basic User keeps AppendTo on `sprk_reportcard`. The ruling removed it only if no
 
 ## 2026-11-06 — Communication send, reply and re-file need Core User (owner, in fm's session)
 
-Basic User is not raised for communication send, reply or re-file (task 046b gaps G11 and G12). These features need Core User, like the other add-on rulings of 2026-11-05. A caller who holds Basic User only is refused with the routes' normal 403. The gaps stay in the guard's baseline, marked "owner ruled: not granted", so any change to them is a deliberate one. Removal R1 was applied on dev on 2026-11-06 (UAC-r2, from `e6c0c94fa3`).
+Basic User is not raised for communication send, reply or re-file (task 046b gaps G11 and G12). These features need Core User, like the other add-on rulings of 2026-11-05. A caller who holds Basic User only is refused the way each route already refuses: a 403 ProblemDetails, or the uniform 404 where the route does not reveal the target (re-file). The gaps stay in the guard's baseline, marked "owner ruled: not granted", so any change to them is a deliberate one. Removal R1 was applied on dev on 2026-11-06 (UAC-r2, from `e6c0c94fa3`).
 
 ## 2026-11-06 — Basic User is read-only on Spaarke tables (owner, in fm's session)
 
 On every Spaarke table (`sprk_*`), Spaarke Basic User holds Read only. Creating, updating, deleting, filing, assigning or sharing Spaarke records needs Core User. Platform privileges that Dataverse needs for any user are not affected. Task 046c applies the rule: the role file, a removal through the reviewed `-Remove` step (run by UAC-r2 under the owner's go), and a guard.
+
+## 2026-11-06 — Core User reads communication threads at Deep (owner, in fm's session)
+
+Sending into a communication thread asks Read on `sprk_communicationthread` as the caller, and that table is user-owned. Core User gets that Read at Deep, so a Core user can reply into threads across their business-unit tree, like Core User's other reads (task 046b gap G13). For Basic User the gap stays "owner ruled: not granted" under the read-only ruling. UAC-r2 applies it through the reviewed add step.
