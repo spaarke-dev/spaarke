@@ -17,6 +17,7 @@
 #   failRemoveOn roleId        the RemovePrivilegeRole POST on that role fails
 #   removeAlsoDrops [privId]   RemovePrivilegeRole also drops these privileges from the root role (a platform that removes more than asked)
 #   removeAlsoSets {privId:depth}   RemovePrivilegeRole also adds, or sets the depth of, these privileges on the root role
+#   addAlsoSets {privId:depth}      AddPrivilegesRole also adds, or sets the depth of, these privileges on the root role
 # Every request is appended to $env:FRP_LOG as one JSON line {Method, Uri}. Any route the script does not use throws, so a new,
 # unplanned call fails a test instead of passing silently.
 
@@ -67,6 +68,8 @@ function Invoke-RestMethod {
                 if (@($s.noPropagate) -notcontains $copy.id) { $global:Held[$copy.id][$p.PrivilegeId] = [string]$p.Depth }
             }
         }
+        # A platform that also sets (adds, or changes the depth of) privileges it was not asked to (task 046c, -Restore).
+        foreach ($id in @($s.addAlsoSets.Keys | Where-Object { $_ })) { $global:Held[$rid][$id] = [string]$s.addAlsoSets[$id] }
         $global:PostMade = $true
         return $null
     }

@@ -43,6 +43,12 @@ namespace Spaarke.ArchTests;
 /// <para><b>The ruled changes (task 046b).</b> <c>config/feature-role-privileges.json</c> lists the role changes the owner ruled on
 /// task 046's gaps; <c>scripts/Set-FeatureRolePrivileges.ps1</c> applies it to an environment. The role files hold each change at
 /// its declared depth, and putting any one back to its earlier level fails this guard.</para>
+/// <para><b>Basic User is read-only on Spaarke tables (task 046c; owner, 2026-11-06).</b> Spaarke Basic User holds Read and nothing else on
+/// every <c>sprk_*</c> table; its other privileges are the platform privileges listed by name in
+/// <see cref="BasicUserPlatformPrivileges"/>. <see cref="BasicUserIsReadOnlyOnSpaarkeTables"/> checks the role file against that rule.
+/// The privileges taken off are the config's "removals" (R3), which the apply script removes from an environment. Core User gains
+/// AppendTo on the agreement-type, organization-type and document-type reference tables first (the config's G17 changes); the other
+/// features that relied on Basic User's privileges were ruled to require Core User (G11, G12, G14 to G16 in the baseline).</para>
 /// </remarks>
 public class FeatureRolePrivilegeGuardTests
 {
@@ -80,6 +86,15 @@ public class FeatureRolePrivilegeGuardTests
     private const string AnalysisPlaybookRead = Bff + "Api/Filters/PlaybookAuthorizationFilter.cs:307-330; "
         + Bff + "Services/RecordCreation/RecordCreationService.RouteAuthorized.cs:150-165";
     private const string AnalysisScopeRead = Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:833-835,881-892";
+
+    /// <summary>The agreement-type bind on an analysis: the wizard's create through the child-records route, and the classifier's update.</summary>
+    private const string AgreementTypeBind = "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx:857-875,924-925; "
+        + "src/solutions/SpaarkeAi/src/components/conversation/agreementTypeLookupWrite.ts:87-110; " + ChildCreate;
+
+    /// <summary>The model-driven form lookups on the organization-type and document-type reference tables (no BFF route asks them;
+    /// Dataverse asks AppendTo on the referenced row when the form sets the lookup).</summary>
+    private const string OrganizationTypeBind = "src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_OrganizationType_Ref.xml:3-18,38-53";
+    private const string DocumentTypeBind = "src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_documenttype_ref.xml:3-18";
 
     /// <summary>The quick create's source Read (one of EntityAccessFilter's tables; contact is the assignee row's).</summary>
     private const string QuickCreateSource = Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:246-260; " + Bff + "Api/Filters/EntityAccessFilter.cs:115-155";
@@ -185,6 +200,16 @@ public class FeatureRolePrivilegeGuardTests
             "prvReadsprk_analysisskill", "prvReadsprk_analysisknowledge", "prvReadsprk_analysistool"),
         .. For("Analysis from a playbook (Basic User + AI Analysis User)", [Basic, AiUser], "Deep",
             Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:152,781-788 (analysis.attach)", "prvReadsprk_Document", "prvAppendTosprk_Document"),
+        // Agreement type on an analysis (task 046c): the Create Analysis wizard binds the agreement-type row on the create it posts to the
+        // child-records route (RecordCreationService as the caller), and the Console classifier sets it on an existing analysis. AppendTo
+        // is asked on the row, which is organization-owned: any depth reaches it. Core User holds it from task 046c (owner, 2026-11-06),
+        // before Basic User loses it.
+        .. For("Analysis agreement type", [Core], "Basic", AgreementTypeBind, "prvAppendTosprk_AgreementType"),
+        .. For("Analysis agreement type (Basic User + AI Analysis User)", [Basic, AiUser], "Basic", AgreementTypeBind, "prvAppendTosprk_AgreementType"),
+        // Organization type and document type (task 046c, owner 2026-11-06): model-driven form lookups on organization-owned reference
+        // tables. Core User holds AppendTo on them, before Basic User loses it.
+        .. For("Organization type on an organization (model-driven form)", [Core], "Basic", OrganizationTypeBind, "prvAppendTosprk_OrganizationType_Ref"),
+        .. For("Document type on a practice area matrix row (model-driven form)", [Core], "Basic", DocumentTypeBind, "prvAppendTosprk_documenttype_ref"),
 
         // Events, typed route: POST /api/v1/events (Create privilege in the route filter; the rest in the service as the caller).
         .. For("Event (typed route)", [Core], "Basic", Bff + "Api/Events/EventEndpoints.cs:66,131", "prvCreatesprk_Event"),
@@ -575,8 +600,8 @@ public class FeatureRolePrivilegeGuardTests
         new("Budget Revision create: only the writer creates one; the cleanup role writes and deletes (owner 2026-11-05)",
             ["prvCreatesprk_BudgetRevision"], [],
             "projects/field-mapping-server-write-path-r1/notes/decisions.md:836; docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md:186"),
-        // R2 (Basic User: no AppendTo on sprk_reportcard) is NOT applied (fix round 3): the communication send, reply and re-file rows ask
-        // it of a Basic User on a report card regarding record, so there is no rule here for it. Awaiting the owner.
+        // R2 (Basic User: no AppendTo on sprk_reportcard) was not applied in 046b. Task 046c covers it and every other non-Read privilege
+        // on a Spaarke table: Basic User is read-only there (BasicUserIsReadOnlyOnSpaarkeTables), so there is no rule here for it.
         new("Invoice line (sprk_billingevent) create: none, by design (BFF-written, ebilling D-18)",
             ["prvCreatesprk_BillingEvent"], [], "projects/ebilling-r1/notes/decisions-log.md:24"),
     ];
@@ -620,17 +645,38 @@ public class FeatureRolePrivilegeGuardTests
         new("Communication send / reply (Basic User)", "prvAppendToAccount", "Basic", CommunicationBasicWait("G11")),
         new("Communication send / reply (Basic User)", "prvAppendToContact", "Basic", CommunicationBasicWait("G11")),
         new("Communication send / reply (Basic User)", "prvReadsprk_Communication", "Basic", CommunicationBasicWait("G11")),
-        new("Communication re-file (Basic User)", "prvWritesprk_Communication", "Basic", CommunicationBasicWait("G12")),
+        new("Communication re-file (Basic User)", "prvWritesprk_Communication", "none", CommunicationBasicWait("G12")),
         new("Communication re-file (Basic User)", "prvReadsprk_Communication", "Basic", CommunicationBasicWait("G12")),
-        new("Communication re-file (Basic User)", "prvAppendsprk_Communication", "Basic", CommunicationBasicWait("G12")),
+        new("Communication re-file (Basic User)", "prvAppendsprk_Communication", "none", CommunicationBasicWait("G12")),
         new("Communication re-file (Basic User)", "prvAppendTosprk_ServiceRequest", "none", CommunicationBasicWait("G12")),
         new("Communication re-file (Basic User)", "prvAppendTosprk_Budget", "none", CommunicationBasicWait("G12")),
         new("Communication re-file (Basic User)", "prvAppendToAccount", "Basic", CommunicationBasicWait("G12")),
         new("Communication re-file (Basic User)", "prvAppendToContact", "Basic", CommunicationBasicWait("G12")),
+        // Task 046c: Basic User is read-only on Spaarke tables (owner 2026-11-06), so it holds no AppendTo on a Spaarke regarding table.
+        .. new[] { "Communication send / reply (Basic User)", "Communication re-file (Basic User)" }.SelectMany(feature =>
+            new[]
+            {
+                "prvAppendTosprk_Matter", "prvAppendTosprk_Project", "prvAppendTosprk_Invoice", "prvAppendTosprk_WorkAssignment",
+                "prvAppendTosprk_Event", "prvAppendTosprk_ReportCard", "prvAppendTosprk_analysis", "prvAppendTosprk_Organization",
+            }.Select(p => new KnownGap(feature, p, "none", CommunicationBasicWait(feature.StartsWith("Communication send", StringComparison.Ordinal) ? "G11" : "G12")))),
+
+        // G14-G16 (task 046c): with Basic User read-only on Spaarke tables, these rows lose a privilege that no other role of their set
+        // holds. Owner ruled (2026-11-06): the features require Core User, as 046b ruled for the add-ons (StandaloneExceptions); no
+        // privilege is added to Office Add In User or AI Analysis User. Core User meets each of these features.
+        new("Event (typed route, Office Add In User)", "prvAppendTosprk_RecordType_Ref", "none", RequiresCoreUser("G14")),
+        new("Event (typed route, Office Add In User)", "prvAppendTosprk_analysis", "none", RequiresCoreUser("G14")),
+        new("Office quick create (Office Add In User)", "prvAppendTosprk_RecordType_Ref", "none", RequiresCoreUser("G14")),
+        new("Analysis from a playbook (Basic User + AI Analysis User)", "prvAppendTosprk_Document", "none", RequiresCoreUser("G15")),
+        new("Analysis agreement type (Basic User + AI Analysis User)", "prvAppendTosprk_AgreementType", "none", RequiresCoreUser("G15")),
+        .. new[] { "prvAppendTosprk_Matter", "prvAppendTosprk_Project", "prvAppendTosprk_Invoice", "prvAppendTosprk_WorkAssignment", "prvAppendTosprk_Event", "prvAppendTosprk_Todo" }
+            .Select(p => new KnownGap("Office save (Basic User)", p, "none", RequiresCoreUser("G16"))),
     ];
 
     private static string CommunicationBasicWait(string gap) =>
         $"{gap}. Owner ruled: not granted (Core User required), 2026-11-06: Spaarke Basic User holds less than the depth the communication route asks of the caller and is not raised.";
+
+    private static string RequiresCoreUser(string gap) =>
+        $"{gap}. Owner ruled: not granted (Core User required), 2026-11-06: Basic User is read-only on Spaarke tables (task 046c) and the add-ons are not given the privilege.";
 
     private static readonly string[] DepthOrder = ["Basic", "Local", "Deep", "Global"];
 
@@ -1197,8 +1243,8 @@ public class FeatureRolePrivilegeGuardTests
         Assert.Equal(new[] { "B: prvCreatesprk_Signal at Basic — R-only" }, ForbiddenHeld(roles, [rules[3]]));
     }
 
-    [Fact(DisplayName = "046b fix round 3: taking AppendTo on sprk_reportcard off a copy of Basic User fails the guard through the communication send and re-file rows")]
-    public void RemovingReportCardAppendToFromBasicUserFailsTheGuard()
+    [Fact(DisplayName = "046c: putting AppendTo on sprk_reportcard back on a copy of Basic User fails the read-only rule and leaves the communication send and re-file baseline entries stale")]
+    public void ReportCardAppendToBackOnBasicUserFailsTheGuard()
     {
         var dir = Path.Combine(Path.GetTempPath(), "sprk-feature-roles-" + Guid.NewGuid().ToString("N"));
         try
@@ -1208,19 +1254,19 @@ public class FeatureRolePrivilegeGuardTests
                 File.Copy(file, Path.Combine(dir, Path.GetFileName(file)));
             var roleNames = Requirements.SelectMany(r => r.Roles).ToArray();
 
-            // must-not-fire: the copy as it is passes
+            // must-not-fire: the copy as it is passes both checks
             var before = Ratchet(Gaps(Requirements, LoadRoles(dir, roleNames)), KnownGaps);
             Assert.Empty(before.Unlisted.Concat(before.Stale).Concat(before.Changed));
+            Assert.Empty(ReadOnlyProblems(LoadRoles(dir, [Basic])[Basic], BasicUserPlatformPrivileges));
 
-            // must-fire: without it, both Basic User rows report the report card
-            var path = Path.Combine(dir, Basic + ".xml");
-            var doc = XDocument.Load(path);
-            doc.Descendants().Single(e => e.Name.LocalName == "RolePrivilege" && Same((string?)e.Attribute("name") ?? "", "prvAppendTosprk_ReportCard")).Remove();
-            doc.Save(path);
+            // must-fire: with it back, the read-only rule names it, and both Basic User baseline entries no longer reproduce
+            AddPrivilege(dir, Basic, "prvAppendTosprk_ReportCard", "Deep");
+            Assert.Equal(new[] { "prvAppendTosprk_ReportCard at Deep: Basic User holds only Read on a Spaarke table (sprk_ReportCard)" },
+                ReadOnlyProblems(LoadRoles(dir, [Basic])[Basic], BasicUserPlatformPrivileges));
             var after = Ratchet(Gaps(Requirements, LoadRoles(dir, roleNames)), KnownGaps);
-            Assert.Contains(after.Unlisted, u => u.StartsWith("Communication send / reply (Basic User): prvAppendTosprk_ReportCard", StringComparison.Ordinal));
-            Assert.Contains(after.Unlisted, u => u.StartsWith("Communication re-file (Basic User): prvAppendTosprk_ReportCard", StringComparison.Ordinal));
-            Assert.DoesNotContain(after.Unlisted, u => u.StartsWith("Communication send / reply: ", StringComparison.Ordinal)); // Core User's rows still hold
+            Assert.Equal(
+                new[] { "Communication send / reply (Basic User): prvAppendTosprk_ReportCard", "Communication re-file (Basic User): prvAppendTosprk_ReportCard" },
+                after.Stale);
         }
         finally
         {
@@ -1548,20 +1594,27 @@ public class FeatureRolePrivilegeGuardTests
     {
         var removals = LoadRemovals(RuledChangesPath);
         var changes = LoadRuledChanges(RuledChangesPath);
-        Assert.Single(removals);
+        // R1 (046b) and the 80 of R3 (046c: Basic User is read-only on Spaarke tables)
+        Assert.Equal(81, removals.Count);
+        Assert.Equal(80, removals.Count(r => r.Gap == "R3" && r.Role == Basic));
         var personRoles = PersonRoles(SolutionsDirectory);
         var roles = LoadRoles(RolesDirectory, removals.Select(r => r.Role));
 
         // must-not-fire: the repo as it is
         Assert.Empty(RemovalProblems(removals, changes, roles));
         Assert.Empty(ForbiddenHeld(personRoles, MustNotHold));
+        Assert.Empty(ReadOnlyProblems(personRoles[Basic], BasicUserPlatformPrivileges));
 
         foreach (var r in removals)
         {
-            // each removed privilege is covered by a must-not-hold rule for that role, so the role file cannot get it back unseen
+            // each removed privilege is covered by a must-not-hold rule for that role (or, for Basic User, by the read-only rule), so the
+            // role file cannot get it back unseen
             var seededRole = new Dictionary<string, string>(personRoles[r.Role], StringComparer.OrdinalIgnoreCase) { [r.Privilege] = r.ExpectedDepth };
             var seeded = new Dictionary<string, IReadOnlyDictionary<string, string>>(personRoles) { [r.Role] = seededRole };
-            Assert.Contains(ForbiddenHeld(seeded, MustNotHold), f => f.StartsWith($"{r.Role}: {r.Privilege} at {r.ExpectedDepth}", StringComparison.Ordinal));
+            if (r.Role == Basic)
+                Assert.Contains(ReadOnlyProblems(seededRole, BasicUserPlatformPrivileges), f => f.StartsWith($"{r.Privilege} at {r.ExpectedDepth}: ", StringComparison.Ordinal));
+            else
+                Assert.Contains(ForbiddenHeld(seeded, MustNotHold), f => f.StartsWith($"{r.Role}: {r.Privilege} at {r.ExpectedDepth}", StringComparison.Ordinal));
 
             // must-fire: the role file holds it again
             var seededRoles = new Dictionary<string, IReadOnlyDictionary<string, string>>(roles) { [r.Role] = seededRole };
@@ -1612,6 +1665,361 @@ public class FeatureRolePrivilegeGuardTests
         }
 
         return problems;
+    }
+
+    // ── The release's role-privilege expectations carry the ruled set (task 046c fix round 2) ────────────────────────────────
+
+    internal sealed record RoleExpectation(IReadOnlySet<string> Absent, IReadOnlyDictionary<string, string> Present);
+
+    private static string ExpectationsDirectory => Path.Combine(SourceScan.RepoRoot, "scripts", "provisioning", "role-privilege-expectations");
+
+    /// <summary>The expectations file of the highest version (<c>spaarkemaster-{version}.json</c>, compared as versions, not as text). The files
+    /// are cumulative, so the newest one is the one a customer upgrade is checked against.</summary>
+    internal static string NewestExpectationsFile(string directory)
+    {
+        var files = Directory.Exists(directory) ? Directory.GetFiles(directory, "spaarkemaster-*.json") : [];
+        var versioned = files
+            .Select(f => (File: f, Ok: Version.TryParse(Path.GetFileNameWithoutExtension(f)["spaarkemaster-".Length..], out var v), Version: v))
+            .Where(x => x.Ok)
+            .OrderByDescending(x => x.Version)
+            .ToList();
+        if (versioned.Count == 0)
+            throw new InvalidOperationException($"No spaarkemaster-{{version}}.json expectations file in {directory}.");
+        return versioned[0].File;
+    }
+
+    internal static IReadOnlyDictionary<string, RoleExpectation> LoadExpectations(string path)
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        var result = new Dictionary<string, RoleExpectation>(StringComparer.Ordinal);
+        foreach (var role in doc.RootElement.GetProperty("roles").EnumerateObject())
+        {
+            var absent = role.Value.TryGetProperty("absent", out var a)
+                ? a.EnumerateArray().Select(x => x.GetString()!).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var present = role.Value.TryGetProperty("present", out var pr)
+                ? pr.EnumerateObject().ToDictionary(x => x.Name, x => x.Value.GetString()!, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            result[role.Name] = new RoleExpectation(absent, present);
+        }
+
+        return result;
+    }
+
+    /// <summary>What the expectations leave out of the ruled set: every removal must be in its role's <c>absent</c> list, and every change in
+    /// its role's <c>present</c> list at exactly its depth. Without them a managed upgrade that leaves a removed privilege behind (or misses
+    /// an added one) passes <c>Test-RolePrivilegeExpectations.ps1</c>.</summary>
+    internal static List<string> ExpectationProblems(
+        IReadOnlyList<Removal> removals, IReadOnlyList<RuledChange> changes, IReadOnlyDictionary<string, RoleExpectation> expectations)
+    {
+        var problems = new List<string>();
+        foreach (var r in removals)
+        {
+            if (!expectations.TryGetValue(r.Role, out var e)) problems.Add($"{r.Role}: no entry in the expectations file (removal {r.Gap} {r.Privilege})");
+            else if (!e.Absent.Contains(r.Privilege)) problems.Add($"{r.Role}: {r.Privilege} — removal {r.Gap} is not in the expectations' absent list");
+        }
+
+        foreach (var c in changes)
+        {
+            if (!expectations.TryGetValue(c.Role, out var e)) problems.Add($"{c.Role}: no entry in the expectations file (change {c.Gap} {c.Privilege})");
+            else if (!e.Present.TryGetValue(c.Privilege, out var depth)) problems.Add($"{c.Role}: {c.Privilege} — change {c.Gap} is not in the expectations' present list");
+            else if (!Same(depth, c.Depth)) problems.Add($"{c.Role}: {c.Privilege} — change {c.Gap} is expected at {depth}, the config declares {c.Depth}");
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "046c fix 2: every removal of config/feature-role-privileges.json is in the newest role-privilege expectations file's absent list, every change in its present list")]
+    public void NewestExpectationsFileCarriesTheRuledSet()
+    {
+        var removals = LoadRemovals(RuledChangesPath);
+        var changes = LoadRuledChanges(RuledChangesPath);
+        var file = NewestExpectationsFile(ExpectationsDirectory);
+        var expectations = LoadExpectations(file);
+
+        // must-not-fire: the repo as it is
+        Assert.Empty(ExpectationProblems(removals, changes, expectations));
+        Assert.True(removals.Count > 0 && changes.Count > 0, "the check is vacuous without removals and changes");
+
+        // must-fire: each removal dropped from absent, and each change dropped from present or moved to another depth, is reported
+        foreach (var r in removals)
+        {
+            var seeded = expectations.ToDictionary(x => x.Key, x => x.Value);
+            seeded[r.Role] = new RoleExpectation(expectations[r.Role].Absent.Where(a => !Same(a, r.Privilege)).ToHashSet(StringComparer.OrdinalIgnoreCase), expectations[r.Role].Present);
+            Assert.Contains(ExpectationProblems(removals, changes, seeded), p => p.StartsWith($"{r.Role}: {r.Privilege} — removal", StringComparison.Ordinal));
+        }
+
+        foreach (var c in changes)
+        {
+            var dropped = expectations[c.Role].Present.Where(x => !Same(x.Key, c.Privilege)).ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+            var seeded = expectations.ToDictionary(x => x.Key, x => x.Value);
+            seeded[c.Role] = new RoleExpectation(expectations[c.Role].Absent, dropped);
+            Assert.Contains(ExpectationProblems(removals, changes, seeded), p => p.StartsWith($"{c.Role}: {c.Privilege} — change", StringComparison.Ordinal) && p.Contains("not in the expectations' present list", StringComparison.Ordinal));
+
+            var moved = new Dictionary<string, string>(dropped, StringComparer.OrdinalIgnoreCase) { [c.Privilege] = Same(c.Depth, "Basic") ? "Deep" : "Basic" };
+            seeded[c.Role] = new RoleExpectation(expectations[c.Role].Absent, moved);
+            Assert.Contains(ExpectationProblems(removals, changes, seeded), p => p.StartsWith($"{c.Role}: {c.Privilege} — change", StringComparison.Ordinal) && p.Contains("is expected at", StringComparison.Ordinal));
+        }
+
+        // must-fire: a role with no entry at all
+        var noRole = expectations.Where(x => x.Key != removals[0].Role).ToDictionary(x => x.Key, x => x.Value);
+        Assert.Contains(ExpectationProblems(removals, changes, noRole), p => p.StartsWith($"{removals[0].Role}: no entry", StringComparison.Ordinal));
+
+        // must-not-fire: other casing, and entries the config does not list
+        var recased = expectations.ToDictionary(
+            x => x.Key,
+            x => new RoleExpectation(x.Value.Absent.Select(a => a.ToUpperInvariant()).ToHashSet(StringComparer.OrdinalIgnoreCase), x.Value.Present.ToDictionary(y => y.Key.ToLowerInvariant(), y => y.Value.ToUpperInvariant(), StringComparer.OrdinalIgnoreCase)));
+        Assert.Empty(ExpectationProblems(removals, changes, recased));
+        var extra = expectations.ToDictionary(
+            x => x.Key,
+            x => new RoleExpectation(x.Value.Absent.Append("prvReadsprk_NotInTheConfig").ToHashSet(StringComparer.OrdinalIgnoreCase), x.Value.Present.Append(new("prvReadsprk_AlsoNotInTheConfig", "Deep")).ToDictionary(y => y.Key, y => y.Value, StringComparer.OrdinalIgnoreCase)));
+        Assert.Empty(ExpectationProblems(removals, changes, extra));
+    }
+
+    [Fact(DisplayName = "046c fix 2: the newest expectations file is chosen by version, not by name; none is an error")]
+    public void NewestExpectationsFileIsChosenByVersion()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "frp-expect-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() => NewestExpectationsFile(dir));
+            foreach (var v in new[] { "1.2.4.0", "1.10.0.0", "1.3.0.0" })
+                File.WriteAllText(Path.Combine(dir, $"spaarkemaster-{v}.json"), "{}");
+            File.WriteAllText(Path.Combine(dir, "spaarkemaster-notes.json"), "{}");
+            Assert.Equal("spaarkemaster-1.10.0.0.json", Path.GetFileName(NewestExpectationsFile(dir)));
+            Assert.Throws<InvalidOperationException>(() => NewestExpectationsFile(Path.Combine(dir, "missing")));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+
+        // the real folder resolves to a file whose name carries a version
+        Assert.Matches(@"^spaarkemaster-\d+\.\d+\.\d+\.\d+\.json$", Path.GetFileName(NewestExpectationsFile(ExpectationsDirectory)));
+    }
+
+    // ── Basic User is read-only on Spaarke tables (task 046c) ──────────────────────────────────────────────────────────────
+
+    /// <summary>Owner ruling 2026-11-06 (projects/field-mapping-server-write-path-r1/notes/decisions.md, "Basic User is read-only on
+    /// Spaarke tables"): on every Spaarke table (<c>sprk_*</c>) Spaarke Basic User holds Read and nothing else. Creating, updating,
+    /// deleting, filing, assigning or sharing Spaarke records needs Spaarke Core User. The platform privileges every user needs are out
+    /// of scope; they are listed here by name, not inferred, so a privilege the rule does not recognise fails instead of passing as
+    /// "platform". Change this list only for a platform (non-<c>sprk_</c>) privilege, in the same change as the role file.</summary>
+    internal static readonly string[] BasicUserPlatformPrivileges =
+        """
+        prvActivateSynchronousWorkflow prvAddressBook prvAppendAccount prvAppendActionCard prvAppendActivity prvAppendAppUserSetting
+        prvAppendArticle prvAppendCalendar prvAppendCategory prvAppendChannelPropertyGroup prvAppendConnection prvAppendContact
+        prvAppendConvertRule prvAppendCustomerRelationship prvAppendEmailTemplate prvAppendEnvironmentVariableDefinition
+        prvAppendExpiredProcess prvAppendFeedback prvAppendImport prvAppendImportFile prvAppendImportMap prvAppendKnowledgeArticle
+        prvAppendKnowledgeArticleViews prvAppendKnowledgeBaseRecord prvAppendLanguageLocale prvAppendMailbox
+        prvAppendMailboxTrackingFolder prvAppendMailMergeTemplate prvAppendmsdyn_AIBFeedbackLoop prvAppendmsdyn_AIEvent
+        prvAppendmsdyn_dmsrequest prvAppendmsdyn_dmsrequeststatus prvAppendmsdyn_favoriteknowledgearticle prvAppendmsdyn_kbattachment
+        prvAppendNewProcess prvAppendNote prvAppendPersonalDocumentTemplate prvAppendPost prvAppendPostFollow prvAppendReport
+        prvAppendRoutingRule prvAppendSharePointData prvAppendSharePointDocument prvAppendSharePointDocumentLocation prvAppendSLA
+        prvAppendSLAKPIInstance prvAppendSocialProfile prvAppendSyncError prvAppendToAccount prvAppendToActionCard prvAppendToActivity
+        prvAppendToArticleTemplate prvAppendToAsyncOperation prvAppendToCalendar prvAppendtoCategory prvAppendToChannelPropertyGroup
+        prvAppendToConnection prvAppendToContact prvAppendToConvertRule prvAppendToCustomerRelationship prvAppendToEmailServerProfile
+        prvAppendToEnvironmentVariableDefinition prvAppendToExpanderEvent prvAppendToExpiredProcess prvAppendToFeedback
+        prvAppendToImport prvAppendToImportFile prvAppendToImportMap prvAppendToKnowledgeArticle prvAppendToKnowledgeArticleViews
+        prvAppendToKnowledgeBaseRecord prvAppendToLanguageLocale prvAppendToMailMergeTemplate prvAppendTomsdyn_aidocumenttemplate
+        prvAppendTomsdyn_AIModel prvAppendTomsdyn_dmsrequest prvAppendTomsdyn_dmsrequeststatus
+        prvAppendTomsdyn_favoriteknowledgearticle prvAppendTomsdyn_kbattachment prvAppendToNewProcess prvAppendToNote
+        prvAppendToPersonalDocumentTemplate prvAppendToPost prvAppendToQueue prvAppendToReport prvAppendToRoutingRule
+        prvAppendToSettingDefinition prvAppendToSharePointData prvAppendToSharePointDocument prvAppendToSharePointDocumentLocation
+        prvAppendToSharePointSite prvAppendToSLA prvAppendToSLAKPIInstance prvAppendToSocialProfile prvAppendToSyncError
+        prvAppendToTraceLog prvAppendToTransactionCurrency prvAppendToTranslationProcess prvAppendToUser prvAppendToUserSettings
+        prvAppendToWorkflow prvAppendToWorkflowSession prvAppendTraceLog prvAppendTransactionCurrency prvAppendTranslationProcess
+        prvAppendUser prvAppendWorkflow prvAppendWorkflowSession prvAssignAccount prvAssignActivity prvAssignAsyncOperation
+        prvAssignCallbackRegistration prvAssignConnection prvAssignContact prvAssignConvertRule prvAssignCustomerRelationship
+        prvAssignEmailSignature prvAssignEmailTemplate prvAssignImport prvAssignImportFile prvAssignImportMap prvAssignKnowledgeArticle
+        prvAssignKnowledgeArticleViews prvAssignMailMergeTemplate prvAssignmsdyn_dmsrequest prvAssignmsdyn_dmsrequeststatus
+        prvAssignmsdyn_kbattachment prvAssignNote prvAssignPersonalDocumentTemplate prvAssignReport prvAssignRoutingRule
+        prvAssignSharePointDocument prvAssignSharePointDocumentLocation prvAssignSharePointSite prvAssignSLA prvAssignSLAKPIInstance
+        prvAssignSocialProfile prvAssignSyncError prvAssignUserEntityInstanceData prvAssignUserForm prvAssignUserQuery
+        prvAssignUserQueryVisualizations prvAssignWorkflow prvAssignWorkflowSession prvBulkEdit prvCreateAccount prvCreateActionCard
+        prvCreateActionCardUserSettings prvCreateActivity prvCreateAppUserSetting prvCreateCallbackRegistration prvCreateConnection
+        prvCreateContact prvCreateCustomerRelationship prvCreateEmailSignature prvCreateEmailTemplate prvCreateExchangeSyncIdMapping
+        prvCreateExpiredProcess prvCreateImport prvCreateImportFile prvCreateImportMap prvCreateKnowledgeArticleViews
+        prvCreateMailboxTrackingFolder prvCreateMailMergeTemplate prvCreatemsdyn_AIBFeedbackLoop prvCreatemsdyn_AIEvent
+        prvCreatemsdyn_customcontrolextendedsettings prvCreatemsdyn_dmsrequest prvCreatemsdyn_dmsrequeststatus
+        prvCreatemsdyn_favoriteknowledgearticle prvCreatemsdyn_richtextfile prvCreatemsdyn_timelinepin prvCreateNewProcess
+        prvCreateNote prvCreatePersonalDocumentTemplate prvCreatePost prvCreatePostFollow prvCreateReport prvCreateSharePointData
+        prvCreateSharePointDocument prvCreateSharePointDocumentLocation prvCreateSocialProfile prvCreateSyncError prvCreateTraceLog
+        prvCreatetrait prvCreateTranslationProcess prvCreateUserApplicationMetadata prvCreateUserEntityInstanceData
+        prvCreateUserEntityUISettings prvCreateUserForm prvCreateUserQuery prvCreateUserQueryVisualizations prvCreateUserSettings
+        prvCreateWorkflow prvCreateWorkflowSession prvDeleteAccount prvDeleteActionCardUserSettings prvDeleteActivity
+        prvDeleteCallbackRegistration prvDeleteConnection prvDeleteContact prvDeleteCustomerRelationship prvDeleteEmailSignature
+        prvDeleteEmailTemplate prvDeleteExchangeSyncIdMapping prvDeleteExpiredProcess prvDeleteImport prvDeleteImportFile
+        prvDeleteImportMap prvDeleteMailboxTrackingFolder prvDeleteMailMergeTemplate prvDeletemsdyn_AIEvent prvDeletemsdyn_dmsrequest
+        prvDeletemsdyn_dmsrequeststatus prvDeletemsdyn_favoriteknowledgearticle prvDeletemsdyn_timelinepin prvDeleteNewProcess
+        prvDeleteNote prvDeletePersonalDocumentTemplate prvDeletePostFollow prvDeleteReport prvDeleteSocialProfile prvDeleteSyncError
+        prvDeleteTranslationProcess prvDeleteUserApplicationMetadata prvDeleteUserEntityInstanceData prvDeleteUserEntityUISettings
+        prvDeleteUserForm prvDeleteUserQuery prvDeleteUserQueryVisualizations prvDeleteUserSettings prvDeleteWorkflow
+        prvDeleteWorkflowSession prvDocumentGeneration prvExportToExcel prvFlow prvGoOffline prvMailMerge prvMerge prvOneDrive prvPrint
+        prvReadAccount prvReadACIViewMapper prvReadActionCard prvReadActionCardUserSettings prvReadActivity prvReadAppConfigMaster
+        prvReadApplicationFile prvReadAppModule prvReadappnotification prvReadAppUserSetting prvReadArticle prvReadArticleTemplate
+        prvReadAsyncOperation prvReadAttribute prvReadAttributeMap prvReadAuthorizationServer prvReadAzureServiceConnection
+        prvReadBusinessUnit prvReadCallbackRegistration prvReadCanvasAppExtendedMetadata prvReadCategory prvReadChannelAccessProfile
+        prvReadChannelPropertyGroup prvReadComplexControl prvReadConnection prvReadConnectionRole prvReadconnector prvReadContact
+        prvReadConvertRule prvReadCustomerRelationship prvReadCustomization prvReadDelveActionHub prvReaddesktopflowbinary
+        prvReaddesktopflowmodule prvReadDocumentTemplate prvReadDuplicateRule prvReadEmailServerProfile prvReadEmailSignature
+        prvReadEmailTemplate prvReadEntity prvReadEntityDataProvider prvReadEntityKey prvReadEntityMap
+        prvReadEnvironmentVariableDefinition prvReadExchangeSyncIdMapping prvReadExpanderEvent prvReadExpiredProcess
+        prvReadExternalParty prvReadFeedback prvReadflowsession prvReadGoal prvReadGoalRollupQuery prvReadHierarchyRule prvReadImport
+        prvReadImportFile prvReadImportMap prvReadInteractionForEmail prvReadKnowledgeArticle prvReadKnowledgeArticleViews
+        prvReadKnowledgeBaseRecord prvReadLanguageLocale prvReadLicense prvReadMailbox prvReadMailboxTrackingFolder
+        prvReadMailMergeTemplate prvReadMCPServer prvReadMCPTool prvReadMetric prvReadMobileOfflineProfile
+        prvReadmsdyn_AIBDatasetsContainer prvReadmsdyn_AIBFeedbackLoop prvReadmsdyn_AIEvent prvReadmsdyn_AIModel prvReadmsdyn_AIOdLabel
+        prvReadmsdyn_AITemplate prvReadmsdyn_customcontrolextendedsettings prvReadmsdyn_dmsrequest prvReadmsdyn_dmsrequeststatus
+        prvReadmsdyn_favoriteknowledgearticle prvReadmsdyn_kbattachment prvReadmsdyn_richtextfile prvReadmsdyn_timelinepin
+        prvReadNewProcess prvReadNewsArticle prvReadNote prvReadOfficeGraphDocument prvReadOptionSet prvReadOrganization
+        prvReadOrganizationSetting prvReadPartnerApplication prvReadPersonalDocumentTemplate prvReadPluginAssembly prvReadPluginType
+        prvReadPosition prvReadPost prvReadPostFollow prvReadProfileRule prvReadQuery prvReadQueue prvReadRecommendedDocument
+        prvReadRelationship prvReadRelationshipRole prvReadReport prvReadRole prvReadRoutingRule prvReadSavedQueryVisualizations
+        prvReadSdkMessage prvReadSdkMessageProcessingStep prvReadSdkMessageProcessingStepImage prvReadSettingDefinition
+        prvReadSharePointData prvReadSharePointDocument prvReadSharePointDocumentLocation prvReadSharePointSite prvReadSLA
+        prvReadSLAKPIInstance prvReadSocialProfile prvReadSuggestionCardTemplate prvReadSyncError prvReadSystemApplicationMetadata
+        prvReadSystemForm prvReadTeam prvReadTraceLog prvReadtrait prvReadTransactionCurrency prvReadTranslationProcess prvReadUser
+        prvReadUserApplicationMetadata prvReadUserEntityInstanceData prvReadUserEntityUISettings prvReadUserForm prvReadUserQuery
+        prvReadUserQueryVisualizations prvReadUserSettings prvReaduxagentcomponent prvReadWebResource prvReadWebWizard
+        prvReadWizardAccessPrivilege prvReadWizardPage prvReadWorkflow prvReadworkflowbinary prvReadWorkflowMetadata
+        prvReadWorkflowSession prvSearchAvailability prvShareAccount prvShareActionCardUserSettings prvShareActivity
+        prvShareCallbackRegistration prvShareConnection prvShareContact prvShareConvertRule prvShareCustomerRelationship
+        prvShareEmailTemplate prvShareImport prvShareImportFile prvShareImportMap prvShareKnowledgeArticle
+        prvShareKnowledgeArticleViews prvShareMailMergeTemplate prvSharemsdyn_dmsrequest prvSharemsdyn_dmsrequeststatus
+        prvSharemsdyn_kbattachment prvShareNote prvSharePersonalDocumentTemplate prvShareReport prvShareRoutingRule
+        prvShareSharePointDocumentLocation prvShareSharePointSite prvShareSLA prvShareSLAKPIInstance prvShareSocialProfile
+        prvShareSyncError prvShareUserEntityInstanceData prvShareUserEntityUISettings prvShareUserForm prvShareUserQuery
+        prvShareUserQueryVisualizations prvShareWorkflow prvShareWorkflowSession prvSyncToOutlook prvUseOfficeApps prvUseTabletApp
+        prvWebMailMerge prvWorkflowExecution prvWriteAccount prvWriteActionCard prvWriteActionCardUserSettings prvWriteActivity
+        prvWriteAppUserSetting prvWriteArticle prvWriteAsyncOperation prvWriteCallbackRegistration prvWriteConnection prvWriteContact
+        prvWriteCustomerRelationship prvWriteEmailSignature prvWriteEmailTemplate prvWriteExchangeSyncIdMapping prvWriteExpanderEvent
+        prvWriteExpiredProcess prvWriteImport prvWriteImportFile prvWriteImportMap prvWriteKnowledgeArticle
+        prvWriteKnowledgeArticleViews prvWriteMailbox prvWriteMailboxTrackingFolder prvWriteMailMergeTemplate
+        prvWritemsdyn_customcontrolextendedsettings prvWritemsdyn_dmsrequest prvWritemsdyn_dmsrequeststatus
+        prvWritemsdyn_favoriteknowledgearticle prvWritemsdyn_kbattachment prvWritemsdyn_richtextfile prvWriteNewProcess prvWriteNote
+        prvWritePersonalDocumentTemplate prvWriteReport prvWriteSharePointData prvWriteSharePointDocument
+        prvWriteSharePointDocumentLocation prvWriteSocialProfile prvWriteSyncError prvWritetrait prvWriteTranslationProcess
+        prvWriteUserApplicationMetadata prvWriteUserEntityInstanceData prvWriteUserEntityUISettings prvWriteUserForm prvWriteUserQuery
+        prvWriteUserQueryVisualizations prvWriteUserSettings prvWriteWorkflow prvWriteWorkflowSession
+        """.Split(new[] { ' ', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+    private static bool IsSpaarkeTable(string table) => table.StartsWith("sprk_", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>What breaks the read-only rule in <paramref name="held"/> (a role's privileges, name to level): a privilege other than Read
+    /// on a Spaarke table; a privilege that is neither Read on a Spaarke table nor in <paramref name="platform"/>; a platform entry that
+    /// names a Spaarke table; a platform entry the role does not hold (the list stays exact).</summary>
+    internal static List<string> ReadOnlyProblems(IReadOnlyDictionary<string, string> held, IReadOnlyCollection<string> platform)
+    {
+        var platformSet = new HashSet<string>(platform, StringComparer.OrdinalIgnoreCase);
+        var problems = new List<string>();
+        foreach (var (name, level) in held.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var table = PrivilegeTable(name);
+            if (table is not null && IsSpaarkeTable(table))
+            {
+                if (!Same(name, "prvRead" + table))
+                    problems.Add($"{name} at {level}: Basic User holds only Read on a Spaarke table ({table})");
+            }
+            else if (!platformSet.Contains(name))
+            {
+                problems.Add($"{name} at {level}: neither Read on a Spaarke table nor in the named platform list (add it to the list only if it is a platform privilege)");
+            }
+        }
+
+        foreach (var p in platformSet.Order(StringComparer.OrdinalIgnoreCase))
+        {
+            if (p.Contains("sprk", StringComparison.OrdinalIgnoreCase))
+                problems.Add($"{p}: the platform list names a Spaarke-table privilege");
+            else if (!held.ContainsKey(p))
+                problems.Add($"{p}: in the platform list but not held by the role (remove it from the list)");
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "046c: Spaarke Basic User holds only Read on every Spaarke table; its other privileges are the named platform list")]
+    public void BasicUserIsReadOnlyOnSpaarkeTables()
+    {
+        var held = LoadRoles(RolesDirectory, [Basic])[Basic];
+        // the rule is not vacuous: the role reads Spaarke tables, and the list is the role's platform set
+        Assert.True(held.Keys.Count(k => PrivilegeTable(k) is { } t && IsSpaarkeTable(t)) >= 100, "Basic User reads fewer than 100 Spaarke tables: wrong file?");
+        Assert.True(BasicUserPlatformPrivileges.Length >= 400, "The platform list is too short to be the role's platform set.");
+        Assert.Equal(BasicUserPlatformPrivileges.Length, BasicUserPlatformPrivileges.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+
+        var problems = ReadOnlyProblems(held, BasicUserPlatformPrivileges);
+        Assert.True(problems.Count == 0,
+            "Spaarke Basic User is read-only on Spaarke tables (owner 2026-11-06, task 046c). A feature that writes, files, assigns or shares "
+            + "Spaarke records needs Spaarke Core User; raise a role change with unified-access-control-r2:\n  " + string.Join("\n  ", problems));
+    }
+
+    [Fact(DisplayName = "046c read-only controls: Create, Write, Delete, Append, AppendTo, Assign or Share on a Spaarke table, an unlisted or unparsable privilege, a list entry on a Spaarke table and a stale list entry are reported; Read at any depth and a listed platform privilege are not")]
+    public void ReadOnlyRuleFires()
+    {
+        string[] platform = ["prvCreateAccount", "prvReadContact"];
+        // must-not-fire: Read on a Spaarke table at every depth and in other casing; the listed platform privileges at any depth
+        Assert.Empty(ReadOnlyProblems(
+            Privileges(("prvReadsprk_Matter", "Global"), ("PRVREADSPRK_PROJECT", "Basic"), ("prvReadsprk_Event", "Deep"), ("prvCreateAccount", "Global"), ("prvreadcontact", "Basic")),
+            platform));
+
+        // must-fire: every non-Read verb on a Spaarke table, in any casing
+        foreach (var verb in new[] { "Create", "Write", "Delete", "Append", "AppendTo", "Assign", "Share" })
+        {
+            var name = $"prv{verb}sprk_Matter";
+            var found = ReadOnlyProblems(Privileges(("prvCreateAccount", "Basic"), ("prvReadContact", "Basic"), (name.ToUpperInvariant(), "Basic")), platform);
+            Assert.Equal(new[] { $"{name.ToUpperInvariant()} at Basic: Basic User holds only Read on a Spaarke table (SPRK_MATTER)" }, found);
+        }
+
+        // must-fire: a privilege the rule cannot classify (unknown verb on a Spaarke table; an unlisted platform privilege)
+        var unknown = ReadOnlyProblems(Privileges(("prvCreateAccount", "Basic"), ("prvReadContact", "Basic"), ("prvExportsprk_Matter", "Global"), ("prvWriteContact", "Basic")), platform);
+        Assert.Equal(2, unknown.Count);
+        Assert.StartsWith("prvExportsprk_Matter at Global: neither Read on a Spaarke table nor in the named platform list", unknown[0], StringComparison.Ordinal);
+        Assert.StartsWith("prvWriteContact at Basic: neither Read on a Spaarke table nor in the named platform list", unknown[1], StringComparison.Ordinal);
+
+        // must-fire: the list itself names a Spaarke-table privilege (it cannot carry one past the rule), or an entry the role does not hold
+        var held = Privileges(("prvCreateAccount", "Basic"), ("prvReadContact", "Basic"), ("prvWritesprk_Matter", "Basic"));
+        Assert.Equal(
+            new[] { "prvWritesprk_Matter at Basic: Basic User holds only Read on a Spaarke table (sprk_Matter)", "prvWritesprk_Matter: the platform list names a Spaarke-table privilege" },
+            ReadOnlyProblems(held, [.. platform, "prvWritesprk_Matter"]));
+        Assert.Equal(new[] { "prvDeleteAccount: in the platform list but not held by the role (remove it from the list)" },
+            ReadOnlyProblems(Privileges(("prvCreateAccount", "Basic"), ("prvReadContact", "Basic")), [.. platform, "prvDeleteAccount"]));
+    }
+
+    [Fact(DisplayName = "046c seeded proof: putting any one of the config's Basic User removals back on a copy of the role file fails the read-only rule, and so does a new unlisted platform privilege")]
+    public void ReadOnlyRuleFiresOnSeededRoleFiles()
+    {
+        var removals = LoadRemovals(RuledChangesPath).Where(r => r.Role == Basic).ToList();
+        Assert.Equal(80, removals.Count);
+        var dir = Path.Combine(Path.GetTempPath(), "sprk-feature-roles-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, Basic + ".xml");
+            var original = File.ReadAllText(Path.Combine(RolesDirectory, Basic + ".xml"));
+            File.WriteAllText(path, original);
+            Assert.Empty(ReadOnlyProblems(LoadRoles(dir, [Basic])[Basic], BasicUserPlatformPrivileges)); // must-not-fire: the copy as it is
+
+            var misses = new List<string>();
+            foreach (var r in removals)
+            {
+                AddPrivilege(dir, Basic, r.Privilege, r.ExpectedDepth);
+                var found = ReadOnlyProblems(LoadRoles(dir, [Basic])[Basic], BasicUserPlatformPrivileges);
+                if (found.Count != 1 || !found[0].StartsWith($"{r.Privilege} at {r.ExpectedDepth}: Basic User holds only Read on a Spaarke table", StringComparison.Ordinal))
+                    misses.Add($"{r.Privilege}: [{string.Join("; ", found)}]");
+                File.WriteAllText(path, original);
+            }
+
+            Assert.Empty(misses);
+
+            AddPrivilege(dir, Basic, "prvWriteSomePlatformTable", "Basic"); // must-fire: not in the list, not a Spaarke-table Read
+            Assert.Equal(new[] { "prvWriteSomePlatformTable at Basic: neither Read on a Spaarke table nor in the named platform list (add it to the list only if it is a platform privilege)" },
+                ReadOnlyProblems(LoadRoles(dir, [Basic])[Basic], BasicUserPlatformPrivileges));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 
     // ── The scan ────────────────────────────────────────────────────────────────────────────────────────────────────────
