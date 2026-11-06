@@ -710,3 +710,10 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Formats:** JPS playbook (`sprk_analysisplaybook`, JSON, executed) · legal playbook (Markdown master, read by Copilot/Cowork Agent Skills) · contract-review playbook (Microsoft's four-column subtype).
 - **Writing rule:** qualify by format where the format matters. **Changed text:** the §3 Internal Standard row no longer says a reviewer's handbook is "not a JPS AI playbook". **Unchanged:** §4.11 (a Policy is a predicate, never a playbook's control flow); a one-line note says that section means the JPS format.
 - **Recorded in** `ontology-component-model.md` §3. Told legal-ai-accelerator and spaarkeai-mcp-bff-api-r1.
+
+## D-210 — The Signal core-record pair is not field-secured (owner, 2026-11-06; relayed from field-mapping-server-write-path-r1)
+
+- **Ruling (relayed):** `sprk_signal.sprk_corerecordtype` and `sprk_corerecordid` get no field security. Readability of a Signal stays decided by the core record's own row security.
+- **Write integrity** of the pair (the 042c rule: a half pair is never written on any path) rests on role privileges, the writers' server-side refusal, column auditing (D-206) and field-mapping 052's report, which also flags a pair changed after create.
+- **Readers fail closed:** if a caller's read of a Signal returns no pair, the server re-checks it and denies the Signal when a pair exists, both on the single-Signal routes and on the Worklist (field-mapping 044 fix round, reviewed by ontology and uac-r2).
+- **Recorded in** this file. Told field-mapping and uac-r2. Detail of the review is kept out of this public file.
