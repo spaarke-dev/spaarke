@@ -437,11 +437,84 @@ public class SecureChildShareMirrorTests
         result.HardDenyWiderThanRead.Should().Be(2);
         log.Findings.Should().HaveCount(2).And.OnlyContain(f => f.Contains($"id={PolicyOfOrdinaryMatter:D}"));
         result.ChildrenOutsideSecureRoots.Should().Be(2, "the policy and the document under ordinary records; counts unchanged");
-        result.Status.Should().Be(SecureChildShareSyncStatus.Completed);
+        result.Status.Should().Be(SecureChildShareSyncStatus.Completed, "a narrowing that kept leaves the run Completed");
+        result.HardDenyNarrowFailed.Should().Be(0);
 
         // Must-not-fire: an ordinary Secure-owned row under no secure root is still untouched (task 148 owns it).
         _shares.WriteLog.Should().NotContain(w => w.RecordId == SecureDocUnderOrdinary);
         _shares.MaskOf("sprk_document", SecureDocUnderOrdinary, User(UserA)).Should().Be(FullAccessOnChild);
+    }
+
+    [Fact]
+    public async Task AHardDenyRowUnderNoSecureRoot_WhoseNarrowingWriteFails_LeavesTheRunIncomplete_WithTheFindingStillReported()
+    {
+        var log = new CapturingSyncLogger();
+        var world = WorldWithPolicy()
+            .OrdinaryRoot("sprk_matter", OrdinaryMatter)
+            .SecureChild("sprk_policy", PolicyOfOrdinaryMatter, ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        _shares.Seed("sprk_policy", PolicyOfOrdinaryMatter, User(UserA), ReadWriteDeleteShare);
+        _shares.Seed("sprk_policy", PolicyOfOrdinaryMatter, User(UserC), WriteAndDelete);
+        _shares.FailWritesOnRecord = ("sprk_policies", PolicyOfOrdinaryMatter);
+
+        var result = await world.Synchronizer(_shares, logger: log).ReconcileAllAsync(CancellationToken.None);
+
+        result.Status.Should().Be(SecureChildShareSyncStatus.Incomplete, "a wider share is left on a hard-deny row");
+        result.HardDenyNarrowFailed.Should().Be(1);
+        result.HardDenyWiderThanRead.Should().Be(2);
+        log.Findings.Should().HaveCount(2).And.OnlyContain(f => f.Contains($"id={PolicyOfOrdinaryMatter:D}"));
+        log.Summary.Should().Contain("hardDenyNarrowFailed=1");
+        result.ChildrenNotUpdated.Should().Be(0, "the row counts stay as they were: the row is outside every secure root");
+        result.ChildrenOutsideSecureRoots.Should().Be(2);
+        _shares.WriteLog.Should().Contain(w => w.RecordId == PolicyOfOrdinaryMatter, "the narrowing was attempted");
+    }
+
+    [Fact]
+    public async Task AHardDenyRowUnderNoSecureRoot_WhoseSharesCannotBeRead_LeavesTheRunIncomplete()
+    {
+        // The standard world has no hard-deny row under a secure root, so the policy below is the only one the run reads.
+        var world = World()
+            .OrdinaryRoot("sprk_matter", OrdinaryMatter)
+            .SecureChild("sprk_policy", PolicyOfOrdinaryMatter, ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        _shares.Seed("sprk_policy", PolicyOfOrdinaryMatter, User(UserA), ReadWriteDeleteShare);
+        _shares.FailBatchReadsOf = "sprk_policy";
+
+        var result = await world.Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        result.Status.Should().Be(SecureChildShareSyncStatus.Incomplete, "whether a wider share is left on it is not known");
+        result.HardDenyUnchecked.Should().Be(1);
+        result.ChildrenNotUpdated.Should().Be(0, "the row counts stay as they were");
+        result.ChildrenOutsideSecureRoots.Should().Be(2);
+        _shares.WriteLog.Should().NotContain(w => w.EntitySet == "sprk_policies");
+    }
+
+    [Fact]
+    public async Task AnOrdinaryRowUnderNoSecureRoot_WhoseWritesWouldFail_HasNoEffectOnTheStatus()
+    {
+        _shares.Seed("sprk_document", SecureDocUnderOrdinary, User(UserA), FullAccessOnChild);
+        _shares.FailWritesOnRecord = ("sprk_documents", SecureDocUnderOrdinary);
+
+        var result = await World().Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        result.Status.Should().Be(SecureChildShareSyncStatus.Completed);
+        result.HardDenyNarrowFailed.Should().Be(0);
+        result.HardDenyUnchecked.Should().Be(0);
+        _shares.WriteLog.Should().NotContain(w => w.RecordId == SecureDocUnderOrdinary);
+    }
+
+    [Fact]
+    public async Task Job_WhenAHardDenyRowUnderNoSecureRootIsNotNarrowed_ReportsFailure_NamingTheHardDenyRow()
+    {
+        var world = WorldWithPolicy()
+            .OrdinaryRoot("sprk_matter", OrdinaryMatter)
+            .SecureChild("sprk_policy", PolicyOfOrdinaryMatter, ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        _shares.Seed("sprk_policy", PolicyOfOrdinaryMatter, User(UserA), ReadWriteDeleteShare);
+        _shares.FailWritesOnRecord = ("sprk_policies", PolicyOfOrdinaryMatter);
+
+        var run = await Job(world.Synchronizer(_shares)).ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeFalse();
+        run.ErrorMessage.Should().Contain("1 hard-deny row(s) not narrowed to Read");
+        run.ResultJson.Should().Contain("\"hardDenyNarrowFailed\":1");
     }
 
     [Fact]

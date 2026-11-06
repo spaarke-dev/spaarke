@@ -108,6 +108,13 @@ public sealed record SecureChildShareSyncResult(
     /// </summary>
     public int HardDenyUnchecked { get; init; }
 
+    /// <summary>
+    /// GitHub #2560: Secure-owned rows of a hard-deny table this run does not mirror (under no secure root, or whose filing
+    /// could not be read) whose Read-only narrowing write or read-back failed. Any one makes the run
+    /// <see cref="SecureChildShareSyncStatus.Incomplete"/>; the next run narrows it again.
+    /// </summary>
+    public int HardDenyNarrowFailed { get; init; }
+
     /// <summary>Children in scope that do not yet match: <see cref="ChildrenNotUpdated"/> + <see cref="ChildrenHeld"/>.</summary>
     public int ChildrenLeftOutOfLine => ChildrenNotUpdated + ChildrenHeld;
 
@@ -2090,21 +2097,30 @@ public sealed class SecureChildShareSynchronizer
             }
 
             // 4. GitHub #2560: the hard-deny rows not mirrored above lose every right but Read. Their counts stay as step 1
-            // left them (outside secure roots, or not updated); only the share counters and the findings move.
+            // left them (outside secure roots, or not updated); only the share counters and the findings move. A narrowing
+            // that did not keep, or a row whose shares could not be read, leaves the run Incomplete: a row under no secure
+            // root is counted only as outside, so without this the run would answer Completed with a wider share left on it.
+            var narrowFailed = false;
+            var hardDenyNarrowFailed = 0;
             foreach (var row in narrowOnly)
             {
                 if (unreadable.Contains(row.Ref))
                 {
                     _hardDenyUnchecked++;
+                    narrowFailed = true;
                     continue;
                 }
 
                 var have = DirectMasks(current[row.Ref]);
                 ReportHardDenyWiderThanRead(row.Ref, have);
-                await NarrowHardDenyToReadAsync(row.Ref, have).ConfigureAwait(false);
+                if (!await NarrowHardDenyToReadAsync(row.Ref, have).ConfigureAwait(false))
+                {
+                    hardDenyNarrowFailed++;
+                    narrowFailed = true;
+                }
             }
 
-            var status = notUpdated == 0 && held == 0
+            var status = notUpdated == 0 && held == 0 && !narrowFailed
                 ? SecureChildShareSyncStatus.Completed
                 : SecureChildShareSyncStatus.Incomplete;
 
@@ -2112,15 +2128,17 @@ public sealed class SecureChildShareSynchronizer
                 status == SecureChildShareSyncStatus.Completed ? LogLevel.Information : LogLevel.Warning,
                 "[SECURE-CHILD-SHARES] scope={Scope} status={Status} inScope={InScope} updated={Updated} unchanged={Unchanged} " +
                 "notUpdated={NotUpdated} held={Held} outsideSecureRoots={Outside} granted={Granted} changed={Changed} revoked={Revoked} " +
-                "hardDenyWiderThanRead={HardDenyWiderThanRead} hardDenyUnchecked={HardDenyUnchecked}",
+                "hardDenyWiderThanRead={HardDenyWiderThanRead} hardDenyUnchecked={HardDenyUnchecked} " +
+                "hardDenyNarrowFailed={HardDenyNarrowFailed}",
                 scope?.ToString() ?? "all", status, inScope.Count + faulted, updated, unchanged, notUpdated, held, outside,
-                _granted, _changed, _revoked, _hardDenyWiderThanRead, _hardDenyUnchecked);
+                _granted, _changed, _revoked, _hardDenyWiderThanRead, _hardDenyUnchecked, hardDenyNarrowFailed);
 
             return new SecureChildShareSyncResult(
                 status, inScope.Count + faulted, updated, unchanged, notUpdated, held, outside, _granted, _changed, _revoked, null)
             {
                 HardDenyWiderThanRead = _hardDenyWiderThanRead,
                 HardDenyUnchecked = _hardDenyUnchecked,
+                HardDenyNarrowFailed = hardDenyNarrowFailed,
             };
         }
 

@@ -2461,6 +2461,7 @@ public sealed class SecureChildReconciler
             {
                 HardDenyWiderThanRead = synced.Sum(r => r.HardDenyWiderThanRead),
                 HardDenyUnchecked = synced.Sum(r => r.HardDenyUnchecked),
+                HardDenyNarrowFailed = synced.Sum(r => r.HardDenyNarrowFailed),
             };
         }
 
