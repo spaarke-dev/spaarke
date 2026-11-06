@@ -32,7 +32,9 @@
 
 ## Reviews in flight / conditions sent
 - **fm (`-69`):**
-  - **044 (field security):** pass 1 done; fix round on `task/fm-044-fix` (one code fix plus script fixes (a) to (f), including -Restore). My conditions went privately. Binding order: the code fix is on dev BEFORE 044 is applied on dev, and the same order holds in provisioning. I review the pass-2 tip and the PR.
+  - **044 (owner 2026-11-06, in fm's session):** no field security on the core pair. Scope: the fail-closed re-read (my conditions) plus a guard (Write/Create on Signal and Decision Record only for System Administrator and Ontology Administrator), auditing on both pair columns, and 052 flagging a pair changed after create. The script, profile and XML are reverted, so there is no apply step and no ordering rule. I review the re-read diff and the inventory.
+  - **032 (owner):** Matter mapping for extracted invoices, fill-only, inside InvoiceSubmissionPersister before its transaction (option 2). I review the design before code, with ebilling.
+  - **Live checks (owner-approved in fm):** the Project->Matter profile and the 021 re-measure. fm sends the UTC window, then I read the gate for the routes that had no traffic.
   - **049 `e8da405eb0` APPROVED 2026-11-06** (rounds 3 and 4: Basic not counted, tests inverted, wording clean). fm opens the PR and merges, then sends the master SHA, then I put the combined deploy to the owner. Rebuild order: BFF, then UI.Components → LegalWorkspace / SpaarkeAi / AI.Widgets (CreateProjectWizard optional). Recommended via fm that the owner delete remote `task/fm-049c` (the old private passage is in public commits).
   - 046b PR #2592 APPROVED (role diff matches dev exactly; auto-merge on).
   - G13 thread Deep withdrawn (private threads); thread Read stays Basic.
