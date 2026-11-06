@@ -132,6 +132,16 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
     internal const int TargetFieldTypeLookup = 100000001;
 
     /// <summary>
+    /// <c>sprk_fieldmappingrule.sprk_syncmode</c> "One-time" (0), written EXPLICITLY on every seeded rule (field-mapping-server-write-path-r1
+    /// task 040, DI-003 / #2181). Every rule this seeder creates targets an Assigned-To column (the attorney matrix), and the
+    /// sync-mode migration is class-aware: an Assigned-To target stays One-time. A push never reads the sync mode of such a rule — it
+    /// applies them only to a request that opts in (<c>includeAssignedTo</c>) — so a seeded rule is neither silently skipped nor
+    /// re-pushed by an ordinary push. A rule of any OTHER class added to <see cref="SeedProfiles"/> is plain data and takes Manual
+    /// Refresh (1): change this and the test <c>SeedAsync_EveryRuleCarriesAnExplicitSyncMode_OneTimeForTheAssignedToMatrix</c> together.
+    /// </summary>
+    internal const int SeededRuleSyncMode = 0;
+
+    /// <summary>
     /// The default attorney-matrix profiles this seeder maintains. Ground-truthed
     /// live against spaarkedev1's Active sprk_fieldmappingprofile +
     /// sprk_fieldmappingrule rows (see file header). Exposed <c>internal</c> for
@@ -549,6 +559,7 @@ public sealed class DataverseWebApiFieldMappingSeeder : IAppConfigSeeder
             // (live spaarkedev1 rules and ACME metadata); 1 is not a valid option and Dataverse refuses it.
             ["sprk_targetfieldtype"] = TargetFieldTypeLookup,
             ["sprk_executionorder"] = rule.ExecutionOrder,
+            ["sprk_syncmode"] = SeededRuleSyncMode,
             ["sprk_isactive"] = true,
         };
 

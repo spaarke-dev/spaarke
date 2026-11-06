@@ -134,6 +134,38 @@ public sealed class DataverseWebApiFieldMappingSeederTests
         bindEl.GetString().Should().StartWith("/sprk_fieldmappingprofiles(");
     }
 
+    // ---------- sync mode: written explicitly, class-aware (task 040, DI-003 / #2181) ----------
+
+    [Fact]
+    public async Task SeedAsync_EveryRuleCarriesAnExplicitSyncMode_OneTimeForTheAssignedToMatrix()
+    {
+        var fake = new FakeDataverseHandler
+        {
+            OnGetRecordType = req => RecordTypeResponse(req),
+            OnGetProfile = _ => JsonResponse(HttpStatusCode.OK, EmptyValueJson()),
+            OnGetRule = _ => JsonResponse(HttpStatusCode.OK, EmptyValueJson()),
+            OnPostProfile = _ => JsonResponse(HttpStatusCode.Created, "{\"sprk_fieldmappingprofileid\":\"20000000-0000-0000-0000-000000000001\"}"),
+            OnPostRule = _ => JsonResponse(HttpStatusCode.Created, "{\"sprk_fieldmappingruleid\":\"30000000-0000-0000-0000-000000000001\"}"),
+        };
+        var seeder = BuildSeeder(fake);
+
+        await seeder.SeedAsync(BuildInput(), CancellationToken.None);
+
+        var rulePosts = fake.Requests.Where(r => r.Method == HttpMethod.Post && r.Uri.AbsolutePath.Contains("sprk_fieldmappingrules")).ToList();
+        rulePosts.Should().HaveCount(20);
+        foreach (var post in rulePosts)
+        {
+            using var body = JsonDocument.Parse(post.Body!);
+            body.RootElement.TryGetProperty("sprk_syncmode", out var syncMode).Should().BeTrue("a seeded rule never leaves the sync mode to the column's default");
+            syncMode.GetInt32().Should().Be(0, "every seeded rule targets an Assigned-To column, which stays One-time; a push applies it only on an opt-in request");
+        }
+
+        DataverseWebApiFieldMappingSeeder.SeedProfiles
+            .SelectMany(p => p.Rules)
+            .Should().OnlyContain(r => r.TargetField.StartsWith("sprk_assigned", StringComparison.Ordinal),
+                "a seeded rule of another class needs the Manual Refresh value; see SeededRuleSyncMode");
+    }
+
     // ---------- T3 idempotency: everything already exists ----------
 
     [Fact]
