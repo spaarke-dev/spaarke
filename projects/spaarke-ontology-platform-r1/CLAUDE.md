@@ -39,7 +39,10 @@ grouping Work Items** (D-34/D-36) — "row" is layout, not vocabulary. **"Flag" 
 - One Decision Record per human resolution, written **last** by the single BFF commit route (FR-18, D-17); append-only
   **by privilege** — no human or Spaarke role may Write/Delete it (verify with the union-of-roles check, NFR-11).
 - Signals and Decision Records group under the **core record** via `CoreAncestorResolver` — never a parallel
-  derivation; the model stays **extensible** to new core types without code changes (D-34, D-36, D-37).
+  derivation; grouping stays **extensible** to new core types without code changes (D-34, D-36, D-37). Exception
+  (D-204, 2026-11-04): secure lineage reads the core pair against a **closed** core-table set, so a new core type
+  needs its catalog row **and** a code change to that set. Until then its Signals are held: visible, never
+  suppression-stamped, shares narrow only.
 - Signals/Decision Records on **Secure** records are secure children (D-33, task 039); no-core items are owner-only
   (D-35, D-39); **no skips** (D-38). Signals are read only through the BFF read route (FR-24).
 - Dedupe key is **episode-scoped**; re-raise rules per D-13/D-32; suppression 3 dismissals / 30 days per (policy,
