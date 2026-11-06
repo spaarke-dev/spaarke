@@ -379,7 +379,7 @@
           <IsCustomField>1</IsCustomField>
           <IsAuditEnabled>1</IsAuditEnabled>
           <IsSecured>0</IsSecured>
-          <IntroducedVersion>1.2.3.0</IntroducedVersion>
+          <IntroducedVersion>1.2.3.1</IntroducedVersion>
           <IsCustomizable>1</IsCustomizable>
           <IsRenameable>1</IsRenameable>
           <CanModifySearchSettings>1</CanModifySearchSettings>
@@ -403,7 +403,7 @@
             <displayname description="AP export email" languagecode="1033" />
           </displaynames>
           <Descriptions>
-            <Description description="The address Email to AP sends an export batch's CSV and JSON files to (EB-D-181). Empty until AP has given one; Email to AP is refused while it is empty." languagecode="1033" />
+            <Description description="The address Email to AP sends an export batch's CSV and JSON files to (EB-D-181). Leave empty until AP has given one; the Email to AP action is refused while it is empty." languagecode="1033" />
           </Descriptions>
         </attribute>
         <attribute PhysicalName="sprk_ApExportMapping">

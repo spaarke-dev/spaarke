@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="sprk_procedureappliesto" localizedName="Procedure Applies To" description="Which records a Procedure governs: every core record, one firm (the invoice firm), or only records it is assigned to (model 3.2, 6.1)." xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.2.3.1</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <displaynames>
+    <displayname description="Procedure Applies To" languagecode="1033" />
+  </displaynames>
+  <Descriptions>
+    <Description description="Which records a Procedure governs: every core record, one firm (the invoice firm), or only records it is assigned to (model 3.2, 6.1)." languagecode="1033" />
+  </Descriptions>
+  <options>
+    <option value="100000000" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="All records" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000001" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Firm" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000002" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Assigned records only" languagecode="1033" />
+      </labels>
+    </option>
+  </options>
+</optionset>

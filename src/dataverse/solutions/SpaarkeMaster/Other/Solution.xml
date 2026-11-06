@@ -149,6 +149,7 @@
       <RootComponent type="1" schemaName="sprk_document" behavior="0" />
       <RootComponent type="1" schemaName="sprk_documenttype" behavior="0" />
       <RootComponent type="1" schemaName="sprk_documenttype_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_ebillingoverride" behavior="0" />
       <RootComponent type="1" schemaName="sprk_ebillingsetting" behavior="0" />
       <RootComponent type="1" schemaName="sprk_emailartifact" behavior="0" />
       <RootComponent type="1" schemaName="sprk_emailreviewlog" behavior="0" />
@@ -190,6 +191,9 @@
       <RootComponent type="1" schemaName="sprk_practicearea_documenttype" behavior="0" />
       <RootComponent type="1" schemaName="sprk_practicearea_ref" behavior="0" />
       <RootComponent type="1" schemaName="sprk_precedent" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_procedure" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_procedureassignment" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_procedureversion" behavior="0" />
       <RootComponent type="1" schemaName="sprk_processingjob" behavior="0" />
       <RootComponent type="1" schemaName="sprk_project" behavior="0" />
       <RootComponent type="1" schemaName="sprk_projecttype_ref" behavior="0" />
@@ -209,6 +213,7 @@
       <RootComponent type="1" schemaName="sprk_speenvironment" behavior="0" />
       <RootComponent type="1" schemaName="sprk_spendsignal" behavior="0" />
       <RootComponent type="1" schemaName="sprk_spendsnapshot" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_storedfile" behavior="0" />
       <RootComponent type="1" schemaName="sprk_timekeeper" behavior="0" />
       <RootComponent type="1" schemaName="sprk_todo" behavior="0" />
       <RootComponent type="1" schemaName="sprk_triagecategory" behavior="0" />
@@ -513,6 +518,7 @@
       <RootComponent type="9" schemaName="sprk_aimodeltier" behavior="0" />
       <RootComponent type="9" schemaName="sprk_aiprovider" behavior="0" />
       <RootComponent type="9" schemaName="sprk_billingapproverrole" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_billingstatus" behavior="0" />
       <RootComponent type="9" schemaName="sprk_budgetcategory" behavior="0" />
       <RootComponent type="9" schemaName="sprk_colorcodes" behavior="0" />
       <RootComponent type="9" schemaName="sprk_costtype" behavior="0" />
@@ -534,10 +540,16 @@
       <RootComponent type="9" schemaName="sprk_playbooktype" behavior="0" />
       <RootComponent type="9" schemaName="sprk_policydomain" behavior="0" />
       <RootComponent type="9" schemaName="sprk_precedentstatus" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_procedureappliesto" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_procedurestatus" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_proceduretype" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_procedureversionstatus" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_publishstate" behavior="0" />
       <RootComponent type="9" schemaName="sprk_relationshiptype" behavior="0" />
       <RootComponent type="9" schemaName="sprk_signalseverity" behavior="0" />
       <RootComponent type="9" schemaName="sprk_signaltype" behavior="0" />
       <RootComponent type="9" schemaName="sprk_source" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_storedfilepurpose" behavior="0" />
       <RootComponent type="9" schemaName="sprk_timekeeperrole" behavior="0" />
       <RootComponent type="9" schemaName="sprk_triggertype" behavior="0" />
       <RootComponent type="9" schemaName="sprk_type" behavior="0" />
