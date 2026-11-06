@@ -31,7 +31,7 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 /// reads it as "not set", so a test fails. Each rule leg is proven for a CIAM contact and for a flagged-external systemuser.
 /// </summary>
 [Trait("category", "external-access")]
-public sealed class ExternalInvoiceVisibilityTests
+public sealed partial class ExternalInvoiceVisibilityTests
 {
     private const int Restricted = 100000002;
     private const int Standard = 100000000;
@@ -713,7 +713,8 @@ public sealed class ExternalInvoiceVisibilityTests
             (rows, ct) => ExternalDocumentNarrowing.DecideAsync(rows, query, ct, honourSubmissionMarker: true),
             service.GetLiveParentRootsAsync,
             _world.RootFlags,
-            NullLogger.Instance);
+            NullLogger.Instance,
+            (ids, ct) => ExternalInvoiceVisibility.ReadFirmHeldInvoicesAsync(_world.FilingReader, ids, ct));
 
         var decision = await ExternalInvoiceVisibility.DecideSourceDocumentsAsync(
             new[] { visible, restricted, missing, Guid.Empty }, readers, cost: null, CancellationToken.None);
@@ -1331,8 +1332,16 @@ public sealed class ExternalInvoiceVisibilityTests
         services.AddSingleton<Azure.Core.TokenCredential>(new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential());
         services.AddSingleton<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(new Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache());
         services.AddHttpContextAccessor();
-        // Production registers the filing reader elsewhere; a parentless source makes no filing read (strict: any call fails).
-        services.AddSingleton(new Mock<IGenericEntityService>(MockBehavior.Strict).Object);
+        // Production registers the filing reader elsewhere; a parentless source makes no filing read (strict: any other call fails).
+        // 095d-2b-1: the one read it makes is the invoice firm hold, app-only through this reader (no invoice holds here).
+        var filing = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var firmHoldReads = 0;
+        filing.Setup(d => d.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_invoice" && q.ColumnSet.Columns.SequenceEqual(new[] { "sprk_firmhold" })),
+                It.IsAny<CancellationToken>()))
+            .Callback(() => firmHoldReads++)
+            .ReturnsAsync(new EntityCollection());
+        services.AddSingleton(filing.Object);
         services.AddExternalAccess();
         services.AddHttpClient<ExternalDataService>().ConfigurePrimaryHttpMessageHandler(() => _world);
         await using var provider = services.BuildServiceProvider();
@@ -1350,6 +1359,7 @@ public sealed class ExternalInvoiceVisibilityTests
         decision.IsVisible(spa).Should().BeTrue();
         decision.HiddenReason(withheld).Should().Be(InvoiceHiddenReason.SourceHidden);
         _world.Reads("sprk_documents").Should().ContainSingle("the submission's own document, read app-only through the module's service");
+        firmHoldReads.Should().Be(1, "the invoices' field-secured firm hold is read app-only through the registered IGenericEntityService");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1633,6 +1643,17 @@ internal sealed class InvoiceWorld : HttpMessageHandler
         }
 
         return row;
+    }
+
+    /// <summary>The world's app-only reader (the filing walk's and, since 095d-2b-1, the invoice firm hold's).</summary>
+    public IGenericEntityService FilingReader => _filingReader.Object;
+
+    /// <summary>095d-2b-1: the invoice's own field-secured firm hold (<c>sprk_invoice.sprk_firmhold</c>) as the app-only reader returns it;
+    /// <see langword="null"/> clears it (the re-run's commit).</summary>
+    public void FirmHold(Guid invoice, string? value)
+    {
+        var row = new Entity("sprk_invoice", invoice) { [Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = value };
+        lock (_filing) _filing[("sprk_invoice", invoice)] = row;
     }
 
     /// <summary>A record of the filing world (what the live-parent walk climbs), with its filing lookups; returns its id.</summary>

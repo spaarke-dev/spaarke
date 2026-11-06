@@ -261,6 +261,7 @@ public sealed record InvoiceApprovalResponse(string Outcome, Guid? DecisionId, G
 public sealed record AssignFirmRequest(Guid? FirmId, string? Note);
 
 /// <summary>200 body of Set firm: <c>assigned</c> (this call applied it) or <c>alreadyAssigned</c> (a repeat: nothing applied), the decision id,
-/// the new and the previous tracking number, and <c>rulesRerun</c> (<c>pending</c>: the re-run is 095d-2). Since 095d-1c a 200 means the
-/// Decision Record exists (written now or found).</summary>
+/// the new and the previous tracking number, and <c>rulesRerun</c> (<c>pending</c> until the queued re-run commits, then <c>completed</c>;
+/// EB-D-187 Q8). Since 095d-1c a 200 means the Decision Record exists (written now or found); since 095d-2b-1 a 200 with <c>pending</c> also
+/// means the re-run is queued (a failed enqueue is 503 <c>incomplete</c> with <c>failedStep</c> <c>rerun</c>).</summary>
 public sealed record AssignFirmResponse(string Outcome, Guid? DecisionId, string? TrackingNumber, string? PreviousTrackingNumber, string? RulesRerun);
