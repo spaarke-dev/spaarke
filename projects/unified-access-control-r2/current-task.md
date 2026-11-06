@@ -32,6 +32,7 @@
   - 049: notes passage removed, and the branch history rewritten (squash + force-with-lease).
   - 046c (Basic User read-only): conditions 1–7 in its POML; inventory and dry run come to me privately before the owner.
 - **ebilling (`-c7`):**
+  - 095d-2b-1 `4f113d72e2` APPROVED 2026-11-06: the withhold is keyed on the app-only `sprk_firmhold`, the invoice is withheld while the re-run is pending, and I verified every external path myself. An outcome reply by email must respect the withhold if one is ever added.
   - 095d-2a-2 (`7316036f5c`, `741a4fccaf`, `0bd7d49f89`) APPROVED 2026-11-06 with no F findings. K1 (line attach between the re-check and the transaction) waits on their invoice row-version answer. K2: a refused-count in the job result in 2b. K3: the result's RerunState stays non-partner-visible.
   - 164a create-only refusal: separate flag + derived `GenericCreateRefused`, conditions accepted.
   - EB-D-196: quote may stay in Signal evidence (B), with the containment test.
@@ -46,7 +47,7 @@
   - #2582 audit flags merged; H6 covers org auditing; audit history stays SysAdmin only.
 
 ## Owner items outstanding
-- ebilling (private): invoice hold reasons sit in a submission column that Core User can write on dev today, so a hold can be edited away. Fix in ebilling task 165, ordered first and before AP export is turned on anywhere; ebilling tells the owner. 095d-2b-1: conditions C1 and C2 (withhold keyed on a user-writable column; invoice visible while the re-run is pending) are in a fix round, re-keyed on the invoice firmhold read app-only. Waiting for the SHA.
+- ebilling (private): invoice hold reasons sit in a submission column that Core User can write on dev today, so a hold can be edited away. Fix in ebilling task 165, ordered first and before AP export is turned on anywhere; ebilling tells the owner. 095d-2b-1 C1 and C2 resolved and approved (`4f113d72e2`).
 - ebilling: approval accepts a fee or expense line of unknown origin. ebilling fixes it in 164a-4a; I review the 164 diff. Condition: a user cannot forge the add-line Decision Record. Does the owner want tracking beyond 164? (Private; do not describe the mechanism in public text.)
 - Should customer environments turn on revoke-on-change (G-8) through provisioning?
 - #2590: a project created app-only with no person lands in the root BU. Choose the rule (refuse vs route) and whether to move the dev row.
