@@ -215,7 +215,7 @@ public sealed class NoAccessShareEnforcer
     /// <param name="cache">The tenant cache (root-set invalidation).</param>
     /// <param name="recordLock">The atomic lease (task 143 r1) that serializes removals per record, so owner S5 holds
     /// across concurrent enforcements. The scheduler's lease store, reused as a keyed mutex under its own key family
-    /// (<c>no-access-enforce:{table}:{id}</c>) — never a job's dispatch key. Reusing it from a service that a scheduled
+    /// (<c>no-access-enforce:{table}:{id}</c>, shared with the other holders listed on <see cref="RemoveUnderRecordLockAsync"/>) — never a job's dispatch key. Reusing it from a service that a scheduled
     /// job resolves is the ADR-036 A1-7 / ADR-052 §5 tension recorded as a project-scoped §6.5 path-A exception in
     /// <c>projects/unified-access-control-r2/design.md</c> §9 (task 143 r2).</param>
     /// <param name="secureChildShares">Task 149's synchronizer (merged after this task): after a root share is removed,
@@ -999,8 +999,12 @@ public sealed class NoAccessShareEnforcer
     /// <para>The lease is the existing atomic primitive (<see cref="IScheduledJobLease"/>: Redis <c>SET NX PX</c> across
     /// every instance and slot, or process-local when Redis is off), keyed per record. It fails CLOSED: a record whose
     /// lease is held by another enforcement, or a lease store that cannot be reached, removes nothing and records a
-    /// failure (the caller is told to try again; the job retries within 5 minutes). It serializes the enforcer with
-    /// itself only — a user's own unshare (task 139) and the model-driven app's Share dialog do not take it.</para>
+    /// failure (the caller is told to try again; the job retries within 5 minutes). The lease is shared by four holders, each
+    /// taking it through <see cref="RecordLockId"/>: this enforcer (<see cref="RemoveUnderRecordLockAsync"/>),
+    /// <see cref="RestrictedExternalShareRemover"/>, the <c>/unshare-user</c> route (<c>InternalShareEndpoints</c>) and the
+    /// create's queued Assigned-To grant (<c>AssignedAccessCreateGrantJobHandler</c>); it serializes those four with one another and with nothing else.
+    /// The model-driven app's Share dialog and the other materializer triggers (an update path's inline pass, the sync
+    /// endpoint, the reconciliation job's own pass) do not take it.</para>
     /// <para><b>The lease is proven held at the revoke</b> (task 143 r2). The reads before the revoke — the re-read, the
     /// other readers' person state — can be slowed by throttling past any fixed duration, and a lease that expired in
     /// between would let a second enforcement take it, read this user's share as "someone else keeps access", and remove
@@ -1037,8 +1041,10 @@ public sealed class NoAccessShareEnforcer
         if (grant.Status != ScheduledJobLeaseStatus.Granted || grant.Token is null)
         {
             run.Fail(logicalName, recordId, userId, "record-busy",
-                $"User {userId}'s share was not removed: another No Access enforcement is changing this record's access " +
-                "right now. Try again in a moment; the 5-minute safety net retries too.");
+                // Task 049: the lease is shared — another enforcement, /unshare-user, the Restricted remover or a create's
+                // queued Assigned-To grant may hold it — so the message names no particular holder.
+                $"User {userId}'s share was not removed: another access change is under way on this record. Try again " +
+                "in a moment; the 5-minute safety net retries too.");
             return null;
         }
 

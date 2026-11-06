@@ -59,6 +59,28 @@ public partial class SignalSuppressionTests
     }
 
     [Fact]
+    public async Task ADecisionRecordWitness_WithOnlyItsCoreRecordPair_IsPlacedThroughThePair_AndIsShown()
+    {
+        // A Decision Record names its core record in a pair (sprk_corerecordtype + sprk_corerecordid) beside its typed lookups. A
+        // witness read without the pair looks as if it names no core record: Secure-owned with no root, it is undetermined and its
+        // detail is withheld. Read with the pair, it sits under the secure matter, the Signal's own family.
+        var s = new Store();
+        var secureMatter = Guid.NewGuid();
+        s.SecureMatter(secureMatter);
+        var signal = s.Open(secureMatter, secureMatter, secure: true, subjectEntity: "sprk_matter");
+        var record = s.Record(RecordedDecisionClass.Dismissal, Counts, daysAgo: 1);
+        var row = s.Records.Single(r => r.Id == record);
+        row["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", MatterType);
+        row["sprk_corerecordid"] = secureMatter.ToString("D");
+        row["owningteam"] = new EntityReference("team", SecureTeamId);
+        var witness = $"sprk_decisionrecord:{record:D}";
+
+        var shown = await ShownOnReadAsync(s, [(signal, [witness])]);
+
+        shown![signal].Should().BeEquivalentTo([witness], "the pair files the Decision Record under the Signal's secure matter");
+    }
+
+    [Fact]
     public async Task T038_AnUndeterminedWitness_OrARefThatNamesNoLineageChild_IsNotShown()
     {
         var s = new Store();

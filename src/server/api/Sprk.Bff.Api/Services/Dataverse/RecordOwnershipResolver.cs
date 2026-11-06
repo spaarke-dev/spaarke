@@ -265,6 +265,11 @@ public sealed class RecordOwnerLookupCache
     /// one per refusal of the walk (the pass reports them); empty when no hard-deny row asked.</summary>
     public IReadOnlyList<Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamIdentity> RestrictedContentOwnerTeams =>
         RestrictedContentByAnswerBusinessUnit.Values.Distinct().ToList();
+
+    /// <summary>#2471 follow-up: whether each communication is filed under anything (the #2468 document rule), once read — so
+    /// a pass deciding N documents of one email reads the communication and its thread once, as it reads each row once. Only
+    /// a decided answer is kept: a communication or thread that does not come back is asked again (and refuses again).</summary>
+    internal Dictionary<Guid, bool> CommunicationFiled { get; } = new();
 }
 
 public sealed record RecordOwnershipContext
@@ -615,8 +620,33 @@ public sealed record RecordOwnershipContext
         "a Signal's or a Decision Record's filing is written only by its own writer, whose ownership question covers the core "
         + "record and the Signals it resolved; a generic re-file does not ask that question, so nothing was written (194b A5)";
 
-    private const string CoreRecordTypeColumn = "sprk_corerecordtype";
-    private const string CoreRecordIdColumn = "sprk_corerecordid";
+    internal const string CoreRecordTypeColumn = "sprk_corerecordtype";
+    internal const string CoreRecordIdColumn = "sprk_corerecordid";
+
+    /// <summary>A row's core record pair as it holds it (<see cref="CorePairOf"/>).</summary>
+    /// <param name="TypeRef">The <c>sprk_recordtype_ref</c> catalog row <c>sprk_corerecordtype</c> names, or <c>null</c>.</param>
+    /// <param name="CoreId">The id <c>sprk_corerecordid</c> holds, when it is a real GUID; otherwise <c>null</c>.</param>
+    /// <param name="Malformed">One half without the other, or an id that is not a GUID.</param>
+    internal readonly record struct CoreRecordPair(Guid? TypeRef, Guid? CoreId, bool Malformed)
+    {
+        /// <summary>Both halves, well formed.</summary>
+        public bool IsWhole => !Malformed && TypeRef is not null && CoreId is not null;
+    }
+
+    /// <summary>
+    /// THE reading of a Signal's or Decision Record's core record pair, shared by the ownership question
+    /// (<see cref="ForExistingRowAsync"/>) and the secure-child lineage (<c>SecureChildLineage.CorePairParent</c>), so the two
+    /// never disagree about which pair is whole: both halves, and an id that parses as a non-empty GUID.
+    /// </summary>
+    internal static CoreRecordPair CorePairOf(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        var typeRef = row.GetAttributeValue<EntityReference>(CoreRecordTypeColumn)?.Id is { } t && t != Guid.Empty ? t : (Guid?)null;
+        var coreText = row.GetAttributeValue<string>(CoreRecordIdColumn)?.Trim();
+        Guid? coreId = Guid.TryParse(coreText, out var parsed) && parsed != Guid.Empty ? parsed : null;
+        var malformed = (typeRef is null) != (coreId is null) || (!string.IsNullOrWhiteSpace(coreText) && coreId is null);
+        return new CoreRecordPair(typeRef, coreId, malformed);
+    }
 
     /// <summary>
     /// UAC task 194b: the ownership question for an EXISTING row, with the parents in the order its writer asks them, so the
@@ -658,10 +688,8 @@ public sealed record RecordOwnershipContext
             return new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly, ChildEntityLogicalName = row.LogicalName });
 
         var undetermined = new ExistingRowOwnership(ForParents(rest) with { SecureOnlyParents = secureOnly, ChildEntityLogicalName = row.LogicalName });
-        var typeRef = row.GetAttributeValue<EntityReference>(CoreRecordTypeColumn)?.Id is { } t && t != Guid.Empty ? t : (Guid?)null;
-        var coreText = row.GetAttributeValue<string>(CoreRecordIdColumn)?.Trim();
-        Guid? coreId = Guid.TryParse(coreText, out var parsed) && parsed != Guid.Empty ? parsed : null;
-        if ((typeRef is null) != (coreId is null) || (!string.IsNullOrWhiteSpace(coreText) && coreId is null))
+        var (typeRef, coreId, malformed) = CorePairOf(row);
+        if (malformed)
             return undetermined with { Undetermined = "its core record pair is malformed" };
 
         var subject = Guid.TryParse(row.GetAttributeValue<string>(CoreAncestorResolver.RegardingRecordIdColumn)?.Trim(), out var pairId)
@@ -1427,6 +1455,16 @@ public static class RecordOwnerRefusal
     /// top business unit is missing, ambiguous or has a member
     /// (<see cref="Sprk.Bff.Api.Infrastructure.Dataverse.RestrictedContentOwnerTeamStatus"/>).</summary>
     public const string RestrictedContentOwnerTeamUnresolved = "record_owner_restricted_content_team_unresolved";
+
+    /// <summary>
+    /// #2468 / #2471 follow-up: a document's primary parent is a communication, and whether that communication is filed
+    /// under anything cannot be decided — the communication, or the thread it sits in, did not come back.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="ParentUnresolved"/>, which this case used
+    /// and which also covers a filed-to record that is missing. (2) Extension — one more code in this set, no new type. (3) Cost
+    /// of doing nothing — a caller cannot tell the two apart, so an unfiled Office save refused here was told to check its
+    /// business unit or the record it is filed to, neither of which is the cause.</remarks>
+    public const string CommunicationFilingUnresolved = "record_owner_communication_filing_unresolved";
 }
 
 /// <summary>
@@ -1812,10 +1850,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
     /// <summary>
     /// True for a CHILD table whose owner a generic re-filing must re-derive: an ownership parent that is not itself a
-    /// root. A root's own ownership (the three secure-flagged roots and the service request) is provisioning's — a
-    /// secure root is provisioned into isolation through task 144's endpoint, never by a bare re-own (owner S6) — so a
-    /// generic update that changes a root's lookups does not reassign it. Write-side only: the owner question's read side also
-    /// looks through a work assignment with no owning team (<see cref="IsLookThroughParent"/>, owner decision 2026-10-29).
+    /// root. A root's own ownership (the three secure-flagged roots and the service request) is not re-derived by a generic
+    /// re-filing: Make Secure and Remove Secure stay provisioning's — a secure root is provisioned into isolation through task
+    /// 144's endpoint, never by a bare re-own (owner S6) — so a generic update that changes a root's lookups does not reassign
+    /// it. Owner amendment 2026-10-29 ("the family members have the same ownership"): in ORDINARY (non-secure) mode a FILED
+    /// work assignment or project follows its family's answer, and an unfiled person-owned one is owned by its person's
+    /// business-unit team — <c>SecureRootInheritance.FollowParentsPassAsync</c>'s root-owner step, through
+    /// <c>SecureChildReconciler.ReownFiledRootAsync</c> (matters are not in it). Write-side only: the owner question's read
+    /// side also looks through a work assignment or project with no owning team (<see cref="IsLookThroughParent"/>).
     /// </summary>
     public static bool IsReparentableChild(string? entityLogicalName) =>
         IsOwnershipParent(entityLogicalName)
@@ -1833,13 +1875,18 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
     /// <summary>
     /// A parent whose filing answers for it when it is not team-owned (the owner question's look-through and the secure
-    /// check's lineage): every reparentable child and, owner decision 2026-10-29, the work assignment — it belongs to its core
-    /// record, so a person-owned, filed work assignment takes its matter's (then project's) business unit. Read-side only: the
-    /// write-side re-file gates ask <see cref="IsReparentableChild"/>, under which a work assignment stays a root.
+    /// check's lineage): every reparentable child and, owner decision 2026-10-29, the work assignment and the project — each
+    /// belongs to its core record, so a person-owned, filed work assignment takes its matter's (then project's) business unit,
+    /// and a person-owned project filed by its BFF-managed pair takes the business unit of the record the pair names
+    /// (<see cref="ReadPairParentAsync"/>). A project whose pair is empty, or names a record that no longer exists, is filed
+    /// under nothing and keeps its own business unit (fix round B-K1/K2/K3: never looked through, never its other lookups).
+    /// Read-side only: the write-side re-file gates ask <see cref="IsReparentableChild"/>, under which both stay roots.
     /// </summary>
     private static bool IsLookThroughParent(string? entityLogicalName) =>
         IsReparentableChild(entityLogicalName)
         || string.Equals(entityLogicalName, Sprk.Bff.Api.Services.Access.SecureRootInheritance.WorkAssignment,
+            StringComparison.OrdinalIgnoreCase)
+        || string.Equals(entityLogicalName, Sprk.Bff.Api.Services.Access.SecureRootInheritance.Project,
             StringComparison.OrdinalIgnoreCase);
 
     // Read-only for creates: the narrowest seam that answers the queries below — the same one RecordContainerResolver
@@ -1934,11 +1981,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             && string.Equals(context.ChildEntityLogicalName, DocumentEntity, StringComparison.OrdinalIgnoreCase)
             && string.Equals(parents[0].EntityLogicalName, RecordThreadFiling.CommunicationTable, StringComparison.OrdinalIgnoreCase))
         {
-            var filed = await IsCommunicationFiledAsync(parents[0], ct).ConfigureAwait(false);
+            var filed = await IsCommunicationFiledAsync(parents[0], context.LookupCache, ct).ConfigureAwait(false);
             if (filed is null)
             {
                 return RecordOwnerResolution.Refused(
-                    RecordOwnerRefusal.ParentUnresolved,
+                    RecordOwnerRefusal.CommunicationFilingUnresolved,
                     $"the parent {parents[0].EntityLogicalName} {parents[0].RecordId:D} or the thread it sits in could not be "
                     + "read, so whether it is filed cannot be decided");
             }
@@ -3617,7 +3664,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
     /// <summary>One parent's ownership facts.</summary>
     private sealed record ParentFacts(
-        RecordOwnershipParent Parent, Guid BusinessUnitId, bool HasOwningTeam, bool FlaggedSecure);
+        RecordOwnershipParent Parent, Guid BusinessUnitId, bool HasOwningTeam, bool FlaggedSecure)
+    {
+        /// <summary>Fix round (B-K2): a project whose ADR-024 pair is EMPTY — filed under nothing, so it is never looked
+        /// through (its own business unit decides, and no look-through depth is spent on it).</summary>
+        public bool UnpairedProject { get; init; }
+    }
 
     /// <summary>
     /// Secure-if-any over every parent. Order of the checks is the point: an unreadable parent refuses before any
@@ -3636,7 +3688,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// unit is then unknown), never "ordinary". A core record (a root, a service request) is never content, and is never
     /// looked through except a work assignment (owner decision 2026-10-29, <see cref="IsLookThroughParent"/>): a person-owned
     /// work assignment that is filed takes its matter's business unit, then its project's (an invoice's or event's matter or
-    /// project when it holds neither), on every path. Any other user-owned core record keeps its own business unit. An
+    /// project when it holds neither), on every path; so does a person-owned project filed by its BFF-managed pair (the record
+    /// the pair names; an unresolvable pair refuses; an empty pair, or one naming a deleted record, files it under nothing).
+    /// Any other user-owned core record keeps its own business unit. An
     /// UNFILED user-owned parent keeps its own business unit too, as before.</remarks>
     private async Task<RecordOwnerResolution> ResolveFromParentsAsync(
         IReadOnlyList<RecordOwnershipParent> parents, RecordOwnershipContext context, bool committedReads, CancellationToken ct,
@@ -3683,7 +3737,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // business unit, and any other core record keeps its own business unit.
         var contentRow = context.KeepCreatorUnlessTargetIsTeamOwned
                          && !IsCoreRecord(facts[0].Parent.EntityLogicalName);
-        var lookThrough = !facts[0].HasOwningTeam && (contentRow || IsLookThroughParent(facts[0].Parent.EntityLogicalName));
+        var lookThrough = !facts[0].HasOwningTeam && !facts[0].UnpairedProject
+                          && (contentRow || IsLookThroughParent(facts[0].Parent.EntityLogicalName));
         string? primaryUndecided = null;
         if (lookThrough && (lookThroughDepth >= MaxLineageDepth || lookedThrough?.Contains(facts[0].Parent) == true))
         {
@@ -3933,18 +3988,33 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         return (lineage, null, false);
 
         // Owner decision 2026-10-29: a work assignment that is not team-owned is read through too — it can only add parents, so
-        // the answer can only become more secure.
+        // the answer can only become more secure. Fix round (B-K2/K3): a project with an EMPTY pair is filed under nothing (a
+        // project is filed only through its pair), so it is not read through.
         static bool IsUnownedChild(ParentFacts fact) =>
-            !fact.HasOwningTeam && IsLookThroughParent(fact.Parent.EntityLogicalName);
+            !fact.HasOwningTeam && !fact.UnpairedProject && IsLookThroughParent(fact.Parent.EntityLogicalName);
     }
 
     /// <summary>
     /// #2468: whether <paramref name="communication"/> is filed under anything — its own ownership-parent lookups (the
     /// parents its own question names, <see cref="RecordOwnershipContext.OrderedParentsOf"/>) or its record thread's filing
     /// (<see cref="RecordThreadFiling"/>: a Direct thread files nothing). Read committed. <c>null</c> when the communication or
-    /// its thread cannot be read (the caller refuses); a Dataverse fault propagates, as every resolver read does.
+    /// its thread does not come back (zero rows; the caller refuses); a Dataverse fault propagates, as every resolver read does.
+    /// With a pass's <paramref name="cache"/> (<see cref="RecordOwnerLookupCache.CommunicationFiled"/>) a decided answer is
+    /// read once for the pass.
     /// </summary>
-    private async Task<bool?> IsCommunicationFiledAsync(RecordOwnershipParent communication, CancellationToken ct)
+    private async Task<bool?> IsCommunicationFiledAsync(
+        RecordOwnershipParent communication, RecordOwnerLookupCache? cache, CancellationToken ct)
+    {
+        if (cache is not null && cache.CommunicationFiled.TryGetValue(communication.RecordId, out var known))
+            return known;
+        var filed = await ReadCommunicationFiledAsync(communication, ct).ConfigureAwait(false);
+        if (cache is not null && filed is { } decided)
+            cache.CommunicationFiled[communication.RecordId] = decided;
+        return filed;
+    }
+
+    /// <summary>The read behind <see cref="IsCommunicationFiledAsync"/>.</summary>
+    private async Task<bool?> ReadCommunicationFiledAsync(RecordOwnershipParent communication, CancellationToken ct)
     {
         var query = new QueryExpression(RecordThreadFiling.CommunicationTable)
         {
@@ -3961,17 +4031,17 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         if (RecordThreadFiling.ThreadOf(row) is not { } threadId)
             return false;
 
-        try
+        // #2471 follow-up: a thread that is not there is decided from the zero-row result (fail closed: its filing is not known,
+        // so the caller refuses); a fault of any type propagates, never taken as a missing row.
+        var thread = await RecordThreadFiling.TryReadThreadAsync(_dataverse, threadId, ct).ConfigureAwait(false);
+        if (thread is null)
         {
-            var thread = await RecordThreadFiling.ReadThreadAsync(_dataverse, threadId, ct).ConfigureAwait(false);
-            return RecordThreadFiling.ParentsOf(thread).Count > 0;
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogWarning(ex, "The thread {ThreadId} of communication {CommunicationId} could not be read (#2468).",
+            _logger.LogWarning("The thread {ThreadId} of communication {CommunicationId} could not be found (#2468).",
                 threadId, communication.RecordId);
             return null;
         }
+
+        return RecordThreadFiling.ParentsOf(thread).Count > 0;
     }
 
     /// <summary>
@@ -3996,9 +4066,44 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // primary order alone.
         if (entity is null)
             return null;
-        return RecordOwnershipContext.OrderedParentsOf(entity)
+        // Owner decision 2026-10-29: a project's BFF-managed pair is its filing; one that cannot be told is unread (refused).
+        var pair = await ReadPairParentAsync(row, entity, committedReads, ct).ConfigureAwait(false);
+        if (pair.Undetermined is not null)
+            return null;
+        return OrderedWithPair(row, entity, pair.Parent)
             .Concat(RecordOwnershipContext.SecureOnlyParentsOf(entity)).Distinct().ToArray();
     }
+
+    /// <summary>
+    /// Owner decision 2026-10-29: the parent a row's ADR-024 pair names ON ITS OWN — only on a table whose pair is BFF-managed
+    /// (a project: <c>SecureRootInheritance.PairNamesAParentOnItsOwn</c>; the one rule creation reads it by,
+    /// <c>SecureRootInheritance.PairParentAsync</c>). A work assignment's pair is never followed (text any user with Write can
+    /// set). <c>Undetermined</c>: the pair names a record that cannot be told — the caller refuses, never "unfiled". Fix
+    /// round (B-K1): a pair naming a record that no longer exists names no parent (the project is no longer filed), as the
+    /// secure-root plan reads a missing parent (<c>SecureRootInheritance.ExistingPairParentAsync</c>). A Dataverse fault
+    /// propagates.
+    /// </summary>
+    private Task<(RecordOwnershipParent? Parent, string? Undetermined)> ReadPairParentAsync(
+        RecordOwnershipParent row, Entity entity, bool committedReads, CancellationToken ct) =>
+        Sprk.Bff.Api.Services.Access.SecureRootInheritance.ExistingPairParentAsync(
+            _dataverse, row.EntityLogicalName, RecordOwnershipContext.PairIdOf(entity),
+            entity.GetAttributeValue<EntityReference>(Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairTypeColumn)?.Id,
+            committedReads, ct);
+
+    /// <summary>
+    /// <paramref name="entity"/>'s ownership parents in its table's primary order, with <paramref name="pairParent"/> (the
+    /// record its BFF-managed pair names) keyed under the pair column — <c>SecureChildLineage.RootLookupOrder</c>'s key for a
+    /// project, so it ranks first.
+    /// </summary>
+    private static IReadOnlyList<RecordOwnershipParent> OrderedWithPair(
+        RecordOwnershipParent row, Entity entity, RecordOwnershipParent? pairParent) =>
+        pairParent is null
+            ? RecordOwnershipContext.OrderedParentsOf(entity)
+            : RecordOwnershipContext.ForRow(
+                row.EntityLogicalName,
+                RecordOwnershipContext.LookupsOf(entity).Append(new KeyValuePair<string, RecordOwnershipParent?>(
+                    Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn, pairParent)),
+                RecordOwnershipContext.PairIdOf(entity)).Parents;
 
     /// <summary>
     /// The filing a look-through follows for <paramref name="row"/>: its ownership parents in its table's primary order
@@ -4015,6 +4120,18 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var entity = await ReadFilingRowAsync(row, committedReads, ct).ConfigureAwait(false);
         if (entity is null)
             return (null, null);
+
+        // Owner decision 2026-10-29: a project's BFF-managed pair is its filing (a work assignment's never is); a pair that
+        // cannot be told refuses (ParentUnresolved), never "unfiled".
+        var pair = await ReadPairParentAsync(row, entity, committedReads, ct).ConfigureAwait(false);
+        if (pair.Undetermined is { } undetermined)
+            return (null, undetermined);
+        if (pair.Parent is not null)
+            return (OrderedWithPair(row, entity, pair.Parent), null);
+        // Fix round (B-K3): a project is filed only through its pair. With no pair parent (an empty pair, or one naming a
+        // record that no longer exists) it is filed under nothing — never its other lookups (OrderedParentsOf).
+        if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairNamesAParentOnItsOwn(row.EntityLogicalName))
+            return (Array.Empty<RecordOwnershipParent>(), null);
 
         var lookups = RecordOwnershipContext.LookupsOf(entity).ToList();
         // #2143 round 3 (K1): on the re-file path what the invoice or event belongs to is a committed read too.
@@ -4078,6 +4195,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var columns = isSecureFlaggedRoot
             ? new ColumnSet(OwningBusinessUnitColumn, OwningTeamColumn, IsSecureColumn)
             : new ColumnSet(OwningBusinessUnitColumn, OwningTeamColumn);
+        // Fix round (B-K2): a project's pair id rides in the same read, so a project filed under nothing is never looked through.
+        var pairedTable = Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairNamesAParentOnItsOwn(parent.EntityLogicalName);
+        if (pairedTable)
+            columns.AddColumn(Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn);
 
         var query = new QueryExpression(parent.EntityLogicalName)
         {
@@ -4106,6 +4227,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // masked. Read as flagged: a root that is not isolated is then refused (never an ordinary team); one that IS isolated
         // takes the secure branch by its BU anyway.
         var flaggedSecure = isSecureFlaggedRoot && (row.GetAttributeValue<bool?>(IsSecureColumn) ?? true);
+        var unpairedProject = pairedTable
+                              && string.IsNullOrWhiteSpace(row.GetAttributeValue<string>(
+                                  Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn));
 
         if (plannedOwningTeams is not null
             && plannedOwningTeams.TryGetValue(
@@ -4128,10 +4252,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 return null;
             }
 
-            return new ParentFacts(parent, plannedBu.Value, HasOwningTeam: true, flaggedSecure);
+            return new ParentFacts(parent, plannedBu.Value, HasOwningTeam: true, flaggedSecure) { UnpairedProject = unpairedProject };
         }
 
-        return new ParentFacts(parent, businessUnitId.Value, hasOwningTeam, flaggedSecure);
+        return new ParentFacts(parent, businessUnitId.Value, hasOwningTeam, flaggedSecure) { UnpairedProject = unpairedProject };
     }
 
     /// <summary>

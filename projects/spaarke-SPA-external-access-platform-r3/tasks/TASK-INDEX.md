@@ -10,7 +10,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | ID | Title | Phase | Status | Deps | Tier/Eff | Rigor | Parallel |
 |----|-------|-------|--------|------|----------|-------|----------|
 | 001 | ADR-028 amendment for R3 (A2, A3 :124, A1 :55) | P0 | ✅ [done] | none | O/h | FULL | — (.claude/, main session; owner approval) |
-| 002 | Grid columns per owner list (FR-09) | P0 | 🔄 [wip] step 1 live on dev 2026-10-29 (allowed columns in all 6 grids); step 2 BFF allow-list in PR #2450 (UAC approved); dev deploy held by UAC 194b hold, then the 9 grid columns | none (owner list) | S/h | STANDARD | Wave 1 when the list arrives |
+| 002 | Grid columns per owner list (FR-09) | P0 | ✅ [done] 2026-10-31 owner OK: owner's columns, labels and widths in all six dev grids (9 added via #2450; number and type columns 200px); rollback JSON in notes/task-002-notes.md | none (owner list) | S/h | STANDARD | Wave 1 when the list arrives |
 | 003 | Spike: Entra B2B self-service sign-up vs custom join (FR-12) | P0 | ✅ [done] | none | O/h | STANDARD | Wave 1 |
 | 010 | Ciam audience forms + default-scheme CIAM guard (FR-22, FR-23) | P1 | ✅ [done] | none | O/h | FULL | Wave 1 |
 | 011 | Modules by user type + partner service-request switch (FR-19, FR-06) | P1 | ✅ [done] | 001 | O/h | FULL | Wave 2 |
@@ -56,14 +56,15 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 068 | "Internal Only" switch on message and email compose surfaces; column and form label "Internal Only" | P5b | ✅ [done] on dev and owner-checked 2026-10-15; "External / Internal Only" tags in the Messages modal and New Email (7419e8637, 247ce6a6e) | 065 | S/h | FULL | CHK3 |
 | 070 | Deploy SPA + dev Teams package to dev | P7 | ✅ [done] 2026-10-29: dev SPA at master `96f1f6b675` (run 40989384010); dev Teams package installed in Dewey Cheatham; smoke done in 071 (notes/task-070-deploy-record.md) | 038, 042, 043, 053, 055, 056, 057 | S/h | STANDARD | — (live, owner-gated) |
 | 071 | Teams live check: contact, licensed user, unlisted directory × desktop/web/mobile (FR-21, A9) | P7 | ✅ [done] 2026-10-29: 8/9 runs pass (unlisted × mobile deferred by owner); guest-check fix PR #2461; broker pre-auth answered no (notes/fr-21-teams-live-check.md) | 070, 075, 076 | S/h | STANDARD | — (owner-driven) |
-| 072 | Both-plane E2E on dev, success criteria 1–12 + FR-10 | P7 | 🔲 [open] needs 002 + 071 | 002, 070, 071 | S/h | STANDARD | — (live) |
-| 073 | Production deploy to external.spaarke.com (gated) | P7 | 🔲 [open] BLOCKED — ACME gate items missing (notes/task-073-gate-acme.md): stamp v2/pre-auth/BU setting/removeUnverifiedEmailClaim, T240c/T240d, consent design, DNS, prod environment | 072 + T240c, T240d, DNS, owner go | S/h | STANDARD | — (blocked until gates) |
+| 072 | Both-plane E2E on dev, success criteria 1–12 + FR-10 | P7 | ✅ [done] 2026-10-31 owner E2E pass; grant email copy approved as drafted; UAT feedback filed (#2490, R4); record notes/task-072-e2e-record.md | 002, 070, 071 | S/h | STANDARD | — (live) |
+| 073 | Production deploy to external.spaarke.com (gated) | P7 | ➡️ [deferred] 2026-11-03: moved to customer-provisioning-orchestration-r1 by the owner (#2532, ISS-030); gate record notes/task-073-gate-acme.md | 072 + T240c, T240d, DNS, owner go | S/h | STANDARD | — (blocked until gates) |
 | 074 | A9 live probes on dev | P7 | ✅ [done] 2026-10-29: all 8 probes pass (notes/task-074-a9-probes.md); follow-ups #2449 (R4) | 058, 059, 075 | S/h | STANDARD | — (live, owner-gated) |
 | 075 | SPA Teams strategy → multitenant NAA (Teams context tid), registration + link in Teams | P4b | ✅ [done] 2026-10-19 | 058 | S/h | FULL | A9 Wave 6 |
 | 076 | Teams package + registration for A9 (manifest, brk-multihub, 043 pipeline) | P4b | ✅ [done] 2026-10-19 | 075 | S/h | FULL | A9 Wave 7 |
 | 077 | BFF default scheme accepts the bare app-id audience (v2 tokens) before the 059 v2 switch | P4b | ✅ [done] 2026-10-19 | 045 | O/h | FULL | A9 (from 059 stop S-1; owner 2026-10-19) |
 | 078 | ISS-010 quick fix: read_query / search_data hide internal-only communications from licensed users flagged external | R3 hardening | ✅ | 065 | O/h | FULL | ISS-010 #1864 (owner 2026-10-20) |
-| 090 | Project wrap-up | Wrap-up | 🔲 [open] | all | S/h | FULL | — (serial) |
+| 079 | #2458 / ISS-024: grant notifier skips the external email for a home-linked WorkforceHome contact | P7 | ✅ [done] 2026-11-01 PR #2500 (fcf01480f4), deployed to dev 14:03:20Z; also fixes #2491; live re-check waived by owner; follow-ups #2499, #2508 (R4) | 036 | S/h | FULL | — |
+| 090 | Project wrap-up | Wrap-up | ✅ [done] 2026-11-03 | all | S/h | FULL | — (serial) |
 
 ## Parallel Execution Plan
 

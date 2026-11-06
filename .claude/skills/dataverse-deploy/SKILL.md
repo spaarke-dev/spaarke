@@ -5,13 +5,13 @@ techStack: [dataverse, pcf-framework, power-platform]
 appliesTo: ["**/Solutions/**", "**/pcf/**", "deploy to dataverse", "pac pcf push"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-16
+last-reviewed: 2026-11-03
 ---
 
 # Dataverse Deploy
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-05-16
+> **Last Reviewed**: 2026-11-03
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — **hub #2 with 269 refs; additive-only refinement**)
 > **Exemplar rationale**: PCF deployment specifics change frequently with PAC CLI updates (v1.34 → v1.46 → ...). No single canonical reference holds steady.
 > **Primary Guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
@@ -52,6 +52,19 @@ last-reviewed: 2026-05-16
 - ✅ **BUT** use `pac pcf push --publisher-prefix sprk` when solution imports empty (see Troubleshooting)
 
 ---
+
+## Progress Checklist
+
+Copy this into your working notes and tick each item as you go:
+
+```
+- [ ] Step 1: Build Fresh
+- [ ] Step 2: Update Version (5 Locations)
+- [ ] Step 3: Copy Fresh Build to Solution
+- [ ] Step 4: Pack and Import
+- [ ] Step 5: Verify
+- [ ] Step 5.1: Verify Schema via MCP (only if the solution has schema changes)
+```
 
 ## Deployment Workflow
 
@@ -111,6 +124,8 @@ pac solution list | grep -i "{SolutionName}"
 ```
 
 Hard refresh browser (`Ctrl+Shift+R`) and verify version footer.
+
+If verification fails: fix the cause, redeploy, and re-run verification; do not report success until it passes.
 
 ### Step 5.1: Verify Schema via MCP (for solutions with schema changes)
 

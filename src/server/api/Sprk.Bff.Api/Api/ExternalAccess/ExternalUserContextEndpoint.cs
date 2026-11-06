@@ -7,16 +7,17 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <summary>
 /// GET /api/v1/external/me
 ///
-/// Called by the Power Pages SPA on startup to retrieve the authenticated portal user's
-/// project access information. Returns the Contact's project list with access levels so
-/// the SPA can build its navigation and enforce client-side access restrictions.
+/// Called by the external SPA and the Teams workforce host on startup to retrieve the caller's own
+/// project access context: the projects the caller can READ (possibly none) with a level string each,
+/// so the client can build its navigation. Principal-agnostic: a CIAM external contact and a workforce user.
 ///
-/// Authentication: Power Pages portal JWT (ExternalCallerAuthorizationFilter).
-/// The filter validates the token and loads participations from Redis / Dataverse.
+/// Authentication: the ExternalCollaboration policy (the Ciam, default and WorkforceHome schemes), then the
+/// group-level CallerPrincipalAuthorizationFilter, which resolves the token to a CallerPrincipal.
+/// A refusal is the resolver's own answer (e.g. 403 registration_required, 500 owner_unconfigured).
 ///
 /// Follows ADR-001: Minimal API — no controllers.
-/// Follows ADR-008: ExternalCallerAuthorizationFilter applied per-endpoint.
-/// Follows ADR-009: Redis-first caching — participation data is cached by the filter.
+/// Follows ADR-008: authorization applied at the route group (policy plus principal filter), not per handler.
+/// Follows ADR-028: one collaboration group serves both planes; this handler does not branch on plane.
 /// </summary>
 public static class ExternalUserContextEndpoint
 {
@@ -31,9 +32,9 @@ public static class ExternalUserContextEndpoint
     /// <param name="httpContext">The current HTTP context (used to retrieve the CallerPrincipal).</param>
     /// <param name="logger">Logger for request tracing.</param>
     /// <returns>
-    /// 200 OK with ExternalUserContextResponse containing the projects the caller can READ.
-    /// 401 Unauthorized if the portal token is missing or invalid (returned by filter).
-    /// 403 Forbidden if the Contact has no active participation records (returned by filter).
+    /// 200 OK with ExternalUserContextResponse containing the projects the caller can READ; the list may be empty.
+    /// 401/403/500 are answered before this handler by the policy and the principal filter: the resolver's
+    /// deny reasons (e.g. 403 registration_required, 500 owner_unconfigured). 500 here if no principal is set.
     /// </returns>
     public static IResult Handle(
         HttpContext httpContext,

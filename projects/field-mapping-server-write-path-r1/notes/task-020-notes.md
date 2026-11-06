@@ -1,0 +1,321 @@
+# Task 020: Matter and Project creates through the child-records route (FR-15, FR-03)
+
+> Rigor FULL. Branch `task/fm-020`, from 38e82f527c. The brief's overrides are binding:
+> - **No wizard work.** Only the BFF route, `bffChildWriteAdapter.ts`, the doc comment in `provisioningService.ts`, and tests.
+> - **No deploys** and **no live Dataverse writes**.
+> - **Off-limits while task 041 runs:** `RecordCreationService*.cs`, `RecordTableRules.cs`, `SearchIndexNameResolver.cs`, `Services/Ai/**` and `SearchIndexDefaultTests.cs`. None of them was touched.
+> - **No search-index assertions.** The tests assert no search-index value (`sprk_ai_search_index` or `sprk_searchindexname`).
+
+## What changed
+
+| File | Change |
+|---|---|
+| `src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs` | Adds `sprk_matter` and `sprk_project` to `CreateTables`. Adds an optional query, `?mappingSourceEntity=&mappingSourceId=`. Adds the single switch `InferMappingSourceTables` (`sprk_matter`, `sprk_project`) and the pure helper `MappingSourceOf`. The handler passes `RecordCreationMapping.ForCaller(probe, bearer, table, id)` to the service. When no source is named and the table is not in the infer set, it passes `Mapping = null` as before. |
+| `src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffChildWriteAdapter.ts` | Adds `sprk_matter` and `sprk_project` to `BFF_CHILD_CREATE_TABLES`. Adds an optional `IBffCreateOptions { mappingSource }` to `createChildRecordViaBff` and `createRecordViaBffWithWarnings`. The adapter adds the query only when a source is passed, and **never changes the body**. |
+| `src/client/shared/Spaarke.UI.Components/src/utils/adapters/index.ts` | Exports the two option types. |
+| `src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts` | Doc comment only: the provisionSecureProject split (below). |
+| `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs` | Extends two reasons: the governed file `Api/ChildRecordEndpoints.cs` and the handler decision `POST /api/v1/child-records/{table}`. Both cover the roots and the fact that `mappingSource` authorizes nothing. |
+| `tests/integration/seam/ChildRecords/ChildRecordMatterProjectCreateSeamTests.cs` (new) | A partial of `RecordCreationServiceMappingSeamTests`. It drives the real handler over the real service. |
+| `tests/integration/seam/ChildRecords/ChildRecordSecureProjectCreateSeamTests.cs` (new) | A partial of `SecureRootInheritanceWriterTests`. It drives the real handler, the real `SecureRootFilingGate` and provisioning's fixture. |
+| `tests/integration/seam/ChildRecords/ChildRecordCreateTablesAgreementTests.cs` (new) | The agreement test: server `CreateTables` == client `BFF_CHILD_CREATE_TABLES` ∪ `RibbonOnlyCreateTables`. Includes must-fire controls and the census-filter control. |
+| `tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.ChildRecordRoutes.cs` | One `.Where` plus a one-line comment (ruling 1; see "Existing-test exceptions"). |
+| `src/client/shared/.../__tests__/bffChildWriteAdapter.test.ts` | Adds to the list test, swaps the fixture (ruling 2) and adds a new describe block. |
+
+### Query parameters, not a request DTO
+
+These parameters replace the POML's "request DTO" wording (ruling 3). The body stays the record's own columns: the route has always taken the Web API payload as is, and a wrapper DTO would change the request shape for every existing table. The parameter names are exactly `mappingSourceEntity` and `mappingSourceId`.
+
+The route never answers these parameters with 400. When a source is half-named, malformed, a non-GUID or `Guid.Empty`:
+- it is passed to the resolver as Undetermined;
+- nothing is mapped;
+- nothing is inferred;
+- the response carries one warning (`MappingSourceResolver.SourceUndeterminedWarning`);
+- the values are never echoed in the response's warning, and a malformed value is never logged (the resolver turns it into Undetermined before anything logs).
+
+Correction (round 3, review #10; the line above once read "never echoed in a warning or a log message"): a WELL-FORMED source is logged. `MappingSourceReadProbe` logs the table name (already checked against `^[a-z][a-z0-9_]*\z` by the resolver) and the GUID: at Information when the caller may not read it, and at Warning when the probe throws or the app-only read fails. No response warning ever carries them.
+
+## §11 for `mappingSource` and `InferMappingSourceTables`
+
+1. **Existing.** `RecordCreationRequest.Mapping` / `RecordCreationMapping.ForCaller` and `MappingSourceResolver` already exist (W2). This is endpoint binding plus pass-through; no new service, abstraction or DI registration. `CallerRecordAccessProbe` is already registered (`ExternalAccessModule.cs:192`).
+2. **Extension.** It extends the existing route and handler. The only new surface is two optional query parameters, one internal set and one internal helper inside `ChildRecordEndpoints.cs`.
+3. **Cost of doing nothing.** Without it, the Matter and Project wizards (tasks 021 and 022) cannot stop mapping on the client. FR-15 needs the route to create them, and FR-03 needs a caller to name the source. A route create of a matter or project would carry no server mapping.
+
+**Placement Justification:** this extends an existing BFF route. There is no new endpoint, service, package or background work.
+
+## provisionSecureProject split (AC4)
+
+**AC4 reading** (ruling 5):
+- A Project filed under a secure parent is created into isolation by the service. Proven by the seam tests in `ChildRecordSecureProjectCreateSeamTests.cs`:
+  - the project is owned by the Secure Record Owners team in the create itself;
+  - `sprk_issecure` is set in the create;
+  - the record is completed in the request with the flag, its own container and the creator's share;
+  - `ShouldBeSecure`.
+- The user's Secure toggle on a new root Project stays on `/external-access/provision-project` (UAC-r2). `sprk_issecure` is a server-only, field-secured column.
+- Task 022 decides the wizard branching.
+
+Steps that remain on `provisionSecureProject`: the whole call. It is a single POST to `/api/v1/external-access/provision-project`, so nothing is dropped from it. Dropping or splitting it would change the UAC-r2 contract, which is escalation trigger 1. Task 020 changes only its doc comment (`provisioningService.ts`, above `provisionSecureProject`).
+
+### Open for 022
+
+- The wizard needs two branches:
+  - a project filed under a secure matter or project goes through `POST /api/v1/child-records/sprk_project` (server isolation; no `provisionSecureProject` call);
+  - the user's own Secure toggle on a project that inherits nothing stays on `provisionSecureProject`.
+- Decide what the wizard does when both apply.
+
+## Real-world check: no wizard starts using the route early
+
+Adding `sprk_matter` and `sprk_project` to `BFF_CHILD_CREATE_TABLES` moves no current writer onto the route, and makes none of them refuse with `bff_not_configured`. Every Matter and Project creator uses the unwrapped Xrm data service:
+
+- **Shared services.** `Spaarke.UI.Components/src/services/matterService.ts:338` and `projectService.ts:368`. Callers: `CreateMatterWizard`, `CreateProjectWizard`, `SummarizeFilesDialog` and `CreateProjectStep`.
+- **Code-page hosts.** `src/solutions/CreateMatterWizard/src/main.tsx:53` and `src/solutions/CreateProjectWizard/src/main.tsx:53` use `createXrmDataService` (not wrapped).
+- **`InAppWizardHost`.** It passes the plain `dataService` at :307, :321 and :377. Only `todoDataService` is wrapped by `withBffChildWrites` (:210-214).
+- **LegalWorkspace.** `matterService.ts:222` uses its own `_webApi`.
+
+So `withBffChildWrites` never sees a matter or project create today. Tasks 021 and 022 move them.
+
+## Failing-first evidence
+
+**C# (the new tests: 32).** The route's pre-change behaviour was put back in place:
+- `sprk_matter` and `sprk_project` removed from `CreateTables`;
+- `InferMappingSourceTables` emptied;
+- `mapping = null` forced before the service call.
+
+The new signature was kept so that the tests compile. With the HEAD file itself they do not compile, which is itself red. Filter: `RouteCreate_|ChildRecordCreateTablesAgreementTests|MappingSourceOf_|ChildRecordRoute_AProject|TheCensusTheory`.
+- **RED: 24 failed, 8 passed.** Every new behaviour test failed:
+  - the matter and project owner tests;
+  - the named and inferred mapping tests;
+  - the denied-versus-missing test;
+  - the 6 malformed-source cases;
+  - the existing table with a named source;
+  - the secure-flag theory for both tables;
+  - the 4 secure-project route tests;
+  - the 4 agreement tests;
+  - `MappingSourceOf_EveryCreateTableThatDoesNotInfer…`.
+  The 8 that passed were:
+  - the 6 pre-existing `SecureChildOwnershipAiToolTests` route tests matched by the filter;
+  - `TheCensusTheory_CoversEveryCreateTable` (the census is unaffected when the matter is absent);
+  - `RouteCreate_AnExistingTableWithNoSource_AsksForNoMapping…`, the guard that the old behaviour is unchanged, so it must pass both before and after.
+- **GREEN: 32 of 32 passed.** The theory guard was added later, giving 33. Its own red and green results are under "Existing-test exceptions".
+
+**Jest** (`bffChildWriteAdapter.test.ts`):
+- RED, with the adapter from HEAD: **5 failed, 39 passed**. The failures were:
+  - `lists exactly the census create tables`;
+  - both `creates a sprk_matter/sprk_project…` cases;
+  - `sends a named mapping source…`;
+  - `passes the mapping source…`.
+- GREEN: **44 of 44 passed**.
+
+## Acceptance criteria
+
+| # | AC | Result | Evidence |
+|---|---|---|---|
+| 1 | `CreateTables` and `BFF_CHILD_CREATE_TABLES` both contain `sprk_matter` and `sprk_project`, and a test asserts the sets agree | PASS | `ChildRecordCreateTablesAgreementTests.TheServerCreateTables_AreTheClientCreateTables_PlusTheRibbonOnlyTables` (server == client ∪ the three ribbon-only tables, ruling 2), plus two must-fire controls. Jest list test. |
+| 2 | Optional `mappingSource`; when absent, existing tables behave exactly as before | PASS | `RouteCreate_AnExistingTableWithNoSource_AsksForNoMapping_EvenWithAProfileForItsParent` (no profile read, no probe, no warnings); `MappingSourceOf_EveryCreateTableThatDoesNotInfer_AsksForNoMappingWhenNoSourceIsNamed`. The existing contract tests are unchanged and green (verification below). |
+| 3 | Matter and Project are owned per FR-09 and mapped fill-only per FR-02 | PASS | `RouteCreate_AnUnfiledMatter_IsOwnedByTheCallersBusinessUnitTeam…`; `RouteCreate_AProjectFiledUnderAMatterOfAnotherUnit_IsOwnedRecordFirst_ByTheMattersTeam`; `RouteCreate_AMatterWithANamedSource_KeepsTheUsersValue_AndFillsTheColumnTheUserNeverTouched`; `RouteCreate_AProjectWithNoSource_InfersItFromTheMatterItIsFiledUnder_FillOnly`. The I-1 stamp does not apply: `sprk_matter` and `sprk_project` are `CoreAncestorResolver.CoreRecordEntities` (roots), not stamped children (`IsStampedChildEntity` is false), so there is no stamp column to assert. The stamp's own reads still run through the real service (`StampWorld`). |
+| 4 | A secure Project created through the route goes into isolation; the notes list the remaining `provisionSecureProject` steps | PASS (with the AC4 reading above) | `ChildRecordRoute_AProjectUnderASecureMatter_IsCreatedIntoIsolation_AndComesOutSecure`; `…UnderAnOrdinaryMatter_StaysOrdinary`; the split above. |
+| 5 | Negative: no Create or Append-To on the parent gives a uniform refusal; an unreadable mapping source gives no mapping and no oracle | PASS | `ChildRecordRoute_AProjectUnderASecureMatterTheCallerCannotAppendTo_IsTheUniformNotFound_AsAMissingMatter` (same status, code and detail; no id echoed; nothing written); `…WhenTheCallerIsOnItsNoAccessList_Is403_AndNothingIsCreated`; `RouteCreate_ANamedSourceTheCallerCannotRead_MapsNothing_AndAnswersExactlyAsAMissingSource` (identical warnings; no source read). Round 3 correction (review #4): that seam test proves only "no read before the probe, and one constant warning" — its probe double overrides `GetCallerRightsAsync` with a constant answer, so the probe's own re-ask schedule never runs there. The real equalisation (a denied record re-asked on the not-found schedule, the same asks and waits) is pinned by `MappingSourceReadProbeTests.ReadAsync_MissingAndDeniedSources_GiveTheIdenticalOutcomeAfterTheSameWork` (task 064). |
+| 6 | RouteAuthorizationGuardTests pass with the ledger; BFF build has 0 errors; BFF and jest tests green; publish delta and CVE recorded | PASS | See "Verification": the solution builds with 0 errors; ArchTests are green (the ISS-005 timing guard passed when rerun on its own); the BFF suites are green after the approved swap; jest 44 of 44. Publish delta +774 bytes; no vulnerable packages. |
+| 7 | Negative: the user value wins; an untouched mapped field is filled; the payload carries no key the user did not enter | PASS | The user value wins and the untouched field is filled: the two `KeepsTheUsersValue` tests. Payload (brief override: the route and adapter add nothing to the body): jest `creates a %s through the route with no query and the unchanged payload` and `sends a named mapping source as query parameters only` (body `toEqual(payload)`). The server reads the source from the query and never from the body. |
+| 8 | The existing child-record route contract tests pass unchanged for the existing tables | PASS | See "Verification": `ChildRecord*` (including `ChildRecordCreateRefusalContractTests`), `SecureChildOwnershipAiToolTests*` and the route suites all pass. The only existing-test edits are the approved exceptions below, which change example tables and one census filter, never a contract assertion. |
+
+Extra coverage, asserting current behaviour without changing it (ruling 1): a caller-supplied `sprk_issecure` on a Matter or Project create, where the column is field-secured as it is live, is refused with 403 `child_record.denied` and nothing is created (`RouteCreate_ACallerSuppliedSecureFlagOnARoot_IsRefused403_AndNothingIsCreated`).
+
+## Existing-test exceptions (approved)
+
+| File:test | Old | New | Reason |
+|---|---|---|---|
+| `SecureChildOwnershipAiToolTests.ChildRecordRoutes.cs:473`, `TheCensusTheory_CoversEveryCreateTable` | `.BeEquivalentTo(ChildRecordEndpoints.CreateTables.Where(t => !SecureRootInheritance.Inherits(t)),` | `.BeEquivalentTo(ChildRecordEndpoints.CreateTables.Where(t => !SecureRootInheritance.Inherits(t) && !SecureRootInheritance.IsParent(t)),` plus a one-line comment | `sprk_matter` is a top root (a parent that inherits from nothing), not a secure child. Its cases are in `ChildRecordMatterProjectCreateSeamTests`. Must-fire: `ChildRecordCreateTablesAgreementTests.TheCensusFilter_ExcludesTheMatter_ATopRootOnTheRoute_AndNothingElseTheOldFilterKept`. Ruling 1. |
+| `bffChildWriteAdapter.test.ts`, `lists exactly the census create tables` (was :40) | the list without matter and project | adds `'sprk_matter'` and `'sprk_project'` | AC1. Ruling 2. |
+| `bffChildWriteAdapter.test.ts`, `refuses a table that is not created through the BFF` (was :118-123) | example table `sprk_matter` | `NON_BFF_TABLE` (`'account'`) | `sprk_matter` is now a BFF create table; the intent is unchanged. Every assertion is byte-for-byte the same. Ruling 2. |
+| `bffChildWriteAdapter.test.ts`, `passes reads, deletes and non-child writes through unchanged` (was :143-158) | `sprk_matter` / `{ sprk_mattername: … }` | `NON_BFF_TABLE` / `NON_BFF_PAYLOAD` | Same reason as above. |
+| `bffChildWriteAdapter.test.ts`, `REFUSES a child write when the host wired no BFF fetch` (was :160-175) | `sprk_matter` / `{ sprk_mattername: … }` | `NON_BFF_TABLE` / `NON_BFF_PAYLOAD` | Same reason as above. |
+
+| `SecureChildOwnershipAiToolTests.ChildRecordRoutes.cs:437`, `ChildCreate_OfATableOutsideTheCensus_IsRefused400` | `[InlineData("sprk_project")]` | `[InlineData("sprk_servicerequest")]` | `sprk_project` is now a create table. The intent, "a real sprk_ table the route does not create", is unchanged. The other two rows and every assertion are byte-for-byte the same. Approved as option A, with conditions. The verify-suites run found it: the only failure, `(table: "sprk_project")`. Before the swap, `sprk_servicerequest` was confirmed absent from `CreateTables`. No POML 021–034 mentions it, and no open PR does either. The only project POMLs that mention it are 017 (a chat-path `RecordTableRules` entry, not the route) and 070 (the edge registry). |
+
+The named constant is guarded by `the pass-through example table is not a BFF create table`. The theory's rows are guarded by `ChildRecordCreateTablesAgreementTests.TheOutsideTheCensusTheory_NamesOnlyTablesTheRouteDoesNotCreate`, which reads the theory's own `[InlineData]` by reflection, so the guard and the theory cannot drift. With the old `sprk_project` row it was RED: the guard failed, and so did the theory row. After the swap it was GREEN: the guard, all three rows and the census theory passed.
+
+## Findings and deferred items
+
+- **F-1 (for main to file or route): the Matter create has no registry-level guard for a caller-supplied `sprk_issecure`.**
+  - In the harness with no field security, `POST /child-records/sprk_matter` with `sprk_issecure: true` returned 201 and wrote the flag. The Project refuses with `secure_flag_transition_only`, because it inherits.
+  - Live, `sprk_issecure` is field-secured, so the caller-context write is refused (403 `child_record.denied`), and the seam test asserts that path.
+  - The only guard is therefore field security. A server-side refusal belongs in `RecordTableRules.cs`, which is off-limits to task 020 (task 041). Not fixed here.
+  - **Fixed in fix round 1** (below): the service refuses it at step 6.
+- **Deferred (main files the issue): should the ribbon-only tables (`sprk_budget`, `sprk_kpiassessment`, `sprk_billingevent`) join the client `BFF_CHILD_CREATE_TABLES`?** They are created through the route only by ribbon commands, so the agreement test names them in `RibbonOnlyCreateTables`.
+- **Deviation:** the publish delta ran from a scratch copy of `publish-delta.ps1` with different temporary worktree paths. This avoids a collision with task 041, which may be running the same script at the same time on `C:\tmp\hpdm` and `C:\tmp\hpdb`. The logic is unchanged.
+
+## Fix round 1 (F-1): a Matter create may not name `sprk_issecure`
+
+Set-up:
+- Merged `origin/work/field-mapping-server-write-path-r1` at bdd152a521 (task 041 plus a master merge) into `task/fm-020` as 3c4941bec5, with no conflicts.
+- After the merge, the build was green and the task 020 seam tests passed 32 of 32 before any change.
+
+**The rule (UAC-r2, 2026-11-03).** A Matter create that names `sprk_issecure` is refused by the SERVICE (ADR-008 path A, no endpoint check):
+- reason `sdap.access.secure_flag_transition_only` (`AccessFollowsParent.SecureFlagReasonCode`);
+- the project's refusal text (`SecureRootInheritance.SecureFlagRefusalText`) and the project's HTTP mapping: `PlanRefused` → `RecordCreationRefusalKind.Forbidden` → 403;
+- true, false and null are all refused: naming the column at all is the refusal.
+
+**Where it lives.** `src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs`, step 6 (the secure-root plan), in the branch for tables that inherit nothing. It applies to `SecureRootInheritance.IsParent(table)`, which in that branch is only `sprk_matter`. It refuses through the step's own `PlanRefused`, with `RecordOwnerResolution.Refused(SecureFlagReasonCode, SecureFlagRefusalText)`.
+
+Why here and not elsewhere:
+- **Not the registry (`RecordTableRules`).** Its server-owned columns are refused at step 2 as `blocked_column` (400, "set by Spaarke — omit it"), and its pre-write rules map to 400 or 404. Neither gives the project's code or its 403.
+- **Not `SecureRootInheritance.cs` or `SecureRootFilingGate.cs`.** Neither file is changed. Their `PlanCreateAsync` returns at once for a table that does not inherit, and the gate is shared by other writers (update tools, field-mapping push), whose contract this fix must not change.
+
+Step 6 is the one place every create path reaches, it already owns this refusal for project and work assignment, and it runs after step 2. So, as for a project, a field-secured column is still refused first by the caller's own column check (403 `child_record.denied`, live).
+
+**The access column (`sprk_accessinheritance`).** Not applied: `sprk_matter` does not carry it.
+- `scripts/Set-AccessInheritanceSchema.ps1:154` creates it only on `@('sprk_workassignment', 'sprk_project')`.
+- The solution source has it only in `sprk_Project`, `sprk_WorkAssignment` and `sprk_Document` `Entity.xml`, with no `sprk_Matter`.
+- `AccessInheritance.Column`'s own doc agrees.
+
+A matter create that names it fails Dataverse's own attribute validation. `RecordTableRules.SecureRootAccessColumns` lists it for a matter only as mapping-protected, which is harmless.
+
+**"Names" includes a JSON null in a mapped item.** `OwnedChildWrite.WritesOf` leaves a JSON-null body column out (it lists a null only for a cleared lookup), yet the create still writes it. The matter check therefore also reads the item's `Columns`. Without that, a system principal's mapped item with `"sprk_issecure": null` was created; that was the red case `system: True, value: null`.
+
+**Paths covered.** Every path that creates a matter goes through `RecordCreationService.CreateAsync`, so step 6 covers all of them:
+
+| Path | How it reaches the service | Test |
+|---|---|---|
+| Child-records route | `ChildRecordEndpoints.CreateAsync` → service, caller Web API body | `RouteCreate_ARootNamingTheSecureFlag_WithoutFieldSecurity_IsRefusedSecureFlagTransitionOnly_403_AndNothingIsCreated` (matter: true, false, null; project rows as controls) |
+| Chat `dataverse.create_record` | `DataverseCreateRecordHandler.cs:430` → service, caller mapped item. `sprk_matter` is a registered table, so it takes the owned path. Refused after the confirmation, as a project's flag is; `ValidateChat`'s pure pre-check covers step 2 columns only (unchanged) | `MatterSecureFlagChatRefusalTests` (true, false, null): `ErrorCode` = the reason, nothing created |
+| Office quick-create | `OfficeService.cs:2431` → service, caller Web API body. Its payload is built from the fixed `QuickCreateRequest` DTO (name, description, type, practice area, …), so a caller cannot name the flag. A mapping rule onto it is skipped, because `sprk_matter`'s `MappingProtectedColumns` include `SecureRootAccessColumns`. | `MatterSecureFlagServiceRefusalTests`, caller Web API body (the Office and route shape: true, false, null) |
+| System writers (playbooks, signals, any app-only caller) | service, `RecordCreationPrincipal.ForSystem`, mapped item | `MatterSecureFlagServiceRefusalTests`, system principal (true, false, null) |
+
+No matter create path bypasses the service: the Office core that used to create directly was deleted in 018, and the chat path for a registered table is the service. The client wizards create matters through `Xrm.WebApi` (see "Real-world check"), which is outside the BFF. There, field security is the guard, unchanged.
+
+**Legitimate senders: none.**
+- `matterService.ts`, the `CreateMatterWizard` and the LegalWorkspace `matterService.ts` never write `sprk_issecure` (grep).
+- No secure-matter provisioning creates a matter through the service. `ProvisionProjectEndpoint.cs:4113` and `UnsecureProjectEndpoint.cs:815` write the flag as an UPDATE of an existing record, not a create.
+- The Office quick-create cannot carry it.
+- The only service create that writes the flag is step 9's own write on a project or work assignment created into isolation, which is server-set after step 6.
+
+**Tests (failing first).**
+- **RED**, before the fix (filter `MatterSecureFlag | RouteCreate_ARoot | RouteCreate_ACallerSuppliedSecureFlag | RouteCreate_AnUnfiledMatter`): **12 failed**:
+  - route matter true, false and null: 201 instead of 403;
+  - service caller and system, true, false and null (6): created;
+  - chat true, false and null: created.
+  The controls passed:
+  - route project true, false and null;
+  - the field-security theory, both tables;
+  - the unfiled matter (must-not-fire);
+  - service matter without the flag, caller and system (must-not-fire).
+- **First fix:** `WritesOf` only. It left 1 failure, system + null, which led to the `Columns` clause above.
+- **GREEN:** 49 of 49 = the 32 task 020 seam tests + 6 route + 8 service + 3 chat.
+- **The existing field-security seam test** (`RouteCreate_ACallerSuppliedSecureFlagOnARoot_IsRefused403_AndNothingIsCreated`) still asserts 403 `child_record.denied` for both tables, because step 2 runs before step 6. Only its doc comment changed: the "a matter's is not" parenthetical became the step order.
+
+**F-2, found in round 1 and fixed in round 2 (below, on the coordinator's instruction).** The same JSON-null gap exists for project and work assignment.
+- A system principal's mapped item `{ "sprk_issecure": null }` on an unfiled `sprk_project` or `sprk_workassignment` is NOT refused. The create writes `sprk_issecure = null`.
+- Probe: a temporary test over `CreateWorld`, since removed. Both tables returned `Succeeded`, with body `sprk_issecure=` present.
+- Cause: `SecureRootFilingGate.PlanCreateAsync` and `SecureRootInheritance.PlanCreateAsync` both ask `NamesSecureFlag(OwnedChildWrite.WritesOf(item))`, and `WritesOf` drops JSON-null body columns.
+- Caller paths are unaffected: the route, chat and Office nulls are refused, as the project control rows show.
+- This is UAC-r2's rule in UAC-r2's files. Tightening it for project and work assignment changes their behaviour beyond F-1, so it is reported rather than fixed. The one-line fix is the same `Columns` clause, in the gate, or in the service before it calls the plan.
+
+**Verification, fix round 1** (`verify-suites.sh` over the fix, after the merge):
+- Solution build: 0 warnings, 0 errors.
+- ArchTests (rebuilt): **1911 of 1911 passed**. The ISS-005 timing guard passed in the full run this time.
+- BFF filtered suites: **6607 passed, 0 failed, 7 skipped** (the pre-existing skips).
+- No TypeScript changed in this round, so jest was not rerun.
+- After the pre-commit `dotnet format`, the 49 seam tests were rerun on the committed code: 49 of 49.
+- Publish delta (the scratch copy of `publish-delta.ps1`), origin/master 249809ce0b against 47dd89ba00: **+591 bytes, total 39.3 MB**. This includes task 041, which is on the work branch but not yet on master.
+- CVE: "no vulnerable packages given the current sources".
+
+## Fix round 2 (F-2): a JSON-null server column on a project or work assignment
+
+**The gap.** A SYSTEM principal's mapped item that names `sprk_issecure` or `sprk_accessinheritance` as a JSON `null` was created, and the null was written. This happened on an unfiled `sprk_project` or `sprk_workassignment`.
+- The secure-root plan (`SecureRootFilingGate.PlanCreateAsync`, `SecureRootInheritance.PlanCreateAsync`) asks `NamesSecureFlag` and `AccessInheritance.IsNamedIn` over `OwnedChildWrite.WritesOf(item)`.
+- `WritesOf` drops a JSON-null body column; it lists a null only for a cleared lookup.
+- **The access column has the same gap.** It was confirmed red for both tables, so it is closed in the same helper with `AccessInheritance.ServerOnlyReasonCode`.
+- Caller paths (route, chat, Office) were not affected.
+
+**The fix.** It is in `RecordCreationService.cs` only. The gate and `SecureRootInheritance.cs` are unchanged, and so is their contract.
+- One helper, `RecordCreationService.SecureRootServerColumnRefusal(table, item)`. It is internal static and pure, and is placed beside `PlanRefused`. It serves all three secure roots, so they cannot drift apart. It reads the names in `WritesOf(item)` plus `item.Columns`, normalised with `SecureRootInheritance.NormalizeColumn`, and asks in the plan's order:
+  - `sprk_accessinheritance` on an inheriting root (project, work assignment) → `AccessInheritance.ServerOnlyReasonCode`, with the gate's words "sprk_accessinheritance is written only by Spaarke, so it was not created";
+  - then `sprk_issecure` on any secure root → `AccessFollowsParent.SecureFlagReasonCode`, `SecureFlagRefusalText`.
+- `sprk_matter` is asked only the flag, since it carries no access column (round 1).
+- Both answers go through step 6's `PlanRefused`, so the response is 403 with the plan's code and words.
+- **Call sites (step 6):**
+  - for an inheriting table, immediately before `_rootFiling.PlanCreateAsync`, after the system-principal filing refusal and the server-set AppendTo check, so every existing order is unchanged;
+  - for a matter, in the non-inheriting branch. This replaces round 1's inline check, so the behaviour is identical.
+- For a non-null value the helper gives the same answer the plan gave, so behaviour changes only for the JSON-null case.
+
+**Tests** (`tests/integration/seam/ChildRecords/SecureRootServerColumnRefusalTests.cs`, which makes the round 1 probe permanent):
+- **The refusal theory.** System principal, unfiled project and work assignment; `sprk_issecure: null` and `sprk_accessinheritance: null` → 403 Forbidden, the plan's code and exact detail, nothing written. Control rows (`sprk_issecure: false`, `sprk_accessinheritance: "{}"`) must give the same answer.
+- **Must-not-fire.** A system create of matter, project and work assignment without either column is created.
+- **RED** before the fix: **4 failed** (both columns null × both tables); the 4 control rows and 3 must-not-fire rows passed.
+- **GREEN** after: the F-2 tests, the round 1 tests, the task 020 seam tests, `ServerBindSpellingTests` and the `WorkAssignmentCreate_*` route tests: **102 of 102**.
+
+**Verification, fix round 2** (`verify-suites.sh`):
+- Solution build: 0 warnings, 0 errors.
+- ArchTests (rebuilt): **1911 of 1911 passed**.
+- BFF filtered suites: **6618 passed, 0 failed, 7 skipped**, which is 6607 + the 11 new tests. The existing `SecureRoot*`, `SecureChildOwnershipAiToolTests*`, `RecordCreation*`, `ServerBindSpelling` and `ChildRecord*` suites stayed green, and none of their files was changed.
+- No TypeScript changed, so jest was not rerun.
+
+## Fix round 3 (review)
+
+These are the Opus review and UAC-r2 review items; neither review had a blocking finding. Each code change has a red/green run: the check was disabled (or HEAD's file put back), the row failed, then the file was restored from a backup.
+
+| Item | Change | Red → green |
+|---|---|---|
+| #1 (K3) matter route rows, real checks | `ChildRecordMatterProjectCreateSeamTests.cs`: `RouteCreate_AMatter_WithoutTheCreatePrivilege_Is403Denied_AndNothingIsCreated` (403 `child_record.denied`); `RouteCreate_AMatter_BindingALookupTheCallerCannotAppendTo_IsTheUniformNotFound_AsAMissingRecord` (`sprk_AssignedToInternal@odata.bind` to an unappendable contact and to a missing one: the same 404 `NotFoundCode`, status, reason and detail, and no id echoed); `RouteCreate_AMatter_NamingTheOwner_Is403_AndNothingIsCreated` (`ownerid@odata.bind` → 403 `child_record.denied`; the test's own `FailOn` hook adds the `ownerid` lookup to the scripted matter metadata, and the shared harness is unchanged). | (a) Privilege check in `CallerWriteAuthorization.CheckCallerMayCreateAsync` disabled → the privilege row failed. (b) `CheckCallerMayAppendToAsync` skipped → the AppendTo row failed. (c) The server-owned-column check disabled in BOTH places that hold it (`CallerWriteAuthorization` and the service's step 2 `CallerBlockedColumnRefusal`) → the owner row failed (404, not 403). With only the service's step 2 check disabled, `CallerWriteAuthorization` still refused it, so the row stayed green: the owner is guarded twice. Restored; all green. |
+| #5 HTTP binding | `HttpCreate_AProjectWithTheMappingSourceInTheQueryString_BindsBothValues_AndTheServiceMapsFromThatSource`: an in-process `WebApplication` on the test server (the pattern of `ChatAckEndpointsContractTests`) maps the real `ChildRecordEndpoints.CreateAsync` at the route's path over the task 014 service harness. `POST …/sprk_project?mappingSourceEntity=sprk_matter&mappingSourceId=<guid>` → 201; the matter is probed as the caller (`(token, "sprk_matters", id)`) and its mapped column fills the project. The group's auth and rate-limit policies are not mapped: they do not bind the query. The handler goes through a `Delegate` variable because the RouteHandler analyzer throws AD0001 on that method group inline; the runtime binding is identical. | `[FromQuery(Name = "unbound")]` on `mappingSourceEntity` → "Expected _probe.Asked to contain a single item, but the collection is empty". Restored; green. |
+| #6 comments | `EntityCreationService.ts`: the header's responsibility 2, the example (:29), the `createEntityRecord` doc and the :629-631 comment now say a table in `BFF_CHILD_CREATE_TABLES` (children, work assignment, matter, project) is created through the BFF. Comments only. | Jest, below. |
+| #7 lazy probe | `ChildRecordEndpoints.CreateAsync` no longer takes `[FromServices] CallerRecordAccessProbe?`. It resolves the probe from `HttpContext.RequestServices` only inside the mapping block; a missing probe still fails closed with 500 `NoDecisionCode`. Behaviour is unchanged (the old parameter already fell back to `RequestServices`). The two seam harnesses now put the probe in `RequestServices`; no other caller passed `callerAccess:`. | Refactor; the existing route seam tests and the #5 HTTP test cover it. |
+| #8 body keys | `SecureRootServerColumnRefusal` also reads every property name of `item.JsonBody`. New theory `SecureRootServerColumnRefusalTests.ASystemItem_WhoseColumnsLeaveOutABodyNull_IsStillRefused` (project/`sprk_issecure`, work assignment/`sprk_accessinheritance`, matter/`sprk_issecure`; a hand-built item whose `Columns` leaves out the body's null key). | HEAD's (round 2) service → **3 failed**; green with the fix. |
+| UAC-r2 note 1 | The helper's access-record text is now the plan's: "sprk_accessinheritance is written only by Spaarke, so the {noun} was not created" (as `SecureRootInheritance.cs:1082`). The F-2 theory asserts the full detail. Round 2's "…so it was not created" above is superseded. No other test asserted the old words. | HEAD's service → **4 failed** (the access rows); green with the fix. |
+| #4, #10 notes | Corrected in place: AC5 row (the seam denied-equals-missing test proves only "no read before the probe, one constant warning"; the equalisation is task 064's probe test) and "Query parameters" (what is logged). | — |
+
+Round 3 red run (HEAD's service, the #1, #8 and note-1 rows): **7 failed, 10 passed** (the 7 are the #8 and note-1 rows; the #1 rows were green because they pin checks that already existed). Green: **21 of 21** (with the secure-project route tests).
+
+### Known limits (review)
+
+- **#9: a profile's existence is visible to the caller.** This is by design under FR-03: a profile is configuration, not a record. The caller's Read on the source record is still probed before the record is read, so no record's existence leaks.
+- **#11: chat refuses after the confirmation card.** A chat create that the service refuses (for example a matter that names `sprk_issecure`) is refused only after the user confirms the card. A project behaves the same today; the refusal is correct, only late.
+
+### Open for 021/022
+
+- **#2:** the route does not pass `ReferenceLookupColumns` or `PostMappingDefaults` to the mapping, as the Office path does. Tasks 021/022 decide whether the wizards need them on the route.
+- **#3:** the secure-toggle window on a new root project. The user's own Secure toggle stays on `/external-access/provision-project`, not on this route; task 022 decides the wizard's branching and closes the window (see "Open for 022").
+
+**Verification, fix round 3** (`verify-suites.sh`):
+- Solution build: 0 warnings, 0 errors.
+- ArchTests (rebuilt): **1911 of 1911 passed**.
+- BFF filtered suites: **6625 passed, 0 failed, 7 skipped**, which is round 2's 6618 + the 7 new tests (3 matter route rows, 1 HTTP binding test, 3 body-key rows). The existing suites stayed green; the only existing-file test edits are the two seam harnesses passing the probe in `RequestServices` (#7) and the F-2 theory's access-row detail (note 1), both in this task's own files.
+- Jest (`npx jest EntityCreationService bffChildWriteAdapter` in `Spaarke.UI.Components`): **4 suites, 69 of 69 passed**. The three `EntityCreationService.*` suites first failed to load ("Cannot find module '@spaarke/sdap-client'": the sibling package's `dist/` was never built in this worktree). That was fixed locally by building it with `tsc -p` (output gitignored), with no source change.
+
+## Verification
+
+`projects/field-mapping-server-write-path-r1/scripts/verify-suites.sh` was run over 7b31722b5e + a5b11bcb72, before the census-theory swap.
+
+- **Solution build:** 0 warnings, 0 errors. The BFF builds with 0 errors.
+- **ArchTests, full:** 1910 passed, 1 failed. The one failure was the ISS-005 timing guard, `ContactCreateOwnerPolicyGuardTests.Control_ManyAssignmentsToOneLocal_ResolveInBoundedTime`: "resolving 60 assignments took 00:00:10.76". At the time the machine had 1.4 GB free RAM, two other sessions' testhosts were running, and this task's publish builds ran alongside. It is not in the change set. **Rerun on its own** (`FullyQualifiedName~ContactCreateOwnerPolicyGuardTests`): **129 of 129 passed** (39 s). `RouteAuthorizationGuardTests` passed with the updated ledger, inside the 1910.
+- **BFF suites, the project filter:** 6596 passed, **1 failed**, 7 skipped.
+  - **Failure:** `SecureChildOwnershipAiToolTests.ChildCreate_OfATableOutsideTheCensus_IsRefused400(table: "sprk_project")`, fixed by the approved swap above.
+  - **Rerun after the swap** (`ChildRecordCreateTablesAgreementTests | ChildCreate_OfATableOutsideTheCensus | TheCensusTheory`): 9 of 9 passed.
+  - **Skipped:** the pre-existing `OfficeEndpointsContractTests` skips, among others; none is new.
+  - **AC8:** the filter covers `ChildRecord*` (including `ChildRecordCreateRefusalContractTests`), `SecureChildOwnershipAiToolTests*`, `SecureRoot*` and `RecordCreation*`. The existing route contract tests passed with no change; the only edits to existing tests are the approved exceptions.
+- **New C# tests:** 33 of 33 green, the 32 from the red/green run plus the theory guard.
+- **Jest** `bffChildWriteAdapter.test.ts`: 44 of 44, rerun after the lint-staged prettier pass.
+- **tsc** (`Spaarke.UI.Components`): 9 errors, none of them in a changed file. All 9 are pre-existing and environment-bound:
+  - `@spaarke/auth` and `@spaarke/sdap-client` not resolved in this worktree;
+  - three `'error' is of type 'unknown'` errors in `FileUploadService.ts`.
+
+## Publish delta and CVE
+
+`publish-delta.ps1` (scratch copy with the temporary paths `C:\tmp\f20m` and `C:\tmp\f20b`; see Deviation), master e9004d25f3 against branch a5b11bcb72:
+- master: zip 41,216,895 bytes, 192 files;
+- branch: zip 41,217,669 bytes, 192 files;
+- **delta +774 bytes; total 39.31 MB**, under the 55 MB review line.
+
+The work-branch base 38e82f527c has no `src/server` difference from origin/master, so the delta is this task's alone. `dotnet list package --vulnerable --include-transitive`: "no vulnerable packages given the current sources". No new HIGH CVE. The temporary worktrees were removed with `Remove-WorktreeSafe.ps1`.
+
+## Conflict check
+
+Run on 2026-11-03 against the 27 open PRs (`gh pr list --state open --json files`). No open PR touches any file in this change:
+- `ChildRecordEndpoints.cs`;
+- the adapter, its index and its test;
+- `provisioningService.ts`;
+- the ledger;
+- `SecureChildOwnershipAiToolTests*`;
+- `tests/integration/seam/ChildRecords/`.
+
+No PR's file list was near the 100-file cap. PR #1501, named in the POML, is CLOSED. The nearest sibling, #2387 (field-mapping task 075, ribbon), has no file overlap.

@@ -762,7 +762,7 @@ access**: a `sprk_externalrecordaccess` grant (contact or organization), or a PO
 
 A non-product write of an "Assigned *" column (grid edit, import, flow) is materialized at the next job tick (≤ 5 min).
 In the removal direction the job is report-only until `ExternalAccess:AssignedAccess:JobRevokeOnChangeEnabled` is
-turned on (owner R3/(g): turned on in dev after the live gate) — until then a field cleared OUTSIDE the product leaves its
+turned on (owner R3/(g): turned on in dev after the live gate; done 2026-11-06, gate G-8, #2574) — until then a field cleared OUTSIDE the product leaves its
 auto grant in place (fail-open in that direction only). The sync route and the L1 writers always remove.
 
 ---

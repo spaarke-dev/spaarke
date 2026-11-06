@@ -161,6 +161,20 @@ public sealed class CoreAncestorRestamper
         _coreAncestors.RefreshInheritedAccessPermissionAsync(entityLogicalName, recordId, ct);
 
     /// <summary>
+    /// field-mapping-server-write-path-r1 task 017 (owner decision 2a, FR-06 step 10): the inherited Access Permission (I-16) a
+    /// NEW row of <paramref name="entityLogicalName"/> filed under the lookups in <paramref name="fields"/> takes, for its create
+    /// payload — <see cref="CoreAncestorResolver.ResolveInheritedAccessPermissionAsync"/> for a row that does not exist yet.
+    /// <see langword="null"/> when it takes none (a document never does here, #2169). Never throws (cancellation aside).
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md §11): Existing — <see cref="RefreshInheritedAccessPermissionAsync"/> is the
+    /// same pass-through for a row that exists; Extension — this is that pass-through for the resolver's payload overload, the
+    /// ONE implementation; Cost of doing nothing — the record-creation service holds only this restamper, so I-16 could not be
+    /// set before the create.</remarks>
+    internal Task<int?> ResolveInheritedAccessPermissionAsync(
+        string entityLogicalName, IReadOnlyDictionary<string, object> fields, CancellationToken ct = default) =>
+        _coreAncestors.ResolveInheritedAccessPermissionAsync(entityLogicalName, fields, Guid.Empty, ct);
+
+    /// <summary>
     /// Whether a write of <paramref name="writtenColumns"/> to <paramref name="entityLogicalName"/> can move a stamp — it
     /// changes what the record is filed under (a stamped child's source or pair) or its root (an intermediate with
     /// children). A caller that constructs its dependencies inline asks this first, so a write that cannot move a stamp
@@ -492,21 +506,24 @@ public sealed class CoreAncestorRestamper
     }
 
     /// <summary>
-    /// field-mapping-server-write-path-r1 task 016 (Repair, FR-14): the I-1 stamp columns <paramref name="row"/> is MISSING,
-    /// fill-only — <see cref="RestampChildAsync"/>'s plan for a row filed under an intermediate
-    /// (<see cref="StampSourceKind.Source"/>), keeping only the columns that hold no value and that the source's current root
-    /// SETS. A stamp that holds a different value is never overwritten, and none is cleared: a stale or orphaned copy is
-    /// <see cref="CoreAncestorStampReconciliationJob"/>'s to repair. Nothing is written here, and nothing is cascaded (the
-    /// row's children are the job's too). <c>null</c>: nothing is missing, the table carries no stamp, or the row is not
-    /// filed under an intermediate (a direct link, filed under nothing, ambiguous or inconsistent).
+    /// field-mapping-server-write-path-r1 task 042b (F1, owner decision A' 2026-11-03): the FULL stamp plan for
+    /// <paramref name="row"/> — exactly what <see cref="RestampChildAsync"/> writes for a row filed under an intermediate
+    /// (<see cref="StampSourceKind.Source"/>): each stamp column whose value differs from the source's current root, SET to
+    /// that root (<see cref="EntityReference"/>) or CLEARED (<see cref="DBNull.Value"/>). A column already holding the root is
+    /// absent. Nothing is written. <c>null</c>: nothing would change, the table carries no stamp, or the row is not filed under
+    /// an intermediate. The owner question asks over the row as it ENDS (a held value that disagrees is replaced), while the
+    /// bind stays fill-only (<see cref="MissingOf"/>).
     /// </summary>
     /// <param name="row">The row as read with every column (its source lookups, its pair and its stamp columns).</param>
-    /// <exception cref="InvalidOperationException">The source's root could not be derived (its message is for the log).</exception>
-    /// <remarks>Component justification (CLAUDE.md §11): Existing — <see cref="RestampChildAsync"/> plans the same stamp but
-    /// re-reads the row and overwrites and clears; Extension — this reuses its probe, classification, root read and
-    /// <see cref="PlanStamp"/>, and adds only the fill-only filter, on the existing component; Cost of doing nothing — Repair
-    /// either cannot add a missing I-1 stamp in its one fill-only update, or overwrites a present stamp.</remarks>
-    internal async Task<Dictionary<string, object>?> PlanMissingStampAsync(
+    /// <exception cref="CoreAncestorStampUnderivableException">The source's root could not be derived (its message is for the
+    /// log); it says whether that is a data condition (field-mapping task 017, owner decision 2a: the create refuses it before
+    /// anything is written).</exception>
+    /// <remarks>Component justification (CLAUDE.md §11): Existing — the fill-only <c>PlanMissingStampAsync</c> (task 016)
+    /// computed this plan and dropped all but the missing columns; Extension — it is replaced by this one plus the fill-only
+    /// filter (<see cref="MissingOf"/>), so there is one plan (042b fix round 2 removed the old method, which had no caller
+    /// left); Cost of doing nothing — a caller-sent stamp that disagrees with the intermediate's root decides the owner, and the
+    /// step-12 restamp then overwrites it (042b F1, the #2483 state again).</remarks>
+    internal async Task<Dictionary<string, object>?> PlanStampOfRowAsync(
         string entityLogicalName, Entity row, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -529,11 +546,22 @@ public sealed class CoreAncestorRestamper
             .ConfigureAwait(false);
         if (!root.Succeeded)
         {
-            throw new InvalidOperationException(
-                $"the root of its {decision.Source.Intermediate} could not be derived: {root.Error}");
+            throw new CoreAncestorStampUnderivableException(
+                $"the root of its {decision.Source.Intermediate} could not be derived: {root.Error}", root.IsPermanent, root.RefusalKind);
         }
 
-        var planned = PlanStamp(row, CoreAncestorResolver.CarriableRootTypes(decision.Source.Intermediate), root.Stamps, host);
+        return PlanStamp(row, CoreAncestorResolver.CarriableRootTypes(decision.Source.Intermediate), root.Stamps, host);
+    }
+
+    /// <summary>
+    /// The fill-only part of a <see cref="PlanStampOfRowAsync"/> plan: the columns <paramref name="row"/> holds no value in and
+    /// the plan SETS. <c>null</c> when none. A stamp that holds a different value is never overwritten here, and none is
+    /// cleared: a stale or orphaned copy is the step-12 restamp's (create) or <see cref="CoreAncestorStampReconciliationJob"/>'s
+    /// (Repair) to replace.
+    /// </summary>
+    internal static Dictionary<string, object>? MissingOf(Entity row, IReadOnlyDictionary<string, object>? planned)
+    {
+        ArgumentNullException.ThrowIfNull(row);
         if (planned is null)
         {
             return null;
@@ -913,4 +941,23 @@ internal sealed record ClearedSource(ClearedSourceOutcome Outcome, string? Inter
     public static ClearedSource Gone(Guid pairId) => new(ClearedSourceOutcome.Gone, null, pairId, null);
 
     public static ClearedSource Unreadable(Guid pairId, string error) => new(ClearedSourceOutcome.Unreadable, null, pairId, error);
+}
+
+/// <summary>
+/// field-mapping-server-write-path-r1 task 017 (owner decision 2a): <see cref="CoreAncestorRestamper.PlanStampOfRowAsync"/>
+/// could not derive the root of the row's source. <see cref="IsPermanent"/> and <see cref="RefusalKind"/> are the derivation's
+/// own (<see cref="CoreAncestorResult.IsPermanent"/>, <see cref="CoreAncestorResult.RefusalKind"/>), so a create can refuse a
+/// data condition (two roots, a source that does not exist) differently from a fault a retry may clear.
+/// </summary>
+/// <remarks>Component justification (CLAUDE.md §11): Existing — the planner threw a bare <see cref="InvalidOperationException"/>;
+/// Extension — this derives from it, so every existing catch (Repair) is unchanged; Cost of doing nothing — the create could not
+/// tell a 400 (the data will not change) from a 503 (try again).</remarks>
+internal sealed class CoreAncestorStampUnderivableException(string message, bool isPermanent, CoreAncestorRefusalKind? refusalKind)
+    : InvalidOperationException(message)
+{
+    /// <summary>True for a data condition a retry does not change.</summary>
+    public bool IsPermanent { get; } = isPermanent;
+
+    /// <summary>Why the derivation failed (<see cref="CoreAncestorRefusalKind.Transient"/> for a fault).</summary>
+    public CoreAncestorRefusalKind? RefusalKind { get; } = refusalKind;
 }

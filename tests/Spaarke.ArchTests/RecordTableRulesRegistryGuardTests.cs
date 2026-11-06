@@ -17,8 +17,10 @@ namespace Spaarke.ArchTests;
 /// (<see cref="ChildRecordEndpoints.CreateTables"/>) and the Office quick-create's Matter and Project, as the adapter
 /// (<c>OfficeService.QuickCreateViaCreationServiceAsync</c>) names its table — <see cref="QuickCreateFieldRequirements.GetLogicalName"/>
 /// (field mapping task 018c; the deleted Office creation core's constants before it). Its Invoice is on the route's list.
-/// The chat <c>dataverse.create_record</c> tool has no accept-list (any table but <c>sprk_document</c>), so
-/// it is not covered. The unified create service (task 013) accepts exactly the registry's tables — an unregistered table
+/// And the budget inquiry's service request (<c>BudgetInquiryExecutor.Table</c>, task 017 item 9).
+/// The chat <c>dataverse.create_record</c> tool has no compiled accept-list (any table but <c>sprk_document</c>); the
+/// platform tables it offers and the owner kept (task 017-d2: <c>task</c>, <c>contact</c>, <c>account</c>) are named
+/// here instead. The unified create service (task 013) accepts exactly the registry's tables — an unregistered table
 /// is refused (<c>record_creation.table_unsupported</c>) — so its accepted set needs no entry here.</para>
 /// <para><b>Controls.</b> <see cref="Guard_MustFire_ACreateTableWithNoEntry_IsReported"/> adds a fixture table the registry
 /// does not hold and requires the guard to report it, against the real registry and against a fixture lookup;
@@ -29,11 +31,21 @@ public class RecordTableRulesRegistryGuardTests
 {
     private const string FixtureTableWithNoEntry = "sprk_registryguardfixture_noentry";
 
+    /// <summary>Task 017-d2: the chat create's offered platform tables the owner kept (decision 2026-10-30, option b).</summary>
+    private static readonly string[] ChatOfferedPlatformTables = ["task", "contact", "account"];
+
     /// <summary>Every table on a server create path's fixed accept-list today.</summary>
     private static IReadOnlyList<string> CreateTables() =>
         ChildRecordEndpoints.CreateTables
             .Append(QuickCreateFieldRequirements.GetLogicalName(QuickCreateEntityType.Matter))
             .Append(QuickCreateFieldRequirements.GetLogicalName(QuickCreateEntityType.Project))
+            // Field mapping task 017 (item 9): the budget inquiry's fixed table, which the service creates once 017c
+            // re-points the inquiry.
+            .Append(Sprk.Bff.Api.Services.Signals.Actions.BudgetInquiryExecutor.Table)
+            // Field mapping task 017-d2 (owner decision 2026-10-30, option b): the platform tables the chat
+            // dataverse.create_record tool offers (a task, people = contact, companies = account). The tool has no compiled
+            // accept-list, so the owner's list is named here; any other chat table stays record_creation.table_unsupported.
+            .Concat(ChatOfferedPlatformTables)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(t => t, StringComparer.Ordinal)
             .ToList();
@@ -73,5 +85,39 @@ public class RecordTableRulesRegistryGuardTests
         var registered = new HashSet<string>(["sprk_todo", "sprk_event", "sprk_matter"], StringComparer.OrdinalIgnoreCase);
 
         Assert.Empty(TablesWithoutAnEntry(["sprk_todo", "sprk_event", "SPRK_Matter"], registered.Contains));
+    }
+
+    // ── Task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): a table only its writer creates is on no fixed
+    //    create accept-list (the service would refuse it there; RecordTableRule.CreatedOnlyByItsWriter). ─────────────────────
+
+    /// <summary>The detector: each create table <paramref name="writerOnly"/> names.</summary>
+    private static IReadOnlyList<string> WriterOnlyTablesIn(IEnumerable<string> createTables, Func<string, bool> writerOnly) =>
+        createTables.Where(writerOnly).ToList();
+
+    private static bool IsWriterOnly(string table) => RecordTableRules.Find(table) is { CreatedOnlyByItsWriter: true };
+
+    [Fact]
+    public void NoCreateTable_IsOneOnlyItsWriterCreates()
+    {
+        var found = WriterOnlyTablesIn(CreateTables(), IsWriterOnly);
+
+        Assert.True(RecordTableRules.All.Count(r => r.CreatedOnlyByItsWriter) == 3,
+            "Expected the three ontology writer tables to be flagged; the guard would check nothing.");
+        Assert.True(found.Count == 0,
+            "These create tables are created only by their writers (RecordTableRule.CreatedOnlyByItsWriter, owner decision " +
+            "D-204), so no fixed create accept-list may name them: " + string.Join(", ", found));
+    }
+
+    [Fact]
+    public void WriterOnlyGuard_MustFire_ACreateListNamingAWriterOnlyTable_IsReported()
+    {
+        Assert.Equal(["sprk_signal", "SPRK_BudgetRevision"],
+            WriterOnlyTablesIn(CreateTables().Append("sprk_signal").Append("SPRK_BudgetRevision"), IsWriterOnly));
+    }
+
+    [Fact]
+    public void WriterOnlyGuard_MustNotFire_OrdinaryCreateTables_ReportNothing()
+    {
+        Assert.Empty(WriterOnlyTablesIn(["sprk_todo", "sprk_event", "sprk_budget", "sprk_servicerequest"], IsWriterOnly));
     }
 }

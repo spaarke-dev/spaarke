@@ -64,6 +64,12 @@ public sealed class IncomingCommunicationProcessor
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
 
     /// <summary>
+    /// Ebilling-r1 task 151c-1a (D2 b): verifies the <see cref="ServerSendMarker"/> of a server-only send. Null (a bare test ctor): no
+    /// message is treated as one, so every message is processed as before.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? _trackingTokenSigner;
+
+    /// <summary>
     /// Matches a GUID pattern — Graph webhook resource paths use user object IDs (GUIDs)
     /// instead of email addresses, e.g. "users/e2e9000e-ce35-4f33-b0de-9c203fd5087a/messages/..."
     /// </summary>
@@ -91,8 +97,10 @@ public sealed class IncomingCommunicationProcessor
         ILogger<IncomingCommunicationProcessor> logger,
         IThreadResolver? threadResolver = null,
         CommunicationParticipantIndexer? participantIndexer = null,
-        CommunicationArrivedProducer? arrivedProducer = null)
+        CommunicationArrivedProducer? arrivedProducer = null,
+        Sprk.Bff.Api.Services.Communication.Tracking.ITrackingTokenSigner? trackingTokenSigner = null)
     {
+        _trackingTokenSigner = trackingTokenSigner;
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _graphClientFactory = graphClientFactory;
         _communicationService = communicationService;
@@ -300,7 +308,13 @@ public sealed class IncomingCommunicationProcessor
         // Extract bounded plain text from the message's attachments and add it to the envelope BEFORE
         // association so an email whose matter/project name appears only in the attachment still matches.
         // Best-effort + non-fatal: on any failure the envelope keeps its subject/body-only match surface.
-        envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
+        // Ebilling-r1 task 151c-1a (D2 b): a verified server-only send is checked FIRST, and its attachment text is not a match signal,
+        // so the export files cannot file this copy under a record named inside them (that record's readers would read the email).
+        var verifiedServerSend = await IsVerifiedServerSendAsync(message, mailboxEmail, graphMessageId, ct);
+        if (!verifiedServerSend)
+        {
+            envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
+        }
 
         // ── Steps 3.7 + 3.8: the association and the OWNER, decided BEFORE the create (task 146) ─────────
         var (decision, owner, filingFields) = await ResolveInboundFilingAsync(envelope, account, graphMessageId, ct);
@@ -434,7 +448,16 @@ public sealed class IncomingCommunicationProcessor
         // ── Step 5: Process attachments ──────────────────────────────────────────
         // Process attachments when: account has AutoCreateRecords enabled, OR account
         // could not be resolved (default to processing rather than silently dropping).
-        var shouldProcessAttachments = account is null || account.AutoCreateRecords;
+        // Ebilling-r1 task 151c-1a (D2 b): a verified server-only send (this server sent these exact files, which are already stored
+        // on their own record) files no attachment document and archives no .eml (checked before step 3.6). Anything unverified is processed as before.
+        if (verifiedServerSend)
+        {
+            _logger.LogInformation(
+                "Verified server-only send: attachment text match, attachment documents and .eml archive skipped | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                communicationId, graphMessageId);
+        }
+
+        var shouldProcessAttachments = !verifiedServerSend && (account is null || account.AutoCreateRecords);
         if (shouldProcessAttachments && message.HasAttachments == true
             && message.Attachments is { Count: > 0 })
         {
@@ -460,7 +483,7 @@ public sealed class IncomingCommunicationProcessor
         // an unset flag (null) is the intended default and archives. An unresolved account (null) also
         // defaults to archiving. Decision lives in CommunicationAccount.ShouldArchiveIncoming() so the
         // default-on contract is pinned by unit test. No historical mail is backfilled (forward-only).
-        if (account?.ShouldArchiveIncoming() ?? true)
+        if (!verifiedServerSend && (account?.ShouldArchiveIncoming() ?? true))
         {
             try
             {
@@ -476,7 +499,7 @@ public sealed class IncomingCommunicationProcessor
                     communicationId, graphMessageId);
             }
         }
-        else
+        else if (!verifiedServerSend)
         {
             _logger.LogInformation(
                 "EML archival skipped: ArchiveIncomingOptIn is disabled for account {Mailbox} | " +
@@ -968,6 +991,60 @@ public sealed class IncomingCommunicationProcessor
                 "Attachment text extraction step failed (non-fatal) | GraphMessageId: {GraphMessageId}; " +
                 "proceeding with subject/body match only", graphMessageId);
             return envelope;
+        }
+    }
+
+    /// <summary>
+    /// Ebilling-r1 task 151c-1a (D2 b): true only when the message carries exactly one <see cref="ServerSendMarker.HeaderName"/> header whose
+    /// token this server signed for exactly the file attachments the message carries. A message without the header costs nothing extra; a
+    /// forged, copied-onto-other-files or unreadable marker, a non-file attachment, or any fault is false (processed as before).
+    /// </summary>
+    internal async Task<bool> IsVerifiedServerSendAsync(Message message, string mailboxEmail, string graphMessageId, CancellationToken ct)
+    {
+        var markers = ServerSendMarker.MarkerValues(message.InternetMessageHeaders?.Select(h => (h.Name, h.Value)));
+        if (markers.Count == 0 || _trackingTokenSigner is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (message.Attachments is { } listed && listed.Any(a => a is not FileAttachment))
+            {
+                return false;
+            }
+
+            // EVERY listed file, not only those that came with bytes (uac-r2 re-check F4): a file left out of the digest would let a message
+            // with the copied header, the batch files and one more file verify, and that file would then never be filed.
+            var files = (message.Attachments ?? []).OfType<FileAttachment>().ToList();
+            if ((files.Count == 0 && message.HasAttachments == true) || files.Any(f => f.ContentBytes is not { Length: > 0 }))
+            {
+                // Listed as having attachments but some or all came without bytes: fetch the whole collection, as the attachment step does.
+                var fetched = await _graphClientFactory.ForApp().Users[mailboxEmail].Messages[graphMessageId]
+                    .Attachments.GetAsync(cancellationToken: ct);
+                if (fetched?.Value is { } all && all.Any(a => a is not FileAttachment))
+                {
+                    return false;
+                }
+
+                // A paged collection would leave the files beyond page 1 out of the digest: not verified (uac-r2 re-check, limit 1).
+                if (fetched?.OdataNextLink is not null)
+                {
+                    return false;
+                }
+
+                files = (fetched?.Value ?? []).OfType<FileAttachment>().ToList();
+            }
+
+            // A file still without bytes is passed as such: the digest is then null and the marker is not honoured.
+            return await ServerSendMarker.IsVerifiedAsync(
+                _trackingTokenSigner, markers, files.Select(f => (f.Name, f.ContentBytes)), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Server-send marker check failed; the message is processed as any other | GraphMessageId: {GraphMessageId}", graphMessageId);
+            return false;
         }
     }
 
@@ -1495,7 +1572,6 @@ public sealed class IncomingCommunicationProcessor
             // the caller (avoids a per-attachment refetch) so matter-scoped RAG returns this correspondence
             // (was null). Best-effort/non-fatal (NFR-04): null when no representable regarding is set.
             ParentEntity: parentEntity,
-            SearchIndexName: null, // handler runs ISearchIndexNameResolver chain
             Source: "InboundEmail",
             CorrelationId: communicationId.ToString("N"));
 

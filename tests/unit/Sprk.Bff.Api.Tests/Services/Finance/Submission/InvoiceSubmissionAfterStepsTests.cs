@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 /// the writer's dedupe key; the automatic rejection is recorded by the REAL <see cref="BillingDecisionRecorder"/> over the writer's test
 /// harness, so "one Decision Record" is the writer's own exactly-once, not a counter in this file.
 /// </summary>
-public class InvoiceSubmissionAfterStepsTests
+public partial class InvoiceSubmissionAfterStepsTests
 {
     private static readonly Guid Submission = Guid.Parse("04900000-0000-4000-8000-0000000000b1");
     private static readonly Guid Matter = Guid.Parse("04900000-0000-4000-8000-0000000000a1");
@@ -106,6 +106,10 @@ public class InvoiceSubmissionAfterStepsTests
         public List<SignalWriteRequest> Writes { get; } = [];
         public List<Guid> Superseded { get; } = [];
         public List<SubmissionDecidedNotification> Notified { get; } = [];
+        /// <summary>Task 152: every invoice-index job the acceptance step queued: (invoice, correlation id).</summary>
+        public List<(Guid InvoiceId, string? CorrelationId)> IndexEnqueues { get; } = [];
+        /// <summary>Task 152: the queue refuses the index job with this.</summary>
+        public Exception? IndexFault { get; set; }
         public HashSet<string> Markers { get; } = new(StringComparer.Ordinal);
         /// <summary>Every write of <c>sprk_processingstatus</c>, conditional or not (an unconditional one is also in <see cref="UnconditionalStatusWrites"/>).</summary>
         public List<Dictionary<string, object>> TerminalWrites { get; } = [];
@@ -139,6 +143,8 @@ public class InvoiceSubmissionAfterStepsTests
         public HashSet<string> RealWriterPolicies { get; } = new(StringComparer.Ordinal);
         public SignalWriter? RealWriter { get; set; }
         public bool CloseChanges { get; set; }
+        /// <summary>Task 097d: a Superseded close that throws, per Signal (once: the entry is removed when it fires).</summary>
+        public Dictionary<Guid, Exception> SupersedeFaults { get; } = [];
 
         // ── D-122 (notes 13c) ──
         /// <summary>The invoice's line ids, as the line query returns them (the outcome's lines by default).</summary>
@@ -358,7 +364,17 @@ public class InvoiceSubmissionAfterStepsTests
                 },
                 time: Clock,
                 commitGate: CommitGate!,
-                refreshApprovers: RefreshApprovers);
+                refreshApprovers: RefreshApprovers,
+                enqueueIndex: (invoice, correlation, _) =>
+                {
+                    if (IndexFault is { } fault)
+                    {
+                        throw fault;
+                    }
+
+                    IndexEnqueues.Add((invoice, correlation));
+                    return Task.CompletedTask;
+                });
         }
 
         /// <summary>Task 094: the resume's commit gate (model 9.1 steps 5-6). Passed unless a test sets it (the constructor requires one, fix round K6).</summary>
@@ -549,6 +565,11 @@ public class InvoiceSubmissionAfterStepsTests
 
         private Task<SignalCloseOutcome> SupersedeAsync(Guid id, string rowVersion, string policyCode, CancellationToken _)
         {
+            if (SupersedeFaults.Remove(id, out var fault))
+            {
+                return Task.FromException<SignalCloseOutcome>(fault);
+            }
+
             var row = Signals.Values.Single(s => s.Id == id);
             if (CloseChanges || row.RowVersion != rowVersion)
             {
@@ -639,7 +660,7 @@ public class InvoiceSubmissionAfterStepsTests
         world.PolicyQueries.Should().BeEmpty("no system finding: the system policy is not read");
     }
 
-    [Fact(DisplayName = "049 D / 094: Accepted - no Signals, no record, no indexing job (owner K), notify Accepted, terminal Accepted")]
+    [Fact(DisplayName = "049 D / 152: Accepted - no Signals, no record, the invoice-index job queued (094: never from the PDF), notify Accepted, terminal Accepted")]
     public async Task Accepted_Notifies()
     {
         var outcome = await Accepted();
@@ -1456,14 +1477,92 @@ public class InvoiceSubmissionAfterStepsTests
         order.Should().NotContain("gate");
     }
 
-    [Fact(DisplayName = "094 (owner K): the after-steps enqueue no indexing job - no constructor takes the job submitter")]
-    public void NoIndexingJob_IsEnqueued()
+    // Task 152 replaces 094's "the after-steps take no job submitter" guard. 094's rule was that a Submit Invoice COPY stays out of indexing,
+    // search and chat grounding because the invoice index was document-keyed (DEF-047). The index is now built from the invoice's structured
+    // records and the job carries no document, so the rule holds by the job's shape, which these tests pin: the payload names the invoice and
+    // the change only, and the handler (InvoiceIndexingJobHandlerTests) reads no document and no submission.
+    [Fact(DisplayName = "152 (supersedes 094's constructor guard): the acceptance's index job is keyed to the acceptance and carries the invoice only, no document")]
+    public async Task AcceptanceIndexJob_CarriesTheInvoiceOnly()
     {
-        typeof(InvoiceSubmissionAfterSteps)
-            .GetConstructors(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-            .SelectMany(c => c.GetParameters())
-            .Should().NotContain(p => p.ParameterType == typeof(JobSubmissionService) || p.ParameterType == typeof(Func<JobContract, CancellationToken, Task>),
-                "the invoice index is document-keyed and a Submit Invoice copy stays out of indexing (DEF-047)");
+        var sent = new List<JobContract>();
+        var jobs = new Mock<JobSubmissionService>(
+            Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.ServiceBusOptions { QueueName = "q", CommunicationQueueName = "c" }),
+            Mock.Of<Microsoft.Extensions.Logging.ILogger<JobSubmissionService>>(),
+            new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+        jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .Callback<JobContract, CancellationToken>((job, _) => sent.Add(job))
+            .Returns(Task.CompletedTask);
+
+        await InvoiceSubmissionAfterSteps.EnqueueAcceptedIndex(jobs.Object)(InvoiceId, "corr-9", CancellationToken.None);
+
+        var job = sent.Should().ContainSingle().Subject;
+        job.JobType.Should().Be(InvoiceIndexingJobHandler.JobTypeName);
+        job.SubjectId.Should().Be(InvoiceId.ToString());
+        job.CorrelationId.Should().Be("corr-9");
+        job.IdempotencyKey.Should().Be($"invoice-index-{InvoiceId:N}-accepted");
+        job.Payload!.RootElement.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo("InvoiceId", "Change");
+        job.Payload.RootElement.GetProperty("InvoiceId").GetGuid().Should().Be(InvoiceId);
+    }
+
+    [Theory(DisplayName = "152: an accepted, uncoded or blocked invoice is queued for the index once, with the job's correlation id")]
+    [InlineData("accepted")]
+    [InlineData("uncoded")]
+    [InlineData("blocked")]
+    public async Task AcceptedKinds_QueueTheIndexJob(string kind)
+    {
+        var outcome = kind switch { "accepted" => await Accepted(), "uncoded" => await AcceptedUncoded(), _ => await Blocked() };
+        var world = new World(outcome);
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-7");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.IndexEnqueues.Should().ContainSingle().Which.Should().Be((InvoiceId, "corr-7"));
+    }
+
+    [Fact(DisplayName = "152: a redelivery (resume) queues the same index job again; it is idempotent by its key, not skipped")]
+    public async Task Resume_QueuesTheIndexJobAgain()
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome);
+
+        await world.Build().RunAsync(Persisted(outcome), "corr-1");
+        world.Row[InvoiceSubmissionPersister.SubmissionStatus] = new OptionSetValue((int)InvoiceSubmissionStatus.Processing);
+        await world.Build().ResumeAsync(Submission, "corr-1");
+
+        world.IndexEnqueues.Should().HaveCount(2).And.OnlyContain(e => e.InvoiceId == InvoiceId);
+    }
+
+    [Fact(DisplayName = "152 (FR-43): an automatic rejection is NOT queued for the invoice index")]
+    public async Task AutoRejected_IsNotIndexed()
+    {
+        var outcome = await AutoRejected();
+        var world = new World(outcome);
+
+        var result = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        result.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.IndexEnqueues.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "152: a queue fault leaves the submission Processing (Retry, no notification, no terminal write); the redelivery queues again")]
+    public async Task IndexEnqueueFault_StaysProcessing_ThenRetrySucceeds()
+    {
+        var outcome = await Accepted();
+        var world = new World(outcome) { IndexFault = new InvalidOperationException("service bus down") };
+
+        var first = await world.Build().RunAsync(Persisted(outcome), "corr-1");
+
+        first.Status.Should().Be(SubmissionAfterStepsStatus.Retry);
+        first.ReasonCode.Should().Be(InvoiceSubmissionAfterSteps.IndexEnqueueFailedCode);
+        world.TerminalWrites.Should().BeEmpty();
+        world.Notified.Should().BeEmpty();
+        world.Status.Should().Be(InvoiceSubmissionStatus.Processing);
+
+        world.IndexFault = null;
+        var second = await world.Build().ResumeAsync(Submission, "corr-1");
+
+        second.Status.Should().Be(SubmissionAfterStepsStatus.Completed);
+        world.IndexEnqueues.Should().ContainSingle();
     }
 
     // ── 13a B: the terminal is written only while Processing, on the row version (F4-2) ──

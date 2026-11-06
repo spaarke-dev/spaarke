@@ -155,6 +155,14 @@ public sealed class CodeSetResolver
             "No UTBMS code set could be resolved: no firm codes, mapping or suggestion applied and the settings default code set is missing or has no task codes.");
     }
 
+    /// <summary>
+    /// Loads the code set a line's coding RECORDED (its <c>coding.codeSetId</c>, 047/049): the set the AI was offered, in the same shape the
+    /// resolution produced. This is not a second resolution order: nothing is chosen, the FR-22 outcome stored at coding time is read back
+    /// (task 101: a reviewer's code correction is judged against that set). <c>null</c> when the set is missing, inactive or has no task codes.
+    /// </summary>
+    public Task<ResolvedCodeSet?> LoadRecordedAsync(Guid codeSetId, CodeSetSource source, CancellationToken cancellationToken = default) =>
+        LoadAsync(codeSetId, source, cancellationToken);
+
     // ── Step 1 ──────────────────────────────────────────────────────────────────
 
     private static List<string> DistinctFirmTaskCodes(IReadOnlyList<InvoiceLineToCode> lines)

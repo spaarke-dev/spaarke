@@ -11,6 +11,9 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.ExternalAccess;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
@@ -49,6 +52,13 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
     /// <summary>The creator's share on the new row when the app-only create ran, and when the "Assigned *" step ran.</summary>
     private int? _creatorShareAtCreate;
     private int? _creatorShareAtAssignedAccess;
+
+    /// <summary>Task 049 fix round 1: the "Assigned *" pass's host — its queue, the maker's linked contact, and the
+    /// materializer an inline pass resolves (counted).</summary>
+    private readonly List<JobContract> _queued = [];
+    private readonly AssignedAccessTestDoubles.Harness _h = new();
+    private Guid? _makersContact;
+    private int _inlinePasses;
 
     public RecordCreationServiceSecureRootSeamTests(ProvisionProjectTestFixture fixture)
     {
@@ -251,10 +261,10 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
     }
 
     [Fact]
-    public async Task CreateAsync_AProjectUnderASecureMatter_IsCreatedIntoIsolation_WithTheSecureBusinessUnitsSearchDefaults()
+    public async Task CreateAsync_AProjectUnderASecureMatter_IsCreatedIntoIsolation_WithNoSearchIndex()
     {
-        // Task 015 review round 1 (F6), FR-10: step 8 reads the OWNING unit — for a row created into isolation, the named
-        // team's unit (the Secure BU), never the caller's.
+        // Task 015 review round 1 (F6), FR-10 read the OWNING unit's index here. Task 041 (FR-40): the index follows the
+        // content type, so step 8 reads no unit, even though the Secure BU holds an index, and writes neither column.
         var secure = Guid.NewGuid();
         SecureMatter(_fixture, secure);
         var secureIndex = Guid.NewGuid();
@@ -280,11 +290,72 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         outcome.Isolated.Should().BeTrue();
         outcome.OwningTeamId.Should().Be(SecureTeam);
-        unitReads.Should().Equal([ProvisionProjectTestFixture.SecureBuId], "the isolated owner's unit, read once");
+        unitReads.Should().BeEmpty("no business unit is read for an index");
         var (table, _, fields) = _writes.Should().ContainSingle().Subject;
         table.Should().Be("sprk_project");
-        fields["sprk_searchindexname"].Should().Be("spaarke-secure-index");
-        fields["sprk_AI_Search_Index@odata.bind"].Should().Be($"/sprk_aisearchindexes({secureIndex:D})");
+        fields.Should().NotContainKey("sprk_searchindexname").And.NotContainKey("sprk_AI_Search_Index@odata.bind");
+    }
+
+    // ── Task 049 fix round 1 (UAC-r2 ruling, item 4): the create-time pass waits for secure provisioning, so eligibility is
+    // decided on the final record ─────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateAsync_AnIsolatedCreate_WhoseSecuringDidNotComplete_QueuesNoPass_AndGrantsNothing()
+    {
+        var secure = Guid.NewGuid();
+        var sharee = Guid.NewGuid();
+        _fixture.SystemUsers[sharee] = (false, false);
+        SecureMatter(_fixture, secure, null, sharee);
+        _fixture.FailShareForPrincipal = sharee; // the creator is shared; the parent's sharee is left to the securing job
+
+        var outcome = await Service().CreateAsync(
+            await WorkAssignmentUnder(secure, assignedTo: Guid.NewGuid()), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.Isolated.Should().BeTrue();
+        outcome.IsolatedCompletion!.IsComplete.Should().BeFalse("the precondition: securing is not finished");
+        outcome.IsolatedCompletion.RowStranded.Should().BeFalse();
+        _queued.Should().BeEmpty("the create-time pass waits for secure provisioning");
+        _inlinePasses.Should().Be(0);
+        _journal.Should().NotContain("assigned-access", "nothing is granted at create; the reconciliation job grants later");
+    }
+
+    [Fact]
+    public async Task CreateAsync_AnIsolatedCreate_ForAnotherAssignee_QueuesItsPass_OnceSecuringCompleted()
+    {
+        var secure = Guid.NewGuid();
+        SecureMatter(_fixture, secure);
+        _makersContact = Guid.NewGuid();
+
+        var outcome = await Service().CreateAsync(
+            await WorkAssignmentUnder(secure, assignedTo: Guid.NewGuid()), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.IsolatedCompletion!.IsComplete.Should().BeTrue();
+        _creatorShareAtAssignedAccess.Should().Be(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CreatorAccessRights),
+            "the pass is decided after the securing completed");
+        var job = _queued.Should().ContainSingle().Subject;
+        job.JobType.Should().Be(AssignedAccessCreateGrantJobHandler.JobTypeName);
+        job.IdempotencyKey.Should().Be($"assigned-access-create:{outcome.CreatedId:N}");
+        _inlinePasses.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CreateAsync_AnIsolatedCreate_ForItsMaker_RunsItsPassInline_OnceSecuringCompleted()
+    {
+        var secure = Guid.NewGuid();
+        SecureMatter(_fixture, secure);
+        _makersContact = Guid.NewGuid();
+
+        var outcome = await Service().CreateAsync(
+            await WorkAssignmentUnder(secure, assignedTo: _makersContact), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.IsolatedCompletion!.IsComplete.Should().BeTrue();
+        _creatorShareAtAssignedAccess.Should().Be(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CreatorAccessRights),
+            "the pass is decided after the securing completed");
+        _queued.Should().BeEmpty("the maker is the assignee");
+        _inlinePasses.Should().Be(1, "the pass ran in the request");
     }
 
     // ── Harness ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -307,13 +378,17 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
 
     private RecordCreationPrincipal AsCaller() => RecordCreationPrincipal.ForCaller(_caller, Guid.NewGuid());
 
-    private async Task<RecordCreationRequest> WorkAssignmentUnder(Guid matter)
+    private async Task<RecordCreationRequest> WorkAssignmentUnder(Guid matter, Guid? assignedTo = null)
     {
-        var mapped = await DataverseWriteItemMapper.MapAsync(_caller, "sprk_workassignment", JsonSerializer.SerializeToElement(new
+        var row = new Dictionary<string, object>
         {
-            sprk_name = "Review the lease",
-            sprk_regardingmatter = new { relatedTable = "sprk_matter", recordId = matter },
-        }), CancellationToken.None);
+            ["sprk_name"] = "Review the lease",
+            ["sprk_regardingmatter"] = new { relatedTable = "sprk_matter", recordId = matter },
+        };
+        if (assignedTo is { } assignee)
+            row["sprk_assignedtointernal"] = new { relatedTable = "contact", recordId = assignee }; // the "for" person
+        var mapped = await DataverseWriteItemMapper.MapAsync(
+            _caller, "sprk_workassignment", JsonSerializer.SerializeToElement(row), CancellationToken.None);
         mapped.Item.Should().NotBeNull(mapped.ValidationError);
         return new RecordCreationRequest("sprk_workassignment", new RecordCreationPayload.Mapped(mapped.Item!))
         {
@@ -395,18 +470,44 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
             ? id
             : null;
 
-    /// <summary>The "Assigned *" step's scope: journaled, with the creator's share on the new row at that moment.</summary>
+    /// <summary>
+    /// The "Assigned *" step's scope: journaled, with the creator's share on the new row at that moment. Since task 049 fix
+    /// round 1 it holds the step's services: a queue that records, the maker's linked contact, and the materializer.
+    /// </summary>
     private sealed class SnapshotScopes(RecordCreationServiceSecureRootSeamTests owner) : IServiceScopeFactory
     {
-        private readonly IServiceScopeFactory _inner =
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+        private IServiceScopeFactory? _inner;
 
         public IServiceScope CreateScope()
         {
             owner._journal.Add("assigned-access");
             if (owner._writes.LastOrDefault() is { Id: var id } && id != Guid.Empty)
                 owner._creatorShareAtAssignedAccess ??= owner._fixture.ShareMaskOf(id, Creator); // the FIRST such step
+            _inner ??= Build();
             return _inner.CreateScope();
+        }
+
+        private IServiceScopeFactory Build()
+        {
+            var jobs = new Mock<JobSubmissionService>(
+                MockBehavior.Strict,
+                Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.ServiceBusOptions { QueueName = "sdap-jobs" }),
+                Mock.Of<Microsoft.Extensions.Logging.ILogger<JobSubmissionService>>(),
+                new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+            jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+                .Callback<JobContract, CancellationToken>((job, _) => owner._queued.Add(job))
+                .Returns(Task.CompletedTask);
+
+            var services = new ServiceCollection();
+            services.AddSingleton(jobs.Object);
+            services.AddSingleton(
+                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.WithContact(owner._makersContact).Object);
+            services.AddScoped(_ =>
+            {
+                Interlocked.Increment(ref owner._inlinePasses);
+                return owner._h.Materializer;
+            });
+            return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
         }
     }
 }

@@ -434,7 +434,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Theory]
-    [InlineData("sprk_project")]
+    [InlineData("sprk_servicerequest")]
     [InlineData("sprk_communication")]
     [InlineData("account")]
     public async Task ChildCreate_OfATableOutsideTheCensus_IsRefused400(string table)
@@ -470,7 +470,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         // (not owned by the named team as a child), so its secure/ordinary/refusal cases are its own
         // (SecureChildOwnershipAiToolTests.WorkAssignmentCreate.cs, SecureRootInheritanceWriterTests.ChildRecordRoute.cs).
         CensusCreateTablesUnderAMatter.Select(row => (string)row[0]).Should()
-            .BeEquivalentTo(ChildRecordEndpoints.CreateTables.Where(t => !SecureRootInheritance.Inherits(t)),
+            // Field-mapping task 020: a top root (a parent that inherits from nothing: sprk_matter) is not a secure child; its cases are ChildRecordMatterProjectCreateSeamTests'.
+            .BeEquivalentTo(ChildRecordEndpoints.CreateTables.Where(t => !SecureRootInheritance.Inherits(t) && !SecureRootInheritance.IsParent(t)),
                 "a table added to the route gets its secure/ordinary/refusal cases");
     }
 
@@ -1706,10 +1707,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
         string table, Dictionary<string, object?> payload, SecureRootFilingGate? gate = null, IDataverseUserClient? user = null,
         IServiceScopeFactory? scopes = null) =>
         ChildRecordEndpoints.CreateAsync(
-            table, Payload(payload), user ?? _user, _world.Resolver(), _appOnly.Object, Restamper(), Shares(),
-            gate ?? SecureRootFilingGateFixtures.NothingSecure(),
-            scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            table, Payload(payload), user ?? _user,
+            RouteRecordCreation.Over(
+                _world.Resolver(), _appOnly.Object, Restamper(), Shares(), gate ?? SecureRootFilingGateFixtures.NothingSecure(),
+                scopes, _routeMembership.Object),
             HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>Task 017: the membership publisher the route's create (through the service) publishes to.</summary>
+    private readonly Moq.Mock<Sprk.Bff.Api.Services.Ai.Membership.Events.IMembershipEventPublisher> _routeMembership = new();
 
     private Task<IResult> RefileChild(string table, Guid id, Dictionary<string, object?> payload) =>
         ChildRecordEndpoints.RefileAsync(

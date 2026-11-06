@@ -685,11 +685,7 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
                         Error = new SaveError
                         {
                             Code = OfficeErrorCodes.RecordOwnerUnresolved,
-                            Message = request.TargetEntity is not null
-                                ? "This item could not be assigned an owner from the record it is filed to, so it "
-                                  + "was not saved. Check that the record still exists and that you can open it."
-                                : "This item could not be assigned an owner from your business unit, so it was not "
-                                  + "saved. Ask an administrator to check your user record's business unit.",
+                            Message = SaveOwnerRefusalMessage(documentOwner.RefusalCode, request.TargetEntity is not null),
                             Retryable = false
                         }
                     };
@@ -1494,6 +1490,24 @@ internal class OfficeService : IOfficeService, IOfficeSubmissionEmailSave
         ReconciledFilingResult.NotPermitted => EmailFilingOutcome.NotPermitted,
         ReconciledFilingResult.Failed => EmailFilingOutcome.Failed,
         _ => null,
+    };
+
+    /// <summary>
+    /// The user-facing reason of a save's early OFFICE_022 (the owner question refused before anything was written), chosen
+    /// by the resolver's <paramref name="refusalCode"/>, as <see cref="MapQuickCreateRefusal"/> chooses its own: #2471
+    /// follow-up — an email whose filing could not be read
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.CommunicationFilingUnresolved"/>) says so, whether or
+    /// not the save names a record; every other code keeps the record or business-unit reason it had.
+    /// </summary>
+    internal static string SaveOwnerRefusalMessage(string? refusalCode, bool filedToRecord) => refusalCode switch
+    {
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.CommunicationFilingUnresolved =>
+            "This item could not be assigned an owner because the email it comes from could not be read, so it was not saved.",
+        _ when filedToRecord =>
+            "This item could not be assigned an owner from the record it is filed to, so it "
+            + "was not saved. Check that the record still exists and that you can open it.",
+        _ => "This item could not be assigned an owner from your business unit, so it was not "
+             + "saved. Ask an administrator to check your user record's business unit.",
     };
 
     /// <summary>

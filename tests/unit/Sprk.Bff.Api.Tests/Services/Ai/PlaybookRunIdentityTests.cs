@@ -183,10 +183,10 @@ public class PlaybookRunIdentityTests
 
         await DrainAsync(Service().ExecuteAsync(RunRequest(), Request(whoAmI: Person), CancellationToken.None));
 
-        writes.Verify(w => w.UpdateRecordFieldsAsync(
-            "sprk_matter", Matter, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), Person), Times.Once);
-        writes.Verify(w => w.UpdateRecordFieldsAsync(
-            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null),
+        writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            "sprk_matter", Matter, It.IsAny<Dictionary<string, object?>>(), Person, It.IsAny<CancellationToken>()), Times.Once);
+        writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()),
             Times.Never, "a person's run never writes app-only");
     }
 
@@ -214,8 +214,8 @@ public class PlaybookRunIdentityTests
 
         await DrainAsync(Service().ExecuteAppOnlyAsync(request, "tenant", CancellationToken.None));
 
-        writes.Verify(w => w.UpdateRecordFieldsAsync(
-            "sprk_matter", Matter, It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null), Times.Once);
+        writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            "sprk_matter", Matter, It.IsAny<Dictionary<string, object?>>(), null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── Background entries: they say who started them ─────────────────────────────────────────────────────────────

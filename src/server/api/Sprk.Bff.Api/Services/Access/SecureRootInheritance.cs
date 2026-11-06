@@ -503,6 +503,75 @@ public sealed partial class SecureRootInheritance
                "filed under a matter or project only through those lookups (the pair repeats one)";
     }
 
+    /// <summary>
+    /// FR-09 (task 015; moved here from <c>RecordCreationService</c> so the ownership resolver reads a project's pair by
+    /// the same rule, owner decision 2026-10-29): the record a row's ADR-024 pair files it under ON ITS OWN — only on a table whose pair is
+    /// BFF-managed (<see cref="PairNamesAParentOnItsOwn"/>: a project, whose only filing is the pair) —
+    /// as an ownership parent. Its record type is read app-only from the catalog, as the secure-root plan reads it before
+    /// this (one row, its <c>sprk_recordlogicalname</c>). Only a table the plan reads as a parent
+    /// (<see cref="IsParent"/>: a matter or project) is returned, so the owner and the secure-root plan
+    /// see the same filing.
+    /// </summary>
+    /// <returns>No parent: the table's pair files nothing on its own, the pair names nothing, or it names a table that is not
+    /// a secure-root parent (a document, an event: the plan reads such a pair as no filing). <c>Undetermined</c>: the pair
+    /// names a record that cannot be told — an id that is not one, no record type, or a type that names no table — which
+    /// the caller refuses (fail closed), never reads as "filed under nothing".</returns>
+    /// <remarks>A Dataverse fault propagates: the caller's owner step refuses it as the owner fault it is.</remarks>
+    internal static async Task<(RecordOwnershipParent? Parent, string? Undetermined)> PairParentAsync(
+        IGenericEntityService entities, string table, string? idText, Guid? typeId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        if (!PairNamesAParentOnItsOwn(table) || string.IsNullOrWhiteSpace(idText))
+            return (null, null);
+
+        if (!Guid.TryParse(idText.Trim(), out var id) || id == Guid.Empty)
+            return (null, $"its {PairIdColumn} is not a record id");
+
+        if (typeId is not { } type || type == Guid.Empty)
+            return (null, $"its {PairIdColumn} names a record without its record type");
+
+        var query = new QueryExpression(RecordTypeRefEntity)
+        {
+            ColumnSet = new ColumnSet(RecordTypeLogicalNameColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(RecordTypeRefEntity + "id", ConditionOperator.Equal, type);
+        var row = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        var named = row?.GetAttributeValue<string>(RecordTypeLogicalNameColumn)?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(named))
+            return (null, "its record type names no table");
+
+        // Review F3: the plan files a project under its pair only when the pair names a matter or project; a pair typed to
+        // anything else files it under nothing, and the owner must agree (else a document's unit would own the project, or
+        // DecideOwnerAsync's consistency check would refuse, "Try again", a create the plan admitted).
+        return IsParent(named) ? (new RecordOwnershipParent(named, id), null) : (null, null);
+    }
+
+    /// <summary>
+    /// Fix round (B-K1): <see cref="PairParentAsync"/> for an EXISTING row, as the ownership resolver and the root-owner step
+    /// read it — a pair naming a record that no longer exists files the row under nothing (the parent is gone), as the
+    /// secure-root plan reads a missing parent ("a missing record confers nothing"). The named record is read by id
+    /// (<paramref name="committed"/>: a committed read, else <c>NoLock</c>). A Dataverse fault reading it propagates.
+    /// </summary>
+    internal static async Task<(RecordOwnershipParent? Parent, string? Undetermined)> ExistingPairParentAsync(
+        IGenericEntityService entities, string table, string? idText, Guid? typeId, bool committed, CancellationToken ct)
+    {
+        var pair = await PairParentAsync(entities, table, idText, typeId, ct).ConfigureAwait(false);
+        if (pair.Parent is not { } parent)
+            return pair;
+
+        var query = new QueryExpression(parent.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(parent.EntityLogicalName + "id"),
+            TopCount = 1,
+            NoLock = !committed,
+        };
+        query.Criteria.AddCondition(parent.EntityLogicalName + "id", ConditionOperator.Equal, parent.RecordId);
+        var found = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Count > 0;
+        return found ? pair : (null, null);
+    }
+
+
     private static readonly AsyncLocal<int> NestedProvisioning = new();
 
     private readonly IGenericEntityService _dataverse;
@@ -995,9 +1064,15 @@ public sealed partial class SecureRootInheritance
     /// under — asked once they are known and BEFORE the No Access checks, so a caller who may not file under a secure record
     /// learns nothing more about it (not even its No Access state). Its refusal is returned as the plan's. <c>null</c>: the
     /// writer made its own check already.</param>
+    /// <param name="secureRequested">field-mapping-server-write-path-r1 task 049 fix round 2 (owner ruling 2026-11-05): the
+    /// creator asked for the record to be secure (the Create Project wizard's Secure choice). A project the wizard creates as
+    /// secure is secure from creation: it is planned INTO isolation whether or not it is filed under a secure record, with
+    /// the same creator, No Access and named-team checks. The writer asks the caller's own rights for that BEFORE this plan
+    /// (<c>RecordCreationService</c>, the delegation rule).</param>
     public async Task<SecureRootCreatePlan> PlanCreateAsync(
         string table, IEnumerable<KeyValuePair<string, object?>> writes, Guid creatorSystemUserId, CancellationToken ct,
-        Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>>? callerMayFileUnder = null)
+        Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>>? callerMayFileUnder = null,
+        bool secureRequested = false)
     {
         ArgumentNullException.ThrowIfNull(writes);
         if (!Inherits(table))
@@ -1024,26 +1099,31 @@ public sealed partial class SecureRootInheritance
             return SecureRootCreatePlan.Refused(Refused(logical, ex.Message));
         }
 
-        if (filingWrites.Count == 0)
+        if (filingWrites.Count == 0 && !secureRequested)
             return SecureRootCreatePlan.Ordinary;
 
-        var answer = await DecideParentsAsync(Overlay(logical, null, filingWrites), ct).ConfigureAwait(false);
+        var answer = filingWrites.Count == 0
+            ? new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), null)
+            : await DecideParentsAsync(Overlay(logical, null, filingWrites), ct).ConfigureAwait(false);
         if (!answer.HasSecureParent)
         {
-            return answer.IsKnown
-                ? SecureRootCreatePlan.Ordinary
-                : SecureRootCreatePlan.Refused(Refused(logical, answer.Unverifiable!));
+            if (!answer.IsKnown)
+                return SecureRootCreatePlan.Refused(Refused(logical, answer.Unverifiable!));
+            if (!secureRequested)
+                return SecureRootCreatePlan.Ordinary;
         }
 
+        var why = answer.HasSecureParent ? "filed under a secure record" : "made secure";
         if (creatorSystemUserId == Guid.Empty)
         {
             return SecureRootCreatePlan.Refused(Refusal(ProvisionProjectEndpoint.ReasonCreatorUnresolved,
-                $"a {noun} filed under a secure record is created secure for the person who creates it, and that person could " +
-                "not be identified, so it was not created"));
+                $"a {noun} {why} is created secure for the person who creates it, and that person could not be identified, " +
+                "so it was not created"));
         }
 
         // G5 on the secure parents (the writer's as-the-caller check) — before anything about them is said.
-        if (callerMayFileUnder is not null
+        if (answer.HasSecureParent
+            && callerMayFileUnder is not null
             && await callerMayFileUnder(answer.SecureParents, ct).ConfigureAwait(false) is { } callerRefusal)
         {
             return SecureRootCreatePlan.Refused(callerRefusal);
@@ -1086,14 +1166,14 @@ public sealed partial class SecureRootInheritance
         if (!topology.IsResolved || topology.OwnerTeamId is not { } team)
         {
             return SecureRootCreatePlan.Refused(Refusal(RecordOwnerRefusal.SecureOwnerTeamUnresolved,
-                $"a {noun} filed under a secure record is created owned by the Secure Record Owners team, which could not be " +
-                "resolved in this environment, so it was not created"));
+                $"a {noun} {why} is created owned by the Secure Record Owners team, which could not be resolved in this " +
+                "environment, so it was not created"));
         }
 
         _logger.LogInformation(
-            "[SECURE-INHERIT] A new {Table} is filed under secure record(s) {Parents}: it is created INTO isolation (owner team " +
-            "{Team}, flagged) for {Creator}.", logical, string.Join(", ", answer.SecureParents.Select(p => $"{p.Table}:{p.Id:D}")),
-            team, creatorSystemUserId);
+            "[SECURE-INHERIT] A new {Table} is {Why} {Parents}: it is created INTO isolation (owner team {Team}, flagged) for " +
+            "{Creator}.", logical, answer.HasSecureParent ? "filed under secure record(s)" : "secure from creation, as its creator asked",
+            string.Join(", ", answer.SecureParents.Select(p => $"{p.Table}:{p.Id:D}")), team, creatorSystemUserId);
         return new SecureRootCreatePlan(null, Isolated: true, team, answer.SecureParents);
     }
 
@@ -1159,8 +1239,13 @@ public sealed partial class SecureRootInheritance
     /// step that does not complete (the container, the sharees) leaves a PROVISIONED-but-incomplete record, which the job
     /// (≤ 5 minutes) completes through the same re-entry branch. Never throws.
     /// </summary>
+    /// <remarks>Fix round 3: <paramref name="secureFromCreation"/> is <c>true</c> for a create the caller asked to be secure.
+    /// The job visits only records filed under a secure parent, so such a record (unfiled, or under a parent that is not
+    /// secure) is not resumed by it: the log says an administrator must act, and says what finishes an incomplete securing,
+    /// instead of promising a retry.</remarks>
     public async Task<SecureRootInheritResult> CompleteIsolatedCreateAsync(
-        string table, Guid recordId, Guid creatorSystemUserId, string traceId, CancellationToken ct)
+        string table, Guid recordId, Guid creatorSystemUserId, string traceId, CancellationToken ct,
+        bool secureFromCreation = false)
     {
         if (!Inherits(table))
             throw new ArgumentOutOfRangeException(nameof(table), table, "Only work assignments and projects inherit security.");
@@ -1196,10 +1281,22 @@ public sealed partial class SecureRootInheritance
         // branch completes it); one nobody can open is removed, read back — never left behind.
         if (await CreatorHoldsShareAsync(logical, recordId, creatorSystemUserId, ct).ConfigureAwait(false))
         {
-            _logger.LogWarning(
-                "[SECURE-INHERIT] {Table} {RecordId} was created into isolation and shared to its creator, but its provisioning did " +
-                "not complete ({Code}: {Detail}); the secure-root inheritance job completes it.", logical, recordId,
-                provisioned.ReasonCode, provisioned.Detail);
+            if (secureFromCreation)
+            {
+                _logger.LogWarning(
+                    "[SECURE-INHERIT] {Table} {RecordId} was created secure from creation and shared to its creator, but its " +
+                    "provisioning did not complete ({Code}: {Detail}); the inheritance job does not visit it, so an " +
+                    "administrator must finish it (for a project: the wizard, or provision-project).", logical, recordId,
+                    provisioned.ReasonCode, provisioned.Detail);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "[SECURE-INHERIT] {Table} {RecordId} was created into isolation and shared to its creator, but its provisioning did " +
+                    "not complete ({Code}: {Detail}); the secure-root inheritance job completes it.", logical, recordId,
+                    provisioned.ReasonCode, provisioned.Detail);
+            }
+
             return provisioned;
         }
 
@@ -1220,6 +1317,15 @@ public sealed partial class SecureRootInheritance
                 "[SECURE-INHERIT] {Table} {RecordId} was created into isolation, but its creator could not be shared ({Code}: " +
                 "{Detail}); the row was deleted (read back gone) and the create is refused.", logical, recordId,
                 provisioned.ReasonCode, provisioned.Detail);
+        }
+        else if (secureFromCreation)
+        {
+            // The job does not visit a secure-from-creation record that has no secure parent: ACTION NEEDED, no retry is promised.
+            _logger.LogCritical(
+                "[SECURE-INHERIT] ACTION NEEDED: {Table} {RecordId} was created secure from creation, its creator could not be " +
+                "shared ({Code}), AND the row could not be removed: it is owned by the memberless Secure Record Owners team and " +
+                "only an administrator can open it. Nothing retries this on its own — an administrator must review and remove " +
+                "it.", logical, recordId, provisioned.ReasonCode);
         }
         else if (provisioned.CompletesAutomatically)
         {

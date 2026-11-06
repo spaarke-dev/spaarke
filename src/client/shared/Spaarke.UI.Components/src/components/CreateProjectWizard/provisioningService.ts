@@ -868,15 +868,38 @@ export type ProvisioningStepKey = (typeof PROVISIONING_STEPS)[number]['key'];
 // Service function
 // ---------------------------------------------------------------------------
 
+/** The reason code the server answers when the project is already secure, with its own container. */
+const ALREADY_PROVISIONED = 'sdap.provision.already_provisioned';
+
+/** Options of {@link provisionSecureProject}. */
+export interface IProvisionSecureProjectOptions {
+  /**
+   * Task 049 fix round 2 (UAC-r2 ruling D2): the project was created secure from creation (`ICreateProjectResult
+   * .securedAtCreate`), so this call only does what is left. The server answers `already_provisioned` only when the
+   * creator share and the container both exist (a create that recorded no container is resumed instead), so that answer
+   * is then success. Without this option `already_provisioned` stays the failure it always was.
+   */
+  securedAtCreate?: boolean;
+}
+
 /**
  * The failed result for a non-2xx answer, from its status and (parsed) ProblemDetails body — whichever
  * way the injected fetch delivered it: returned (the body read here) or thrown as `@spaarke/auth`'s
  * `ApiError` (the body already parsed onto it). One function so the two cannot classify differently.
  */
-function failureFromProblem(status: number, problemBody: unknown): IProvisionProjectResult {
+function failureFromProblem(
+  status: number,
+  problemBody: unknown,
+  options?: IProvisionSecureProjectOptions
+): IProvisionProjectResult {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const problem: any = problemBody && typeof problemBody === 'object' ? problemBody : null;
   const reasonCode: string | undefined = typeof problem?.reasonCode === 'string' ? problem.reasonCode : undefined;
+  if (options?.securedAtCreate === true && reasonCode === ALREADY_PROVISIONED) {
+    // Task 049 fix round 2 (D2): the create already secured it, with its container — nothing was left to do.
+    console.info('[ProvisioningService] The project was secured at creation; nothing was left to provision.');
+    return { success: true };
+  }
   const serverDetail: string | undefined = problem?.detail ?? problem?.title;
   const extensions: IProvisioningFailureExtensions = {};
   if (typeof problem?.creatorShareConfirmed === 'boolean') {
@@ -913,6 +936,14 @@ function failureFromProblem(status: number, problemBody: unknown): IProvisionPro
 /**
  * Calls the BFF /api/v1/external-access/provision-project endpoint.
  *
+ * Field-mapping-server-write-path-r1 task 020 (spec FR-15), the secure-Project split: a project CREATED through
+ * `POST /api/v1/child-records/sprk_project` FILED UNDER a secure matter or project is made secure by the server in that
+ * create (the secure-root plan: created into isolation, owned by the Secure Record Owners team, shared to its creator,
+ * its container and its parents' sharees completed) — this call is not needed for it. This call stays the one path for the
+ * user's own "Secure Project" choice on a project that inherits no isolation: the server marks it secure, shares it to the
+ * creator, moves it to the named owner team and provisions its container (unified-access-control-r2's contract,
+ * unchanged). Which of the two a wizard uses is decided when it moves onto the route (task 022).
+ *
  * Dependencies are injected as parameters to avoid solution-specific imports.
  *
  * @param request - Provisioning request payload
@@ -922,13 +953,16 @@ function failureFromProblem(status: number, problemBody: unknown): IProvisionPro
  *   `{name}` of the per-person warnings (round 29). A host that names colleagues knows their names; the server's response
  *   carries only ids. An id with no (or a blank) name here, or an empty id, is shown as "Someone" (`UNNAMED_PERSON`, round
  *   40 item 3) — never an empty name.
+ * @param options - Optional. `securedAtCreate` after a project created secure from creation (task 049 fix round 2):
+ *   `already_provisioned` is then success ({@link IProvisionSecureProjectOptions}).
  * @returns IProvisionProjectResult — never throws.
  */
 export async function provisionSecureProject(
   request: IProvisionProjectRequest,
   authenticatedFetch: typeof fetch,
   bffBaseUrl: string,
-  principalNames?: Readonly<Record<string, string>>
+  principalNames?: Readonly<Record<string, string>>,
+  options?: IProvisionSecureProjectOptions
 ): Promise<IProvisionProjectResult> {
   const url = `${bffBaseUrl}/api/v1/external-access/provision-project`;
 
@@ -947,7 +981,7 @@ export async function provisionSecureProject(
       } catch {
         /* ignore JSON parse failure — classification falls through to 'error' */
       }
-      return failureFromProblem(response.status, problem);
+      return failureFromProblem(response.status, problem, options);
     }
 
     const data: IProvisionProjectResponse = await response.json();
@@ -1005,7 +1039,7 @@ export async function provisionSecureProject(
     // classification the returned-response branch uses, or every authored failure state (most of them
     // retryable) collapses into the generic non-retryable one below.
     if (isApiError(err)) {
-      return failureFromProblem(err.status, problemOf(err));
+      return failureFromProblem(err.status, problemOf(err), options);
     }
     // Transport failure — no reason code exists, so this is an unclassified 'error'. The exception
     // message stays in the console for the same reason the server's detail does.

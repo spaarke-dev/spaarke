@@ -200,6 +200,13 @@ describe('sprk_secure_child_ribbon.js — which "New" a subgrid shows (task 147 
     }
   );
 
+  it('the AP export batch (ebilling 151c-2) offers NO "New" at all: neither the platform "+ New" nor the BFF command; no flag is read', async () => {
+    const h = harness({ flag: false });
+    await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf('sprk_billingexport')))).resolves.toBe(false);
+    await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf('sprk_billingexport')))).resolves.toBe(false);
+    expect(h.reads).toEqual([]);
+  });
+
   it('an unsaved host keeps the platform command (it prefills nothing) and offers no BFF command', () => {
     const h = harness({ flag: true });
     const unsaved = { data: { entity: { getId: () => '', getEntityName: () => 'sprk_matter' } } };
@@ -244,7 +251,11 @@ describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
 
   it('a billing event on an invoice also binds the one core record the invoice is filed under', async () => {
     const h = harness({ flag: true, invoiceRow: { _sprk_matter_value: MATTER_ID, _sprk_project_value: null } });
-    h.ribbon.newChild(formOf('sprk_invoice'), { getRelationship: () => ({ attributeName: 'sprk_invoice' }) }, 'sprk_billingevent');
+    h.ribbon.newChild(
+      formOf('sprk_invoice'),
+      { getRelationship: () => ({ attributeName: 'sprk_invoice' }) },
+      'sprk_billingevent'
+    );
     for (let i = 0; i < 10 && h.forms.length === 0; i++) await flush();
 
     expect(h.posts).toHaveLength(1);
@@ -258,7 +269,11 @@ describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
     ['two core records', { _sprk_matter_value: MATTER_ID, _sprk_project_value: PROJECT_ID }],
   ])('a billing event on an invoice with %s is refused before anything is sent', async (_label, row) => {
     const h = harness({ flag: true, invoiceRow: row });
-    h.ribbon.newChild(formOf('sprk_invoice'), { getRelationship: () => ({ attributeName: 'sprk_invoice' }) }, 'sprk_billingevent');
+    h.ribbon.newChild(
+      formOf('sprk_invoice'),
+      { getRelationship: () => ({ attributeName: 'sprk_invoice' }) },
+      'sprk_billingevent'
+    );
     for (let i = 0; i < 10 && h.alerts.length === 0; i++) await flush();
 
     expect(h.posts).toEqual([]);

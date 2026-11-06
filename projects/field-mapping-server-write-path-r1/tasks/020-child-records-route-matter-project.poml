@@ -4,7 +4,7 @@
     <title>Child-records route covers sprk_matter and sprk_project; optional mappingSource; secure-Project split (FR-15)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>019 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api and .ts in the UI library; tags include bff-api, security, frontend, testing (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>

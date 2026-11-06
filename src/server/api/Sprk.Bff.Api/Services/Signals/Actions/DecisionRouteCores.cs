@@ -77,12 +77,9 @@ public class DecisionRouteCores
         var result = await ChildRecordEndpoints.CreateAsync(
             table, payload,
             sp.GetRequiredService<IDataverseUserClient>(),
-            sp.GetRequiredService<IRecordOwnershipResolver>(),
-            sp.GetRequiredService<IFieldMappingDataverseService>(),
-            sp.GetRequiredService<CoreAncestorRestamper>(),
-            sp.GetRequiredService<SecureChildShareSynchronizer>(),
-            sp.GetRequiredService<SecureRootFilingGate>(),
-            sp.GetRequiredService<IServiceScopeFactory>(),
+            // Field-mapping-server-write-path-r1 task 017: the handler takes the ONE server create (its old collaborators
+            // moved into it); this call changed only its arguments.
+            sp.GetRequiredService<Sprk.Bff.Api.Services.RecordCreation.RecordCreationService>(),
             http,
             sp.GetRequiredService<ILogger<Program>>(),
             ct).ConfigureAwait(false);

@@ -76,10 +76,10 @@ public sealed class RefileWriterBindShapeTests
     {
         _output = output;
         _write
-            .Setup(w => w.UpdateRecordFieldsAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(),
-                It.Is<Guid?>(g => g == _writesAs)))
-            .Returns((string table, Guid id, Dictionary<string, object?> fields, CancellationToken _, Guid? _) =>
+            .Setup(w => w.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.Is<Guid?>(g => g == _writesAs),
+                It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, Dictionary<string, object?> fields, Guid? _, CancellationToken _) =>
             {
                 _writes.Add(fields);
                 ApplyBinds(table, id, fields); // the lookup moves; the owner is the writer's reparent's to move
