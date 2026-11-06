@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Resolution;
@@ -35,6 +36,59 @@ internal static class ExtractionProvenance
     internal const string ActionCodeMember = "actionCode";
     internal const string ActionVersionMember = "actionVersion";
     internal const string HeaderMember = "header";
+
+    // ── Task 164a-2 (EB-D-193): the reviewer-added marker ──
+
+    /// <summary>The member of a line's <c>provenance</c> that says where the line came from. Absent on a line intake wrote.</summary>
+    internal const string SourceMember = "source";
+
+    /// <summary>The <see cref="SourceMember"/> value of a line a reviewer added through Add line. Its totals rule is EB-D-199.</summary>
+    internal const string ReviewerSource = "reviewer";
+
+    /// <summary>The member that names the Add line decision that created the line (the deterministic decision id, a Guid in text).</summary>
+    internal const string DecisionIdMember = "decisionId";
+
+    /// <summary>
+    /// The id Add line gives the row it creates for the decision <paramref name="decisionId"/> (164a-2 F1): derived from the decision id alone, so a
+    /// retry of the same decision addresses the same row (one line), and a row can be proven to be the added line of that decision. Placed here, beside
+    /// the marker it authenticates, and not on <see cref="InvoiceSubmissionPersister"/> beside <c>LineIdFor</c>: the persister is not edited by this
+    /// task (it overlaps 082d and 095d-2a), and the prefix keeps the id space apart from every intake line id.
+    /// </summary>
+    internal static Guid AddedLineIdFor(Guid decisionId) =>
+        InvoiceSubmissionPersister.IdOf($"ebilling-added-line-{decisionId:D}");
+
+    /// <summary>
+    /// A reviewer-added line's whole <c>sprk_extractionconfidence</c> (EB-D-193): <c>{ "provenance": { "source": "reviewer", "decisionId": "..." } }</c>.
+    /// Numbers, flags and ids only: no name, text or value (EB-D-189 conditions), and no new column. A line written this way carries no
+    /// analyzer pair, so <see cref="LineProvenance.HasExtraction"/> is false and an extracted-field correction of it is refused (brief K1).
+    /// </summary>
+    internal static string ForReviewerAddedLine(Guid decisionId) =>
+        new JsonObject
+        {
+            [Member] = new JsonObject
+            {
+                [SourceMember] = ReviewerSource,
+                [DecisionIdMember] = decisionId.ToString("D", CultureInfo.InvariantCulture),
+            },
+        }.ToJsonString();
+
+    /// <summary>
+    /// True ONLY for a row Add line created (164a-2 F1, the one read every money or exemption decision uses): the column says
+    /// <c>provenance.source = "reviewer"</c>, its <c>decisionId</c> parses, AND the row's id is <see cref="AddedLineIdFor"/> of that decision. The
+    /// column is not field-secured, so the marker alone proves nothing: anyone who may write a line could copy it onto an intake line and take that
+    /// line out of billed, fees, expenses and the percent base. The id cannot be set by writing a field. False for an empty or unreadable column,
+    /// no <c>provenance</c>, another source (ordinal), a missing or unparsable decision id, and an id that does not match.
+    /// </summary>
+    internal static bool IsReviewerAdded(Entity line)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        return ReadMember(line.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence)) is { } member
+            && string.Equals(Text(member, SourceMember), ReviewerSource, StringComparison.Ordinal)
+            && Text(member, DecisionIdMember) is { } text
+            && Guid.TryParseExact(text, "D", out var decisionId)
+            && decisionId != Guid.Empty
+            && line.Id == AddedLineIdFor(decisionId);
+    }
 
     /// <summary>The header fields a reviewer may correct, under the <see cref="BillingFieldNames"/> / resolution spellings.</summary>
     internal static readonly string[] HeaderFieldNames =

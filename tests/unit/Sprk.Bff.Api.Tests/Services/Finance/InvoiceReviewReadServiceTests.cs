@@ -394,6 +394,45 @@ public sealed class InvoiceReviewReadServiceTests
         line.StatusLabel.Should().Be("Processing");
     }
 
+    [Theory(DisplayName = "164a-2 (EB-D-193): ReviewLineDto.ReviewerAdded is true only for provenance.source = reviewer; absent, another source, damaged or empty give false")]
+    [InlineData("""{"provenance":{"source":"reviewer","decisionId":"0d0d0d0d-0000-4000-8000-000000000001"}}""", true)]
+    [InlineData("""{"provenance":{"source":"reviewer","decisionId":"0d0d0d0d-0000-4000-8000-000000000001"},"fields":{"Hours":{"confidence":0.9}}}""", true)]
+    [InlineData("""{"provenance":{"source":"reviewer"}}""", false)]
+    [InlineData("""{"provenance":{"source":"reviewer","decisionId":"0d0d0d0d-0000-4000-8000-000000000002"}}""", false)] // F1: another decision than the row's id
+    [InlineData("""{"provenance":{"analyzerId":"sprk_invoice_v1","apiVersion":"2026-06-01-preview","actionCode":"INVOICE-LINE-CODE","actionVersion":1}}""", false)]
+    [InlineData("""{"provenance":{"source":"Reviewer"}}""", false)]
+    [InlineData("""{"provenance":{"source":"extraction"}}""", false)]
+    [InlineData("""{"provenance":{"source":true}}""", false)]
+    [InlineData("""{"source":"reviewer"}""", false)]
+    [InlineData("""{"fields":{}}""", false)]
+    [InlineData("not json", false)]
+    [InlineData(null, false)]
+    public async Task TheLineCarriesTheReviewerAddedMarker(string? extraction, bool expected)
+    {
+        var w = new World();
+        // F1: the row Add line created has the id derived from its decision (0d0d0d0d-...-001 in the markers above).
+        w.AddLine(1, InvoiceLineStatus.Flagged, extraction: extraction).Id = ExtractionProvenance.AddedLineIdFor(Guid.Parse("0d0d0d0d-0000-4000-8000-000000000001"));
+
+        var line = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.Lines.Single();
+
+        line.ReviewerAdded.Should().Be(expected);
+    }
+
+    [Fact(DisplayName = "164a-2 (EB-D-193): in one review, only the reviewer-added line is marked; an intake line beside it is not")]
+    public async Task OnlyTheReviewerAddedLineIsMarked()
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Clean, extraction: Extraction);
+        var decision = Guid.Parse("0d0d0d0d-0000-4000-8000-000000000001");
+        w.AddLine(2, InvoiceLineStatus.Flagged, extraction: ExtractionProvenance.ForReviewerAddedLine(decision)).Id = ExtractionProvenance.AddedLineIdFor(decision);
+        // F1 must-fire: an intake line (3) copying the same valid-looking marker is not marked.
+        w.AddLine(3, InvoiceLineStatus.Flagged, extraction: ExtractionProvenance.ForReviewerAddedLine(decision));
+
+        var lines = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.Lines;
+
+        lines.Select(l => (l.Sequence, l.ReviewerAdded)).Should().Equal((1, false), (2, true), (3, false));
+    }
+
     [Fact(DisplayName = "100: per-field page, box and confidence come back; a field below the reliability threshold is marked low-confidence; codes show as billed and resolved")]
     public async Task ExtractionFieldsAndCodes()
     {

@@ -29,7 +29,11 @@ public enum InvoiceAdjustmentMethod
 }
 
 /// <summary>One Invoice Line as the calculator sees it. <see cref="Amount"/> is <c>sprk_amount</c> (the billed value; for an Adjustment line it is the
-/// COMPUTED adjustment, which the calculator overwrites); <see cref="ApprovedAmount"/> is <c>sprk_approvedamount</c>.</summary>
+/// COMPUTED adjustment, which the calculator overwrites); <see cref="ApprovedAmount"/> is <c>sprk_approvedamount</c>.
+/// <see cref="ReviewerAdded"/> (EB-D-193, EB-D-199) marks a Fee or Expense line the reviewer added through Add line (<c>provenance.source = "reviewer"</c>
+/// on the line's extraction JSON, read by <see cref="InvoiceTotalsService.ReviewerAddedOf"/>): the firm did not bill it, so it is outside the billed
+/// total, the fees, the expenses and the percent base, and it contributes to the approved total by its own rule. False for every intake line and
+/// ignored for an Adjustment line.</summary>
 public sealed record InvoiceLineInput(
     Guid Id,
     InvoiceLineCostType? CostType,
@@ -37,7 +41,8 @@ public sealed record InvoiceLineInput(
     decimal? ApprovedAmount,
     InvoiceLineStatus? Status,
     InvoiceAdjustmentMethod? AdjustmentMethod,
-    decimal? AdjustmentValue);
+    decimal? AdjustmentValue,
+    bool ReviewerAdded = false);
 
 /// <summary>Stable reason codes of a refusal (FR-32). Callers branch on these; never on the message.</summary>
 public static class InvoiceTotalsRefusalCodes
@@ -91,7 +96,12 @@ public sealed record InvoiceTotalsCalculation(
 /// line-adjustments total = sum of those; a Percent Adjustment line = value% x (fees total - sum of the Fee lines' adjustments)
 /// (expenses are never in the base; every percent line uses the same base, they do not compound); a Fixed Adjustment line = its value;
 /// invoice-adjustments total = sum of the Adjustment-line amounts;
-/// approved total = billed total - line-adjustments total - invoice-adjustments total.</para>
+/// approved total = billed total + added-lines contribution - line-adjustments total - invoice-adjustments total.</para>
+/// <para><b>Reviewer-added lines (EB-D-192, EB-D-199).</b> A Fee or Expense line the reviewer added is not in what the firm billed, so it is NOT in the fees
+/// total, the expenses total, the line-adjustments total or the percent base, and it never changes the billed total. Its contribution to the
+/// approved total is its amount while it is undecided or Accepted, its approved amount when Reduced, and 0 when Disallowed; the contributions are summed
+/// and added to the billed total. Disallowing an added line therefore never subtracts from the firm's billed lines. A Reduced added line is checked like
+/// any Reduced line (approved amount between 0 and its amount). An intake line (<see cref="InvoiceLineInput.ReviewerAdded"/> false) is unchanged.</para>
 /// <para><b>Rounding.</b> <see cref="decimal"/> throughout. Each computed adjustment and each total is rounded to 2 decimals with
 /// <see cref="MidpointRounding.AwayFromZero"/> (the owner-facing choice recorded in <c>docs/data-model/sprk_invoice.md</c>).
 /// The billed total is taken as given (it is the stored <c>sprk_totalamount</c>).</para>
@@ -121,7 +131,7 @@ public static class InvoiceTotalsCalculator
                 InvoiceTotalsRefusalCodes.BilledTotalMissing, "The invoice has no billed total, so the approved total cannot be derived."));
         }
 
-        decimal fees = 0m, expenses = 0m, feeLineAdjustments = 0m, expenseLineAdjustments = 0m;
+        decimal fees = 0m, expenses = 0m, feeLineAdjustments = 0m, expenseLineAdjustments = 0m, addedContribution = 0m;
         var adjustmentLines = new List<InvoiceLineInput>();
 
         foreach (var line in lines)
@@ -135,6 +145,15 @@ public static class InvoiceTotalsCalculator
                     if (!TryLineAdjustment(line, out var lineAdjustment, out var refusal))
                     {
                         return Refused(refusal!);
+                    }
+
+                    if (line.ReviewerAdded)
+                    {
+                        // EB-D-199: outside billed, fees, expenses and the percent base; only its contribution reaches the approved total.
+                        // The adjustment is the part of the amount NOT approved, so the contribution is the amount less it (Disallowed: 0,
+                        // Reduced: the approved amount, undecided or Accepted: the amount).
+                        addedContribution += line.Amount - lineAdjustment;
+                        break;
                     }
 
                     if (line.CostType == InvoiceLineCostType.Fee)
@@ -167,6 +186,7 @@ public static class InvoiceTotalsCalculator
         feeLineAdjustments = Round(feeLineAdjustments);
         expenseLineAdjustments = Round(expenseLineAdjustments);
         var lineAdjustmentsTotal = Round(feeLineAdjustments + expenseLineAdjustments);
+        addedContribution = Round(addedContribution);
 
         // D-42: a percent adjustment is taken on fees AFTER the fee lines' own adjustments; expenses never enter the base.
         // D-129 (2): the base is clamped at zero. A percent adjustment on a net-negative fee base adjusts nothing (10% of -700 is 0).
@@ -187,7 +207,7 @@ public static class InvoiceTotalsCalculator
 
         invoiceAdjustments = Round(invoiceAdjustments);
 
-        var approved = Round(billed - lineAdjustmentsTotal - invoiceAdjustments);
+        var approved = Round(billed + addedContribution - lineAdjustmentsTotal - invoiceAdjustments);
 
         // FR-32 refuses adjustments that exceed the billed total. D-129 (1): the floor applies only when the billed total is zero or more; a credit
         // memo (billed total below zero, D-127) legitimately has a negative approved total and has no extra limit.

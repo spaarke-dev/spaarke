@@ -326,7 +326,7 @@ public class DecisionActionCatalogTests
     // =================================================================================================
 
     private static readonly string[] BillingCodes =
-        ["accept-line", "reduce-line", "disallow-line", "approve-invoice", "reject-invoice", "return-to-firm", "override-submission", "assign-firm"];
+        ["accept-line", "reduce-line", "disallow-line", "approve-invoice", "reject-invoice", "return-to-firm", "override-submission", "assign-firm", "add-line"];
 
     [Fact]
     public void BillingActions_AreExactlyTheStatedSet_EachWithAPlanLaneARecordClassAndAGate()
@@ -354,6 +354,7 @@ public class DecisionActionCatalogTests
     [InlineData("return-to-firm", DecisionRecordClass.Judgement, GateRiskTier.Tier4)]
     [InlineData("override-submission", DecisionRecordClass.Judgement, GateRiskTier.Tier3)]
     [InlineData("assign-firm", DecisionRecordClass.Judgement, GateRiskTier.Tier4)] // 095d-1b: declared Tier3; not reversible and visible to the firm, it resolves to Tier4
+    [InlineData("add-line", DecisionRecordClass.Judgement, GateRiskTier.Tier2b)] // 164a-2 (EB-D-198): Tier2b, reversible by a later disallow-line
     public void EachBillingAction_HasItsRecordClassAndGateTier(string code, DecisionRecordClass recordClass, GateRiskTier tier)
     {
         DecisionActionCatalog.TryGetBilling(code, out var action).Should().BeTrue();
@@ -369,6 +370,7 @@ public class DecisionActionCatalogTests
     [InlineData("return-to-firm", "reason")]
     [InlineData("override-submission", "reason")]
     [InlineData("assign-firm", "firm")] // 095d-1b: the firm is required, the note is not
+    [InlineData("add-line", "reason")] // 164a-2 (EB-D-198): the reason is required
     [InlineData("accept-line")]
     [InlineData("approve-invoice")]
     public void BillingActions_RequireExactlyTheStatedParameters_AReasonForEveryAdverseDecisionAndOverride(string code, params string[] required)
@@ -410,6 +412,23 @@ public class DecisionActionCatalogTests
         DecisionActionCatalog.FirstBillingConflict(["override-submission", "approve-invoice"]).Should().BeNull();
         DecisionActionCatalog.TryGetBilling("override-submission", out var overrideAction).Should().BeTrue();
         overrideAction.Excludes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AddLine_IsABillingOnlyLineDecision_WithARequiredReason_NoExclusions_AndTheStatedGate()
+    {
+        // 164a-2 (EB-D-198): required reason, Tier2b, Judgement, Reversible, RecordOfTruthImpact; excludes empty; BillingActions only.
+        DecisionActionCatalog.TryGetBilling("add-line", out var action).Should().BeTrue();
+        action.Excludes.Should().BeEmpty();
+        action.RecordClass.Should().Be(DecisionRecordClass.Judgement);
+        action.Gate.Should().BeEquivalentTo(new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true));
+        action.Parameters.Should().ContainSingle(p => p.Code == "reason" && p.Required);
+        DecisionActionCatalog.TryGet("add-line", out _).Should().BeFalse("never in the Signals catalog, so the commit route cannot take it");
+        DecisionActionCatalog.All.Select(a => a.Code).Should().NotContain("add-line");
+        foreach (var other in DecisionActionCatalog.BillingActions.Where(a => a.Code != "add-line"))
+        {
+            DecisionActionCatalog.FirstBillingConflict(["add-line", other.Code]).Should().BeNull(because: $"add-line excludes nothing, {other.Code} included");
+        }
     }
 
     [Fact]

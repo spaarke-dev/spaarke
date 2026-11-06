@@ -181,9 +181,11 @@ internal sealed class ApExportWorld
     }
 
     /// <summary>Adds one more line to <paramref name="invoice"/> (cost type: Fee 100000000, Expense 100000001, Adjustment 100000002; state: 0 Active, 1 Inactive).</summary>
-    public Entity AddLine(Entity invoice, int costType, decimal amount, int sequence, int? state = null, int? status = null, decimal? approvedAmount = null)
+    public Entity AddLine(
+        Entity invoice, int costType, decimal amount, int sequence, int? state = null, int? status = null, decimal? approvedAmount = null,
+        Guid? id = null, string? extraction = null)
     {
-        var line = new Entity("sprk_billingevent", Guid.NewGuid())
+        var line = new Entity("sprk_billingevent", id ?? Guid.NewGuid())
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice.Id),
             ["sprk_linesequence"] = sequence,
@@ -204,6 +206,11 @@ internal sealed class ApExportWorld
         if (approvedAmount is { } approved)
         {
             line["sprk_approvedamount"] = new Money(approved);
+        }
+
+        if (extraction is not null)
+        {
+            line["sprk_extractionconfidence"] = extraction;
         }
 
         Dataverse.Put(line);

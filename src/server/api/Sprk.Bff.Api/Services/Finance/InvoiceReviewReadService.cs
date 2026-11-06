@@ -74,6 +74,7 @@ public sealed record ReviewFlagsDto(bool CanRead, bool CanDecide);
 /// <param name="Rate">The billed rate of a Fee line, the unit cost of an Expense line.</param>
 /// <param name="HighestSeverity"><c>Info</c>, <c>Warning</c> or <c>Critical</c>; null when the line has no finding.</param>
 /// <param name="Fields">Per extracted field: its page, bounding box and confidence (the Document tab and the low-confidence marker).</param>
+/// <param name="ReviewerAdded">EB-D-193: the reviewer added this line through Add line (<c>provenance.source = "reviewer"</c> on its extraction JSON and its id derived from the marker's decision id); the firm did not bill it. False for every intake line, and for a line whose extraction is empty or unreadable.</param>
 /// <param name="LineFindings">EB-D-175 / EB-D-176: why the line is Flagged when no policy finding says so: the AI did not check it (<c>coding.not_returned</c>) or it has no description (<c>line.no_description</c>). Empty for a line with neither, and for a submission stored before these were written. Not counted in <see cref="FindingCount"/> or <see cref="HighestSeverity"/>, which describe the policy findings.</param>
 public sealed record ReviewLineDto(
     Guid Id,
@@ -98,7 +99,8 @@ public sealed record ReviewLineDto(
     string? HighestSeverity,
     IReadOnlyList<ReviewFindingDto> Findings,
     IReadOnlyDictionary<string, ReviewFieldDto> Fields,
-    IReadOnlyList<ReviewLineFindingDto> LineFindings);
+    IReadOnlyList<ReviewLineFindingDto> LineFindings,
+    bool ReviewerAdded);
 
 /// <summary>The roster entry a fee line's timekeeper name matched (046), with its classification.</summary>
 public sealed record ReviewTimekeeperDto(Guid Id, string? Name, int? Classification);
@@ -731,7 +733,8 @@ public sealed class InvoiceReviewReadService
             severity,
             findings,
             extraction.Fields,
-            lineFindings);
+            lineFindings,
+            ExtractionProvenance.IsReviewerAdded(row));
     }
 
     /// <summary>The label the screen shows for a status: Pending is shown as Processing (D-58, prototype F-1).</summary>

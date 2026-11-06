@@ -908,7 +908,8 @@ public sealed class InvoiceAdjustmentService
             row.GetAttributeValue<Money>(InvoiceTotalsService.LineApprovedAmount)?.Value,
             status is { } s && Enum.IsDefined(typeof(InvoiceLineStatus), s) ? (InvoiceLineStatus)s : null,
             method is { } m && Enum.IsDefined(typeof(InvoiceAdjustmentMethod), m) ? (InvoiceAdjustmentMethod)m : null,
-            row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue));
+            row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue),
+            InvoiceTotalsService.ReviewerAddedOf(row));
     }
 
     private static ReviewTotalsDto TotalsOf(Entity invoice, InvoiceTotalsCalculation calculation) => new(
