@@ -57,12 +57,43 @@ Per act: what ran, what came out, and how it compares with the expected result. 
 |---|---|
 | `Spaarke NDA – Mutual v1.0 (table).docx` (our four columns, plus title, scope and version lines, plus `(nda.xxx)` ids) | Ran **create-playbook synthesis**: it treated our playbook as a single precedent. It wrote a new `Documents/Copilot/Created/mutual-nda-review-playbook.docx` with 24 topics, every one "Counsel decision — single-instance evidence", and no saved-playbook card. The compromise positions survived as content. It listed 8 "topics not addressed in the source", among them the public-domain exclusion, which our playbook does cover inside other topics. Copy: `evidence/act1/word-create-playbook-from-table.docx` |
 | The same file again, in the same chat | "The playbook has already been created and validated": no new run |
-| Our heading format `Spaarke NDA – Mutual v1.0.docx` | Not clear from the screenshots: both show the (table) file. **To confirm with the owner** |
+| Our heading format `Spaarke NDA – Mutual v1.0.docx` | Owner confirmed this was the file used for item 1. Not imported directly (see the follow-up below) |
 | Cowork's `mutual-nda-review-playbook.docx` | **Imported directly** as a saved-playbook card named **"Acme Mutual NDA Review Playbook"** (the document's Title), with Save and run review / Save playbook. So Cowork-to-Word works |
-| Review run with the imported playbook | All 32 topics "Not relevant". **To confirm:** which document was open; probably not an NDA (the playbook itself?) |
+| Review run with the imported playbook | All 32 topics "Not relevant": a blank document was open (owner confirmed), so this is expected |
 
 Our files carry no property marker that differs. The visible differences are the preamble (scope and version lines, Heading 1 versus Title) and the ids in the Topic column. A/B variants are in OneDrive `Documents/Cowork/Test/POC-Act1/word-ab/`:
 - `A - title only.docx`: Title-style heading only, no ids;
 - `B - no ids.docx`: the original preamble, ids removed.
 
 If A imports directly and B doesn't, the preamble is the trigger.
+
+**Owner follow-up (2026-11-05):**
+- Item 1 was run on the heading format `Spaarke NDA – Mutual v1.0.docx`. Word's own coverage line names the "(table)" file, so possibly both were tried in one chat. Either way, **neither of our formats was imported directly**.
+- The review in item 3 ran on a **blank document**, so "Not relevant" is expected (gap #12: information only).
+- The stray `nda-review` was deleted by the owner; Cowork now lists 11 added.
+
+## Act 3
+
+### Step 1: T-P13 visual probe (2026-11-05, 30 seconds)
+
+"Run the Spaarke visual probe (T-P13)" routed to our personal skill `spaarke-visual-probe`. It wrote 10 files to `Test/T-P13/`.
+
+**Sandbox:**
+- Python 3.12.15, with lxml 6.1.3, python-docx 1.2.0, **openpyxl 3.1.5, python-pptx 1.0.2, matplotlib 3.11.2**, pandas 3.0.6, PIL 12.3.0, pypdf 6.19.0, pdfplumber 0.11.10 and numpy 2.5.3. No plotly.
+- Tools: node v24.7.0, soffice, pdftoppm, pandoc, tesseract. No Chromium.
+
+| Format | Result |
+|---|---|
+| PNG / SVG in chat | **File only.** Neither shows inline in the chat |
+| Markdown table in chat | Renders |
+| Mermaid in chat | **Renders as a diagram** |
+| LaTeX in chat | Renders (inline and block) |
+| `dashboard-static.html` in the preview | Renders, and the SVG bars and labels show. **But the HTML text shows white on the page's light background:** the preview applies dark-theme text colour and keeps the page background. Text needs an explicit colour wherever a background is set |
+| `dashboard-script.html` in the preview | **The inline script runs, the button works, and `fetch()` to the internet succeeds (HTTP 200).** The CDN `<script>` does not load |
+| `chart.xlsx` (our `xlsx_lite`) in the preview | Native bar chart and coloured cells render (Excel for the web) |
+| `chart.pptx` (python-pptx) in the preview | Chart renders (PowerPoint for the web) |
+
+**What this means:**
+- Interactive dashboards are possible (inline JavaScript).
+- The preview is **not network-isolated**: an output page can call out to the internet. Keep our generated HTML script-free (OD-30 stands); that is now a security rule, not just a style choice.
+- Cards (V3) are not needed for charts. Mermaid gives diagrams in chat, and the Office previews give charts in files.
