@@ -481,7 +481,7 @@ public sealed class InvoiceSubmissionRerunTests
     // ── C2: the invoice left In Review while the re-run was pending ──
 
     [Theory(DisplayName = "095d-2a-2 (C2): an invoice Returned to Firm or Superseded while the re-run was pending still gets the commit (marker cleared, rulesRerun completed); the review detail is left out")]
-    [InlineData(InvoiceStatusCodes.StateActive, InvoiceStatusCodes.ReturnedToFirm)]
+    [InlineData(InvoiceStatusCodes.StateInactive, InvoiceStatusCodes.ReturnedToFirm)]
     [InlineData(InvoiceStatusCodes.StateInactive, InvoiceStatusCodes.Superseded)]
     public async Task AnInvoiceOutOfReview_IsCommitted_WithoutTheDetail(int state, int status)
     {
