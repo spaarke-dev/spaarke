@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="174" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>BFF: the Console decision route refuses billing Signals; the worklist route names each billing item's invoice (D-207)</title>
+    <phase>11 UAT</phase>
+    <gate>startable now (D-207, owner 2026-11-06)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes .cs on the decision commit path and the worklist read route; refusal before any write.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two narrow, fully specified changes with named files and contracts.</model-tier-reason>
+    <effort>high</effort>
+    <deps>none</deps>
+    <tags>bff-api,signals,testing</tags>
+    <estimated-effort>3 hours</estimated-effort>
+    <parallel-group>P-207</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner ruling D-207 (EB-D-194): invoice review and approval decisions are made ONLY in eBilling's Invoice Review page; billing Work Items stay in the Console Worklist and open that page as a pop-up. Today a Console user activating a billing Work Item reaches `POST /api/v1/signals/{id}/decision`, which asks Write on the Signal's subject (`DecisionCallerRights`) and refuses an invoice-line subject with a 403 `SubjectWriteMissing`, because person roles hold only Read on `sprk_billingevent` (ebilling D-90, by design). The Worklist item also carries no subject type or invoice id, so the Console cannot open the right invoice. On dev: 35 open invoice-line and 5 invoice Signals, all Decide lane.</prompt>
+  <role>SPAARKE BFF engineer (Signals).</role>
+  <goal>(1) The commit route refuses a Signal whose subject table is `sprk_invoice` or `sprk_billingevent` with ONE distinct refusal before any caller-rights probe, read-for-write or write, telling the client to decide it in Invoice Review. (2) `GET /api/v1/signals/worklist` adds an `invoiceReview` member to each billing item: `{ "invoiceId": guid, "lineId": guid | null }`; for a line subject `lineId` is the subject id and `invoiceId` its parent invoice (`sprk_billingevent.sprk_invoice`, `_sprk_invoice_value`), read in ONE batched query per response; for an invoice subject `invoiceId` is the subject id and `lineId` null. Every other item omits the member (null, not present in JSON when the serializer omits nulls; match the route's existing convention). Nothing else in either route changes.</goal>
+
+  <constraints>
+    <constraint source="D-207">Refusal code: `decision.decided_in_invoice_review` (HTTP 409, ProblemDetails, the route's existing refusal shape), raised by the route's existing pre-write validation stage, before `DecisionCallerRights.CheckAsync`. Detect billing Signals by the subject table derived the way the commit route already derives it (the regarding pair / subject lookup), not by policy code text. A Signal whose subject cannot be derived keeps today's behaviour.</constraint>
+    <constraint source="D-207">The line → invoice read is one query for all line items in the response (`$filter` on the line ids, `$select` `_sprk_invoice_value` only), run as the route already reads with its identity. Never emit `invoiceReview` with a null `invoiceId`: for a line whose parent cannot be read (missing, no invoice) omit the member for that item and log once at Warning with the ids only. A read fault omits the member for all line items and logs once; it never fails the worklist response.</constraint>
+    <constraint source="CLAUDE.md §11">No new endpoint, service or DI registration. Extend the existing route handlers / read service. Add the refusal code beside the route's existing codes.</constraint>
+    <constraint source="D-204">Do not touch the writers (`SignalWriter`, `DecisionRecordWriter`) or `DecisionCallerRights`.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no git stash. No Dataverse writes, no deploys. Never run the unfiltered Sprk.Bff.Api.Tests (filter on Signal/Worklist/DecisionCommit). Run the full ArchTests and measure the publish-size delta against a fresh master build (bff-hygiene).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A commit for a Signal with subject `sprk_billingevent` returns 409 `decision.decided_in_invoice_review`; the caller-rights probe, every Dataverse write and the Decision Record writer are never called (strict mocks). Same for subject `sprk_invoice`. Mutation: move the check after `DecisionCallerRights.CheckAsync` and a test fails.</criterion>
+    <criterion testable="true">A commit for a matter-subject Signal is unchanged (existing tests green); a Signal with an underivable subject keeps its current refusal.</criterion>
+    <criterion testable="true">The worklist response for a line item carries `invoiceReview` with the parent invoice id and the line id; an invoice item carries the invoice id and `lineId` null; a matter, To Do or event item has no `invoiceReview`. Assert the serialized JSON.</criterion>
+    <criterion testable="true">Two line items on two invoices plus one invoice item cost exactly ONE extra Dataverse read (count the reads). Negative: a line with no parent invoice omits the member; a fault on the batched read omits it for all lines and the route still returns 200.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-207, D-204)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Signals/SignalReadEndpoints.cs (the worklist route) and the read service it calls</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs (~:1547 CallerMayDecideAsync; the pre-write validation stage and existing refusal codes)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceTotalsService.cs (`LineInvoiceLookup` = `sprk_invoice`)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Worklist/types.ts (WorklistItem; task 175 adds `invoiceReview` there with the same shape)</file>
+    </files>
+  </knowledge>
+</task>
