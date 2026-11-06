@@ -255,14 +255,23 @@ internal static class RecordShareLevels
     internal static int InheritedRootMirrorMask(int parentMask) => parentMask & ChildMirrorableMask;
 
     /// <summary>
-    /// The <c>AccessMask</c> literal for a mask built from <see cref="ChildMirrorableMask"/> bits, in the canonical
-    /// order. A bit outside the mirrorable set is refused rather than silently dropped.
+    /// The <c>AccessMask</c> literal for a mirrored share written on a row of <paramref name="table"/>, from a mask built
+    /// from <see cref="ChildMirrorableMask"/> bits, in the canonical order. A bit outside the mirrorable set is refused rather
+    /// than silently dropped; on a hard-deny table
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsRestrictedContentTable"/>) so is every bit but
+    /// Read (<see cref="HardDenyChildMirrorableMask"/>, GitHub #2560) — the last check before the write, whatever the caller
+    /// computed.
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">The mask carries a bit a child mirror never carries.</exception>
-    internal static RecordShareRights ChildMirrorRights(int mask)
+    /// <exception cref="ArgumentException"><paramref name="table"/> is blank.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The mask carries a bit a mirror on that table never carries.</exception>
+    internal static RecordShareRights ChildMirrorRights(string table, int mask)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
         if ((mask & ~ChildMirrorableMask) != 0)
             throw new ArgumentOutOfRangeException(nameof(mask), mask, "A child mirror carries only Read, Write, Append, AppendTo, Delete and Share.");
+        if (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsRestrictedContentTable(table)
+            && (mask & ~HardDenyChildMirrorableMask) != 0)
+            throw new ArgumentOutOfRangeException(nameof(mask), mask, "A mirrored share on a hard-deny row carries only Read.");
 
         var names = LevelRights.Where(r => (mask & r.DataverseBit) != 0).Select(r => r.Name);
         return new RecordShareRights(string.Join(",", names), mask);

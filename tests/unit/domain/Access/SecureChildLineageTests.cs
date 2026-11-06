@@ -448,13 +448,46 @@ public class SecureChildLineageTests
     [Fact]
     public void ChildMirrorRights_WritesTheCanonicalLiteral_AndRefusesAssign()
     {
-        RecordShareLevels.ChildMirrorRights(65559).AccessRightsCsv
+        RecordShareLevels.ChildMirrorRights("sprk_document", 65559).AccessRightsCsv
             .Should().Be("ReadAccess,WriteAccess,AppendAccess,AppendToAccess,DeleteAccess");
-        RecordShareLevels.ChildMirrorRights(262167).AccessRightsCsv
+        RecordShareLevels.ChildMirrorRights("sprk_document", 262167).AccessRightsCsv
             .Should().Be("ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess");
-        RecordShareLevels.ChildMirrorRights(1).AccessRightsCsv.Should().Be("ReadAccess");
+        RecordShareLevels.ChildMirrorRights("sprk_document", 1).AccessRightsCsv.Should().Be("ReadAccess");
 
-        var withAssign = () => RecordShareLevels.ChildMirrorRights(1 | 524288);
+        var withAssign = () => RecordShareLevels.ChildMirrorRights("sprk_document", 1 | 524288);
         withAssign.Should().Throw<ArgumentOutOfRangeException>("a child mirror never carries Assign");
+    }
+
+    // GitHub #2560, defence in depth: the last check before a mirrored share is written refuses anything but Read on a
+    // hard-deny table, whatever the caller computed.
+    [Theory]
+    [InlineData("sprk_policy", 1 | 2)]
+    [InlineData("sprk_policy", 2)]
+    [InlineData("sprk_policyversion", 262167)]
+    [InlineData("sprk_storedfile", 1 | 65536)]
+    [InlineData("SPRK_POLICY", 1 | 262144)]
+    public void ChildMirrorRights_OnAHardDenyTable_RefusesEveryBitButRead(string table, int mask)
+    {
+        var write = () => RecordShareLevels.ChildMirrorRights(table, mask);
+        write.Should().Throw<ArgumentOutOfRangeException>("a mirrored share on a hard-deny row carries only Read")
+            .WithMessage("*hard-deny*");
+    }
+
+    [Fact]
+    public void ChildMirrorRights_OnAHardDenyTable_AllowsRead_AndAnOrdinaryTableAllowsWrite()
+    {
+        RecordShareLevels.ChildMirrorRights("sprk_policy", 1).AccessRightsCsv.Should().Be("ReadAccess");
+        RecordShareLevels.ChildMirrorRights("sprk_policyversion", 1).AccessRightsCsv.Should().Be("ReadAccess");
+
+        // Must-not-fire: an ordinary child table takes Write (and the rest of the mirrorable set) as before.
+        RecordShareLevels.ChildMirrorRights("sprk_document", 1 | 2).AccessRightsCsv.Should().Be("ReadAccess,WriteAccess");
+        RecordShareLevels.ChildMirrorRights("sprk_event", 2).AccessRightsCsv.Should().Be("WriteAccess");
+    }
+
+    [Fact]
+    public void ChildMirrorRights_RefusesABlankTable()
+    {
+        var blank = () => RecordShareLevels.ChildMirrorRights(" ", 1);
+        blank.Should().Throw<ArgumentException>();
     }
 }

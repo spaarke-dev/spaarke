@@ -58,6 +58,15 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         Guid DocDirect, Guid? DocRelated, Guid Event, Guid TodoUnderDocument, Guid Communication, Guid Memo, Guid MessageInDirectThread,
         Guid UnfiledDocument, Guid OtherRecordsDocument, Guid DirectThread, Guid ChildRoot, Guid ChildRootsTodo)
     {
+        /// <summary>
+        /// GitHub #2560: a rule (<c>sprk_policy</c>, a HARD-DENY table) filed under the record — a matter only, the one
+        /// record a rule is filed under — in a family seeded outside isolation (the provisioning direction). Mirrored at
+        /// Read only, whatever the record's share carries. Not seeded for the unsecure direction: a hard-deny row leaving
+        /// isolation goes to the customer's restricted-content team, which this fixture's root business unit cannot give
+        /// (R4b-2c refuses it, fail closed); RestrictedContentReconcileTests covers that move.
+        /// </summary>
+        public Guid? Policy { get; init; }
+
         /// <summary>The children the transition must move.</summary>
         public IEnumerable<(string Table, Guid Id)> Children()
         {
@@ -69,6 +78,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
             yield return ("sprk_communication", Communication);
             yield return ("sprk_memo", Memo);
             yield return ("sprk_communication", MessageInDirectThread);
+            if (Policy is { } policy)
+                yield return ("sprk_policy", policy);
         }
 
         /// <summary>The rows the transition must never write.</summary>
@@ -100,7 +111,10 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
             Event: Guid.NewGuid(), TodoUnderDocument: Guid.NewGuid(), Communication: Guid.NewGuid(), Memo: Guid.NewGuid(),
             MessageInDirectThread: Guid.NewGuid(),
             UnfiledDocument: Guid.NewGuid(), OtherRecordsDocument: Guid.NewGuid(), DirectThread: Guid.NewGuid(),
-            ChildRoot: Guid.NewGuid(), ChildRootsTodo: Guid.NewGuid());
+            ChildRoot: Guid.NewGuid(), ChildRootsTodo: Guid.NewGuid())
+        {
+            Policy = rootTable == "sprk_matter" && !childrenIsolated ? Guid.NewGuid() : null,
+        };
 
         void Child(string table, Guid id, params (string, string, Guid)[] lookups)
         {
@@ -121,6 +135,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         else
             world.UserOwnedChild("sprk_communication", family.Communication, (regarding, rootTable, rootId));
         Child("sprk_memo", family.Memo, (regarding, rootTable, rootId));
+        if (family.Policy is { } policy)
+            Child("sprk_policy", policy, ("sprk_matter", rootTable, rootId));
 
         // A message on the record, in a per-user Direct thread: the message is the record's child; the thread is not.
         world.UserOwnedChild("sprk_communicationthread", family.DirectThread);
@@ -219,6 +235,11 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
                 new Dictionary<DataversePrincipalRef, int> { [DataversePrincipalRef.User(Creator)] = MirrorOf(table, ProvisionProjectEndpoint.CreatorAccessRights) },
                 "a child's sharees are exactly the record's, at the record's rights (Share included since round 91)");
         }
+
+        // GitHub #2560, as Dataverse stores it (Read = 1): the rule carries Read only; an ordinary child carries more.
+        if (family.Policy is { } policy)
+            _fixture.SharesOn(policy).Should().Equal(new Dictionary<DataversePrincipalRef, int> { [DataversePrincipalRef.User(Creator)] = 1 });
+        _fixture.SharesOn(family.DocDirect)[DataversePrincipalRef.User(Creator)].Should().NotBe(1, "an ordinary child keeps the full mirror");
 
         AssertDecoysUntouched(family, decoysBefore);
 

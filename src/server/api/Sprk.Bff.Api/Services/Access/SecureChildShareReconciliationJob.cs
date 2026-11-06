@@ -95,12 +95,13 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
             result.IsComplete ? LogLevel.Information : LogLevel.Warning,
             "[SECURE-CHILD-SHARES] heartbeat status={Status} inScope={InScope} updated={Updated} unchanged={Unchanged} " +
             "notUpdated={NotUpdated} held={Held} outsideSecureRoots={Outside} granted={Granted} changed={Changed} " +
-            "revoked={Revoked} detail={Detail} attempt={Attempt} durationMs={DurationMs} trigger={Trigger} runId={RunId} " +
+            "revoked={Revoked} hardDenyWiderThanRead={HardDenyWiderThanRead} hardDenyUnchecked={HardDenyUnchecked} " +
+            "detail={Detail} attempt={Attempt} durationMs={DurationMs} trigger={Trigger} runId={RunId} " +
             "correlationId={CorrelationId}",
             result.Status, result.ChildrenInScope, result.ChildrenUpdated, result.ChildrenUnchanged,
             result.ChildrenNotUpdated, result.ChildrenHeld, result.ChildrenOutsideSecureRoots, result.SharesGranted,
-            result.SharesChanged, result.SharesRevoked, result.Detail, context.Attempt, (long)duration.TotalMilliseconds,
-            context.Trigger, context.RunId, context.CorrelationId);
+            result.SharesChanged, result.SharesRevoked, result.HardDenyWiderThanRead, result.HardDenyUnchecked, result.Detail,
+            context.Attempt, (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
         if (result.Status == SecureChildShareSyncStatus.Failed)
         {
@@ -128,6 +129,8 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
                 granted = result.SharesGranted,
                 changed = result.SharesChanged,
                 revoked = result.SharesRevoked,
+                hardDenyWiderThanRead = result.HardDenyWiderThanRead,
+                hardDenyUnchecked = result.HardDenyUnchecked,
                 detail = result.Detail,
                 attempt = context.Attempt,
             }));

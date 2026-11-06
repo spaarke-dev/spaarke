@@ -95,6 +95,19 @@ public sealed record SecureChildShareSyncResult(
     /// <summary>Task 158 r1: the isolated parents the inherited mirror was taken from (every one shares each principal).</summary>
     public IReadOnlyList<(string Table, Guid Id)>? InheritedFrom { get; init; }
 
+    /// <summary>
+    /// GitHub #2560: direct shares found on a row of a hard-deny table carrying more than Read (each reported as
+    /// <c>HardDenyRowShareWiderThanRead</c>). Every one is narrowed to Read, or revoked, by the same run; one whose write did
+    /// not keep is found again by the next run.
+    /// </summary>
+    public int HardDenyWiderThanRead { get; init; }
+
+    /// <summary>
+    /// GitHub #2560: Secure-owned rows of a hard-deny table whose own shares could not be read, so whether one carries more
+    /// than Read is not known this run. The next run reads them again.
+    /// </summary>
+    public int HardDenyUnchecked { get; init; }
+
     /// <summary>Children in scope that do not yet match: <see cref="ChildrenNotUpdated"/> + <see cref="ChildrenHeld"/>.</summary>
     public int ChildrenLeftOutOfLine => ChildrenNotUpdated + ChildrenHeld;
 
@@ -1071,7 +1084,7 @@ public sealed class SecureChildShareSynchronizer
                 if (current == 0)
                 {
                     await _recordShare.GrantAccessAsync(
-                        entitySet, root.Id, principal, RecordShareLevels.ChildMirrorRights(mask).AccessRightsCsv, ct).ConfigureAwait(false);
+                        entitySet, root.Id, principal, RecordShareLevels.ChildMirrorRights(root.Table, mask).AccessRightsCsv, ct).ConfigureAwait(false);
                     granted++;
                 }
                 else
@@ -1444,7 +1457,7 @@ public sealed class SecureChildShareSynchronizer
         // The record types already warned about this run as mapping to no core table (one warning per type per run).
         private readonly HashSet<Guid> _unknownTypesWarned = new();
 
-        private int _granted, _changed, _revoked, _hardDenyWiderThanRead;
+        private int _granted, _changed, _revoked, _hardDenyWiderThanRead, _hardDenyUnchecked;
 
         public Run(SecureChildShareSynchronizer owner, Guid secureTeamId, CancellationToken ct)
         {
@@ -1988,8 +2001,11 @@ public sealed class SecureChildShareSynchronizer
             var outside = 0;
             var faulted = 0;
 
-            // 1. Each secure child's roots; keep those in scope.
+            // 1. Each secure child's roots; keep those in scope. A hard-deny row this run does not mirror — its filing could
+            // not be read, or it is under no secure root — is still kept for the Read-only narrowing (GitHub #2560), which
+            // needs no root.
             var inScope = new List<(Row Row, Lineage Lineage)>();
+            var narrowOnly = new List<Row>();
             foreach (var row in _secureChildren.Values)
             {
                 Lineage lineage;
@@ -1999,12 +2015,14 @@ public sealed class SecureChildShareSynchronizer
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
                 {
-                    // A fault is not an answer: nothing is written on the child, and it counts as examined AND not updated
+                    // A fault is not an answer: nothing is mirrored on the child, and it counts as examined AND not updated
                     // (so "N of M" never has N > M). In a scoped run every candidate was found BELOW the root by the
                     // downward walk, so the fault is about one of the root's own related records.
                     Log.LogWarning(ex, "[SECURE-CHILD-SHARES] The filing of {Child} could not be read; it is not synchronized.", row.Ref);
                     faulted++;
                     notUpdated++;
+                    if (IsHardDeny(row.Ref.Table))
+                        narrowOnly.Add(row);
                     continue;
                 }
 
@@ -2014,18 +2032,20 @@ public sealed class SecureChildShareSynchronizer
                 if (lineage.SecureRoots.Count == 0 && lineage.Undetermined is null)
                 {
                     outside++;
+                    if (IsHardDeny(row.Ref.Table))
+                        narrowOnly.Add(row);
                     continue;
                 }
 
                 inScope.Add((row, lineage));
             }
 
-            // 2. Each child's current shares, batched per table.
+            // 2. Each child's current shares, batched per table (the narrow-only hard-deny rows with them).
             var current = new Dictionary<RowRef, IReadOnlyList<DataversePrincipalAccess>>();
             var unreadable = new HashSet<RowRef>();
-            foreach (var group in inScope.GroupBy(c => c.Row.Ref.Table))
+            foreach (var group in inScope.Select(c => c.Row).Concat(narrowOnly).GroupBy(r => r.Ref.Table))
             {
-                var ids = group.Select(c => c.Row.Ref.Id).ToArray();
+                var ids = group.Select(r => r.Ref.Id).ToArray();
                 try
                 {
                     var shares = await _owner._recordShare
@@ -2054,6 +2074,8 @@ public sealed class SecureChildShareSynchronizer
                 if (unreadable.Contains(row.Ref))
                 {
                     notUpdated++;
+                    if (IsHardDeny(row.Ref.Table))
+                        _hardDenyUnchecked++;
                     continue;
                 }
 
@@ -2067,6 +2089,21 @@ public sealed class SecureChildShareSynchronizer
                 }
             }
 
+            // 4. GitHub #2560: the hard-deny rows not mirrored above lose every right but Read. Their counts stay as step 1
+            // left them (outside secure roots, or not updated); only the share counters and the findings move.
+            foreach (var row in narrowOnly)
+            {
+                if (unreadable.Contains(row.Ref))
+                {
+                    _hardDenyUnchecked++;
+                    continue;
+                }
+
+                var have = DirectMasks(current[row.Ref]);
+                ReportHardDenyWiderThanRead(row.Ref, have);
+                await NarrowHardDenyToReadAsync(row.Ref, have).ConfigureAwait(false);
+            }
+
             var status = notUpdated == 0 && held == 0
                 ? SecureChildShareSyncStatus.Completed
                 : SecureChildShareSyncStatus.Incomplete;
@@ -2075,12 +2112,16 @@ public sealed class SecureChildShareSynchronizer
                 status == SecureChildShareSyncStatus.Completed ? LogLevel.Information : LogLevel.Warning,
                 "[SECURE-CHILD-SHARES] scope={Scope} status={Status} inScope={InScope} updated={Updated} unchanged={Unchanged} " +
                 "notUpdated={NotUpdated} held={Held} outsideSecureRoots={Outside} granted={Granted} changed={Changed} revoked={Revoked} " +
-                "hardDenyWiderThanRead={HardDenyWiderThanRead}",
+                "hardDenyWiderThanRead={HardDenyWiderThanRead} hardDenyUnchecked={HardDenyUnchecked}",
                 scope?.ToString() ?? "all", status, inScope.Count + faulted, updated, unchanged, notUpdated, held, outside,
-                _granted, _changed, _revoked, _hardDenyWiderThanRead);
+                _granted, _changed, _revoked, _hardDenyWiderThanRead, _hardDenyUnchecked);
 
             return new SecureChildShareSyncResult(
-                status, inScope.Count + faulted, updated, unchanged, notUpdated, held, outside, _granted, _changed, _revoked, null);
+                status, inScope.Count + faulted, updated, unchanged, notUpdated, held, outside, _granted, _changed, _revoked, null)
+            {
+                HardDenyWiderThanRead = _hardDenyWiderThanRead,
+                HardDenyUnchecked = _hardDenyUnchecked,
+            };
         }
 
         private enum ChildOutcome { Updated, Unchanged, NotUpdated, Held }
@@ -2088,13 +2129,29 @@ public sealed class SecureChildShareSynchronizer
         /// <summary>One child: compute the mirror, write the difference (revokes, narrowings, grants), read it back.</summary>
         private async Task<ChildOutcome> MirrorAsync(Row row, Lineage lineage, IReadOnlyList<DataversePrincipalAccess> shares)
         {
-            // The intersection of every secure root's mirror. A root whose shares cannot be read stops every write here.
+            var have = DirectMasks(shares);
+
+            // GitHub #2560: a mirrored share on a hard-deny row carries Read only, so a wider share found on one is reported
+            // (the table, the row id and the principal's kind — never a name) before anything else can stop this child. It is
+            // ended at Read, or revoked, on every path a child whose own shares were read takes: the plan below does it when
+            // the roots are read (held, stale fresh re-read and No Access refusal included — a pure narrowing needs neither
+            // the fresh re-check nor the No Access list, and a share without Read whose Read cannot be added is revoked); a
+            // root whose shares cannot be read narrows it to Read without the roots (NarrowHardDenyToReadAsync). A hard-deny
+            // row this run does not mirror at all is narrowed by SynchronizeAsync step 4; one whose shares could not be read
+            // is counted as unchecked.
+            ReportHardDenyWiderThanRead(row.Ref, have);
+
+            // The intersection of every secure root's mirror. A root whose shares cannot be read stops every write here but
+            // the Read-only narrowing of a hard-deny row.
             Dictionary<DataversePrincipalRef, int>? desired = null;
             foreach (var root in lineage.SecureRoots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id))
             {
                 var mirror = await RootMirrorAsync(root, row.Ref.Table).ConfigureAwait(false);
                 if (mirror is null)
+                {
+                    await NarrowHardDenyToReadAsync(row.Ref, have).ConfigureAwait(false);
                     return ChildOutcome.NotUpdated;
+                }
 
                 desired = desired is null
                     ? new Dictionary<DataversePrincipalRef, int>(mirror)
@@ -2107,20 +2164,6 @@ public sealed class SecureChildShareSynchronizer
 
             desired ??= new Dictionary<DataversePrincipalRef, int>();
             var heldBack = lineage.Undetermined is not null;
-            var have = DirectMasks(shares);
-
-            // GitHub #2560: a mirrored share on a hard-deny row carries Read only, so a wider share found on one is reported
-            // (the table, the row id and the principal's kind — never a name). The plan below ends it at Read, or revokes it
-            // where the roots give no Read, in every mode (held, stale root read, No Access refusal): a pure narrowing needs
-            // neither the fresh re-check nor the No Access list, and a share without Read whose Read cannot be added is revoked.
-            foreach (var kind in HardDenySharesWiderThanRead(row.Ref.Table, have))
-            {
-                _hardDenyWiderThanRead++;
-                Log.LogWarning(
-                    "[SECURE-CHILD-SHARES] HardDenyRowShareWiderThanRead table={Table} id={Id} principalKind={PrincipalKind}: " +
-                    "a share on a hard-deny row carries more than Read; it is narrowed to the mirror.",
-                    row.Ref.Table, row.Ref.Id, kind);
-            }
 
             var revokes = new List<DataversePrincipalRef>();
             var modifies = new List<(DataversePrincipalRef Principal, int Mask)>();
@@ -2241,22 +2284,41 @@ public sealed class SecureChildShareSynchronizer
             if (revokes.Count == 0 && modifies.Count == 0 && grants.Count == 0)
                 return failed ? ChildOutcome.NotUpdated : heldBack ? ChildOutcome.Held : ChildOutcome.Unchanged;
 
-            var entitySet = SecureChildLineage.Children[row.Ref.Table].EntitySet;
+            failed |= !await WriteAndReadBackAsync(row.Ref, have, revokes, modifies, grants).ConfigureAwait(false);
+
+            if (failed)
+                return ChildOutcome.NotUpdated;
+            return heldBack ? ChildOutcome.Held : ChildOutcome.Updated;
+        }
+
+        /// <summary>
+        /// Writes one child's planned revokes, narrowings/widenings and grants, then reads it back: it must carry exactly
+        /// <paramref name="have"/> with the plan applied. <c>false</c> when a write failed or the read-back did not match.
+        /// </summary>
+        private async Task<bool> WriteAndReadBackAsync(
+            RowRef child,
+            IReadOnlyDictionary<DataversePrincipalRef, int> have,
+            IReadOnlyList<DataversePrincipalRef> revokes,
+            IReadOnlyList<(DataversePrincipalRef Principal, int Mask)> modifies,
+            IReadOnlyList<(DataversePrincipalRef Principal, int Mask)> grants)
+        {
+            var failed = false;
+            var entitySet = SecureChildLineage.Children[child.Table].EntitySet;
 
             foreach (var principal in revokes)
-                failed |= !await TryWriteAsync(row.Ref, "revoke", principal,
-                    () => _owner._recordShare.RevokeAccessAsync(entitySet, row.Ref.Id, principal, _ct), () => _revoked++);
+                failed |= !await TryWriteAsync(child, "revoke", principal,
+                    () => _owner._recordShare.RevokeAccessAsync(entitySet, child.Id, principal, _ct), () => _revoked++);
 
             foreach (var (principal, mask) in modifies)
-                failed |= !await TryWriteAsync(row.Ref, "modify", principal,
+                failed |= !await TryWriteAsync(child, "modify", principal,
                     () => _owner._recordShare.ModifyAccessAsync(
-                        entitySet, row.Ref.Id, principal, RecordShareLevels.ChildMirrorRights(mask).AccessRightsCsv, _ct),
+                        entitySet, child.Id, principal, RecordShareLevels.ChildMirrorRights(child.Table, mask).AccessRightsCsv, _ct),
                     () => _changed++);
 
             foreach (var (principal, mask) in grants)
-                failed |= !await TryWriteAsync(row.Ref, "grant", principal,
+                failed |= !await TryWriteAsync(child, "grant", principal,
                     () => _owner._recordShare.GrantAccessAsync(
-                        entitySet, row.Ref.Id, principal, RecordShareLevels.ChildMirrorRights(mask).AccessRightsCsv, _ct),
+                        entitySet, child.Id, principal, RecordShareLevels.ChildMirrorRights(child.Table, mask).AccessRightsCsv, _ct),
                     () => _granted++);
 
             // Read back: the child must now carry exactly the planned shares.
@@ -2269,22 +2331,70 @@ public sealed class SecureChildShareSynchronizer
             try
             {
                 var after = DirectMasks(await _owner._recordShare
-                    .GetPrincipalAccessOrThrowAsync(row.Ref.Table, row.Ref.Id, _ct).ConfigureAwait(false));
+                    .GetPrincipalAccessOrThrowAsync(child.Table, child.Id, _ct).ConfigureAwait(false));
                 if (after.Count != expected.Count || after.Any(p => !expected.TryGetValue(p.Key, out var m) || m != p.Value))
                 {
-                    Log.LogWarning("[SECURE-CHILD-SHARES] {Child} did not read back as its mirror after the writes.", row.Ref);
+                    Log.LogWarning("[SECURE-CHILD-SHARES] {Child} did not read back as its mirror after the writes.", child);
                     failed = true;
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
             {
-                Log.LogWarning(ex, "[SECURE-CHILD-SHARES] {Child} could not be read back after the writes.", row.Ref);
+                Log.LogWarning(ex, "[SECURE-CHILD-SHARES] {Child} could not be read back after the writes.", child);
                 failed = true;
             }
 
-            if (failed)
-                return ChildOutcome.NotUpdated;
-            return heldBack ? ChildOutcome.Held : ChildOutcome.Updated;
+            return !failed;
+        }
+
+        private static bool IsHardDeny(string table) =>
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsRestrictedContentTable(table);
+
+        /// <summary>
+        /// GitHub #2560: reports each direct share on a hard-deny row that carries more than Read
+        /// (<see cref="HardDenySharesWiderThanRead"/>) and counts it. The line names the table, the row id and the principal's
+        /// kind, never the principal.
+        /// </summary>
+        private void ReportHardDenyWiderThanRead(RowRef child, IReadOnlyDictionary<DataversePrincipalRef, int> have)
+        {
+            foreach (var kind in HardDenySharesWiderThanRead(child.Table, have))
+            {
+                _hardDenyWiderThanRead++;
+                Log.LogWarning(
+                    "[SECURE-CHILD-SHARES] HardDenyRowShareWiderThanRead table={Table} id={Id} principalKind={PrincipalKind}: " +
+                    "a share on a hard-deny row carries more than Read; it will be narrowed to Read at most.",
+                    child.Table, child.Id, kind);
+            }
+        }
+
+        /// <summary>
+        /// GitHub #2560: the narrowing a hard-deny row gets when its secure roots are not known — under none, its filing
+        /// unreadable, or a root's shares unreadable. Every direct share carrying more than Read keeps only its Read
+        /// (<c>have &amp; Read</c>); one without Read is revoked. It only ever removes rights, so it needs neither the roots
+        /// nor the No Access list. Nothing is written on any other table. <c>false</c> when a write or the read-back failed.
+        /// </summary>
+        private async Task<bool> NarrowHardDenyToReadAsync(RowRef child, IReadOnlyDictionary<DataversePrincipalRef, int> have)
+        {
+            if (!IsHardDeny(child.Table))
+                return true;
+
+            var revokes = new List<DataversePrincipalRef>();
+            var modifies = new List<(DataversePrincipalRef Principal, int Mask)>();
+            foreach (var (principal, mask) in have)
+            {
+                if ((mask & ~RecordShareLevels.HardDenyChildMirrorableMask) == 0)
+                    continue;
+                var narrowed = mask & RecordShareLevels.HardDenyChildMirrorableMask;
+                if (RecordShareLevels.CanRead(narrowed))
+                    modifies.Add((principal, narrowed));
+                else
+                    revokes.Add(principal);
+            }
+
+            if (revokes.Count == 0 && modifies.Count == 0)
+                return true;
+
+            return await WriteAndReadBackAsync(child, have, revokes, modifies, []).ConfigureAwait(false);
         }
 
         /// <summary>
