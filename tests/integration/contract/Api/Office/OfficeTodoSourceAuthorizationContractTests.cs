@@ -406,8 +406,20 @@ public sealed class TodoSourceAccessTestWebAppFactory : OfficeTestWebAppFactory
     private readonly HashSet<(string EntitySet, Guid Id)> _readable = new();
     private readonly HashSet<(string LogicalName, Guid Id)> _existingRows = new();
 
-    /// <summary>Every <c>IGenericEntityService.CreateAsync</c> call, in order — the proof a row was (not) written.</summary>
-    public List<Entity> CreatedEntities { get; } = new();
+    /// <summary>
+    /// Field mapping task 030a: the To Do is created by <c>RecordCreationService</c> as the caller; this host scripts the caller's
+    /// Dataverse for it and captures its one app-only create (<see cref="OfficeTodoRecordCreationHost"/>).
+    /// </summary>
+    public OfficeTodoRecordCreationHost RecordCreation { get; } = new();
+
+    /// <summary>
+    /// Every created row, in order — the proof a row was (not) written. Since task 030a, the service's app-only create, viewed
+    /// as the SDK entity the old <c>IGenericEntityService.CreateAsync</c> capture held.
+    /// </summary>
+    public IReadOnlyList<Entity> CreatedEntities => RecordCreation.CreatedEntities;
+
+    /// <summary>Every <c>IGenericEntityService.CreateAsync</c> call (none since task 030a).</summary>
+    public List<Entity> GenericCreates { get; } = new();
 
     /// <summary>Every access question the filter asked, in order.</summary>
     public List<(string EntitySet, Guid Id)> Probed { get; } = new();
@@ -453,7 +465,7 @@ public sealed class TodoSourceAccessTestWebAppFactory : OfficeTestWebAppFactory
                 {
                     var id = Guid.NewGuid();
                     entity.Id = id;
-                    CreatedEntities.Add(entity);
+                    GenericCreates.Add(entity);
                     return id;
                 });
             // The APP-ONLY core-ancestor read: a row that exists carries a matter stamp; one that does not
@@ -488,6 +500,9 @@ public sealed class TodoSourceAccessTestWebAppFactory : OfficeTestWebAppFactory
             var probe = new GrantTableProbe(_readable, Probed, this);
             services.RemoveAll<CallerRecordAccessProbe>();
             services.AddSingleton<CallerRecordAccessProbe>(probe);
+
+            // Task 030a: the caller's Dataverse and the service's app-only writer.
+            RecordCreation.Register(services);
         });
     }
 

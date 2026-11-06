@@ -1562,8 +1562,9 @@ public static class OfficeEndpoints
 
         try
         {
-            // The caller's systemuserid — one input to the owner-team resolution (task 080). The To Do is owned by a
-            // business-unit default owner TEAM, never the caller; see OfficeService.ResolveTodoOwnerTeamAsync.
+            // The caller's systemuserid — the input to the To Do's default Assigned To (the caller's linked contact, task 083).
+            // The To Do is owned by a business-unit default owner TEAM, never the caller: the unified create decides it,
+            // record-first (field mapping task 030a; see OfficeService.CreateTodoAsync).
             var ownerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
             var ownerSystemUserId = ownerResolution.IsResolved ? ownerResolution.SystemUserId : null;
 
@@ -1598,6 +1599,16 @@ public static class OfficeEndpoints
             logger.LogWarning(
                 "Create To Do refused: {Code} ({Status}), CorrelationId={CorrelationId}",
                 problem.Code, problem.StatusCode, traceId);
+
+            // Field mapping task 030a: the unified create's refusal of a record the request names (no AppendTo, or not found)
+            // is the route filter's ONE uniform refusal, built by the filter's own builder, so "denied" and "not found" stay
+            // indistinguishable whichever check refused.
+            if (problem.Code == OfficeErrorCodes.AccessDenied
+                && problem.Extensions?.TryGetValue(OfficeService.AssigneeReasonCodeExtension, out var reason) == true
+                && reason is TodoSourceAccessFilter.DeniedReasonCode)
+            {
+                return TodoSourceAccessFilter.Deny(context);
+            }
 
             return Results.Problem(
                 type: OfficeErrorCodes.GetTypeUri(problem.Code),

@@ -105,13 +105,13 @@ public sealed class TodoSourceAccessFilter : IEndpointFilter
     /// The ONE reason code this filter emits, for every refusal. See the class remarks: a reason code that
     /// varied with the record would be the existence oracle rebuilt.
     /// </summary>
-    private const string DeniedReasonCode = "source_record_inaccessible";
+    internal const string DeniedReasonCode = "source_record_inaccessible";
 
     /// <summary>
     /// The ONE detail sentence this filter emits. Names no record, no id and no type, and says the same
     /// thing whether the record is absent, invisible, of an unauthorizable type, or simply not readable.
     /// </summary>
-    private const string DeniedDetail =
+    internal const string DeniedDetail =
         "You do not have permission to create a To Do against one or more of the records it refers to, "
         + "or those records are not available. Open the record you want the To Do filed against and try "
         + "again, or ask its owner to share it with you.";
@@ -355,8 +355,10 @@ public sealed class TodoSourceAccessFilter : IEndpointFilter
     /// <remarks>
     /// Takes no reason and no record: every caller-visible field except <c>correlationId</c> is a constant,
     /// which is what makes "denied" and "not found" indistinguishable rather than merely similar.
+    /// Internal (field mapping task 030a): the route renders the unified create's own refusal of a record the request
+    /// names (no AppendTo, or not found) with this same builder, so the two refusals are one body.
     /// </remarks>
-    private static IResult Deny(HttpContext httpContext)
+    internal static IResult Deny(HttpContext httpContext)
         => Results.Problem(
             statusCode: StatusCodes.Status403Forbidden,
             title: "Forbidden",

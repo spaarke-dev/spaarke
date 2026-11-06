@@ -428,11 +428,29 @@ public class OfficeTodoRegardingContractTests
 /// </summary>
 public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
 {
-    /// <summary>Every <see cref="Entity"/> passed to <c>IGenericEntityService.CreateAsync</c> during this factory's lifetime, in call order.</summary>
-    public List<Entity> CreatedEntities { get; } = new();
+    /// <summary>
+    /// Field mapping task 030a: the To Do is created by <c>RecordCreationService</c> as the caller. This host scripts the
+    /// caller's Dataverse for it and captures its one app-only create (<see cref="OfficeTodoRecordCreationHost"/>).
+    /// </summary>
+    public OfficeTodoRecordCreationHost RecordCreation { get; } = new();
+
+    /// <summary>
+    /// Every created row, in call order, as the SDK entity the old <c>IGenericEntityService.CreateAsync</c> capture held: since
+    /// task 030a, the service's app-only create viewed as that entity (<see cref="RecordCreationWriteCapture"/>).
+    /// </summary>
+    public IReadOnlyList<Entity> CreatedEntities => RecordCreation.CreatedEntities;
+
+    /// <summary>Every <see cref="Entity"/> passed to <c>IGenericEntityService.CreateAsync</c> (none since task 030a).</summary>
+    public List<Entity> GenericCreates { get; } = new();
 
     /// <summary>Task 156: carrier rows (document / communication) by (entity, id) — their root columns.</summary>
     public Dictionary<(string Entity, Guid Id), Entity> CarrierRows { get; } = new();
+
+    /// <summary>
+    /// Task 030a: mapping-source rows (a matter or project the To Do is filed under) by (entity, id), as the app-only read of
+    /// the field-mapping step answers them. Empty by default: the read answers nothing, as before.
+    /// </summary>
+    public Dictionary<(string Entity, Guid Id), Entity> SourceRows { get; } = new();
 
     /// <summary>Task 156: carriers whose read fails.</summary>
     public HashSet<(string Entity, Guid Id)> CarrierFaults { get; } = new();
@@ -511,7 +529,7 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
                 {
                     var id = Guid.NewGuid();
                     entity.Id = id;
-                    CreatedEntities.Add(entity);
+                    GenericCreates.Add(entity);
                     return id;
                 });
             // Deliberate failure seam for the fail-closed stamp test (task 035): Invoice is CHILD-class,
@@ -519,6 +537,14 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
             dataverseMock
                 .Setup(d => d.RetrieveAsync("sprk_invoice", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new InvalidOperationException("Test: simulated core-ancestor read failure for sprk_invoice."));
+            // Task 030a: the field-mapping step's app-only read of the matter or project a To Do is filed under.
+            foreach (var source in new[] { "sprk_matter", "sprk_project" })
+            {
+                dataverseMock
+                    .Setup(d => d.RetrieveAsync(source, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken __) =>
+                        SourceRows.TryGetValue((entity, id), out var row) ? row : null!);
+            }
             // Task 156 (verifier round 1 item 8): a carrier-only To Do is stamped from its carrier, so the carrier is READ.
             // A carrier not seeded in CarrierRows names no root (an empty row); one in CarrierFaults is unreadable.
             foreach (var carrier in new[] { "sprk_document", "sprk_communication" })
@@ -566,6 +592,9 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
 
             // Capture logs in-memory so a test can assert the "no linked contact" warning was actually written.
             services.AddSingleton<ILoggerProvider>(Logs);
+
+            // Task 030a: the caller's Dataverse and the service's app-only writer.
+            RecordCreation.Register(services);
         });
     }
 

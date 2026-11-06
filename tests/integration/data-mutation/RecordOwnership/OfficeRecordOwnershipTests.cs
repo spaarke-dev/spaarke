@@ -226,10 +226,13 @@ public class OfficeRecordOwnershipTests
         asked.TargetEntityLogicalName.Should().Be("sprk_matter");
         asked.TargetRecordId.Should().Be(matterId);
 
-        // c1-r1 (owner round 13 item 9): the Office user who asked is recorded on the app-created To Do.
-        asked.RequestedBy!.ObjectId.Should().Be(SavingUserOid);
+        // c1-r1 (owner round 13 item 9): the Office user who asked is recorded on the app-created To Do. Field mapping task 030a:
+        // the unified create names the person who asked by WhoAmI under their own token (ADR-028), carries their object id as
+        // the caller's, and stamps that systemuser as the creator person (as on the typed routes, task 031).
+        asked.RequestedBy!.SystemUserId.Should().Be(OfficeTodoRecordCreationHost.Caller);
+        asked.CallerObjectId.Should().Be(SavingUserOid);
         todo.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id
-            .Should().Be(RecordOwnershipResolverDouble.DefaultRequesterPersonId);
+            .Should().Be(OfficeTodoRecordCreationHost.Caller);
     }
 
     [Fact]

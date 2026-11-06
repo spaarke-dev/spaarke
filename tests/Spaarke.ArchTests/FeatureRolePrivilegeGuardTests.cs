@@ -85,8 +85,11 @@ public class FeatureRolePrivilegeGuardTests
     private const string QuickCreateSource = Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:246-260; " + Bff + "Api/Filters/EntityAccessFilter.cs:115-155";
 
     /// <summary>A project created from a matter or project is filed under it: the ADR-024 pair names it, and AppendTo is asked on it.</summary>
-    private const string QuickCreateFiledUnder = Bff + "Services/Office/OfficeService.cs:2402-2419,2633-2638; "
+    private const string QuickCreateFiledUnder = Bff + "Services/Office/OfficeService.cs:2396-2413,2627-2632; "
         + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:115-131";
+
+    /// <summary>The Office To Do's payload (task 030a): the record regarding, its record type, the carriers and the Assigned To contact.</summary>
+    private const string OfficeTodoCreate = Bff + "Services/Office/OfficeService.cs:2925-2963,2976-2990; ";
 
     /// <summary>The Office "Save as version" offer needs Read on the colliding document, asked of the caller.</summary>
     private const string VersionOfferRead = Bff + "Api/Office/OfficeEndpoints.cs:547-605";
@@ -230,20 +233,20 @@ public class FeatureRolePrivilegeGuardTests
         // Office quick create (POST /api/office/quickcreate/{entityType}): Create in the filter; Matter and Project through the service.
         .. For("Office quick create", [Core], "Basic", Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:100-117; " + Bff + "Api/Filters/FinanceAuthorizationFilter.cs:335",
             "prvCreatesprk_Matter", "prvCreatesprk_Project", "prvCreatesprk_Invoice"),
-        .. For("Office quick create", [Core], "Basic", Bff + "Services/Office/OfficeService.cs:2428-2445",
+        .. For("Office quick create", [Core], "Basic", Bff + "Services/Office/OfficeService.cs:2422-2439",
             "prvAppendsprk_Matter", "prvAppendsprk_Project"),
-        .. For("Office quick create", [Core], "Deep", Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:310-345; " + Bff + "Services/Office/OfficeService.cs:2437-2455",
+        .. For("Office quick create", [Core], "Deep", Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:310-345; " + Bff + "Services/Office/OfficeService.cs:2431-2449",
             "prvReadContact", "prvAppendToContact"),
-        .. For("Office quick create", [Core], "Basic", Bff + "Services/Office/OfficeService.cs:2408-2419", "prvAppendTosprk_RecordType_Ref"),
+        .. For("Office quick create", [Core], "Basic", Bff + "Services/Office/OfficeService.cs:2402-2413", "prvAppendTosprk_RecordType_Ref"),
         .. For("Office quick create (Office Add In User)", [Basic, Office], "Basic",
             Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:100-117; " + Bff + "Api/Filters/FinanceAuthorizationFilter.cs:335",
             "prvCreatesprk_Matter", "prvCreatesprk_Project", "prvCreatesprk_Invoice"),
-        .. For("Office quick create (Office Add In User)", [Basic, Office], "Basic", Bff + "Services/Office/OfficeService.cs:2428-2445",
+        .. For("Office quick create (Office Add In User)", [Basic, Office], "Basic", Bff + "Services/Office/OfficeService.cs:2422-2439",
             "prvAppendsprk_Matter", "prvAppendsprk_Project"),
         .. For("Office quick create (Office Add In User)", [Basic, Office], "Deep",
-            Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:310-345; " + Bff + "Services/Office/OfficeService.cs:2437-2455",
+            Bff + "Api/Filters/QuickCreateSourceAccessFilter.cs:310-345; " + Bff + "Services/Office/OfficeService.cs:2431-2449",
             "prvReadContact", "prvAppendToContact"),
-        .. For("Office quick create (Office Add In User)", [Basic, Office], "Basic", Bff + "Services/Office/OfficeService.cs:2408-2419",
+        .. For("Office quick create (Office Add In User)", [Basic, Office], "Basic", Bff + "Services/Office/OfficeService.cs:2402-2413",
             "prvAppendTosprk_RecordType_Ref"),
         // Read on the named source (fix round 1; contact is the assignee row above), and AppendTo on the matter or project a new
         // project is filed under.
@@ -258,6 +261,16 @@ public class FeatureRolePrivilegeGuardTests
         .. For("Office To Do", [Core], "Basic", Bff + "Api/Filters/TodoSourceAccessFilter.cs:221-259", "prvCreatesprk_Todo"),
         .. For("Office To Do", [Core], "Deep", Bff + "Api/Filters/TodoSourceAccessFilter.cs:99,202-212",
             "prvReadsprk_Matter", "prvReadsprk_Project", "prvReadsprk_Invoice", "prvReadsprk_Document", "prvReadsprk_Communication", "prvReadContact"),
+        // Field mapping task 030a: the row is created through RecordCreationService as the caller, which asks Append on the To Do and
+        // AppendTo on every record its lookups name (the record regarding, the document and email carriers, the Assigned To contact)
+        // and on the record type it is stamped with (organization-owned: any depth).
+        .. For("Office To Do", [Core], "Basic", OfficeTodoCreate + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:95-112",
+            "prvAppendsprk_Todo"),
+        .. For("Office To Do", [Core], "Deep", OfficeTodoCreate + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:160-175",
+            "prvAppendTosprk_Matter", "prvAppendTosprk_Project", "prvAppendTosprk_Invoice", "prvAppendTosprk_Document",
+            "prvAppendTosprk_Communication", "prvAppendToContact"),
+        .. For("Office To Do", [Core], "Basic", OfficeTodoCreate + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:494-500",
+            "prvAppendTosprk_RecordType_Ref"),
 
         // Communication send / reply (POST /api/communications/send and /send-bulk, fix round 3): the route filter asks AppendTo, as the
         // caller, on every association and on every regarding record copied from the email being replied to (RegardingFieldMap.All, all

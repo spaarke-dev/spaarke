@@ -229,9 +229,8 @@ public class RecordOwnerAssignmentCensusTests
             + "refusal creates nothing and is logged (email capture never fails on it)."),
         new CensusEntry("DocumentCheckoutService.cs", "sprk_fileversion", 1, Disposition.Routed,
             "A file version is content of its document (ContentOf); a refusal is a 409 and nothing is written."),
-        new CensusEntry("OfficeService.cs", "sprk_todo", 1, Disposition.Routed,
-            "Office to-do: ForChild over the record regarding, its core-ancestor stamps and the document / email "
-            + "carriers (secure-if-any, task 146); unfiled → the acting user's team."),
+        // Field-mapping-server-write-path-r1 task 030a: POST /api/office/todo creates its sprk_todo through RecordCreationService
+        // (the unified create decides the owner from the record regarding and the carriers), so OfficeService.cs's entry is gone.
         new CensusEntry("TodoGenerationService.cs", "sprk_todo", 1, Disposition.Routed,
             "Generated to-dos are owned from their source event (ownershipSource); a refusal counts the rule failed."),
 
@@ -598,8 +597,8 @@ public class RecordOwnerAssignmentCensusTests
             "Owned from the inherited filing links or the caller."),
         new OwnerWriteEntry("OfficeService.cs", "QuickCreateAsync", 1, OwnerWriteKind.Routed,
             "Office invoice quick-create — the resolver's team (task 080)."),
-        new OwnerWriteEntry("OfficeService.cs", "CreateTodoAsync", 1, OwnerWriteKind.Routed,
-            "Office to-do — secure-if-any over regarding, stamps and carriers."),
+        // (OfficeService.cs.CreateTodoAsync writes no owner since field-mapping task 030a: RecordCreationService.cs's
+        // OwnedCreateFields, below, writes the Office To Do's.)
         new OwnerWriteEntry("EmailUploadCaptureService.cs", "CaptureWithOutcomeAsync", 1, OwnerWriteKind.Routed, // word-add-in-r1 task 121: the body moved (CaptureAsync wraps it)
             "Upload capture — the team the evaluated filing resolved."),
         new OwnerWriteEntry("IncomingCommunicationProcessor.cs", "CreateCommunicationRecordAsync", 1, OwnerWriteKind.Routed,
@@ -2632,7 +2631,8 @@ public class RecordOwnerAssignmentCensusTests
         // in-process save, IOfficeSubmissionEmailSave); SaveAsync is now a one-line delegation.
         new PersonBearingWriter("OfficeService.cs", "SaveCoreAsync", "the Office user saving a document (carried to the worker)"),
         new PersonBearingWriter("OfficeService.cs", "QuickCreateAsync", "the Office user quick-creating an invoice"),
-        new PersonBearingWriter("OfficeService.cs", "ResolveTodoOwnerTeamAsync", "the Office user creating a To Do"),
+        // (OfficeService.ResolveTodoOwnerTeamAsync was deleted by field-mapping task 030a: the Office To Do is created through
+        // RecordCreationService, whose DecideOwnerAsync names the caller via WhoAmI.)
         new PersonBearingWriter("OfficeDocumentPersistence.cs", "CreateDocumentWithSpePointersAsync", "the saving user, on the document"),
         new PersonBearingWriter("OfficeJobQueue.cs", "QueueUploadFinalizationAsync", "carries the saving user to the worker"),
         new PersonBearingWriter("UploadFinalizationWorker.cs", "CreateDocumentRecordAsync", "the carried saving user"),
