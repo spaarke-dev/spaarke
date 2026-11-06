@@ -771,3 +771,11 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Ontology scope (two tasks):**
   1. **BFF:** (a) `POST /api/v1/signals/{id}/decision` refuses a Signal whose subject is `sprk_invoice` or `sprk_billingevent` with one distinct code before any read-for-write or write (replaces today's 403 `SubjectWriteMissing` for these); (b) `GET /api/v1/signals/worklist` adds an `invoiceReview` member (`invoiceId`, optional `lineId`) to billing items, a line resolved to its parent invoice in one batched read; nothing else changes for other items.
   2. **Console (shared Worklist + host):** the Decide lane's cards gain **Invoice decisions** (items with `invoiceReview`), after All; the work-type buckets exclude those items so the counts still sum (W-8). Activating such an item opens `sprk_invoicereviewpage` as a dialog (`Xrm.Navigation.navigateTo`, `data=invoiceId%3D…%26lineId%3D…`) and refreshes on close; it never opens the Decision wizard. Reuse `MetricCard`/`MetricCardRow` and the existing lane filter (D-24); no new card component. Ships after ebilling deploys the page to dev (ebilling 112); 1(a) can ship before.
+
+## D-208 — "Finding" is the user word for a billing Work Item (owner, 2026-11-06)
+
+- **Owner (this session, 2026-11-06):** "yes 'Finding' is acceptable", answering whether ebilling's word may name a billing Work Item for users.
+- **Meaning:** a **Finding** is a Work Item produced by an invoice review about an invoice or an invoice line (subject `sprk_invoice` / `sprk_billingevent`). It is a qualified name, not a new layer: still one Work Item per open Signal, decided only in Invoice Review (D-207), and its decision writes a Decision Record.
+- **Where:** Invoice Review, billing contexts in the Console (the Invoice decisions card keeps its owner-chosen label) and Copilot's billing link-outs. Everywhere else, and generically, the row is a **Work Item**.
+- **Not:** an entity or code name (same rule as Work Item, §3.1). The pipeline's stored results (`pipelineFindings`, `sprk_findingsjson`) are the engineering source of a Finding.
+- **Recorded in** `ontology-component-model.md` §3. Told ebilling and spaarkeai-mcp-bff-api-r1.
