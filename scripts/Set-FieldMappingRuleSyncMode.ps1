@@ -13,12 +13,13 @@
       CLASS          RULE'S TARGET COLUMN                                            VALUE
       Assigned-To    an access-conferring Assigned-To column of its target table      0  One-time
                      (the BFF's MembershipOptionsDefaults.CanonicalAccessConferringRegistry)
-      Filing         a filing column of its target table - a typed filing lookup,     0  One-time ("never re-pushable")
+      Filing         a filing column of its target table - a typed filing lookup,     0  One-time (not re-pushed)
                      the regarding pair or a regarding stamp (RecordFamilyEdges)
       Plain data     anything else                                                     1  Manual Refresh
 
-    An Assigned-To rule is applied by a push only on a request that opts in (includeAssignedTo), whatever its value; a filing
-    rule is never applied by a push. Their value stays 0 so no ordinary refresh can re-file or re-assign a record.
+    An Assigned-To rule is applied by a push only on a request that opts in (includeAssignedTo), whatever its value. A filing
+    rule is applied by a push only while its value is 1 (the push then re-files the child through its re-file path); this
+    script keeps it at 0, so an ordinary refresh does not re-file a record. Both classes stay 0.
 
     The two class tables below are COPIES of the BFF's registries (a script cannot read them); the tests in
     SyncModeMigrationClassDataTests hold each copy to its source, so a column added to the registry or to a family edge fails a

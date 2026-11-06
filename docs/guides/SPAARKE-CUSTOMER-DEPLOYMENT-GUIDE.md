@@ -2243,7 +2243,7 @@ still carries `IntroducedVersion` `1.0.0.0` on the new components.
 **Who is affected.** Every environment that already has field-mapping rules. The field-mapping push
 (`POST /api/v1/field-mappings/push`) applies only **Copy** rules whose Sync Mode is **Manual Refresh**. Rules authored before this
 change hold **One-time** or an empty value, so after the upgrade a push would apply none of them. A new environment is seeded
-correctly (the attorney-matrix profiles are Assigned-To rules and are seeded explicitly at One-time); only rules that existed
+correctly (each seeded rule is written with its class value, see below); only rules that existed
 before the upgrade need this step.
 
 **The value depends on the rule's class** (the script reads the rule's target table and column):
@@ -2251,11 +2251,19 @@ before the upgrade need this step.
 | Class | Rule's target column | Sync Mode |
 |---|---|---|
 | Assigned-To | an access-conferring Assigned-To column of the target table | One-time (0) |
-| Filing | a filing column of the target table (typed filing lookup, regarding pair, regarding stamp) | One-time (0), never re-pushable |
+| Filing | a filing column of the target table (typed filing lookup, regarding pair, regarding stamp) | One-time (0): not re-pushed while it stays 0 |
 | Plain data | anything else | Manual Refresh (1) |
 
 An Assigned-To rule is applied by a push only on a request that opts in (`includeAssignedTo`, which also needs Write on the source
-record), whatever its Sync Mode. Default, Concat and Template rules are never written.
+record), whatever its Sync Mode. "Assigned-To" means exactly the columns the BFF's access registry lists for the target table
+(`Membership:AccessConferringRoles`, seeded from `MembershipOptionsDefaults.CanonicalAccessConferringRegistry`): matter, project,
+work assignment, event, invoice, to-do and analysis. The push, this script and the provisioning seeder all classify from that one
+registry. A filing rule is applied by a push only while its Sync Mode is Manual Refresh (it then re-files the child); the script
+keeps it at One-time. Default, Concat and Template rules are never written.
+
+A newly provisioned environment's attorney-matrix rules are seeded at their class value: Matter → Event and Matter → Invoice
+target Assigned-To columns (One-time); Matter → Report Card targets columns the registry does not list, so they are plain data
+(Manual Refresh).
 
 1. **Dry run first (read-only).** `scripts/Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl <url>` lists each rule that would
    change (class, current value, new value) and the totals. It writes nothing.

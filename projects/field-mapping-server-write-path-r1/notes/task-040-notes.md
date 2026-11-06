@@ -15,8 +15,8 @@
   access columns stays in the per-rule loop; `ApplyMappingRule` does not know about it (test below).
 - Per-child failure text is fixed (`ChildUpdateFailedMessage`, `RuleFailedMessage`, and the re-file refusal carries its code only);
   the detail goes to the log with a correlation id (#1437, ADR-019).
-- FR-34 members: `preview`, `includeAssignedTo`, `childIds`, `kind` (request); `preview`, `changes`, `skippedNoWriteCount`,
-  `truncated`, `skippedRuleCount` (response). See the design in `docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md`.
+- FR-34 members: `preview`, `includeAssignedTo`, `childIds` (request; `kind` was removed in fix round 1); `preview`, `changes`,
+  `skippedNoWriteCount`, `truncated`, `skippedRuleCount`, `refusedChildIds` (response). See the design in `docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md`.
 - DI-002: `AuthorizePushSourceAsync` asks the shared `MappingSourceReadProbe.CheckCallerReadOfSourceAsync` (the
   `AuthorizationGateTimingTests` push case stays green).
 - `RecordFamilyReader.ReadChildrenAsync` / `HasListedEdge` (one level, caller-scoped, primary-parent rule, DetailTables skipped).
@@ -47,6 +47,7 @@ and applies only on the confirm button, with `childIds` = exactly the previewed 
    (the attorney matrix), and a push applies an Assigned-To rule only on an opt-in request whatever its Sync Mode, so the seeder
    writes `sprk_syncmode = 0` explicitly (never the column default). A seeded rule of another class would take 1: the constant
    and the test are marked for that. If the owner wants 1 anyway it is a one-line change plus the test.
+   **Superseded by fix round 1 (below):** with the one classifier, the report-card rules are plain data and seed 1.
 4. **The #2188 caller-mask guard.** `ApplyCopyOverwrite` is a second engine entry that takes a source, which that guard forbids
    by design. The guard now scans `ApplyCopyOverwrite` as an engine call, pins it as internal, and lists the push's one call
    site (`FieldMappingEndpoints.ApplyMappingRule`) as a ratcheted, reasoned exemption: the push reads its source AS THE CALLER
@@ -124,8 +125,58 @@ never applies an Assigned-To rule whatever its value. The owner reviews this bef
 - `sprk_fieldmapping_push.js` (the ribbon script) is not changed here; it is 075's.
 - The class tables in the script are copies; `SyncModeMigrationClassDataTests` fail the build when they drift.
 
+## Fix round 1 (review of `6e7ac9cae4`), branch `task/fm-040-fix`
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 | One Assigned-To classifier | Fixed. `PushRuleSelection.AssignedToColumnsOf(registry)` is the one classifier: a (table, column) listed in the BOUND registry (`MembershipOptions.AccessConferringRoles`), any table; an empty registry reads as the canonical one. The endpoint takes `IOptions<MembershipOptions>` and builds it once per request. The script's table (`SyncModeMigrationClassDataTests`, now derived from the bound registry and cross-checked against the classifier both ways) and the seeder (new ArchTest `FieldMappingSeederSyncModeClassTests`, which asks the classifier about every seeded rule) are pinned to it. Docs name the one source. |
+| 1 | Seeded sync modes | Matter → Event and Matter → Invoice: 0 (One-time; every target is a registry column, so a push applies them only with `includeAssignedTo`). Matter → Report Card: 1 (Manual Refresh; the registry lists no `sprk_reportcard` column, so these rules are plain data and an ordinary push refreshes them). **Owner / UAC-r2 to confirm** the report-card class (it follows from the registry as it stands). |
+| 2 | A faulting rule leaves a log trace | Fixed. `ApplyMappingRule` takes the push's logger; the engine runs inside a correlation-id scope and reports the columns whose rule threw (`ApplyCopyOverwrite`'s new `faultedColumns`); an engine fault is an Error (`RuleFailedMessage`), never a Skipped; the method's own catch logs the exception with a correlation id. The preview passes the logger too. |
+| 3 | Re-file refusals return codes only | Fixed. The root-filing refusal and the reparent refusal return `RefileRefusedMessage(code)` (the same sentence as the owner-unresolved catch); the reason is logged with a correlation id. |
+| 4 | Preview reports refused ticked rows; 409 per table | Fixed. The preview returns `refusedChildIds`; the panel says how many ticked records cannot be updated instead of "already have the current values". A 409 (no Filing edge) for one table is reported for that table (thrown `ApiError` or returned status) and the other tables still preview and apply. |
+| 5 | Partial multi-table apply | Fixed. Each table is applied on its own; the outcome names the tables updated and not completed; `onApplied` gets what was written plus `failedTables`. When every table fails, the one fixed text is shown and `onApplied` is not called. |
+| 6 | Tests prove the real classifier | Fixed. `PushHost` registers the real options post-configure, the real family reader and the real participation service (its Dataverse refuses, so flags read unreadable). Event and root (project under the matter) cases, each with and without the opt-in. The opt-in test now uses a One-time Assigned-To rule, so it fails if the opt-in does nothing. The existing invoice attorney-lookup contract test now opts in (its attorney column is an invoice registry column). |
+| 7 | The faulting-rule test | Fixed. A source value whose text form throws faults inside the engine; a rule with no source field throws in the push's own gates; a third test drives the per-child loop. |
+| 8 | Missing tests | Added: apply-side Secure child gets a suggestion (pending confirmation), no grant (`AssignedAccessWriterTriggerTests`); a money-target parity case (`moneyAttributes` on the create side). |
+| 9 | Fail-closed services | Fixed. `RecordFamilyReader`, `ExternalParticipationService` and `IOptions<MembershipOptions>` are required parameters; the test hosts register them. |
+| 10 | Panel effect dependency | Fixed. The preview effect depends on `source.table` / `source.id`. |
+| 11 | Filing wording | Wording corrected (chosen over a server skip): the push applies a filing rule only while its Sync Mode is Manual Refresh, and then re-files the child through the kept re-file path (`ReparentAsync`, `AfterRefileAsync`); the script keeps filing rules at One-time. A server skip would make the kept re-file path unreachable and change the re-file contract tests the POML requires unchanged. Script header, deployment guide, scripts README and framework doc updated. |
+| 12 | Scope cut | `kind` removed from the request, the validation and the client; `IsSupportedKind` / `FilingKindName` removed; the dead `Truncated && !Preview && ChildIds is null` branch removed. The two kind contract tests were deleted with the member. |
+| K2 #10 | Guard wrapper (#2188) | Not done. A type only the caller-read can construct would change `ApplyMappingRule` and `ApplyMappingsToChildRecordsAsync`, whose 16 test files build raw dictionaries, including `DocumentAccessPermissionPushTargetTests`, which must stay unchanged. Per UAC-r2 it is not a precondition of the guard sign-off; listed below as a known limit. |
+
+Tests that failed first (old code copied back, then restored):
+- Client: 8 of 20 in `RecordFamilyActionPanel.test.tsx` failed against the old panel and service (the 5 new tests, the kind-free
+  request, the `onApplied` shape and the service's kind-free body); all 20 pass now.
+- Server, against the old endpoint, family, selection, DTOs and engine (the new contract tests compile against it): 4 failed —
+  the event case and the root case of the classifier tests (`includeAssignedTo: false`; the old classifier answered for three
+  tables and was optional in the host), the reworked opt-in test (One-time rule, so only a working opt-in writes it), and the
+  preview's `refusedChildIds`. The "with opt-in" twins and the invoice attorney
+  test pass on both (they are controls).
+- Server, compile-level only (they call members the old code does not have): the classifier unit tests, the script/classifier
+  cross-check, the three fault tests (`logger:`), the seeder test and the seeder ArchTest (`RuleSyncMode`). Against the old
+  behaviour an engine fault was a Skipped field result with no log entry.
+- Passed on the old code too (missing coverage of existing behaviour, not a behaviour change): the apply-side Secure suggestion
+  test and the money-target parity case.
+
+Final counts, fix round 1:
+- `Sprk.Bff.Api.Tests`, filtered on the push, family, classifier, parity, sync-mode class, Assigned-To trigger and materializer,
+  re-file, invoice-family, search-index, secure-root, access-writer, create-time, membership-options, family-reader and
+  gate-timing classes (never the whole project): 2275 passed, 0 failed.
+- `Spaarke.ArchTests` (whole project): 1977 passed, 0 failed (1974 + the three seeder-class tests).
+- `Sprk.Provisioning.ControlPlane.Tests` seeder class: 9 passed.
+- `Spaarke.UI.Components` `src/components/RecordFamilyModal`: 2 suites, 46 passed. ESLint clean, prettier applied, `tsc` reports no
+  error in these files.
+- `Set-FieldMappingRuleSyncMode.ps1 -SelfTest`: PASS. There is no Pester file for this script; its offline check is `-SelfTest`.
+
+Known limits added in fix round 1 (left as is):
+- Two child-discovery paths: an ordinary request still uses the parent-lookup discovery (#12, decision 1).
+- The preview does not model every apply refusal (root filing, invoice family, re-file); those surface per record on apply (#14).
+- The 500-child cap's refusal text (#13, second half) is unchanged.
+- The correlation id is logged, not returned in the response (#16).
+- The guard wrapper type for the caller-read source values is not added (K2 #10, above).
+
 ## Defects found
 
 - None outstanding from this task. The two wall-clock sensitive tests above and the ArchTest guards are reported, not changed.
 
-rework: 3 (the three ArchTests guards fixed after the first full run)
+rework: 3 (the three ArchTests guards fixed after the first full run); fix round 1: 1
