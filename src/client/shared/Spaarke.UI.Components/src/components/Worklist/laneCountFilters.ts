@@ -6,6 +6,10 @@
  * type cards sum to the lane total. An item whose work type is missing or does not belong to its lane is counted in a
  * trailing "Other" card instead of being dropped, so the sum holds on bad data too (Missing-never-blank).
  *
+ * The Decide lane also has an "Invoice decisions" card right after All (task 175, D-207): the billing items (those with
+ * `invoiceReview`), which are decided in the Invoice Review page, not by work type. The work-type cards and Other EXCLUDE them,
+ * so the non-All cards still partition the lane. Like Other it is shown only while it holds an item. The Do lane is unchanged.
+ *
  * The cards are LENSES ON MEMBERSHIP, not queues (FR-34): choosing one narrows the list the host already shows
  * (`filterLaneItems`); it never opens another list. Choosing the selected card again returns to All. A type whose count
  * falls to 0 is disabled by the card, and a selection that points at it resolves back to All (`resolveLaneFilterKey`),
@@ -18,10 +22,14 @@
 
 import { daysBetweenLocalMidnight, parseDueDate } from '../../utils/dateLocal';
 import type { MetricCardConfig } from '../WorkspaceShell/types';
+import { hasInvoiceReview } from './types';
 import type { WorkType, WorklistItem, WorklistLane } from './types';
 
-/** `all` (the whole lane), a work type, or `other` (items with no valid work type for the lane). */
-export type LaneFilterKey = 'all' | 'other' | WorkType;
+/**
+ * `all` (the whole lane), `invoiceDecisions` (Decide only: billing items, which are decided in Invoice Review - D-207), a work
+ * type, or `other` (items with no valid work type for the lane).
+ */
+export type LaneFilterKey = 'all' | 'invoiceDecisions' | 'other' | WorkType;
 
 /** The work types of each lane and their labels, in display order (`sprk_policy.sprk_worktype`, task 007). */
 export const LANE_WORK_TYPES: Readonly<Record<WorklistLane, ReadonlyArray<{ key: WorkType; label: string }>>> = {
@@ -49,18 +57,22 @@ function laneItems(items: readonly WorklistItem[], lane: WorklistLane): Worklist
 }
 
 /**
- * The lane's filters: `all` first, then one per work type of the lane, then `other` only when something is in it. The
- * non-`all` buckets partition the lane, so their counts sum to the `all` count.
+ * The lane's filters: `all` first, then (Decide only) `invoiceDecisions` when something is in it, then one per work type of the
+ * lane, then `other` only when something is in it. The non-`all` buckets partition the lane, so their counts sum to the `all` count.
  */
 export function bucketLaneItems(items: readonly WorklistItem[], lane: WorklistLane): LaneCountBucket[] {
   const inLane = laneItems(items, lane);
   const types = LANE_WORK_TYPES[lane];
   const typeKeys = new Set<string>(types.map(t => t.key));
   const buckets: LaneCountBucket[] = [{ key: 'all', label: 'All', items: inLane }];
+  // Billing items (D-207) leave the work-type cards and Other for their own card, in the Decide lane only.
+  const billing = lane === 'Decide' ? inLane.filter(hasInvoiceReview) : [];
+  const rest = lane === 'Decide' ? inLane.filter(i => !hasInvoiceReview(i)) : inLane;
+  if (billing.length > 0) buckets.push({ key: 'invoiceDecisions', label: 'Invoice decisions', items: billing });
   for (const t of types) {
-    buckets.push({ key: t.key, label: t.label, items: inLane.filter(i => i.workType === t.key) });
+    buckets.push({ key: t.key, label: t.label, items: rest.filter(i => i.workType === t.key) });
   }
-  const other = inLane.filter(i => !i.workType || !typeKeys.has(i.workType));
+  const other = rest.filter(i => !i.workType || !typeKeys.has(i.workType));
   if (other.length > 0) buckets.push({ key: 'other', label: 'Other', items: other });
   return buckets;
 }

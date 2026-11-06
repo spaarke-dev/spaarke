@@ -12,6 +12,10 @@
  *   - `aggregateRow` - task 054's email reconciliation card, whose "Open Email Review" opens the Reconciliation tab through the pane
  *                      event bus (no-op in a bus-less host).
  *
+ *   - `openInvoiceReview` - billing Work Items are decided only in the eBilling Invoice Review page (D-207, task 175): the shared opener
+ *                      shows it as a dialog (`Xrm.Navigation.navigateTo`) and the widget reads the lists again when it closes. Without Xrm
+ *                      it rejects and the widget says "Invoice Review could not be opened"; it never opens the wizard for a billing item.
+ *
  * The narrative slot is not filled here either: the shared widget asks `service.narrate` for the Assistant's summary of the list's counts
  * (task 062), shows it while no filter is on, and a host-supplied `narrative` would win. This host supplies none.
  * The decision wizard itself is already mounted by the Console shell (`DecisionWizardHost` in `ThreePaneShell`, task 058), so there is
@@ -28,6 +32,7 @@ import {
   createWorklistService,
   createXrmNavigationService,
   getXrm,
+  openInvoiceReview,
 } from '@spaarke/ui-components';
 import { useOptionalDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
 import { useAiSession } from '../../providers/useAiSession';
@@ -97,6 +102,7 @@ export const WorklistWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
         lookup={lookup}
         openLookup={openLookup}
         openRecord={openRecord}
+        openInvoiceReview={openInvoiceReview}
         aggregateRow={aggregateRow}
       />
     </div>
