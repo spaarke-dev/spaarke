@@ -9,33 +9,23 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Pre-pipeline: gather the full context so `/project-pipeline` can produce a **complete** plan |
-| **Step** | 2 of 4: read the held ontology PRs #2580 / #2579 and every other open PR touching our files |
-| **Status** | in-progress |
-| **Next Action** | Finish the open-PR sweep (the last command timed out). Run `gh pr diff 2580` and `gh pr diff 2579`, and record what they change in our files in `notes/pre-pipeline-context.md`. Then propose to the owner how the plan covers B-1/B-2/B-5 without waiting (plan against #2580's code), and run `/project-pipeline` only after the owner agrees. |
-
-### Files Modified This Session
-- All committed and pushed. Branch `work/spaarkeai-mcp-bff-api-r1` = origin (merge `619712f997`, master merged 2026-11-06, clean). Draft PR #2587.
+| **Task** | Pre-pipeline context gathering: done |
+| **Step** | 4 of 4: ready for `/project-pipeline` |
+| **Status** | ready (owner to say go) |
+| **Next Action** | Run `/project-pipeline projects/spaarkeai-mcp-bff-api-r1`. The plan covers ALL work (B-1..B-10, FR-01..FR-19) against the merged #2580/#2579 code; nothing is deferred. Phase 0 tasks use a master-based spike branch (see directives). |
 
 ### Critical Context
-- Owner directive (2026-11-06): "we do not want to put together a partial plan that awaits other project merges". The plan must cover every task with the code context in hand.
-- Ontology asked that B-1, B-2 and B-5 build on PR #2580 (task/174-billing-refusal, 5 commits ahead, 708 behind master; it changes `DecisionCommitService.cs` +34, `SignalReadService.cs` +121, `EarlierInvoiceReadability.cs`, `DecisionCommitEndpoints.cs`, plus tests). PR #2579 (task/175-invoice-decisions-card, client: Worklist types, laneCountFilters, decisionDisplay, worklistWizardItem, worklistService) is held with it until ebilling task 112 puts Invoice Review on dev.
-- Ontology said: "after #2580 is on master (**or branch from its head**)". So the plan can be written against #2580's code now.
+- Owner chose (2026-11-06) to merge the held ontology PRs into this branch: #2580 `9423f37004` (merge `489f6508fc`) and #2579 `ab04492ab7` (merge `026b61554a`). The BFF builds with 0 warnings and 0 errors. Facts about their code: `notes/pre-pipeline-context.md`.
+- **STANDING (ontology condition):**
+  - NO dev BFF deploy from this branch until ontology's #2580/#2579 pair has deployed (it waits for ebilling task 112).
+  - Phase 0 live tests run from a separate spike branch cut from master. Deploys only with the owner's per-SHA go in uac-r2's session.
+  - Our master PR merges after their pair. Re-merge if their branches move (they merge, never rebase).
+- The D-207 order and replay guard are unchanged. The MCP commit goes only through `DecisionCommitService`.
 
 ---
 
-## Active Task / Lanes
-- Pre-pipeline context gathering (above). `spec.md` is final; `design.md` is approved (O-1 to O-26).
-
-## Next Actions
-1. Re-run the open-PR sweep, without the files filter if it is slow: `gh pr list --state open --limit 80 --json number,title,headRefName`, then `gh pr view N --json files` for the candidates touching `Services/Signals/`, `Api/Signals/`, `Components/Worklist/`, `DecisionWizard/`, `DataverseUserClient`, `CallerResolution`, `AuthorizationModule`, `EndpointMappingExtensions`, `RouteAuthorizationGuard` or `Sprk.Bff.Api.csproj`.
-2. Read the #2580 and #2579 diffs. Record the post-merge shape of each file we touch (signatures, new members such as `invoiceReview`, the new 409 reason code) in `notes/pre-pipeline-context.md`.
-3. Gather the other background the pipeline needs: `knowledge/mcp-apps`, the researcher notes (`.claude/agent-memory/researcher/*2026-11-05*`), ModelContextProtocol.AspNetCore 2.3.1 API surface (researcher if needed), and the widget samples.
-4. Present the "complete plan" approach to the owner, then run `/project-pipeline projects/spaarkeai-mcp-bff-api-r1`.
-
 ## Open Owner Questions / Blockers
-- **Billing review in Copilot** (next slice) vs EB-D-194. It does not block v1.
-- The approach for B-1, B-2 and B-5 relative to the held #2580: plan against its code now, and decide how execution handles the merge order.
+- Billing review in Copilot (next slice) vs EB-D-194. It does not block v1.
 
 ## Where the standing decisions live
 - Owner decisions: `design.md` §0 (O-1 to O-26). Naming and cross-project agreements: `notes/coordination/2026-11-06-copilot-naming-and-ownership.md`.
