@@ -1,30 +1,20 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-11-06 ~08:10Z (main session checkpoint). Recovery: read Quick Recovery first.
-> **Done on master**: 001–006, 010–016, 017, 018, 037, 039, 038, 070–074, 043 + 046 (#2573), 048, 042c, 046b (#2592, c5aa7ab6cd).
-> **Live on dev:** BFF master 0f53e053bf (042c + 048). 046b additions and R1 applied by UAC-r2, VERIFY PASS. G-8 ON on dev since 2026-11-06 04:02Z.
-> **Next dev deploy:** combined deploy of master with 049 (after #2599 merges): BFF first, then Spaarke.UI.Components → LegalWorkspace, SpaarkeAi, AI.Widgets (CreateProjectWizard optional). UAC-r2 puts it to the owner in its session.
+> **Last updated**: 2026-11-06 ~19:30Z (main session checkpoint). Recovery: read Quick Recovery first.
+> **Done on master**: 001–006, 010–018, 037–039, 042c, 043, 046, 046b (#2592), 048, 049 (#2599, 20669df6a9), 070–074.
+> **Live on dev:** BFF + Console bundle at master 20669df6a9 (deployed by UAC-r2 16:44Z, gate PASS; no organic traffic on the new routes yet). 046b roles applied. G-8 on. Core User given to 5 add-on users (17:30Z). Console User removed from root team "Spaarke" (18:11Z).
+> **W3 direction (owner + UAC-r2, decisions.md 5e4f4be3aa):** named exceptions plus guards; no core redesign in R1; no given-id input in RecordCreationService.
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active** | uac-r2: `spaarke-wt-unified-access-control-r2-20`; ontology: `spaarke-wt-spaarke-ontology-platform-r1-38`; ebilling: `spaarke-wt-ebilling-r1-c7`.
-- **049 → PR #2599** (work branch head dc08e14990 = master b6dee2e590 + 049 squashed e8da405eb0), auto-merge on with --match-head-commit. UAC-r2 approved e8da405eb0. Verified: build 0 warnings, ArchTests 1973/1973, verify-suites 6968/0/7, client tsc 0, publish delta +19,759 B (39.23 MB), no CVE. Do NOT commit to the work branch until #2599 merges (this checkpoint is uncommitted on purpose).
-- **History cleanup done** (owner go 2026-11-06): task/fm-049b squashed and force-pushed; remote task/fm-049c deleted. No remote branch holds the old commits.
-- **Flaky client test** OntologyAdmin Rules "Retire" filed #2597 (not ours).
-- **046c** (Basic User read-only on sprk_*): next task; POML has uac-r2's pre-apply evidence, rollback and window conditions.
-- **021**: wizard deploy waits on 049's dev deploy + re-measure (task/fm-021 d6dc73e9f6).
-- **033 must be re-scoped before it runs** (D-204).
-- **Private:** uac-r2 by message only. |
-| **Next Action** | 1. On #2599 merge: send master SHA to uac-r2; commit this checkpoint + TASK-INDEX 049 ✅ (POML status completed); push.
-2. Start 046c via task-execute.
-3. After the dev deploy: Project→Matter profile on dev, 021 re-measure.
-4. Owner open: live checks on dev (042c/048 refusals, 043) need the owner's go in THIS session; inactive playbook at analysis start; Family 1.0.56; 076; #2556. |
-| **Owner rulings 2026-11-06** (decisions.md) | R2 not applied; communication send/re-file needs Core User (G11/G12 not granted); Basic User is read-only on sprk_* (046c); G13 is not a gap (thread Read stays Basic, capped by a guard). 049 history rewrite + 049c delete approved. |
-| **Open PRs** | #2599 (049). #2387 (075, HOLD, ships with 040). |
-| **Issues** | #2597 (flaky Rules test), #2583, #2574, #2590, #2444, #2413, #2429, #2469, #1948. |
-| **Owner to do** | 076 live check. Leftover worktrees for end-of-project Remove-WorktreeSafe: agent-aec6d06ca99a5a9f6 (075), agent-a7ed21b81867c4e2e (039), agent-ae68466fd18cb8df3 (046b, merged), agent-ab6391bd0d308344f (049b), agent-a3d88f8312b09e715 (049c, remote deleted), agent-a7d775a1f12d2a061 (043), agent-ada15efbfe379567a (046). |
+| **Branches (none merged yet)** | 046c → task/fm-046c-fix ad88f1f9b7 (review pass 2 running). 030a → task/fm-030 c2f99fa55b, fix round on task/fm-030a-fix running. 044 → task/fm-044-build 6d98e001af; fix round on task/fm-044-fix running, LIMITED to the BFF null-pair fix + caller-read inventory (script items HELD pending owner A/B). 040 → task/fm-040 6e7ac9cae4, Opus review running. 032 → task/fm-032 96769b68bf (notes only). 034 → task/fm-034 bb887aadcd (notes only). |
+| **Owner questions open** | (1) 044: A = drop field security on the core pair (keep fail-closed re-read, column auditing confirmed on both pair columns, guard no non-admin Write on Signal/DR, 052 reports half pairs AND pair changed after create) vs B = keep field security. Ontology-r1 + UAC-r2 accept A with those conditions. Revises 042c ruling. (2) Go for live checks on dev: Project→Matter profile + 021 re-measure (FMSWP- rows). (3) 032: FR-20 mapping for extracted invoices in R1 (mapping step in persister) or deferred (recorded: deferred). (4) Office To Do no assignee: mapped Assigned To beats caller contact (A, new order) or caller wins (B, old). |
+| **Next actions** | On each review/fix report: fix round or scoped re-check → merge into work branch serially (030a and 046c both edit FeatureRolePrivilegeGuardTests.cs) → verify-suites → publish-delta → PR. 046c: PR then dev apply from THIS session with owner go (order: G17 changes -Apply/-Verify, then -Remove -Gap R3 -Apply/-Verify; rollback -Restore -Gap R3). 044 fix diff → ontology-r1 + UAC-r2. 040: UAC-r2 sign-off on #2188 caller-mask guard exemption; 075 ships with 040. 030a/030b PRs → word-add-in for a content read. Re-scope POMLs 030b, 032, 033, 034 under the W3 direction. File the 044 H7b provisioning issue (neutral). Sweep notes for per-identity privilege detail before the next master PR. |
+| **Private (message only)** | UAC-r2 and ontology-r1 get access findings by message; never in repo text. |
+| **Issues** | #2597 (flaky OntologyAdmin Rules test), #2583, #2574, #2590, #2444, #2413, #2429, #2469, #1948. Open PR #2387 (075, HOLD, with 040). |
+| **Worktrees** | Many agent worktrees under C:/code_files/spaarke/.claude/worktrees (046b, 049b, 049c, 043, 046, 075, 039, plus today's 030/032/034/040/044/046c and fix rounds). Remove at project end via Remove-WorktreeSafe. |
 
 ## How wave-2 agents are run (lessons)
 
