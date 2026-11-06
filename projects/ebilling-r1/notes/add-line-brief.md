@@ -59,11 +59,11 @@ From step 6 on, `CancellationToken.None` (ADJ:576). Every later step is idempote
   - outside billed, fees, expenses and the percent base.
   This changes I-1; tell ontology-r1 (spend, D-130).
 - **Q2 (owner, §11): the marker.** No typed column fits (`sprk_createdbyperson` is on intake lines too; `sprk_visibilitystate` is spend state; `sprk_reviewedby` means decided). **Recommend:** `provenance.source = "reviewer"` in the existing `sprk_extractionconfidence` (EB-D-170's home; a flag and an id meet uac's 095d-2a condition 1). A typed column → escalate, never in 164a.
-- **Q3 (ontology-r1): the code.** None of the nine fits (`DecisionActionCatalog.cs:379-449`). **Recommend:** `add-line` (required reason, Tier2b, Judgement, Reversible, RecordOfTruthImpact), subject = the line (D-75): add it to the writer's line codes (`Services/Signals/DecisionRecordWriter.cs:1256`, ontology code) and `Billing_C2`. FR-30 gains Add line.
+- **Q3 (ontology-r1): the code.** None of the nine fits (`DecisionActionCatalog.cs:379-449`). **Recommend:** `add-line` (required reason, Tier2b, Judgement, Reversible, RecordOfTruthImpact), subject = the line (D-75): add it to the writer's line codes (`Services/Signals/DecisionRecordWriter.cs:1256`, ontology code) and `Billing_C2`. FR-30 gains Add line. **ANSWERED (ontology): OK**, with conditions: same-commit `Billing_C2` update; BillingActions only (commit route refuses it, tested); idempotent on the decision id (one line, one record on retry); excludes empty.
 - **Q4 (owner): AI coding.** **Recommend:** none. The reviewer types the codes; FR-22 and the rules check them. That keeps the service out of `Services/Ai` (bff-extensions A4).
 - **Q5 (R4 + owner): partners.** Firms read no lines today (no `sprk_billingevent` module in `ExternalAccessModule`; 130/134 open). **Recommend:** nothing while In Review (FR-38); once decided, 130 lists it as its own item (date, description excerpt, approved amount, fixed label "Added by the client"); the reason stays internal. 164 adds no external surface.
 - **Q6 (uac-r2): other create paths.** Whether `sprk_billingevent` should stay in scope of the generic child-record route and uac 147's SecureChild "New Billing Event" ribbon (not deployed). Sent to uac-r2. **Recommend:** remove the table from both, so Add line is the one server-side owner of a new line (ADR-002). Until then, 164c's dry run refuses.
-- **Q7 (ontology-r1).** Add line cannot clear the firm hold (gated) or a Procedure hold (only Override or the re-run releases one), so the O3 link is unreachable in R1. **Recommend:** a pure function with unit tests, and no seed.
+- **Q7 (ontology-r1). ANSWERED:** no link code in R1 (code nothing calls proves nothing). Add line cannot clear the last hold reason (EB-D-185/190; only Override or the re-run releases a Procedure hold). Must-not-fire test instead: never `LinkConditionClearedRecordAsync`, never ConditionCleared on a held invoice. Trigger: if a later change gives Add line a hold-clearing path, O3 applies then.
 
 ## 5. Files
 
@@ -101,7 +101,7 @@ ADR-001, 002, 008, 010, 015, 018, 019, 024, 028 (`constraints/auth.md`), 034, 03
 - T3 a rule on the line → a Signal keyed `…|sprk_billingevent|{lineId}|1`.
 - T4 a changed invoice-level set → Superseded with no record, then n+1. *Must-not-fire:* an unchanged set only refreshes `sprk_lastevaluated`.
 - T5 a cleared non-hold group → ConditionCleared, no link.
-- T6 the Q7 function. *Must-not-fire:* Blocked entries and the override stamp stay byte-identical.
+- T6 Q7 must-not-fire: no hold link and no ConditionCleared on a held invoice; Blocked entries and the override stamp stay byte-identical. T6b Q3: the commit route refuses `add-line`; a retry gives one line and one record. T6c a reviewer-typed invalid code raises the same finding as an imported one.
 - T7 I-2 refuses approve until accept-line; Accept all Clean skips the line.
 - T8 Q1 for accept, reduce and disallow; billed, fees and expenses unchanged.
 
