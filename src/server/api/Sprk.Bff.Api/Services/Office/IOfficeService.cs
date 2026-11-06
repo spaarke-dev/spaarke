@@ -168,16 +168,23 @@ public interface IOfficeService
     /// </summary>
     /// <param name="request">Create-To-Do request (name, description, contact assignee, due date, priority/effort scores, regarding).</param>
     /// <param name="userId">Authenticated user id (OBO oid).</param>
-    /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c> — an INPUT to the owner-team resolution, not the owner (task 080: every record created here is owned by a business-unit default owner team, and the create is refused with OFFICE_022 when none resolves — never app-owned).</param>
+    /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c>. It only picks the default Assigned To contact (the caller's linked contact, used when the request names none and no field-mapping profile fills the column). It is not the owner and is not the identity the create runs as.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The created To Do id + name, or null when the request carries no name (the endpoint validates the name first, so this is a defensive guard).</returns>
+    /// <returns>The created To Do id + name. <see langword="null"/> when the request carries no name (the endpoint validates the name first, so this is a defensive guard), or when the create service refused for a reason the route does not map (an I-1 stamp that could not be derived or a check that could not be made); the endpoint answers that as 403 OFFICE_010 and nothing was written.</returns>
+    /// <exception cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException">
+    /// 403 OFFICE_022 when no owner resolves; 403 OFFICE_009 with reason code <c>source_record_inaccessible</c> (the To Do route
+    /// filter's one uniform body) when the caller may not AppendTo, or cannot find, a record, document, email or assignee the
+    /// request names.
+    /// </exception>
     /// <remarks>
     /// <para>
     /// Targets <c>sprk_todo</c> (NOT <c>sprk_event</c>) — mirroring the <c>CreateTodoWizard</c> field set. The
     /// regarding is written via the entity-specific lookup (<c>sprk_regardingmatter</c>/<c>project</c>/<c>invoice</c>)
-    /// plus the ADR-024 denormalized resolver fields (id/name, and a best-effort record-type ref). App-only create
-    /// via <see cref="IGenericEntityService"/>, owned by a business-unit default owner team resolved record-first
-    /// (regarding record → document → communication → caller; task 080), refused with OFFICE_022 when none resolves.
+    /// plus the ADR-024 denormalized resolver fields (id/name, and a best-effort record-type ref). Created through
+    /// <c>RecordCreationService</c> as the caller (field mapping task 030a): the service checks the caller's rights on every
+    /// record the To Do names, derives the I-1 stamps, decides the owner record-first (regarding record → document →
+    /// communication → the caller's business unit) and makes the one app-only create. This method is the adapter: it builds the
+    /// payload and maps the service's refusals to the route's existing codes.
     /// </para>
     /// </remarks>
     Task<CreateTodoResponse?> CreateTodoAsync(
