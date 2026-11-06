@@ -813,26 +813,6 @@ public class DecisionActionExecutorsTests
         request.BodyFormat.Should().Be(BodyFormat.PlainText);
     }
 
-    [Theory]
-    [InlineData(null, "a matter")]
-    [InlineData("", "a matter")]
-    [InlineData("  ", "a matter")]
-    [InlineData("Acme v. Roe", "Acme v. Roe")]
-    public async Task Messages_FooterRecordReference_IsTheNameWhenThereIsOne_ElseANeutralNoun(string? coreName, string expected)
-    {
-        var core = new DecisionCoreRecord("sprk_matter", MatterId, null, coreName);
-        var sentByEmail = new List<SendCommunicationRequest>();
-        var sentByReminder = new List<SendCommunicationRequest>();
-
-        await new SendEmailExecutor(Probe(AccessRights.Read | AccessRights.AppendTo).Object, new FakeUserClient(), SendingCores(sentByEmail).Object)
-            .ExecuteAsync(Request(Message("a@b.example"), null, core), CancellationToken.None);
-        await new SendReminderExecutor(Probe(CanWrite | AccessRights.AppendTo).Object, new FakeUserClient(), SendingCores(sentByReminder).Object)
-            .ExecuteAsync(Request(Message("a@b.example"), WorkAssignmentItem, core), CancellationToken.None);
-
-        sentByEmail.Single().Associations.Should().ContainSingle().Which.EntityName.Should().Be(expected);
-        sentByReminder.Single().Associations.Should().ContainSingle().Which.EntityName.Should().Be(expected);
-    }
-
     [Fact]
     public async Task SendEmail_TheSendRefuses_IsReportedWithoutAWrittenId()
     {

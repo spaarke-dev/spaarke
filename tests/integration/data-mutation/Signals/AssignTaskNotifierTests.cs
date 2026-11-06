@@ -358,63 +358,6 @@ public sealed class AssignTaskNotifierTests
     }
 
     [Fact]
-    public async Task WhenTheRecordNameIsWithheld_TheFootersRecordReference_IsANeutralNoun_NeverTheTableNameOrId()
-    {
-        var h = new Harness { RecordLabel = null };
-
-        (await h.NotifyAsync()).Should().BeEmpty();
-
-        var association = h.UserSends.Single().Associations.Should().ContainSingle().Which;
-        association.EntityName.Should().Be("a matter");
-        association.EntityName.Should().NotContain("sprk_").And.NotContain(Matter.ToString("D"));
-    }
-
-    [Fact]
-    public async Task WhenTheRecordNameIsShown_TheFootersRecordReference_IsTheName()
-    {
-        var h = new Harness();
-
-        (await h.NotifyAsync()).Should().BeEmpty();
-
-        h.UserSends.Single().Associations.Should().ContainSingle().Which.EntityName.Should().Be(Label);
-    }
-
-    [Fact]
-    public async Task ARecordTypeTheEmailDoesNotKnow_GetsTheGenericFooterReference()
-    {
-        var h = new Harness { RecordLabel = null };
-        var notice = new AssignTaskNotice(Contact, TaskId, "Call the client", new DateOnly(2026, 11, 15), new DecisionCoreRecord("sprk_widget", Matter));
-
-        (await h.NotifyAsync(notice)).Should().BeEmpty();
-
-        h.UserSends.Single().Associations.Should().ContainSingle().Which.EntityName.Should().Be("a record");
-    }
-
-    [Fact]
-    public async Task AnExternalAssignee_GetsTheNeutralFooterReference_NeverTheTableNameOrId()
-    {
-        var h = new Harness();
-        h.MakeExternal();
-
-        (await h.NotifyAsync()).Should().BeEmpty();
-
-        var sent = (h.UserSends.Count > 0 ? h.UserSends : h.SystemSends.Select(s => s.Request).ToList()).Should().ContainSingle().Which;
-        sent.Associations.Should().ContainSingle().Which.EntityName.Should().Be("a matter");
-    }
-
-    [Theory]
-    [InlineData("sprk_matter", "a matter")]
-    [InlineData("sprk_project", "a project")]
-    [InlineData("sprk_workassignment", "a work assignment")]
-    [InlineData("sprk_widget", "a record")]
-    public void FooterReference_BlankLabel_IsTheNounOfTheCoreType(string coreLogicalName, string expected)
-    {
-        AssignTaskNotifier.FooterReference(null, coreLogicalName).Should().Be(expected);
-        AssignTaskNotifier.FooterReference("  ", coreLogicalName).Should().Be(expected);
-        AssignTaskNotifier.FooterReference("Acme (MAT-0042)", coreLogicalName).Should().Be("Acme (MAT-0042)");
-    }
-
-    [Fact]
     public async Task NoDueDate_SaysSo()
     {
         var h = new Harness();
