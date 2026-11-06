@@ -64,6 +64,8 @@
 - ebilling: a hold-column item is fixed in ebilling task 165, ordered first and before AP export is turned on anywhere; ebilling tells the owner (detail held privately). 095d-2b-1 C1 and C2 resolved and approved (`4f113d72e2`).
 - ebilling: a line-validation item is fixed in 164a-4a; I review the 164 diff against conditions sent privately. Does the owner want tracking beyond 164?
 - Should customer environments turn on revoke-on-change (G-8) through provisioning?
+- Access-conferring registry (FR-24, task 041 seed): `sprk_reportcard` has 8 `sprk_assigned*` lookups but is not in the registry, so they confer nothing (report card access follows its parent). Should they confer access? Same class as the `sprk_servicerequest` follow-up. fm 040 seeds report-card push rules as plain data (SyncMode 1) and pins the seed to the registry both ways.
+- #2292 fix: PR #2609 (merges on green). Needs a dev deploy (owner go), then one reconciliation run to back-fill and a row-count check.
 - #2590: a project created app-only with no person lands in the root BU. Choose the rule (refuse vs route) and whether to move the dev row.
 - Column auditing on the writer-only tables' lookups (covered by ontology's flags? verify), 044 field-security profile, the person-path refusal uniformity question (private), the AP diagnostics batch, the VS Code agent-dir cleanup, word-add-in Office saves, 095a, click-test 195, Q1/Q4 (private), older: #2343, #2245, #2250, #2260, #2270, #2262, #2396, 191 F1/S4, 190 Apply, #2382, #2505; tasks 140/165/153.
 
