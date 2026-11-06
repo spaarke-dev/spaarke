@@ -109,7 +109,7 @@
                         <labels>
                           <label description="" languagecode="1033" />
                         </labels>
-                        <control id="sprk_totalamount" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_totalamount" disabled="false" />
+                        <control id="sprk_totalamount" classid="{533B9E00-756B-4312-95A0-DC888637AC78}" datafieldname="sprk_totalamount" disabled="true" />
                       </cell>
                     </row>
                   </rows>

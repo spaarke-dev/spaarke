@@ -176,7 +176,9 @@ $Spec = [ordered]@{
                 ReadOnly = 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal' })
         # IInvoiceTotalsService is the one owner of the five totals (I-1): disabled, never editable on a form.
         # Task 095c-4: the firm is set only by the submission pipeline (and 095d's assign-firm); a native edit would bypass it: disabled.
-        ForceReadOnly = 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal', 'sprk_vendororg'
+        # Task 166 (EB-D-200): the billed total is server-written too (the submission create; the Invoice Review correction), so it is disabled as well.
+        # The quick-create form is not touched by this script: its sprk_totalamount control is disabled in the SpaarkeMaster source.
+        ForceReadOnly = 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal', 'sprk_vendororg', 'sprk_totalamount'
     }
     sprk_billingevent      = @{
         Form = 'Section'; FormName = 'Billing Event main form'

@@ -195,7 +195,9 @@ public class RecordTableRulesTests
         // (TypedMatterProjectPlusRegardingWorkAssignment) — a row names exactly ONE core record, the caller's.
         // ebilling-r1 082c-2 (uac-r2 2026-11-04): sprk_invoice also protects its review detail, which only typed BFF writers derive.
         string[] expected = table == "sprk_invoice"
-            ? ["sprk_matter", "sprk_project", "sprk_regardingworkassignment", "sprk_reviewdetail"]
+            ? ["sprk_matter", "sprk_project", "sprk_regardingworkassignment", "sprk_reviewdetail",
+                // ebilling-r1 task 166 fix round (EB-D-200): the billed total and the five derived totals, written only by typed finance writers.
+                "sprk_totalamount", "sprk_feestotal", "sprk_expensestotal", "sprk_lineadjustmentstotal", "sprk_invoiceadjustmentstotal", "sprk_approvedtotal"]
             : ["sprk_matter", "sprk_project", "sprk_regardingworkassignment"];
         RecordTableRules.Get(table).MappingProtectedColumns.Should().BeEquivalentTo(expected);
         RecordTableRules.Get(table).MappingProtectedColumns.Contains("SPRK_Matter").Should().BeTrue("case-insensitive, as every list");

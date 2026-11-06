@@ -1025,6 +1025,15 @@ internal static class InheritedAccessPermission
     /// decides no access and no hold (approval reads the stored submission state), but a generic write would show a label no hold backs, or
     /// leave one on a closed invoice. Its writers are typed (<c>InvoiceReviewDetailWritersGuardTests</c>); the record-creation mapping
     /// refuses it as well (<c>RecordTableRules.MappingProtectedColumns</c>).</item>
+    /// <item>ebilling-r1 task 166 fix round (EB-D-200, adversarial review F1). <c>sprk_invoice</c>: its billed total <c>sprk_totalamount</c>
+    /// (<c>InvoiceReviewService.InvTotalAmount</c>) and its five derived totals, <c>sprk_feestotal</c>, <c>sprk_expensestotal</c>,
+    /// <c>sprk_lineadjustmentstotal</c>, <c>sprk_invoiceadjustmentstotal</c> and <c>sprk_approvedtotal</c> (<c>InvoiceTotalsService</c>). They decide
+    /// no access, but the approval, the AP export and the derived Threshold read them. They are field-secured so that only the BFF application
+    /// user writes them; that user is a member of the Writers profile, so field security does not stop its generic writers, and this refusal does.
+    /// Their writers are typed: <c>InvoiceTotalsService</c> (the derived totals), the submission persister (the create) and
+    /// <c>InvoiceCorrectionService</c> (the header correction), none of which asks this refusal
+    /// (<c>InvoiceMoneyColumnsAppOnlyWriteGuardTests</c>). The record-creation mapping refuses them as well
+    /// (<c>RecordTableRules.MappingProtectedColumns</c>).</item>
     /// <para>Not listed: <c>sprk_billingevent.sprk_invoice</c>. A same-invoice repeat Duplicate about a line is judged by the
     /// line's current invoice, the event's invoice (read as the caller), so the column is read. It is not refused because
     /// the supported detach / move / re-attach sequence (<see cref="InvoiceFamilyCoreRecordGuard.DetachMoveReattachHint"/>, D-96)
@@ -1176,6 +1185,16 @@ internal static class InheritedAccessPermission
                 Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceVendorOrg,
                 // ebilling-r1 082c-2 fix round 1 (uac-r2, F4): the review detail is DERIVED from the open hold reasons (D-205) by its typed writers.
                 Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column,
+                // ebilling-r1 task 166 fix round (EB-D-200, adversarial review F1): the billed total and the five derived totals are field-secured
+                // so that only the BFF application user writes them, but that user is a Writers member, so field security does not stop its generic
+                // writers (an output mapping, an Update Record node, Repair). This refusal does. Their writers are typed (InvoiceTotalsService,
+                // InvoiceSubmissionPersister, InvoiceCorrectionService); see InvoiceMoneyColumnsAppOnlyWriteGuardTests.
+                Sprk.Bff.Api.Services.Finance.InvoiceReviewService.InvTotalAmount,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceFeesTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceExpensesTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceLineAdjustmentsTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceInvoiceAdjustmentsTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceApprovedTotal,
             },
             [Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -1334,6 +1353,8 @@ internal static class InheritedAccessPermission
                     ? "it decides no access, but it holds the invoice from approval and export; only the submission pipeline writes it"
                     : isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column, StringComparison.OrdinalIgnoreCase)
                         ? "it decides no access; it says why the invoice is held for review, and only its typed writers derive it"
+                    : isInvoice && IsInvoiceMoneyColumn(accessColumn)
+                        ? "it decides no access; it is an invoice amount, and only typed writers derive it"
                     : isInvoice
                         ? "it decides no access, but it decides whether the invoice can be approved and exported; only the submission pipeline writes it"
                         : "it decides who may see what";
@@ -1354,6 +1375,16 @@ internal static class InheritedAccessPermission
             : RecordOwnerResolution.Refused(AppOnlyCreatorWriteReasonCode,
                 $"{creator} of a record is set by Spaarke (it records who created the record), so it was not written");
     }
+
+    /// <summary>Whether <paramref name="column"/> is one of the six <c>sprk_invoice</c> amount columns the typed finance writers own (task 166,
+    /// EB-D-200): the billed total and the fees, expenses, line-adjustments, invoice-adjustments and approved totals.</summary>
+    private static bool IsInvoiceMoneyColumn(string column) =>
+        string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceReviewService.InvTotalAmount, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceFeesTotal, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceExpensesTotal, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceLineAdjustmentsTotal, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceInvoiceAdjustmentsTotal, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceApprovedTotal, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>What to hold and what to write on one row of a <see cref="RecordTables"/> table (task 189).</summary>
     internal sealed record DocumentDecision

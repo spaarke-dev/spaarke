@@ -294,7 +294,17 @@ internal static partial class RecordTableRules
             // a valid create with multiple_core_records. The core record is the caller's to name.
             // ebilling-r1 082c-2 (uac-r2 2026-11-04): plus the review detail, which only its typed BFF writers derive (InvoiceReviewDetail), so a
             // field-mapping rule may not set it.
-            MappingProtectedColumns = Columns([.. InvoiceFamilyCoreLookupsOf("sprk_invoice"), Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column]),
+            // ebilling-r1 task 166 fix round (EB-D-200): plus the billed total and the five derived totals, field-secured and written only by the
+            // typed finance writers (the BFF application user is a Writers member, so field security alone does not stop a generic mapping).
+            MappingProtectedColumns = Columns([
+                .. InvoiceFamilyCoreLookupsOf("sprk_invoice"),
+                Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column,
+                Sprk.Bff.Api.Services.Finance.InvoiceReviewService.InvTotalAmount,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceFeesTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceExpensesTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceLineAdjustmentsTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceInvoiceAdjustmentsTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceApprovedTotal]),
             PreWriteRules = [InvoiceFamilyRule],
         },
         new RecordTableRule { Table = "sprk_reportcard", Kind = RecordTableKind.Child },
