@@ -37,6 +37,8 @@ name: CI Standalone Checks
 #                                                                 Deploy-Release.ps1 worklist-configuration phase.
 #                                                                 Set-FeatureRolePrivileges.ps1 (the role-privilege
 #                                                                 apply script: dry run, -Apply, -Remove, exit codes).
+#                                                                 Set-CorePairFieldSecurity.ps1 (the core pair field
+#                                                                 security script: dry run, -Apply, -Verify, revert).
 #   owner-teams-script-tests (new)                                 Pester controls for Set-CustomerOwnerTeams.ps1 (the
 #                                                                 Secure Record unit refusal, the owner-decision
 #                                                                 dry-run exit code).
@@ -480,6 +482,8 @@ jobs:
   # with "Export-ModuleMember ... can only be called from inside a module" (seen in uac-r2's 194b review).
   # Set-FeatureRolePrivileges.Tests.ps1 (field-mapping-server-write-path-r1 task 046b) runs scripts/Set-FeatureRolePrivileges.ps1 whole in a child
   # pwsh against a test double of az and Invoke-RestMethod (tests/scripts/Set-FeatureRolePrivileges.Harness.ps1): no network, no token.
+  # Set-CorePairFieldSecurity.Tests.ps1 (field-mapping-server-write-path-r1 task 044) runs scripts/Set-CorePairFieldSecurity.ps1 the same way,
+  # against tests/scripts/Set-CorePairFieldSecurity.Harness.ps1.
   # --------------------------------------------------------------------------
   ontology-script-tests:
     name: Ontology script tests (Pester)
@@ -500,7 +504,7 @@ jobs:
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
-          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Seed-BillingSystemPolicy.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1, tests/scripts/Set-FeatureRolePrivileges.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Seed-BillingSystemPolicy.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1, tests/scripts/Set-FeatureRolePrivileges.Tests.ps1, tests/scripts/Set-CorePairFieldSecurity.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------
