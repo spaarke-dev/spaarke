@@ -1562,3 +1562,75 @@ uac-r2's condition before the owner is asked for P2: every partner and contact r
 **ORDERING: P2 needs a 095c BFF on the environment first.** The dev BFF is master, and master has no `sprk_trackingscope` code (0 hits, 2026-11-05). Step 5 of `Deploy-EbillingSubmissionTrackingScopeSchema.ps1` makes the scope column SystemRequired, after which a BFF that does not write it has every submission create refused by the platform (0x80040200). So the migration on an environment runs only after a BFF with 095c is deployed there. The live seam test (`TrackingNumberAllocatorLiveTests.Renumber`) therefore cannot be a gate before the master PR on dev; it runs after the master merge and the dev deploy, before any release beyond dev (owner decision pending).
 
 rework: fix-round-2 task 095d-1c
+
+### 16.11 095d-2a-1 (2026-11-05): stored re-run facts, one copy of steps 2-5, rebuild from stored rows
+
+Branch `task/ebilling-095d2a1`. EB-D-189 option A: intake now stores the AI facts a re-run needs, so the re-run after Set firm calls no extraction and no AI except the coding of lines whose code set changes (EB-D-186). Not in this slice: the commit transaction, the job handler, the Set-firm enqueue, Signals, the partner withhold, `RulesRerunCompleted`.
+
+**The stored facts and where they live.**
+
+| Fact | Column | Shape |
+|---|---|---|
+| (a) Section totals (fees, expenses, adjustments) with confidences | `sprk_findingsjson`, `provenance.sectionTotals` | `{FeesTotal: {value, confidence}, ...}`, exact JSON numbers; kept apart from `provenance.header` so `ParseSubmission` and the correction re-evaluation are unchanged |
+| (b) Timekeeper summary names | `sprk_findingsjson`, `provenance.timekeeperSummary` | string array, blanks dropped (the processor drops them too) |
+| (c) Per-line "no date" flag | `sprk_extractionconfidence` (per line), `dateMissing` | boolean; the line's date column cannot tell "no date" from a default |
+| (d) Observation quotes | `sprk_findingsjson`, `provenance.observations` | `[{line, type, quotedText}]`, joined back to the line coding by (line, type) |
+
+Names and quotes are only in `sprk_findingsjson` (field-secured, app-only reads, `FindingsJsonAppOnlyReadGuard`). `sprk_extractionconfidence` holds numbers and flags only. Neither column is indexed (`InvoiceIndexDocument` names neither). The logs carry counts only (`TheStoredFacts_AreNeverLogged`). External routes cannot read the column: no external module is registered for `sprk_invoicesubmission`, no module lists the column, and the fetch guard refuses it as an attribute, a condition, a `valueof` and an order on every module (`ExternalFindingsJsonPinTests`).
+
+**One copy of steps 2-5.** `InvoiceSubmissionProcessor.EvaluateAsync` ends after step 1 by calling the private `EvaluateStepsAsync` (steps 1c-5). The new public `EvaluateFromReadAsync(snapshot, read, finalDelivery, coding?)` checks the flag and calls the same method with a caller-supplied coding step. The existing processor tests pass unchanged. FR-22 step 1 (the firm's billed task codes) is `CodeSetResolver.ResolveFirmCodesAsync`, and `ResolveAsync` calls it, so step 1 also has one copy. `EvaluateFromReadAsync` is not on `IInvoiceSubmissionProcessor`: adding it breaks the test doubles that implement the interface, and 2a-2 is the only caller. 2a-2 takes the concrete class.
+
+**Rebuild.** `StoredSubmissionRead.Rebuild(submissionId, findingsJson, lineRows, logger)` gives the `ExtractedInvoice` and the stored coding. Values come from the line columns; confidence, page, box, repair and returned value come from the line's extraction `fields`. A submission stored before this slice (any member missing or malformed) gives the typed refusal `ebilling.rerun.facts_missing`; non-contiguous line sequences or a coding the stored observations do not match give `ebilling.rerun.stored_rows_inconsistent`. A refusal writes nothing, the hold stays, and the Error log carries `Permanent=true` and the reason code only.
+
+**The re-run coding step.** `RerunLineCoding` is an `ILineCodingService` handed to `EvaluateFromReadAsync`. It asks step 1 alone (Dataverse reads, no AI). A line is sent to the processor's own coding facade only when its stored code set differs from the step-1 set; every other line keeps its stored codes, observations and quotes. An uncoded invoice keeps its stored hold (raised again as 047 raised it) unless step 1 now names a set. If the facade resolves a different set than step 1 named, the step faults (nothing is mixed, nothing is written).
+
+**Per-rule AI table.** No rule handler calls AI; each reads the evaluation request built from the read, the coding and the resolution. The table says which AI-produced fact each rule needs and where the re-run gets it.
+
+| Rule | AI-produced input | Re-run source |
+|---|---|---|
+| 1 ApprovedTimekeeper | line timekeeper names (extraction), the resolution's roster match | line columns; (b) for summary names; resolution re-runs (see below) |
+| 2 ApprovedRate | rate (extraction), timekeeper/classification match | line columns; resolution re-runs |
+| 3 TimeIncrement | hours (extraction) | line columns |
+| 4 DailyHoursCap | hours, timekeeper, date (extraction) | line columns; (c) keeps a missing date missing |
+| 5 NonBillableActivity | task and activity codes (AI coding) | stored coding; re-coded only when the line's code set changes |
+| 6 ExpenseRule | expense code (AI coding), amount (extraction) | stored coding (same rule); line columns |
+| 7 InvoiceAge | line date, invoice date (extraction) | line columns, `provenance.header`; (c) |
+| 8 CoreRecordWindow | line date (extraction) | line columns; (c) |
+| 9 Duplicate | invoice number, line fields (extraction) | `provenance.header`, line columns |
+| 10 RequiredData | presence of header and line values (extraction) | `provenance.header`, line columns; (c) |
+| 11 AiObservation | observation type and confidence (AI coding), quote | stored coding; (d) for the quote |
+| 12 AddedFee | line amounts (extraction) | line columns |
+| 13 Discount | rate (extraction) | line columns |
+| System SubmissionIntegrity | D-91 invoice number (extraction); 047 coding findings; arithmetic check | `provenance.header`; the re-run coding step; (a) for the section totals |
+
+No rule needs an AI fact that is not stored. The round-trip parity test (below) proves it on the mixed fixture: the rebuilt read through `EvaluateFromReadAsync`, with a strict AI mock (0 reads, 0 document loads), gives the same evaluation request, findings, pipeline findings, resolution input and findings JSON as a direct `EvaluateAsync`.
+
+**Flagged to the owner (not an escalation).** Step 2's timekeeper match can call AI embeddings (`TimekeeperMatcher.GenerateEmbeddingAsync`) over the firm's roster when the exact match misses. That is not AI coding, and EB-D-186 does not name it. On a firmless intake the matcher is skipped (`InvoiceResolutionService.cs:86-105`), so the re-run is the first time it can fire. 2a-2 decides whether to allow it or pass a flag that skips the embedding fallback.
+
+**uac-r2 condition 4: the field-mapping push and `sprk_findingsjson`.** The push cannot read or write the column without impersonation; no code change is needed.
+- The source read `RetrieveSourceRecordValuesAsCallerAsync` (`Api/FieldMappingEndpoints.cs:735-769`) uses `IImpersonatedCommunicationQuery`, which sends `MSCRMCallerID`.
+- The child writes go through `UpdateRecordFieldsAsync(..., impersonateSystemUserId: callerSystemUserId)` (`:1189-1190`) and `InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(..., callerSystemUserId)` (`:1179-1180`).
+- The app-only reads on the push are the profile and rule configuration (`:488`), entity-set names (`:756`, `:972`) and the guard's core-lookup read (`:1140`); none takes a rule's columns.
+- `MappingProtectedColumns` (`RecordTableRules.cs:338-341`, `:953`) is consulted only on record creation (`RecordCreationService.Mapping.cs:189`), not on the push. On the push the column is held by field security alone, as `ParentLineage.cs:1054-1065` already states.
+- Residual (platform): a System Administrator bypasses field security, so an administrator's push can read and write the column. No field-mapping file was edited.
+
+**Component justification (CLAUDE.md section 11).**
+- `EvaluateFromReadAsync`: overlaps `EvaluateAsync`; it is that method's steps 2-5 behind a new entry, not a copy. Without it the re-run must call extraction again (an AI call EB-D-186 forbids) or copy steps 2-5.
+- `ResolveFirmCodesAsync`: overlaps `ResolveAsync` step 1, which now calls it. Without it the re-run cannot tell which lines change set without running the AI coding.
+- `StoredSubmissionRead`: overlaps `ExtractionProvenance.ParseSubmission` (the correction path), which reads the header and fields only and has no refusal. Extending that parser would change the correction re-evaluation's contract. Without it no stored submission can be re-evaluated.
+- `RerunLineCoding`: overlaps `ILineCodingService` (it implements it and wraps the facade). Without it every line goes to the AI coding service, which EB-D-186 forbids.
+No new column, endpoint, DI registration or package.
+
+**Tests and seeds.**
+- `InvoiceSubmissionPersisterTests.RerunFacts.cs`: must-fire and must-not-fire per fact (a)-(d); the no-log assertion; the round-trip parity test; the fail-closed refusal theory (SEEDED, 5 cases: no findings JSON, and each of `sectionTotals`, `timekeeperSummary`, `observations`, `dateMissing` missing); inconsistent stored rows. Before the change all 12 failed (intake stored none of the facts).
+- `RerunLineCodingTests.cs` (7 cases): no AI call with no step-1 set and with the same set; the changed line only re-coded; the set-mismatch fault; an uncoded invoice keeps its hold (2 cases); an uncoded invoice is coded once a firm set applies.
+- `ExternalFindingsJsonPinTests.cs` (SEEDED, 2): seeding the column into the invoices module's `ReadableColumns` made both fail.
+- Seeds: fail-closed refusal (5/5 failed with the refusal disabled) and the external pin (2/2 failed); both files restored hash-identical.
+- `InvoiceSubmissionPersisterTests.MixedInvoiceGoldenJson`: the tail now carries the three additive members; the format change is the intended one.
+- Extra tests beyond the brief, kept: the round-trip parity test (the only proof that no rule needs a missing fact) and the inconsistent-rows test (the second refusal reason).
+
+**Deviations and known limits.**
+- `sprk_findingsjson` is not added to `UnfilterableColumns`. That set narrows a readable column; this column is readable on no module, which the pin tests prove, and that is stronger.
+- The firm, client and matter names, the firm's matter reference and the PO are not stored, so the rebuilt header leaves them empty. No rule or the resolution reads them (resolution reads the summary names only). The firm name feeds the stored `invoiceName`, so the rebuilt findings JSON says "Invoice INV-100" where intake wrote "Firm LLP - INV-100". 2a-2 keeps the stored `invoiceName`.
+- Also not rebuilt: a fee line's title value, the page count (0) and the row boxes; no step 1c-5 reads them. Text columns hold at most 100 characters (the persister's cap), so a value whose extraction `fields` entry is absent is rebuilt from the capped column.
+- The findings JSON grows by the names and quotes; it stays under the persister's 1 MB limit, which still refuses an oversize write.
