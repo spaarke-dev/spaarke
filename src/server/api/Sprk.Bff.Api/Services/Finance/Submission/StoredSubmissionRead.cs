@@ -21,7 +21,8 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// the section totals and total due as exact numbers (<c>provenance.sectionTotals</c>). The timekeeper summary names
 /// (<c>provenance.timekeeperSummary</c>). Each fee and expense line: its columns as <see cref="InvoiceSubmissionPersister.BuildLines"/> wrote
 /// them (a value correction is in the column and feeds the re-run, Q4), where a number is the exact one read (<c>fields.&lt;name&gt;.exact</c>)
-/// unless the column no longer equals its 2-decimal rounding (a correction, so the column wins); its <c>sprk_extractionconfidence</c>
+/// unless a reviewer corrected or confirmed it or the column no longer equals its 2-decimal rounding (a correction; either way the column
+/// wins); its <c>sprk_extractionconfidence</c>
 /// (confidence, page, box, repair and the <c>dateMissing</c> flag, which a corrected or confirmed date overrides); and its coding block with
 /// the observation quotes from <c>provenance.observations</c>.</para>
 /// <para><b>Fail closed.</b> A submission stored without the re-run facts (before task 095d-2a-1, or with a firm) is
@@ -173,7 +174,7 @@ internal static class StoredSubmissionRead
                 ? InvoiceLineType.Fee
                 : InvoiceLineType.Expense;
             rowIndex[type] = rowIndex.TryGetValue(type, out var n) ? n + 1 : 0;
-            lines.Add(Line(row, fields, type, rowIndex[type], dateMissing && !verified.Contains((row.Id, ResolutionFieldNames.Date))));
+            lines.Add(Line(row, fields, type, rowIndex[type], dateMissing && !verified.Contains((row.Id, ResolutionFieldNames.Date)), verified));
 
             if (StoredLineCoding.Parse(index, extraction["coding"] as JsonObject, quotes[index].ToList()) is not { } lineCoding)
             {
@@ -274,13 +275,18 @@ internal static class StoredSubmissionRead
 
     // ── Lines ──
 
-    private static ExtractedInvoiceLine Line(Entity row, JsonObject fields, InvoiceLineType type, int rowIndex, bool dateMissing)
+    private static ExtractedInvoiceLine Line(
+        Entity row, JsonObject fields, InvoiceLineType type, int rowIndex, bool dateMissing, IReadOnlySet<(Guid? LineId, string Field)> verified)
     {
         var isFee = type == InvoiceLineType.Fee;
         var quantity = row.GetAttributeValue<decimal?>(InvoiceSubmissionPersister.LineQuantity);
         var rate = row.GetAttributeValue<Money>(InvoiceSubmissionPersister.LineRate)?.Value;
         var amount = row.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value;
         var date = row.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate) is { } stamp ? DateOnly.FromDateTime(stamp) : (DateOnly?)null;
+
+        // A number a reviewer corrected or confirmed is its column, as InvoiceCorrectionReevaluation reads it: a correction to the exact value's
+        // own rounding (0.655 corrected to 0.66) leaves the column equal to that rounding, so only the verified row tells it from intake's.
+        decimal? Number(string name, decimal? column) => verified.Contains((row.Id, name)) ? column : Exact(fields, name, column);
 
         return new ExtractedInvoiceLine
         {
@@ -289,11 +295,11 @@ internal static class StoredSubmissionRead
             Date = Field(fields, ResolutionFieldNames.Date, dateMissing ? null : date, DateOf),
             TimekeeperAsBilled = Field(fields, ResolutionFieldNames.TimekeeperAsBilled, row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTimekeeper), s => s),
             TitleAsBilled = Field<string?>(fields, "TitleAsBilled", null, s => s),
-            Hours = Field(fields, ResolutionFieldNames.Hours, Exact(fields, ResolutionFieldNames.Hours, isFee ? quantity : null), DecimalOf),
-            Rate = Field(fields, ResolutionFieldNames.Rate, Exact(fields, ResolutionFieldNames.Rate, isFee ? rate : null), DecimalOf),
-            Quantity = Field(fields, ResolutionFieldNames.Quantity, Exact(fields, ResolutionFieldNames.Quantity, isFee ? null : quantity), DecimalOf),
-            UnitCost = Field(fields, ResolutionFieldNames.UnitCost, Exact(fields, ResolutionFieldNames.UnitCost, isFee ? null : rate), DecimalOf),
-            Amount = Field(fields, ResolutionFieldNames.Amount, Exact(fields, ResolutionFieldNames.Amount, amount), DecimalOf),
+            Hours = Field(fields, ResolutionFieldNames.Hours, Number(ResolutionFieldNames.Hours, isFee ? quantity : null), DecimalOf),
+            Rate = Field(fields, ResolutionFieldNames.Rate, Number(ResolutionFieldNames.Rate, isFee ? rate : null), DecimalOf),
+            Quantity = Field(fields, ResolutionFieldNames.Quantity, Number(ResolutionFieldNames.Quantity, isFee ? null : quantity), DecimalOf),
+            UnitCost = Field(fields, ResolutionFieldNames.UnitCost, Number(ResolutionFieldNames.UnitCost, isFee ? null : rate), DecimalOf),
+            Amount = Field(fields, ResolutionFieldNames.Amount, Number(ResolutionFieldNames.Amount, amount), DecimalOf),
             Narrative = Field(fields, BillingFieldNames.Narrative, row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineDescription), s => s),
             TaskCodeAsBilled = Field(fields, BillingFieldNames.BilledTaskCode, row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTaskCodeAsBilled), s => s),
             ActivityCodeAsBilled = Field(fields, BillingFieldNames.BilledActivityCode, row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineActivityCodeAsBilled), s => s),
@@ -303,7 +309,8 @@ internal static class StoredSubmissionRead
 
     /// <summary>
     /// A number as intake judged it: the exact value read (<c>fields.&lt;name&gt;.exact</c>) while the 2-decimal column still holds its rounding
-    /// (either midpoint rule), else the column (a reviewer's correction wrote it, or no value was read). The caller has checked the member is there.
+    /// (either midpoint rule), else the column (a reviewer's correction wrote it, or no value was read). The caller has checked the member is there,
+    /// and that no reviewer corrected or confirmed the field (then the column wins outright).
     /// </summary>
     private static decimal? Exact(JsonObject fields, string name, decimal? column)
     {

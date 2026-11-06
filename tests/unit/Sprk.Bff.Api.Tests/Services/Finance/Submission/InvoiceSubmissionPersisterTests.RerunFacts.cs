@@ -473,6 +473,23 @@ public partial class InvoiceSubmissionPersisterTests
         unverified.Read.Lines[1].Date.Value.Should().BeNull();
     }
 
+    [Fact(DisplayName = "095d-2a-1 (V1): a number a reviewer corrected to its exact value's own rounding is the column, not the exact value")]
+    public async Task ACorrectionToTheRoundedValue_Wins()
+    {
+        // Line 2 was read as 0.125 hours; the column holds 0.13. A reviewer corrects the hours to 0.13: the column still equals the rounding,
+        // so only the correction row tells the reviewer's 0.13 from intake's 0.125.
+        var intake = await PersistNoFirmIntakeAsync();
+        intake.Lines[2].GetAttributeValue<decimal?>("sprk_quantity").Should().Be(0.13m, "the setup: the column is the exact value's rounding");
+        var verified = new HashSet<(Guid? LineId, string Field)> { (intake.Lines[2].Id, ResolutionFieldNames.Hours) };
+
+        var corrected = Rebuild(intake, verified: verified);
+        var unverified = Rebuild(intake);
+
+        corrected.Read!.Lines[2].Hours.Value.Should().Be(0.13m, "the reviewer's value");
+        corrected.Read.Lines[3].UnitCost.Value.Should().Be(0.655m, "must-not-fire: a number nobody verified keeps its exact value");
+        unverified.Read!.Lines[2].Hours.Value.Should().Be(0.125m, "must-not-fire: unverified, the exact value read");
+    }
+
     // ── fail closed: a submission stored without the facts ──
 
     /// <summary>A stored copy without the re-run facts (as intake wrote it before task 095d-2a-1, or with a firm): <paramref name="only"/> one, or all.</summary>
