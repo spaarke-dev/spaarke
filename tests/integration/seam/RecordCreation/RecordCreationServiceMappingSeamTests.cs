@@ -271,6 +271,26 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         _scripted.Posts.Should().BeEmpty("the row is never created as the caller");
     }
 
+    /// <summary>
+    /// Task 049 (NFR-02 Part C): a mapped row's step 5 checks the caller's own values, then the merged row — each pass read
+    /// the table's privilege names again. Step 5 now reads each table-metadata path once, and still asks every access
+    /// question (AppendTo on the matter, once per pass) of Dataverse: no access answer is kept (ADR-009).
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_AMappedRow_ReadsEachTableMetadataOnce_ButAsksEveryAccessQuestion()
+    {
+        MatterToEventProfile();
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _user.Paths.Count(p => p == "EntityDefinitions(LogicalName='sprk_event')?$select=LogicalName,Privileges")
+            .Should().Be(1, "step 5's passes read the table's privilege names once");
+        _user.Paths.Count(p => p.Contains("RetrievePrincipalAccess", StringComparison.Ordinal)
+                               && p.Contains(OrdinaryMatter.ToString("D"), StringComparison.Ordinal))
+            .Should().BeGreaterThan(1, "AppendTo on the matter is asked in each pass, never remembered");
+    }
+
     [Fact]
     public async Task CreateAsync_ACallersOwnLookupTheyCannotAppendTo_StillRefusesWithTheUniformNotFound_MappingOrNot()
     {
