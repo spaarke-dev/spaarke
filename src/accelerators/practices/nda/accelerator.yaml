@@ -1,6 +1,6 @@
 # NDA accelerator: what the build assembles (design §5.5). Paths are relative to src/accelerators/.
 id: nda
-version: 0.1.2-poc # POC build for the end-to-end walk-through (notes/poc-e2e/runbook.md)
+version: 0.1.3-poc # 0.1.3: audit-pack chart colours (POC gap #17). POC build for the end-to-end walk-through (notes/poc-e2e/runbook.md)
 wave: 1
 status: mvp-test # positions are test positions, not attorney-approved (design §8.4)
 
