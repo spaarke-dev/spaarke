@@ -93,6 +93,11 @@ Manifest schema read by H6:
    commands; every export names `--environment` (default spaarkedev1).
 6. **PR**: the diff of the unpacked source is the release review. The release note lists **removed components**
    (they are deleted from managed customer environments on upgrade — §5).
+6a. **Role changes that take privileges off a role** (the release carries Basic User read-only, removals gap R3, and Core User's
+   reference-table AppendTo, gap G17; `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §5.1): on any environment other than dev,
+   before the release, users who hold an add-on (Office Add In User, AI Analysis User) without Core User are given Core User or listed for
+   the owner. The release's expectations file under `scripts/provisioning/role-privilege-expectations/` lists the R3 privileges as absent on
+   Basic User and the G17 privileges as present on Core User (the file is cumulative: a later version carries them too).
 7. **Publish** (after merge): run `publish-dataverse-solutions-manifest.yml` — first with `publish: false` (dry run:
    pack + checks + manifest as a run artifact; every pull request touching the package source runs this too), then
    with `publish: true`. It refuses a zip whose name, version or managed flag is wrong, a zip with environment-variable

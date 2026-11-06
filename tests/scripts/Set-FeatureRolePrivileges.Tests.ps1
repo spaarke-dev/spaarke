@@ -61,8 +61,14 @@ BeforeAll {
     }
 
     # Runs the script whole. $RoleA lets a test rename the roles (the config and role XML follow the scenario's role names).
-    function Invoke-Frp([hashtable]$Scenario, [string[]]$ScriptArgs = @(), [switch]$RealAz, [string]$RoleA = 'Role A', [switch]$WithRemoval, [switch]$XmlHoldsRemoved, [switch]$AlsoAdded, [switch]$SecondRemoval, [string]$SecondGap = 'R2') {
+    function Invoke-Frp([hashtable]$Scenario, [string[]]$ScriptArgs = @(), [switch]$RealAz, [string]$RoleA = 'Role A', [switch]$WithRemoval, [switch]$XmlHoldsRemoved, [switch]$AlsoAdded, [switch]$SecondRemoval, [string]$SecondGap = 'R2', [switch]$AddsPending) {
         $script:N++
+        # -Remove refuses while a declared change is pending, so a -Remove run starts with the adds held (Role A pa, Role B pb, root and
+        # copy) unless the test is about that refusal (-AddsPending leaves the scenario's own state).
+        if (($ScriptArgs -contains '-Remove') -and -not $AddsPending) {
+            $Scenario.held['ra'] = @{ pa = 'Deep' }; $Scenario.held['ra1'] = @{ pa = 'Deep' }
+            $Scenario.held['rb'] = @{ pb = 'Deep' }; $Scenario.held['rb1'] = @{ pb = 'Deep' }
+        }
         $dir = Join-Path $script:Work "run$($script:N)"
         $rolesDir = Join-Path $dir 'Roles'
         New-Item -ItemType Directory -Path $rolesDir -Force | Out-Null
@@ -301,9 +307,9 @@ Describe 'Set-FeatureRolePrivileges.ps1 (stubbed Dataverse)' {
             @($r.Posts | Where-Object { $_.Uri -match 'RemovePrivilegeRole' }).Count | Should -Be 0
             @($r.Requests | Where-Object { $_.Uri -match '=rc' -or $_.Uri -match 'sprk_c' }).Count | Should -Be 0
         }
-        It '-Remove never adds: the adds are not read or written' {
+        It '-Remove never adds: the adds are read (for the refusal below) but never written' {
             $r = Invoke-Frp (New-Scenario) @('-Remove', '-Apply') -WithRemoval
-            @($r.Requests | Where-Object { $_.Uri -match 'sprk_a|sprk_b|=ra|=rb' }).Count | Should -Be 0
+            @($r.Posts | Where-Object { $_.Uri -match 'roles\((ra|ra1|rb|rb1)\)' -or $_.Uri -match 'AddPrivilegesRole' }).Count | Should -Be 0
         }
         It '-Remove -Verify fails while the removal is pending, and passes once it is absent everywhere' {
             $pending = Invoke-Frp (New-Scenario) @('-Remove', '-Verify') -WithRemoval
@@ -452,8 +458,8 @@ Describe 'Set-FeatureRolePrivileges.ps1 (stubbed Dataverse)' {
         It '-Restore -Gap R1 -Apply puts back R1 only, not another gap''s removal that is also absent' {
             $s = & $script:removed
             $s.held['rd'] = @{}; $s.held['rd1'] = @{}   # Role D's R2 removal is absent on its root and copy too
-            $all = Invoke-Frp $s @('-Restore') -WithRemoval -SecondRemoval
-            $all.Out | Should -Match 'DRY RUN: no writes. Re-run with -Restore -Apply to make the 2 restore\(s\) above'
+            $all = Invoke-Frp $s @('-Restore', '-Gap', 'R1,R2') -WithRemoval -SecondRemoval
+            $all.Out | Should -Match 'DRY RUN: no writes. Re-run with -Restore -Gap R1,R2 -Apply to make the 2 restore\(s\) above'
             $r = Invoke-Frp $s @('-Restore', '-Gap', 'R1', '-Apply') -WithRemoval -SecondRemoval
             $r.Exit | Should -Be 0
             $r.Posts.Count | Should -Be 1
@@ -528,11 +534,17 @@ Describe 'Set-FeatureRolePrivileges.ps1 (stubbed Dataverse)' {
             $r.Out | Should -Match 'Role C \(copy rc1\) prvAppendTosprk_c: expected Deep, read back None'
             $r.Out | Should -Match 'Applied in this run before the failure \(1\)'
         }
-        It 'a failed AddPrivilegesRole: nothing applied, the -Restore re-run hint, exit 1' {
-            $r = Invoke-Frp (& $script:removed @{ failPostOn = 'rc' }) @('-Restore', '-Apply') -WithRemoval
+        It 'a failed AddPrivilegesRole: nothing applied, the -Restore re-run hint carries the run''s own -Gap, exit 1' {
+            $r = Invoke-Frp (& $script:removed @{ failPostOn = 'rc' }) @('-Restore', '-Gap', 'R1', '-Apply') -WithRemoval
             $r.Exit | Should -Be 1
             $r.Out | Should -Match 'FAIL: AddPrivilegesRole on'
+            $r.Out | Should -Match 'Re-run -Restore -Gap R1 -Apply to converge'
+            $r.Out | Should -Match 'Re-run -Restore -Gap R1 -Verify to see what is still pending'
+        }
+        It 'a failed AddPrivilegesRole without -Gap names the plain -Restore commands (control)' {
+            $r = Invoke-Frp (& $script:removed @{ failPostOn = 'rc' }) @('-Restore', '-Apply') -WithRemoval
             $r.Out | Should -Match 'Re-run -Restore -Apply to converge'
+            $r.Out | Should -Match 'Re-run -Restore -Verify to see'
         }
         It 'a platform that also adds another privilege (px) during the rollback fails the run, naming it' {
             $r = Invoke-Frp (& $script:removed @{ addAlsoSets = @{ px = 'Global' } }) @('-Restore', '-Apply') -WithRemoval
@@ -549,6 +561,184 @@ Describe 'Set-FeatureRolePrivileges.ps1 (stubbed Dataverse)' {
             $r.Exit | Should -Be 0
             $r.Out | Should -Match 'Nothing to change'
             $r.Posts.Count | Should -Be 0
+        }
+    }
+
+    Context '046c fix round: the run''s own mode flags in every hint' {
+        It 'a failed RemovePrivilegeRole under -Gap: both hints carry -Remove -Gap R1' {
+            $r = Invoke-Frp (New-Scenario @{ failRemoveOn = 'rc' }) @('-Remove', '-Gap', 'R1', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'Re-run -Remove -Gap R1 -Apply to converge'
+            $r.Out | Should -Match 'Re-run -Remove -Gap R1 -Verify to see what is still pending'
+        }
+        It 'a failed read-back under -Gap: the hint carries -Remove -Gap R1' {
+            $r = Invoke-Frp (New-Scenario @{ failReadOf = 'rc1' }) @('-Remove', '-Gap', 'R1', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'Re-run -Remove -Gap R1 -Verify to see what the live roles hold'
+        }
+        It 'a failed final re-read under -Restore -Gap: the hint carries -Restore -Gap R1' {
+            $s = New-Scenario @{ held = @{ ra = @{}; ra1 = @{}; rb = @{}; rb1 = @{}; rc = @{ pz = 'Basic' }; rc1 = @{ pz = 'Basic' } }; failReadAfter = @{ rc = 1 } }
+            $r = Invoke-Frp $s @('-Restore', '-Gap', 'R1', '-Apply') -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'FAIL: re-read on'
+            $r.Out | Should -Match 'Re-run -Restore -Gap R1 -Verify to see what the live roles hold'
+        }
+        It 'nothing to remove but a copy still holds the privilege: the -Apply message names -Remove -Gap R2 -Verify' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Gap', 'R2', '-Apply') -WithRemoval -SecondRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'APPLY: nothing to remove'
+            $r.Out | Should -Match 're-run -Remove -Gap R2 -Verify'
+        }
+        It 'a successful -Remove -Apply that leaves a copy holding it: the final message names the run''s own flags' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Gap', 'R1,R2', '-Apply') -WithRemoval -SecondRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 're-run -Remove -Gap R1,R2 -Verify'
+        }
+        It 'without -Gap the same message names -Remove -Verify (control)' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Apply') -WithRemoval -SecondRemoval
+            $r.Out | Should -Match 're-run -Remove -Verify\.'
+        }
+    }
+
+    Context '046c fix round: -Remove refuses while a declared change is pending' {
+        It 'a dry run exits 1, names the pending changes, says to apply them first, and writes nothing' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove') -WithRemoval -AddsPending
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'REFUSED: -Remove will not run while 2 declared change\(s\) are pending'
+            $r.Out | Should -Match 'Role A prvCreatesprk_a \(G1\)'
+            $r.Out | Should -Match 'Role B prvCreatesprk_b \(G2\)'
+            $r.Out | Should -Match 'Apply them first'
+            $r.Out | Should -Not -Match 'DRY RUN: no writes'
+            $r.Posts.Count | Should -Be 0
+        }
+        It '-Remove -Apply exits 1 and removes nothing' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Apply') -WithRemoval -AddsPending
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'REFUSED'
+            $r.Posts.Count | Should -Be 0
+        }
+        It '-Remove -Gap R1 -Apply refuses too, and the message carries the flags' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Gap', 'R1', '-Apply') -WithRemoval -AddsPending
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'REFUSED: -Remove -Gap R1 will not run'
+            $r.Out | Should -Match 'then re-run -Remove -Gap R1 -Apply'
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'one change pending out of two: refuses, naming only that one' {
+            $r = Invoke-Frp (New-Scenario @{ held = @{ ra = @{ pa = 'Deep' }; ra1 = @{ pa = 'Deep' }; rb = @{}; rb1 = @{}; rc = @{ pc = 'Deep'; pz = 'Basic' }; rc1 = @{ pc = 'Deep'; pz = 'Basic' } } }) @('-Remove', '-Apply') -WithRemoval -AddsPending
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'while 1 declared change\(s\) are pending: Role B prvCreatesprk_b \(G2\)'
+            $r.Out | Should -Not -Match 'pending:.*Role A'
+            $r.Posts.Count | Should -Be 0
+        }
+        It 'a pending change still refuses when no removal is pending' {
+            $r = Invoke-Frp (New-Scenario @{ held = @{ ra = @{}; ra1 = @{}; rb = @{ pb = 'Deep' }; rb1 = @{ pb = 'Deep' }; rc = @{ pz = 'Basic' }; rc1 = @{ pz = 'Basic' } } }) @('-Remove', '-Apply') -WithRemoval -AddsPending
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'REFUSED'
+            $r.Out | Should -Not -Match 'Nothing to change'
+        }
+        It 'it reads the adds but never writes them (refused: no POST at all)' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Apply') -WithRemoval -AddsPending
+            @($r.Requests | Where-Object { $_.Uri -match '=ra|=rb' }).Count | Should -BeGreaterThan 0
+            @($r.Posts | Where-Object { $_.Uri -match 'AddPrivilegesRole' }).Count | Should -Be 0
+        }
+        It 'the refusal does not print a rollback command' {
+            (Invoke-Frp (New-Scenario) @('-Remove') -WithRemoval -AddsPending).Out | Should -Not -Match 'Rollback\s+:'
+        }
+        It 'the adds held (and the removal pending): -Remove runs (control)' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove') -WithRemoval
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'Changes\s+: none pending'
+            $r.Out | Should -Not -Match 'REFUSED'
+        }
+        It '-Remove -Verify checks the removals only: a pending change does not fail it (control)' {
+            $r = Invoke-Frp (New-Scenario @{ held = @{ ra = @{}; ra1 = @{}; rb = @{}; rb1 = @{}; rc = @{ pz = 'Basic' }; rc1 = @{ pz = 'Basic' } } }) @('-Remove', '-Verify') -WithRemoval -AddsPending
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'VERIFY PASS'
+        }
+        It '-Restore does not read the adds (control)' {
+            $r = Invoke-Frp (New-Scenario) @('-Restore') -WithRemoval -AddsPending
+            @($r.Requests | Where-Object { $_.Uri -match 'sprk_a|sprk_b|=ra|=rb' }).Count | Should -Be 0
+        }
+    }
+
+    Context '046c fix round: -Gap must name a gap' {
+        It '<case> stops before anything is read' -ForEach @(
+            @{ case = '-Remove -Gap ""'; a = @('-Remove', '-Gap', "''") }
+            @{ case = '-Remove -Gap @("")'; a = @('-Remove', '-Gap', '@('''')') }
+            @{ case = '-Remove -Gap $null'; a = @('-Remove', '-Gap', '$null') }
+            @{ case = '-Restore -Gap ""'; a = @('-Restore', '-Gap', "''") }
+            @{ case = '-Remove -Gap ","'; a = @('-Remove', '-Gap', "','") }
+        ) {
+            $r = Invoke-Frp (New-Scenario) $a -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match '-Gap names no gap\.'
+            $r.Requests.Count | Should -Be 0
+        }
+        It 'an empty -Gap without -Remove or -Restore is still refused as a -Gap without a mode' {
+            $r = Invoke-Frp (New-Scenario) @('-Gap', "''") -WithRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match '-Gap limits -Remove or -Restore'
+            $r.Requests.Count | Should -Be 0
+        }
+        It 'no -Gap at all is not an empty -Gap (control)' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove') -WithRemoval
+            $r.Out | Should -Not -Match 'names no gap'
+            $r.Exit | Should -Be 0
+        }
+    }
+
+    Context '046c fix round: the rollback line is printed once, before the apply' {
+        It '-Remove -Apply whose final report is printed: no third rollback line, none for zero removals' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Apply') -WithRemoval -SecondRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match 'REMOVED and read back'
+            $r.Out | Should -Not -Match 'restores exactly the 0 removal'
+            # one line before the apply, one after the read-back; the final report prints none
+            @([regex]::Matches($r.Out, 'Rollback\s+:')).Count | Should -Be 2
+        }
+        It 'the line after the read-back is the same command as the one before the apply' {
+            $r = Invoke-Frp (New-Scenario) @('-Remove', '-Apply') -WithRemoval -SecondRemoval
+            $cmds = @([regex]::Matches($r.Out, 'Rollback\s+: (pwsh [^\r\n]*?-Apply)') | ForEach-Object { $_.Groups[1].Value })
+            $cmds.Count | Should -Be 2
+            $cmds[0] | Should -Be $cmds[1]
+            $cmds[0] | Should -Match '-Restore -Gap R1 -Apply$'
+        }
+        It 'a dry run with no removal pending prints no rollback line' {
+            $r = Invoke-Frp (New-Scenario @{ held = @{ ra = @{}; ra1 = @{}; rb = @{}; rb1 = @{}; rc = @{ pz = 'Basic' }; rc1 = @{ pz = 'Basic' } } }) @('-Remove') -WithRemoval
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Not -Match 'Rollback\s+:'
+        }
+    }
+
+    Context '046c fix round: -Restore without -Gap when the block holds more than one gap' {
+        It '-Restore refuses, naming the gaps, and reads nothing' {
+            $r = Invoke-Frp (New-Scenario) @('-Restore') -WithRemoval -SecondRemoval
+            $r.Exit | Should -Be 1
+            $r.Out | Should -Match '-Restore without -Gap would restore the removals of 2 gaps \(R1, R2\)'
+            $r.Requests.Count | Should -Be 0
+        }
+        It '-Restore -Apply and -Restore -Verify refuse the same way' {
+            foreach ($mode in '-Apply', '-Verify') {
+                $r = Invoke-Frp (New-Scenario) @('-Restore', $mode) -WithRemoval -SecondRemoval
+                $r.Exit | Should -Be 1
+                $r.Out | Should -Match 'Name the gap\(s\) to restore'
+                $r.Posts.Count | Should -Be 0
+            }
+        }
+        It '-Restore with one gap in the block needs no -Gap (control)' {
+            (Invoke-Frp (New-Scenario) @('-Restore', '-Verify') -WithRemoval).Exit | Should -Be 0
+        }
+        It '-Restore -Gap names the gap and runs (control)' {
+            (Invoke-Frp (New-Scenario) @('-Restore', '-Gap', 'R1', '-Verify') -WithRemoval -SecondRemoval).Exit | Should -Be 0
+        }
+        It 'a -Remove with several gaps pending prints a rollback that names them (the plain command would refuse)' {
+            $s = New-Scenario
+            $s.held['rd'] = @{ pd = 'Deep' }
+            $r = Invoke-Frp $s @('-Remove') -WithRemoval -SecondRemoval
+            $r.Exit | Should -Be 0
+            $r.Out | Should -Match 'Rollback\s+: pwsh scripts/Set-FeatureRolePrivileges.ps1 -EnvironmentUrl https://example.invalid -Restore -Gap R1,R2 -Apply'
+            $r.Out | Should -Match 'restores exactly the 2 removal\(s\) above'
         }
     }
 
