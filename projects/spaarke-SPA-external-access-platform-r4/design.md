@@ -226,6 +226,7 @@ R3 sends these open issues to "R4 backlog". None was in this design before. Each
 | #2270 | Contacts that `ContactIdentityBinderFactory` creates in a foreign Dataverse environment have no owner. **Owner decision:** where does a foreign environment's owner team come from? |
 | #2271 | The document-lock 409 has no ProblemDetails title or status, so clients show generic text |
 | #2275 | `no-mock-identity.test.tsx` fails on its first run after an edit (cold Vite transform hits the 60 s timeout) |
+| #2578 | **Dev fault, every 5 min since at least 2026-11-03:** the secured-column readability proof fails (WhoAmI 403 `0x80072560` "not a member of the organization", `ContactIdentityStore.ReadProofAsync` via `WebApiColumnReadPermissionSource`), and the proof fails closed. Filed by ontology to R3; routed to R4 on 2026-11-05. Unverified lead from uac-r2's d763 gate: it comes from the link reconciliation's pass over the registered `acme` environment (its registry row, or a missing application user there), not the BFF's own environment, and it predates R3. Ties in with #2270. Live reads need the owner to see the commands first; a setting change needs owner approval and a rollback. |
 | #2278 | Backfill the owner of contacts that already exist (`scripts/Backfill-RecordOwnership.ps1` doesn't cover `contact`). Pairs with #1673. |
 
 **Inherited state, not issues** (confirmed with R3, 2026-11-04):
