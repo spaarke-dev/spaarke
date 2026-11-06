@@ -182,6 +182,28 @@ public partial class InvoiceSubmissionPersisterTests
 
     private static JsonObject LineFields(Entity line) => JsonNode.Parse(line.GetAttributeValue<string>("sprk_extractionconfidence"))!["fields"]!.AsObject();
 
+    /// <summary>
+    /// Task 095d-2a-2: the firmless intake of <see cref="RerunRead"/> as Dataverse stores it, for <see cref="InvoiceSubmissionRerunTests"/>: the
+    /// submission row as the processor read it with the persister's update applied, the invoice it created, and its lines (rounded).
+    /// </summary>
+    internal static async Task<(Entity Submission, Entity Invoice, List<Entity> Lines)> StoredFirmlessIntakeAsync(
+        IReadOnlyList<ExtractedInvoiceLine>? lines = null)
+    {
+        var harness = NoFirmIntake(lines);
+        var outcome = await harness.RunAsync();
+        var store = NoFirmStore();
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        var rows = store.Transactions.Single().Select(Target).ToList();
+
+        var submission = Copy(harness.Row);
+        foreach (var (key, value) in rows.Single(e => e.LogicalName == "sprk_invoicesubmission").Attributes)
+        {
+            submission[key] = value;
+        }
+
+        return (submission, Copy(rows.Single(e => e.LogicalName == "sprk_invoice")), AsDataverseStores(rows.Where(e => e.LogicalName == "sprk_billingevent")));
+    }
+
     // ── (a) the section totals, the total due and the line count ──
 
     [Fact(DisplayName = "095d-2a-1 (a): the section totals and total due are stored with their confidences, as exact numbers, in the findings provenance, with the line count; never on a line")]

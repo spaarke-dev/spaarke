@@ -1055,8 +1055,9 @@ internal static class InheritedAccessPermission
     /// (<c>sprk_findingsjson</c>, <see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson"/>).
     /// They decide no access, but since 1c their <c>assignFirm</c> member decides the immutable Decision Record's decider, note and date
     /// (<c>InvoiceAssignFirmService.BuildDecision</c>), so only its typed writers may change it. The typed writers are the
-    /// submission persister, <c>InvoiceCorrectionReevaluation</c>, <c>SubmissionOverrideService</c> and Set firm
-    /// (<c>InvoiceAssignFirmService</c>); they go through <c>IGenericEntityService</c>, not these paths. Where the column is otherwise
+    /// submission persister, <c>InvoiceCorrectionReevaluation</c>, <c>SubmissionOverrideService</c>, Set firm
+    /// (<c>InvoiceAssignFirmService</c>) and the re-run after it (<c>InvoiceSubmissionRerun</c>, which changes only <c>assignFirm.rulesRerun</c>
+    /// in that member); they go through <c>IGenericEntityService</c>, not these paths. Where the column is otherwise
     /// held: app-only generic writes (an Update Record node, an output mapping, Repair) are refused here. A person-run write is blocked by
     /// field security (only the "Spaarke BFF-Managed Field Writers" profile holds update on the column), except for System Administrators,
     /// a platform rule that holds for every secured column. A create-time or repair field-mapping rule is skipped by
@@ -1321,7 +1322,7 @@ internal static class InheritedAccessPermission
             // 095d-1b: so is the firm invoice number (set by the allocator; an undone submission clears it).
             // 095d-1c F4-1: the stored findings decide a Decision Record's decider, note and date; they decide no access.
             var decides = !isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson, StringComparison.OrdinalIgnoreCase)
-                ? "it decides no access; only typed writers write it: the submission persister, InvoiceCorrectionReevaluation, SubmissionOverrideService and Set firm (InvoiceAssignFirmService)"
+                ? "it decides no access; only typed writers write it: the submission persister, InvoiceCorrectionReevaluation, SubmissionOverrideService, Set firm (InvoiceAssignFirmService) and its re-run (InvoiceSubmissionRerun)"
                 : !isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmInvoiceNumberColumn, StringComparison.OrdinalIgnoreCase)
                 ? "it decides no access; only the tracking number allocator sets it"
                 : !isInvoice && (string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn, StringComparison.OrdinalIgnoreCase)

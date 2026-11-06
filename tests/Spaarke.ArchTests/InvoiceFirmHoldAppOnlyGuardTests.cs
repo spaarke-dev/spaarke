@@ -41,6 +41,9 @@ public sealed class InvoiceFirmHoldAppOnlyGuardTests
         // WRITER (095d-1b): clears it in the invoice update of Set firm's one renumber transaction, sent by the allocator's app-only
         // ExecuteTransactionAsync; it reads the hold only through InvoiceFirmHold.IsHeldAsync over its own IGenericEntityService (app-only).
         typeof(Sprk.Bff.Api.Services.Finance.InvoiceAssignFirmService),
+        // READER and WRITER (095d-2a-2): the re-run reads the invoice's hold through its own IGenericEntityService (app-only) and clears the
+        // rerun-pending marker in its one ExecuteTransactionAsync (app-only, row-version conditioned), the only clearer of that marker.
+        typeof(InvoiceSubmissionRerun),
     ];
 
     /// <summary>Types that name the column without reading or writing a row: held to C1 and C2, not C3.</summary>

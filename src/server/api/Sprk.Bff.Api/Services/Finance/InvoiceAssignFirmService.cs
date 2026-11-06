@@ -1004,8 +1004,8 @@ public sealed class InvoiceAssignFirmService
             // The invoice: its firm, its number and its own hold REPLACED by the rerun-pending marker, conditioned on the version read (16.4
             // condition 2). EB-D-185 / uac-r2 R3: the firm is set but the rules re-run for it has not completed, so the invoice stays held and
             // the firm gate (InvoiceFirmGate) answers "re-run pending" from this field-secured marker alone, whatever the submission link says.
-            // TODO(095d-2 / 2a-2): the COMPLETED re-run is the only writer that clears the marker (a failed re-run leaves it in place). Nothing in
-            // Set firm or the gate clears or downgrades it.
+            // The COMPLETED re-run's commit (InvoiceSubmissionRerun, task 095d-2a-2) is the only writer that clears the marker, in the transaction
+            // that writes rulesRerun = completed; a failed or refused re-run leaves it in place. Nothing in Set firm or the gate clears or downgrades it.
             var invoice = new Entity(InvoiceReviewReadService.InvoiceEntity, InvoiceId)
             {
                 [InvoiceSubmissionPersister.InvoiceVendorOrg] = firm,

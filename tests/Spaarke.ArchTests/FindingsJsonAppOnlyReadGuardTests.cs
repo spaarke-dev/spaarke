@@ -55,6 +55,9 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         // task 095d-1b: Set firm reads it app-only (IGenericEntityService) for the stored decision and writes it in the renumber transaction (the
         // new trackingNumber and the assignFirm member), sent by the allocator's app-only ExecuteTransactionAsync, row-version conditioned
         typeof(Sprk.Bff.Api.Services.Finance.InvoiceAssignFirmService),
+        // task 095d-2a-2: the re-run after Set firm reads it app-only (IGenericEntityService) for the stored facts and decision, and writes the
+        // re-evaluated findings (assignFirm.rulesRerun = completed) in its one app-only ExecuteTransactionAsync, row-version conditioned
+        typeof(InvoiceSubmissionRerun),
     ];
 
     /// <summary>
