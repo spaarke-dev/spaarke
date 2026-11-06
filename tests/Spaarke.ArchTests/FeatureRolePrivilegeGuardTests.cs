@@ -107,11 +107,12 @@ public class FeatureRolePrivilegeGuardTests
         + Bff + "Services/Communication/CommunicationThreadReadService.cs:1311-1335";
 
     /// <summary>The send reads the thread it is stamped into, and the thread's regarding record, as the caller (an impersonated query,
-    /// so Dataverse asks Read on <c>sprk_communicationthread</c>). Basic is the depth (owner-directed, G13 closed): record threads are
-    /// owned by their record's team (<c>ThreadResolver.CreateThreadAsync</c>, <c>CreateRecordThreadAsync</c>, and the anchored-owner
-    /// reconcile of <c>CommunicationThreadFilingSweepJob</c>), which a member reads at Basic through team membership; Direct threads
-    /// are private by ownership and share, so a deeper Read would open them across the business-unit tree. Even a share needs the
-    /// privilege at Basic, which both roles hold.</summary>
+    /// so Dataverse asks Read on <c>sprk_communicationthread</c>). Basic is the depth (owner-directed, G13 closed). Basic suffices for
+    /// record threads owned by their record's team: those created by the current code (<c>ThreadResolver.CreateThreadAsync</c>,
+    /// <c>CreateRecordThreadAsync</c>), and older ones once the thread filing sweep has been applied
+    /// (<c>CommunicationThreadFilingSweepJob</c>). A thread the sweep skips keeps its owner. Basic is the depth; a deeper Read is not
+    /// needed. Thread privacy for Direct threads is by ownership and share; this Read stays at Basic (<see cref="MustNotExceed"/> pins
+    /// the ceiling). A share also needs the privilege at Basic, which both roles hold.</summary>
     private const string CommSendThreadRead = Bff + "Api/Filters/CommunicationRecordAuthorizationFilter.cs:647,672,767; "
         + Bff + "Services/Communication/CommunicationThreadReadService.cs:1260-1275";
 
@@ -562,6 +563,28 @@ public class FeatureRolePrivilegeGuardTests
         new("Invoice line (sprk_billingevent) create: none, by design (BFF-written, ebilling D-18)",
             ["prvCreatesprk_BillingEvent"], [], "projects/ebilling-r1/notes/decisions-log.md:24"),
     ];
+
+    /// <summary>A rule that the named roles hold <paramref name="Privileges"/> at no more than <paramref name="MaxDepth"/> (a ceiling;
+    /// holding less, or not at all, passes: the requirement rows ask for the floor).</summary>
+    internal sealed record MustNotExceedRule(string Rule, string[] Privileges, string MaxDepth, string[] Roles, string Evidence);
+
+    /// <summary>The depth ceilings (task 046b, K2).</summary>
+    internal static readonly IReadOnlyList<MustNotExceedRule> MustNotExceed =
+    [
+        // Thread privacy for Direct threads is by ownership and share; this Read stays at Basic.
+        new("Thread Read stays at Basic: record threads are read through the record's team, Direct threads are private by ownership and share",
+            ["prvReadsprk_CommunicationThread"], "Basic", [Core, Basic],
+            "docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md:180; " + Bff + "Services/Communication/CommunicationThreadReadService.cs:1260-1275"),
+    ];
+
+    /// <summary>Each (role, privilege) of a rule's roles that is held deeper than the rule's ceiling (an unknown level counts as deeper).</summary>
+    internal static List<string> ExceededDepth(IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> personRoles, IReadOnlyList<MustNotExceedRule> rules) =>
+        (from rule in rules
+         from role in rule.Roles
+         where personRoles.ContainsKey(role)
+         from privilege in rule.Privileges
+         where personRoles[role].TryGetValue(privilege, out var held) && (Rank(held) < 0 || Rank(held) > Rank(rule.MaxDepth))
+         select $"{role}: {privilege} at {personRoles[role][privilege]} exceeds {rule.MaxDepth} — {rule.Rule}").ToList();
 
     /// <summary>The ratchet: today's gaps (tasks 046 and 046b), each with the change it waits on. Remove an entry when its change
     /// lands. G1, G2 and G4-G8 were applied to the role files by task 046b (owner rulings 2026-11-05); G10 was withdrawn (no role
@@ -1080,6 +1103,56 @@ public class FeatureRolePrivilegeGuardTests
         Assert.Equal(
             new[] { "Other: prvDeletesprk_DecisionRecord at Global — R-writer", "Person: prvCreatesprk_Signal at Basic — R-writer" },
             ForbiddenHeld(personRoles, rules));
+    }
+
+    [Fact(DisplayName = "046b K2: Core User and Basic User hold Read on the communication thread at no more than Basic (the real role files pass)")]
+    public void ThreadReadStaysAtBasic()
+    {
+        var personRoles = PersonRoles(SolutionsDirectory);
+        Assert.All(MustNotExceed, rule =>
+        {
+            Assert.NotEmpty(rule.Privileges);
+            Assert.True(Rank(rule.MaxDepth) >= 0, $"'{rule.MaxDepth}' is not a depth.");
+            Assert.All(rule.Roles, role => Assert.True(personRoles.ContainsKey(role), $"'{role}' is named by a ceiling but is not a person role file."));
+            Assert.Empty(MissingEvidencePaths(rule.Evidence, SourceScan.RepoRoot));
+        });
+        // the ceiling is not vacuous: both roles hold the privilege (at Basic)
+        Assert.All(new[] { Core, Basic }, role => Assert.Equal("Basic", personRoles[role]["prvReadsprk_CommunicationThread"], ignoreCase: true));
+
+        var exceeded = ExceededDepth(personRoles, MustNotExceed);
+        Assert.True(exceeded.Count == 0, "A role holds Read on the communication thread deeper than Basic:\n  " + string.Join("\n  ", exceeded));
+    }
+
+    [Fact(DisplayName = "046b K2 controls: a seeded copy of Core User or Basic User with the thread Read at Local, Deep or Global fails the ceiling; Basic, an absent privilege and other roles do not")]
+    public void ThreadReadCeilingFires()
+    {
+        var real = PersonRoles(SolutionsDirectory);
+        Assert.Empty(ExceededDepth(real, MustNotExceed)); // must-not-fire: the real files
+
+        foreach (var role in new[] { Core, Basic })
+        {
+            foreach (var depth in new[] { "Local", "Deep", "Global" })
+            {
+                var seeded = new Dictionary<string, IReadOnlyDictionary<string, string>>(real)
+                {
+                    [role] = new Dictionary<string, string>(real[role], StringComparer.OrdinalIgnoreCase) { ["prvReadsprk_CommunicationThread"] = depth },
+                };
+                var found = ExceededDepth(seeded, MustNotExceed); // must-fire
+                Assert.Single(found);
+                Assert.StartsWith($"{role}: prvReadsprk_CommunicationThread at {depth} exceeds Basic", found[0], StringComparison.Ordinal);
+            }
+        }
+
+        // must-not-fire: Basic is the ceiling, not over it; a privilege the role lacks; a role the rule does not name
+        var rule = new MustNotExceedRule("R", ["prvReadsprk_X"], "Basic", ["A", "B"], "x.md:1");
+        var roles = new Dictionary<string, IReadOnlyDictionary<string, string>>
+        {
+            ["A"] = Privileges(("prvReadsprk_X", "Basic")),
+            ["B"] = Privileges(("prvReadsprk_Y", "Global")),
+            ["C"] = Privileges(("prvReadsprk_X", "Global")),
+        };
+        Assert.Empty(ExceededDepth(roles, [rule]));
+        Assert.Single(ExceededDepth(new Dictionary<string, IReadOnlyDictionary<string, string>>(roles) { ["A"] = Privileges(("prvReadsprk_X", "Local")) }, [rule]));
     }
 
     [Fact(DisplayName = "046b fix round 3 K: a must-not-hold rule with a vacuous Only (empty, or overlapping Except) is reported; Only unset or naming one other role is not; Only limits a rule to the roles it names")]

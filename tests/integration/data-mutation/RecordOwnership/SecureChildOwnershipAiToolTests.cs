@@ -1089,6 +1089,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         public int PatchStatus { get; set; } = 204;
 
+        /// <summary>The message a refused PATCH (<see cref="PatchStatus"/> 400 and above) carries; set it to Dataverse's own text to script the real refusal.</summary>
+        public string PatchRefusalMessage { get; set; } = "Denied.";
+
         /// <summary>The status the caller's POST answers with; 400 and above is a refusal (nothing is created).</summary>
         public int PostStatus { get; set; } = 201;
         public List<(string Path, string Body)> Posts { get; } = new();
@@ -1408,7 +1411,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             if (MissingRow(Uri.UnescapeDataString(relativePath)) is { } absent)
                 return Task.FromResult(absent);
             if (PatchStatus >= 400)
-                return Task.FromResult(DataverseUserResponse.Fail(PatchStatus, DataverseUserClientErrorCodes.AccessDenied, "Denied."));
+                return Task.FromResult(DataverseUserResponse.Fail(PatchStatus, DataverseUserClientErrorCodes.AccessDenied, PatchRefusalMessage));
             if (RefuseUndeclared(relativePath, jsonBody) is { } refused)
                 return Task.FromResult(refused);
             if (RefuseSecuredColumn(jsonBody) is { } secured)

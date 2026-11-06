@@ -161,6 +161,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         // own 403 ProblemDetails carrying the caller-access reason code. No owner is assigned and no Signal is queued.
         UnfiledCommunicationExists();
         _user.PatchStatus = 403;
+        // Dataverse's own text for a missing Append (the route's mapping is by status and code, not by this text).
+        _user.PatchRefusalMessage = "Principal user (Id=00000000-0000-0000-0000-000000000001, type=8, roleCount=2) is missing prvAppendsprk_communication privilege (Id=00000000-0000-0000-0000-000000000002) on OTC=10001 for entity 'sprk_communication'.";
         var trigger = FilingSignalDoubles.Trigger();
         var entities = ReadsBeforeAndAfter(matterBefore: PreviousMatter, matterAfter: OrdinaryMatter);
 
