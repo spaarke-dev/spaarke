@@ -565,9 +565,11 @@ jobs:
       - name: Remove-WorktreeSafe (Pester)
         shell: pwsh
         run: |
-          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
-          Import-Module Pester -MinimumVersion 5.5.0
-          $r = Invoke-Pester -Path tests/scripts/Remove-WorktreeSafe.Tests.ps1 -Output Detailed -PassThru
+          # Pinned like the other Pester jobs, so a new Pester major cannot silently change this job. (-MinimumVersion
+          # installed the newest; Pester 6.2.0 fails these files at load on at least one dev machine.)
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -RequiredVersion 5.7.1
+          $r = Invoke-Pester -Path tests/scripts/Remove-WorktreeSafe.Tests.ps1, tests/scripts/Clean-AgentWorktrees.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------

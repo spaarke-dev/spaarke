@@ -44,10 +44,13 @@ BeforeAll {
     }
 
     function Invoke-Safe { param([string[]]$Paths, [switch]$Force, [switch]$WhatIf)
-        $a = @('-NoProfile', '-NonInteractive', '-File', $script:Script, '-Path') + ($Paths -join ',')
-        if ($Force) { $a += '-Force' }
-        if ($WhatIf) { $a += '-WhatIf' }
-        $out = & $script:Pwsh @a 2>&1 | Out-String
+        # -Command, not -File: `pwsh -File s.ps1 -Path a,b` binds ONE string "a,b" to [string[]]$Path, so a
+        # multi-path call would test a single nonexistent path (found 2026-11-05; same bug stalled a real cleanup).
+        $list = ($Paths | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ','
+        $cmd = "& '$($script:Script -replace "'", "''")' -Path @($list)"
+        if ($Force) { $cmd += ' -Force' }
+        if ($WhatIf) { $cmd += ' -WhatIf' }
+        $out = & $script:Pwsh -NoProfile -NonInteractive -Command "$cmd; exit `$LASTEXITCODE" 2>&1 | Out-String
         return @{ Code = $LASTEXITCODE; Out = $out }
     }
 
@@ -148,6 +151,9 @@ Describe 'Remove-WorktreeSafe.ps1' {
         It 'validates every path first: one bad path means the good one is untouched too' {
             $r = Invoke-Safe -Paths @($script:F.Victim, $script:F.Wt) -Force
             $r.Code | Should -Not -Be 0
+            # both paths reached the script as two paths: the refusal names the victim itself, not a joined "a,b"
+            $r.Out | Should -Match ('REFUSED\s+' + [regex]::Escape($script:F.Victim) + ' :')
+            $r.Out | Should -Not -Match 'not an existing folder'
             Test-Path -LiteralPath $script:F.Wt | Should -BeTrue
             (Get-Item -LiteralPath (Join-Path $script:F.Wt 'node_modules') -Force).LinkType | Should -Be 'Junction'
         }

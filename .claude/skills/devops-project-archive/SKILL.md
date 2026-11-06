@@ -4,14 +4,14 @@ tags: [devops, project-archive, gh-cli, git]
 techStack: [gh-cli, graphql, git, python]
 appliesTo: ["/devops-project-archive", "archive project", "close project"]
 alwaysApply: false
-last-reviewed: 2026-10-12
+last-reviewed: 2026-11-05
 ---
 
 # devops-project-archive
 
 > **Category**: DevOps / Portfolio
 > **Tier**: Non-destructive — closes Issue state only. Worktree preserved.
-> **Last Reviewed**: 2026-10-12 (final AI spend captured at close-out, Step 3); 2026-06-25 (worktree-deletion behavior REMOVED per operator workflow change)
+> **Last Reviewed**: 2026-11-05 (Step 5.5: remove the project's finished sub-agent copies; the project worktree is still kept); 2026-10-12 (final AI spend captured at close-out, Step 3); 2026-06-25 (worktree-deletion behavior REMOVED per operator workflow change)
 
 ## What this skill does (and doesn't)
 
@@ -117,6 +117,17 @@ Issue: #N (closed)
 
 The folder + `.archived` mark this project as closed. The worktree remains usable — operator can revisit, re-run tools, or clean up at their own cadence (via a separate workflow, not this skill).
 
+### Step 5.5: Remove the project's finished sub-agent copies
+
+Sub-agents launched with worktree isolation get a full repo copy under the **main checkout's** `.claude\worktrees\`, whichever worktree the session ran in, and Claude Code's own sweep keeps every copy whose task branch was merged locally but never pushed (FAILURE-MODES G-25). Archive is the last point at which this project's copies are known to be finished. These are throwaway agent copies, **not** the project worktree, which stays.
+
+```powershell
+pwsh scripts/worktree/Clean-AgentWorktrees.ps1 -Project {slug} -WhatIf   # show what would go
+pwsh scripts/worktree/Clean-AgentWorktrees.ps1 -Project {slug}           # remove them
+```
+
+It removes a copy only when it is unlocked, idle 12 h or more, clean, and its commits are in `work/{slug}`; it removes through `Remove-WorktreeSafe.ps1` and keeps the copy's branch. Report the "removed / kept" line in Step 6. Anything it keeps (locked, dirty, unmerged) is listed with the reason: leave it, and mention it to the operator.
+
 ### Step 6: Report
 
 ```
@@ -124,6 +135,7 @@ Archived project: projects/{name}/
   Issue #N closed (Status=Completed, Closed Date=YYYY-MM-DD)
   Folder retained with .archived marker
   Worktree c:/code_files/spaarke-wt-{slug} PRESERVED (clean up separately if desired)
+  Sub-agent copies: {N} removed, {M} kept ({reasons})
   Remote branch work/{slug} preserved on origin
 ```
 
