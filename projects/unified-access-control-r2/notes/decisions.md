@@ -248,3 +248,25 @@ The matrix and gap table are in `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITEC
   - It is the only person role with those rights, held by a few named admins, with Dataverse auditing on for the three tables.
   - Every generic BFF path refuses changes to these tables (task 048), so the model-driven app, under this role, is the cleanup path.
   - Console User's Append and AppendTo on these tables stay.
+
+## 2026-11-05: Security roles: owner rulings on the add-on gap batch (field-mapping task 046b)
+
+field-mapping checked each add-on role alone against the feature matrix. Owner rulings, 2026-11-05, in this session:
+
+- **Office Add In User and AI Analysis User are NOT standalone.** Neither gets the gaps it shows when held alone (Office: 6, including To Do save and events regarding an analysis; AI Analysis: Read, AppendTo and Write on `sprk_document`, the last being G9). Both need Core User. This narrows the earlier "add-ons standalone" ruling for these two roles.
+- **Console User needs Core User.** It does not get the 28 Decide-lane rights it lacks alone. The guard records it as an exception to "standalone", like the two above.
+- **Two removals (tightening):**
+  - Ontology Administrator loses Create on `sprk_budgetrevision`. A cleanup role needs Write and Delete, not Create; creation stays with the table's writer. The rest of the cleanup ruling above stands.
+  - Basic User loses AppendTo on `sprk_reportcard` (Deep). Core User now holds it (G1). field-mapping first confirms that no matrix feature needs it on Basic User.
+  - The apply script only adds or raises, so the removals need their own reviewed step; uac-r2 applies them on dev under this go.
+- **The root business unit's default team no longer holds Office Add In User on dev.** Removed 2026-11-05 by uac-r2 under the owner's go, before the 046b additions, so they reach only users who hold the role directly. It matches the Office add-ins guide: the role is optional and never assigned to a team.
+
+## 2026-11-05: A secure project created from the Console wizard is secure from creation
+
+The owner asked for the best technical and process answer.
+
+**Decision (uac-r2, under the owner's delegation).** The wizard's create declares that the project is to be secure. The server then creates it through the same path as a record filed under a secure parent (field-mapping task 049): secure and isolated from creation, with the Assigned-To pass run after isolation completes. `provisionSecureProject` keeps the container and the rest of provisioning, and is a no-op for what is already done. field-mapping builds it in 049 (they own the wizard and the create path); uac-r2 reviews it.
+
+**Why not change rule A3 as well.** A3 ("an Assigned-To grant that existed before the record became secure is kept") protects people already working on a record that is secured later. Changing it would remove their access, and this case doesn't need it: the fix is to stop the wizard's project being a non-secure record before it is secured.
+
+**Checked on dev, 2026-11-05:** no secure project holds an active granted or shared Assigned-To row, so no existing data needs repair.
