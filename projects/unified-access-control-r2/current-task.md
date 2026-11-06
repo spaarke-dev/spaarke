@@ -78,7 +78,7 @@
 - 049 secure-from-creation reasoning (assigned contacts granted before securing) stays in peer channels only.
 
 ## My own backlog
-- #2576 (probe fault shown as denial; ~26 callers), #2560, #2524, gate null-column hardening, SharePoint census, #2543, #2292, K-P1 for task 191; parked: 193 (C:/wt193), 197, #2427, 196a/196b; TASK-INDEX reconcile at 090.
+- #2590 (an app-only project with no person lands in the root BU; the owner chooses the rule: refuse or route), #2585 (re-file whole-row read → a metadata column set; hardening), #2576 (probe fault shown as denial; ~26 callers), #2560, #2524, gate null-column hardening, SharePoint census, #2543, #2292, K-P1 for task 191; parked: 193 (C:/wt193), 197, #2427, 196a/196b; TASK-INDEX reconcile at 090.
 
 ## Peers
 uac-r2 `-20` (this session) · ebilling `-c7` · field-mapping `-69` · ontology `-38` · provisioning `-b8` · word-add-in `-7b` · website `spaarke-website-cb` · SPA R4 `spaarke-wt-spa-external-access-platform-ad` (copy it on SPA invoice or record-modal UI changes).
