@@ -59,15 +59,21 @@ internal static class StoredSubmissionRead
         InvoiceSubmissionPersister.InvoiceBillingPeriodEnd, InvoiceSubmissionPersister.InvoiceCurrency, InvoiceReviewService.InvTotalAmount,
     ];
 
-    /// <summary>The rebuild's answer: the read and the stored coding, or the reason it is refused.</summary>
-    internal sealed record Result(ExtractedInvoice? Read, StoredCoding? Coding, string? RefusalReason)
+    /// <summary>
+    /// The rebuild's answer: the read and the stored coding, or the reason it is refused. <paramref name="Verified"/> is the fields a reviewer
+    /// corrected or confirmed, keyed by the read's line index (null for the header), for
+    /// <see cref="InvoiceSubmissionProcessor.EvaluateFromReadAsync"/>, which judges them at confidence 1.0 as the correction path does.
+    /// </summary>
+    internal sealed record Result(
+        ExtractedInvoice? Read, StoredCoding? Coding, string? RefusalReason, IReadOnlySet<(int? LineIndex, string Field)>? Verified)
     {
         /// <summary>True when the read and the coding were rebuilt.</summary>
         internal bool IsRerunnable => RefusalReason is null;
 
-        internal static Result Rerunnable(ExtractedInvoice read, StoredCoding coding) => new(read, coding, null);
+        internal static Result Rerunnable(ExtractedInvoice read, StoredCoding coding, IReadOnlySet<(int? LineIndex, string Field)> verified) =>
+            new(read, coding, null, verified);
 
-        internal static Result NotRerunnable(string reason) => new(null, null, reason);
+        internal static Result NotRerunnable(string reason) => new(null, null, reason, null);
     }
 
     /// <summary>
@@ -150,6 +156,7 @@ internal static class StoredSubmissionRead
         }
 
         var quotes = facts.Observations.ToLookup(q => q.Line);
+        var verifiedByIndex = new HashSet<(int? LineIndex, string Field)>(verified.Where(v => v.LineId is null).Select(v => ((int?)null, v.Field)));
         var lines = new List<ExtractedInvoiceLine>(stored.Count);
         var coded = new List<StoredLineCoding>(stored.Count);
         var rowIndex = new Dictionary<InvoiceLineType, int>();
@@ -175,6 +182,7 @@ internal static class StoredSubmissionRead
                 : InvoiceLineType.Expense;
             rowIndex[type] = rowIndex.TryGetValue(type, out var n) ? n + 1 : 0;
             lines.Add(Line(row, fields, type, rowIndex[type], dateMissing && !verified.Contains((row.Id, ResolutionFieldNames.Date)), verified));
+            verifiedByIndex.UnionWith(verified.Where(v => v.LineId == row.Id).Select(v => ((int?)index, v.Field)));
 
             if (StoredLineCoding.Parse(index, extraction["coding"] as JsonObject, quotes[index].ToList()) is not { } lineCoding)
             {
@@ -212,7 +220,7 @@ internal static class StoredSubmissionRead
             ApiVersion = provenance.ApiVersion!,
         };
 
-        return Result.Rerunnable(read, coding);
+        return Result.Rerunnable(read, coding, verifiedByIndex);
     }
 
     // ── Header ──
@@ -224,7 +232,8 @@ internal static class StoredSubmissionRead
         ExtractionProvenance.HeaderField Read(string name) => provenance.Header[name];
 
         // As InvoiceCorrectionReevaluation's header rule: a field a reviewer corrected or confirmed is its column (the correction wrote it
-        // there); any other is the value the analyzer read. The confidence stays the analyzer's.
+        // there); any other is the value the analyzer read. The confidence here stays the analyzer's: the evaluation judges a verified field at
+        // 1.0 (Result.Verified, applied where the correction path applies it, on the combined confidence).
         string? Value(string name) => verified.Contains(((Guid?)null, name)) ? ColumnText(invoice, name) : Read(name).Value;
 
         ExtractedInvoiceField<string?> TextField(string name) => new() { Value = Value(name), Confidence = Read(name).Confidence };

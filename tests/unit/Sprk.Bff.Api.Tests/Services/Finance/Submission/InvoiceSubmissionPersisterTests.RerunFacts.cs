@@ -36,7 +36,7 @@ public partial class InvoiceSubmissionPersisterTests
 
     private static readonly IReadOnlySet<(Guid? LineId, string Field)> NoneVerified = new HashSet<(Guid? LineId, string Field)>();
 
-    private static ExtractedInvoice RerunRead(IReadOnlyList<ExtractedInvoiceLine> lines) => new()
+    private static ExtractedInvoice RerunRead(IReadOnlyList<ExtractedInvoiceLine> lines, decimal currencyConfidence = 0.99m) => new()
     {
         Header = new ExtractedInvoiceHeader
         {
@@ -55,7 +55,7 @@ public partial class InvoiceSubmissionPersisterTests
             ExpensesTotal = InvoiceSubmissionProcessorTests.F<decimal?>(null, 0.4m),
             AdjustmentsTotal = InvoiceSubmissionProcessorTests.F<decimal?>(-25.5m, 0.7m),
             TotalDue = InvoiceSubmissionProcessorTests.F<decimal?>(1474.625m, 0.95m),
-            Currency = InvoiceSubmissionProcessorTests.F<string?>("USD"),
+            Currency = InvoiceSubmissionProcessorTests.F<string?>("USD", currencyConfidence),
         },
         Lines = lines,
         TimekeeperSummary =
@@ -117,9 +117,9 @@ public partial class InvoiceSubmissionPersisterTests
         new() { Type = InvoiceLineObservationType.BlockBilling, Confidence = 0.9m, QuotedText = Quote };
 
     /// <summary>The intake of a firmless submission (095c-3) over <see cref="RerunRead"/>, coded with a block-billing observation per line.</summary>
-    private static ProcessorHarness NoFirmIntake(IReadOnlyList<ExtractedInvoiceLine>? lines = null, ILogger? logger = null)
+    private static ProcessorHarness NoFirmIntake(IReadOnlyList<ExtractedInvoiceLine>? lines = null, ILogger? logger = null, decimal currencyConfidence = 0.99m)
     {
-        var read = RerunRead(lines ?? RerunLines());
+        var read = RerunRead(lines ?? RerunLines(), currencyConfidence);
         var harness = new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal, Ai = ReadingAi(read), Lines = read.Lines, Logger = logger };
         harness.Row.Attributes.Remove("sprk_vendororg");
         harness.Coding.Observations = [BlockBillingQuote];
@@ -130,9 +130,10 @@ public partial class InvoiceSubmissionPersisterTests
     private sealed record StoredIntake(Store Store, List<Entity> Lines, string Findings, Entity Invoice);
 
     /// <summary>Persists a firmless intake.</summary>
-    private static async Task<StoredIntake> PersistNoFirmIntakeAsync(CapturingLogger? logger = null, IReadOnlyList<ExtractedInvoiceLine>? lines = null)
+    private static async Task<StoredIntake> PersistNoFirmIntakeAsync(
+        CapturingLogger? logger = null, IReadOnlyList<ExtractedInvoiceLine>? lines = null, decimal currencyConfidence = 0.99m)
     {
-        var outcome = await NoFirmIntake(lines, logger).RunAsync();
+        var outcome = await NoFirmIntake(lines, logger, currencyConfidence).RunAsync();
         var store = NoFirmStore(logger is null ? null : new Store { Logger = logger });
         (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
         var requests = store.Transactions.Single();
@@ -488,6 +489,57 @@ public partial class InvoiceSubmissionPersisterTests
         corrected.Read!.Lines[2].Hours.Value.Should().Be(0.13m, "the reviewer's value");
         corrected.Read.Lines[3].UnitCost.Value.Should().Be(0.655m, "must-not-fire: a number nobody verified keeps its exact value");
         unverified.Read!.Lines[2].Hours.Value.Should().Be(0.125m, "must-not-fire: unverified, the exact value read");
+    }
+
+    /// <summary>True when <paramref name="finding"/> reads the extracted <paramref name="field"/> below the reliability threshold.</summary>
+    private static bool LowConfidenceRead(BillingFinding finding, string field) =>
+        finding.ValuesRead.Any(v => v.ExtractedField?.Field == field && v.BelowReliabilityThreshold);
+    [Fact(DisplayName = "095d-2a-1 (V2): a low-confidence field a reviewer corrected or confirmed is judged at 1.0 on the re-run (no low-confidence finding); an unverified one still raises it")]
+    public async Task AVerifiedLowConfidenceField_RaisesNoLowConfidenceFinding_OnTheRerun()
+    {
+        // The currency read at 0.5 (below the threshold, so money is "unclear") and line 2's hours read at 0.5 (its TimeIncrement finding
+        // reads them). Both are what intake stored; the rebuilt read keeps the analyzer's 0.5.
+        var lines = RerunLines().Select((line, i) => i == 2 ? line with { Hours = InvoiceSubmissionProcessorTests.F<decimal?>(0.125m, 0.5m) } : line).ToList();
+        var intake = await PersistNoFirmIntakeAsync(lines: lines, currencyConfidence: 0.5m);
+        var confirmed = new HashSet<(Guid? LineId, string Field)>
+        {
+            (null, BillingFieldNames.Currency),
+            (intake.Lines[2].Id, ResolutionFieldNames.Hours),
+        };
+
+        async Task<(ProcessorHarness Harness, SubmissionEvaluationOutcome Outcome)> RerunAsync(IReadOnlySet<(Guid? LineId, string Field)> verified)
+        {
+            var rebuilt = Rebuild(intake, verified: verified);
+            rebuilt.IsRerunnable.Should().BeTrue("the setup");
+            rebuilt.Read!.Header.Currency.Confidence.Should().Be(0.5m, "the read keeps the analyzer's confidence; the evaluation judges a verified field");
+            var harness = new ProcessorHarness
+            {
+                Channel = InvoiceSubmissionChannel.Internal,
+                Rules = [Version("BILL-RATE", RuleType.ApprovedRate), Version("BILL-INC", RuleType.TimeIncrement)],
+                Ai = new Mock<IInvoiceAi>(MockBehavior.Strict).Object,
+            };
+            var coding = new RerunLineCoding(harness.Coding, (_, _) => Task.FromResult<ResolvedCodeSet?>(null), rebuilt.Coding!, new CapturingLogger());
+            var outcome = await harness.Build().EvaluateFromReadAsync(FirmSnapshot(), rebuilt.Read, finalDelivery: false, coding, rebuilt.Verified);
+            return (harness, outcome);
+        }
+
+
+        // Must-fire: confirmed, both are judged at 1.0, exactly as InvoiceCorrectionReevaluation judges them.
+        var (verifiedRun, verifiedOutcome) = await RerunAsync(confirmed);
+        verifiedRun.Evaluated!.HeaderConfidence[BillingFieldNames.Currency].Should().Be(1m);
+        verifiedRun.Evaluated.Lines[2].FieldConfidence[ResolutionFieldNames.Hours].Should().Be(1m);
+        verifiedOutcome.Evaluation!.Skips.Should().BeEmpty("a confirmed currency is judged, not unclear");
+        verifiedOutcome.Evaluation.Findings.Should().NotContain(f => f.ReasonCode == BillingEvaluationReasons.CurrencyUnreliable);
+        verifiedOutcome.Evaluation.Findings.Should().Contain(f => f.Subject.LineIndex == 2 && f.RuleType == RuleType.TimeIncrement, "the setup: the finding still fires")
+            .Which.ValuesRead.Should().NotContain(v => v.BelowReliabilityThreshold, "the confirmed hours are not low-confidence");
+        verifiedOutcome.Evaluation.Findings.Should().NotContain(f => LowConfidenceRead(f, BillingFieldNames.Currency) || LowConfidenceRead(f, ResolutionFieldNames.Hours));
+        verifiedRun.Evaluated.Lines[0].FieldConfidence[ResolutionFieldNames.Hours].Should().Be(0.99m, "must-not-fire: another line's hours are the analyzer's");
+
+        // Must-not-fire: unverified, the same stored fields raise the low-confidence findings.
+        var (unverifiedRun, unverifiedOutcome) = await RerunAsync(NoneVerified);
+        unverifiedRun.Evaluated!.HeaderConfidence[BillingFieldNames.Currency].Should().Be(0.5m);
+        unverifiedOutcome.Evaluation!.Findings.Should().Contain(f => f.ReasonCode == BillingEvaluationReasons.CurrencyUnreliable && LowConfidenceRead(f, BillingFieldNames.Currency));
+        unverifiedOutcome.Evaluation.Findings.Should().Contain(f => f.Subject.LineIndex == 2 && f.RuleType == RuleType.TimeIncrement && LowConfidenceRead(f, ResolutionFieldNames.Hours));
     }
 
     // ── fail closed: a submission stored without the facts ──
