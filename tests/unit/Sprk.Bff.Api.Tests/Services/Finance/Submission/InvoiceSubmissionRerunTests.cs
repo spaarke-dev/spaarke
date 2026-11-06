@@ -59,6 +59,10 @@ public sealed class InvoiceSubmissionRerunTests
         commit.Select(r => ((UpdateRequest)r).Target.LogicalName).Should().Equal(
             ["sprk_invoicesubmission", "sprk_invoice", .. Enumerable.Repeat("sprk_billingevent", world.LineIds.Count)]);
 
+        // Must-not-fire controls for A1 and A2: every line is this submission's own and the core records agree, so the run proceeds.
+        world.LineIds.Select((id, i) => id == InvoiceSubmissionPersister.LineIdFor(SubmissionId, i)).Should().AllBeEquivalentTo(true);
+        EligibleApproverResolver.SingleCoreOf("sprk_invoice", world.Row(InvoiceId)).Should().NotBeNull();
+
         // The marker, cleared in the same commit that writes rulesRerun = completed.
         var invoice = world.Row(InvoiceId);
         invoice.GetAttributeValue<string>(InvoiceFirmHold.InvoiceHoldColumn).Should().BeNull();
@@ -119,7 +123,8 @@ public sealed class InvoiceSubmissionRerunTests
     public enum Failure
     {
         EvaluationFaults,
-        ProceduresUnresolvedOnTheFinalDelivery,
+        ProceduresUnresolvedBeforeTheFinalDelivery,
+        PlanFaults,
         CommitFaults,
         CommitOutcomeUnknown,
         LockBusy,
@@ -127,7 +132,8 @@ public sealed class InvoiceSubmissionRerunTests
 
     [Theory(DisplayName = "095d-2a-2 (uac-r2 condition 2): a failed re-run writes nothing, so the marker, the firm hold and rulesRerun = pending all stay; the job retries")]
     [InlineData(Failure.EvaluationFaults, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.EvaluationFailed)]
-    [InlineData(Failure.ProceduresUnresolvedOnTheFinalDelivery, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.ProceduresUnresolved)]
+    [InlineData(Failure.ProceduresUnresolvedBeforeTheFinalDelivery, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.EvaluationFailed)]
+    [InlineData(Failure.PlanFaults, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.OutcomeInconsistent)]
     [InlineData(Failure.CommitFaults, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.Unavailable)]
     [InlineData(Failure.CommitOutcomeUnknown, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.OutcomeUnknown)]
     [InlineData(Failure.LockBusy, InvoiceSubmissionRerunStatus.Busy, InvoiceSubmissionRerunCodes.Busy)]
@@ -138,14 +144,16 @@ public sealed class InvoiceSubmissionRerunTests
         world.Processor = failure switch
         {
             Failure.EvaluationFaults => new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal, EvaluationFault = new InvalidOperationException("resolver down") },
-            Failure.ProceduresUnresolvedOnTheFinalDelivery => new ProcessorHarness
+            Failure.ProceduresUnresolvedBeforeTheFinalDelivery => new ProcessorHarness
             {
                 Channel = InvoiceSubmissionChannel.Internal,
-                FinalDelivery = true,
                 EvaluationFault = new ProcedureResolutionFaultException("two versions in force"),
             },
             _ => world.Processor,
         };
+
+        // C4 (K3): a fault while the commit is built (here the clock the findings stamp reads) is a typed failure, never an exception.
+        world.Time = failure == Failure.PlanFaults ? new FaultingTime() : null;
         world.CommitFault = failure switch
         {
             Failure.CommitFaults => new InvalidOperationException("service unavailable"),
@@ -157,7 +165,7 @@ public sealed class InvoiceSubmissionRerunTests
             world.BusyKeys.Add(InvoiceLineDecisionService.LockKeyFor(InvoiceId));
         }
 
-        var result = await world.RunAsync(finalDelivery: failure == Failure.ProceduresUnresolvedOnTheFinalDelivery);
+        var result = await world.RunAsync(finalDelivery: false);
 
         result.Status.Should().Be(status);
         result.Code.Should().Be(code);
@@ -171,6 +179,7 @@ public sealed class InvoiceSubmissionRerunTests
         // Retryable: the same run, with the fault gone, completes.
         world.Processor = new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal };
         world.CommitFault = null;
+        world.Time = null;
         world.BusyKeys.Clear();
         (await world.RunAsync()).Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
         InvoiceFirmHold.StateOf(world.Row(InvoiceId)).Should().Be(InvoiceFirmHold.InvoiceHoldState.None);
@@ -184,8 +193,10 @@ public sealed class InvoiceSubmissionRerunTests
         DecisionForeign,
         MarkerMissing,
         FirmMismatch,
-        NotInReview,
         LookupRepointed,
+        LineNotOwned,
+        CoreMismatch,
+        StoredDecisionRewritten,
     }
 
     [Theory(DisplayName = "095d-2a-2: a refused re-run writes nothing (no transaction is sent), leaves the hold and the marker, and logs Permanent=true")]
@@ -195,8 +206,10 @@ public sealed class InvoiceSubmissionRerunTests
     [InlineData(Refusal.DecisionForeign, InvoiceSubmissionRerunCodes.DecisionForeign)]
     [InlineData(Refusal.MarkerMissing, InvoiceSubmissionRerunCodes.MarkerMissing)]
     [InlineData(Refusal.FirmMismatch, InvoiceSubmissionRerunCodes.FirmMismatch)]
-    [InlineData(Refusal.NotInReview, InvoiceSubmissionRerunCodes.NotInReview)]
     [InlineData(Refusal.LookupRepointed, InvoiceSubmissionRerunCodes.NotLinked)]
+    [InlineData(Refusal.LineNotOwned, InvoiceSubmissionRerunCodes.LineNotOwned)]
+    [InlineData(Refusal.CoreMismatch, InvoiceSubmissionRerunCodes.CoreMismatch)]
+    [InlineData(Refusal.StoredDecisionRewritten, InvoiceSubmissionRerunCodes.DecisionForeign)]
     public async Task ARefusedRerun_WritesNothing_AndLogsPermanent(Refusal refusal, string code)
     {
         var world = await World.SeedAsync();
@@ -222,12 +235,21 @@ public sealed class InvoiceSubmissionRerunTests
             case Refusal.FirmMismatch:
                 world.Row(InvoiceId)[InvoiceSubmissionPersister.InvoiceVendorOrg] = new EntityReference("sprk_organization", Guid.NewGuid());
                 break;
-            case Refusal.NotInReview:
-                world.Row(InvoiceId)["statuscode"] = new OptionSetValue(InvoiceStatusCodes.InReview + 1);
-                break;
             case Refusal.LookupRepointed:
                 // Nothing reached through the submission lookup may clear a marker: the invoice is derived from the submission id.
                 world.Row(SubmissionId)[InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", Guid.NewGuid());
+                break;
+            case Refusal.LineNotOwned:
+                // A1: a foreign row swapped in for the last line, same count and same sequence: the rebuild's count check alone would pass it.
+                world.SwapInForeignLine(world.LineIds[^1]);
+                break;
+            case Refusal.CoreMismatch:
+                // A2: the submission names another core record than the invoice.
+                world.Row(SubmissionId)["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+                break;
+            case Refusal.StoredDecisionRewritten:
+                // A3: the derived decision id is passed, but the stored assignFirm.decisionId was rewritten.
+                world.EditFindings(f => f[InvoiceAssignFirmService.StoredDecisionMember]!["decisionId"] = Guid.NewGuid().ToString("D"));
                 break;
         }
 
@@ -244,6 +266,19 @@ public sealed class InvoiceSubmissionRerunTests
         if (refusal is not (Refusal.MarkerMissing or Refusal.StoredDecisionMissing or Refusal.DecisionForeign))
         {
             world.Row(InvoiceId).GetAttributeValue<string>(InvoiceFirmHold.InvoiceHoldColumn).Should().Be(InvoiceFirmHold.InvoiceRerunPendingValue);
+        }
+
+        if (refusal is not (Refusal.StoredDecisionMissing or Refusal.FactsMissing))
+        {
+            world.Findings()[InvoiceAssignFirmService.StoredDecisionMember]!["rulesRerun"]!.GetValue<string>().Should().Be(InvoiceAssignFirmService.RulesRerunPending);
+        }
+
+        if (refusal is Refusal.LineNotOwned or Refusal.CoreMismatch)
+        {
+            // U2 (a): a distinct, countable code with the table and the row id only.
+            var entry = world.Logger.Entries.Single(e => e.Level == LogLevel.Error && e.Message.Contains(code, StringComparison.Ordinal)).Message;
+            entry.Should().Contain(refusal == Refusal.LineNotOwned ? "sprk_billingevent " + world.LineIds[^1].ToString("D") : "sprk_invoice " + InvoiceId.ToString("D"));
+            entry.Should().NotContain(Reviewer.ToString("D")).And.NotContain("Firm LLP");
         }
     }
 
@@ -370,7 +405,245 @@ public sealed class InvoiceSubmissionRerunTests
         world.Applied.Single().Skip(3).Should().OnlyContain(r => !((UpdateRequest)r).Target.Attributes.ContainsKey(InvoiceReviewReadService.LineReviewedBy));
     }
 
+    // ── C1 (uac-r2 condition 2, T4): unresolved Procedures on the final delivery ──
+
+    private static ProcessorHarness Unresolved() =>
+        new() { Channel = InvoiceSubmissionChannel.Internal, EvaluationFault = new ProcedureResolutionFaultException("two versions in force") };
+
+    [Fact(DisplayName = "095d-2a-2 (C1, T4): unresolved Procedures on the final delivery commit the reviewable hold - Blocked, procedures_unresolved, every line rules.not_checked, 659490001; marker cleared, rulesRerun completed; approval still refused")]
+    public async Task UnresolvedProcedures_OnTheFinalDelivery_CommitTheReviewableHold()
+    {
+        var world = await World.SeedAsync();
+        world.Processor = Unresolved();
+
+        var result = await world.RunAsync(finalDelivery: true);
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        result.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.Blocked);
+        result.ReviewDetail.Should().Be(InvoiceReviewDetail.BillingTermsNotChecked);
+
+        // U1 (d): ONE transaction carries the hold and the marker clear.
+        var commit = world.Applied.Should().ContainSingle().Subject;
+        var invoice = world.Row(InvoiceId);
+        InvoiceFirmHold.StateOf(invoice).Should().Be(InvoiceFirmHold.InvoiceHoldState.None);
+        world.Findings()[InvoiceAssignFirmService.StoredDecisionMember]!["rulesRerun"]!.GetValue<string>().Should().Be(InvoiceAssignFirmService.RulesRerunCompleted);
+        invoice.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value.Should().Be(InvoiceReviewDetail.BillingTermsNotChecked);
+
+        var reason = world.Row(SubmissionId).GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode);
+        var json = world.Findings().ToJsonString();
+        InvoiceFirmHold.IsHeld(reason, json, out _).Should().BeFalse("the firm hold is gone");
+        InvoiceProcedureHold.ReasonsOf(reason, json).Should().Contain(SubmissionReasonCodes.ProceduresUnresolved);
+        InvoiceOpenHolds.ReasonsOf(InvoiceFirmHold.HasNoFirm(invoice), invoiceHoldSet: false, [new InvoiceOpenHolds.StoredSubmission(reason, json)])
+            .Should().Equal([SubmissionReasonCodes.ProceduresUnresolved], "approval reads these holds: it is refused");
+        world.Lines().Should().OnlyContain(l => l.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus).Value == (int)InvoiceLineStatus.Flagged,
+            "every line is rules.not_checked");
+
+        // U1 (a): what a partner can read of the invoice (statuscode, sprk_reviewdetail) is the closed "could not be checked" value; the commit
+        // writes no text to the invoice, and the Procedure detail lives only in the submission's findings, which no partner module reads.
+        ((UpdateRequest)commit[1]).Target.Attributes.Keys.Should().BeEquivalentTo([InvoiceFirmHold.InvoiceHoldColumn, InvoiceReviewDetail.Column]);
+        invoice.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+    }
+
+    [Fact(DisplayName = "095d-2a-2 (C1, U1 d): a commit that fails for the unresolved hold keeps the marker; nothing is committed")]
+    public async Task UnresolvedProcedures_ACommitFault_KeepsTheMarker()
+    {
+        var world = await World.SeedAsync();
+        world.Processor = Unresolved();
+        world.CommitFault = new InvalidOperationException("service unavailable");
+        var before = world.Snapshot();
+
+        var result = await world.RunAsync(finalDelivery: true);
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Failed);
+        world.Applied.Should().BeEmpty();
+        world.Snapshot().Should().Equal(before);
+        InvoiceFirmHold.StateOf(world.Row(InvoiceId)).Should().Be(InvoiceFirmHold.InvoiceHoldState.RerunPending);
+    }
+
+    [Fact(DisplayName = "095d-2a-2 (C1, U1 c): Procedures that resolve after the final delivery change nothing - the run completed, so a repeat is AlreadyCompleted and the hold stays until an Override")]
+    public async Task ProceduresResolvingLater_DoNotReopenTheRun()
+    {
+        var world = await World.SeedAsync();
+        world.Processor = Unresolved();
+        (await world.RunAsync(finalDelivery: true)).Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        var after = world.Snapshot();
+
+        world.Processor = new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal };
+        var repeat = await world.RunAsync(finalDelivery: true);
+
+        repeat.Status.Should().Be(InvoiceSubmissionRerunStatus.AlreadyCompleted);
+        world.Snapshot().Should().Equal(after);
+        InvoiceProcedureHold.ReasonsOf(world.Row(SubmissionId).GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode), world.Findings().ToJsonString())
+            .Should().Contain(SubmissionReasonCodes.ProceduresUnresolved);
+    }
+
+    // ── C2: the invoice left In Review while the re-run was pending ──
+
+    [Theory(DisplayName = "095d-2a-2 (C2): an invoice Returned to Firm or Superseded while the re-run was pending still gets the commit (marker cleared, rulesRerun completed); the review detail is left out")]
+    [InlineData(InvoiceStatusCodes.StateActive, InvoiceStatusCodes.ReturnedToFirm)]
+    [InlineData(InvoiceStatusCodes.StateInactive, InvoiceStatusCodes.Superseded)]
+    public async Task AnInvoiceOutOfReview_IsCommitted_WithoutTheDetail(int state, int status)
+    {
+        var world = await World.SeedAsync();
+        var invoice = world.Row(InvoiceId);
+        invoice["statecode"] = new OptionSetValue(state);
+        invoice["statuscode"] = new OptionSetValue(status);
+        invoice[InvoiceReviewDetail.Column] = null; // D-205: blanked by the move out of In Review
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        result.ReviewDetail.Should().BeNull();
+        ((UpdateRequest)world.Applied.Single()[1]).Target.Attributes.Keys.Should().Equal([InvoiceFirmHold.InvoiceHoldColumn], "the detail is not written outside In Review");
+        InvoiceFirmHold.StateOf(world.Row(InvoiceId)).Should().Be(InvoiceFirmHold.InvoiceHoldState.None);
+        world.Row(InvoiceId).Attributes[InvoiceReviewDetail.Column].Should().BeNull();
+        world.Findings()[InvoiceAssignFirmService.StoredDecisionMember]!["rulesRerun"]!.GetValue<string>().Should().Be(InvoiceAssignFirmService.RulesRerunCompleted);
+
+        // A reopen (the supersede undo) finds the marker gone: the gate no longer answers "re-run pending".
+        invoice = world.Row(InvoiceId);
+        invoice["statecode"] = new OptionSetValue(InvoiceStatusCodes.StateActive);
+        invoice["statuscode"] = new OptionSetValue(InvoiceStatusCodes.InReview);
+        InvoiceFirmHold.StateOf(invoice).Should().Be(InvoiceFirmHold.InvoiceHoldState.None);
+    }
+
+    // ── T18, T6 ──
+
+    [Fact(DisplayName = "095d-2a-2 (T18, T6 control): a firm hold on another linked submission keeps the invoice waiting for its firm (659490002); that submission and its stamp are untouched")]
+    public async Task AFirmHoldOnAnotherSubmission_KeepsWaitingForFirm()
+    {
+        var world = await World.SeedAsync();
+        var otherFindings = JsonNode.Parse(world.IntakeFindings!)!.AsObject();
+        otherFindings[SubmissionOverrideService.OverrideMember] = ValidStamp();
+        var other = world.AddOtherSubmission(world.IntakeReason, otherFindings.ToJsonString());
+        InvoiceFirmHold.IsHeld(world.IntakeReason, otherFindings.ToJsonString(), out _).Should().BeTrue("the setup: the other submission stores the firm hold");
+        var otherBefore = world.Snapshot().Where(kv => kv.Key.StartsWith(other.ToString("D"), StringComparison.Ordinal)).ToList();
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        result.ReviewDetail.Should().Be(InvoiceReviewDetail.WaitingForFirm);
+        world.Row(InvoiceId).GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value.Should().Be(InvoiceReviewDetail.WaitingForFirm);
+        world.Snapshot().Where(kv => kv.Key.StartsWith(other.ToString("D"), StringComparison.Ordinal)).Should().Equal(otherBefore);
+        world.Applied.Single().Should().NotContain(r => ((UpdateRequest)r).Target.Id == other);
+    }
+
+    private static JsonObject ValidStamp() => new()
+    {
+        ["recordId"] = Guid.Parse("095d2a20-0000-4000-8000-0000000000d1").ToString("D"),
+        ["bySystemUserId"] = Reviewer.ToString("D"),
+        ["on"] = "2026-06-04T00:00:00.0000000Z",
+        ["reason"] = "released",
+    };
+
+    [Fact(DisplayName = "095d-2a-2 (T6): a valid Override stamp with the overridden code is removed by a re-hold - IsReleased is false and approval is refused")]
+    public async Task AReHold_RemovesTheOverrideStamp()
+    {
+        var world = await World.SeedAsync();
+        world.EditFindings(f => f[SubmissionOverrideService.OverrideMember] = ValidStamp());
+        world.Row(SubmissionId)[InvoiceSubmissionPersister.SubmissionReasonCode] = SubmissionReasonCodes.Overridden;
+        InvoiceProcedureHold.IsReleased(SubmissionReasonCodes.Overridden, world.Findings().ToJsonString()).Should().BeTrue("control: released before the re-run");
+        world.Processor = new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal, Procedures = GappedProcedures() };
+
+        (await world.RunAsync()).Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+
+        var reason = world.Row(SubmissionId).GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode);
+        var json = world.Findings().ToJsonString();
+        world.Findings().ContainsKey(SubmissionOverrideService.OverrideMember).Should().BeFalse("R14: a re-hold removes the stamp in the same write");
+        InvoiceProcedureHold.IsReleased(reason, json).Should().BeFalse();
+        InvoiceProcedureHold.ReasonsOf(reason, json).Should().Contain(SubmissionReasonCodes.ProcedureGap, "approval is refused");
+    }
+
+    // ── EB-D-187 on a path where Classify rejects ──
+
+    [Fact(DisplayName = "095d-2a-2 (EB-D-187, T5): on a submission whose channel classifies a rejection as AutoRejected, the re-run holds it for review (HeldInsteadOfRejected): Blocked, never Rejected")]
+    public async Task AnAutoRejection_IsHeldForReview_EndToEnd()
+    {
+        var aged = new[] { InvoiceSubmissionProcessorTests.FeeLine(date: new DateOnly(2026, 1, 20)) };
+        var world = await World.SeedAsync(aged);
+        world.Row(SubmissionId)["sprk_channel"] = new OptionSetValue((int)InvoiceSubmissionChannel.Spa);
+        world.Processor = new ProcessorHarness { Rules = [InvoiceSubmissionProcessorTests.InvoiceAgeReject()] };
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        result.Kind.Should().Be(SubmissionEvaluationKind.Blocked);
+        result.ReasonCode.Should().Be(SubmissionReasonCodes.Blocked);
+        var (status, _) = InvoiceSubmissionPersister.TerminalFor(SubmissionEvaluationKind.Blocked, SubmissionReasonCodes.Blocked);
+        world.Row(SubmissionId).GetAttributeValue<OptionSetValue>(InvoiceSubmissionPersister.SubmissionStatus).Value.Should().Be((int)status);
+        world.Row(SubmissionId).GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode).Should().Be(SubmissionReasonCodes.Blocked,
+            "the held (D-101) reason, not an automatic rejection's");
+        world.Row(InvoiceId).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
+    }
+
+    // ── T9, T22 ──
+
+    [Fact(DisplayName = "095d-2a-2 (T9): the evaluation is scoped to the stored firm (the Duplicate priors and the firm rule sets are read for this firm only)")]
+    public async Task TheEvaluation_IsForTheStoredFirm()
+    {
+        var world = await World.SeedAsync();
+
+        (await world.RunAsync()).Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+
+        world.Processor.Evaluated!.FirmId.Should().Be(Firm);
+        world.Processor.Evaluated.SubmissionId.Should().Be(SubmissionId);
+    }
+
+    [Fact(DisplayName = "095d-2a-2 (T22, Q3): no document read; with no code set change nothing is sent to coding; a line whose code set changes is the only one re-coded")]
+    public async Task NoDocumentRead_AndCodingOnlyForChangedLines()
+    {
+        var unchanged = await World.SeedAsync();
+        unchanged.FirmCodeSet = FakeCodeSet;
+        var control = await unchanged.RunAsync();
+        control.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        control.RecodedLines.Should().Be(0);
+        unchanged.Processor.Coding.Request.Should().BeNull("no line's code set changed");
+        unchanged.Processor.Reads.Should().Be(0);
+        unchanged.Processor.DocumentLoads.Should().Be(0);
+
+        var changed = await World.SeedAsync();
+        changed.FirmCodeSet = FakeCodeSet;
+        var line0 = changed.Row(changed.LineIds[0]);
+        var extraction = JsonNode.Parse(line0.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence))!.AsObject();
+        extraction["coding"]!["codeSetId"] = Guid.NewGuid().ToString("D");
+        line0[InvoiceSubmissionPersister.LineExtractionConfidence] = extraction.ToJsonString();
+
+        var result = await changed.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        result.RecodedLines.Should().Be(1);
+        changed.Processor.Coding.Request!.Lines.Select(l => l.LineKey).Should().Equal("0");
+        changed.Processor.Reads.Should().Be(0);
+        changed.Processor.DocumentLoads.Should().Be(0);
+    }
+
+    /// <summary>The code set the processor harness's coding service answers with (and intake stored).</summary>
+    private static readonly ResolvedCodeSet FakeCodeSet =
+        new(Guid.Parse("04900000-0000-4000-8000-0000000000e1"), "UTBMS", CodeSetSource.FirmCodes, [], [], []);
+
+    // ── A1 (K1): a line attached between the read and the commit ──
+
+    [Fact(DisplayName = "095d-2a-2 (A1, K1): a line attached between the evaluation and the commit is seen by the re-check inside the locks; nothing is committed and the marker stays")]
+    public async Task ALineAttachedBeforeTheCommit_IsNeverCommittedOver()
+    {
+        var world = await World.SeedAsync();
+        world.AttachLineOnRecheck = true;
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().NotBe(InvoiceSubmissionRerunStatus.Completed);
+        result.Code.Should().Be(InvoiceSubmissionRerunCodes.LineNotOwned, "re-evaluated from fresh reads, the attached row is refused");
+        world.Attempts.Should().Be(0);
+        world.Applied.Should().BeEmpty();
+        InvoiceFirmHold.StateOf(world.Row(InvoiceId)).Should().Be(InvoiceFirmHold.InvoiceHoldState.RerunPending);
+    }
+
     // ── harness ──
+
+    private sealed class FaultingTime : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => throw new InvalidOperationException("clock unavailable");
+    }
 
     private static ProcedureResolution GappedProcedures()
     {
@@ -423,10 +696,28 @@ public sealed class InvoiceSubmissionRerunTests
 
         public ProcessorHarness Processor { get; set; } = new() { Channel = InvoiceSubmissionChannel.Internal };
 
+        /// <summary>The clock the re-run stamps its state with (null: the system clock).</summary>
+        public TimeProvider? Time { get; set; }
+
+        /// <summary>What FR-22 step 1 alone answers (null: no firm code set, so no line is re-coded).</summary>
+        public ResolvedCodeSet? FirmCodeSet { get; set; }
+
+        /// <summary>K1: the pre-commit re-check of the line set finds one foreign fee row attached since the read (once).</summary>
+        public bool AttachLineOnRecheck { get; set; }
+
+        /// <summary>The firmless intake's stored reason code and findings, before Set firm.</summary>
+        public string? IntakeReason { get; private init; }
+
+        public string? IntakeFindings { get; private init; }
+
         public static async Task<World> SeedAsync(IReadOnlyList<ExtractedInvoiceLine>? lines = null)
         {
             var (submission, invoice, stored) = await InvoiceSubmissionPersisterTests.StoredFirmlessIntakeAsync(lines);
-            var world = new World();
+            var world = new World
+            {
+                IntakeReason = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode),
+                IntakeFindings = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson),
+            };
             InvoiceFirmHold.StateOf(invoice).Should().Be(InvoiceFirmHold.InvoiceHoldState.Held, "the setup: a firmless intake is held for its firm");
 
             // Set firm's effects (095d-1b): the firm, the rerun-pending marker, the stored decision with rulesRerun = pending.
@@ -462,6 +753,31 @@ public sealed class InvoiceSubmissionRerunTests
         public IEnumerable<Entity> Lines() => LineIds.Where(_rows.ContainsKey).Select(id => _rows[id]);
 
         public void RemoveRow(Guid id) => _rows.Remove(id);
+
+        /// <summary>A1: replaces line <paramref name="id"/> by a copy under a foreign id (same invoice, sequence and columns).</summary>
+        public Guid SwapInForeignLine(Guid id)
+        {
+            var foreign = Copy(_rows[id]);
+            foreign.Id = Guid.NewGuid();
+            _rows.Remove(id);
+            _rows[foreign.Id] = foreign;
+            LineIds[LineIds.IndexOf(id)] = foreign.Id;
+            return foreign.Id;
+        }
+
+        /// <summary>Another submission linked to the invoice, as stored.</summary>
+        public Guid AddOtherSubmission(string? reasonCode, string? findings)
+        {
+            var other = new Entity("sprk_invoicesubmission", Guid.NewGuid())
+            {
+                [InvoiceSubmissionPersister.SubmissionInvoice] = new EntityReference("sprk_invoice", InvoiceId),
+                [InvoiceSubmissionPersister.SubmissionReasonCode] = reasonCode,
+                [InvoiceSubmissionPersister.SubmissionFindingsJson] = findings,
+                ["versionnumber"] = 10L,
+            };
+            _rows[other.Id] = other;
+            return other.Id;
+        }
 
         public JsonObject Findings() =>
             JsonNode.Parse(Row(SubmissionId).GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson))!.AsObject();
@@ -511,7 +827,7 @@ public sealed class InvoiceSubmissionRerunTests
                 .Returns(Task.CompletedTask);
 
             var rerun = new InvoiceSubmissionRerun(
-                entities.Object, Processor.Build(), Processor.Coding, (_, _) => Task.FromResult<ResolvedCodeSet?>(null), locks.Object, Logger, null)
+                entities.Object, Processor.Build(), Processor.Coding, (_, _) => Task.FromResult(FirmCodeSet), locks.Object, Logger, Time)
             {
                 ReviewDetailProbe = ReviewDetailColumnProbe.Fixed(true),
             };
@@ -520,8 +836,31 @@ public sealed class InvoiceSubmissionRerunTests
 
         private EntityCollection Retrieve(QueryExpression query)
         {
+            // K1: the re-check reads only which rows the invoice has (no extraction JSON); a row attached since the evaluation's read shows here.
+            if (AttachLineOnRecheck && query.EntityName == "sprk_billingevent"
+                && !query.ColumnSet.Columns.Contains(InvoiceSubmissionPersister.LineExtractionConfidence))
+            {
+                AttachLineOnRecheck = false;
+                var attached = Copy(_rows[LineIds[0]]);
+                attached.Id = Guid.NewGuid();
+                attached[InvoiceSubmissionPersister.LineSequence] = LineIds.Count + 1;
+                _rows[attached.Id] = attached;
+            }
+
             var rows = _rows.Values.Where(r => r.LogicalName == query.EntityName && query.Criteria.Conditions.All(c => Matches(r, c)));
-            return new EntityCollection(rows.Select(Copy).ToList()) { MoreRecords = false };
+            return new EntityCollection(rows.Select(r => Project(r, query.ColumnSet)).ToList()) { MoreRecords = false };
+        }
+
+        /// <summary>The row as Dataverse returns it: only the columns asked for (a column the re-run forgets to ask for is missing).</summary>
+        private static Entity Project(Entity row, ColumnSet columns)
+        {
+            var copy = new Entity(row.LogicalName, row.Id);
+            foreach (var (key, value) in row.Attributes.Where(a => columns.AllColumns || columns.Columns.Contains(a.Key)))
+            {
+                copy[key] = value;
+            }
+
+            return copy;
         }
 
         private static bool Matches(Entity row, ConditionExpression condition)

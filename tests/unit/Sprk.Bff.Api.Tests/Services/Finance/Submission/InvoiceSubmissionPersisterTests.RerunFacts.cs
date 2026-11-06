@@ -204,6 +204,26 @@ public partial class InvoiceSubmissionPersisterTests
         return (submission, Copy(rows.Single(e => e.LogicalName == "sprk_invoice")), AsDataverseStores(rows.Where(e => e.LogicalName == "sprk_billingevent")));
     }
 
+    [Fact(DisplayName = "095d-2a-2 (T11): a 049 redelivery of a submission the re-run already committed is a no-op - linked, so nothing is created or re-evaluated over the re-run's rows")]
+    public async Task A049Redelivery_AfterTheRerun_IsANoOp()
+    {
+        // The redelivered job evaluates with the firm Set firm wrote; the submission is linked to its invoice since intake.
+        var outcome = await new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal }.RunAsync();
+        var (_, _, lines) = await StoredFirmlessIntakeAsync();
+        var store = new Store();
+        store.Submission["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId);
+        foreach (var line in lines)
+        {
+            store.StoredLines.Add(new Entity("sprk_billingevent", line.Id) { ["sprk_linesequence"] = line.GetAttributeValue<int>("sprk_linesequence") });
+        }
+
+        var result = await store.Build().PersistAsync(outcome, null);
+
+        result.Status.Should().Be(SubmissionPersistStatus.Resumed);
+        result.InvoiceId.Should().Be(InvoiceId);
+        store.Transactions.Should().BeEmpty("the re-run's committed rows are never rewritten by the intake path");
+    }
+
     // ── (a) the section totals, the total due and the line count ──
 
     [Fact(DisplayName = "095d-2a-1 (a): the section totals and total due are stored with their confidences, as exact numbers, in the findings provenance, with the line count; never on a line")]

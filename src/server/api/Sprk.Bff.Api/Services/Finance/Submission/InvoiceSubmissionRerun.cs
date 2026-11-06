@@ -75,8 +75,12 @@ public static class InvoiceSubmissionRerunCodes
     /// <summary>The invoice does not carry the rerun-pending marker (<see cref="InvoiceFirmHold.InvoiceRerunPendingValue"/>).</summary>
     public const string MarkerMissing = "ebilling.rerun.marker_missing";
 
-    /// <summary>The invoice is not Active and In Review (for example Returned to Firm while the re-run was pending).</summary>
-    public const string NotInReview = "ebilling.rerun.not_in_review";
+    /// <summary>A fee or expense line of the invoice is not one this submission's intake created
+    /// (<see cref="InvoiceSubmissionPersister.LineIdFor"/>): the re-run never writes a row it does not own.</summary>
+    public const string LineNotOwned = "ebilling.rerun.line_not_owned";
+
+    /// <summary>The invoice's one core record is not the submission's (<see cref="EligibleApproverResolver.SingleCoreOf"/>).</summary>
+    public const string CoreMismatch = "ebilling.rerun.core_mismatch";
 
     /// <summary>The submission row cannot be read as a submission (<see cref="SubmissionSnapshot.Read"/>).</summary>
     public const string SubmissionUnreadable = "ebilling.rerun.submission_unreadable";
@@ -94,11 +98,11 @@ public static class InvoiceSubmissionRerunCodes
     /// <summary>The commit's outcome is unknown (no fault returned); the retry reads <c>rulesRerun</c> and never commits twice.</summary>
     public const string OutcomeUnknown = "ebilling.rerun.outcome_unknown";
 
-    /// <summary>The evaluation faulted or gave no persistable outcome.</summary>
+    /// <summary>The evaluation faulted or gave no persistable outcome (an unresolved Procedure before the final delivery included).</summary>
     public const string EvaluationFailed = "ebilling.rerun.evaluation_failed";
 
-    /// <summary>uac-r2 condition 2: the Procedures could not be resolved; a failed re-run leaves the marker and the hold.</summary>
-    public const string ProceduresUnresolved = SubmissionReasonCodes.ProceduresUnresolved;
+    /// <summary>The persister's builders found the outcome inconsistent with the stored rows (a fault, never a partial commit).</summary>
+    public const string OutcomeInconsistent = "ebilling.rerun.outcome_inconsistent";
 }
 
 /// <summary>The typed outcome of <see cref="InvoiceSubmissionRerun.RunAsync"/>.</summary>
@@ -140,15 +144,19 @@ public sealed record InvoiceSubmissionRerunResult(
 /// removes it in the same write). Added: <see cref="StateMember"/>, the re-run's own state and the reset decisions as history;</item>
 /// <item>the invoice: <see cref="InvoiceFirmHold.InvoiceHoldColumn"/> cleared (the rerun-pending marker; this commit is its ONLY clearer), and the
 /// review detail derived from the holds that remain after this write (<see cref="InvoiceOpenHolds.ReasonsOf"/> over every linked submission with
-/// this one's new state substituted), where the column exists;</item>
+/// this one's new state substituted), where the column exists and the invoice is In Review. Outside In Review (Returned to Firm, Superseded
+/// while the re-run was pending) the detail is left out of the write: D-205 keeps it blank there, and a reopen derives it;</item>
 /// <item>each fee and expense line: the resolution, coding and status columns <see cref="InvoiceSubmissionPersister.BuildLines"/> derives (never
 /// a billed or corrected value). A line a reviewer decided before EB-D-185 is reset to that derivation (EB-D-187 / Q4): its decision columns are
 /// cleared; its correction rows and Decision Records are kept as history.</item>
 /// </list>
 /// <para><b>Fail closed.</b> A refused, failed or partial re-run writes nothing, so the marker, the firm markers and the hold all stay
 /// (uac-r2 condition 2). Refusals (facts missing, stored rows inconsistent, findings unreadable, no or a foreign stored decision, a firm or
-/// marker mismatch, over the transaction ceiling) are logged <c>Permanent=true</c>. A row version changed under the commit re-evaluates once,
-/// then fails for a retry. The Procedures run (uac-r2 condition 3); when they cannot be resolved the re-run has failed and writes nothing.</para>
+/// marker mismatch, a line this submission does not own, a core record that differs, over the transaction ceiling) are logged
+/// <c>Permanent=true</c>. A row version changed under the commit, or a line attached or removed since the read, re-evaluates once, then fails
+/// for a retry. The Procedures run (uac-r2 condition 3): an unresolved Procedure before the final delivery fails the run (nothing written);
+/// on the final delivery the processor's held outcome (<c>procedures_unresolved</c>, every line <c>rules.not_checked</c>) is a reviewable hold
+/// and is committed like any other outcome.</para>
 /// <para><b>EB-D-187.</b> A new hold (a Procedure gap, a rule finding) holds the invoice for review; a finding that would auto-reject holds it
 /// (<see cref="SubmissionEvaluationKind.Blocked"/>), never rejects it. No Decision Record is written and the invoice status is never written.</para>
 /// <para><b>Idempotent.</b> A run that finds <c>rulesRerun</c> completed writes nothing (<see cref="InvoiceSubmissionRerunStatus.AlreadyCompleted"/>).</para>
@@ -196,7 +204,11 @@ public sealed class InvoiceSubmissionRerun
     [
         .. StoredSubmissionRead.InvoiceColumns, "statecode", "statuscode", InvoiceTotalsService.VersionNumber,
         InvoiceSubmissionPersister.InvoiceVendorOrg, InvoiceFirmHold.InvoiceHoldColumn,
+        .. InvoiceFamilyCoreRecordGuard.CoreRecordLookups[FinanceBaseValues.InvoiceEntity].Select(l => l.Column),
     ];
+
+    /// <summary>The line columns the pre-commit re-check reads: which fee and expense rows the invoice has.</summary>
+    private static readonly string[] LineSetColumns = [InvoiceTotalsService.LineCostType];
 
     private static readonly string[] LineColumns =
     [
@@ -285,7 +297,7 @@ public sealed class InvoiceSubmissionRerun
     /// <summary>Everything the commit sends, built before any write.</summary>
     private sealed record Plan(
         Guid SubmissionId, Guid InvoiceId, IReadOnlyList<OrganizationRequest> Requests, SubmissionEvaluationKind Kind, string? ReasonCode,
-        int ResetLines, int RecodedLines, int? ReviewDetail);
+        int ResetLines, int RecodedLines, int? ReviewDetail, IReadOnlySet<Guid> LineIds);
 
     private sealed record State(
         Entity? Submission, Entity? Invoice, IReadOnlyList<Entity> Lines, IReadOnlySet<(Guid? LineId, string Field)> Verified,
@@ -337,7 +349,8 @@ public sealed class InvoiceSubmissionRerun
         if (string.Equals(stored.RulesRerun, InvoiceAssignFirmService.RulesRerunCompleted, StringComparison.Ordinal))
         {
             var rerunState = StoredStateOf(root);
-            _logger.LogInformation("Re-run of submission {SubmissionId}: already completed ({State}); nothing written.", submissionId, rerunState);
+            _logger.LogInformation("Re-run of submission {SubmissionId}: already completed ({State}); nothing written.", submissionId,
+                KnownStates.Contains(rerunState ?? string.Empty) ? rerunState : "unknown");
             return (null, new InvoiceSubmissionRerunResult(
                 InvoiceSubmissionRerunStatus.AlreadyCompleted, InvoiceSubmissionRerunCodes.AlreadyCompleted, false, submissionId, RerunState: rerunState));
         }
@@ -367,15 +380,40 @@ public sealed class InvoiceSubmissionRerun
             return (null, Refuse(submissionId, InvoiceSubmissionRerunCodes.MarkerMissing));
         }
 
-        if (invoice.GetAttributeValue<OptionSetValue>("statecode")?.Value != InvoiceStatusCodes.StateActive
-            || invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value != InvoiceStatusCodes.InReview)
-        {
-            return (null, Refuse(submissionId, InvoiceSubmissionRerunCodes.NotInReview));
-        }
+        // Outside In Review (Returned to Firm, Superseded while the re-run was pending) the re-run still commits; only the review detail is
+        // left out (D-205: blank outside In Review; a reopen derives it).
+        var inReview = invoice.GetAttributeValue<OptionSetValue>("statecode")?.Value == InvoiceStatusCodes.StateActive
+            && invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value == InvoiceStatusCodes.InReview;
 
         if (VersionOf(submission) is not { } submissionVersion || VersionOf(invoice) is not { } invoiceVersion)
         {
             return (null, Transient(submissionId, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.Unavailable, "version", null));
+        }
+
+        var (snapshot, snapshotFailure) = SubmissionSnapshot.Read(submission);
+        if (snapshot is null || snapshot.FirmId != stored.FirmId)
+        {
+            _logger.LogError("Re-run of submission {SubmissionId}: the submission cannot be read as a submission ({Reason}).", submissionId, snapshotFailure);
+            return (null, Refuse(submissionId, InvoiceSubmissionRerunCodes.SubmissionUnreadable));
+        }
+
+        // A2: the invoice's ONE core record is the submission's. The lines are written for that record; another record is never reached.
+        if (EligibleApproverResolver.SingleCoreOf(FinanceBaseValues.InvoiceEntity, invoice) is not { } core
+            || core.Entity != snapshot.CoreRecord.EntityLogicalName || core.Id != snapshot.CoreRecord.RecordId)
+        {
+            return (null, Refuse(submissionId, InvoiceSubmissionRerunCodes.CoreMismatch, FinanceBaseValues.InvoiceEntity, invoiceId));
+        }
+
+        // A1: every fee and expense row is one this submission's intake created (its id derives from the submission and its sequence). A row
+        // attached by anything else is never written; the rebuild's count check would miss one swapped in at the same sequence.
+        foreach (var line in state.Lines)
+        {
+            if (line.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value is (int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense
+                && (line.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) is not { } sequence || sequence < 1
+                    || line.Id != InvoiceSubmissionPersister.LineIdFor(submissionId, sequence - 1)))
+            {
+                return (null, Refuse(submissionId, InvoiceSubmissionRerunCodes.LineNotOwned, InvoiceSubmissionPersister.LineEntity, line.Id));
+            }
         }
 
         // ── Rebuild (EB-D-189: no document read) and evaluate with the firm (steps 2-5, the pipeline's own). ──
@@ -384,13 +422,6 @@ public sealed class InvoiceSubmissionRerun
         {
             // Rebuild logged it Permanent=true with the reason code; nothing is written and the hold stays.
             return (null, new InvoiceSubmissionRerunResult(InvoiceSubmissionRerunStatus.Refused, refusal, true, submissionId));
-        }
-
-        var (snapshot, snapshotFailure) = SubmissionSnapshot.Read(submission);
-        if (snapshot is null || snapshot.FirmId != stored.FirmId)
-        {
-            _logger.LogError("Re-run of submission {SubmissionId}: the submission cannot be read as a submission ({Reason}).", submissionId, snapshotFailure);
-            return (null, Refuse(submissionId, InvoiceSubmissionRerunCodes.SubmissionUnreadable));
         }
 
         var coding = new RerunLineCoding(_coding, _firmCodeSet, rebuilt.Coding!, _logger);
@@ -404,15 +435,13 @@ public sealed class InvoiceSubmissionRerun
             return (null, Transient(submissionId, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.EvaluationFailed, "evaluate", ex));
         }
 
-        if (outcome.RulesSkippedForUnresolvedProcedures)
-        {
-            // uac-r2 condition 2: a re-run whose Procedures cannot be resolved has failed. It writes nothing, so the marker and the firm hold stay.
-            return (null, Transient(submissionId, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.ProceduresUnresolved, "procedures", null));
-        }
-
+        // Before the final delivery an unresolved Procedure propagates (caught above: nothing written). On the final delivery the processor
+        // returns its held outcome (procedures_unresolved, no rule result, every line rules.not_checked): a reviewable hold, committed as the
+        // re-run's outcome (uac-r2 condition 2: procedures_unresolved through InvoiceOpenHolds), so it alone has no evaluation or decision.
         if (outcome.Kind is not (SubmissionEvaluationKind.Accepted or SubmissionEvaluationKind.AcceptedUncoded
                 or SubmissionEvaluationKind.Blocked or SubmissionEvaluationKind.AutoRejected)
-            || outcome.RulesSkippedForNoFirm || outcome.Evaluation is null || outcome.Decision is null)
+            || outcome.RulesSkippedForNoFirm
+            || (!outcome.RulesSkippedForUnresolvedProcedures && (outcome.Evaluation is null || outcome.Decision is null)))
         {
             return (null, Transient(submissionId, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.EvaluationFailed, outcome.ReasonCode ?? outcome.Kind.ToString(), null));
         }
@@ -420,9 +449,18 @@ public sealed class InvoiceSubmissionRerun
         // EB-D-187 (Q5): a finding that would auto-reject holds the invoice for review instead (the D-101 held set); nothing is rejected here.
         outcome = HeldInsteadOfRejected(outcome);
 
-        return BuildPlan(new PlanInput(
-            submissionId, invoiceId, root, stored, outcome, state, submissionVersion, invoiceVersion, coding.RecodedLineCount,
-            await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false)));
+        var writeDetail = inReview && await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false);
+        var input = new PlanInput(
+            submissionId, invoiceId, root, stored, outcome, state, submissionVersion, invoiceVersion, coding.RecodedLineCount, writeDetail);
+        try
+        {
+            return BuildPlan(input);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException or ArgumentException)
+        {
+            // K3: the builders found the outcome inconsistent with the stored rows. A typed failure, nothing written.
+            return (null, Transient(submissionId, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.OutcomeInconsistent, "plan", ex));
+        }
     }
 
     /// <summary>EB-D-187: a would-be automatic rejection is held for review (Blocked), as the Internal channel already classifies it.</summary>
@@ -493,7 +531,9 @@ public sealed class InvoiceSubmissionRerun
             .. lineRequests,
         ];
 
-        return (new Plan(input.SubmissionId, input.InvoiceId, requests, outcome.Kind, terminal.ReasonCode, reset.Count, input.RecodedLines, detail), null);
+        return (new Plan(
+            input.SubmissionId, input.InvoiceId, requests, outcome.Kind, terminal.ReasonCode, reset.Count, input.RecodedLines, detail,
+            stored.Values.Select(l => l.Id).ToHashSet()), null);
     }
 
     /// <summary>
@@ -674,6 +714,13 @@ public sealed class InvoiceSubmissionRerun
 
             try
             {
+                // K1: inside the locks, the invoice still has exactly the fee and expense rows the plan was built from. A row attached or
+                // removed since the read (the row versions do not see either) re-evaluates; the marker is never cleared over it.
+                if (!(await LineIdsAsync(plan.InvoiceId, ct).ConfigureAwait(false)).SetEquals(plan.LineIds))
+                {
+                    return Transient(plan.SubmissionId, InvoiceSubmissionRerunStatus.Changed, InvoiceSubmissionRerunCodes.Changed, "lines", null);
+                }
+
                 await _entities.ExecuteTransactionAsync(plan.Requests, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (IsVersionConflict(ex))
@@ -784,7 +831,26 @@ public sealed class InvoiceSubmissionRerun
         return new State(submission, invoice, lines, verified, others);
     }
 
+    /// <summary>The ids of the invoice's fee and expense rows as stored now (the pre-commit re-check, K1).</summary>
+    private async Task<HashSet<Guid>> LineIdsAsync(Guid invoiceId, CancellationToken ct)
+    {
+        var query = new QueryExpression(InvoiceSubmissionPersister.LineEntity)
+        {
+            ColumnSet = new ColumnSet(LineSetColumns),
+            PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
+        };
+        query.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, ConditionOperator.Equal, invoiceId);
+        query.AddOrder($"{InvoiceSubmissionPersister.LineEntity}id", OrderType.Ascending);
+        return (await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false))
+            .Where(l => l.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value is (int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense)
+            .Select(l => l.Id)
+            .ToHashSet();
+    }
+
     // ── Helpers ──
+
+    /// <summary>The <see cref="StateMember"/> states this code knows; any other stored value is logged as "unknown" (it is row data).</summary>
+    private static readonly HashSet<string> KnownStates = new(StringComparer.Ordinal) { StateCommitted };
 
     /// <summary>The stored re-run state (<see cref="StateMember"/>'s <c>state</c>), or null when absent.</summary>
     private static string? StoredStateOf(JsonObject root) => StoredSubmissionRead.Text(root[StateMember] as JsonObject, "state");
@@ -802,6 +868,14 @@ public sealed class InvoiceSubmissionRerun
     {
         _logger.LogError("Re-run of submission {SubmissionId}: refused ({Code}); nothing is written and the hold stays (Permanent={Permanent}).",
             submissionId, code, true);
+        return new InvoiceSubmissionRerunResult(InvoiceSubmissionRerunStatus.Refused, code, true, submissionId);
+    }
+
+    /// <summary>A permanent refusal that names the row it is about: the table and the row id only (never a person or partner text).</summary>
+    private InvoiceSubmissionRerunResult Refuse(Guid submissionId, string code, string table, Guid rowId)
+    {
+        _logger.LogError("Re-run of submission {SubmissionId}: refused ({Code}) at {Table} {RowId}; nothing is written and the hold stays (Permanent={Permanent}).",
+            submissionId, code, table, rowId, true);
         return new InvoiceSubmissionRerunResult(InvoiceSubmissionRerunStatus.Refused, code, true, submissionId);
     }
 

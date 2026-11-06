@@ -3263,6 +3263,21 @@ public partial class SubmissionOverrideServiceTests
         InvoiceProcedureHold.ReasonsOf(w.Submission).Should().NotBeEmpty("still held");
     }
 
+    [Fact(DisplayName = "114 / 095d-2a-2 (uac-r2 U1 b): an Override of a procedures_unresolved hold without the privilege is refused and writes nothing (the authorised release: Override_ReleasesAProcedureHold_OnEitherChannel, Internal + unresolved)")]
+    public async Task Release_OfAnUnresolvedHold_WithoutThePrivilege_IsRefused()
+    {
+        var w = await World.CreateHeldAsync(InvoiceSubmissionChannel.Internal, unresolved: true);
+        w.Probe.Release(EbillingOverridePrivilege.PrivilegeName);
+
+        var result = await w.OverrideAsync(reason: Reason);
+
+        result.Kind.Should().Be(BlockedDecisionKind.Refused);
+        result.StatusCode.Should().Be(403);
+        result.ErrorCode.Should().Be("ebilling.override.not_permitted");
+        w.AssertNothingWritten();
+        InvoiceProcedureHold.ReasonsOf(w.Submission).Should().Contain(SubmissionReasonCodes.ProceduresUnresolved);
+    }
+
     [Theory(DisplayName = "114 fail closed: stored findings that do not name the hold are refused - an Accepted submission with the Procedure reason, and an Internal Blocked one with no deciding finding (C22 is lifted only for a stored Procedure hold)")]
     [InlineData(InvoiceSubmissionChannel.Spa)]
     [InlineData(InvoiceSubmissionChannel.Internal)]
