@@ -546,28 +546,10 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 
 ## D-204 — Signals and Decision Records are created only by their ontology writers; generic creates of them are refused (ontology position, 2026-11-04)
 
-- **Context:** field-mapping-server-write-path-r1 task 042c (approved by uac-r2) relayed two follow-ups for ontology:
-  - Rows created through `RecordCreationService` (chat `dataverse.create_record`, generic creates) get the core pair but not the typed `sprk_matter`.
-  - Such a create can write a Decision Record's `sprk_steps` (`resolvedSignalIds`, `reviewId`), which `DecisionCommitService` and the reconciler trust.
-- **Facts (master `7c7d24a3b7`):**
-  - Only `SignalWriter` and `DecisionRecordWriter` create these rows.
-  - No other BFF code creates `sprk_signal` or `sprk_decisionrecord` through `RecordCreationService`. `RecordTableRules` lists them only to exclude field mapping.
-  - Live Create on both tables is held only by System Administrator, System Customizer, Service Writer and Spaarke Ontology Service (`security-roles.md` §17, D-62/D-147). So an ordinary user's caller-checked create is already refused. The exposure is defence in depth (an admin, or a future system-principal caller), not a live defect.
-- **Position:** a generic create of `sprk_signal` or `sprk_decisionrecord` is **refused as a whole table**, before anything is written, on both the caller and the system principal. The pattern is ebilling's `ServerWrittenInvoiceFamilyTables`. A field rule on `sprk_steps` alone would leave every other column of an append-only evidence row forgeable (fact snapshot, action code, record class, subject, core), so ontology does not want one.
-  - One server-side owner per invariant (CLAUDE.md §17).
-  - The rows are append-only evidence (D-2).
-  - `sprk_budgetrevision` is in the same registry block. It is created only by the decision path (`DecisionActionExecutors`), so it gets the same refusal unless field-mapping finds a legitimate generic creator.
-- **Q1 answer, which follows from the position:**
-  - Ontology readers list by the core pair (context) and the `sprk_regarding*` stamp (filing), never by typed `sprk_matter` (task 145, `notes/task-145-matter-readers.md`).
-  - Typed `sprk_matter` (and on a Decision Record `sprk_project` / `sprk_workassignment`) is still a lineage owner parent. It keeps a record about a secure core in that family after a re-file (D-123, K1). It is read by the suppression lineage columns, the `SignalReevaluationJob` lineage row, `TodoAssigneeOwnerReconciliationJob` and uac-r2's reconciler and share synchroniser.
-  - With the refusal, no row reaches that state. If a legitimate generic creator is ever added, it must write the typed column the way the writers do (`LineageColumnByCoreEntity`).
-- **Owner of the change:** field-mapping. `RecordCreationService` and the chat handler are theirs, and ontology reviews it. Keep the detail out of public issues.
-- **Census on dev, 2026-11-04 (asked by uac-r2):**
-  - **Decision Records:** every row whose core is a matter, project or work assignment has its typed column. 4 rows have a service-request core, which has no typed column by design (D-36; excluded from lineage).
-  - **Signals:** no matter-core row lacks `sprk_matter`. 32 rows have a project or work-assignment core and no typed core column, because `sprk_signal` has only the typed `sprk_matter`, so the writer cannot set one.
-    - 25 are work-assignment cores whose subject is the work assignment itself, so the stamp equals the core.
-    - 7 are project cores whose subject is an event (4) or a To Do (3). For these the core reaches the lineage only through the subject's stamp, which is the K1 case and pre-dates 042c.
-  - uac-r2 owns the fix: the core pair in `SecureChildLineage` for `sprk_signal`, or a typed project/work-assignment lookup on `sprk_signal`. The lookup is a schema change and needs the owner.
+- **Rule:** `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision` are written only by their ontology writers. Every generic create path refuses the whole table, for the caller and the system principal, before anything is read or written (registry flag `CreatedOnlyByItsWriter`; the pattern of ebilling's `ServerWrittenInvoiceFamilyTables`).
+- **Why:** one server-side owner per invariant (CLAUDE.md §17); the rows are append-only evidence (D-2).
+- **Readers:** ontology readers list by the core pair (context) and the `sprk_regarding*` stamp (filing), never by typed `sprk_matter` (task 145, `notes/task-145-matter-readers.md`). If a legitimate generic creator is ever added, it must write the typed lineage column the way the writers do (`LineageColumnByCoreEntity`).
+- **Owner of the change:** field-mapping (task 042c); ontology and uac-r2 reviewed it. Review detail is kept out of this public file.
 
 ## D-205 — ebilling 082c brief: ontology rulings on C1, decision (a), the C6 legacy precedence, ExpenseRule split, (b) and (d) (ontology position, 2026-11-04)
 
@@ -590,66 +572,7 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
   - A 114 Override release closes it through the billing decision path with a Decision Record.
   - Add the `BillingFindingSignalMapper` order entry and a test that a gap plus firm_missing share one Signal and that clearing one keeps it open.
 - **Accepted as written:** C14 (the transient-fault ruling, D-203 follow-up), C21 (D-203(11)), C22 (082c reaches master only with ebilling 114), C11's "gap wins over a 073 rejection on SPA" (held, never passed, never auto-rejected on unchecked lines).
-- **Owner accepted D-204** (2026-11-04, in field-mapping's session, relayed; their decisions.md `08c7c60e3d`). Built on field-mapping `task/fm-042c`. Ontology and uac-r2 review the diff before merge.
-  - **Ontology check:** our executors' generic creates (`DecisionRouteCores.CreateChildAsync`, `BudgetInquiryExecutor`) target only `sprk_budget`, `sprk_todo`, `sprk_event`, `sprk_workassignment` and `sprk_servicerequest`. `sprk_budgetrevision` is created by the writer identity (`DecisionActionExecutors.cs:33,370`). The refusal therefore breaks no decision step.
-- **Reviewed 2026-11-04: field-mapping 042c fix round 4 (`task/fm-042c` `4b45ba3cc5`): ontology PASS.**
-  - The registry flag `CreatedOnlyByItsWriter` sits on the three tables.
-  - `RecordCreationService` refuses them at the first registry read, before any read or write, for the caller and the system principal. The chat create refuses them in both validate and execute.
-  - Decision-commit seam tests pass (Create Budget, Revise Budget, Assign Task).
-  - A writer-guard ArchTest has both controls.
-- **Follow-up (private, not in public issues):** the playbook UpdateRecord node runs as the BFF identity, which holds System Administrator. It can upsert-create, and can also UPDATE, these three tables. That bypasses the append-only privilege guarantee for Decision Records and SignalWriter's lifecycle for Signals.
-  - Ontology's position: refuse all three as UpdateRecord targets, for update and upsert alike, not only upsert-create.
-  - First, field-mapping runs a read-only census of configured playbook nodes targeting them.
-  - This extends D-204 from create to update, so the owner decides through field-mapping. uac-r2 classifies it.
-  - **Owner accepted the update extension** (2026-11-04, in field-mapping's session, relayed). Field-mapping builds it as task 048.
-    - Scope: chat update_record, the playbook UpdateRecord step and the output-mapping path (`DataverseUpdateHandler`) refuse all three tables, update and upsert alike.
-    - Census on dev (read-only): 0 of the 93 configured `sprk_playbooknode` rows name these tables.
-    - Ontology confirmed output mapping is in scope. No legitimate playbook writes these tables through it. The writers (SignalWriter, DecisionRecordWriter, the Revise Budget writer and SignalEvaluationService's upsert) do not use any generic path.
-    - Ontology asked for must-not-fire tests on the writers' own updates and for a rebase onto uac-r2's `5df0a80e1d`. Ontology reviews the diff before merge.
-  - **Delete gap (2026-11-05, found by fm's 048 review; private).** The chat `delete_record` tool does not refuse the three tables. Ontology supports extending D-204 to deletes; the owner decides through fm.
-    - Nothing of ours deletes these rows through a generic path. The writers never delete: a Signal ends by a close, and Decision Records are append-only.
-    - The exposure: Ontology Administrator holds Delete on `sprk_signal` and `sprk_budgetrevision`. A deleted revision makes an incorrect Signal look right.
-    - Proposed: refuse all three as delete targets, for the caller and the system principal, before any read, through the same registry flag. The same goes for any other generic delete path. No role change.
-    - **Owner decided (2026-11-05, in field-mapping's session, relayed; fm `72d30b6853`): chat delete honours D-204.** It lands in fm 048 as fix round 2:
-      - chat `delete_record` refuses the three tables in validate and execute, before any read, for the caller and the system principal;
-      - every other generic delete path is refused, or excluded with a reason in fm's notes;
-      - must-fire and must-not-fire tests;
-      - model-driven admin privileges unchanged; Service Deleter untouched.
-    - Ontology reviews the combined update + delete diff of 048 before merge.
-  - **fm 048 review (2026-11-05; `task/fm-048` `2a05764261..59d1008c9f`, contains `909754869f`): PASS, no findings.**
-    - One flag, all three directions. `RefuseWriterOnlyTableUpdate` / `RefuseWriterOnlyTableDelete` read `CreatedOnlyByItsWriter`.
-      - The ArchTest proves create, update and delete agree table by table, and that the compiled bodies read the flag.
-      - Matching is trimmed and case-insensitive.
-      - Both chat tools lower-case the logical name, then resolve it through `EntityDefinitions(LogicalName=…)`, so an entity-set name can't bypass the check.
-    - Chat `delete_record` refuses in ValidateChat and in Execute straight after parsing: before the approval argument, the metadata read and the delete. Tests check there are no Dataverse calls, approved or not.
-      - The tool has one identity, the caller's client.
-      - The text names no privilege and says nothing about whether the row exists.
-    - Other deletes: a closed list of 15 members with fixed tables, checked by an IL-scan ArchTest, plus must-fire and must-not-fire controls. Ontology spot-checked the list:
-      - `SecureRootInheritance` covers work assignments and projects only.
-      - External `DeleteRecordAsync` is limited to the closed `DeletableKind` enum.
-      - Accepted limit: raw HTTP and SDK deletes are outside the scan. None takes a caller-chosen table today.
-    - Update paths refuse on the table:
-      - chat `update_record` (validate and execute);
-      - the UpdateRecord node and the ActionSeam (`UpdateRecordActionCore`; only lookup-target metadata is read before the refusal, never the row);
-      - `DataverseUpdateHandler`;
-      - the field-mapping push (request check and child writer);
-      - `WorkProductRecordPersister`;
-      - `ChildRecordEndpoints` core;
-      - `OwnedChildWrite.RefileAsync`.
-    - Must-not-fire covers the writers (Revise Budget, the decision commit, the Signal close and DR link) and ordinary tables.
-    - The #2568 tests in `CoreRecordPairUpdateWriterTests` were changed from "other column written" to "refused whole". That is the intended consequence.
-    - No runtime test for the SignalEvaluationService upsert: not needed, since the writers ArchTest proves it never reaches a generic path.
-- **Dev deploy of the lineage fix (master `909754869f`, live 2026-11-05 04:16:30Z; uac-r2 ran it with the owner's go): ontology PASS on the 30-minute gate and the AFTER read-back.**
-  - Gate results:
-    - 0 5xx and 0 held-pair Warnings;
-    - 0 SuppressionPartitionUndeterminedException;
-    - the secure-child reconcile made 0 reassign or put-back writes.
-  - Read-back, before and after, unchanged:
-    - the 7 project-core Signals: owner and BU unchanged, 0 shares;
-    - the 4 service-request-core Decision Records: owner and BU unchanged, 0 shares;
-    - 0 service-request-core Signals.
-  - Still open: Worklist `/api/v1/signals` 200, to be confirmed from organic or UAT traffic, and the suppression and Undetermined counts after the first nightly `SignalReevaluationJob`. Either a non-zero Undetermined count or a 5xx reopens this.
-- **Consequence for D-36 extensibility (2026-11-04, uac-r2 second review K2).** Grouping through `CoreAncestorResolver` stays data-driven. Secure lineage, however, now holds a core pair whose type maps outside the closed core-table set. So a new core type needs its catalog row and a code change to that set before its Signals reconcile and suppress normally. Until then they are held: visible, never stamped, shares narrow only. This is accepted as fail-closed. The project CLAUDE.md data-and-security line is amended to match. The test rename or split is done on uac-r2's branch.
+- **D-204 follow-ups (2026-11-04/05, owner, relayed via field-mapping):** the same table-level refusal now also covers generic **updates and deletes** of the three tables, on every generic path (field-mapping 042c and 048; ontology reviewed both PASS). The decision path is unaffected: the writers use no generic path. Live on dev since `0f53e053bf`. uac-r2's secure-lineage change for these tables (master `909754869f`) passed ontology's gate on 2026-11-05. A new core type needs its catalog row and a code change before its Signals and Decision Records take part in secure lineage (uac-r2 K2). Review detail is kept out of this public file.
 - **082c-1 owner review (2026-11-04, `origin/task/ebilling-082c-1` at `a680dacf0d`; source diff read in full): PASS, with one change.**
   - **Must change (Q1):** under Split (ExpenseRule), a higher-ranked valid version displaces a lower version's cap only when it **states a cap** (`MaxAmountPerItem` non-null).
     - A codes-only higher version leaves the lower cap in force.
@@ -735,7 +658,7 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - the writers that blank on exit and the supersede undo.
   - **Known limits accepted:**
     - The census is re-runnable and the reconciliation pass counts it every run. It can still grow (a subgrid "Add existing", a refused filing), so it is run before each rollout.
-    - A caller-scoped write (chat `update_record` as the user, or the model-driven form) can still set the label, because the column is unsecured by design. It is a label, not a hold, and the next writer re-derives it. -Verify does not catch a wrong non-blank value inside In Review.
+    - The review-detail label is a derived display value, not a hold: the next writer re-derives it and approval never reads it. -Verify does not check the value inside In Review (known limit, agreed).
   - **Fix round 3 re-check (2026-11-05; `7a955cc983..0999003007`): F1 and F2 PASS. ebilling's own adversarial pass on the range is still running.**
     - F1 helper: `InvoiceOpenHolds.ReasonsOf` / `ReasonsAsync` unite the firm hold (no firm, the invoice's own hold, a stored reason, or a `pipelineFindings` marker on ANY linked submission) with the Procedure reasons. The invoice's own hold is read app-only.
     - F1 callers:
@@ -767,7 +690,7 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 ## D-207 — Billing Work Items: decided only in Invoice Review; the Console opens it and adds an Invoice decisions card (owner, 2026-11-06; ebilling EB-D-194, relayed)
 
 - **Owner (in ebilling's session, relayed):** one owner per decision, never both surfaces. Invoice review and approval decisions (line accept/reduce/disallow, Add line, Override, approve, Reject, Return, Set firm, corrections) are made ONLY in the Invoice Review page; budget and spend decisions ONLY in the Console's Decisions. Both write the same Decision Records. Billing Work Items stay in the Worklist (owner, this session, 2026-11-05) and open the Invoice Review page as a pop-up on their invoice (`lineId` optional; the Worklist refreshes on close; no postMessage). The Console Decision modal does not rebuild billing actions. New: a Console **Invoice decisions** filter card. Resolves DI-139 / #2572 (option (a) as a pop-up; options 1-3 withdrawn).
-- **Facts:** dev has 40 open billing Work Items (35 invoice-line, 5 invoice, Decide lane). Core User holds Deep CRUD on `sprk_invoice` and Read only on `sprk_billingevent` (D-90, by design); no role change. `WorklistItem` carries no subject type or invoice id, so the route must supply them.
+- **Facts:** dev has 40 open billing Work Items (35 invoice-line, 5 invoice, Decide lane). Person roles hold only Read on `sprk_billingevent` (D-90, by design), so the Console's rights probe would answer a misleading 403; no role change. `WorklistItem` carries no subject type or invoice id, so the route must supply them.
 - **Ontology scope (two tasks):**
   1. **BFF:** (a) `POST /api/v1/signals/{id}/decision` refuses a Signal whose subject is `sprk_invoice` or `sprk_billingevent` with one distinct code before any read-for-write or write (replaces today's 403 `SubjectWriteMissing` for these); (b) `GET /api/v1/signals/worklist` adds an `invoiceReview` member (`invoiceId`, optional `lineId`) to billing items, a line resolved to its parent invoice in one batched read; nothing else changes for other items.
   2. **Console (shared Worklist + host):** the Decide lane's cards gain **Invoice decisions** (items with `invoiceReview`), after All; the work-type buckets exclude those items so the counts still sum (W-8). Activating such an item opens `sprk_invoicereviewpage` as a dialog (`Xrm.Navigation.navigateTo`, `data=invoiceId%3D…%26lineId%3D…`) and refreshes on close; it never opens the Decision wizard. Reuse `MetricCard`/`MetricCardRow` and the existing lane filter (D-24); no new card component. Ships after ebilling deploys the page to dev (ebilling 112); 1(a) can ship before.
