@@ -201,6 +201,29 @@ The prompt asked for "the library view: a grid of NDAs by topic with a dashboard
 - **Citations: all 356 quotes are found word for word** in the source documents. That covers 289 from Word, which the skill also checked by script, and 67 from PDF, which we checked here with `pypdf`. A sample of 10 non-GREEN citations all point at the right clause.
 - **Small defect:** the standards text reads "Spaarke NDA – Mutual v1.0 **v1.0**". The playbook title already carries the version, and the skill appends it again. It also reports skill `v0.1.2-poc`: the personal skill folder was not rebuilt for 0.1.3, and nothing changed in it.
 
+### 6c follow-up: "Redline the three with the most REDs" (96 credits for three; same task)
+Prompt, in the same task: "Yes. Redline the three with the most REDs: b16 Oakhollow, b10 Verdant Loop and b03 Larkspur. Save each set of outputs next to its NDA … No cover emails." 14 NDAs had a RED, not the 3 the runbook assumed, so we named the top three.
+- **Sequencing:** one task, no new task per NDA. Cowork loaded the `Spaarke NDA (MVP)` plugin (`nda-review` **v0.1.3**) next to `nda-library-review`, planned all three, showed **one plan card for all three**, then built them. The plan and choices are in `evidence/act6/6c-redline-plan.md`.
+  - The choices were "build all three", "b10 and b03 only (skip the PDF)" or "change". We built all three.
+  - Choosing an option needs **Submit** as well, which cost Claude a minute.
+- **The plan handled the double counts from gap #27.** b10 trade secrets became "comment only: fixed by the new 8.1 wording". The b16 Representatives edit adds responsibility and keeps the written-duty standard as an accepted fallback. That is the right fix, though it is still labelled "Escalate".
+- **The PDF path was explained on the plan card:** "rebuilt a Word version from the PDF text … the first comment says so … compare against the PDF or ask for their Word file."
+- **Outputs:** 15 files in `Inbox/NDA batch/` on the team site, 5 per NDA. "All three passed every output check." One upload approval. No emails.
+- **Our check, read in the browser from SharePoint:**
+
+  | NDA | Internal redline: ins / del / comments / summary links | External redline | Clean copy |
+  |---|---|---|---|
+  | b16 Oakhollow (PDF, rebuilt) | 3 / 2 / 8 / 8 | 3 / 2, no comments | no revisions |
+  | b10 Verdant Loop | 2 / 2 / 4 / 4 | 2 / 2, no comments | no revisions |
+  | b03 Larkspur | 3 / 2 / 3 / 3 | 3 / 2, no comments | no revisions |
+
+  Comments match the planned changes (8, 4 and 3), and every change has a summary link. The rebuilt b16 has **no signature-block table**: the PDF text rebuild flattens it (part of gap #22).
+- **Open questions it raised:**
+  - Larkspur is a health-data company, so check whether a data-protection agreement is needed.
+  - Verdant Loop: confirm the legal name and state, and the effective date.
+  - Oakhollow: ask for the Word file; confirm the 5-year term and the non-solicit.
+- **Cost:** the task total went from 185 to 281 credits, so **96 for three redlines, about 32 each**, because the library review already held the ratings. The single Brightwater review in Act 3 cost 122. The month total is 4,147. The banner now says "unlimited credits": the spending policy changed after Act 0 (gap #5).
+
 ### 6a, 6b and 6c compared
 | | 6a `compare-key-terms` | 6b `review-contract` | 6c `nda-library-review` |
 |---|---|---|---|
@@ -212,4 +235,4 @@ The prompt asked for "the library view: a grid of NDAs by topic with a dashboard
 | Questions before running | None | Playbook confirmation plus 4 questions | Plan card, then Start |
 | Credits | 259 | 449 | **185** |
 
-6c is the cheapest of the three and the only one rated at topic level. 6b's playbook audit (gap #25) is the one thing it does that 6c doesn't.
+6c is the cheapest of the three and the only one rated at topic level. It also leads straight into redlines: three more for 96 credits in the same task. 6b's playbook audit (gap #25) is the one thing it does that 6c doesn't.
