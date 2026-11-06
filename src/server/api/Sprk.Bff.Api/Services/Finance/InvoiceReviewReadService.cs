@@ -74,7 +74,7 @@ public sealed record ReviewFlagsDto(bool CanRead, bool CanDecide);
 /// <param name="Rate">The billed rate of a Fee line, the unit cost of an Expense line.</param>
 /// <param name="HighestSeverity"><c>Info</c>, <c>Warning</c> or <c>Critical</c>; null when the line has no finding.</param>
 /// <param name="Fields">Per extracted field: its page, bounding box and confidence (the Document tab and the low-confidence marker).</param>
-/// <param name="ReviewerAdded">EB-D-193: the reviewer added this line through Add line (<c>provenance.source = "reviewer"</c> on its extraction JSON); the firm did not bill it. False for every intake line, and for a line whose extraction is empty or unreadable.</param>
+/// <param name="ReviewerAdded">EB-D-193: the reviewer added this line through Add line (<c>provenance.source = "reviewer"</c> on its extraction JSON and its id derived from the marker's decision id); the firm did not bill it. False for every intake line, and for a line whose extraction is empty or unreadable.</param>
 /// <param name="LineFindings">EB-D-175 / EB-D-176: why the line is Flagged when no policy finding says so: the AI did not check it (<c>coding.not_returned</c>) or it has no description (<c>line.no_description</c>). Empty for a line with neither, and for a submission stored before these were written. Not counted in <see cref="FindingCount"/> or <see cref="HighestSeverity"/>, which describe the policy findings.</param>
 public sealed record ReviewLineDto(
     Guid Id,
@@ -210,8 +210,7 @@ internal sealed record LineExtraction(
     (string? Code, string? FirmCode, bool Mismatch) Task,
     (string? Code, string? FirmCode, bool Mismatch) Activity,
     (string? Code, string? FirmCode, bool Mismatch) Expense,
-    IReadOnlyList<string> Refused,
-    bool ReviewerAdded = false)
+    IReadOnlyList<string> Refused)
 {
     public static LineExtraction Empty { get; } = new(
         new Dictionary<string, ReviewFieldDto>(), null, false, false, null, default, default, default, []);
@@ -233,7 +232,6 @@ internal sealed record LineExtraction(
                 return Empty;
             }
 
-            var reviewerAdded = ExtractionProvenance.IsReviewerAdded(root);
             var fields = new Dictionary<string, ReviewFieldDto>(StringComparer.Ordinal);
             if (root.TryGetProperty("fields", out var fieldsJson) && fieldsJson.ValueKind == JsonValueKind.Object)
             {
@@ -261,7 +259,7 @@ internal sealed record LineExtraction(
 
             if (!root.TryGetProperty("coding", out var coding) || coding.ValueKind != JsonValueKind.Object)
             {
-                return new LineExtraction(fields, null, false, false, null, default, default, default, [], reviewerAdded);
+                return new LineExtraction(fields, null, false, false, null, default, default, default, []);
             }
 
             var status = Text(coding, "status");
@@ -282,8 +280,7 @@ internal sealed record LineExtraction(
                 Code(coding, "task"),
                 Code(coding, "activity"),
                 Code(coding, "expense"),
-                refused,
-                reviewerAdded);
+                refused);
         }
         catch (JsonException)
         {
@@ -737,7 +734,7 @@ public sealed class InvoiceReviewReadService
             findings,
             extraction.Fields,
             lineFindings,
-            extraction.ReviewerAdded);
+            ExtractionProvenance.IsReviewerAdded(row));
     }
 
     /// <summary>The label the screen shows for a status: Pending is shown as Processing (D-58, prototype F-1).</summary>

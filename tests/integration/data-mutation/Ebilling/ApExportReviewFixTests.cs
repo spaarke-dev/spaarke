@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.DataMutation.Ebilling;
@@ -108,6 +109,68 @@ public sealed class ApExportReviewFixTests
         adjustmentLine.GetProperty("billed").GetDecimal().Should().Be(0m, "the firm billed nothing for an adjustment");
         lines.Single(l => l.GetProperty("billed").GetDecimal() == 300m).GetProperty("approved").GetDecimal().Should().Be(0m);
         lines.Single(l => l.GetProperty("billed").GetDecimal() == 1000m).GetProperty("approved").GetDecimal().Should().Be(800m);
+    }
+
+    // =========================================================================================
+    // 2b. 164a-2 F2 (EB-D-192): a reviewer-added line is outside BilledTotal, inside ApprovedTotal
+    // =========================================================================================
+
+    [Theory(DisplayName = "164a-2 F2: with a reviewer-added line (accepted, reduced, disallowed or undecided) lines[].billed still add up to BilledTotal and lines[].approved to ApprovedTotal (the totals come from the real calculator)")]
+    [InlineData(Clean, null, 1200)]
+    [InlineData(100000003, null, 1200)]      // Accepted
+    [InlineData(Reduced, 150, 1150)]
+    [InlineData(Disallowed, null, 1000)]
+    public async Task LineSums_ReconcileWithTheInvoiceTotals_WhenALineWasAddedByTheReviewer(int status, int? approvedAmount, int expectedApproved)
+    {
+        var world = new ApExportWorld();
+        var invoice = world.AddInvoice("INV-A", lines: 0);
+        var firm = world.AddLine(invoice, Fee, 1000m, sequence: 1, status: 100000003, approvedAmount: 1000m);
+        var decision = Guid.Parse("a164a200-0000-4000-8000-0000000000d1");
+        var added = world.AddLine(
+            invoice, Fee, 200m, sequence: 2, status: status, approvedAmount: approvedAmount is { } a ? a : null,
+            id: ExtractionProvenance.AddedLineIdFor(decision), extraction: ExtractionProvenance.ForReviewerAddedLine(decision));
+
+        var calculation = InvoiceTotalsCalculator.Calculate(1000m,
+        [
+            new InvoiceLineInput(firm.Id, InvoiceLineCostType.Fee, 1000m, 1000m, InvoiceLineStatus.Accepted, null, null),
+            new InvoiceLineInput(added.Id, InvoiceLineCostType.Fee, 200m, approvedAmount, (InvoiceLineStatus)status, null, null, ReviewerAdded: true),
+        ]);
+        calculation.ApprovedTotal.Should().Be(expectedApproved);
+        world.Dataverse.Touch("sprk_invoice", invoice.Id, new Dictionary<string, object>
+        {
+            ["sprk_totalamount"] = new Money(1000m),
+            ["sprk_lineadjustmentstotal"] = new Money(calculation.LineAdjustmentsTotal),
+            ["sprk_invoiceadjustmentstotal"] = new Money(calculation.InvoiceAdjustmentsTotal),
+            ["sprk_approvedtotal"] = new Money(calculation.ApprovedTotal),
+        });
+        world.GrantEverything();
+
+        var result = await world.ExportAsync(invoice);
+
+        result.Outcome.Should().Be(ApExportOutcome.Created, result.Detail);
+        var exported = InvoicesOf(world, result.BatchId!.Value)[0];
+        var lines = exported.GetProperty("lines").EnumerateArray().ToList();
+        lines.Should().HaveCount(2, "the added line is exported, as its own line");
+        lines.Sum(l => l.GetProperty("billed").GetDecimal()).Should().Be(exported.GetProperty("BilledTotal").GetDecimal()).And.Be(1000m);
+        lines.Sum(l => l.GetProperty("approved").GetDecimal()).Should().Be(exported.GetProperty("ApprovedTotal").GetDecimal()).And.Be(expectedApproved);
+        lines.Single(l => l.GetProperty("billed").GetDecimal() == 0m).GetProperty("approved").GetDecimal().Should().Be(expectedApproved - 1000m, "the added line's contribution");
+    }
+
+    [Fact(DisplayName = "164a-2 F2 must-not-fire: an INTAKE line that carries a copied reviewer marker is exported with its billed amount (the marker alone does not decide)")]
+    public async Task AnIntakeLine_WithACopiedMarker_IsExportedAsBilled()
+    {
+        var world = new ApExportWorld();
+        var invoice = world.AddInvoice("INV-A", lines: 0);
+        world.AddLine(invoice, Fee, 1000m, sequence: 1, status: 100000003, approvedAmount: 1000m,
+            extraction: ExtractionProvenance.ForReviewerAddedLine(Guid.Parse("a164a200-0000-4000-8000-0000000000d1")));
+        world.GrantEverything();
+
+        var result = await world.ExportAsync(invoice);
+
+        result.Outcome.Should().Be(ApExportOutcome.Created, result.Detail);
+        var line = InvoicesOf(world, result.BatchId!.Value)[0].GetProperty("lines").EnumerateArray().Single();
+        line.GetProperty("billed").GetDecimal().Should().Be(1000m);
+        line.GetProperty("approved").GetDecimal().Should().Be(1000m);
     }
 
     // =========================================================================================

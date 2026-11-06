@@ -671,4 +671,26 @@ public sealed class InvoiceTotalsCalculatorTests
         result.InvoiceAdjustmentsTotal.Should().Be(40m);
         result.ApprovedTotal.Should().Be(960m);
     }
+
+    // Known limit (164a-2 F1): the marker can be removed from a genuine added line by anyone who may write the line. The line is then an intake line to the
+    // calculator. Pinned exactly: the billed total is an input and does not move; fees (or expenses) are overstated by the line's amount; the
+    // approved total is UNDERSTATED by the same amount, because the line's contribution is lost and, if it was Reduced or Disallowed, a firm-line
+    // adjustment is charged against billed money that was never billed. Spend follows the approved total.
+    [Theory(DisplayName = "164a-2 F1 known limit: a genuine added line whose marker was removed is counted as billed: fees overstated, approved understated, both by its amount")]
+    [InlineData(InvoiceLineStatus.Flagged, null)]
+    [InlineData(InvoiceLineStatus.Accepted, 200)]
+    [InlineData(InvoiceLineStatus.Reduced, 150)]
+    [InlineData(InvoiceLineStatus.Disallowed, 0)]
+    public void AnAddedLine_WithItsMarkerRemoved_IsCountedAsBilled(InvoiceLineStatus status, int? approved)
+    {
+        decimal? ap = approved is null ? null : (decimal)approved;
+        InvoiceLineInput Added(bool marked) =>
+            new(Guid.NewGuid(), InvoiceLineCostType.Fee, 200m, ap, status, null, null, ReviewerAdded: marked);
+
+        var withMarker = InvoiceTotalsCalculator.Calculate(1000m, new[] { Fee(1000m, InvoiceLineStatus.Accepted, 1000m), Added(true) });
+        var withoutMarker = InvoiceTotalsCalculator.Calculate(1000m, new[] { Fee(1000m, InvoiceLineStatus.Accepted, 1000m), Added(false) });
+
+        withoutMarker.FeesTotal.Should().Be(withMarker.FeesTotal + 200m, "fees are overstated by the line's amount");
+        withMarker.ApprovedTotal.Should().Be(withoutMarker.ApprovedTotal + 200m, "approved is understated by the line's amount");
+    }
 }

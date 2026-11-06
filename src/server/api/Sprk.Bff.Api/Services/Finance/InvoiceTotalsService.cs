@@ -243,12 +243,12 @@ public sealed class InvoiceTotalsService : IInvoiceTotalsService
         ReviewerAddedOf(line));
 
     /// <summary>
-    /// True when the line is one the reviewer added through Add line (EB-D-193): <c>provenance.source = "reviewer"</c> in its
-    /// <c>sprk_extractionconfidence</c>. The one definition every <see cref="InvoiceLineInput"/> builder uses, so no totals path can count an added
-    /// line as a billed one. A row without the column read, an empty or unreadable column, or another source is not reviewer-added.
+    /// True when the line is one the reviewer added through Add line (EB-D-193): the marker in its <c>sprk_extractionconfidence</c> AND its id
+    /// derived from the marker's decision id (<see cref="ExtractionProvenance.IsReviewerAdded(Entity)"/>, 164a-2 F1). The one definition every
+    /// <see cref="InvoiceLineInput"/> builder uses, so no totals path can count an added line as a billed one, and a copied marker on an intake line
+    /// takes nothing out of billed.
     /// </summary>
-    internal static bool ReviewerAddedOf(Entity line) =>
-        ExtractionProvenance.IsReviewerAdded(line.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence));
+    internal static bool ReviewerAddedOf(Entity line) => ExtractionProvenance.IsReviewerAdded(line);
 
     /// <summary>The enum for an option-set column, or null for an empty column or a value the enum does not name (the calculator refuses it).</summary>
     private static T? OptionOf<T>(Entity line, string column) where T : struct, Enum =>

@@ -11,9 +11,10 @@ Decisions this implements: EB-D-192 (totals, coding), EB-D-193 (the marker), EB-
 | `DecisionActionCatalog` (`BillingActions` only) | New `add-line`: required `reason` (TextArea), Judgement, Tier2b (`Reversible`, `RecordOfTruthImpact`), `Excludes` empty, plan lane Decide, no Next step. Appended after `assign-firm`. Not in `All`, so the Signals commit route cannot take it. |
 | `DecisionRecordWriter` | One literal: `BillingSubjectByCode` maps `add-line` to `sprk_billingevent` (the line, D-75) beside the three line codes. The doc comment names it. Nothing else in the writer changed. |
 | `InvoiceTotalsCalculator` | `InvoiceLineInput.ReviewerAdded` (trailing, default false). Rule below. |
-| `ExtractionProvenance` | `SourceMember`, `ReviewerSource`, `DecisionIdMember`, `ForReviewerAddedLine(decisionId)` (the write), `IsReviewerAdded(string?)` and `IsReviewerAdded(JsonElement)` (the read). |
-| `InvoiceTotalsService` | `ReviewerAddedOf(Entity)` (the one definition of the read), `ToRow` sets the flag, and the lines query now also reads `sprk_extractionconfidence`. |
-| `InvoiceReviewReadService` | `ReviewLineDto.ReviewerAdded` (bool, last member), set from `LineExtraction.ReviewerAdded` (an optional trailing member, set from the same parse). |
+| `ExtractionProvenance` | `SourceMember`, `ReviewerSource`, `DecisionIdMember`, `ForReviewerAddedLine(decisionId)` (the write), `AddedLineIdFor(decisionId)` (the row id) and `IsReviewerAdded(Entity)` (the only read; fix round F1). |
+| `InvoiceTotalsService` | `ReviewerAddedOf(Entity)` (delegates to `ExtractionProvenance.IsReviewerAdded(Entity)`), `ToRow` sets the flag, and the lines query now also reads `sprk_extractionconfidence`. |
+| `InvoiceReviewReadService` | `ReviewLineDto.ReviewerAdded` (bool, last member), set from `ExtractionProvenance.IsReviewerAdded(row)` in `ToLine`. |
+| `ApExportService.ReadLinesAsync` (fix round F2) | A reviewer-added line is exported with `billed = 0` (as an Adjustment line); `approved` stays its contribution. The lines query reads `sprk_extractionconfidence`. |
 
 ## The approved-total rule (EB-D-199, test T8)
 
@@ -31,14 +32,26 @@ Tests (T8): accept, reduce (including to 0), disallow, undecided (Flagged, Pendi
 | `InvoiceAdjustmentService.ToInput` (adjustment add and remove dry runs) | `ReviewerAddedOf(row)` | `LineQuery` already reads the column. |
 | `InvoiceCorrectionService.DryRunTotalsAsync` | through `InvoiceAdjustmentService.ToInput` | Same rows, no change needed. |
 | `InvoiceLineDecisionService` dry run (two constructions, the decided and the undecided branch) | `ReviewerAddedOf(row)` | `LineQuery` already reads the column. |
+| `ApExportService.ReadLinesAsync` (not an `InvoiceLineInput`; same read) | `ExtractionProvenance.IsReviewerAdded(line)` | F2. |
+| `InvoiceReviewReadService.ToLine` (not an `InvoiceLineInput`; same read) | `ExtractionProvenance.IsReviewerAdded(row)` | `ReviewLineDto.ReviewerAdded`. |
 | `InvoiceAdjustmentService` line 542, the new Adjustment line | default false | An Adjustment line is never reviewer-added; the flag is ignored for it. |
 | Tests only | `ApExportReviewFixTests`, `InvoiceTotalsCalculatorTests` | Positional, default false; unchanged. |
 
-No other production code builds an `InvoiceLineInput` or calls `InvoiceTotalsCalculator.Calculate`.
+No other production code builds an `InvoiceLineInput` or calls `InvoiceTotalsCalculator.Calculate`. Every production read of the flag goes through the entity overload; the JSON-only reads are private.
 
-## The marker (EB-D-193)
+## The marker (EB-D-193) and what authenticates it (fix round F1)
 
-`sprk_extractionconfidence` of an added line is `{"provenance":{"source":"reviewer","decisionId":"<guid>"}}`: a source word and an id, no name, text or value, no new column. The read is exact: ordinal `"reviewer"` in `provenance.source`. Absent, another source, another case, a non-string, a damaged or empty column, and a top-level `source` all give false. An added line has no analyzer pair, so `HasExtraction` is false and an extracted-field correction of it is refused (brief K1).
+`sprk_extractionconfidence` of an added line is `{"provenance":{"source":"reviewer","decisionId":"<guid>"}}`: a source word and an id, no name, text or value, no new column.
+
+The column is not field-secured and no guard covers it, so the marker alone must never decide. `ExtractionProvenance.IsReviewerAdded(Entity)` is true ONLY when all three hold: the marker says `reviewer` (ordinal), its `decisionId` parses (and is not empty), and `line.Id == AddedLineIdFor(decisionId)`. A copy of the marker on an intake line, or on any row with another id, reads false, so it takes nothing out of billed, fees, expenses or the percent base. The read is exact: absent, another source or case, a non-string, a missing or unparsable decision id, a damaged or empty column, and a top-level `source` all give false. There is no public JSON-only read; the JSON helpers are private.
+
+**Placement of `AddedLineIdFor`:** in `ExtractionProvenance`, beside the marker it authenticates, and not next to `InvoiceSubmissionPersister.LineIdFor`. The persister is not edited by this task (it overlaps 082d and 095d-2a), and the `ebilling-added-line-` prefix keeps these ids apart from every intake line id. It uses the persister's existing `IdOf`.
+
+An added line has no analyzer pair, so `HasExtraction` is false and an extracted-field correction of it is refused (brief K1).
+
+**For 164a-4a (the Add line service):** create the row with id `ExtractionProvenance.AddedLineIdFor(decisionId)` and write `ExtractionProvenance.ForReviewerAddedLine(decisionId)` into its `sprk_extractionconfidence`, with the same `decisionId` that goes to the Decision Record. A row created with any other id will not read as reviewer-added. The deterministic id also gives the Q3 idempotency: a retry addresses the same row, so there is one line and one record.
+
+**Known limit:** the marker can still be removed from a genuine added line by anyone who may write the line. The line then reads as an intake line. Effects, checked against the calculator (`AnAddedLine_WithItsMarkerRemoved_IsCountedAsBilled`, all four statuses): the stored billed total (`sprk_totalamount`) is an input and does not move; the fees total (or expenses total) is overstated by the line's amount; and the approved total is UNDERSTATED by the line's amount, not unchanged: its contribution is lost, and if it was Reduced or Disallowed the intake rule also charges a firm-line adjustment against money that was never billed. Spend follows the approved total, so spend is understated by the same amount. The AP export would emit the line with `billed` equal to its amount. Removing the marker is a loss of the line's payment, not a gain.
 
 ## Idempotency on the decision id (EB-D-198)
 
@@ -67,9 +80,9 @@ Their review set, additive and minimal:
 
 ## Findings outside this change (reported, not fixed)
 
-- **AP export lines.** `ApExportService.ReadLinesAsync` (about line 1063) emits `line.billed = sprk_amount` for every Fee and Expense line, including a reviewer-added one. For an added line the lines' `billed` then sums to more than the invoice's `BilledTotal`, while the lines' `approved` still sums to the `ApprovedTotal`. The export has no way to tell the line apart (brief K3). The owner of the export should decide before Add line ships: emit `billed = 0` for an added line (as for an Adjustment line), or accept the difference.
+- **AP export lines (fixed in the fix round, F2).** `ApExportService.ReadLinesAsync` now emits `billed = 0` for a reviewer-added line (as for an Adjustment line, EB-D-192: the billed total stays as billed) and its contribution as `approved`; `lines[].billed` sums to `BilledTotal` and `lines[].approved` to `ApprovedTotal` (tests for accepted, reduced, disallowed and undecided). `ApExportService` was in scope for that round only.
 - **Totals read cost.** Every recalculation now reads `sprk_extractionconfidence` for each line (a JSON column up to 100,000 characters; typically a few thousand). It is the only way to read the marker without a new column. A narrower read (a second query that filters on the marker) was not used because Dataverse cannot filter on JSON content reliably. Re-measure if an invoice has thousands of lines.
 
 ## Verification
 
-Run on this branch; see the commit and the final report for counts. Mutation checks (each reverted): ignoring the flag in the calculator, forcing `ReviewerAddedOf` and the provenance read to false, removing `add-line` from the writer's line literal, and forcing the review read's marker to false. Each turned the new or extended tests red (24 failures for the first three together, 11 for the last two).
+Run on this branch; see the commit and the final report for counts. Mutation checks (each reverted): ignoring the flag in the calculator, forcing `ReviewerAddedOf` and the provenance read to false, removing `add-line` from the writer's line literal, and forcing the review read's marker to false. Fix round seeds: dropping the id comparison from `IsReviewerAdded(Entity)` turns the F1 must-fire tests red (10 failures: totals service, line decision, review read, AP export, ToInput, provenance); making the AP export ignore the marker turns the F2 reconciliation red (4). Each turned the new or extended tests red (24 failures for the first three together, 11 for the last two).
