@@ -1421,10 +1421,10 @@ public static class OfficeEndpoints
         // Authorization: OfficeAuthFilter validates user authentication, then TodoSourceAccessFilter
         // (word-add-in-r1 task 064, ADR-008) read-gates ALL FOUR caller-supplied record ids —
         // regardingRecordId, documentId, communicationId, assignedToContactId — before the handler runs.
-        // Every one of them is written onto a row the CALLER owns, and the regarding target is read
-        // app-only by CoreAncestorResolver to stamp its parent matter/project onto that row, so an
-        // ungated id let a caller both attach a To Do to a record they cannot read and harvest that
-        // record's core ancestor. The filter's single constant deny body is also what closes the
+        // Every one of them is written onto the new To Do, and the regarding target is read app-only by the
+        // create service (RecordCreationService, which also decides the owner) to stamp its parent
+        // matter/project onto that row, so an ungated id let a caller both attach a To Do to a record
+        // they cannot read and harvest that record's core ancestor. The filter's single constant deny body is also what closes the
         // 403-vs-201 record-existence oracle — see TodoSourceAccessFilter's remarks.
         group.MapPost("/todo", CreateTodoAsync)
             .WithName("OfficeCreateTodo")
