@@ -152,6 +152,9 @@ def run(state_path: Path, solution_roots: list[Path], check: bool, strict: bool)
         "tables_changed_off_state": [],
     }
     found_tables: set[str] = set()
+    missing_by_table: dict[str, set[str]] = {}
+    extra_by_table: dict[str, set[str]] = {}
+    on_dev_off_by_table: dict[str, set[str]] = {}
     disagreements = 0
 
     for root in solution_roots:
@@ -181,13 +184,16 @@ def run(state_path: Path, solution_roots: list[Path], check: bool, strict: bool)
             if st["entity_flipped"]:
                 report["entity_flips"] += 1
             report["attribute_flips"] += len(st["attr_flipped"])
-            if st["state_cols_without_node"]:
-                report["attrs_in_state_without_node"][name] = st["state_cols_without_node"]
-            if st["attr_not_in_state"]:
-                report["attrs_in_source_not_in_state"][name] = st["attr_not_in_state"]
-            on_dev_off = list(st["attr_source_on_dev_off"]) + (["<entity>"] if st["entity_source_on_dev_off"] else [])
-            if on_dev_off:
-                report["source_on_dev_off"][name] = on_dev_off
+            # A table can have an Entity.xml in more than one solution folder (sprk_Document is in SpaarkeMaster and
+            # spaarke_containers), so these per-table findings MERGE across folders instead of the last folder read
+            # overwriting the earlier ones (#2584): a state column lacks a node only if NO folder has one
+            # (intersection); a source-only column and a source-on/dev-off flag count if ANY folder has it (union).
+            missing = set(st["state_cols_without_node"])
+            missing_by_table[name] = missing_by_table[name] & missing if name in missing_by_table else missing
+            extra_by_table.setdefault(name, set()).update(st["attr_not_in_state"])
+            on_dev_off_by_table.setdefault(name, set()).update(
+                list(st["attr_source_on_dev_off"]) + (["<entity>"] if st["entity_source_on_dev_off"] else [])
+            )
             if st["entity_flipped"] or st["attr_flipped"]:
                 disagreements += (1 if st["entity_flipped"] else 0) + len(st["attr_flipped"])
                 report["changed_files"].append(str(path.relative_to(REPO_ROOT)) if path.is_relative_to(REPO_ROOT) else str(path))
@@ -196,6 +202,9 @@ def run(state_path: Path, solution_roots: list[Path], check: bool, strict: bool)
                         raise SourceFormatError(f"{path}: flips counted but bytes unchanged")
                     path.write_bytes(new)
 
+    report["attrs_in_state_without_node"] = {t: sorted(c) for t, c in sorted(missing_by_table.items()) if c}
+    report["attrs_in_source_not_in_state"] = {t: sorted(c) for t, c in sorted(extra_by_table.items()) if c}
+    report["source_on_dev_off"] = {t: sorted(c) for t, c in sorted(on_dev_off_by_table.items()) if c}
     report["tables_in_state_without_folder"] = sorted(
         t for t, v in state.items() if t not in found_tables and not v.get("intersect") and t not in EXCLUDED_TABLES
     )
