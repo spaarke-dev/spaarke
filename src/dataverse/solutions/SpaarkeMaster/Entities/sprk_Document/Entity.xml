@@ -5270,6 +5270,67 @@
             <Description description="The relocation ledger: what a move of this document's file between SharePoint Embedded containers still owes for the OLD item (re-key, index, source delete), with the old item's witness. Written ONLY by the BFF in the same update as the re-point and cleared when settled; field-secured. Do not edit by hand: an unreadable value stops the document's file from being moved again until an administrator repairs it. unified-access-control-r2 task 166, owner rounds 37 and 45." languagecode="1033" />
           </Descriptions>
         </attribute>
+        <attribute PhysicalName="sprk_RestrictedBySubmission">
+          <Type>bit</Type>
+          <Name>sprk_restrictedbysubmission</Name>
+          <LogicalName>sprk_restrictedbysubmission</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>1</IsSecured>
+          <IntroducedVersion>1.2.3.1</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <AppDefaultValue>0</AppDefaultValue>
+          <optionset Name="sprk_document_sprk_restrictedbysubmission">
+            <OptionSetType>bit</OptionSetType>
+            <IntroducedVersion>1.2.3.1</IntroducedVersion>
+            <IsCustomizable>1</IsCustomizable>
+            <displaynames>
+              <displayname description="Restricted by invoice submission" languagecode="1033" />
+            </displaynames>
+            <Descriptions>
+              <Description description="Yes only on an .eml Document that the Outlook add-in invoice submission (from-email, task 095) saved own-Restricted: written in the SAME create as that narrowing, never in an update. The (a') predicate skips only a Restricted narrowing that carries this marker, so the firm still sees its own invoice (model 9.1). Written only by the BFF (field-secured); app-only generic writers and the field-mapping push refuse it (InheritedAccessPermission.RefuseAppOnlyWrite). Default No." languagecode="1033" />
+            </Descriptions>
+            <options>
+              <option value="1" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="Yes" languagecode="1033" />
+                </labels>
+              </option>
+              <option value="0" ExternalValue="" IsHidden="0">
+                <labels>
+                  <label description="No" languagecode="1033" />
+                </labels>
+              </option>
+            </options>
+          </optionset>
+          <displaynames>
+            <displayname description="Restricted by invoice submission" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="Yes only on an .eml Document that the Outlook add-in invoice submission (from-email, task 095) saved own-Restricted: written in the SAME create as that narrowing, never in an update. The (a') predicate skips only a Restricted narrowing that carries this marker, so the firm still sees its own invoice (model 9.1). Written only by the BFF (field-secured); app-only generic writers and the field-mapping push refuse it (InheritedAccessPermission.RefuseAppOnlyWrite). Default No." languagecode="1033" />
+          </Descriptions>
+        </attribute>
         <attribute PhysicalName="sprk_searchindexcompletedon">
           <Type>datetime</Type>
           <Name>sprk_searchindexcompletedon</Name>
