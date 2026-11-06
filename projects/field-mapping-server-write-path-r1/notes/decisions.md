@@ -646,7 +646,7 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 
 ### 2026-11-02 — Ontology-r1 research: the Signal/Decision writers keep their dedicated identity (recommendation; owner to decide)
 
-- **Source:** ontology-r1, `projects/spaarke-ontology-platform-r1/notes/writer-identity-fr21-answer.md` (branch `docs/ontology-platform-design`, 4279c429d2). The owner asked for deep research first.
+- **Source:** ontology-r1's FR-21 answer (keep the dedicated writer identity; named FR-21 exception), reviewed privately with UAC-r2. The owner asked for deep research first.
 - **Why the identity exists:** ontology D-1, "ADR-028 path A", 2026-10-03/04.
   - The shared BFF identities are System Administrator. Dataverse privileges are additive with no deny, so those identities can Write and Delete `sprk_decisionrecord`.
   - `mi-ontology-writer-dev` holds only the Spaarke Ontology Service role:
