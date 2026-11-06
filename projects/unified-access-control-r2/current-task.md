@@ -14,13 +14,13 @@
 | **Active work** | None in code. **#2560 MERGED** (PR #2598, `b6dee2e590`; issue closed); C:/wt2560 and C:/wtfm removed. Waiting on: fm 049 round-3 SHA; ebilling 095d-2a-2 SHA and the 095a column-security pre-apply ping. |
 | **Also in flight** | #2577 test-host fix MERGED (#2596, `972929fd69`). |
 | **Dev state** | BFF = **20669df6a9** (since 2026-11-06 16:44:51Z) plus the `sprk_spaarkeai` bundle at the same SHA (16:54:04Z). G-8 revoke-on-change ON. 226 settings. |
-| **Next action** | 1. **Root team "Spaarke" (09fbf21c, root BU 06fbf21c) holds Console User (teamrole 2c969f10).** The owner chose "remove after census". CENSUS DONE: enabled humans in the root BU are `# Spaarke Get Started` (bc067eb1: NO direct roles, so it gets Basic and Console only through the team; it is the census finding's principal); Ralph root 1d02f31c (has Console User DIRECTLY plus System Administrator, so unaffected); and the Microsoft Support User and Delegated Admin. The ~146 app users lose a human role they shouldn't have. NEXT: ask the owner for the GO to disassociate Console User from team 09fbf21c (`DELETE teams(09fbf21c-1872-f011-b4cb-7c1e52671ad0)/teamroles_association(51c924e2-bdbe-f111-a05b-3833c5e9614d)/$ref`), and whether `# Spaarke Get Started` should get Console User directly (default: no). Then read back, and the census should drop to 0. 2. 046c: owner ruling "all five get Core User": DONE 17:30Z (role f8ce167c, BU cb15f587; read-back OK for 49f89867, bcebc56c, b0cd2d30, 4c9917c2, e44317a0). Tell fm and word-add-in; also tell them the root account 1d02f31c holds System Administrator. 046c's own apply is fm's, with the owner's go in their session; I review the PR after its fix round and asked for a step-order check. 3. Open: organic traffic for the fm and ontology route checks (ontology reads its own); the 02:30Z nightly (ontology). |
+| **Next action** | 1. **Root team "Spaarke": Console User REMOVED 18:11:46Z** (owner go; read-back shows only Basic User left on the team). Check that the next `[SECURE-CENSUS]` drops below 5. `# Spaarke Get Started` (getstarted@): the owner said it is a special-purpose marketing account; leave it as is and change nothing (no license removal, no environment security group; self-service joining is correct behaviour). 2. 046c: owner ruling "all five get Core User": DONE 17:30Z (role f8ce167c, BU cb15f587; read-back OK for 49f89867, bcebc56c, b0cd2d30, 4c9917c2, e44317a0). Tell fm and word-add-in; also tell them the root account 1d02f31c holds System Administrator. 046c's own apply is fm's, with the owner's go in their session; I review the PR after its fix round and asked for a step-order check. 3. Open: organic traffic for the fm and ontology route checks (ontology reads its own); the 02:30Z nightly (ontology). |
 
 ## Decisions this session (2026-11-06, owner here)
 - W3 direction: named exceptions plus guards; no core redesign in R1; no given-id input in the core (fm recorded it at `5e4f4be3aa`).
 - Deploy go for 20669df6a9 (done).
 - 046c: all five add-on holders get Core User (done 17:30Z).
-- The root team's Console User is removed after a census (census done; removal waits on the go).
+- The root team's Console User was removed (done 18:11Z). Get Started is left as is; no root-cause change (owner).
 - ebilling EB-D-200 = option D (via ebilling).
 
 ## The next dev deploy (owner: wait for 049)
@@ -54,6 +54,7 @@
   - #2582 audit flags merged; H6 covers org auditing; audit history stays SysAdmin only.
 
 ## Owner items outstanding
+- Dev: application users with production-like names (`# spaarke-bff-api-prod`, `# JobsServiceProd`) hold System Administrator in DEV (fm 044 finding). Ask the owner whether those identities belong in dev.
 - ebilling (private): invoice hold reasons sit in a submission column that Core User can write on dev today, so a hold can be edited away. Fix in ebilling task 165, ordered first and before AP export is turned on anywhere; ebilling tells the owner. 095d-2b-1 C1 and C2 resolved and approved (`4f113d72e2`).
 - ebilling: approval accepts a fee or expense line of unknown origin. ebilling fixes it in 164a-4a; I review the 164 diff. Condition: a user cannot forge the add-line Decision Record. Does the owner want tracking beyond 164? (Private; do not describe the mechanism in public text.)
 - Should customer environments turn on revoke-on-change (G-8) through provisioning?
