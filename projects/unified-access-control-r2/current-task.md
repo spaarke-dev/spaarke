@@ -25,6 +25,7 @@
 
 ## Reviews in flight / conditions sent
 - **fm (`-69`):**
+  - **049 `e8da405eb0` APPROVED 2026-11-06** (rounds 3 and 4: Basic not counted, tests inverted, wording clean). fm opens the PR and merges, then sends the master SHA, then I put the combined deploy to the owner. Rebuild order: BFF, then UI.Components → LegalWorkspace / SpaarkeAi / AI.Widgets (CreateProjectWizard optional). Recommended via fm that the owner delete remote `task/fm-049c` (the old private passage is in public commits).
   - 046b PR #2592 APPROVED (role diff matches dev exactly; auto-merge on).
   - G13 thread Deep withdrawn (private threads); thread Read stays Basic.
   - 049: rights gate option (b): Basic never counts for a team-owned target; invert the two 049-only tests.
