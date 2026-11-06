@@ -2078,9 +2078,16 @@ internal sealed class RecordCreationMapping
     internal Guid? SourceId { get; }
 
     /// <summary>Mapping read as the caller: <paramref name="probe"/> asks their Read on the source under their token.</summary>
+    /// <param name="probe">The caller-rights probe.</param>
+    /// <param name="callerBearerToken">The caller's bearer token.</param>
+    /// <param name="sourceTable">The explicit source table, if the caller named one.</param>
+    /// <param name="sourceId">The explicit source id, if the caller named one.</param>
+    /// <param name="documentShown">Task 043: the route's answer to the external document narrowing for a <c>sprk_document</c>
+    /// source (<see cref="MappingSourceReader.DocumentShown"/>); none means a document source maps nothing.</param>
     internal static RecordCreationMapping ForCaller(
-        CallerRecordAccessProbe probe, string? callerBearerToken, string? sourceTable = null, Guid? sourceId = null) =>
-        new(MappingSourceReader.ForCaller(probe, callerBearerToken), sourceTable, sourceId);
+        CallerRecordAccessProbe probe, string? callerBearerToken, string? sourceTable = null, Guid? sourceId = null,
+        Func<Guid, CancellationToken, Task<bool>>? documentShown = null) =>
+        new(MappingSourceReader.ForCaller(probe, callerBearerToken, documentShown), sourceTable, sourceId);
 }
 
 /// <summary>

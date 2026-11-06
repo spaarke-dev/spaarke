@@ -2374,6 +2374,13 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("PUT /api/memory/pins/{pinId}", "UpdatePinAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-68): another user's pin is answered exactly as an unknown one (PinnedMemoryEndpoints.cs:432, "
             + ":443), then the NEW matter is checked AppendTo as the caller through CallerRecordAccessProbe (:448)."),
+        new HandlerDecision("POST /api/v1/documents", "CreateDocumentAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
+            "Task 166 (the former Pending UNOWNED-NEW waiver): before the app-only write (DataverseDocumentsEndpoints.cs:977) "
+            + "AuthorizeDocumentCreateAsync (:932, :1060) asks the caller's Create on sprk_document AS THE CALLER through "
+            + "CallerRecordAccessProbe.CallerHoldsPrivilegeAsync (:1074), then derives the caller's business-unit container "
+            + "server-side by RecordContainerResolver.ResolveForActingUserAsync (:1093; an enabled, internal user only) and "
+            + "requires the body's ContainerId to match it (:1120; the row does not store it). Not held and another "
+            + "container are one 403; an exception or timeout is a 403; no container is refused."),
         new HandlerDecision("POST /api/v1/field-mappings/push", "PushFieldMappingsAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-67): Read on the SOURCE record and the caller's systemuserid through CallerRecordAccessProbe "
             + "(FieldMappingEndpoints.cs:474, :776), then the source and the children are read and written impersonated as "
@@ -2797,7 +2804,8 @@ public partial class RouteAuthorizationGuardTests
         // rule 2's SECOND clause — "a create with no pre-existing resource" — not rule 4's forbidden
         // build-go-green move. The distinction matters, so state it plainly: there is no resource to
         // authorize because the record does not exist yet; that is the whole reason the route exists.
-        // It is the same reasoning the Permanent waiver on POST /api/v1/documents already carries.
+        // (POST /api/v1/documents once carried the same reasoning; it is now a handler decision that checks
+        // Create as the caller and requires the caller's business-unit container.)
         //
         // What makes it safe is NOT a filter, and pretending otherwise would be the dishonest version:
         //   - The route has NO container parameter, so a caller cannot name where bytes go. That is
@@ -2865,8 +2873,8 @@ public partial class RouteAuthorizationGuardTests
         // ---------- task 167: the two task-074 PERMANENT waivers on /api/v1/documents were NOT TRUE as written ----------
         //
         // "POST /api/v1/documents — CREATE, there is no pre-existing resource": the body REQUIRES a ContainerId (an existing
-        // container) and writes it with no caller-rights check, so the strict CreateWithNoPriorResource test fails. Now a
-        // Pending UNOWNED-NEW waiver (below). "GET /api/v1/documents — COLLECTION READ, result trimming": the sweep showed it
+        // container) and writes it with no caller-rights check, so the strict CreateWithNoPriorResource test fails. It was a
+        // Pending UNOWNED-NEW waiver; task 166 resolved it with an in-handler decision (HandlerDecisions). "GET /api/v1/documents — COLLECTION READ, result trimming": the sweep showed it
         // is a caller-chosen-container read, the ungated twin of the route task 078 gated — now Pending, owned by 166
         // (S-66). Converting Permanent to Pending is the allowed direction.
 
@@ -3118,11 +3126,6 @@ public partial class RouteAuthorizationGuardTests
         Pending("POST /api/compose/documents/{documentSpeId}/apply-template", "166", Gap.NoDecision,
             "[low] Resolves a caller-named template with an APP token (ComposeTemplateEndpoints.cs:95-106). "
             + "Safe only if every template is org-shared."),
-        Pending("POST /api/v1/documents", "166", Gap.NoDecision,
-            "[medium] The body's required ContainerId (Models.cs CreateDocumentRequest) is written with no "
-            + "caller-rights check; only the owner team is server-derived "
-            + "(DataverseDocumentsEndpoints.cs:571-597). The old Permanent 'CREATE' waiver was not true as "
-            + "written."),
         Pending("GET /api/resilience/circuits", "166", Gap.NoDecision,
             "[low] Operator diagnostics: every downstream circuit-breaker state to any signed-in user "
             + "(ResilienceEndpoints.cs:48-59). No admin policy."),

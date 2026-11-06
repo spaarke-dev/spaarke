@@ -845,19 +845,48 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
         // recorded for THIS request's playbook id, and only when the evaluator lets the request through (it calls next only
         // after every check above passed). The decision itself is unchanged; the handler reads the record to exempt that one
         // playbook (by its id) from the create's AppendTo question (RecordCreationRequest.RouteAuthorizedLookups).
-        var allowed = request.PlaybookId is { } decided && decided != Guid.Empty
-            ? new EndpointFilterDelegate(ctx =>
+        // Task 043 (owner 2026-11-04): the same "let through" also records the body document, which the Document check above
+        // (AttachDocumentCheck: the caller's Read + AppendTo, then THE external document narrowing) decided for this caller. The
+        // handler hands that decision to the field mapping of a Document to Analysis profile, so the narrowing is not asked twice.
+        var documentId = request.DocumentId;
+        var allowed = new EndpointFilterDelegate(ctx =>
+        {
+            if (request.PlaybookId is { } decided && decided != Guid.Empty)
             {
                 RecordPlaybookUseAuthorized(ctx.HttpContext, decided);
-                return next(ctx);
-            })
-            : next;
+            }
+
+            RecordDocumentAttachAuthorized(ctx.HttpContext, documentId);
+            return next(ctx);
+        });
         return await EvaluateAsync(context, allowed, targets, FinanceDenial.Forbidden);
     }
 
     /// <summary>The <see cref="HttpContext.Items"/> key of the create filter's playbook-use record: a private object, so nothing
     /// a request carries (body, query, header) can set it.</summary>
     private static readonly object PlaybookUseAuthorizedKey = new();
+
+    /// <summary>Task 043: the <see cref="HttpContext.Items"/> key of the create filter's document record (a private object, as
+    /// <see cref="PlaybookUseAuthorizedKey"/>).</summary>
+    private static readonly object DocumentAttachAuthorizedKey = new();
+
+    /// <summary>
+    /// Task 043: records that the /create filter's Document check (Read + AppendTo, then the external document narrowing)
+    /// allowed <paramref name="documentId"/> for this caller. Called by <see cref="AuthorizeCreateAsync"/> only, after every check
+    /// passed (<c>RouteAuthorizedLookupsCallSiteTests</c>).
+    /// </summary>
+    internal static void RecordDocumentAttachAuthorized(HttpContext httpContext, Guid documentId) =>
+        httpContext.Items[DocumentAttachAuthorizedKey] = documentId;
+
+    /// <summary>
+    /// Task 043: the document the /create filter's Document check allowed on this request, or <c>null</c> when it allowed none
+    /// (a request the filter did not run on). The handler's field mapping treats only this document as shown by the external
+    /// document narrowing.
+    /// </summary>
+    internal static Guid? AuthorizedDocumentId(HttpContext httpContext) =>
+        httpContext.Items.TryGetValue(DocumentAttachAuthorizedKey, out var recorded) && recorded is Guid authorised && authorised != Guid.Empty
+            ? authorised
+            : null;
 
     /// <summary>
     /// Task 031 fix round 1: records that the /create filter authorised <paramref name="playbookId"/> for this caller (public, or

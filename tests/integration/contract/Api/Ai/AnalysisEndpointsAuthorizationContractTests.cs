@@ -686,6 +686,109 @@ public class AnalysisEndpointsAuthorizationContractTests
             It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()), Times.Never, "no scope ids were sent");
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Task 043 (owner 2026-11-04): a Document to Analysis profile maps for a caller who can read the document. The REAL
+    // filter decides the body document (Read + AppendTo, then THE external document narrowing); the handler reuses that
+    // decision and the REAL service asks the caller's own Read on the document before mapping. A Default rule maps without
+    // an app read, so what is mapped is visible on the created row.
+    // ---------------------------------------------------------------------------------------------
+
+    private const string MappedDescription = "Filed from the document";
+
+    /// <summary>A Document to Analysis profile with one Default rule into sprk_description, and the caller's own Read on the
+    /// document as RetrievePrincipalAccess answers it (none unless <paramref name="callerReads"/>).</summary>
+    private static void DocumentToAnalysisProfile(AnalysisAuthHost host, Guid documentId, bool callerReads)
+    {
+        host.AppOnly
+            .Setup(a => a.GetFieldMappingProfileWithRulesAsync("sprk_document", "sprk_analysis", true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FieldMappingProfileEntity
+            {
+                Name = "Document to Analysis",
+                SourceEntity = "sprk_document",
+                TargetEntity = "sprk_analysis",
+                IsActive = true,
+                Rules =
+                [
+                    new FieldMappingRuleEntity
+                    {
+                        Name = "default to sprk_description",
+                        SourceField = string.Empty,
+                        TargetField = "sprk_description",
+                        TargetFieldType = Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.FieldTypeText,
+                        MappingType = Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.MappingTypeDefault,
+                        DefaultValue = MappedDescription,
+                        IsActive = true,
+                    },
+                ],
+            });
+        host.Probe.RecordRights = (set, id) => callerReads && set == Documents && id == documentId ? AccessRights.Read : AccessRights.None;
+    }
+
+    private static string? DescriptionOf(IReadOnlyDictionary<string, object?> fields) => BindOf(fields, "sprk_description");
+
+    [Theory(DisplayName = "043 AC1/AC3: a caller who can read the document (internal, or external with the document shown) gets the profile's value, and no warnings member")]
+    [InlineData(Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.Internal)]
+    [InlineData(Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External)]
+    public async Task Create_ADocumentTheCallerCanRead_MapsItsProfile_AndReturnsNoWarnings(
+        Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode caller)
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        host.CallerMode = caller;
+        var documentId = host.World.Document(Guid.NewGuid());
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        DocumentToAnalysisProfile(host, documentId, callerReads: true);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId }));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Created, body);
+        DescriptionOf(host.AppOnlyCreates.Should().ContainSingle().Subject.Fields).Should().Be(MappedDescription);
+        host.Probe.RecordRightsCalls.Should().Contain((Documents, documentId), "the service asks the caller's own Read on the document");
+        JsonNode.Parse(body)!.AsObject().Select(p => p.Key).Should().Equal(new[] { "analysisId" }, "AC6: no warnings, no member");
+    }
+
+    [Fact(DisplayName = "043 AC2/AC6: the route lets the caller through, but their own Read on the document is not there - 201, nothing mapped, the one warning in the body")]
+    public async Task Create_ADocumentTheCallerCannotRead_MapsNothing_AndReturnsTheOneWarning()
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        DocumentToAnalysisProfile(host, documentId, callerReads: false);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId }));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Created, body);
+        host.AppOnlyCreates.Should().ContainSingle().Which.Fields.Should().NotContainKey("sprk_description");
+        var json = JsonNode.Parse(body)!.AsObject();
+        json["analysisId"]!.GetValue<Guid>().Should().Be(host.AppOnlyCreates.Single().Id);
+        json["warnings"]!.AsArray().Select(w => w!.GetValue<string>()).Should().Equal(
+            Sprk.Bff.Api.Services.Dataverse.FieldMapping.MappingSourceReadProbe.SourceUnavailableWarning);
+        body.Should().NotContain(documentId.ToString(), "the warning names no record");
+    }
+
+    [Theory(DisplayName = "043 AC3: an external caller the narrowing does not show the document to (hidden, or a narrowing fault) is the route's existing 403 - nothing created, nothing mapped")]
+    [InlineData("hidden")]
+    [InlineData("narrowing-faults")]
+    public async Task Create_AnExternalCallerTheNarrowingDoesNotShowTheDocumentTo_IsTheExisting403(string shape)
+    {
+        await using var host = await AnalysisAuthHost.StartAsync();
+        host.CallerMode = Sprk.Bff.Api.Tests.AccessControl.NarrowingCallerMode.External;
+        var documentId = host.World.Document(Guid.NewGuid(), permission: shape == "hidden" ? 100000002 : null); // Restricted
+        if (shape == "narrowing-faults")
+        {
+            host.World.Faults[Documents] = HttpStatusCode.ServiceUnavailable;
+        }
+
+        host.Access.Grant(Documents, documentId, ReadAppendTo);
+        DocumentToAnalysisProfile(host, documentId, callerReads: true);
+
+        var response = await host.SendAsync(Create(new { name = "A", documentId }));
+
+        await AssertForbiddenAsync(response, "sdap.access.deny.insufficient_rights");
+        host.VerifyCreateWroteNothing();
+    }
+
     [Fact(DisplayName = "162 f1 create: a fault while declaring the checks (the body playbook's lookup throws) denies 403 system_failure and creates nothing")]
     public async Task Create_CheckDeclarationFault_Denies()
     {
