@@ -826,7 +826,7 @@ public sealed class InvoiceAssignFirmService
             _logger.LogInformation("Set firm on invoice {InvoiceId}: Decision Record {RecordId} ({State}).", invoiceId, recorded.RecordId, recordState);
         }
 
-        return await QueueRerunAsync(invoiceId, submissionId, stored, outcome, recorded.RecordId, callerUserId, ct).ConfigureAwait(false);
+        return await QueueRerunAsync(invoiceId, submissionId, stored, outcome, recorded.RecordId, callerUserId).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -835,15 +835,18 @@ public sealed class InvoiceAssignFirmService
     /// and the repeat queues it again. A completed re-run queues nothing. The answer carries the stored <c>rulesRerun</c>.
     /// </summary>
     private async Task<AssignFirmResult> QueueRerunAsync(
-        Guid invoiceId, Guid submissionId, AssignFirmStoredDecision stored, AssignFirmOutcome outcome, Guid recordId, Guid? callerUserId, CancellationToken ct)
+        Guid invoiceId, Guid submissionId, AssignFirmStoredDecision stored, AssignFirmOutcome outcome, Guid recordId, Guid? callerUserId)
     {
         if (string.Equals(stored.RulesRerun, RulesRerunPending, StringComparison.Ordinal))
         {
             try
             {
-                await _enqueueRerun(submissionId, stored.DecisionId, ct).ConfigureAwait(false);
+                // The apply and the Decision Record are committed by now, so this enqueue is the last step of the same decision: it does not run on
+                // the request token, or a caller that goes away here would lose the re-run silently (rulesRerun stays pending with nothing queued).
+                // The enqueue had no timeout of its own to keep. An OperationCanceledException from it can only be the queue client's own timeout.
+                await _enqueueRerun(submissionId, stored.DecisionId, CancellationToken.None).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            catch (Exception ex)
             {
                 return Incomplete(invoiceId, submissionId, IncompleteStepRerun, ex.GetType().Name, callerUserId);
             }

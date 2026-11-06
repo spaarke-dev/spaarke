@@ -172,10 +172,12 @@ public sealed partial class InvoiceAssignFirmServiceTests
             (_, _) => { Calls.Add("filing"); return Task.FromResult(Filing); },
             Log,
             new FixedTime(Now),
-            (submission, decision, _) =>
+            (submission, decision, enqueueCt) =>
             {
                 // 095d-2b-1: the re-run's enqueue; kept out of Calls so the 1b/1c order assertions are unchanged.
                 EnqueueAttempts.Add((submission, decision));
+                EnqueueTokens.Add(enqueueCt);
+                enqueueCt.ThrowIfCancellationRequested();
                 if (OnEnqueue?.Invoke() is { } fault)
                 {
                     return Task.FromException(fault);
@@ -191,6 +193,9 @@ public sealed partial class InvoiceAssignFirmServiceTests
         /// <summary>095d-2b-1: every enqueue of the re-run asked (submission, decision), and those that were queued.</summary>
         public readonly List<(Guid Submission, Guid Decision)> EnqueueAttempts = [];
         public readonly List<(Guid Submission, Guid Decision)> Enqueued = [];
+
+        /// <summary>Fix round (F2): the token each enqueue ran on. The fake honours it, as the queue client does.</summary>
+        public readonly List<CancellationToken> EnqueueTokens = [];
 
         /// <summary>095d-2b-1: a fault the next enqueue throws (null: queued).</summary>
         public Func<Exception?>? OnEnqueue;

@@ -81,8 +81,10 @@
     rules re-run; the re-run's one commit sets the stored member's "rulesRerun" to "completed" (and clears the rerun-pending marker). A
     submission whose Set firm is recorded (check (f) found its record) but whose "rulesRerun" is not "completed" is "recorded, re-run not
     done": the invoice stays held and its submission withheld from partners. A lost enqueue (the BFF answered 503 incomplete, failedStep
-    rerun) is finished by a repeat of the Set firm; a dead-lettered or refused re-run job needs an operator (Permanent=true = operator, not
-    retry). Inside -RecordedNoRerunWindowMinutes of its decidedOn it is INFO; older, -Verify reports it as FAIL (exit 1); -WhatIf and -Apply
+    rerun) is queued again by a repeat of the Set firm that names the same firm, while the repeat is accepted (it answers 200 already
+    assigned). When the repeat answers 409 changed or no submission, or the re-run job was refused (Permanent=true), no operator tool queues
+    the re-run directly (issue #2601); a dead-lettered job's message is replayed by an operator from the dead-letter queue, and a refused
+    job needs its cause fixed first. Inside -RecordedNoRerunWindowMinutes of its decidedOn it is INFO; older, -Verify reports it as FAIL (exit 1); -WhatIf and -Apply
     only report it.
 
     WHAT IT IS NOT. Not an access column: it decides no visibility. It is refused to the BFF's app-only generic writers
@@ -113,7 +115,7 @@
 
 .PARAMETER RecordedNoRerunWindowMinutes
     Task 095d-2b-1, check (g): how long a recorded Set firm may wait for its rules re-run to complete before -Verify fails (default 60 minutes,
-    1 to 10080). Inside it the row is INFO: the queued job retries for minutes before it dead-letters.
+    1 to 10080). Inside it the row is INFO: the queued job's deliveries (up to five) follow one another without a delay, so a lasting fault dead-letters it within moments, not after minutes (issue #2600).
 
 .EXAMPLE
     pwsh scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1 -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -WhatIf
@@ -683,7 +685,7 @@ Write-Host "`n(g) Set firm recorded, re-run not done (window $RecordedNoRerunWin
 foreach ($row in $rerunRows) {
     if ($row.Stored.RulesRerun -eq $RulesRerunCompleted) { $rerunDone++; continue }
     $ageMinutes = [Math]::Floor(($nowUtc - $row.Stored.DecidedOn).TotalMinutes)
-    $what = "(g) invoice $($row.InvoiceId) (submission $($row.SubmissionId)): Set firm recorded $ageMinutes min ago, rules re-run not done - the invoice stays held; a repeat of the Set firm re-queues it, a dead-lettered or refused re-run needs an operator"
+    $what = "(g) invoice $($row.InvoiceId) (submission $($row.SubmissionId)): Set firm recorded $ageMinutes min ago, rules re-run not done - the invoice stays held; a repeat of the Set firm naming the same firm re-queues it while the BFF accepts the repeat (200 already assigned); on a 409 answer or a refused re-run no operator tool queues it directly (issue #2601); a dead-lettered job is replayed from the dead-letter queue"
     if ($ageMinutes -gt $RecordedNoRerunWindowMinutes) {
         $rerunOverdue++
         if ($Verify) { Report 'FAIL' "$what (older than the $RecordedNoRerunWindowMinutes-minute window)" } else { Report 'INFO' "$what (older than the window; -Verify fails on it)" }

@@ -450,7 +450,9 @@ public sealed partial class InvoiceSubmissionRerunTests
         public Task<JobOutcome> ProcessAsync(bool final)
         {
             var job = InvoiceSubmissionRerunJobHandler.BuildJob(SubmissionId, DecisionId, "corr-1");
-            job.Attempt = final ? job.MaxAttempts : 1;
+            // As in production: Attempt stays 1 (nothing advances it) and only the broker's DeliveryCount grows (ServiceBusJobProcessor sets it).
+            job.Attempt = 1;
+            job.DeliveryCount = final ? JobContract.MaxDeliveryCount : 1;
             return Handler().ProcessAsync(job, CancellationToken.None);
         }
     }

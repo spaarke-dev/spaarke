@@ -79,6 +79,45 @@ public sealed partial class InvoiceAssignFirmServiceTests
         w.Recorded[1].Should().BeEquivalentTo(w.Recorded[0], "the repeat records the same decision (the writer answers already recorded)");
     }
 
+    [Fact(DisplayName = "095d-2b-1 fix round F2 (must fire): the request token cancelled after the commit (apply and record done) still queues the re-run, on a token the caller cannot cancel")]
+    public async Task RequestCancelledAfterTheCommit_StillQueuesTheRerun()
+    {
+        using var cts = new CancellationTokenSource();
+        var w = new World
+        {
+            // The caller goes away once the Decision Record is written: the commit has happened, the enqueue is next.
+            OnRecord = d => { cts.Cancel(); return new BillingDecisionRecordResult(World.RecordId, AlreadyRecorded: false, Sprk.Bff.Api.Services.Signals.RecordedDecisionClass.Judgement); },
+        };
+
+        var result = await w.Assign(ct: cts.Token);
+
+        cts.IsCancellationRequested.Should().BeTrue("the control is real: the request token was cancelled before the enqueue");
+        (result.Outcome, result.Status, result.RulesRerun).Should().Be((AssignFirmOutcome.Assigned, 200, InvoiceAssignFirmService.RulesRerunPending));
+        w.Applied.Should().NotBeNull();
+        w.Recorded.Should().ContainSingle();
+        w.Enqueued.Should().Equal([(SubmissionId, InvoiceAssignFirmService.DecisionIdFor(SubmissionId))]);
+        w.EnqueueTokens.Should().ContainSingle().Which.CanBeCanceled.Should().BeFalse("the enqueue does not run on the request token");
+    }
+
+    [Fact(DisplayName = "095d-2b-1 fix round F2 (must not fire): a cancellation before the commit writes nothing, records nothing and queues nothing")]
+    public async Task RequestCancelledBeforeTheCommit_WritesNothing_AndQueuesNothing()
+    {
+        using var cts = new CancellationTokenSource();
+        var w = new World
+        {
+            OnRenumber = _ => { cts.Cancel(); throw new OperationCanceledException(cts.Token); },
+        };
+
+        var act = () => w.Assign(ct: cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        w.Applied.Should().BeNull("the apply never committed");
+        w.Transactions.Should().BeEmpty();
+        w.Recorded.Should().BeEmpty();
+        w.EnqueueAttempts.Should().BeEmpty();
+        w.Enqueued.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "095d-2b-1: a repeat after the re-run committed (rulesRerun completed) queues nothing and answers rulesRerun completed")]
     public async Task Repeat_AfterTheRerunCompleted_QueuesNothing()
     {
