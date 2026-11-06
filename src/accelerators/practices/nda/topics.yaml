@@ -9,6 +9,7 @@
 #   look_for          clause signals that locate the topic in an agreement
 #   sides             sides for which the topic applies (mutual, disclosing, receiving)
 #   default_priority  High | Medium | Low (a playbook may override)
+#   aliases           optional: other names playbooks use for this topic (playbook_import.py maps rows by them)
 #   contractnli       ContractNLI hypothesis names used to seed eval cases (check names against the
 #                     dataset release before scoring; empty when none applies)
 practice: nda
@@ -54,6 +55,7 @@ topics:
     title: One-sided carve-outs
     question: Does any carve-out remove a class of one party's information from protection?
     look_for: ['shall not include', 'excluding', 'notwithstanding']
+    aliases: ['Additional exclusions', 'Added exclusion']
     sides: [mutual, disclosing]
     default_priority: High
     contractnli: []
@@ -181,6 +183,7 @@ topics:
     title: Housekeeping
     question: Are the effective date, party names, notices and signature blocks correct?
     look_for: ['Effective Date', 'IN WITNESS WHEREOF', 'By:', 'Name:', 'Title:']
+    aliases: ['Execution', 'Signature block', 'Signatory', 'Signing']
     sides: [mutual, disclosing, receiving]
     default_priority: Low
     contractnli: []

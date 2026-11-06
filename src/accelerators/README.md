@@ -10,6 +10,7 @@ core/
     probe.py            what the sandbox can run
     segment_clauses.py  section map + unique paragraph keys
     playbook_parse.py   Markdown playbook -> JSON; closed topic ids
+    playbook_import.py  four-column Word playbook (create-playbook / Word format) -> our Markdown, rows mapped to topic ids
     ooxml_redline.py    edit plan -> surgical tracked changes, comments, bookmarks; external + clean copies
     summary_table.py    page-1 linked summary (internal redline)
     check_outputs.py    blocking checks incl. untracked-edit detection

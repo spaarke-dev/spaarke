@@ -43,10 +43,26 @@ Per act: what ran, what came out, and how it compares with the expected result. 
 
 **Join key.** No topic ids, and row names are the model's own wording. Without a mapping step, a Cowork-built playbook can't be compared topic by topic with `review.json` or with the library grid.
 
-**Step 3** (convert with `playbook_import.py`, then render again) could not run: the script doesn't exist. See gap-log #9.
+**Step 3 (done 2026-11-05).** Built `core/engines/playbook_import.py` (7 tests) and added an optional `aliases` field to `topics.yaml` (`housekeeping`, `one-sided-carveouts`).
+- **Cowork's playbook:** 32 rows: 15 mapped, 3 merged, 10 gap, 4 extra. With `--baseline`, residuals is taken from our baseline, so 24 topics are written and none is silent. The mapping matches the manual comparison above.
+- **Fallback suggestions:** 12, where our baseline has a fallback the import lacks.
+- **Rows to check:** 1, 2, 3, 4, 5, 12, 13, 18 and 21 (merged, extra or weak matches).
+- **Our table format:** 24 of 24 rows mapped by their explicit topic ids.
+- **Word's output:** 24 of 24 rows mapped by keyword.
+- **Rendered back** to our Word heading format: `evidence/act1/Acme Mutual NDA Review Playbook (imported, Spaarke format).docx`. The Markdown and the import report are beside it.
 
-**Step 4** is the owner's, in Word desktop: New playbook › import each format. Files on the team site under `Playbooks/NDA/`:
-- `Spaarke NDA – Mutual v1.0.docx` (headings);
-- `Spaarke NDA – Mutual v1.0 (table).docx` (four columns).
+**Step 4 (owner, Word desktop, 2026-11-05).** Word's `/` **Create playbook** behaves differently depending on the file:
 
-Also import Cowork's `mutual-nda-review-playbook.docx` from OneDrive `Documents/Cowork/Test/POC-Act1/`. For each, log the saved name, whether the compromise or fallback column survives, and what General guidelines contains.
+| Input | What Word did |
+|---|---|
+| `Spaarke NDA – Mutual v1.0 (table).docx` (our four columns, plus title, scope and version lines, plus `(nda.xxx)` ids) | Ran **create-playbook synthesis**: it treated our playbook as a single precedent. It wrote a new `Documents/Copilot/Created/mutual-nda-review-playbook.docx` with 24 topics, every one "Counsel decision — single-instance evidence", and no saved-playbook card. The compromise positions survived as content. It listed 8 "topics not addressed in the source", among them the public-domain exclusion, which our playbook does cover inside other topics. Copy: `evidence/act1/word-create-playbook-from-table.docx` |
+| The same file again, in the same chat | "The playbook has already been created and validated": no new run |
+| Our heading format `Spaarke NDA – Mutual v1.0.docx` | Not clear from the screenshots: both show the (table) file. **To confirm with the owner** |
+| Cowork's `mutual-nda-review-playbook.docx` | **Imported directly** as a saved-playbook card named **"Acme Mutual NDA Review Playbook"** (the document's Title), with Save and run review / Save playbook. So Cowork-to-Word works |
+| Review run with the imported playbook | All 32 topics "Not relevant". **To confirm:** which document was open; probably not an NDA (the playbook itself?) |
+
+Our files carry no property marker that differs. The visible differences are the preamble (scope and version lines, Heading 1 versus Title) and the ids in the Topic column. A/B variants are in OneDrive `Documents/Cowork/Test/POC-Act1/word-ab/`:
+- `A - title only.docx`: Title-style heading only, no ids;
+- `B - no ids.docx`: the original preamble, ids removed.
+
+If A imports directly and B doesn't, the preamble is the trigger.
