@@ -357,7 +357,7 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
 
 ### Hot-Path Declaration
 
-Copied from design.md §16, with `root-CLAUDE-md` changed to **YES** because FR-18 edits the CLAUDE.md §1.1 product-name table. design.md §16 still says NO; update it at the next design revision.
+Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.md §1.1 product-name table).
 
 ```xml
 <hot-path-declaration>

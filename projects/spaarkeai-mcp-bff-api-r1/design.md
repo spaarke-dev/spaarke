@@ -511,7 +511,7 @@ The unused `Microsoft.Agents.Hosting.AspNetCore` package stays (O-15; removal tr
   <spaarke-ai>NO — src/solutions/SpaarkeAi/** untouched; shared-lib decision components may gain props (lookup/shim seams), consumed unchanged by the Console</spaarke-ai>
   <ci-workflows>YES — widget build step feeding the BFF embedded resource; MCP conformance run; possibly a connector/plugin package build</ci-workflows>
   <skill-directives>YES — rewrite .claude/skills/mcp-tool-handler; update declarative-agent and widget-design skills to current schemas</skill-directives>
-  <root-CLAUDE-md>NO</root-CLAUDE-md>
+  <root-CLAUDE-md>YES — §1.1 product-name table gains the "Spaarke for Microsoft 365 Copilot" family and its "Spaarke" core member (spec FR-18)</root-CLAUDE-md>
 </hot-path-declaration>
 ```
 
