@@ -4,19 +4,19 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-06 ~02:10Z (checkpoint #97: PR #2577 open with a merge watcher; 046b additions applied; R2 dropped; the next deploy waits for 049).
+> **Last Updated**: 2026-11-06 ~02:25Z (#2577 merged f34993dc78; ebilling 164a is create-only; the next deploy waits for 049).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; peers take the owner's go for their own live writes in their sessions. |
-| **Active work** | **PR #2577**, POST /api/v1/documents: the caller needs Create on sprk_document, and the body's container must be the caller's BU container. Branch `task/uac-doc-create-auth`, head 4bf202544c, worktree C:/wtdc. Adversarial review clean after the fixes; both integration suites pass (199/8 skipped, 353/23 skipped); +1,509 B publish. A background job merges it when Router and Client lint are both green. No uncommitted files. |
+| **Active work** | None in code. **PR #2577 MERGED** as `f34993dc78` (POST /api/v1/documents: the caller needs Create on sprk_document, in the caller's BU container); worktree C:/wtdc removed; fm was told and adds the "Summarize Files (unfiled document)" matrix row in 046b. No uncommitted files. |
 | **Dev state** | BFF = **0f53e053bf** since 2026-11-05T21:39:06Z (gate PASS; record `notes/deploy-gate-2026-11-05-0f53e053bf.md`; gate script `$TEMP/uacmerge/uacg/gate0f5.sh`). Rollback snapshot `deploy/rollback/wwwroot-20261105T213757Z` = 909754869f. Dev SPA = b083d62183. 046b role additions are live (below). The root default team "Spaarke" holds Console User + Basic User only. |
-| **Next action** | 1. When #2577 merges: Remove-WorktreeSafe C:/wtdc; tell fm the merge SHA (whoever merges second, #2577 or 046b, adds the "Summarize Files (unfiled document)" matrix row: Core, prvCreatesprk_document, in FeatureRolePrivilegeGuardTests + doc §5.1). If the watcher reports FAILED, fix and re-push. 2. After 02:30Z: read the nightly SignalReevaluationJob counts on 0f53e053bf (suppression, SuppressionPartitionUndeterminedException, 5xx, exceptions) and send them to ontology. Expect the #2578 WhoAmI 403 every 5 min (pre-existing). 3. fm 046b `-Remove` for R1 only when fm sends the head SHA (do NOT run 8b45f8dfd0). 4. Review fm 049b when the head SHA arrives (~3–4 h from 01:00Z). 5. Then ONE combined deploy (owner's go naming the SHA; every peer re-OKs the combined SHA, ontology included; avoid restarts 02:20–03:00Z). |
+| **Next action** | 1. (Done: #2577 merged.) 2. After 02:30Z: read the nightly SignalReevaluationJob counts on 0f53e053bf (suppression, SuppressionPartitionUndeterminedException, 5xx, exceptions) and send them to ontology. Expect the #2578 WhoAmI 403 every 5 min (pre-existing). 3. fm 046b `-Remove` for R1 only when fm sends the head SHA (do NOT run 8b45f8dfd0). 4. Review fm 049b when the head SHA arrives (~3–4 h from 01:00Z). 5. Then ONE combined deploy (owner's go naming the SHA; every peer re-OKs the combined SHA, ontology included; avoid restarts 02:20–03:00Z). |
 
 ## The next dev deploy (owner: wait for 049)
-- Contents: master `0f6618094b` (#2573 fm 043) + 049 + #2577 if merged. Code pages: LegalWorkspace, SpaarkeAi, CreateProjectWizard, AI.Widgets.
+- Contents: master `0f6618094b` (#2573 fm 043) + #2577 (`f34993dc78`) + 049. Code pages: LegalWorkspace, SpaarkeAi, CreateProjectWizard, AI.Widgets.
 - Gate: gate0f5.sh set, plus:
   - fm 043: analysis create 0 5xx; push 0 5xx with the 409 rate unchanged on non-analysis targets; child-records create 0 5xx;
   - ontology: table_unsupported = baseline 0; writer codes 0; SignalWriter/DecisionRecordWriter refusals 0; Undetermined 0; census unchanged (9).
@@ -38,6 +38,7 @@
   - 095d-2: partners stay withheld while the re-run is pending; a failed job keeps the hold; placement in `Services/Ai/Jobs` if AI-coupled;
   - 095d-2a option A conditions: names/quotes only in field-secured `sprk_findingsjson`; never on external routes; not indexed or logged; the push gap on that column closed;
   - EB-D-188: ledger entry; G5 on the invoice; In Review + firm only; no external reach; the DR names the caller.
+  - **164a (sprk_billingevent): generic CREATE refused only** (the full writer-only rule would break D-96's detach/move/re-attach, which uses generic update). Conditions sent: a separate create-only flag (NOT `CreatedOnlyByItsWriter`, which also drives 048's update/delete refusals) plus one derived property read by every create site; the PR lists every reader of the flag as create or update/delete; tests: create refusals write nothing; must-not-fire on D-96 re-attach and the typed writers; signal/DR/budgetrevision refusals unchanged; delete unchanged and stated; guard text at AccessTableReaderScanTests:73 updated. Gate effect: ontology's `table_unsupported` baseline count must be filtered by table after 164a deploys (tell ontology at that deploy).
   - After the PR: P2 migration (their session), then my flip of `Ebilling__StoredFileReconcileEnabled` (owner go HERE).
 - **ontology** (`-38`): Worklist 200 from organic traffic DONE (01:31:37Z). Still owed: the nightly counts from 2026-11-06 02:30Z.
 
