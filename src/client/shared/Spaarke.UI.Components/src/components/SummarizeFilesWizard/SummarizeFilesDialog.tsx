@@ -553,7 +553,10 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
                 const provisionResult = await provisionSecureProject(
                   { projectId: result.projectId, projectRef: result.projectName ?? '' },
                   authenticatedFetch,
-                  bffBaseUrl
+                  bffBaseUrl,
+                  undefined,
+                  // Task 049 fix round 2: after a project created secure from creation, only what is left is done.
+                  { securedAtCreate: result.securedAtCreate === true }
                 );
                 if (!provisionResult.success) {
                   // Since task 076 a secure project without its own container REFUSES uploads (it never

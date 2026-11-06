@@ -800,3 +800,64 @@ Numbering note (2026-11-04): the "task 043" planned on 2026-11-02 for the `sprk_
 ## 2026-11-04 — The generic update tools do not change Signal, Decision Record or Budget Revision rows (owner; D-204 extended)
 
 **Decision (owner, this session):** chat's update-record tool, the playbook Update Record node and (subject to ontology's answer) playbook output mapping refuse to change `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision`. These rows are changed only by their own processes (the Signal lifecycle and evaluation, the decision commit, the budget revision executor), which are unchanged. Requested by ontology; UAC-r2 classifies it as an integrity rule. Read-only census on dev: none of the 93 configured playbook nodes targets these tables. Task 048.
+
+## 2026-11-05 — Chat delete honours D-204 (owner)
+
+**Decision (owner, this session):** the general delete path (chat `dataverse.delete_record`, and any other generic delete of a caller- or config-chosen table) refuses `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision`, reading the same `CreatedOnlyByItsWriter` flag. Admin privileges in the model-driven app are unchanged; person-role Delete privileges are task 046's question. Ontology and UAC-r2 agree. Added to task 048.
+
+## 2026-11-05 — NFR-02 exceeded on the server create path: speed up the server (owner)
+
+**Finding:** task 021's live timing (notes/task-021-live.md): the Create Matter create p95 rose by +2634 ms (budget +500 ms). Server medians: CallerChecks 983 ms (sequential AppendTo per bound record), PostCreate 1331 ms (the I-12 L1 assigned-access grant and the membership event inside the request), TableRules 302, Owner 261, FieldMapping 176, Create 136.
+
+**Decision (owner, this session):** speed up the server rather than raise the budget: run the per-record caller checks concurrently, and move the assigned-access grant (and membership event) out of the request so it completes within seconds after the record is returned. UAC-r2 reviews the grant timing. Then create the Project to Matter profile on dev (owner approved 2026-11-05) and re-measure. The 021 wizard deploy waits for that. Task 049.
+
+## 2026-11-05 — Role rulings on task 046's gaps (owner, given in UAC-r2's session)
+
+| Gap | Ruling |
+|---|---|
+| G1 Report Card | Spaarke Core User: Create, Append and AppendTo on `sprk_reportcard` at Deep (AppendTo also files a KPI assessment under a report card) |
+| G2 Event type | Spaarke Office Add In User: AppendTo on `sprk_eventtype_ref` Deep → Global |
+| G3 Office save to a contact (Basic User) | Not applied; Spaarke Basic User is unchanged. Office Add In User carries it (G4) |
+| G4 Office quick create with an assignee | Spaarke Office Add In User: AppendTo on `contact` Basic → Deep |
+| G5 Procedure override | Spaarke Billing Administrator: Read on `sprk_procedure` at Deep (already on dev; the file aligns) |
+| G6 Office version save | Spaarke **Office Add In User**: Write on `sprk_document` at Deep |
+| G7 / G8 Event regarding an account / a budget | Spaarke Office Add In User: AppendTo on `account` and on `sprk_budget` at Deep |
+| Office To Do; the Console Do lane | Stay Core-only |
+| New Billing Event (no role creates it) | Not decided here; passed to ebilling as a ribbon question |
+
+**Role model (owner):** add-on roles are **standalone**: an add-on may be held without a base role, so each add-on must meet its own features alone. Task 046b extends the matrix and guard to check each add-on alone, and sends the resulting gap list to UAC-r2 for one owner decision before any of it is applied.
+
+**Writer-only tables at role level:** no person role holds Create, Write or Delete on `sprk_signal`, `sprk_decisionrecord` or `sprk_budgetrevision`, except Spaarke Ontology Administrator, the designated cleanup role (ontology D-160). Task 046b's guard pins that rule.
+
+**How it is applied:** task 046b builds the role-file changes and an apply script (`-WhatIf`, `-Apply`, `-Verify`; edits the root role through the Web API and reads back every business-unit copy). UAC-r2 reviews it and runs `-Apply` on dev in its session under the owner's go.
+
+## 2026-11-05 — Standalone add-on rulings, two role removals, and secure-from-creation wizard projects (owner, given in UAC-r2's session; UAC-r2 decisions.md 51793949a0)
+
+- **Not standalone, by ruling:** Office Add In User and AI Analysis User are not standalone; neither is meant to be held alone, so no gap is opened for either alone (G9 dropped). Console User needs Core User. The guard and §5.1 record each as a ruled exception with that reason.
+- **Two removals (task 046b):** Ontology Administrator loses Create on `sprk_budgetrevision` and keeps Write and Delete. Basic User loses AppendTo on `sprk_reportcard`, provided no §5.1 feature needs it on Basic User. The apply script gets an explicit removal step with the same fail-closed reads and read-back of every business-unit copy. UAC-r2 applies it on dev.
+- **Secure from creation (task 049):** a project the wizard creates as secure is secure from creation. The wizard's create declares the intent in one optional field, validated on the server. RecordCreationService handles it like an isolated create, and provisioning does only what is left.
+- **049 backstop:** the record-busy answer on `/no-access/enforce` and `/assigned-access/sync` stays a 500 ProblemDetails with a message and trace id. The restricted-root and ledger-root scans take the ordered read and the recent-change window, like the first scan. Removals by the reconciliation job stay report-only until UAC-r2's gate G-8 (#2574).
+
+## 2026-11-06 — Removal R2 is not applied (under the 2026-11-05 ruling's own condition)
+
+Basic User keeps AppendTo on `sprk_reportcard`. The ruling removed it only if no §5.1 feature needed it on Basic User. Communication send, reply and re-file ask that privilege as the caller when a report card is a regarding record (`CommunicationRecordAuthorizationFilter`), so the condition fails. Task 046b adds matrix rows for those routes. Removal R1 (Ontology Administrator loses Create on `sprk_budgetrevision`) proceeds. Recorded by fm and UAC-r2; the owner was informed through UAC-r2.
+
+## 2026-11-06 — Communication send, reply and re-file need Core User (owner, in fm's session)
+
+Basic User is not raised for communication send, reply or re-file (task 046b gaps G11 and G12). These features need Core User, like the other add-on rulings of 2026-11-05. A caller who holds Basic User only is refused the way each route already refuses: a 403 ProblemDetails, or the uniform 404 where the route does not reveal the target (re-file). The gaps stay in the guard's baseline, marked "owner ruled: not granted", so any change to them is a deliberate one. Removal R1 was applied on dev on 2026-11-06 (UAC-r2, from `e6c0c94fa3`).
+
+## 2026-11-06 — Basic User is read-only on Spaarke tables (owner, in fm's session)
+
+On every Spaarke table (`sprk_*`), Spaarke Basic User holds Read only. Creating, updating, deleting, filing, assigning or sharing Spaarke records needs Core User. Platform privileges that Dataverse needs for any user are not affected. Task 046c applies the rule: the role file, a removal through the reviewed `-Remove` step (run by UAC-r2 under the owner's go), and a guard.
+
+## 2026-11-06 — Core User reads communication threads at Deep (owner, in fm's session)
+
+Sending into a communication thread asks Read on `sprk_communicationthread` as the caller, and that table is user-owned. Core User gets that Read at Deep, so a Core user can reply into threads across their business-unit tree, like Core User's other reads (task 046b gap G13). For Basic User the gap stays "owner ruled: not granted" under the read-only ruling. UAC-r2 applies it through the reviewed add step.
+
+## 2026-11-06 — G13 grant withdrawn (supersedes "Core User reads communication threads at Deep")
+
+The ruling above rested on a wrong premise. Core User is not raised. Direct threads are private by ownership and explicit shares, so the depth of Read on `sprk_communicationthread` is part of their privacy rule and stays Basic. Record threads are owned by the owner of the record they are filed to, normally a team, and a member reads them at Basic. Task 046b sets the send/reply row to match. G13 stays open only if a record thread can remain owned by its creator. The owner was told in fm's session.
+
+## 2026-11-06 — G13 is not a gap (closes "G13 grant withdrawn")
+
+The send/reply thread read needs Basic. Record threads are owned by their record's team at creation (`ThreadResolver`), and a member reads them at Basic. Threads anchored to a party, and Direct threads, are read through ownership and shares, by the privacy rule. Core User and Basic User both hold Basic, so no role changes. Task 046b, `5d079d1508`.

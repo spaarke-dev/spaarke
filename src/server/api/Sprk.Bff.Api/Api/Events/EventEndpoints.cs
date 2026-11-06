@@ -806,7 +806,12 @@ public static class EventEndpoints
     /// the caller's own Read on it is probed before it is read. <c>null</c> (no mapping, logged) when the probe is not
     /// registered: a mapping that cannot be made as the caller is never made another way, and never refuses the create.
     /// </summary>
-    internal static RecordCreationMapping? CallerMappingOf(HttpContext httpContext, ILogger logger)
+    /// <param name="httpContext">The request.</param>
+    /// <param name="logger">The route's logger.</param>
+    /// <param name="documentShown">Task 043: the route's answer to the external document narrowing for a document source
+    /// (<see cref="RecordCreationMapping.ForCaller"/>); the event route passes none.</param>
+    internal static RecordCreationMapping? CallerMappingOf(
+        HttpContext httpContext, ILogger logger, Func<Guid, CancellationToken, Task<bool>>? documentShown = null)
     {
         var probe = httpContext.RequestServices?.GetService<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
         if (probe is null)
@@ -815,7 +820,8 @@ public static class EventEndpoints
             return null;
         }
 
-        return RecordCreationMapping.ForCaller(probe, Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext));
+        return RecordCreationMapping.ForCaller(
+            probe, Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext), documentShown: documentShown);
     }
 
     /// <summary>The route's existing generic failure: a 500 that says nothing about why.</summary>

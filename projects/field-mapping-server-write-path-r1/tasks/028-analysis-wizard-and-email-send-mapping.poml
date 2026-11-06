@@ -121,6 +121,8 @@
     <criterion testable="true">Deployed to dev via code-page-deploy; live check recorded in the task notes (mapped fields present on first load, user values kept, owner = owning team per FR-09); rollback bundle noted.</criterion>
     <criterion testable="true">Widget jest and host build pass; no existing test outside the Analysis wizard and send path changes.</criterion>
     <criterion testable="true">(Added 2026-11-02, FR-40 / task 041.) createXrmEmailComposeHandlers.ts sends no sprk_searchindexname and no sprk_AI_Search_Index bind on the attachment's sprk_document create (grep), and no longer calls resolveUserBuDefaults unless another value on that path still needs it (reason in the notes); a jest test on the handler's create payload proves it; the Spaarke.UI.Components build and tests pass.</criterion>
+    <criterion testable="true">(Added 2026-11-05, task 043 review.) The Analysis wizard reads the optional `warnings` array of the /api/ai/analysis/create 201 body (analysisService.ts) and shows it to the user (e.g. "no fields were copied from the document"); a jest test with a body carrying one warning proves it is shown, and a body with no warnings member shows nothing.</criterion>
+    <criterion testable="true">(Added 2026-11-05, task 043 review.) The wizard keeps creating the analysis through /api/ai/analysis/create. POST /child-records/sprk_analysis passes no document decision to the mapping, so a Document to Analysis profile maps nothing there; moving the wizard onto that route needs the route to pass the document narrowing decision first (notes/task-043-notes.md, Known limits).</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-16, FR-17. PR #1501 overlaps the widget; PR #2110 overlaps CommunicationService.cs.</notes>

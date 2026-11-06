@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using Sprk.Bff.Api.Services.ExternalAccess;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Services.RecordCreation;
 
@@ -187,6 +188,7 @@ internal sealed partial class RecordCreationService
 
         ValidateReferenceLookupColumns(table, rule, request);
         ValidateRouteAuthorizedLookups(table, request, principal);
+        ValidateSecureFromCreation(table, request, principal);
         var defaults = PostMappingDefaultValues(table, rule, request);
 
         Decision decision;
@@ -293,7 +295,14 @@ internal sealed partial class RecordCreationService
         /// <summary>The person an isolated root was created for (the plan's creator), when the plan isolated it.</summary>
         public Guid? IsolatedFor { get; init; }
 
+        /// <summary>Task 049 fix round 2: the caller asked for the record to be secure (the words of step 12's outcomes).</summary>
+        public bool SecureFromCreation { get; init; }
+
         public string? GrantorOid { get; init; }
+
+        /// <summary>The maker's <c>systemuserid</c> (the caller's, or the system create's requester), when known. Step 12 asks
+        /// whether the root's "for" person is this person's linked contact (task 049 fix round 1).</summary>
+        public Guid? MakerSystemUserId { get; init; }
 
         /// <summary>Step 3's and step 5's warnings about the mapped values (task 014): what was not mapped, and why.</summary>
         public IReadOnlyList<RecordCreationWarning> MappingWarnings { get; init; } = [];
@@ -634,10 +643,16 @@ internal sealed partial class RecordCreationService
         }
         else
         {
+            // Task 049 (NFR-02 Part C): a mapped row's step 5 checks the caller's own values, then the merged row (and on a
+            // failure each value, then the row as written): every pass re-read the same table metadata. Within this step each
+            // such read is asked once; access answers are never kept (CallerMetadataReadMemo). Scoped to step 5 only: the
+            // other steps' reads, and the pre-write rules, keep the caller's own client.
+            var checking = new CallerMetadataReadMemo(user);
+
             // The K-2 guard (a server-set FILING lookup) ran before step 3. Task 031 fix round 1 (F1): a route-authorised
             // lookup is asked Read as the caller here, and only its AppendTo is skipped below (appendToSkip).
             var routeAuthorized = await CheckRouteAuthorizedLookupsAsync(
-                user, callerSystemUserId!.Value, table, callerItem, item, request, ct).ConfigureAwait(false);
+                checking, callerSystemUserId!.Value, table, callerItem, item, request, ct).ConfigureAwait(false);
             if (routeAuthorized.Refusal is { } routeRefusal)
                 return Decision.Refuse(CallerCheckRefused(routeRefusal, noun));
             var appendToSkip = routeAuthorized.SkipAppendTo;
@@ -645,7 +660,7 @@ internal sealed partial class RecordCreationService
             if (mappedValues.Count == 0)
             {
                 var check = await CallerWriteAuthorization.CheckCallerMayCreateAsync(
-                    user, callerSystemUserId!.Value, table, item, appendToSkip, ct).ConfigureAwait(false);
+                    checking, callerSystemUserId!.Value, table, item, appendToSkip, ct).ConfigureAwait(false);
                 if (!check.Succeeded)
                     return Decision.Refuse(CallerCheckRefused(check, noun));
 
@@ -655,7 +670,7 @@ internal sealed partial class RecordCreationService
             else
             {
                 var checkedMerge = await CheckMergedPayloadAsync(
-                    table, user, callerSystemUserId!.Value, callerItem, item, mappedValues, appendToSkip, noun,
+                    table, checking, callerSystemUserId!.Value, callerItem, item, mappedValues, appendToSkip, noun,
                     mappingWarnings, ct, defaultColumns).ConfigureAwait(false);
                 if (checkedMerge.Refusal is { } mergedRefusal)
                     return Decision.Refuse(mergedRefusal);
@@ -684,6 +699,7 @@ internal sealed partial class RecordCreationService
         trace.Begin(RecordCreationStep.SecureRootPlan);
         var creatorPerson = callerSystemUserId ?? Guid.Empty;
         Guid? isolatedTeam = null;
+        (RecordCreationRefusal? Refusal, Dictionary<string, object>? Plan)? earlyStampPlan = null;
         if (SecureRootInheritance.Inherits(table))
         {
             // A work assignment or project filed under a record may be filed under a SECURE one: then it is created into
@@ -726,8 +742,21 @@ internal sealed partial class RecordCreationService
             if (SecureRootServerColumnRefusal(table, item) is { } serverColumn)
                 return Decision.Refuse(PlanRefused(serverColumn, noun));
 
+            // Task 049 fix round 2 (UAC-r2 D1): a create the caller asks to be secure first passes the delegation rule
+            // provision-project asks (Write and the table's Share privilege), on the record as an ordinary create would make it.
+            if (request.SecureFromCreation)
+            {
+                var gate = await SecureFromCreationGateAsync(table, rule, item, user!, creatorPerson, ownerContextObjectId,
+                    requestedBy, noun, trace.CorrelationId, ct).ConfigureAwait(false);
+                if (gate.Refusal is { } gateRefusal)
+                    return Decision.Refuse(gateRefusal);
+                earlyStampPlan = gate.Planned;
+            }
+
             var plan = await _rootFiling.PlanCreateAsync(table, OwnedChildWrite.WritesOf(item), creatorPerson, ct,
-                user is null ? null : CallerMayFileUnder(user, creatorPerson, item, request.ServerSetLookupColumns)).ConfigureAwait(false);
+                    user is null ? null : CallerMayFileUnder(user, creatorPerson, item, request.ServerSetLookupColumns),
+                    secureRequested: request.SecureFromCreation)
+                .ConfigureAwait(false);
             if (plan.Refusal is { } planRefusal)
                 return Decision.Refuse(PlanRefused(planRefusal, noun));
 
@@ -735,7 +764,9 @@ internal sealed partial class RecordCreationService
                 isolatedTeam = secureTeam;
 
             trace.Record(RecordCreationStep.SecureRootPlan, RecordCreationStepState.Ran,
-                isolatedTeam is null ? "ordinary" : "into isolation (the named Secure Record Owners team)");
+                isolatedTeam is null ? "ordinary"
+                : request.SecureFromCreation ? "into isolation (the named Secure Record Owners team), as the caller asked"
+                : "into isolation (the named Secure Record Owners team)");
         }
         else
         {
@@ -753,7 +784,7 @@ internal sealed partial class RecordCreationService
         // Its trace step is step 10's (StampAndInheritance), begun here: a refusal is recorded under it, with the same codes and
         // words as before; a derivation that succeeds is recorded once, at step 10, which binds it.
         trace.Begin(RecordCreationStep.StampAndInheritance);
-        var planned = await PlanStampBeforeOwnerAsync(table, item, noun, ct).ConfigureAwait(false);
+        var planned = earlyStampPlan ?? await PlanStampBeforeOwnerAsync(table, item, noun, ct).ConfigureAwait(false);
         if (planned.Refusal is { } stampPlanRefusal)
             return Decision.Refuse(stampPlanRefusal);
 
@@ -811,7 +842,9 @@ internal sealed partial class RecordCreationService
             Item = item,
             OwningTeamId = owningTeam,
             IsolatedFor = isolatedTeam is null ? null : creatorPerson,
+            SecureFromCreation = request.SecureFromCreation,
             GrantorOid = grantorOid,
+            MakerSystemUserId = callerSystemUserId,
             MappingWarnings = referenceWarnings.Count == 0 ? mappingWarnings : [.. referenceWarnings, .. mappingWarnings],
             SearchIndexDrops = indexDrops,
         };
@@ -1754,10 +1787,22 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
-    /// Step 12, in the existing paths' order: the number read-back (autonumber tables), the isolated root's completion, the
-    /// "Assigned *" grants of a root, the I-1 re-stamp and I-16 (step 10), the secure child's sharee mirror, the membership
-    /// event. Never throws; returns a refusal only when an isolated root had to be removed again.
+    /// The refusal text of a secure-from-creation create whose row had to be removed again (fix round 3): one neutral
+    /// sentence; the reason code travels in the refusal's code, not in the words.
     /// </summary>
+    internal static string SecureFromCreationNotSecuredDetail(string noun) =>
+        $"The {noun} could not be secured, so it was not kept. Please try again or ask an administrator.";
+
+    /// <summary>
+    /// Step 12, in the existing paths' order: the number read-back (autonumber tables), the isolated root's completion, the
+    /// "Assigned *" grants of a root (<see cref="GrantAssignedAccessAsync"/>), the I-1 re-stamp and I-16 (step 10), the secure
+    /// child's sharee mirror, the membership event. Never throws; returns a refusal only when an isolated root had to be
+    /// removed again.
+    /// </summary>
+    /// <remarks>Task 049 fix round 1 (UAC-r2 ruling, item 4): for an isolated root, the create-time pass waits for secure
+    /// provisioning, so eligibility is decided on the final record. It runs only once <c>CompleteIsolatedCreateAsync</c>
+    /// reports the securing complete; otherwise nothing is granted at create, and the assigned-access reconciliation job
+    /// grants it later.</remarks>
     private async Task<RecordCreationRefusal?> AfterCreateAsync(
         string table, Guid id, RecordTableRule rule, Decision decision, string noun, string correlationId, List<string> warnings,
         Action<SecureRootInheritResult> isolatedCompleted)
@@ -1767,7 +1812,8 @@ internal sealed partial class RecordCreationService
 
         if (decision.IsolatedFor is { } isolatedFor)
         {
-            var secured = await _rootFiling.CompleteIsolatedCreateAsync(table, id, isolatedFor, correlationId).ConfigureAwait(false);
+            var secured = await _rootFiling.CompleteIsolatedCreateAsync(
+                table, id, isolatedFor, correlationId, decision.SecureFromCreation).ConfigureAwait(false);
             isolatedCompleted(secured);
             if (secured.RowRemoved)
             {
@@ -1775,20 +1821,24 @@ internal sealed partial class RecordCreationService
                     table, id, secured.ReasonCode);
                 return new RecordCreationRefusal(RecordCreationRefusalKind.Undecided,
                     secured.ReasonCode ?? SecureRootInheritance.ReasonUnexpectedResult,
-                    $"The {noun} is filed under a secure record, so it is created secure and shared to you, and that share " +
-                    $"could not be made, so the new {noun} was removed again. Nothing was created. " +
-                    (secured.CompletesAutomatically
-                        ? "Try again in a few minutes."
-                        : $"Securing it was refused ({secured.ReasonCode}), and trying again will not change that: an " +
-                          "administrator needs to review your access to the secure record it would be filed under."));
+                    decision.SecureFromCreation
+                        ? SecureFromCreationNotSecuredDetail(noun)
+                        : $"The {noun} is filed under a secure record, so it is created secure and shared to you, and that share " +
+                          $"could not be made, so the new {noun} was removed again. Nothing was created. " +
+                          (secured.CompletesAutomatically
+                              ? "Try again in a few minutes."
+                              : $"Securing it was refused ({secured.ReasonCode}), and trying again will not change that: an " +
+                                "administrator needs to review your access to the secure record it would be filed under."));
             }
 
             if (secured.RowStranded)
             {
+                // A secure-from-creation project is not visited by the secure-root inheritance job unless it is filed under a
+                // secure parent, so no retry is promised for it: an administrator must act.
                 warnings.Add(
                     $"The {noun} was created as a secure record, but it could not be shared to you and could not be removed " +
                     $"again ({secured.ReasonCode}); " +
-                    (secured.CompletesAutomatically
+                    (secured.CompletesAutomatically && !decision.SecureFromCreation
                         ? "it is shared to you automatically once that step succeeds (it is retried every few minutes)."
                         : "it will not be shared to you automatically — only an administrator can open it, and an administrator " +
                           "needs to review and remove it."));
@@ -1797,15 +1847,30 @@ internal sealed partial class RecordCreationService
             {
                 warnings.Add(
                     $"The {noun} was created as a secure record shared to you, but securing it could not be finished yet " +
-                    $"({secured.ReasonCode}); it is completed automatically within a few minutes.");
+                    $"({secured.ReasonCode}); " +
+                    (decision.SecureFromCreation
+                        ? $"it is not finished automatically; an administrator can finish securing the {noun}."
+                        : "it is completed automatically within a few minutes."));
+            }
+
+            if (rule.Kind == RecordTableKind.Root)
+            {
+                if (secured.IsComplete && !secured.RowStranded)
+                {
+                    await GrantAssignedAccessAsync(table, id, rule, decision, correlationId).ConfigureAwait(false);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "[ASSIGNED-ACCESS] The create-time pass of {Table} {Id} waits for secure provisioning, so eligibility is " +
+                        "decided on the final record; the assigned-access reconciliation job runs it (correlationId={CorrelationId}).",
+                        table, id, correlationId);
+                }
             }
         }
-
-        if (rule.Kind == RecordTableKind.Root)
+        else if (rule.Kind == RecordTableKind.Root)
         {
-            // I-12 L1: the "Assigned *" contacts' grant or share now. Never throws; a fault is the job's.
-            await AssignedAccessMaterializer.RunAfterWriteAsync(
-                _scopes, table, id, writtenColumns: null, decision.GrantorOid, _logger, CancellationToken.None).ConfigureAwait(false);
+            await GrantAssignedAccessAsync(table, id, rule, decision, correlationId).ConfigureAwait(false);
         }
 
         await AfterCreateStepAsync("core-ancestor stamp (I-1)", table, id, async () =>
@@ -1844,6 +1909,103 @@ internal sealed partial class RecordCreationService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The I-12 L1 "Assigned *" pass of a created root. Inline when the root's "for" person is its maker's own linked contact
+    /// (task 049 fix round 1, UAC-r2 ruling: the maker's own Assigned-To share stays immediate); otherwise queued
+    /// (<see cref="QueueAssignedAccessGrantAsync"/>), and inline again when nothing could be queued (as before task 049).
+    /// Never throws; a fault is the reconciliation job's.
+    /// </summary>
+    private async Task GrantAssignedAccessAsync(string table, Guid id, RecordTableRule rule, Decision decision, string correlationId)
+    {
+        if (await ForPersonIsTheMakerAsync(table, id, rule, decision).ConfigureAwait(false)
+            || !await QueueAssignedAccessGrantAsync(table, id, decision.GrantorOid, correlationId).ConfigureAwait(false))
+        {
+            await AssignedAccessMaterializer.RunAfterWriteAsync(
+                _scopes, table, id, writtenColumns: null, decision.GrantorOid, _logger, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Task 049 fix round 1 (UAC-r2 ruling): whether the created root's "for" person (<see cref="RecordTableRule.ForPerson"/>,
+    /// Assigned To) is its maker's linked contact, as <see cref="IIdentityNormalizationService.ResolveAsync"/> answers it: the
+    /// resolver the chat and Office adapters fill that column from (cached). Only a root that sets the column asks. Fails
+    /// closed: no maker, no resolver in this host, or a lookup that faults, outlasts
+    /// <see cref="AssignedAccessCreateGrantJobHandler.EnqueueTimeout"/> or answers no contact is <c>false</c>, so the pass is
+    /// queued and never granted inline on a guess.
+    /// </summary>
+    private async Task<bool> ForPersonIsTheMakerAsync(string table, Guid id, RecordTableRule rule, Decision decision)
+    {
+        if (rule.ForPerson is not { } forPerson
+            || !string.Equals(forPerson.RelatedTable, "contact", StringComparison.OrdinalIgnoreCase)
+            || decision.MakerSystemUserId is not { } maker || maker == Guid.Empty)
+        {
+            return false;
+        }
+
+        var assignee = decision.Item?.Lookups
+            .FirstOrDefault(l => string.Equals(l.Column, forPerson.Column, StringComparison.OrdinalIgnoreCase))?.RecordId;
+        if (assignee is not { } forPersonId || forPersonId == Guid.Empty)
+            return false;
+
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            if (scope.ServiceProvider.GetService<IIdentityNormalizationService>() is not { } identity)
+                return false;
+
+            using var timeout = new CancellationTokenSource(AssignedAccessCreateGrantJobHandler.EnqueueTimeout);
+            var person = await identity.ResolveAsync(maker, timeout.Token).ConfigureAwait(false);
+            return person.ContactId is { } contact && contact == forPersonId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] The maker of {Table} {Id} could not be matched to its Assigned To ({ExceptionType}); the " +
+                "create-time pass is queued.", table, id, ex.GetType().Name);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Task 049 Part B (NFR-02; UAC-r2's conditions, notes/task-049-notes.md): queues the I-12 L1 "Assigned *" pass of a
+    /// created project, matter or work assignment (<see cref="AssignedAccessCreateGrantJobHandler"/>), so the create returns
+    /// without it. Create only: every update path keeps its inline pass. The message names the root, the grantor and the
+    /// cache tenants, never the assignees. Returns <c>false</c> when nothing was queued (another table, no queue in this
+    /// host, a failed or slow send), and the caller then runs the pass inline, as before.
+    /// </summary>
+    private async Task<bool> QueueAssignedAccessGrantAsync(string table, Guid id, string? grantorOid, string correlationId)
+    {
+        if (!AssignedAccessMaterializer.TryParseRootLogicalName(table, out var rootType))
+            return false;
+
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            if (scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>() is not { } jobs)
+                return false;
+
+            var tenant = scope.ServiceProvider.GetService<IConfiguration>() is { } configuration
+                ? ImpersonatedRootSetSource.DeploymentCacheTenant(configuration)
+                : null;
+            var job = AssignedAccessCreateGrantJobHandler.NewJob(
+                new AssignedAccessCreateGrantPayload(rootType, id, grantorOid, tenant is null ? [] : [tenant]), correlationId);
+
+            using var timeout = new CancellationTokenSource(AssignedAccessCreateGrantJobHandler.EnqueueTimeout);
+            await jobs.SubmitJobAsync(job, timeout.Token).ConfigureAwait(false);
+            _logger.LogInformation(
+                "[ASSIGNED-ACCESS] Queued the create-time grant of {Table} {Id} (job {JobId}, correlationId={CorrelationId}).",
+                table, id, job.JobId, correlationId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] The create-time grant of {Table} {Id} could not be queued ({ExceptionType}); it runs inline " +
+                "(correlationId={CorrelationId}).", table, id, ex.GetType().Name, correlationId);
+            return false;
+        }
     }
 
     /// <summary>One post-create step: a failure is logged and the create stands (step 12 never throws).</summary>
@@ -1892,6 +2054,9 @@ internal sealed partial class RecordCreationService
     private sealed class StepTrace(string table, string correlationId, ILogger logger)
     {
         private readonly List<RecordCreationStepRecord> _steps = [];
+
+        /// <summary>The request's correlation id (for the logs of a step's own helpers).</summary>
+        public string CorrelationId => correlationId;
 
         /// <summary>The step running now (for the fault log).</summary>
         public RecordCreationStep? Current { get; private set; }
@@ -2033,6 +2198,17 @@ internal sealed record RecordCreationRequest(string Table, RecordCreationPayload
     public AssignedAccessGrantor Grantor { get; init; } = AssignedAccessGrantor.Caller;
 
     /// <summary>
+    /// Task 049 fix round 2 (owner ruling 2026-11-05; UAC-r2's rulings D1 and D2): the caller asks for the record to be secure
+    /// (the Create Project wizard's Secure choice, <c>?secure=true</c> on the child-record route). A project the wizard creates
+    /// as secure is secure from creation: after the caller holds the rights the delegation rule asks on
+    /// <c>provision-project</c> (Write and the table's Share privilege on the record as an ordinary create would make it), it
+    /// is created INTO isolation like a row filed under a secure record, and completed the same way (step 12). Only a table
+    /// whose create can be isolated (<see cref="SecureRootInheritance.Inherits"/>: a project or a work assignment), and only a
+    /// caller's create; anything else is an argument error. <c>false</c> (the default): the create is exactly what it was.
+    /// </summary>
+    public bool SecureFromCreation { get; init; }
+
+    /// <summary>
     /// Task 019 review: search-index values (FR-38) the caller's adapter already removed from the payload BEFORE it mapped it
     /// (the chat create drops them first so a malformed index lookup cannot fail the mapping, review R7). They are logged at
     /// step 12 with the other drops (record id, applied index, origin <c>caller</c>, only when they differ from what was
@@ -2078,9 +2254,16 @@ internal sealed class RecordCreationMapping
     internal Guid? SourceId { get; }
 
     /// <summary>Mapping read as the caller: <paramref name="probe"/> asks their Read on the source under their token.</summary>
+    /// <param name="probe">The caller-rights probe.</param>
+    /// <param name="callerBearerToken">The caller's bearer token.</param>
+    /// <param name="sourceTable">The explicit source table, if the caller named one.</param>
+    /// <param name="sourceId">The explicit source id, if the caller named one.</param>
+    /// <param name="documentShown">Task 043: the route's answer to the external document narrowing for a <c>sprk_document</c>
+    /// source (<see cref="MappingSourceReader.DocumentShown"/>); none means a document source maps nothing.</param>
     internal static RecordCreationMapping ForCaller(
-        CallerRecordAccessProbe probe, string? callerBearerToken, string? sourceTable = null, Guid? sourceId = null) =>
-        new(MappingSourceReader.ForCaller(probe, callerBearerToken), sourceTable, sourceId);
+        CallerRecordAccessProbe probe, string? callerBearerToken, string? sourceTable = null, Guid? sourceId = null,
+        Func<Guid, CancellationToken, Task<bool>>? documentShown = null) =>
+        new(MappingSourceReader.ForCaller(probe, callerBearerToken, documentShown), sourceTable, sourceId);
 }
 
 /// <summary>

@@ -4,7 +4,7 @@
     <title>Security roles match what each feature asks of its caller: a feature permission matrix, proposed role changes for UAC-r2, and a role guard (owner 2026-11-04)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
     <gate>031 and 042c merged to master</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-relevant analysis across every create path plus a new ArchTest with a ratchet baseline (tags security, roles, testing).</rigor-reason>
     <model-tier>opus</model-tier>

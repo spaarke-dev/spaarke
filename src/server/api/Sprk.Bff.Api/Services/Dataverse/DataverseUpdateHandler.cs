@@ -110,6 +110,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                 $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).");
         }
 
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter, the list the general create refuses). A
+        // playbook's output mapping is refused whole for them, app-only or as the run's user, before any row is read or written.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(entityLogicalName) is { } writerOnly)
+        {
+            throw new RecordOwnerUnresolvedException(entityLogicalName, writerOnly.RefusalCode!, writerOnly.Reason!);
+        }
+
         // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
         // and an invoice re-file keeps its lines (D-96). Decided on the stored lookups overlaid with this write, before it.
         // #2257 (master merge): a person's write answers "not found" as "could not be read" (the guard reads as the app).

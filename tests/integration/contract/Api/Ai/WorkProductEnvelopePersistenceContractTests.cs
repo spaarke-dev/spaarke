@@ -190,6 +190,49 @@ public class WorkProductEnvelopePersistenceContractTests
             "refused straight after the registry mapping, before the host table is resolved");
     }
 
+    // ─── Task 048 (owner decision 2026-11-04, D-204 extended to updates): changed only by their writers ─────
+
+    [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    [InlineData("sprk_budgetrevision")]
+    public async Task PersistAsync_ARegistryRowTargetingATableOnlyItsWriterChanges_IsRefused_AndNothingIsWritten(string table)
+    {
+        var events = new List<string>();
+        var dataverse = new FakeDataverseUserClient(
+            events, registryTopic: "writer-summary", registryHostEntity: table, registryTargetField: "sprk_description");
+        var persister = new TopicRegistryWorkProductPersister(
+            dataverse, Mock.Of<ILogger<TopicRegistryWorkProductPersister>>());
+        var entry = new SessionOutput
+        {
+            Key = "wp-writer-1",
+            BindingId = BindingId.ToString("D"),
+            UcId = "UC-A-1",
+            Turn = 1,
+            Disposition = "work_product",
+            Payload = ParseJson("""{"tldr":"t"}"""),
+            CreatedAt = DateTimeOffset.UtcNow,
+        };
+        var binding = new Binding
+        {
+            BindingId = BindingId,
+            ConsumerType = "chat-summarize",
+            ConsumerCode = "writer-summary",
+            Ucid = "UC-A-1",
+            Disposition = BindingDisposition.WorkProduct,
+        };
+
+        var persist = () => persister.PersistAsync(entry, binding, new ChatHostContext(table, HostRecordId.ToString("D")));
+
+        (await persist.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain($"{table}.sprk_description")
+            .And.Contain(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterMessage(table));
+        events.Should().NotContain("patch", "nothing is written");
+        dataverse.PatchedPath.Should().BeNull();
+        dataverse.Gets.Should().NotContain(g => g.StartsWith($"EntityDefinitions(LogicalName='{table}')", StringComparison.Ordinal),
+            "refused straight after the registry mapping, before the host table is resolved");
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────────────────────────────
 
     private static string SchemaPath() => Path.Combine(

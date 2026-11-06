@@ -380,6 +380,33 @@ public class FieldMappingPushAuthorizationContractTests
             Times.Never);
     }
 
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 043 review round 2 (F1, iv; must-not-fire): only a DOCUMENT source is resolved by the
+    /// target's ownership primary order. A matter source whose target has two lookups to it is still the existing 409, with the
+    /// same reason code and wording, even where that order (sprk_analysis: sprk_regardingmatter is declared) would name one.
+    /// </summary>
+    [Fact]
+    public async Task Push_FromANonDocumentSource_WithTwoLookupsOnTheTarget_IsStillTheAmbiguous409()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(
+            targetEntity: "sprk_analysis", targetSet: "sprk_analysises", lookupsToSource: ["sprk_regardingmatter", "sprk_secondmatter"]);
+
+        var response = await host.SendAsync(Authenticated(PushBody(targetEntity: "sprk_analysis")));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        var problem = JsonNode.Parse(body)!;
+        problem["reasonCode"]!.GetValue<string>().Should().Be(FieldMappingEndpoints.ParentLookupAmbiguousReasonCode);
+        problem["detail"]!.GetValue<string>().Should().Be(
+            "'sprk_analysis' has 2 lookups to 'sprk_matter', so which one names the parent is ambiguous. Nothing was updated.");
+        host.ChildQueries.Should().BeEmpty("the route never guesses which lookup names the parent");
+        host.FieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     [Theory]
     [InlineData("sprk_event')/x?$filter=('")]
     [InlineData("sprk event")]
@@ -392,6 +419,31 @@ public class FieldMappingPushAuthorizationContractTests
         var response = await host.SendAsync(Authenticated(PushBody(targetEntity: targetEntity)));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "an entity name is interpolated into OData and metadata paths");
+        host.ProbedSources.Should().BeEmpty();
+        host.VerifyNothingReadOrWritten();
+        host.MetadataQueries.Should().BeEmpty();
+    }
+
+    // field-mapping-server-write-path-r1 task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision
+    // Record and a Budget Revision are changed only by their writers. A push aimed at one is refused on the request, with the one
+    // message of RecordTableRules.RefuseWriterOnlyTableUpdate, before the source is authorized or anything is read or written.
+
+    [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    [InlineData("sprk_budgetrevision")]
+    public async Task Push_ToATableOnlyItsWriterChanges_Is400_AndNothingIsAsked(string targetEntity)
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData();
+
+        var response = await host.SendAsync(Authenticated(PushBody(targetEntity: targetEntity)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var problem = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        problem["errors"]!["targetEntity"]![0]!.GetValue<string>()
+            .Should().Be(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterMessage(targetEntity));
         host.ProbedSources.Should().BeEmpty();
         host.VerifyNothingReadOrWritten();
         host.MetadataQueries.Should().BeEmpty();
@@ -617,6 +669,9 @@ public class FieldMappingPushAuthorizationContractTests
 
         public Exception? Fault { get; set; }
 
+        /// <summary>The one source record <see cref="Rights"/> applies to (task 043: a document source sets its own).</summary>
+        public Guid RightsOn { get; set; } = MatterId;
+
         public override Task<AccessRights> GetCallerRightsAsync(
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
@@ -626,7 +681,7 @@ public class FieldMappingPushAuthorizationContractTests
                 return Task.FromException<AccessRights>(Fault);
             }
 
-            return Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && recordId == MatterId ? Rights : AccessRights.None);
+            return Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && recordId == RightsOn ? Rights : AccessRights.None);
         }
 
         public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)
@@ -668,10 +723,12 @@ public class FieldMappingPushAuthorizationContractTests
             _dataverse = dataverse;
         }
 
-        public static async Task<PushHost> StartAsync(HttpMessageHandler? dataverse = null)
+        /// <param name="dataverse">A stand-in for Dataverse behind the REAL impersonated seam (#2253 fix round 3).</param>
+        /// <param name="configure">Task 043: registrations added last (e.g. the stated caller for the external document narrowing).</param>
+        public static async Task<PushHost> StartAsync(HttpMessageHandler? dataverse = null, Action<IServiceCollection>? configure = null)
         {
             var host = new PushHost(dataverse);
-            await host.InitializeAsync();
+            await host.InitializeAsync(configure);
             return host;
         }
 
@@ -841,7 +898,7 @@ public class FieldMappingPushAuthorizationContractTests
             SourceReads.Should().BeEmpty("no source read — as the caller or app-only — before the source is authorized");
         }
 
-        private async Task InitializeAsync()
+        private async Task InitializeAsync(Action<IServiceCollection>? configure)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
@@ -868,6 +925,7 @@ public class FieldMappingPushAuthorizationContractTests
             // Batch-4 integration (task 158): a push that files a work assignment or project under a secure record secures
             // it; no record in these tests is secure (a module boundary here).
             builder.Services.AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
+            configure?.Invoke(builder.Services);
 
             builder.WebHost.UseTestServer();
             _app = builder.Build();

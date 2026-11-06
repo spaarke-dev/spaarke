@@ -487,6 +487,64 @@ internal static partial class RecordTableRules
     }
 
     /// <summary>
+    /// The reason code when a generic BFF update path is asked to change a row of a table only its writer changes
+    /// (<see cref="RefuseWriterOnlyTableUpdate"/>). Nothing is written.
+    /// </summary>
+    internal const string ChangedOnlyByItsWriterReasonCode = "record_update.changed_only_by_its_writer";
+
+    /// <summary>
+    /// The ONE update-side check of <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> (field-mapping-server-write-path-r1 task
+    /// 048; owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are changed
+    /// only by their writers, so a generic update of one is refused whole, or <c>null</c> when the table's update may proceed.
+    /// It reads the same flag the create refusals read (<see cref="RecordCreationService"/>, the chat create tool), so create
+    /// and update refuse one list. The generic update paths ask it after their shape-only refusals and before any row is read
+    /// or written: the chat update tool (<c>DataverseUpdateRecordHandler</c>, validate and execute), the Update Record node and
+    /// the action seam (<c>UpdateRecordActionCore</c>), a playbook's output mapping (<c>DataverseUpdateHandler</c>), the
+    /// field-mapping push (its request check) and the work-product persister. Each maps the answer to its own refusal, with
+    /// <see cref="RecordOwnerResolution.Reason"/> as the message. Table only: it reads nothing, so it answers the same for any
+    /// record, payload, identity and write mode (update or upsert). The writers never reach these paths
+    /// (<c>WriterOnlyTablesWritersGuardTests</c>). The table is matched trimmed and in any case.
+    /// </summary>
+    /// <param name="table">The table the update names.</param>
+    internal static RecordOwnerResolution? RefuseWriterOnlyTableUpdate(string? table) =>
+        Find(table) is { CreatedOnlyByItsWriter: true } rule
+            ? RecordOwnerResolution.Refused(ChangedOnlyByItsWriterReasonCode, ChangedOnlyByItsWriterMessage(rule.Table))
+            : null;
+
+    /// <summary>The reason code when a generic BFF delete path is asked to remove a row of a table only its writer changes
+    /// (<see cref="RefuseWriterOnlyTableDelete"/>). Nothing is removed.</summary>
+    internal const string RemovedOnlyByItsWriterReasonCode = "record_delete.changed_only_by_its_writer";
+
+    /// <summary>
+    /// The delete-side check of <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> (field-mapping-server-write-path-r1 task 048
+    /// fix round 2; owner decision 2026-11-05, D-204 extended to the general delete path): a Signal, a Decision Record and a Budget
+    /// Revision are changed only by their writers, so a generic delete of one is refused whole, or <c>null</c> when the table's
+    /// delete may proceed. It reads the same flag the create and update refusals read, so the three paths refuse one list. Table
+    /// only: it reads nothing, so it answers the same for any record, identity and approval. The table is matched trimmed and in any
+    /// case. The only generic delete whose table a caller chooses is the chat delete tool (<c>DataverseDeleteRecordHandler</c>, validate
+    /// and execute); every other delete names a fixed table (<c>WriterOnlyTablesUpdateGuardTests</c> lists them).
+    /// </summary>
+    /// <param name="table">The table the delete names.</param>
+    internal static RecordOwnerResolution? RefuseWriterOnlyTableDelete(string? table) =>
+        Find(table) is { CreatedOnlyByItsWriter: true } rule
+            ? RecordOwnerResolution.Refused(RemovedOnlyByItsWriterReasonCode, ChangedOnlyByItsWriterDeleteMessage(rule.Table))
+            : null;
+
+    /// <summary>The plain refusal message for a delete of a <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> table (the chat
+    /// delete tool words the same refusal for the model: <c>DataverseDeleteRecordHandler.ChangedOnlyByItsWriterChatMessage</c>).</summary>
+    internal static string ChangedOnlyByItsWriterDeleteMessage(string table) =>
+        $"'{table}' records are changed only by Spaarke itself and can't be removed by this operation; nothing was removed. " +
+        $"({RemovedOnlyByItsWriterReasonCode})";
+
+    /// <summary>The refusal message for an update of a <see cref="RecordTableRule.CreatedOnlyByItsWriter"/> table on every path a
+    /// person reads it on (the Update Record node, a playbook's output mapping, the work-product persister, the field-mapping push,
+    /// the child-records update): a plain sentence. The chat update tool words the same refusal for the model
+    /// (<c>DataverseUpdateRecordHandler.ChangedOnlyByItsWriterChatMessage</c>), as the chat create tool does for a create.</summary>
+    internal static string ChangedOnlyByItsWriterMessage(string table) =>
+        $"'{table}' records are changed only by Spaarke itself and can't be changed by this update; nothing was written. " +
+        $"({ChangedOnlyByItsWriterReasonCode})";
+
+    /// <summary>
     /// Task 037 (FR-36): what <paramref name="rule"/>'s copied defaults (<see cref="ServerDefault.CopiedFrom"/>) come to on
     /// the create row <paramref name="item"/> — one entry per copied default whose column the row leaves UNSET (absent: no
     /// value, no bind and no clear; an explicit null is a value the caller chose and wins), with the lookup the row binds
@@ -1070,6 +1128,9 @@ internal sealed record RecordTableRule
     /// such a create at the start of its pipeline, before any read, mapping, check or write, for the caller and the system
     /// principal alike, exactly as it refuses a table it does not create (<see cref="RecordCreationRefusal.TableUnsupportedCode"/>).
     /// The entry stays registered for what the registry declares beyond the create (its mapping exclusion).
+    /// Task 048 (owner decision 2026-11-04, D-204 extended to updates): the same flag says the rows are CHANGED only by the
+    /// writer too; every generic update path refuses such a table through <see cref="RecordTableRules.RefuseWriterOnlyTableUpdate"/>,
+    /// so create and update read one list.
     /// </summary>
     public bool CreatedOnlyByItsWriter { get; init; }
 }
