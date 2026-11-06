@@ -50,7 +50,7 @@ Nothing for G3 or G9 and nothing from Part D went into a role file.
 | AI Analysis User | Analysis from a playbook, Analysis run, Analysis run (writing playbook) |
 | Console User | Decision commit and Decision actions, the Decide lane: Write on the subject is not asked of it alone for event, To Do and work assignment subjects (the Do lane's subjects, `SignalReadService.cs:229-234`; the Do lane stays Core-only) |
 | Billing Administrator | Billing: Procedure override (its row was already alone) |
-| AI Analysis Admin | Playbook administration (new row: Create and Share on `sprk_analysisplaybook`, asked of the caller, `PlaybookEndpoints.cs:27,107,120,176`, `PlaybookAuthorizationFilter.cs:55-75,166,172`) |
+| AI Analysis Admin | Playbook administration (rows: Create and Share on `sprk_analysisplaybook`, asked of the caller, `PlaybookEndpoints.cs:27,107,120,176`, `PlaybookAuthorizationFilter.cs:55-75,166,172`; Write for the edit routes and Read for a clone's source, added in fix round 2) |
 | Ontology Administrator | none in this matrix: its routes write as the user, so Dataverse asks each right itself (`OntologyAdminCallerBoundaryGuardTests`) |
 | Access Administrator | none in this matrix: membership writes, pinned by `ContactOrganizationMembershipWriterGuardTests` |
 | Reporting Access Admin, Author, Viewer | none in this matrix: the reporting routes admit a caller by the role itself (`ReportingAuthorizationFilter.cs`) |
@@ -97,18 +97,18 @@ Decisions for the owner with this list: whether the Console's Decide lane is mea
 
 ```
 Roles:
-  Spaarke Billing Administrator        root role in the root BU; 5 business-unit copies take its privileges
-  Spaarke Core User                    root role in the root BU; 5 business-unit copies take its privileges
-  Spaarke Office Add In User           root role in the root BU; 5 business-unit copies take its privileges
+  Spaarke Billing Administrator        root role in the root BU; every business-unit copy takes its privileges
+  Spaarke Core User                    root role in the root BU; every business-unit copy takes its privileges
+  Spaarke Office Add In User           root role in the root BU; every business-unit copy takes its privileges
 Changes     : 8
-  Spaarke Core User                    prvAppendsprk_ReportCard           None   -> Deep   (G1; 5 business-unit copies)
-  Spaarke Core User                    prvAppendTosprk_ReportCard         None   -> Deep   (G1; 5 business-unit copies)
-  Spaarke Core User                    prvCreatesprk_ReportCard           None   -> Deep   (G1; 5 business-unit copies)
-  Spaarke Office Add In User           prvAppendToAccount                 Basic  -> Deep   (G7; 5 business-unit copies)
-  Spaarke Office Add In User           prvAppendToContact                 Basic  -> Deep   (G4, G7; 5 business-unit copies)
-  Spaarke Office Add In User           prvAppendTosprk_Budget             None   -> Deep   (G8; 5 business-unit copies)
-  Spaarke Office Add In User           prvAppendTosprk_EventType_Ref      Deep   -> Global (G2; 5 business-unit copies)
-  Spaarke Office Add In User           prvWritesprk_Document              None   -> Deep   (G6; 5 business-unit copies)
+  Spaarke Core User                    prvAppendsprk_ReportCard           None   -> Deep   (G1; every business-unit copy)
+  Spaarke Core User                    prvAppendTosprk_ReportCard         None   -> Deep   (G1; every business-unit copy)
+  Spaarke Core User                    prvCreatesprk_ReportCard           None   -> Deep   (G1; every business-unit copy)
+  Spaarke Office Add In User           prvAppendToAccount                 Basic  -> Deep   (G7; every business-unit copy)
+  Spaarke Office Add In User           prvAppendToContact                 Basic  -> Deep   (G4, G7; every business-unit copy)
+  Spaarke Office Add In User           prvAppendTosprk_Budget             None   -> Deep   (G8; every business-unit copy)
+  Spaarke Office Add In User           prvAppendTosprk_EventType_Ref      Deep   -> Global (G2; every business-unit copy)
+  Spaarke Office Add In User           prvWritesprk_Document              None   -> Deep   (G6; every business-unit copy)
 Live depth above the declared one (never lowered here): none
 Business-unit copies that differ from their root role on a declared privilege: none
 DRY RUN: no writes. Re-run with -Apply to make the 8 change(s) above.   (exit 0)
@@ -186,3 +186,34 @@ Branch `task/fm-046b`. No Dataverse write was made and `-Apply` was not run; the
 ### Verification (fix round 1)
 
 `dotnet build tests/Spaarke.ArchTests --no-incremental`: 0 Warning(s), 0 Error(s). `FeatureRolePrivilegeGuardTests`: 20 / 20 (19 before). Whole `Spaarke.ArchTests`: 1960 / 1960 passed (1959 before; the one added test is `TheAppUsersSetIsPinned`). `Sprk.Bff.Api.Tests` not run (no `src/server` change).
+
+## Fix round 2 (playbook administration rows, role-file duplicates, apply script hardening)
+
+Branch `task/fm-046b`. No Dataverse write was made and `-Apply` was not run. The script's apply path is shown against a test double only (no network, no token).
+
+| Item | Outcome |
+|---|---|
+| 1. F3: AI Analysis Admin alone is not fully checked | Done. The "Playbook administration" feature now has two more rows, both checked with the add-on as the only role: Write on `sprk_analysisplaybook` at Basic (the update, canvas-save and node create / update / delete / scopes routes ask the caller's Write first, then ownership of the row, which is user-owned, so Basic is enough: `PlaybookEndpoints.cs:41,155`, `NodeEndpoints.cs:34,59,73,89`, `PlaybookAuthorizationFilter.cs:166-172`), and Read at Global for a clone's source (`PlaybookEndpoints.cs:177` with `AddPlaybookAccessAuthorizationFilter`, mode `OwnerOrSharedOrPublic`: a public playbook needs no Read, any other is the caller's own Dataverse Read on a user-owned row, which for another owner's playbook is the role depth; Global matches the other rows that read a playbook). The role files meet both, so no `KnownGaps` entry, no gap-table row and no gap-summary change. The doc's §5.1 "Playbook administration" row lists the added asks. |
+| 2. F3: the AppUsers file-name skip hid duplicates | Done. `PersonRoles` now runs `DuplicateRoleFiles` over every role file under every `Roles` folder before it leaves the app users' role out; a second file with any role's name (any casing) throws. |
+| 3. K1: a role outside the root business unit | Done. The script throws, inside the fail-closed read block and before any write, when a resolved root role's business unit is not the root business unit (`Root role '<name>' is not in the root business unit. Nothing was changed.`, copied from `scripts/ebilling/Deploy-EbillingBillingAdminRole.ps1`). |
+| 4. K2: no depth pre-check | Done. After the table-metadata reads and before any write the script reads `privileges(<id>)?$select=name,canbebasic,canbelocal,canbedeep,canbeglobal` for each declared privilege (once per privilege) and throws, naming the privilege, role and depth, when the declared depth is not allowed. `canbelocal` was added to the three the item names so a declared Local is checked too. |
+| 5. K2: `-Apply` exited 0 on drift | Done. With nothing pending, `-Apply` (not a dry run) exits 1 when a live depth is above the declared one or a business-unit copy differs, printing the same reasons `-Verify` prints. A dry run still exits 0; `-Apply` with nothing pending and no drift still exits 0. |
+| 6. K2: a failed read-back printed no summary | Done. The writes and the read-back share one try; the catch prints the applied and not-applied lists for either phase (and, for the read-back, that every write was sent and `-Verify` shows what the live roles hold), then rethrows (exit non-zero). |
+| 7. K1: the role-name filter was not encoded | Done. The `$filter` value is `[Uri]::EscapeDataString` of the name with its quotes doubled. |
+| 8. K3: `MustNotHold` names could be misspelt | Done. `MustNotHoldNamesRealTables`: each privilege must be `prv` + a known verb + a table that is an entity folder under some `src/dataverse/solutions/*/Entities` folder (case-insensitive). |
+| 9. Notes hygiene | Done. The dry-run output above says "every business-unit copy", not a number. |
+
+Not touched: `ProcedureRolePrivilegeGuardTests.cs` and `scripts/ebilling/*` (copies of ebilling's files, replaced at merge time).
+
+### Proofs
+
+- **Item 1, seeded.** Deleting `prvWritesprk_analysisplaybook` from `Spaarke AI Analysis Admin.xml` fails `FeatureRequirementsAreHeldByTheirRoles` ("Playbook administration (update, canvas, nodes) ... held: none") and `PuttingARuledChangeBackFailsTheGuard`; deleting `prvReadsprk_analysisplaybook` fails it on the clone row. 20 passed / 2 failed each time; the role file restored with `git checkout`.
+- **Item 2.** A second `Spaarke Ontology Service.xml` in another solution's `Roles` folder: the round 1 guard (the file as committed) passed 20 / 20 with it present; the new guard fails (`A role is named by two role files`, plus the three checks that load the person roles). Must-not-fire: the repo's role files (`ASecondFileNamedForAnyRoleFails`, which also seeds a second person-role file and a second app-users file in a scratch copy).
+- **Item 8.** A misspelt name in the real `MustNotHold` list (`prvDeletesprk_DecisonRecord`) fails `MustNotHoldNamesRealTables`. Must-not-fire: the real list, and the same names in other casing. Must-fire in the test: misspelt table, misspelt verb, no `prv` prefix, a verb with no table.
+- **Items 3-7, the script.** `tests/scripts/Set-FeatureRolePrivileges.Tests.ps1` (Pester 3.4) runs the whole script in a child pwsh against `tests/scripts/Set-FeatureRolePrivileges.Harness.ps1`, a test double of `az`, `Invoke-RestMethod` and `Start-Sleep` (same approach as `Apply-DoLanePolicies.Harness.ps1`). Against the round 1 script: 9 passed, **7 failed** (non-root role, disallowed depth, depth read before the first write, `-Apply` on drift, the two read-back failures, the encoded filter); the controls pass in both. Against this round's script: **16 / 16**.
+- **Fail closed.** The real script, a dry run, an empty `AZURE_CONFIG_DIR`: `FAIL: a read failed: No Dataverse token ... Nothing was changed.`, exit 1 (also a test).
+- **Lint.** `Parser::ParseFile` on the script: 0 errors.
+
+### Verification (fix round 2)
+
+`dotnet build tests/Spaarke.ArchTests --no-incremental`: 0 Warning(s), 0 Error(s). `FeatureRolePrivilegeGuardTests`: 22 / 22 (20 before; added `ASecondFileNamedForAnyRoleFails` and `MustNotHoldNamesRealTables`). Whole `Spaarke.ArchTests`: 1962 / 1962 passed (1960 before; the two added tests). `Sprk.Bff.Api.Tests` not run (no `src/server` change).

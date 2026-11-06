@@ -333,6 +333,18 @@ public class FeatureRolePrivilegeGuardTests
         .. For("Playbook administration (create, clone, share, unshare)", [AiAdmin], "Basic",
             Bff + "Api/Ai/PlaybookEndpoints.cs:27,107,120,176; " + Bff + "Api/Filters/PlaybookAuthorizationFilter.cs:55-75,166,172",
             "prvCreatesprk_analysisplaybook", "prvSharesprk_analysisplaybook"),
+        // Editing a playbook (fix round 2 F3-1): the update, canvas save and node create / update / delete / scopes routes ask the caller's
+        // Write privilege on the table before anything else (the services write app-only), then ownership of the row (own row: Basic is
+        // enough, the table is user-owned).
+        .. For("Playbook administration (update, canvas, nodes)", [AiAdmin], "Basic",
+            Bff + "Api/Ai/PlaybookEndpoints.cs:41,155; " + Bff + "Api/Ai/NodeEndpoints.cs:34,59,73,89; " + Bff + "Api/Filters/PlaybookAuthorizationFilter.cs:55-75,166-172",
+            "prvWritesprk_analysisplaybook"),
+        // Cloning also reads the playbook being copied (the playbook-use decision, OwnerOrSharedOrPublic): a public playbook needs no
+        // Read; any other is the caller's own Dataverse Read on a user-owned row, which for another owner's playbook is the role depth.
+        // Global, as the other rows that read a playbook (analysis from a playbook, analysis run).
+        .. For("Playbook administration (clone: read the source playbook)", [AiAdmin], "Global",
+            Bff + "Api/Ai/PlaybookEndpoints.cs:177; " + Bff + "Api/Filters/PlaybookAuthorizationFilter.cs:307-330",
+            "prvReadsprk_analysisplaybook"),
 
         // Billing (ebilling-r1 task 089e, owner-approved): removing or previewing a Procedure override asks Read on the Procedure.
         // The route (ProcedureAssignmentEndpoints.cs) comes with ebilling-r1 089e; on this branch the requirement is its task.
@@ -864,6 +876,53 @@ public class FeatureRolePrivilegeGuardTests
             + "and raise it with unified-access-control-r2:\n  " + string.Join("\n  ", held));
     }
 
+    private static readonly string[] PrivilegeVerbs = ["AppendTo", "Append", "Create", "Read", "Write", "Delete", "Assign", "Share"];
+
+    /// <summary>The table of a privilege name (<c>prv</c> + verb + table), or null when the name does not start with <c>prv</c> and a known verb.</summary>
+    internal static string? PrivilegeTable(string privilege)
+    {
+        if (!privilege.StartsWith("prv", StringComparison.OrdinalIgnoreCase)) return null;
+        var rest = privilege[3..];
+        // AppendTo is listed before Append, so the longer verb wins.
+        var verb = PrivilegeVerbs.FirstOrDefault(v => rest.StartsWith(v, StringComparison.OrdinalIgnoreCase));
+        return verb is null || rest.Length == verb.Length ? null : rest[verb.Length..];
+    }
+
+    /// <summary>Every entity folder name under any <c>Entities</c> folder of any solution under <paramref name="root"/>.</summary>
+    internal static HashSet<string> EntityNames(string root) =>
+        Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories)
+            .Where(d => string.Equals(Path.GetFileName(Path.GetDirectoryName(d)), "Entities", StringComparison.OrdinalIgnoreCase))
+            .Select(d => Path.GetFileName(d)!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Each rule privilege whose name has no known verb, or whose table is not an entity in <paramref name="entities"/> (case-insensitive):
+    /// a misspelt name would match no role and so keep the rule quiet for ever (fix round 2 K3).</summary>
+    internal static List<string> UnknownMustNotHoldTables(IReadOnlyList<MustNotHoldRule> rules, ISet<string> entities) =>
+        (from rule in rules
+         from privilege in rule.Privileges
+         let table = PrivilegeTable(privilege)
+         where table is null || !entities.Contains(table)
+         select $"{privilege} ({rule.Rule}): " + (table is null ? "not 'prv' + a known verb + a table" : $"no entity '{table}' under src/dataverse/solutions/**/Entities")).ToList();
+
+    [Fact(DisplayName = "046b must-not-hold names: every rule privilege names a real table (an entity under src/dataverse/solutions/**/Entities); a misspelt name fails")]
+    public void MustNotHoldNamesRealTables()
+    {
+        var entities = EntityNames(SolutionsDirectory);
+        Assert.NotEmpty(entities);
+
+        // must-not-fire: the real list
+        Assert.Empty(UnknownMustNotHoldTables(MustNotHold, entities));
+        // must-not-fire: other casing of a real table
+        Assert.Empty(UnknownMustNotHoldTables([new("R", ["PRVCREATESPRK_SIGNAL", "prvAppendTosprk_BILLINGEVENT"], [], "x")], entities));
+
+        // must-fire: a misspelt table, a misspelt verb, no prefix, a verb with no table
+        var misspelt = UnknownMustNotHoldTables(
+            [new("R", ["prvCreatesprk_Signall", "prvCreatesprk_DecisonRecord", "prvMakesprk_Signal", "sprk_Signal", "prvCreate"], [], "x")], entities);
+        Assert.Equal(5, misspelt.Count);
+        Assert.Contains(misspelt, m => m.StartsWith("prvCreatesprk_Signall", StringComparison.Ordinal));
+        Assert.Contains(misspelt, m => m.StartsWith("prvCreatesprk_DecisonRecord", StringComparison.Ordinal));
+    }
+
     [Fact(DisplayName = "046b must-not-hold controls: a forbidden privilege at any depth or casing is reported; an excepted role, the app users' role and other privileges are not")]
     public void MustNotHoldFires()
     {
@@ -956,17 +1015,65 @@ public class FeatureRolePrivilegeGuardTests
     private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> PersonRoles(string root)
     {
         var result = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal);
-        foreach (var file in ProcedureRolePrivilegeGuardTests.RoleFiles(root).Order(StringComparer.Ordinal))
+        var files = ProcedureRolePrivilegeGuardTests.RoleFiles(root).Order(StringComparer.Ordinal).ToList();
+        // Fix round 2 F3-2: the duplicate check runs over EVERY role file, before the app users' role is left out, so a second
+        // file named for the app users' role fails too (it would otherwise be skipped by name and never read).
+        var duplicates = DuplicateRoleFiles(files);
+        if (duplicates.Count > 0)
+            throw new InvalidOperationException("A role is named by two role files: " + string.Join("; ", duplicates));
+        foreach (var file in files)
         {
             var name = Path.GetFileNameWithoutExtension(file);
             if (RoleClasses.Any(c => c.Role == name && c.Kind == RoleKind.AppUsers))
                 continue;
-            if (result.ContainsKey(name))
-                throw new InvalidOperationException($"Two role files define '{name}': {file}");
             result[name] = LoadRoles(Path.GetDirectoryName(file)!, [name])[name];
         }
 
         return result;
+    }
+
+    /// <summary>The role names (file names, any casing) that more than one role file carries, each with its files.</summary>
+    internal static List<string> DuplicateRoleFiles(IEnumerable<string> files) =>
+        files.GroupBy(f => Path.GetFileNameWithoutExtension(f), StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .Select(g => $"'{g.Key}' in {string.Join(" and ", g.Order(StringComparer.Ordinal))}")
+            .ToList();
+
+    [Fact(DisplayName = "046b role-file duplicates: a second file named for ANY role, the app users' role included, fails; the repo's role files do not")]
+    public void ASecondFileNamedForAnyRoleFails()
+    {
+        // must-not-fire: the repo as it is
+        Assert.Empty(DuplicateRoleFiles(ProcedureRolePrivilegeGuardTests.RoleFiles(SolutionsDirectory)));
+        Assert.NotEmpty(PersonRoles(SolutionsDirectory));
+
+        var root = Path.Combine(Path.GetTempPath(), "sprk-feature-roles-dup-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var dir = Path.Combine(root, "SpaarkeMaster", "Roles");
+            Directory.CreateDirectory(dir);
+            foreach (var file in Directory.EnumerateFiles(RolesDirectory, "*.xml"))
+                File.Copy(file, Path.Combine(dir, Path.GetFileName(file)));
+            Assert.Empty(DuplicateRoleFiles(ProcedureRolePrivilegeGuardTests.RoleFiles(root)));
+            Assert.NotEmpty(PersonRoles(root));
+
+            // must-fire: a second file named for the app users' role, in another solution's Roles folder
+            var other = Path.Combine(root, "SomeOtherSolution", "Roles");
+            Directory.CreateDirectory(other);
+            File.Copy(Path.Combine(RolesDirectory, Writer + ".xml"), Path.Combine(other, Writer + ".xml"));
+            var duplicates = DuplicateRoleFiles(ProcedureRolePrivilegeGuardTests.RoleFiles(root));
+            Assert.Single(duplicates);
+            Assert.Contains($"'{Writer}'", duplicates[0], StringComparison.Ordinal);
+            Assert.Throws<InvalidOperationException>(() => PersonRoles(root));
+            File.Delete(Path.Combine(other, Writer + ".xml"));
+
+            // must-fire: a second file named for a person role
+            File.Copy(Path.Combine(RolesDirectory, Console + ".xml"), Path.Combine(other, Console + ".xml"));
+            Assert.Throws<InvalidOperationException>(() => PersonRoles(root));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     /// <summary>Each person role's held privilege that a rule forbids, unless the rule excepts the role.</summary>
