@@ -4,7 +4,7 @@
     <title>Apply the owner's role rulings on 046's gaps (role files + apply script), pin the writer-only rule at role level, and check each add-on role alone (owner 2026-11-05)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
     <gate>046's second adversarial pass has no open F finding. The live apply is UAC-r2's, in its session, under the owner's go; this task never writes to Dataverse.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security roles (role XML + an apply script that writes roles through the Web API), the ArchTest guard, and a new role-model rule (standalone add-ons).</rigor-reason>
     <model-tier>opus</model-tier>
