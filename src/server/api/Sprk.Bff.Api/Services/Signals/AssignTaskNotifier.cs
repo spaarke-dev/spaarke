@@ -215,6 +215,16 @@ public class AssignTaskNotifier
             ["sprk_workassignment"] = ("Work assignment", "workassignment"),
         };
 
+    /// <summary>
+    /// The text an email's tracking footer shows for the record a message is filed under: <paramref name="label"/> when there is one, otherwise a
+    /// neutral reference built from the record's noun ("a matter", "a project", "a work assignment", "a record" for a type not listed in
+    /// <see cref="CoreTypes"/>). The footer never falls back to the table name or the id.
+    /// </summary>
+    internal static string FooterReference(string? label, string coreLogicalName) =>
+        !string.IsNullOrWhiteSpace(label)
+            ? label
+            : $"a {(CoreTypes.TryGetValue(coreLogicalName ?? string.Empty, out var type) ? type.Noun : "Record").ToLowerInvariant()}";
+
     private static readonly Lazy<string> Template = new(LoadTemplate);
 
     private readonly CommunicationService _communication;
@@ -586,7 +596,7 @@ public class AssignTaskNotifier
             CorrelationId = correlationId,
             IsInternalOnly = true,
             Associations = core is not null && core.Id != Guid.Empty
-                ? [new CommunicationAssociation { EntityType = core.Entity, EntityId = core.Id, EntityName = record.Label }]
+                ? [new CommunicationAssociation { EntityType = core.Entity, EntityId = core.Id, EntityName = FooterReference(record.Label, core.Entity) }]
                 : null,
         };
 

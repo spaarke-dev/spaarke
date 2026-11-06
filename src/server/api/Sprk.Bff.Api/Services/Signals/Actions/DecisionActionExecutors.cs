@@ -1077,7 +1077,7 @@ public abstract class MessageExecutorBase : IDecisionActionExecutor
         {
             if (!await DecisionExec.CallerCanAppendToAsync(_probe, request.Http, core.Entity, core.Id, ct).ConfigureAwait(false))
                 return Refuse(DecisionActionReasons.NotAuthorized, "You do not have permission to file a message against this record.");
-            associations = [new CommunicationAssociation { EntityType = core.Entity, EntityId = core.Id, EntityName = core.Name }];
+            associations = [new CommunicationAssociation { EntityType = core.Entity, EntityId = core.Id, EntityName = AssignTaskNotifier.FooterReference(core.Name, core.Entity) }];
         }
 
         return (null, new SendCommunicationRequest
