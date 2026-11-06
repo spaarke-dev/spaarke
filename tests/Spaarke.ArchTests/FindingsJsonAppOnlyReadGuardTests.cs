@@ -58,6 +58,9 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         // task 095d-2a-2: the re-run after Set firm reads it app-only (IGenericEntityService) for the stored facts and decision, and writes the
         // re-evaluated findings (assignFirm.rulesRerun = completed) in its one app-only ExecuteTransactionAsync, row-version conditioned
         typeof(InvoiceSubmissionRerun),
+        // task 164a-4a (EB-D-188): Add line reads it app-only (IGenericEntityService, through InvoiceCorrectionReevaluation.ReadSubmissionAsync) and
+        // writes the patched findings and the addLine member in its one app-only ExecuteTransactionAsync, row-version conditioned
+        typeof(InvoiceLineAddService),
     ];
 
     /// <summary>
