@@ -16,7 +16,8 @@
 
     REMOVALS (-Remove)
       A separate, explicit block: config "removals" lists role, privilege and the depth it is expected to be held at now. The add
-      path above never removes anything and never reads that block; -Remove never adds or raises. -Remove acts on exactly the
+      path above never removes anything: it validates that block (a stale entry fails closed) but never acts on it. -Remove never adds or
+      raises. -Remove acts on exactly the
       listed privileges (RemovePrivilegeRole on the ROOT role, one call per privilege), nothing else: after each run the root role
       is compared with its state before and any other difference fails the run. A privilege held at a depth other than the expected
       one is not removed (exit 1, nothing changed). The role XML must not hold a listed privilege (checked before connecting).
@@ -32,7 +33,10 @@
                  that cannot be completed or does not match, prints the changes applied in this run and the ones not applied,
                  and exits non-zero; re-run -Apply to converge. Names anything the platform added that was not asked for.
                  When nothing is pending but a live depth is above the declared one or a business-unit copy differs, -Apply
-                 exits 1 with the report -Verify prints (it never lowers a depth or edits a copy).
+                 exits 1 with the report -Verify prints (it never lowers a depth or edits a copy). The same holds after a
+                 successful read-back: the written roles are re-read, and a depth above the declared one, a copy that differs
+                 from its root role, a held-at-another-depth removal or a copy still holding a removed privilege is printed in
+                 the same report and exits 1 (a run that leaves the roles off the declared set is not a success).
       -Verify    Read-only. Exits 1 when any change is still pending, a live depth is above the declared one, or a
                  business-unit copy differs from its root role on a declared privilege; 0 when the live roles match.
 
@@ -260,123 +264,146 @@ function Get-Depth($Held, $Privilege) {
     if ($null -eq $h) { 'None' } else { [string]$h.Depth }
 }
 
-# ── The plan ────────────────────────────────────────────────────────────────────────────────────────────────
-$plan = [System.Collections.Generic.List[object]]::new()
-$aboveDeclared = [System.Collections.Generic.List[string]]::new()
-$copyDrift = [System.Collections.Generic.List[string]]::new()
-$fromDrift = [System.Collections.Generic.List[string]]::new()
-foreach ($c in @($(if ($checkAdds) { $changes }))) {
-    $role = $roleCache[$c.role]
-    $live = Get-Depth $role.Held $c.PrivilegeRef
-    # Informational: the plan always uses the live depth; a live depth other than the config's 'from' means the role
-    # changed since the config was written (or since the last dry run).
-    if ($live -ne [string]$c.from) {
-        $fromDrift.Add(("{0,-36} {1,-34} config from {2,-6} live {3}" -f $role.Name, $c.PrivilegeRef.Name, $c.from, $live))
-    }
-    if ((Get-Rank $live) -lt (Get-Rank $c.depth)) {
-        $plan.Add([pscustomobject]@{ Role = $role; Privilege = $c.PrivilegeRef; Old = $live; New = [string]$c.depth; Gap = [string]$c.gap })
-    }
-    elseif ((Get-Rank $live) -gt (Get-Rank $c.depth)) {
-        $aboveDeclared.Add(("{0,-36} {1,-34} live {2,-6} declared {3} (not lowered here)" -f $role.Name, $c.PrivilegeRef.Name, $live, $c.depth))
-    }
-    foreach ($copy in $role.Copies) {
-        $copyDepth = Get-Depth $copy.Held $c.PrivilegeRef
-        if ($copyDepth -ne $live) {
-            $copyDrift.Add(("{0,-36} {1,-34} copy {2} holds {3,-6} root holds {4}" -f $role.Name, $c.PrivilegeRef.Name, $copy.Id, $copyDepth, $live))
+# ── The state ───────────────────────────────────────────────────────────────────────────────────────────────
+# What the live roles (as held in $roleCache) hold against the declared set: the plan, and everything that keeps them from matching it. Built
+# once after the reads, and again after a successful read-back (so -Apply can report what it cannot fix).
+function Get-State {
+    $plan = [System.Collections.Generic.List[object]]::new()
+    $aboveDeclared = [System.Collections.Generic.List[string]]::new()
+    $copyDrift = [System.Collections.Generic.List[string]]::new()
+    $fromDrift = [System.Collections.Generic.List[string]]::new()
+    foreach ($c in @($(if ($checkAdds) { $changes }))) {
+        $role = $roleCache[$c.role]
+        $live = Get-Depth $role.Held $c.PrivilegeRef
+        # Informational: the plan always uses the live depth; a live depth other than the config's 'from' means the role
+        # changed since the config was written (or since the last dry run).
+        if ($live -ne [string]$c.from) {
+            $fromDrift.Add(("{0,-36} {1,-34} config from {2,-6} live {3}" -f $role.Name, $c.PrivilegeRef.Name, $c.from, $live))
         }
-    }
-}
-
-# ── The removal plan: only the privileges the removals block lists ────────────────────────────────────────────
-# A removal is pending while the privilege is held on the root role (at the expected depth) or on any business-unit copy. A root role
-# that holds it at another depth than expected is a mismatch: the run stops (nothing is removed) and -Verify reports it.
-$removalPlan = [System.Collections.Generic.List[object]]::new()
-$removalMismatch = [System.Collections.Generic.List[string]]::new()
-$removalCopies = [System.Collections.Generic.List[string]]::new()
-if ($checkRemovals) {
-    foreach ($r in $removals) {
-        $role = $roleCache[$r.role]
-        $live = Get-Depth $role.Held $r.PrivilegeRef
-        if ($live -eq 'None') {
-            foreach ($copy in $role.Copies) {
-                $copyDepth = Get-Depth $copy.Held $r.PrivilegeRef
-                if ($copyDepth -ne 'None') { $removalCopies.Add(("{0,-36} {1,-34} copy {2} still holds {3} (the root role does not)" -f $role.Name, $r.PrivilegeRef.Name, $copy.Id, $copyDepth)) }
+        if ((Get-Rank $live) -lt (Get-Rank $c.depth)) {
+            $plan.Add([pscustomobject]@{ Role = $role; Privilege = $c.PrivilegeRef; Old = $live; New = [string]$c.depth; Gap = [string]$c.gap })
+        }
+        elseif ((Get-Rank $live) -gt (Get-Rank $c.depth)) {
+            $aboveDeclared.Add(("{0,-36} {1,-34} live {2,-6} declared {3} (not lowered here)" -f $role.Name, $c.PrivilegeRef.Name, $live, $c.depth))
+        }
+        foreach ($copy in $role.Copies) {
+            $copyDepth = Get-Depth $copy.Held $c.PrivilegeRef
+            if ($copyDepth -ne $live) {
+                $copyDrift.Add(("{0,-36} {1,-34} copy {2} holds {3,-6} root holds {4}" -f $role.Name, $c.PrivilegeRef.Name, $copy.Id, $copyDepth, $live))
             }
         }
-        elseif ($live -ne [string]$r.expectedDepth) {
-            $removalMismatch.Add(("{0,-36} {1,-34} held at {2}, the config expects {3} (not removed)" -f $role.Name, $r.PrivilegeRef.Name, $live, $r.expectedDepth))
-        }
-        else {
-            $removalPlan.Add([pscustomobject]@{ Role = $role; Privilege = $r.PrivilegeRef; Old = $live; New = 'None'; Gap = [string]$r.gap })
+    }
+
+    # The removal plan: only the privileges the removals block lists. A removal is pending while the privilege is held on the root role
+    # (at the expected depth) or on any business-unit copy. A root role that holds it at another depth than expected is a mismatch: the
+    # run stops (nothing is removed) and -Verify reports it.
+    $removalPlan = [System.Collections.Generic.List[object]]::new()
+    $removalMismatch = [System.Collections.Generic.List[string]]::new()
+    $removalCopies = [System.Collections.Generic.List[string]]::new()
+    if ($checkRemovals) {
+        foreach ($r in $removals) {
+            $role = $roleCache[$r.role]
+            $live = Get-Depth $role.Held $r.PrivilegeRef
+            if ($live -eq 'None') {
+                foreach ($copy in $role.Copies) {
+                    $copyDepth = Get-Depth $copy.Held $r.PrivilegeRef
+                    if ($copyDepth -ne 'None') { $removalCopies.Add(("{0,-36} {1,-34} copy {2} still holds {3} (the root role does not)" -f $role.Name, $r.PrivilegeRef.Name, $copy.Id, $copyDepth)) }
+                }
+            }
+            elseif ($live -ne [string]$r.expectedDepth) {
+                $removalMismatch.Add(("{0,-36} {1,-34} held at {2}, the config expects {3} (not removed)" -f $role.Name, $r.PrivilegeRef.Name, $live, $r.expectedDepth))
+            }
+            else {
+                $removalPlan.Add([pscustomobject]@{ Role = $role; Privilege = $r.PrivilegeRef; Old = $live; New = 'None'; Gap = [string]$r.gap })
+            }
         }
     }
+
+    $chosen = $plan
+    if ($Remove) { $chosen = $removalPlan }
+    [pscustomobject]@{
+        Plan = $chosen; AddPlan = $plan
+        AboveDeclared = $aboveDeclared; CopyDrift = $copyDrift; FromDrift = $fromDrift
+        RemovalPlan = $removalPlan; RemovalMismatch = $removalMismatch; RemovalCopies = $removalCopies
+    }
 }
-if ($Remove) { $plan = $removalPlan }
+
+# What keeps the live roles from matching the declared set: a pending change, a depth above the declared one, a copy that differs.
+function Get-Reasons($State) {
+    $reasons = @()
+    if ($checkAdds) {
+        if ($State.AddPlan.Count -gt 0) { $reasons += "$($State.AddPlan.Count) change(s) pending" }
+        if ($State.AboveDeclared.Count -gt 0) { $reasons += "$($State.AboveDeclared.Count) live depth(s) above the declared one" }
+        if ($State.CopyDrift.Count -gt 0) { $reasons += "$($State.CopyDrift.Count) business-unit copy difference(s)" }
+    }
+    if ($checkRemovals) {
+        if ($State.RemovalPlan.Count -gt 0) { $reasons += "$($State.RemovalPlan.Count) removal(s) pending" }
+        if ($State.RemovalMismatch.Count -gt 0) { $reasons += "$($State.RemovalMismatch.Count) privilege(s) held at a depth other than the config expects" }
+        if ($State.RemovalCopies.Count -gt 0) { $reasons += "$($State.RemovalCopies.Count) business-unit copy still holding a removed privilege" }
+    }
+    , $reasons
+}
 
 # ── Report ──────────────────────────────────────────────────────────────────────────────────────────────────
-Write-Host ''
-Write-Host 'Roles:'
-foreach ($r in $roleCache.Values | Sort-Object Name) {
-    Write-Host ("  {0,-36} root role in the root BU; {1} business-unit copies take its privileges" -f $r.Name, $r.Copies.Count)
-}
-Write-Host ''
-if ($checkAdds) {
-    if ($plan.Count -eq 0) { Write-Host 'Changes     : none pending.' -ForegroundColor Green }
-    else {
-        Write-Host "Changes     : $($plan.Count)"
-        foreach ($p in $plan | Sort-Object { $_.Role.Name }, { $_.Privilege.Name }) {
-            Write-Host ("  {0,-36} {1,-34} {2,-6} -> {3,-6} ({4}; {5} business-unit copies)" -f $p.Role.Name, $p.Privilege.Name, $p.Old, $p.New, $p.Gap, $p.Role.Copies.Count) -ForegroundColor Cyan
-        }
+function Write-Report($State) {
+    Write-Host ''
+    Write-Host 'Roles:'
+    foreach ($r in $roleCache.Values | Sort-Object Name) {
+        Write-Host ("  {0,-36} root role in the root BU; {1} business-unit copies take its privileges" -f $r.Name, $r.Copies.Count)
     }
     Write-Host ''
-    Write-Host 'Live depth above the declared one (never lowered here):'
-    if ($aboveDeclared.Count -eq 0) { Write-Host '  none' }
-    foreach ($d in $aboveDeclared) { Write-Host "  $d" -ForegroundColor DarkYellow }
-    Write-Host "Live depth differs from the config's 'from' (informational: drift since the config or the last dry run; the plan uses the live depth):"
-    if ($fromDrift.Count -eq 0) { Write-Host '  none' }
-    foreach ($d in $fromDrift) { Write-Host "  $d" -ForegroundColor DarkYellow }
-    Write-Host 'Business-unit copies that differ from their root role on a declared privilege:'
-    if ($copyDrift.Count -eq 0) { Write-Host '  none' }
-    foreach ($d in $copyDrift) { Write-Host "  $d" -ForegroundColor DarkYellow }
-}
-if ($checkRemovals) {
-    if ($checkAdds) { Write-Host '' }
-    if ($removalPlan.Count -eq 0) { Write-Host 'Removals    : none pending.' -ForegroundColor Green }
-    else {
-        Write-Host "Removals    : $($removalPlan.Count)"
-        foreach ($p in $removalPlan | Sort-Object { $_.Role.Name }, { $_.Privilege.Name }) {
-            Write-Host ("  {0,-36} {1,-34} {2,-6} -> removed ({3}; root role, then every business-unit copy)" -f $p.Role.Name, $p.Privilege.Name, $p.Old, $p.Gap) -ForegroundColor Cyan
+    if ($checkAdds) {
+        if ($State.AddPlan.Count -eq 0) { Write-Host 'Changes     : none pending.' -ForegroundColor Green }
+        else {
+            Write-Host "Changes     : $($State.AddPlan.Count)"
+            foreach ($p in $State.AddPlan | Sort-Object { $_.Role.Name }, { $_.Privilege.Name }) {
+                Write-Host ("  {0,-36} {1,-34} {2,-6} -> {3,-6} ({4}; {5} business-unit copies)" -f $p.Role.Name, $p.Privilege.Name, $p.Old, $p.New, $p.Gap, $p.Role.Copies.Count) -ForegroundColor Cyan
+            }
         }
+        Write-Host ''
+        Write-Host 'Live depth above the declared one (never lowered here):'
+        if ($State.AboveDeclared.Count -eq 0) { Write-Host '  none' }
+        foreach ($d in $State.AboveDeclared) { Write-Host "  $d" -ForegroundColor DarkYellow }
+        Write-Host "Live depth differs from the config's 'from' (informational: drift since the config or the last dry run; the plan uses the live depth):"
+        if ($State.FromDrift.Count -eq 0) { Write-Host '  none' }
+        foreach ($d in $State.FromDrift) { Write-Host "  $d" -ForegroundColor DarkYellow }
+        Write-Host 'Business-unit copies that differ from their root role on a declared privilege:'
+        if ($State.CopyDrift.Count -eq 0) { Write-Host '  none' }
+        foreach ($d in $State.CopyDrift) { Write-Host "  $d" -ForegroundColor DarkYellow }
     }
-    Write-Host 'Held at a depth other than the config expects (never removed):'
-    if ($removalMismatch.Count -eq 0) { Write-Host '  none' }
-    foreach ($d in $removalMismatch) { Write-Host "  $d" -ForegroundColor DarkYellow }
-    Write-Host 'Business-unit copies that still hold a privilege the root role no longer holds (never edited here):'
-    if ($removalCopies.Count -eq 0) { Write-Host '  none' }
-    foreach ($d in $removalCopies) { Write-Host "  $d" -ForegroundColor DarkYellow }
+    if ($checkRemovals) {
+        if ($checkAdds) { Write-Host '' }
+        if ($State.RemovalPlan.Count -eq 0) { Write-Host 'Removals    : none pending.' -ForegroundColor Green }
+        else {
+            Write-Host "Removals    : $($State.RemovalPlan.Count)"
+            foreach ($p in $State.RemovalPlan | Sort-Object { $_.Role.Name }, { $_.Privilege.Name }) {
+                Write-Host ("  {0,-36} {1,-34} {2,-6} -> removed ({3}; root role, then every business-unit copy)" -f $p.Role.Name, $p.Privilege.Name, $p.Old, $p.Gap) -ForegroundColor Cyan
+            }
+        }
+        Write-Host 'Held at a depth other than the config expects (never removed):'
+        if ($State.RemovalMismatch.Count -eq 0) { Write-Host '  none' }
+        foreach ($d in $State.RemovalMismatch) { Write-Host "  $d" -ForegroundColor DarkYellow }
+        Write-Host 'Business-unit copies that still hold a privilege the root role no longer holds (never edited here):'
+        if ($State.RemovalCopies.Count -eq 0) { Write-Host '  none' }
+        foreach ($d in $State.RemovalCopies) { Write-Host "  $d" -ForegroundColor DarkYellow }
+    }
 }
 
+$state = Get-State
+$plan = $state.Plan
+Write-Report $state
+
 # ── Verify ──────────────────────────────────────────────────────────────────────────────────────────────────
-# What keeps the live roles from matching the declared set: a pending change, a depth above the declared one, a copy that differs.
-$reasons = @()
-if ($checkAdds) {
-    if ($plan.Count -gt 0) { $reasons += "$($plan.Count) change(s) pending" }
-    if ($aboveDeclared.Count -gt 0) { $reasons += "$($aboveDeclared.Count) live depth(s) above the declared one" }
-    if ($copyDrift.Count -gt 0) { $reasons += "$($copyDrift.Count) business-unit copy difference(s)" }
-}
-if ($checkRemovals) {
-    if ($removalPlan.Count -gt 0) { $reasons += "$($removalPlan.Count) removal(s) pending" }
-    if ($removalMismatch.Count -gt 0) { $reasons += "$($removalMismatch.Count) privilege(s) held at a depth other than the config expects" }
-    if ($removalCopies.Count -gt 0) { $reasons += "$($removalCopies.Count) business-unit copy still holding a removed privilege" }
-}
+$reasons = Get-Reasons $state
 if ($Verify) {
     if ($reasons.Count -eq 0) { Write-Host "`nVERIFY PASS: the live roles hold the declared set$(if ($checkRemovals) { ' and none of the listed removals' })." -ForegroundColor Green; exit 0 }
     Write-Host "`nVERIFY FAIL: $($reasons -join '; ') (listed above)." -ForegroundColor Red
     exit 1
 }
+
 # A privilege held at a depth the config does not expect is not removed: the run stops, in every mode, with nothing changed.
-if ($Remove -and $removalMismatch.Count -gt 0) {
-    Write-Host "`nFAIL: $($removalMismatch.Count) privilege(s) held at a depth other than the config expects (listed above). Nothing was changed; fix the config or the role and re-run." -ForegroundColor Red
+if ($Remove -and $state.RemovalMismatch.Count -gt 0) {
+    Write-Host "`nFAIL: $($state.RemovalMismatch.Count) privilege(s) held at a depth other than the config expects (listed above). Nothing was changed; fix the config or the role and re-run." -ForegroundColor Red
     exit 1
 }
 if ($plan.Count -eq 0) {
@@ -451,18 +478,33 @@ try {
                 $removedIds = @($group.Group.Privilege.Id)
                 $collateral = @($role.Held.Keys | Where-Object { $removedIds -notcontains $_ -and (-not $after.ContainsKey($_) -or [string]$after[$_].Depth -ne [string]$role.Held[$_].Depth) })
                 $appeared = @($after.Keys | Where-Object { -not $role.Held.ContainsKey($_) })
-                foreach ($id in $collateral) { $failed += "$($role.Name) (root): $($role.Held[$id].PrivilegeName) is not in the removals block but changed or went missing" }
-                foreach ($id in $appeared) { $failed += "$($role.Name) (root): $($after[$id].PrivilegeName) appeared during the removal" }
+                # Each reported privilege names its depth before and after, so the report says what the platform did.
+                foreach ($id in $collateral) {
+                    $afterDepth = if ($after.ContainsKey($id)) { [string]$after[$id].Depth } else { 'None' }
+                    $failed += "$($role.Name) (root): $($role.Held[$id].PrivilegeName) is not in the removals block but changed or went missing (before $([string]$role.Held[$id].Depth), after $afterDepth)"
+                }
+                foreach ($id in $appeared) { $failed += "$($role.Name) (root): $($after[$id].PrivilegeName) appeared during the removal (before None, after $([string]$after[$id].Depth))" }
             }
             if ($t.Label -eq 'root' -and -not $Remove) {
                 $unrequested = @($after.Keys | Where-Object { -not $role.Held.ContainsKey($_) -and -not ($group.Group.Privilege.Id -contains $_) })
                 if ($unrequested.Count -gt 0) {
-                    Write-Host "WARNING: $($role.Name) also gained $($unrequested.Count) privilege(s) that were not requested: $(($unrequested | ForEach-Object { $after[$_].PrivilegeName }) -join ', '). Not removed here." -ForegroundColor Yellow
+                    Write-Host "WARNING: $($role.Name) also gained $($unrequested.Count) privilege(s) that were not requested (before None): $(($unrequested | ForEach-Object { "$($after[$_].PrivilegeName) after $([string]$after[$_].Depth)" }) -join ', '). Not removed here." -ForegroundColor Yellow
                 }
             }
         }
     }
     if ($failed.Count -gt 0) { throw "Read-back did not match after 8 tries of 4 seconds:`n  $($failed -join "`n  ")" }
+
+    # Every write is confirmed. Re-read the roles that were written and rebuild the state: what still keeps the live roles from the declared
+    # set (a depth above the declared one, a copy that differs, a removal's copy) is reported below and fails the run, as -Verify does.
+    foreach ($group in $plan | Group-Object { $_.Role.Id }) {
+        $role = $group.Group[0].Role
+        $failedRole = $role.Name
+        $role.Held = Get-HeldMap $role.Id
+        foreach ($copy in $role.Copies) { $copy.Held = Get-HeldMap $copy.Id }
+    }
+    $finalState = Get-State
+    $finalReasons = Get-Reasons $finalState
 }
 catch {
     Write-Host "`nFAIL: $phase on '$failedRole' failed: $($_.Exception.Message)" -ForegroundColor Red
@@ -480,5 +522,11 @@ catch {
 }
 if ($Remove) { Write-Host "`nREMOVED and read back absent on the root role and every business-unit copy: $($plan.Count) removal(s)." -ForegroundColor Green }
 else { Write-Host "`nAPPLIED and read back on every business-unit copy: $($plan.Count) change(s)." -ForegroundColor Green }
+if ($finalReasons.Count -gt 0) {
+    # The writes held, but the roles still differ from the declared set in a way this script never fixes: not a success.
+    Write-Report $finalState
+    Write-Host "`nAPPLY: the changes were applied and read back, but the live roles do not match the declared set: $($finalReasons -join '; ') (listed above). This script never lowers a depth or edits a copy; fix it in the environment and re-run -Verify." -ForegroundColor Red
+    exit 1
+}
 Write-Host 'Dataverse caches principal privileges; a probe straight after this can show the old result. Re-check until stable.'
 exit 0

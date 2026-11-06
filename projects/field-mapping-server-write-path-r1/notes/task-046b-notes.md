@@ -29,7 +29,7 @@ Nothing for G3 or G9 and nothing from Part D went into a role file.
 - G1's AppendTo: the ruling says it files a KPI assessment under a report card. New feature rows "KPI assessment (filed under a report card)" [Core]: Create and Append on `sprk_kpiassessment` (Basic), AppendTo on `sprk_reportcard` (Deep); evidence `ChildRecordEndpoints.cs:70-85` (`sprk_kpiassessment` is a create table, the secure-record ribbon's "New KPI Assessment") and `SecureChildLineage.cs:302-303` (a KPI assessment is filed under a matter, project or report card). Without the row, removing the AppendTo would fail nothing.
 - G6: the Write went on Office Add In User, so the version-save row's set is now Basic User + Office Add In User (it was Basic User alone).
 - G3: accepted, not applied. The baseline entry stays, its reason updated.
-- G9: stayed in the baseline in the first pass; dropped in fix round 2 (below): a run that can write documents is Core User's only.
+- G9: stayed in the baseline in the first pass; dropped in fix round 2 (below): Basic User with AI Analysis User is not a set a document-writing run is meant for. (Fix round 3 corrects the wording: the run is not limited to one role; it asks Write on `sprk_document` as the caller, so any role set holding it can run one.)
 - G10: removed from the baseline, the gap table and the Decision commit Write row (seven subjects remain). Recorded in the doc and the test comment: no role change; invoice-line Signals are decided in the invoice review; the Console route will refuse them (#2572, ontology DI-139).
 - Office To Do and the Console Do lane: Core-only (doc rows; test comments). Console User alone is checked against the Decide lane only (below).
 - Create on `sprk_billingevent`: "none, by design (BFF-written, ebilling D-18)" in the doc (new row) and a `MustNotHold` rule (no person role holds it). The doc notes that ebilling hides the model-driven "New Billing Event" button in its own ribbon deploy.
@@ -47,7 +47,7 @@ Nothing for G3 or G9 and nothing from Part D went into a role file.
 | Add-on | Checked alone against |
 |---|---|
 | Office Add In User | Ruled not standalone in fix round 2 (below): not checked alone. Its features, still checked with a base role: Office save, Office version save, Office quick create, Event (typed route) |
-| AI Analysis User | Ruled not standalone in fix round 2 (below): not checked alone. Its features, still checked with Basic User: Analysis from a playbook, Analysis run (not the writing run: Core User's only) |
+| AI Analysis User | Ruled not standalone in fix round 2 (below): not checked alone. Its features, still checked with Basic User: Analysis from a playbook, Analysis run (not the writing run) |
 | Console User | Ruled in fix round 2 (below) to need Core User: not checked alone. Its features are checked with Core User: Decision commit and Decision actions (the Do lane stays Core-only) |
 | Billing Administrator | Billing: Procedure override (its row was already alone) |
 | AI Analysis Admin | Playbook administration (rows: Create and Share on `sprk_analysisplaybook`, asked of the caller, `PlaybookEndpoints.cs:27,107,120,176`, `PlaybookAuthorizationFilter.cs:55-75,166,172`; Write for the edit routes and Read for a clone's source, added in fix round 2) |
@@ -194,8 +194,8 @@ Not touched: `ProcedureRolePrivilegeGuardTests.cs` and `scripts/ebilling/*` (cop
 |---|---|
 | 10. Standalone exceptions | Done. `StandaloneExceptions` in `FeatureRolePrivilegeGuardTests` lists Office Add In User, AI Analysis User and Console User, each with its reason; `ExpectedStandaloneExceptions` pins the list literally (`TheStandaloneExceptionsArePinned`: an added or dropped role, no reason, or a role that is not an add-on with features fails). The three are no longer repeated alone (`AloneRows` skips the exceptions); every other add-on stays checked alone. `RemovingAStandaloneExceptionBringsItsGapsBack` takes each exception away in turn and shows that gaps come back for that role (must-fire), and shows none with the exceptions (must-not-fire). The `KnownGaps` entries for the three roles alone, D39 included, are deleted; the baseline keeps G3 only. G9 is dropped: the "Analysis run (writing playbook, Basic User + AI Analysis User)" row is deleted (the Core User row stays), and the AI Analysis User class no longer names it. Doc §5.1: role model, gap table (G9 row gone), the standalone gap summary (replaced by the ruling), the Roles-meant column of the Office, analysis and Decision commit rows. This notes file: Part D table, the gap list section. |
 | 11. Removal 1 | Done. `prvCreatesprk_BudgetRevision` is out of `Spaarke Ontology Administrator.xml` (Write and Delete stay). The writer-only `MustNotHold` rule no longer lists Create on `sprk_budgetrevision`; a new rule forbids Create on it for every person role with no exception. Seeded: Create put back in the role file fails the guard (3 tests: the must-not-hold check on the real files, the seeded role-file test, the removals test). |
-| 12. Removal 2 | Done. Checked first: the "Report Card wizard" and "KPI assessment" rows are [Core] only, and no declared row asks `prvAppendTosprk_ReportCard` of a role set that includes Basic User (the event regarding-types list has no report card), so nothing blocked it. `prvAppendTosprk_ReportCard` is out of `Spaarke Basic User.xml`. `MustNotHoldRule` gained an optional `Only` list; the new rule (`prvAppendTosprk_ReportCard`, Only Basic User) fires on Basic User and not on Core User, which keeps it. Seeded: the privilege put back in Basic User fails the guard; the seeded role-file test covers both removals. |
-| 13. Script removal step | Done. `config/feature-role-privileges.json` has a separate `removals` block (role, table, privilege, `expectedDepth`, gap, feature) with the two removals. `scripts/Set-FeatureRolePrivileges.ps1 -Remove` acts on that block only: dry run by default, `-Remove -Apply`, `-Remove -Verify`. The add path never reads the block and never removes. RemovePrivilegeRole is a Web API action bound to the role (the repo's reviewed scripts `Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1` and `ebilling/Deploy-EbillingBillingAdminRole.ps1` call it with the body `{ Privilege: { @odata.type: Microsoft.Dynamics.CRM.privilege, privilegeid } }`; the same shape is used, one call per privilege on the root role). Same fail-closed reads, the root-business-unit and single-root-role checks, the settle loop, the read-back that the privilege is absent on the root role and every business-unit copy, and the applied / not-applied summary. A privilege held at a depth other than `expectedDepth` is not removed (exit 1, nothing changed); the config is refused before connecting when the role XML still holds a listed privilege or a privilege is both added and removed; after the removal the root role is compared with its state before and any other difference fails the run. `-Verify` (plain or `-Remove`) fails while a removal is pending or a copy still holds a removed privilege. |
+| 12. Removal 2 | Done. Checked first: the "Report Card wizard" and "KPI assessment" rows are [Core] only, and no declared row asks `prvAppendTosprk_ReportCard` of a role set that includes Basic User (the event regarding-types list has no report card), so nothing blocked it. `prvAppendTosprk_ReportCard` was taken out of `Spaarke Basic User.xml`. **Superseded in fix round 3: R2 is not applied** (the privilege is back in the role file and the rule is gone; see below). `MustNotHoldRule` gained an optional `Only` list, which stays. |
+| 13. Script removal step | Done. `config/feature-role-privileges.json` has a separate `removals` block (role, table, privilege, `expectedDepth`, gap, feature) with the two removals. `scripts/Set-FeatureRolePrivileges.ps1 -Remove` acts on that block only: dry run by default, `-Remove -Apply`, `-Remove -Verify`. The add path never removes: it validates the block (a stale entry fails closed) but never acts on it. RemovePrivilegeRole is a Web API action bound to the role (the repo's reviewed scripts `Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1` and `ebilling/Deploy-EbillingBillingAdminRole.ps1` call it with the body `{ Privilege: { @odata.type: Microsoft.Dynamics.CRM.privilege, privilegeid } }`; the same shape is used, one call per privilege on the root role). Same fail-closed reads, the root-business-unit and single-root-role checks, the settle loop, the read-back that the privilege is absent on the root role and every business-unit copy, and the applied / not-applied summary. A privilege held at a depth other than `expectedDepth` is not removed (exit 1, nothing changed); the config is refused before connecting when the role XML still holds a listed privilege or a privilege is both added and removed; after the removal the root role is compared with its state before and any other difference fails the run. `-Verify` (plain or `-Remove`) fails while a removal is pending or a copy still holds a removed privilege. |
 
 Proofs for items 10-13: the same seeded fail-before method as above (role files and the exception entry edited in place, restored with `git checkout` or from a saved copy). The script is shown against the test double only (`tests/scripts/Set-FeatureRolePrivileges.Tests.ps1`, now 32 cases, 14 of which fail on the previous script): `-Remove` dry run; `-Remove -Apply` sends one RemovePrivilegeRole whose body names only the listed privilege; the add path with a removals block present makes no RemovePrivilegeRole call; `-Remove` reads and writes none of the adds; `-Remove -Verify` and plain `-Verify`; nothing pending; a copy that still holds it; a role outside the root business unit; a depth other than expected; the role file still holding the privilege; both added and removed; a copy that never drops it; a failed read-back; a failed RemovePrivilegeRole; a platform that also drops another privilege. `Parser::ParseFile` on the script: 0 errors.
 
@@ -206,4 +206,61 @@ Proofs for items 10-13: the same seeded fail-before method as above (role files 
 - `-Apply`: exit 0, and every business-unit copy read back.
 - `-Verify`: exit 0, PASS.
 - Observed: AddPrivilegesRole raises an existing lower-depth row to the requested depth in place (Basic -> Deep), with no separate removal.
-- The removals (items 11-13) are not yet applied. UAC-r2 runs `-Remove` after the re-check.
+- The removals (items 11-13) are not yet applied. UAC-r2 runs `-Remove` after the re-check; after fix round 3 the block lists one removal (R1).
+
+## Fix round 3 (R2 withdrawn, communication rows, apply script exit codes, Pester 5)
+
+Branch `task/fm-046b`. No Dataverse write was made and `-Apply` / `-Remove -Apply` were not run; the script's apply paths are shown against the test double only.
+
+| Item | Outcome |
+|---|---|
+| 1. F1: drop removal R2 | Done. **R2 not applied: communication send, reply and re-file ask AppendTo on a report card regarding record as the caller; awaiting the owner.** Evidence: `CommunicationRecordAuthorizationFilter.cs:650-706` (send and send-bulk: AppendTo on associations and on regarding records copied from the email replied to; `RegardingFieldMap.All` includes `sprk_regardingreportcard`; `CallerRecordAccessProbe` at `:779-787`), and the re-file (`:79-84`, `CommunicationEndpoints.cs:128-153`, `OwnedChildWrite.cs:803,832-836,897`). `Spaarke Basic User.xml` is back to its state before `8b45f8dfd0` (byte-identical to `98813dcaa2`'s); R2 is out of `config/feature-role-privileges.json` removals; the `Only=[Basic]` MustNotHold rule is gone; `RemovalsAreAbsentFromTheRoleFilesAndForbidden` expects the single removal (R1). |
+| 2. New matrix rows | Done. "Communication send / reply" and "Communication re-file" in the guard and doc §5.1, each for Core User and for Basic User (a base role alone; the existing communication rows are Core User's, and Basic User files and reads). Asks, all as the caller, at Deep (communications and regarding records are team-owned, I-6): AppendTo on the twelve tables of `RegardingFieldMap.All` (`RegardingFieldMap.cs:14-27`, `RegardingNameFields.cs:70-85`); send / reply also Read on `sprk_communication` (a reply reads the email it inherits from, `:687-696`, `CommunicationThreadReadService.cs:1311-1335`); re-file also Write (`:218,536-540`) and Read (`ChildRecordEndpoints.cs:685-687`) on `sprk_communication`. Create on `sprk_communication` is not asked of the caller (the row is written app-only). Core User meets every row; Basic User's gaps are in the table below. |
+| 3. F1: exit codes | Done. After a successful read-back the written roles are re-read and the state rebuilt (`Get-State`, `Write-Report`, `Get-Reasons`, the shapes `-Verify` uses); a depth above the declared one, a copy that differs from its root role, a removal held at another depth or a copy still holding a removed privilege prints the same report and exits 1 ("APPLY: the changes were applied and read back, but the live roles do not match the declared set"). A copy that drifted before the write and was converged by it is not reported (control). |
+| 4. F3: Pester 5 | Done. `tests/scripts/Set-FeatureRolePrivileges.Tests.ps1` uses `BeforeAll` helpers and `Should -Be` syntax; it passes under Pester 5.7.1 (38 / 38; the 32 earlier cases are all kept). Added to the Pester list of the `ontology-script-tests` job in `.github/workflows/ci-standalone-checks.yml` (same checkout paths, same 5.7.1 pin). |
+| 5. F3: "both added and removed" | Done. Role C's file holds `prvAppendTosprk_c` at Global (the added depth), so the add check passes and only the script's own pair check can stop the run; the test asserts that message alone (and not the XML messages). |
+| 6. K: vacuous `Only` | Done. `VacuousOnly`: `Only` empty, or a role in both `Only` and `Except`, is reported (`PersonRolesHoldNothingTheyMustNot` asserts none). Controls in `MustNotHoldRejectsAVacuousOnly`: must-fire (empty; overlapping), must-not-fire (`Only` unset; `Only` naming a role `Except` does not), and `Only` limits `ForbiddenHeld` to the roles it names. |
+| 7. K: "other privilege changed" report | Done. Each reported privilege names its depth before and after (`changed or went missing (before Basic, after None)`, `appeared during the removal (before None, after Global)`); the "also gained" warning on the add path names the depth after. Harness: `removeAlsoSets` (a platform that adds or changes a privilege). |
+| 8. K: wording | Done. Doc §5.1 (Removals paragraph) and the script header: the add path validates the removals block but never acts on it, and a stale entry fails closed. G9 paragraph and the Analysis run row: a writing run asks Write on `sprk_document` as the caller, so any role set that holds it can run one (the "Core User only" wording is gone). |
+
+### New gaps (Basic User; owner decision pending, in `KnownGaps` with the held depth)
+
+Core User meets every new row. Basic User, with the report card AppendTo back, lacks:
+
+| # | Feature | Privilege (Deep needed) | Held by Basic User |
+|---|---|---|---|
+| G11 | Communication send / reply | AppendTo `sprk_servicerequest` | none |
+| G11 | Communication send / reply | AppendTo `sprk_budget` | none |
+| G11 | Communication send / reply | AppendTo `account`, AppendTo `contact` | Basic |
+| G11 | Communication send / reply | Read `sprk_communication` | Basic |
+| G12 | Communication re-file | Write and Read `sprk_communication` | Basic |
+| G12 | Communication re-file | AppendTo `sprk_servicerequest`, `sprk_budget` | none |
+| G12 | Communication re-file | AppendTo `account`, `contact` | Basic |
+
+No role file changed for G11 and G12. The baseline also still holds G3. The decision: give Basic User these depths, or rule that a Basic User does not send, reply to or re-file communications.
+
+### Proofs (fix round 3)
+
+- **Item 2, seeded.** Taking `prvAppendTosprk_ReportCard` out of the real `Spaarke Basic User.xml` fails `FeatureRequirementsAreHeldByTheirRoles`, naming "Communication send / reply (Basic User)" and "Communication re-file (Basic User)" (held: none). `RemovingReportCardAppendToFromBasicUserFailsTheGuard` does the same on a copy: the copy passes first, then fails with both rows named, while Core User's rows still hold.
+- **Item 3, failing first.** The Pester file against the previous script (`8b45f8dfd0`): 38 cases, **6 failed** (the three exit-code cases, the three before / after cases); the other 32 passed. Against this round's script: 38 / 38.
+- **Item 5.** Deleting the script's added-and-removed check (the `is both added and removed in the config` line) fails the test, because the XML check fires with a different message.
+- **Item 6.** `VacuousOnly` did not exist before; the control fails to compile without it, and passes with it.
+- **Fail closed.** The real script, a dry run, an empty `AZURE_CONFIG_DIR`: `FAIL: a read failed` ... `Nothing was changed`, exit 1 (also a Pester case).
+- **Lint.** `Parser::ParseFile` on the script, the test file and the harness: 0 errors.
+
+### Known limits (fix round 3)
+
+- Not modelled in the new rows: the attachment Read (an `AuthorizationService` decision, not a single privilege), the thread visibility read, and the Append Dataverse itself asks on `sprk_communication` when a re-file writes a lookup.
+- The re-file's AppendTo is the BFF's for ownership parents (`OwnedChildWrite.cs:803,832`) and Dataverse's, on the caller's own PATCH, for the other regarding tables; both are the caller's right on the record.
+
+### Verification (fix round 3)
+
+| Check | Result |
+|---|---|
+| `dotnet build tests/Spaarke.ArchTests --no-incremental` | 0 Warning(s), 0 Error(s) |
+| `FeatureRolePrivilegeGuardTests` | 27 / 27 (25 before; added `MustNotHoldRejectsAVacuousOnly`, `RemovingReportCardAppendToFromBasicUserFailsTheGuard`) |
+| Whole `Spaarke.ArchTests` | 1967 / 1967 passed (1965 before) |
+| Pester 5.7.1, `tests/scripts/Set-FeatureRolePrivileges.Tests.ps1` | 38 / 38 passed (32 before); 6 fail on the previous script |
+| `Parser::ParseFile` on the script, test file and harness | 0 errors |
+| Dry run, empty `AZURE_CONFIG_DIR`, real script | exit 1, `FAIL: a read failed` ... `Nothing was changed` |
+| `Sprk.Bff.Api.Tests` | not run (no `src/server` change) |

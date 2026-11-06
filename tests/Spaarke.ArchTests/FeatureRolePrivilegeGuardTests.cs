@@ -91,6 +91,25 @@ public class FeatureRolePrivilegeGuardTests
     /// <summary>The Office "Save as version" offer needs Read on the colliding document, asked of the caller.</summary>
     private const string VersionOfferRead = Bff + "Api/Office/OfficeEndpoints.cs:547-605";
 
+    /// <summary>Every regarding table a communication can be filed under (<c>RegardingFieldMap.All</c>, which the send filter's association
+    /// allow-list <c>RegardingNameFields.EntitySetName</c> matches): AppendTo is asked on each, as the caller.</summary>
+    private static readonly string[] CommunicationRegardingAppendTo =
+    [
+        "prvAppendTosprk_Matter", "prvAppendTosprk_Project", "prvAppendTosprk_Invoice", "prvAppendTosprk_ServiceRequest",
+        "prvAppendTosprk_WorkAssignment", "prvAppendTosprk_Event", "prvAppendTosprk_Budget", "prvAppendTosprk_ReportCard",
+        "prvAppendTosprk_analysis", "prvAppendTosprk_Organization", "prvAppendToAccount", "prvAppendToContact",
+    ];
+
+    private const string CommSendRegarding = Bff + "Api/Filters/CommunicationRecordAuthorizationFilter.cs:650-706,779-787; "
+        + Bff + "Services/Communication/Engine/RegardingFieldMap.cs:14-27; " + Bff + "Services/Communication/RegardingNameFields.cs:70-85";
+
+    private const string CommSendReplyRead = Bff + "Api/Filters/CommunicationRecordAuthorizationFilter.cs:687-696; "
+        + Bff + "Services/Communication/CommunicationThreadReadService.cs:1311-1335";
+
+    private const string CommRefileOwn = Bff + "Api/Filters/CommunicationRecordAuthorizationFilter.cs:218,536-540; " + Bff + "Api/ChildRecordEndpoints.cs:685-687";
+
+    private const string CommRefileRegarding = Bff + "Api/CommunicationEndpoints.cs:128-153; " + Bff + "Services/Dataverse/OwnedChildWrite.cs:803,832-836,897";
+
     private static readonly string[] EntityAccessTablesRead =
         ["prvReadsprk_Matter", "prvReadsprk_Project", "prvReadsprk_Invoice", "prvReadsprk_WorkAssignment", "prvReadsprk_Event", "prvReadsprk_Todo", "prvReadContact"];
 
@@ -226,6 +245,24 @@ public class FeatureRolePrivilegeGuardTests
         .. For("Office To Do", [Core], "Deep", Bff + "Api/Filters/TodoSourceAccessFilter.cs:99,202-212",
             "prvReadsprk_Matter", "prvReadsprk_Project", "prvReadsprk_Invoice", "prvReadsprk_Document", "prvReadsprk_Communication", "prvReadContact"),
 
+        // Communication send / reply (POST /api/communications/send and /send-bulk, fix round 3): the route filter asks AppendTo, as the
+        // caller, on every association and on every regarding record copied from the email being replied to (RegardingFieldMap.All, all
+        // twelve tables), and a reply reads the email it inherits from as the caller. The communication itself is written app-only, so no
+        // Create is asked. Communications and the regarding records are team-owned (I-6): Deep. Base roles are the sets: Basic User
+        // files and reads.
+        .. For("Communication send / reply", [Core], "Deep", CommSendRegarding, CommunicationRegardingAppendTo),
+        .. For("Communication send / reply", [Core], "Deep", CommSendReplyRead, "prvReadsprk_Communication"),
+        .. For("Communication send / reply (Basic User)", [Basic], "Deep", CommSendRegarding, CommunicationRegardingAppendTo),
+        .. For("Communication send / reply (Basic User)", [Basic], "Deep", CommSendReplyRead, "prvReadsprk_Communication"),
+
+        // Communication re-file (PATCH /api/communications/{id}/filing): the route filter asks Write on the communication, the re-file core
+        // reads the row and asks AppendTo on every record it is moved under, as the caller (Dataverse asks it on the lookups of the
+        // caller's own PATCH for the rest).
+        .. For("Communication re-file", [Core], "Deep", CommRefileOwn, "prvWritesprk_Communication", "prvReadsprk_Communication"),
+        .. For("Communication re-file", [Core], "Deep", CommRefileRegarding, CommunicationRegardingAppendTo),
+        .. For("Communication re-file (Basic User)", [Basic], "Deep", CommRefileOwn, "prvWritesprk_Communication", "prvReadsprk_Communication"),
+        .. For("Communication re-file (Basic User)", [Basic], "Deep", CommRefileRegarding, CommunicationRegardingAppendTo),
+
         // Mapping-source reads (every create that maps; the push's source): Read on the source, as the caller.
         .. For("Mapping-source read", [Core], "Deep",
             Bff + "Services/Dataverse/FieldMapping/MappingSourceReadProbe.cs:119,141-171; " + Bff + "Api/Filters/EntityAccessFilter.cs:115-155",
@@ -249,8 +286,9 @@ public class FeatureRolePrivilegeGuardTests
         // (I-6): Deep.
         .. For("Analysis run (writing playbook)", [Core], "Deep",
             Bff + "Api/Ai/AnalysisEndpoints.cs:118-120; " + Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:922-952,970", "prvWritesprk_Document"),
-        // G9 dropped (owner 2026-11-05, decisions.md:836): a run that can write documents is asked of Core User only; Basic User with AI
-        // Analysis User is not meant for it, so there is no row for that set.
+        // G9 dropped (owner 2026-11-05, decisions.md:836): Basic User with AI Analysis User is not meant for a run that can write documents,
+        // so there is no row for that set. The run is not limited to one role: it asks Write on sprk_document as the caller, so any role set
+        // that holds it can run one.
         // Any other run: Read on every document, and the playbook-use decision (Read on the playbook unless it is public).
         .. For("Analysis run", [Core], "Deep",
             Bff + "Api/Ai/AnalysisEndpoints.cs:115-120; " + Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:26-28,943-952", "prvReadsprk_Document"),
@@ -468,6 +506,17 @@ public class FeatureRolePrivilegeGuardTests
     /// <paramref name="Only"/> set, the rule covers just those roles.</summary>
     internal sealed record MustNotHoldRule(string Rule, string[] Privileges, string[] Except, string Evidence, string[]? Only = null);
 
+    /// <summary>Each rule whose <c>Only</c> is set but could never fire: an empty list covers no role, and a role that is both in
+    /// <c>Only</c> and in <c>Except</c> is excepted from the very rule that names it (fix round 3 K).</summary>
+    internal static List<string> VacuousOnly(IReadOnlyList<MustNotHoldRule> rules) =>
+        (from rule in rules
+         where rule.Only is not null
+         let only = rule.Only!
+         let empty = only.Length == 0
+         let overlap = only.Intersect(rule.Except, StringComparer.Ordinal).ToArray()
+         where empty || overlap.Length > 0
+         select $"{rule.Rule}: " + (empty ? "Only is empty, so the rule covers no role" : $"Only and Except both name {string.Join(", ", overlap)}")).ToList();
+
     /// <summary>What no person role holds (task 046b). A person role is every role file but the app users' role.</summary>
     internal static readonly IReadOnlyList<MustNotHoldRule> MustNotHold =
     [
@@ -484,12 +533,8 @@ public class FeatureRolePrivilegeGuardTests
         new("Budget Revision create: only the writer creates one; the cleanup role writes and deletes (owner 2026-11-05)",
             ["prvCreatesprk_BudgetRevision"], [],
             "projects/field-mapping-server-write-path-r1/notes/decisions.md:836; docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md:186"),
-        // Fix round 2 (owner 2026-11-05, decisions.md:836): Spaarke Basic User holds no AppendTo on a report card; no feature in the
-        // matrix asks it on a role set with Basic User (the KPI assessment's AppendTo is Core User's).
-        new("Spaarke Basic User: no AppendTo on sprk_reportcard (owner 2026-11-05)",
-            ["prvAppendTosprk_ReportCard"], [],
-            "projects/field-mapping-server-write-path-r1/notes/decisions.md:836; docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md:199",
-            [Basic]),
+        // R2 (Basic User: no AppendTo on sprk_reportcard) is NOT applied (fix round 3): the communication send, reply and re-file rows ask
+        // it of a Basic User on a report card regarding record, so there is no rule here for it. Awaiting the owner.
         new("Invoice line (sprk_billingevent) create: none, by design (BFF-written, ebilling D-18)",
             ["prvCreatesprk_BillingEvent"], [], "projects/ebilling-r1/notes/decisions-log.md:24"),
     ];
@@ -502,7 +547,25 @@ public class FeatureRolePrivilegeGuardTests
     [
         new("Office save (Basic User)", "prvAppendToContact", "Basic",
             "G3. Accepted, not applied (owner 2026-11-05): Spaarke Basic User is unchanged; Office Add In User carries it (G4)."),
+
+        // Fix round 3: the communication send / reply and re-file rows for Basic User (new rows; the owner has not ruled on them). Each
+        // waits on one owner decision through unified-access-control-r2: give Basic User these depths, or rule that a Basic User does
+        // not send, reply to or re-file communications.
+        new("Communication send / reply (Basic User)", "prvAppendTosprk_ServiceRequest", "none", CommunicationBasicWait("G11")),
+        new("Communication send / reply (Basic User)", "prvAppendTosprk_Budget", "none", CommunicationBasicWait("G11")),
+        new("Communication send / reply (Basic User)", "prvAppendToAccount", "Basic", CommunicationBasicWait("G11")),
+        new("Communication send / reply (Basic User)", "prvAppendToContact", "Basic", CommunicationBasicWait("G11")),
+        new("Communication send / reply (Basic User)", "prvReadsprk_Communication", "Basic", CommunicationBasicWait("G11")),
+        new("Communication re-file (Basic User)", "prvWritesprk_Communication", "Basic", CommunicationBasicWait("G12")),
+        new("Communication re-file (Basic User)", "prvReadsprk_Communication", "Basic", CommunicationBasicWait("G12")),
+        new("Communication re-file (Basic User)", "prvAppendTosprk_ServiceRequest", "none", CommunicationBasicWait("G12")),
+        new("Communication re-file (Basic User)", "prvAppendTosprk_Budget", "none", CommunicationBasicWait("G12")),
+        new("Communication re-file (Basic User)", "prvAppendToAccount", "Basic", CommunicationBasicWait("G12")),
+        new("Communication re-file (Basic User)", "prvAppendToContact", "Basic", CommunicationBasicWait("G12")),
     ];
+
+    private static string CommunicationBasicWait(string gap) =>
+        $"{gap}. Owner decision pending (found in fix round 3): Spaarke Basic User holds less than the depth the communication route asks of the caller.";
 
     private static readonly string[] DepthOrder = ["Basic", "Local", "Deep", "Global"];
 
@@ -915,6 +978,7 @@ public class FeatureRolePrivilegeGuardTests
     public void PersonRolesHoldNothingTheyMustNot()
     {
         var personRoles = PersonRoles(SolutionsDirectory);
+        Assert.Empty(VacuousOnly(MustNotHold));
         Assert.All(MustNotHold, rule =>
         {
             Assert.NotEmpty(rule.Privileges);
@@ -993,6 +1057,62 @@ public class FeatureRolePrivilegeGuardTests
             ForbiddenHeld(personRoles, rules));
     }
 
+    [Fact(DisplayName = "046b fix round 3 K: a must-not-hold rule with a vacuous Only (empty, or overlapping Except) is reported; Only unset or naming one other role is not; Only limits a rule to the roles it names")]
+    public void MustNotHoldRejectsAVacuousOnly()
+    {
+        // must-fire: empty Only; a role in both Only and Except
+        var rules = new MustNotHoldRule[]
+        {
+            new("R-empty", ["prvCreatesprk_Signal"], [], "x.md:1", []),
+            new("R-overlap", ["prvCreatesprk_Signal"], ["A", "B"], "x.md:1", ["B", "C"]),
+            new("R-null", ["prvCreatesprk_Signal"], ["A"], "x.md:1"),                      // must-not-fire: Only unset
+            new("R-only", ["prvCreatesprk_Signal"], ["A"], "x.md:1", ["B"]),               // must-not-fire: Only names a role Except does not
+        };
+        Assert.Equal(
+            new[] { "R-empty: Only is empty, so the rule covers no role", "R-overlap: Only and Except both name B" },
+            VacuousOnly(rules));
+        Assert.Empty(VacuousOnly(MustNotHold));
+
+        // Only limits the rule: it fires on the role it names and on no other
+        var roles = new Dictionary<string, IReadOnlyDictionary<string, string>>
+        {
+            ["B"] = Privileges(("prvCreatesprk_Signal", "Basic")),
+            ["D"] = Privileges(("prvCreatesprk_Signal", "Basic")),
+        };
+        Assert.Equal(new[] { "B: prvCreatesprk_Signal at Basic — R-only" }, ForbiddenHeld(roles, [rules[3]]));
+    }
+
+    [Fact(DisplayName = "046b fix round 3: taking AppendTo on sprk_reportcard off a copy of Basic User fails the guard through the communication send and re-file rows")]
+    public void RemovingReportCardAppendToFromBasicUserFailsTheGuard()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sprk-feature-roles-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            foreach (var file in Directory.EnumerateFiles(RolesDirectory, "*.xml"))
+                File.Copy(file, Path.Combine(dir, Path.GetFileName(file)));
+            var roleNames = Requirements.SelectMany(r => r.Roles).ToArray();
+
+            // must-not-fire: the copy as it is passes
+            var before = Ratchet(Gaps(Requirements, LoadRoles(dir, roleNames)), KnownGaps);
+            Assert.Empty(before.Unlisted.Concat(before.Stale).Concat(before.Changed));
+
+            // must-fire: without it, both Basic User rows report the report card
+            var path = Path.Combine(dir, Basic + ".xml");
+            var doc = XDocument.Load(path);
+            doc.Descendants().Single(e => e.Name.LocalName == "RolePrivilege" && Same((string?)e.Attribute("name") ?? "", "prvAppendTosprk_ReportCard")).Remove();
+            doc.Save(path);
+            var after = Ratchet(Gaps(Requirements, LoadRoles(dir, roleNames)), KnownGaps);
+            Assert.Contains(after.Unlisted, u => u.StartsWith("Communication send / reply (Basic User): prvAppendTosprk_ReportCard", StringComparison.Ordinal));
+            Assert.Contains(after.Unlisted, u => u.StartsWith("Communication re-file (Basic User): prvAppendTosprk_ReportCard", StringComparison.Ordinal));
+            Assert.DoesNotContain(after.Unlisted, u => u.StartsWith("Communication send / reply: ", StringComparison.Ordinal)); // Core User's rows still hold
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "046b must-not-hold seeded drift: each forbidden privilege given to any person role but the excepted one is reported")]
     public void MustNotHoldFiresForEverySeededPersonRole()
     {
@@ -1043,7 +1163,6 @@ public class FeatureRolePrivilegeGuardTests
             AddPrivilege(dir, OntologyAdmin, "prvCreatesprk_Signal", "Global"); // excepted: the cleanup role
             AddPrivilege(dir, Writer, "prvDeletesprk_Signal", "Global");         // the app users' role is not a person role
             AddPrivilege(dir, OntologyAdmin, "prvCreatesprk_BudgetRevision", "Deep"); // fix round 2: the cleanup role does not create one
-            AddPrivilege(dir, Basic, "prvAppendTosprk_ReportCard", "Deep");           // fix round 2: seeded back on Basic User
 
             // K1 (fix round 1): a role file in ANY other solution's Roles folder is a person role too.
             var other = Path.Combine(root, "SomeOtherSolution", "src", "Roles");
@@ -1055,12 +1174,11 @@ public class FeatureRolePrivilegeGuardTests
 
             var found = ForbiddenHeld(PersonRoles(root), MustNotHold).Order(StringComparer.Ordinal).ToList();
 
-            Assert.Equal(5, found.Count);
+            Assert.Equal(4, found.Count);
             Assert.StartsWith("Spaarke Added Elsewhere: prvDeletesprk_DecisionRecord at Basic", found[0], StringComparison.Ordinal);
-            Assert.StartsWith("Spaarke Basic User: prvAppendTosprk_ReportCard at Deep", found[1], StringComparison.Ordinal);
-            Assert.StartsWith("Spaarke Basic User: prvCreatesprk_BillingEvent at Basic", found[2], StringComparison.Ordinal);
-            Assert.StartsWith("Spaarke Console User: prvWritesprk_Signal at Deep", found[3], StringComparison.Ordinal);
-            Assert.StartsWith("Spaarke Ontology Administrator: prvCreatesprk_BudgetRevision at Deep", found[4], StringComparison.Ordinal);
+            Assert.StartsWith("Spaarke Basic User: prvCreatesprk_BillingEvent at Basic", found[1], StringComparison.Ordinal);
+            Assert.StartsWith("Spaarke Console User: prvWritesprk_Signal at Deep", found[2], StringComparison.Ordinal);
+            Assert.StartsWith("Spaarke Ontology Administrator: prvCreatesprk_BudgetRevision at Deep", found[3], StringComparison.Ordinal);
         }
         finally
         {
@@ -1273,7 +1391,7 @@ public class FeatureRolePrivilegeGuardTests
     {
         var removals = LoadRemovals(RuledChangesPath);
         var changes = LoadRuledChanges(RuledChangesPath);
-        Assert.Equal(2, removals.Count);
+        Assert.Single(removals);
         var personRoles = PersonRoles(SolutionsDirectory);
         var roles = LoadRoles(RolesDirectory, removals.Select(r => r.Role));
 

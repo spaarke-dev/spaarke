@@ -98,14 +98,6 @@
       "privilege": "prvCreatesprk_BudgetRevision",
       "expectedDepth": "Deep",
       "feature": "Budget Revision create: only the writer creates one (owner ruling 2026-11-05); the role keeps Write and Delete"
-    },
-    {
-      "gap": "R2",
-      "role": "Spaarke Basic User",
-      "table": "sprk_reportcard",
-      "privilege": "prvAppendTosprk_ReportCard",
-      "expectedDepth": "Deep",
-      "feature": "No feature in the matrix asks AppendTo on a report card of a role set with Basic User (owner ruling 2026-11-05)"
     }
   ]
 }
