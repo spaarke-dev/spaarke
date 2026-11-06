@@ -52,6 +52,19 @@ public sealed class H7bSecureRecordSetupHandlerTests
     }
 
     [Fact]
+    public async Task S23_TheRuntimeRoleGoesToInterStepStateSystemUserId_NotToTheAppRegistrationUser()
+    {
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        var repo = new FakeRepository(BuildRun(dv));
+
+        var result = await BuildHandler(repo, dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        dv.UserRoles.Keys.Should().BeEquivalentTo(new[] { dv.MiAppUser }, "systemUserId is the managed identity's application user");
+        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId });
+    }
+
+    [Fact]
     public async Task AbsentInviteCodeHash_IsRecordedInTheVerifiedGateEvidence_NotFailed()
     {
         var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);   // SpaarkeMaster 1.2.2.0: no sprk_externalinvitecodehash yet

@@ -225,6 +225,7 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
             new SecureRecordSetupTarget(state.DataverseEnvUrl!, tenantId, state.BffAppRegId!),
             roleSet,
             [bffAppUser, miAppUser],
+            miAppUser,
             customerUnitId,
             dryRun);
         SecureRecordSetupOutcome outcome;

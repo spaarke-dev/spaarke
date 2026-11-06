@@ -42,6 +42,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// <summary>Team-role disassociations are accepted but do not stick (verify-phase tests).</summary>
     internal bool TeamRoleDisassociationsIgnored { get; set; }
 
+    /// <summary>User-role associations are accepted but do not stick (S23 verify-phase test).</summary>
+    internal bool UserRoleAssociationsIgnored { get; set; }
+
     /// <summary>Profiles whose user/team associations are accepted but do not stick (verify-phase tests).</summary>
     internal HashSet<Guid> ProfileAssociationsIgnored { get; } = [];
 
@@ -93,6 +96,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     internal Guid AccessAdministratorRoleId { get; private set; }
     internal Guid CoreUserRoleId { get; private set; }
     internal Guid NoAccessEntryReadPrivilegeId { get; private set; }
+    /// <summary>S23: the SpaarkeMaster role as the import leaves it - the root copy and the customer unit's copy (a replica of it).</summary>
+    internal Guid RootOntologyRoleId { get; private set; }
+    internal Guid OntologyRoleId { get; private set; }
     internal Guid BffAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f1");
     internal Guid MiAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f2");
     internal static readonly string[] LockedTables = ["sprk_invoice", "sprk_matter", "sprk_project", "sprk_workassignment"];
@@ -175,6 +181,7 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         dv.RolePrivileges[dv.AccessAdministratorRoleId][entryRead.Id] = (entryRead.Name, "Global");
         dv.CoreUserRoleId = dv.AddRole(dv.RootUnitId, SecureRecordSetupProcedure.CoreUserRoleName);
 
+        dv.RootOntologyRoleId = dv.AddRole(dv.RootUnitId, SecureRecordSetupProcedure.OntologyServiceRoleName);
         dv.UserApplicationId[dv.BffAppUser] = Guid.NewGuid();
         dv.UserApplicationId[dv.MiAppUser] = Guid.NewGuid();
         dv.CustomerUnitId = Guid.NewGuid();
@@ -182,7 +189,17 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         dv.CustomerDefaultTeamId = dv.AddTeam(dv.CustomerUnitId, CustomerUnitName, isDefault: true);
         dv.UserUnit[dv.BffAppUser] = dv.CustomerUnitId;
         dv.UserUnit[dv.MiAppUser] = dv.CustomerUnitId;
+        dv.OntologyRoleId = dv.AddRole(dv.CustomerUnitId, SecureRecordSetupProcedure.OntologyServiceRoleName, parentRootRoleId: dv.RootOntologyRoleId);
         return dv;
+    }
+
+    /// <summary>A systemuser in <paramref name="unitId"/>; <paramref name="isApplicationUser"/> false = an interactive user (no application id).</summary>
+    internal Guid AddUser(Guid unitId, bool isApplicationUser)
+    {
+        var id = Guid.NewGuid();
+        UserUnit[id] = unitId;
+        UserApplicationId[id] = isApplicationUser ? Guid.NewGuid() : null;
+        return id;
     }
 
     /// <summary>
@@ -371,6 +388,28 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             .Take(2).ToArray());
     }
 
+    public Task<IReadOnlyList<SecureSetupRole>> FindRoleCopiesAsync(SecureRecordSetupTarget target, string name, CancellationToken cancellationToken)
+    {
+        Read(nameof(FindRoleCopiesAsync));
+        return Task.FromResult<IReadOnlyList<SecureSetupRole>>(
+            Roles.Where(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray());
+    }
+
+    public Task<IReadOnlyList<SecureSetupRoleUser>> ListRoleUsersAsync(SecureRecordSetupTarget target, Guid roleId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListRoleUsersAsync));
+        return Task.FromResult<IReadOnlyList<SecureSetupRoleUser>>(UserRoles.Where(kv => kv.Value.Contains(roleId))
+            .Select(kv => new SecureSetupRoleUser(kv.Key, UserApplicationId.GetValueOrDefault(kv.Key))).ToArray());
+    }
+
+    public Task<IReadOnlyList<SecureSetupRole>> ListUserRolesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListUserRolesAsync));
+        return Task.FromResult<IReadOnlyList<SecureSetupRole>>(UserRoles.TryGetValue(systemUserId, out var ids)
+            ? ids.Select(id => Roles.Single(r => r.Id == id)).ToArray()
+            : []);
+    }
+
     public Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken)
     {
         Read(nameof(ListTeamRolesAsync));
@@ -512,6 +551,20 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     {
         Write($"AssociateTeamRole {teamId} {roleId}");
         TeamRoles[teamId].Add(roleId);
+        return Task.CompletedTask;
+    }
+
+    public Task AssociateUserRoleAsync(SecureRecordSetupTarget target, Guid systemUserId, Guid roleId, CancellationToken cancellationToken)
+    {
+        Write($"AssociateUserRole {systemUserId} {roleId}");
+        if (!UserRoleAssociationsIgnored)
+        {
+            if (!UserRoles.TryGetValue(systemUserId, out var ids))
+            {
+                UserRoles[systemUserId] = ids = [];
+            }
+            ids.Add(roleId);
+        }
         return Task.CompletedTask;
     }
 

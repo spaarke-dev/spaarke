@@ -21,10 +21,11 @@ public sealed class SecureRecordSetupProcedureTests
     private static readonly SecureRecordOwnerRoleSet Set = SecureRecordOwnerRoleSet.Embedded;
     private static readonly SecureRecordSetupTarget Target = new("https://spaarke-acme.crm.dynamics.com/", "tenant", "bff-app");
 
-    private static Task<SecureRecordSetupOutcome> RunAsync(FakeSecureRecordSetupDataverse dv, bool dryRun = false, Guid? customerUnit = null)
+    private static Task<SecureRecordSetupOutcome> RunAsync(
+        FakeSecureRecordSetupDataverse dv, bool dryRun = false, Guid? customerUnit = null, Guid? runtimeUser = null)
         => new SecureRecordSetupProcedure(dv, NullLogger.Instance)
-            .RunAsync(new SecureRecordSetupRequest(Target, Set, [dv.BffAppUser, dv.MiAppUser], customerUnit ?? dv.CustomerUnitId, dryRun),
-                CancellationToken.None);
+            .RunAsync(new SecureRecordSetupRequest(Target, Set, [dv.BffAppUser, dv.MiAppUser], runtimeUser ?? dv.MiAppUser,
+                customerUnit ?? dv.CustomerUnitId, dryRun), CancellationToken.None);
 
     private static FakeSecureRecordSetupDataverse NewEnv() => FakeSecureRecordSetupDataverse.NewEnvironment(Set);
 
@@ -1220,6 +1221,161 @@ public sealed class SecureRecordSetupProcedureTests
 
         (await act.Should().ThrowAsync<SecureRecordSetupDataverseException>()).Which.Kind.Should().Be(SecureRecordSetupFaultKind.RateLimited);
         dv.Writes.Should().BeEmpty();
+    }
+
+    // ------------------------------------------------------------ S23: the runtime identity holds "Spaarke Ontology Service"
+
+    private static readonly string OntologyRole = SecureRecordSetupProcedure.OntologyServiceRoleName;
+
+    [Fact]
+    public async Task S23_AssignsTheCustomerUnitCopy_ToTheRuntimeUser_AndVerifiesIt()
+    {
+        var dv = NewEnv();
+
+        var outcome = await RunAsync(dv);
+
+        var applied = outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>().Subject;
+        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId }, "the copy in the user's own (customer) business unit");
+        dv.UserRoles.Should().NotContainKey(dv.BffAppUser, "only the managed identity's application user gets the role");
+        dv.Writes.Should().ContainSingle(w => w.StartsWith("AssociateUserRole", StringComparison.Ordinal));
+        applied.Actions.Should().Contain($"give BFF runtime user {dv.MiAppUser} the role '{OntologyRole}'");
+    }
+
+    [Fact]
+    public async Task S23_RoleAlreadyHeld_WritesNothing()
+    {
+        var dv = NewEnv();
+        dv.UserRoles[dv.MiAppUser] = [dv.OntologyRoleId];
+
+        var outcome = await RunAsync(dv);
+
+        outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.Writes.Should().NotContain(w => w.StartsWith("AssociateUserRole", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task S23_DryRun_PlansTheAssignment_WithoutWriting()
+    {
+        var dv = NewEnv();
+
+        var outcome = await RunAsync(dv, dryRun: true);
+
+        outcome.Should().BeOfType<SecureRecordSetupOutcome.Planned>().Which.Actions
+            .Should().Contain($"give BFF runtime user {dv.MiAppUser} the role '{OntologyRole}'");
+        dv.UserRoles.Should().BeEmpty();
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_RoleMissingInTheCustomerUnit_Refuses_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        dv.Roles.RemoveAll(r => r.BusinessUnitId == dv.CustomerUnitId && r.Name == OntologyRole);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleUnresolved, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(OntologyRole).And.Contain("import SpaarkeMaster");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_TwoCopiesInTheCustomerUnit_Refuses_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        dv.AddRole(dv.CustomerUnitId, OntologyRole);
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleUnresolved, FailureClass.Resumable);
+
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_RuntimeUserAbsent_Refuses_AndWritesNothing()
+    {
+        var dv = NewEnv();
+
+        var refused = Refused(await RunAsync(dv, runtimeUser: Guid.Empty),
+            SecureRecordSetupRejectionCodes.OntologyServiceRoleUnresolved, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("H10 output missing");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_RuntimeUserInAnotherBusinessUnit_Refuses_NamingBothIds_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        var stray = dv.AddUser(dv.RootUnitId, isApplicationUser: true);
+
+        var refused = Refused(await RunAsync(dv, runtimeUser: stray),
+            SecureRecordSetupRejectionCodes.OntologyServiceRoleUserOutsideCustomerBusinessUnit, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.RootUnitId.ToString()).And.Contain(dv.CustomerUnitId.ToString());
+        dv.Writes.Should().BeEmpty();
+        dv.UserRoles.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_TeamHoldsTheRole_Quarantines_NamingIt_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        dv.TeamRoles[dv.CustomerDefaultTeamId].Add(dv.OntologyRoleId);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleHumanOrTeamHolder,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.CustomerDefaultTeamId.ToString());
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_TeamHoldingTheRootCopy_AlsoQuarantines()
+    {
+        var dv = NewEnv();
+        dv.TeamRoles[dv.RootDefaultTeamId].Add(dv.RootOntologyRoleId);
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleHumanOrTeamHolder, FailureClass.QuarantineRequired);
+
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_InteractiveUserHoldsTheRole_Quarantines_NamingIt_AndWritesNothing()
+    {
+        var dv = NewEnv();
+        var human = dv.AddUser(dv.CustomerUnitId, isApplicationUser: false);
+        dv.UserRoles[human] = [dv.OntologyRoleId];
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleHumanOrTeamHolder,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(human.ToString());
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S23_AppRegistrationUserHoldsTheRole_IsAllowed_AndNeverRemoved()
+    {
+        var dv = NewEnv();
+        dv.UserRoles[dv.BffAppUser] = [dv.OntologyRoleId];
+
+        var outcome = await RunAsync(dv);
+
+        outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.UserRoles[dv.BffAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId }, "an application user may hold it and is left alone");
+        dv.UserRoles[dv.MiAppUser].Should().BeEquivalentTo(new[] { dv.OntologyRoleId });
+        dv.Writes.Should().NotContain(w => w.Contains(dv.BffAppUser.ToString(), StringComparison.Ordinal) && w.Contains(dv.OntologyRoleId.ToString(), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task S23_AssociationThatDoesNotStick_FailsTheStep_WithTheNotHeldCode()
+    {
+        var dv = NewEnv();
+        dv.UserRoleAssociationsIgnored = true;
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyServiceRoleNotHeld, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain(dv.MiAppUser.ToString()).And.Contain(OntologyRole);
     }
 
     private static Guid SecureUnit(FakeSecureRecordSetupDataverse dv)

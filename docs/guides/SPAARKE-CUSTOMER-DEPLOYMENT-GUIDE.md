@@ -1884,6 +1884,14 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
 - the BFF's two application users as members of the `Standing Grant Administrators` field-security profile (without
   it the platform hides `contact.sprk_standinggrant` from the BFF and every standing grant reads as not held; ISS-020 /
   #1565) — other members of that profile are never touched;
+- (S23) the BFF's runtime Dataverse identity (the managed identity's application user, by application id) holds
+  `Spaarke Ontology Service`, which it needs to read the ontology tables; no team or interactive user may hold that role.
+  H7b assigns the copy in the customer business unit, reads it back, and fails the step if it is missing. It refuses
+  `secure_setup.ontology_service_role_unresolved` (Resumable: import SpaarkeMaster, or H10's output is missing),
+  `secure_setup.ontology_service_role_user_outside_customer_bu` or
+  `secure_setup.ontology_service_role_human_or_team_holder` (QuarantineRequired), before writing anything; the
+  verification failure is `secure_setup.ontology_service_role_not_held` (Resumable). Other application users that hold the
+  role are left alone;
 - a check that `sprk_noaccessentry` is readable, and that the `Spaarke Access Administrator` role holds Read on it at
   Global while `Spaarke Core User` holds none (unified-access-control-r2 task 154; verified, never repaired — H7b
   refuses `secure_setup.no_access_entry_roles_incomplete` and names `scripts/Set-NoAccessEntryRolePrivileges.ps1`);

@@ -10,7 +10,8 @@
 // ships) — plus S22 (ISS-025 / #1803): the locks on contact.sprk_externalinvitedon and, once it ships,
 // contact.sprk_externalinvitecodehash, VERIFIED ONLY — and (#2317) S19 also verifies the lock on the access level
 // contact.sprk_accesspermissiongrant, and S22 the locks on the BFF-only columns sprk_externalinvitedemailhash,
-// sprk_externalinvitedtenantid and sprk_externalaccessremovedon once they ship. Every step READS first
+// sprk_externalinvitedtenantid and sprk_externalaccessremovedon once they ship — plus S23: the BFF's runtime Dataverse identity (the managed identity's
+// application user) holds the "Spaarke Ontology Service" role, and no team or interactive user does. Every step READS first
 // and writes only what is missing, so a second run against a configured environment performs no write at all.
 //
 // THREE PHASES
@@ -54,12 +55,14 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 /// <param name="Target">The environment and the identity that signs in to it.</param>
 /// <param name="RoleSet">The codified set (embedded <c>config/secure-record-owner-role.json</c>).</param>
 /// <param name="BffApplicationUserIds">The BFF's Dataverse application users H10 registered — the only writer-profile members.</param>
+/// <param name="BffRuntimeApplicationUserId">S23: the Dataverse application user of the BFF's runtime identity, the user-assigned managed identity (InterStepState.SystemUserId); <see cref="Guid.Empty"/> = H10's output is missing.</param>
 /// <param name="CustomerBusinessUnitId">T259: the customer's business unit H10 created (InterStepState.CustomerBusinessUnitId).</param>
 /// <param name="DryRun">Read everything, write nothing, return the plan.</param>
 public sealed record SecureRecordSetupRequest(
     SecureRecordSetupTarget Target,
     SecureRecordOwnerRoleSet RoleSet,
     IReadOnlyList<Guid> BffApplicationUserIds,
+    Guid BffRuntimeApplicationUserId,
     Guid CustomerBusinessUnitId,
     bool DryRun);
 
@@ -166,6 +169,12 @@ public sealed class SecureRecordSetupProcedure
 
     /// <summary>S19: the standing-grant flag's column.</summary>
     public const string StandingGrantColumn = "sprk_standinggrant";
+
+    /// <summary>
+    /// S23: the role (shipped in SpaarkeMaster, copied into every business unit) the BFF's runtime identity needs to read the
+    /// ontology tables. Only application users may hold it: no team and no interactive user.
+    /// </summary>
+    public const string OntologyServiceRoleName = "Spaarke Ontology Service";
 
     /// <summary>S21: the table whose reads task 154 (owner decision O2) restricts to access administrators.</summary>
     public const string NoAccessEntryTable = "sprk_noaccessentry";
@@ -372,9 +381,11 @@ public sealed class SecureRecordSetupProcedure
         }
 
         // T259 §6 T3 — both BFF application users are in the customer's unit (never the root, never the secure unit).
+        var appUserUnits = new Dictionary<Guid, Guid?>();
         foreach (var appUser in request.BffApplicationUserIds.Distinct())
         {
             var appUserUnit = await dv.GetUserBusinessUnitAsync(t, appUser, ct).ConfigureAwait(false);
+            appUserUnits[appUser] = appUserUnit;
             if (appUserUnit != customerUnit.Id)
             {
                 return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.AppUserOutsideCustomerBusinessUnit,
@@ -383,6 +394,64 @@ public sealed class SecureRecordSetupProcedure
                     "roles — an owner decision. Nothing was written.");
             }
         }
+
+        // S23 (read half) — the BFF's runtime identity must hold "Spaarke Ontology Service"; no team and no interactive user may.
+        // Dataverse only assigns the copy that belongs to the USER's business unit, so the copy is resolved by the user's own
+        // unit (T3's reading when the user is one of the checked application users — no second query) and that unit must be
+        // the customer's. Every refusal here is before any write.
+        var runtimeUser = request.BffRuntimeApplicationUserId;
+        if (runtimeUser == Guid.Empty)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.OntologyServiceRoleUnresolved,
+                $"The BFF's runtime Dataverse user (H10's systemUserId, the managed identity's application user) is not known: " +
+                $"H10 output missing, so '{OntologyServiceRoleName}' cannot be assigned. Nothing was written.");
+        }
+        if (!appUserUnits.TryGetValue(runtimeUser, out var runtimeUserUnit))
+        {
+            runtimeUserUnit = await dv.GetUserBusinessUnitAsync(t, runtimeUser, ct).ConfigureAwait(false);
+        }
+        if (runtimeUserUnit != customerUnit.Id)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyServiceRoleUserOutsideCustomerBusinessUnit,
+                $"The BFF's runtime Dataverse user {runtimeUser} is in business unit {runtimeUserUnit?.ToString() ?? "(no such user)"}, " +
+                $"not the customer's business unit {customerUnit.Id}; '{OntologyServiceRoleName}' is assigned from the user's own " +
+                "unit and H10 puts the user in the customer's unit. Moving a user strips its roles - an owner decision. " +
+                "Nothing was written.");
+        }
+        var ontologyRoles = await dv.FindRolesAsync(t, OntologyServiceRoleName, customerUnit.Id, ct).ConfigureAwait(false);
+        if (ontologyRoles.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.OntologyServiceRoleUnresolved,
+                $"Business unit '{customerUnit.Name}' ({customerUnit.Id}) has {ontologyRoles.Count} roles named " +
+                $"'{OntologyServiceRoleName}' (expected exactly one). It ships in SpaarkeMaster: import SpaarkeMaster (H6), then " +
+                "resume. Nothing was written.");
+        }
+        var ontologyRoleId = ontologyRoles[0].Id;
+        var ontologyHolderProblems = new List<string>();
+        foreach (var copy in await dv.FindRoleCopiesAsync(t, OntologyServiceRoleName, ct).ConfigureAwait(false))
+        {
+            var holderTeams = await dv.ListRoleTeamHoldersAsync(t, copy.Id, ct).ConfigureAwait(false);
+            if (holderTeams.Count > 0)
+            {
+                ontologyHolderProblems.Add($"teams [{Ids(holderTeams)}] hold the copy {copy.Id}");
+            }
+            var interactive = (await dv.ListRoleUsersAsync(t, copy.Id, ct).ConfigureAwait(false))
+                .Where(u => u.ApplicationId is null)
+                .Select(u => u.UserId)
+                .ToArray();
+            if (interactive.Length > 0)
+            {
+                ontologyHolderProblems.Add($"interactive users [{Ids(interactive)}] hold the copy {copy.Id}");
+            }
+        }
+        if (ontologyHolderProblems.Count > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyServiceRoleHumanOrTeamHolder,
+                $"'{OntologyServiceRoleName}' may be held by application users only, but " +
+                string.Join("; ", ontologyHolderProblems) +
+                ". Who holds the role is an operator decision; nothing is removed here. Nothing was written.");
+        }
+        var runtimeUserRoles = await dv.ListUserRolesAsync(t, runtimeUser, ct).ConfigureAwait(false);
 
         // S4 (root half) — a role of this name in the ROOT unit is copied into every unit, so a unit created below would
         // already hold a replica beside the one S4 creates, assignable everywhere (T218e: why the role never ships).
@@ -1102,6 +1171,14 @@ public sealed class SecureRecordSetupProcedure
                 () => dv.AssociateProfileUserAsync(t, standingProfileId, bffUser, ct)).ConfigureAwait(false);
         }
 
+        // S23 - the BFF's runtime identity holds the customer-unit copy of "Spaarke Ontology Service". Other application users
+        // that hold the role (the app-registration user included) are allowed and never touched.
+        if (runtimeUserRoles.All(r => r.Id != ontologyRoleId))
+        {
+            await Write($"give BFF runtime user {runtimeUser} the role '{OntologyServiceRoleName}'",
+                () => dv.AssociateUserRoleAsync(t, runtimeUser, ontologyRoleId, ct)).ConfigureAwait(false);
+        }
+
         // S13 — no NULL secure flag may remain (a new environment has none; an upgraded one has the pre-column rows). It
         // runs before the BFF deploy because H9 waits for H7b, and a task-150 BFF refuses an EMPTY flag.
         foreach (var table in lockedIdentities)
@@ -1124,9 +1201,15 @@ public sealed class SecureRecordSetupProcedure
             defaultTeamId!.Value, [(readerProfileId, ReaderProfileName), (linkReaderProfileId, IdentityLinkReaderProfileName)],
             [(writerProfileId, WriterProfileName), (linkWriterProfileId, IdentityLinkWriterProfileName)],
             standingProfileId, bffUsers, lockedIdentities, ct).ConfigureAwait(false);
+        var ontologyNotHeld = (await dv.ListUserRolesAsync(t, runtimeUser, ct).ConfigureAwait(false)).All(r => r.Id != ontologyRoleId);
+        if (ontologyNotHeld)
+        {
+            problems.Add($"BFF runtime user {runtimeUser} does not hold '{OntologyServiceRoleName}' ({ontologyRoleId}) after it was assigned");
+        }
         if (problems.Count > 0)
         {
-            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.VerifyFailed,
+            return Refuse(FailureClass.Resumable,
+                ontologyNotHeld ? SecureRecordSetupRejectionCodes.OntologyServiceRoleNotHeld : SecureRecordSetupRejectionCodes.VerifyFailed,
                 "The re-read state is not the codified one: " + string.Join("; ", problems) +
                 ". Dataverse may still be applying a write; resume re-runs every step (each reads first).");
         }

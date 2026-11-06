@@ -224,6 +224,28 @@ public static class SecureRecordSetupRejectionCodes
     public const string AccessRemovedOnLockOtherWriter = "secure_setup.access_removed_on_lock_other_writer";
 
     /// <summary>
+    /// S23: the BFF's runtime Dataverse identity (H10's <c>SystemUserId</c>, the managed identity's application user) is not
+    /// known, or the "Spaarke Ontology Service" role cannot be resolved to exactly one copy in that user's business unit
+    /// (Resumable: H10's output is missing, or import SpaarkeMaster, H6).
+    /// </summary>
+    public const string OntologyServiceRoleUnresolved = "secure_setup.ontology_service_role_unresolved";
+
+    /// <summary>
+    /// S23: the runtime user's business unit is not the customer's business unit, so the customer-unit copy of the role
+    /// cannot be assigned to it (QuarantineRequired: moving a user strips its roles - an owner decision).
+    /// </summary>
+    public const string OntologyServiceRoleUserOutsideCustomerBusinessUnit = "secure_setup.ontology_service_role_user_outside_customer_bu";
+
+    /// <summary>
+    /// S23: a team, or a systemuser with no application id (an interactive user), holds a copy of "Spaarke Ontology Service"
+    /// (QuarantineRequired: nothing is removed here; who holds the role is an operator decision).
+    /// </summary>
+    public const string OntologyServiceRoleHumanOrTeamHolder = "secure_setup.ontology_service_role_human_or_team_holder";
+
+    /// <summary>S23: the re-read shows the runtime identity does not hold the role after the association (Resumable).</summary>
+    public const string OntologyServiceRoleNotHeld = "secure_setup.ontology_service_role_not_held";
+
+    /// <summary>
     /// Dry run finished: the plan is in the <see cref="H7bSecureRecordSetupHandler.PlanGateId"/> gate evidence and nothing
     /// was written. The run stops here so no later handler runs against an environment the dry run left unconfigured.
     /// </summary>

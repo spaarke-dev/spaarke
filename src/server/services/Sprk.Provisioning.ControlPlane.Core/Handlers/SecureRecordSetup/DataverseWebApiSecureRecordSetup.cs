@@ -154,6 +154,22 @@ public sealed class DataverseWebApiSecureRecordSetup : ISecureRecordSetupDataver
         => Session(target).FindRolesAsync(name, businessUnitId, cancellationToken);
 
     /// <inheritdoc/>
+    public Task<IReadOnlyList<SecureSetupRole>> FindRoleCopiesAsync(SecureRecordSetupTarget target, string name, CancellationToken cancellationToken)
+        => Session(target).FindRoleCopiesAsync(name, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<SecureSetupRoleUser>> ListRoleUsersAsync(SecureRecordSetupTarget target, Guid roleId, CancellationToken cancellationToken)
+        => Session(target).ListRoleUsersAsync(roleId, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<SecureSetupRole>> ListUserRolesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+        => Session(target).ListUserRolesAsync(systemUserId, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task AssociateUserRoleAsync(SecureRecordSetupTarget target, Guid systemUserId, Guid roleId, CancellationToken cancellationToken)
+        => Session(target).AssociateUserRoleAsync(systemUserId, roleId, cancellationToken);
+
+    /// <inheritdoc/>
     public Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken)
         => Session(target).ListTeamRolesAsync(teamId, cancellationToken);
 
@@ -376,6 +392,24 @@ internal sealed class SecureRecordSetupWebApi
                 $"Reading role '{name}'", ct).ConfigureAwait(false))
             .Select(Role).ToArray();
 
+    internal async Task<IReadOnlyList<SecureSetupRole>> FindRoleCopiesAsync(string name, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"roles?$filter=name eq '{Literal(name)}'" +
+                "&$select=roleid,name,_businessunitid_value,_parentrootroleid_value,_roletemplateid_value",
+                $"Reading every copy of role '{name}'", ct).ConfigureAwait(false))
+            .Select(Role).ToArray();
+
+    internal async Task<IReadOnlyList<SecureSetupRoleUser>> ListRoleUsersAsync(Guid roleId, CancellationToken ct)
+        => (await GetAllValuesAsync($"roles({roleId})/systemuserroles_association?$select=systemuserid,applicationid",
+                "Reading the role's users", ct).ConfigureAwait(false))
+            .Select(r => new SecureSetupRoleUser(Id(r, "systemuserid"), OptionalId(r, "applicationid"))).ToArray();
+
+    internal async Task<IReadOnlyList<SecureSetupRole>> ListUserRolesAsync(Guid systemUserId, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"systemusers({systemUserId})/systemuserroles_association?$select=roleid,name,_businessunitid_value,_parentrootroleid_value,_roletemplateid_value",
+                "Reading the user's roles", ct).ConfigureAwait(false))
+            .Select(Role).ToArray();
+
     internal async Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(Guid teamId, CancellationToken ct)
         => (await GetAllValuesAsync(
                 $"teams({teamId})/teamroles_association?$select=roleid,name,_businessunitid_value,_parentrootroleid_value,_roletemplateid_value",
@@ -537,6 +571,10 @@ internal sealed class SecureRecordSetupWebApi
 
     internal Task AssociateTeamRoleAsync(Guid teamId, Guid roleId, CancellationToken ct)
         => WriteAsync(HttpMethod.Post, $"teams({teamId})/teamroles_association/$ref", Reference("roles", roleId), "Giving the team the role", ct);
+
+    internal Task AssociateUserRoleAsync(Guid systemUserId, Guid roleId, CancellationToken ct)
+        => WriteAsync(HttpMethod.Post, $"systemusers({systemUserId})/systemuserroles_association/$ref", Reference("roles", roleId),
+            "Giving the user the role", ct);
 
     internal Task DisassociateTeamRoleAsync(Guid teamId, Guid roleId, CancellationToken ct)
         => WriteAsync(HttpMethod.Delete, $"teams({teamId})/teamroles_association({roleId})/$ref", null, "Taking the role from the team", ct);
