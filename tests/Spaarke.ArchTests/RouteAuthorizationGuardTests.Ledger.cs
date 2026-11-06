@@ -2803,7 +2803,8 @@ public partial class RouteAuthorizationGuardTests
         // rule 2's SECOND clause — "a create with no pre-existing resource" — not rule 4's forbidden
         // build-go-green move. The distinction matters, so state it plainly: there is no resource to
         // authorize because the record does not exist yet; that is the whole reason the route exists.
-        // It is the same reasoning the Permanent waiver on POST /api/v1/documents already carries.
+        // (POST /api/v1/documents once carried the same reasoning; it is now a handler decision that checks
+        // Create as the caller and requires the caller's business-unit container.)
         //
         // What makes it safe is NOT a filter, and pretending otherwise would be the dishonest version:
         //   - The route has NO container parameter, so a caller cannot name where bytes go. That is
