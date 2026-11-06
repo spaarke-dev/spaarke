@@ -857,3 +857,7 @@ Sending into a communication thread asks Read on `sprk_communicationthread` as t
 ## 2026-11-06 — G13 grant withdrawn (supersedes "Core User reads communication threads at Deep")
 
 The ruling above rested on a wrong premise. Core User is not raised. Direct threads are private by ownership and explicit shares, so the depth of Read on `sprk_communicationthread` is part of their privacy rule and stays Basic. Record threads are owned by the owner of the record they are filed to, normally a team, and a member reads them at Basic. Task 046b sets the send/reply row to match. G13 stays open only if a record thread can remain owned by its creator. The owner was told in fm's session.
+
+## 2026-11-06 — G13 is not a gap (closes "G13 grant withdrawn")
+
+The send/reply thread read needs Basic. Record threads are owned by their record's team at creation (`ThreadResolver`), and a member reads them at Basic. Threads anchored to a party, and Direct threads, are read through ownership and shares, by the privacy rule. Core User and Basic User both hold Basic, so no role changes. Task 046b, `5d079d1508`.
