@@ -4,16 +4,16 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-05 ~22:15Z (0f53e053bf deployed to dev, gate PASS; 043 cleared; 049 decisions sent).
+> **Last Updated**: 2026-11-06 ~02:00Z (PR #2577 open with merge watcher; 046b additions applied; R2 dropped; deploy waits for 049).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; peers take the owner's go for their own live writes in their sessions. |
-| **Active work** | Reviews (below). No deploy in flight. No uncommitted files. |
+| **Active work** | **PR #2577** (POST /api/v1/documents: Create as the caller + the caller's BU container; branch `task/uac-doc-create-auth`, worktree C:/wtdc): adversarial review clean after fixes; both integration suites pass; a background job merges it when Router + Client lint are green. Filed #2576 (probe fault shown as denial). After merge: remove C:/wtdc (Remove-WorktreeSafe), and add the Summarize Files matrix row if 046b merged first. Reviews (below). No deploy in flight. |
 | **Dev state** | BFF = **0f53e053bf** since 2026-11-05T21:39:06Z (gate PASS; record `notes/deploy-gate-2026-11-05-0f53e053bf.md`; gate script `$TEMP/uacmerge/uacg/gate0f5.sh`). Rollback snapshot `deploy/rollback/wwwroot-20261105T213757Z` is 909754869f. Dev SPA = b083d62183. |
-| **Next action** | 0. Next dev deploy = ONE combined deploy after 049 merges (owner: wait for 049; 0f6618094b = #2573 fm 043 held; every peer re-OKs the combined SHA). 1. fm 049b: review when fm sends the final head SHA (fix round in progress, with my decisions below). 2. 046b -Apply on dev when fm's script and WhatIf are ready (owner go given for G1, G2, G4-G8). 3. ebilling master PR review when it opens. 4. Owed to ontology: Signals 200 and the nightly counts on 0f53e053bf. |
+| **Next action** | 0. Next dev deploy = ONE combined deploy after 049 merges (owner: wait for 049; 0f6618094b = #2573 fm 043 held; every peer re-OKs the combined SHA). 1. fm 049b: review when fm sends the final head SHA (fix round in progress, with my decisions below). 2. 046b `-Remove` on dev for R1 only (Ontology Admin Create on budgetrevision) when fm sends its head SHA; R2 dropped; do NOT run 8b45f8dfd0. Additions G1-G8 are done. 3. ebilling master PR review when it opens. 4. Owed to ontology: Signals 200 and the nightly counts on 0f53e053bf. |
 
 ## Reviews in flight
 - **ebilling** (`-c7`):
