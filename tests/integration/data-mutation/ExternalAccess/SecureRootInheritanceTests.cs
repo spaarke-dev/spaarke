@@ -64,7 +64,7 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
 
     private static int Mask(string rightsCsv) => RecordShareLevels.MaskForRightsCsv(rightsCsv);
 
-    private static int MirrorOf(string rightsCsv) => RecordShareLevels.ChildMirrorMask(Mask(rightsCsv));
+    private static int MirrorOf(string rightsCsv) => RecordShareLevels.InheritedRootMirrorMask(Mask(rightsCsv));
 
     private static async Task<JsonElement> JsonOf(HttpResponseMessage response)
     {

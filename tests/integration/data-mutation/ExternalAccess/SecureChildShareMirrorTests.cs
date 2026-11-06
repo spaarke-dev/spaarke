@@ -145,6 +145,81 @@ public class SecureChildShareMirrorTests
         _shares.WriteLog.Where(w => w.RecordId == DocR).Should().ContainSingle().Which.Rights.Should().Be(FullChildCsv);
     }
 
+    // ── GitHub #2560: a mirrored share on a hard-deny row carries Read only ─────────────────────────────────────────
+
+    private static readonly Guid PolicyOfMatter = Guid.Parse("901c0000-0000-4000-8000-000000000001");
+    private static readonly Guid VersionOfPolicy = Guid.Parse("901c0000-0000-4000-8000-000000000002");
+    private const int WriteOnly = 2;
+    private const int ReadWriteDeleteShare = 1 | 2 | 65536 | 262144;
+
+    /// <summary>The standard world plus a rule (<c>sprk_policy</c>) under the secure matter and its version.</summary>
+    private static SecureChildShareWorld WorldWithPolicy() => World()
+        .SecureChild("sprk_policy", PolicyOfMatter, ("sprk_matter", "sprk_matter", SecureMatter))
+        .SecureChild("sprk_policyversion", VersionOfPolicy, ("sprk_policy", "sprk_policy", PolicyOfMatter));
+
+    [Fact]
+    public async Task Reconcile_AHardDenyChild_IsMirroredAtReadOnly_WhateverTheRootShareCarries()
+    {
+        _shares.Seed("sprk_matter", SecureMatter, User(UserA), FullAccess);
+        _shares.Seed("sprk_matter", SecureMatter, User(UserB), Collaborate);
+        _shares.Seed("sprk_matter", SecureMatter, User(UserC), WriteOnly);
+        _shares.Seed("sprk_matter", SecureMatter, DataversePrincipalRef.Team(TeamT), FullAccess);
+
+        var result = await WorldWithPolicy().Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        result.Status.Should().Be(SecureChildShareSyncStatus.Completed);
+        foreach (var (table, id) in new[] { ("sprk_policy", PolicyOfMatter), ("sprk_policyversion", VersionOfPolicy) })
+        {
+            _shares.MaskOf(table, id, User(UserA)).Should().Be(ViewOnly, $"{table}: Full Access on the root mirrors Read only");
+            _shares.MaskOf(table, id, User(UserB)).Should().Be(ViewOnly, $"{table}: Collaborate on the root mirrors Read only");
+            _shares.MaskOf(table, id, DataversePrincipalRef.Team(TeamT)).Should().Be(ViewOnly, $"{table}: a team too");
+            _shares.MaskOf(table, id, User(UserC)).Should().BeNull($"{table}: a root share without Read mirrors nothing");
+        }
+
+        _shares.WriteLog.Where(w => w.EntitySet is "sprk_policies" or "sprk_policyversions")
+            .Should().OnlyContain(w => w.Action == "GrantAccess" && w.Rights == ViewCsv);
+
+        // Must-not-fire: the matter's ordinary child keeps the full mirror, Share and Delete included.
+        _shares.MaskOf("sprk_document", DocOfMatter, User(UserA)).Should().Be(FullAccessOnChild);
+        _shares.MaskOf("sprk_document", DocOfMatter, User(UserB)).Should().Be(CollaborateOnChild);
+    }
+
+    [Fact]
+    public async Task Reconcile_AWiderShareOnAHardDenyChild_IsNarrowedToRead_AndOneTheRootGivesNoReadIsRevoked()
+    {
+        _shares.Seed("sprk_matter", SecureMatter, User(UserA), FullAccess);
+        _shares.Seed("sprk_matter", SecureMatter, User(UserC), WriteOnly);
+        _shares.Seed("sprk_policy", PolicyOfMatter, User(UserA), ReadWriteDeleteShare);
+        _shares.Seed("sprk_policy", PolicyOfMatter, User(UserC), ReadWriteDeleteShare);
+        _shares.Seed("sprk_policyversion", VersionOfPolicy, User(UserA), ViewOnly); // already the mirror
+
+        var result = await WorldWithPolicy().Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        result.Status.Should().Be(SecureChildShareSyncStatus.Completed);
+        _shares.MaskOf("sprk_policy", PolicyOfMatter, User(UserA)).Should().Be(ViewOnly, "children follow their roots: Read only");
+        _shares.MaskOf("sprk_policy", PolicyOfMatter, User(UserC)).Should().BeNull("the root gives no Read: revoked");
+        _shares.WriteLog.Where(w => w.RecordId == PolicyOfMatter).Should().BeEquivalentTo(new[]
+        {
+            ("ModifyAccess", "sprk_policies", PolicyOfMatter, User(UserA), (string?)ViewCsv),
+            ("RevokeAccess", "sprk_policies", PolicyOfMatter, User(UserC), (string?)null),
+        });
+        _shares.WriteLog.Should().NotContain(w => w.RecordId == VersionOfPolicy, "a Read-only share on a hard-deny row is the mirror");
+    }
+
+    [Fact]
+    public async Task SyncRoot_AWiderShareOnAHardDenyChild_IsNarrowedToRead_InTheRequest()
+    {
+        _shares.Seed("sprk_matter", SecureMatter, User(UserA), Collaborate);
+        _shares.Seed("sprk_policyversion", VersionOfPolicy, User(UserA), ReadWriteDeleteShare);
+
+        var result = await WorldWithPolicy().Synchronizer(_shares).SyncRootAsync("sprk_matter", SecureMatter, CancellationToken.None);
+
+        result.Status.Should().Be(SecureChildShareSyncStatus.Completed);
+        _shares.MaskOf("sprk_policyversion", VersionOfPolicy, User(UserA)).Should().Be(ViewOnly);
+        _shares.MaskOf("sprk_policy", PolicyOfMatter, User(UserA)).Should().Be(ViewOnly);
+        _shares.MaskOf("sprk_document", DocOfMatter, User(UserA)).Should().Be(CollaborateOnChild, "an ordinary child: unchanged");
+    }
+
     [Fact]
     public async Task Reconcile_CoversMattersAndWorkAssignments()
     {

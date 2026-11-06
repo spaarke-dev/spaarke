@@ -164,7 +164,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         _ => "workassignment",
     };
 
-    private static int MirrorOf(string rightsCsv) => RecordShareLevels.ChildMirrorMask(RecordShareLevels.MaskForRightsCsv(rightsCsv));
+    private static int MirrorOf(string childTable, string rightsCsv) =>
+        RecordShareLevels.ChildMirrorMask(childTable, RecordShareLevels.MaskForRightsCsv(rightsCsv));
 
     private static async Task<JsonElement> JsonOf(HttpResponseMessage response)
     {
@@ -210,13 +211,12 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
             .PostAsJsonAsync(ProvisionRoute, new { recordType = RecordType(rootTable), recordId = rootId });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        var creatorMirror = MirrorOf(ProvisionProjectEndpoint.CreatorAccessRights);
         foreach (var (table, id) in family.Children())
         {
             _fixture.ChildWorld.OwnerOf(table, id).Should().Be(DataversePrincipalRef.Team(SecureTeam),
                 $"{table} {id} is an existing child of the record now secure");
             _fixture.SharesOn(id).Should().Equal(
-                new Dictionary<DataversePrincipalRef, int> { [DataversePrincipalRef.User(Creator)] = creatorMirror },
+                new Dictionary<DataversePrincipalRef, int> { [DataversePrincipalRef.User(Creator)] = MirrorOf(table, ProvisionProjectEndpoint.CreatorAccessRights) },
                 "a child's sharees are exactly the record's, at the record's rights (Share included since round 91)");
         }
 
