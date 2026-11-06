@@ -275,3 +275,11 @@ The owner asked for the best technical and process answer.
 
 - **Office Add In User is for licensed core users** (attorneys, paralegals and the like), assigned directly, never through a team. After its removal from the root default team, four dev service or demo accounts no longer hold it (# Accounts Payable, # Invoice Processing, # Spaarke Get Started, # UAC Child BU Test User). The owner ruled that none of them gets it back. Office add-in saves by those accounts are refused, as expected.
 - **The next dev BFF deploy waits for field-mapping 049.** Master `0f6618094b` (#2573, field-mapping 043) is not deployed alone. One combined deploy follows 049's merge: the BFF plus the LegalWorkspace, SpaarkeAi, CreateProjectWizard and AI.Widgets code pages. Each peer re-checks the combined SHA; ontology's OK covered `0f6618094b` only.
+
+## 2026-11-06: Basic User keeps AppendTo on report cards (046b removal R2 not applied)
+
+The owner's removal of Basic User's AppendTo on `sprk_reportcard` (2026-11-05, above) was conditional on no matrix feature needing it. field-mapping's re-check found two that do. Sending or replying to an email filed against a report card asks AppendTo on each regarding record as the caller, and so does re-filing an email to a report card. The Connections editor offers Report Card as a filing target. Under the ruling's own condition the removal is not applied, and Basic User keeps the privilege. field-mapping adds matrix rows for communication send, reply and re-file so the guard checks them.
+
+Removal R1 (Ontology Administrator loses Create on `sprk_budgetrevision`) stands and was re-verified: only the writer identity creates budget revisions.
+
+If the owner later wants Basic-only users unable to file emails against report cards, that is a separate change (the Connections editor and the regarding map), not a role edit.
