@@ -1079,6 +1079,26 @@ Each has a fallback:
 
 Microsoft's Copilot answers (2026-11-05) point to the same need: users have to know which skill to pick and where playbooks live.
 
+**Individual user: the package zip** (owner scenario, 2026-11-06; backlog X12, X13). An attorney with an M365 Copilot licence and no team library gets one zip, "Spaarke Legal AI Accelerator – <practice> v<x.y>.zip".
+
+- **What's in it.** The zip mirrors the target tree: one top folder, `Legal Knowledge/`, holding:
+  - `START HERE.pdf`;
+  - `Playbooks/<practice>/`: the Markdown master and the Word copy, plus an empty `Archive/`;
+  - `Precedents/`;
+  - `Grounding/{Format,Samples}/`: synthetic samples with their expected results, used for the trial run;
+  - `Accelerators/`: the Cowork plugin `.zip` (named "upload, do not unzip"), the quick cards, an IT one-pager, and the release notes and disclaimer.
+
+  Word-only users need only `Playbooks/` and the Word card. That keeps the two editions apart.
+- **Save.** Extract All into OneDrive `Documents`; with no sync client, upload the folder at onedrive.com. The files must end up in OneDrive, because Word's Attach from Cloud and Cowork read only the cloud. A later version is extracted over the top, and setup moves superseded versions to `Archive/`.
+- **Set up:**
+  - **Step 0, preflight.** Is Word's `/Review contract` listed? Is Cowork available, with credits? Is plugin **Upload** offered? If not, the user sends IT the one-pager.
+  - **Part 1, Word (about 5 minutes, nothing to install).** Attach the Word copy, save the playbook, and run a trial review on a sample with a known expected result.
+  - **Part 2, Cowork (10–15 minutes).**
+    - Upload the plugin and publish it to "Only you".
+    - Run `/spaarke-nda-setup` in personal mode. It does the environment check and asks one or two question cards. After validating the playbook, it writes the profile (with one approval). Then it creates the output folders, offers the custom-instructions block, and runs a trial review.
+  - **Part 3, optional: change a position.** Setup writes the new version of **both** the master and the Word copy, and moves the old ones to `Archive/`. This needs the renderer shipped as a setup script (X13). Today only the build can write the Word copy, so a change made by an individual would leave the Word copy stale.
+- **Depends on the Word test set:** Part 1 steps 3–4 (R1, R4), and whether the card says to save the playbook or attach it every time (R6).
+
 ### 8.2 NDA: the reference implementation (from the POC)
 
 The NDA Accelerator's first cut comes from the POC:

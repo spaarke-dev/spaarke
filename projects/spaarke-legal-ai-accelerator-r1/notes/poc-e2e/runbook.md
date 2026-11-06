@@ -116,6 +116,8 @@ The policy follows §7.2a of `playbook-library-and-grounding.md`:
    - what General guidelines contain.
 
 ### Act 2: the attorney in Word: the Word test set. Proves the Word deliverable (revised 2026-11-06).
+**The step-by-step script with capture points is `word-test-script.md`.** The table below is the summary.
+
 *Revised after the owner's Act 1 review: that discussion already captured the Act 2 feedback (design v0.6 §2.4.6). Each test is short. Log a screenshot and one line per test in `results.md`. Design §12 lists what each test decides.*
 
 **Setup.**
