@@ -886,3 +886,13 @@ The send/reply thread read needs Basic. Record threads are owned by their record
 - **032: extracted invoices get Matter field mapping in R1.** `InvoiceSubmissionPersister` stays the single creator; a fill-only mapping step inside it, before its transaction, calls the same mapping engine (W3 direction, option 2). No change to `RecordCreationService`. Ebilling-r1 and UAC-r2 review.
 - **Office To Do assignee order:** the user's explicit choice; else the field-mapped value; else the user's own contact (the order 030a implements).
 - **Live checks on dev approved:** the Project→Matter profile check and the 021 re-measure, test rows prefixed FMSWP-.
+
+## 2026-11-06 — 049b: only the maker is granted inside the request (UAC-r2)
+
+**Finding (021 re-measure, task-021-live.md):** when the created root's Assigned To is its maker, 049 runs the assigned-access pass inline for every assigned subject (5 subjects, 11 writes, about 6.6 s), so the create p95 was 11.8 s.
+
+**Ruling (UAC-r2):** the inline pass exists so the maker can open the record at once. Inline grants the maker's own subject only; every other subject, external grants included, goes through the queued path the non-maker case uses. Conditions:
+1. The queued remainder uses the same ordered scan and revoke-on-change (G-8) path: no new queue, no second owner.
+2. If enqueueing the remainder fails, it is logged and the reconciler completes it; the create never reports "all granted".
+3. If the maker's inline grant fails, today's behaviour is unchanged.
+4. Tests: maker case is exactly 1 subject inline and N-1 queued; the non-maker case is unchanged; an external subject is never inline.

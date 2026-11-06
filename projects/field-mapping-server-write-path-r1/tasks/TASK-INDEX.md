@@ -41,13 +41,14 @@
 | 046c | [Basic User is read-only on Spaarke tables: role file, -Remove, guard (owner 2026-11-06)](046c-basic-user-read-only-on-spaarke-tables.poml) | FR-08, FR-26 | opus / high | FULL | none | 046b; live removal by UAC-r2 under the owner's go | 🔲 [open] |
 | 048 | [Signal, Decision Record and Budget Revision changed only by their writers: generic update tools refuse them (owner 2026-11-04, D-204 extended)](048-writer-only-tables-refused-by-generic-updates.poml) | FR-41 | opus / high | FULL | none | 042c | ✅ [done] PR #2570 merged 2026-11-05 (0f53e053bf) |
 | 049 | [Create path within NFR-02: concurrent caller checks, assigned-access grant after the response (owner 2026-11-05)](049-create-path-latency-nfr02.poml) | NFR-02 | opus / high | FULL | none | 021, 042c | ✅ [done] master via #2599 (20669df6a9, 2026-11-06); dev deploy via UAC-r2 |
+| 049b | Create path: when the maker is the root's Assigned To, grant only the maker inline and queue the other subjects (UAC-r2 ruling 2026-11-06) | NFR-02 | opus / high | FULL | none | 049 | 🔲 queued for the next agent slot |
 
 ## Phase 3 — W3 Product creators onto the service
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 020 | [Child-records route: Matter, Project, `mappingSource`](020-child-records-route-matter-project.poml) | FR-15 | opus / high | FULL | none | 019 | ✅ (#2551, aef86b89f7) |
-| 021 | [Matter wizard (reference) + latency before/after](021-matter-wizard-migration.poml) | FR-16, NFR-02 | sonnet / high | FULL | W3-wizards | 020, 041 | 🔄 code + review fix round 1 on task/fm-021 (d6dc73e9f6); live NFR-02 +2634 ms (task-021-live.md) → 049; wizard deploy waits for 049 |
+| 021 | [Matter wizard (reference) + latency before/after](021-matter-wizard-migration.poml) | FR-16, NFR-02 | sonnet / high | FULL | W3-wizards | 020, 041 | 🔄 code + review fix round 1 on task/fm-021 (d6dc73e9f6). Re-measure 2026-11-06 after 049, with the Project→Matter profile: still over NFR-02 (maker is Assigned To: p95 +10.4 s, inline grant of every subject → 049b; queued: about +2 s). Owner decision pending (task-021-live.md); wizard deploy waits |
 | 022 | [Project wizard (incl. secure Project)](022-project-wizard-migration.poml) | FR-16, FR-15 | opus / high | FULL | W3-wizards | 021, 041 | 🔲 |
 | 023 | [Event wizard](023-event-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 022, 041 | 🔲 |
 | 024 | [To Do wizard](024-todo-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 023, 041 | 🔲 |
