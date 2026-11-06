@@ -4,7 +4,8 @@
 // Component Justification (CLAUDE.md §11):
 //   (1) Existing — TrackingNumberAllocator.RenumberSubmissionAsync (095d-1a) moves a no-firm submission into a firm's scope in one transaction,
 //       but decides nothing about the invoice; InvoiceApprovalService and SubmissionOverrideService decide an invoice but never set its firm;
-//       InvoiceFirmHold reads the hold; the only writers of sprk_firmhold are the persister's create and this service's apply (the rerun-pending marker, EB-D-185).
+//       InvoiceFirmHold reads the hold; sprk_firmhold is written by the persister's create (firm_missing), this service's apply (which WRITES the
+//       rerun-pending marker over it, EB-D-185) and the re-run's commit (InvoiceSubmissionRerun, 095d-2a-2), the only writer that clears it.
 //   (2) Extension — the allocator is the number columns' only writer (D-37) and must stay ignorant of invoices, lines and files; the approval
 //       and override services each own another decision's order and recovery (ADR-002: one owner per invariant). Setting a firm is its own
 //       decision with its own refusals, stored decision and repeat rule, so it is its own service that hands its apply to the allocator.
@@ -1004,8 +1005,8 @@ public sealed class InvoiceAssignFirmService
             // The invoice: its firm, its number and its own hold REPLACED by the rerun-pending marker, conditioned on the version read (16.4
             // condition 2). EB-D-185 / uac-r2 R3: the firm is set but the rules re-run for it has not completed, so the invoice stays held and
             // the firm gate (InvoiceFirmGate) answers "re-run pending" from this field-secured marker alone, whatever the submission link says.
-            // TODO(095d-2 / 2a-2): the COMPLETED re-run is the only writer that clears the marker (a failed re-run leaves it in place). Nothing in
-            // Set firm or the gate clears or downgrades it.
+            // The COMPLETED re-run's commit (InvoiceSubmissionRerun, task 095d-2a-2) is the only writer that clears the marker, in the transaction
+            // that writes rulesRerun = completed; a failed or refused re-run leaves it in place. Nothing in Set firm or the gate clears or downgrades it.
             var invoice = new Entity(InvoiceReviewReadService.InvoiceEntity, InvoiceId)
             {
                 [InvoiceSubmissionPersister.InvoiceVendorOrg] = firm,

@@ -38,9 +38,13 @@ public sealed class InvoiceFirmHoldAppOnlyGuardTests
         typeof(InvoiceFirmHold), // READER: HeldInvoicesAsync queries sprk_invoice for the column through the IGenericEntityService its callers pass (app-only)
         typeof(InvoiceOpenHolds), // READER (082c-2 fix round 3): ReasonsAsync reads the invoice's own hold through the IGenericEntityService its callers pass (app-only); never writes it
         typeof(InvoiceSubmissionPersister), // WRITER: sets it in the invoice create of the held outcome, inside the app-only ExecuteTransactionAsync
-        // WRITER (095d-1b): clears it in the invoice update of Set firm's one renumber transaction, sent by the allocator's app-only
-        // ExecuteTransactionAsync; it reads the hold only through InvoiceFirmHold.IsHeldAsync over its own IGenericEntityService (app-only).
+        // WRITER (095d-1b, EB-D-185): WRITES the rerun-pending marker over firm_missing in the invoice update of Set firm's one renumber
+        // transaction, sent by the allocator's app-only ExecuteTransactionAsync; it never clears the column. It reads the hold only through
+        // InvoiceFirmHold.IsHeldAsync over its own IGenericEntityService (app-only).
         typeof(Sprk.Bff.Api.Services.Finance.InvoiceAssignFirmService),
+        // READER and WRITER (095d-2a-2): the re-run reads the invoice's hold through its own IGenericEntityService (app-only) and clears the
+        // rerun-pending marker in its one ExecuteTransactionAsync (app-only, row-version conditioned), the only clearer of that marker.
+        typeof(InvoiceSubmissionRerun),
     ];
 
     /// <summary>Types that name the column without reading or writing a row: held to C1 and C2, not C3.</summary>

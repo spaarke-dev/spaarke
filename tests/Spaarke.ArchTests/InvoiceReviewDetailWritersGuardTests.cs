@@ -24,7 +24,8 @@ namespace Spaarke.ArchTests;
 /// names no column literal, so <see cref="TheCommitGateUndoDerivesTheDetail"/> pins that it derives one.</para>
 /// <para><b>Pending writers</b> (each must recompute from the invoice's REMAINING reasons in its own transaction, and be added here): (2) the
 /// re-check that clears a gap or unresolved (no 082c-2 path clears one: 082d / 101's correction re-evaluation and the ebilling-r2 explicit
-/// re-check); (4) the 095d-2 re-run. (5), the 114 Override release, is built (<c>SubmissionOverrideService.BuildReleaseTransaction</c>, listed
+/// re-check). (4), the 095d-2 re-run, is built (<c>InvoiceSubmissionRerun.InvoiceAfter</c>, listed in <see cref="Writers"/>;
+/// <see cref="TheRerunDerivesThroughOpenHolds"/> pins its derivation). (5), the 114 Override release, is built (<c>SubmissionOverrideService.BuildReleaseTransaction</c>, listed
 /// in <see cref="Writers"/>; <see cref="TheOverrideReleaseDerivesThroughOpenHolds"/> pins its derivation). The 089e chain close is NOT a pending writer (8): C19 found it writes
 /// <c>sprk_signal</c> only and never an invoice status, so it never needs the detail.</para>
 /// <para><b>Enforced by this test</b> (CLAUDE.md section 16 ladder): a type cannot say "only these methods write this column", so the rule is an
@@ -50,6 +51,9 @@ public sealed class InvoiceReviewDetailWritersGuardTests
         // (5) the 114 Override release (task 114): the detail re-derived from the holds that remain (InvoiceOpenHolds.ReasonsAfterAsync), in the
         // release transaction with the submission's state. The derivation is pinned by TheOverrideReleaseDerivesThroughOpenHolds.
         (typeof(SubmissionOverrideService), "BuildReleaseTransaction"),
+        // (4) the 095d-2 re-run (task 095d-2a-2): the detail re-derived from the holds that remain after its commit (InvoiceOpenHolds.ReasonsOf over
+        // every linked submission with this one's new state, the invoice's own hold cleared by the same write), in the re-run's one transaction.
+        (typeof(InvoiceSubmissionRerun), "InvoiceAfter"),
     ];
 
     /// <summary>Types and methods that name the column without writing a row value: the definition, the probe and the two registrations.</summary>
@@ -119,6 +123,24 @@ public sealed class InvoiceReviewDetailWritersGuardTests
         Assert.Empty(MethodsCallingOpenHolds(IlCallScan.WithNested(typeof(ReviewDetailUnrelatedControlFixture))));
     }
 
+    [Fact(DisplayName = "095d-2a-2 (D-205 writer 4): the re-run derives the review detail through InvoiceOpenHolds.ReasonsOf and ReviewDetailOf in InvoiceSubmissionRerun.InvoiceAfter")]
+    public void TheRerunDerivesThroughOpenHolds()
+    {
+        var types = IlCallScan.WithNested(typeof(InvoiceSubmissionRerun));
+        var key = $"{typeof(InvoiceSubmissionRerun).FullName}::InvoiceAfter";
+
+        Assert.True(MethodsCallingReviewDetailOf(types).Contains(key),
+            "The re-run writes the review detail, so it must derive it with InvoiceReviewDetail.ReviewDetailOf in InvoiceAfter (D-205 writer 4).");
+        Assert.True(MethodsCallingOpenHolds(types, nameof(InvoiceOpenHolds.ReasonsOf)).Contains(key),
+            "The re-run must derive the detail from every hold that remains after its commit through InvoiceOpenHolds.ReasonsOf (the derivation "
+            + "approval agrees with), never from this submission's outcome alone.");
+
+        // Controls: a method that calls ReasonsOf is seen; one that does not, is not.
+        Assert.Contains(Key((typeof(OpenHoldsOfControlFixture), nameof(OpenHoldsOfControlFixture.Derive))),
+            MethodsCallingOpenHolds(IlCallScan.WithNested(typeof(OpenHoldsOfControlFixture)), nameof(InvoiceOpenHolds.ReasonsOf)));
+        Assert.Empty(MethodsCallingOpenHolds(IlCallScan.WithNested(typeof(ReviewDetailUnrelatedControlFixture)), nameof(InvoiceOpenHolds.ReasonsOf)));
+    }
+
     [Fact(DisplayName = "082c-2 controls: the scan fires on a method that names the column, and not on one that names another column")]
     public void Controls()
     {
@@ -136,8 +158,11 @@ public sealed class InvoiceReviewDetailWritersGuardTests
             .ToHashSet(StringComparer.Ordinal);
 
     private static HashSet<string> MethodsCallingOpenHolds(IEnumerable<Type> types) =>
+        MethodsCallingOpenHolds(types, nameof(InvoiceOpenHolds.ReasonsAfterAsync));
+
+    private static HashSet<string> MethodsCallingOpenHolds(IEnumerable<Type> types, string method) =>
         IlCallScan.MethodReferences(types)
-            .Where(r => r.Target.Name == nameof(InvoiceOpenHolds.ReasonsAfterAsync) && r.Target.DeclaringType == typeof(InvoiceOpenHolds))
+            .Where(r => r.Target.Name == method && r.Target.DeclaringType == typeof(InvoiceOpenHolds))
             .Select(r => Key((IlCallScan.Outermost(r.Caller), IlCallScan.SourceMethodName(r.Caller, r.CallerMethod))))
             .ToHashSet(StringComparer.Ordinal);
 
@@ -158,6 +183,12 @@ internal static class ReviewDetailWriterControlFixture
 internal static class ReviewDetailDeriverControlFixture
 {
     public static int? Derive() => InvoiceReviewDetail.ReviewDetailOf(null);
+}
+
+/// <summary>Derives the open holds from stored state (must-fire for the 095d-2a-2 scan). Never run; only its IL is read.</summary>
+internal static class OpenHoldsOfControlFixture
+{
+    public static IReadOnlySet<string> Derive() => InvoiceOpenHolds.ReasonsOf(false, false, []);
 }
 
 /// <summary>Derives the open holds through the after-write derivation (must-fire for the 114 scan). Never run; only its IL is read.</summary>
