@@ -40,6 +40,8 @@
     - (1) Approval refuses a line of unknown origin: the task 164 criterion "approval refuses a line of unknown origin", moved here in full.
     - (2) Status: approval, AP export and spend count an invoice as Approved, Sent to AP or Paid only when the matching server-written record exists, and otherwise refuse or hold it (409, a distinct code). The records: the approve Decision Record; the export batch or its record for Sent to AP; the paid record. Verify that each one is class (a) or (b). Spend (`FinanceBaseValues`) is ontology-r1's code: make the minimal change and list it for their review.
     - (3) Totals: approval and AP export check that the stored invoice totals equal `InvoiceTotalsCalculator` over the lines, and refuse on a mismatch (409, a distinct code).
+    - (4) Pending spend (a confirmed defect found in the 165a review, not a known limit): both pending-spend paths (`FinanceBaseValues.cs` ~:416 anti-join, `FinanceRollupService.cs` ~:344) exclude every invoice `InvoiceBlockedHold` holds, so a user edit of a submission's status, reason code or link cannot make a held invoice count as pending spend. ontology-r1 owns `FinanceBaseValues`: minimal change, listed for their review. Must-fire per path with a must-not-fire control; one seed.
+    Merge note: 165a puts the invoice's own-submission selection in one helper; 164a-4a moved `ReadSubmissionAsync` into `InvoiceFindingsDiff`. Whichever merges second calls the helper there.
   </scope>
 
   <acceptance-criteria>
@@ -79,5 +81,6 @@
 
   <escalation>
     <trigger>A hold source cannot be made (a), (b) or (c) without changing D-101 behaviour visible to reviewers or firms: STOP and report.</trigger>
+    <trigger>OPEN OWNER QUESTION (165a K6): 165a holds an invoice whose own submission is not linked, which also holds invoices created outside a submission (Outlook add-in quick-create, the generic child-record create route, older records; 11 In Review on dev, 2026-11-06). Nothing server-written marks an invoice as manual. Until the owner decides, keep the hold and do not build an exemption.</trigger>
   </escalation>
 </task>
