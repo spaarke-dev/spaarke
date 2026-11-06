@@ -121,6 +121,50 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
             return Log(SubmissionEvaluationOutcome.Failed(snapshot.SubmissionId, ex.ErrorCode, snapshot));
         }
 
+        return await EvaluateStepsAsync(snapshot, read, finalDelivery, _coding, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 095d-2a-1: steps 1c-5 (the D-91 check, resolve, code, evaluate, decide) on a read already in hand, through the same code
+    /// <see cref="EvaluateAsync"/> runs after its step 1 (one pipeline, not a copy). The re-run after Set firm calls it with the read rebuilt
+    /// from the stored rows (<see cref="StoredSubmissionRead"/>); it never reads the document. Writes nothing. Not on
+    /// <see cref="IInvoiceSubmissionProcessor"/>: only the re-run calls it.
+    /// </summary>
+    /// <param name="snapshot">The submission as read now (with the firm Set firm wrote).</param>
+    /// <param name="read">The invoice as the analyzer read it.</param>
+    /// <param name="finalDelivery">As <see cref="EvaluateAsync"/>.</param>
+    /// <param name="coding">The coding step; null is the processor's own <see cref="ILineCodingService"/>. The re-run passes
+    /// <see cref="RerunLineCoding"/>, which codes through that service only the lines whose code set changes (EB-D-186).</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>As <see cref="EvaluateAsync"/>; a flag that is off is a Failed outcome.</returns>
+    public Task<SubmissionEvaluationOutcome> EvaluateFromReadAsync(
+        SubmissionSnapshot snapshot,
+        ExtractedInvoice read,
+        bool finalDelivery,
+        ILineCodingService? coding = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(read);
+
+        // ADR-018: the flag first, as EvaluateAsync.
+        if (!_ebilling.CurrentValue.Enabled)
+        {
+            return Task.FromResult(Log(SubmissionEvaluationOutcome.Failed(snapshot.SubmissionId, SubmissionReasonCodes.EbillingDisabled, snapshot)));
+        }
+
+        return EvaluateStepsAsync(snapshot, read, finalDelivery, coding ?? _coding, ct);
+    }
+
+    /// <summary>
+    /// Steps 1c-5 on a read already in hand: the D-91 check, resolve, code, evaluate, decide. The ONE copy of this logic (task 095d-2a-1):
+    /// <see cref="EvaluateAsync"/> calls it after step 1, and the re-run after Set firm calls it on the read rebuilt from the stored rows.
+    /// <paramref name="codingStep"/> is the coding step: the processor's own <see cref="ILineCodingService"/> for intake, or the re-run's, which
+    /// codes through that same service only the lines whose code set changes (EB-D-186).
+    /// </summary>
+    private async Task<SubmissionEvaluationOutcome> EvaluateStepsAsync(
+        SubmissionSnapshot snapshot, ExtractedInvoice read, bool finalDelivery, ILineCodingService codingStep, CancellationToken ct)
+    {
         // Step 1c: D-91. A difference holds for review; it never rejects and never changes the tracking number.
         var numberCheck = InvoiceNumberCheck.Compare(snapshot.FirmInvoiceNumber, read.Header.FirmInvoiceNumber);
         IReadOnlyList<SubmissionPipelineFinding> pipelineFindings = numberCheck.Result == InvoiceNumberMatch.Mismatch
@@ -160,7 +204,7 @@ public sealed class InvoiceSubmissionProcessor : IInvoiceSubmissionProcessor
         string? codingHold = null;
         try
         {
-            coding = await _coding.CodeLinesAsync(BuildCodingRequest(snapshot, read), ct).ConfigureAwait(false);
+            coding = await codingStep.CodeLinesAsync(BuildCodingRequest(snapshot, read), ct).ConfigureAwait(false);
         }
         catch (FeatureDisabledException ex)
         {
