@@ -222,7 +222,7 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
       - clicking a row opens that Work Item's wizard;
       - loading, empty and error states render;
       - the Console's own worklist is unchanged (its tests pass, with no visual change).
-      - billing Work Items (invoice decisions) render only as a link out to the Invoice Review page (`sprk_invoicereviewpage`, `data=invoiceId%3D{guid}` with a bare lower-case guid; add `lineId` when ebilling ships it), built from the item's `invoiceReview` member. They are never completed in Copilot (EB-D-194). Until ontology #2580 is on master, those items are omitted or shown without a link.
+      - billing Work Items (invoice decisions) render only as a link out to the Invoice Review page (`sprk_invoicereviewpage`, `data=invoiceId%3D{guid}%26lineId%3D{guid}` with bare lower-case guids; `lineId` is ignored today and turns on line focus when EB-D-194's optional parameter lands, as confirmed by ontology and ebilling on 2026-11-06), built from the item's `invoiceReview` member. They are never completed in Copilot (EB-D-194). Until ontology #2580 is on master, those items are omitted or shown without a link.
 
 13. **FR-13 — Widget: the Decision wizard.** `DecisionWizardHost` / `DecisionItemWizard` run through a `ResponseFetchFn` shim mapped onto FR-06, FR-07 and FR-08.
     - The flow is: What was found → one step per planned action → Next steps → Confirm.
