@@ -830,3 +830,10 @@ Numbering note (2026-11-04): the "task 043" planned on 2026-11-02 for the `sprk_
 **Writer-only tables at role level:** no person role holds Create, Write or Delete on `sprk_signal`, `sprk_decisionrecord` or `sprk_budgetrevision`, except Spaarke Ontology Administrator, the designated cleanup role (ontology D-160). Task 046b's guard pins that rule.
 
 **How it is applied:** task 046b builds the role-file changes and an apply script (`-WhatIf`, `-Apply`, `-Verify`; edits the root role through the Web API and reads back every business-unit copy). UAC-r2 reviews it and runs `-Apply` on dev in its session under the owner's go.
+
+## 2026-11-05 — Standalone add-on rulings, two role removals, and secure-from-creation wizard projects (owner, given in UAC-r2's session; UAC-r2 decisions.md 51793949a0)
+
+- **Not standalone, by ruling:** Office Add In User and AI Analysis User are not standalone; neither is meant to be held alone, so no gap is opened for either alone (G9 dropped). Console User needs Core User. The guard and §5.1 record each as a ruled exception with that reason.
+- **Two removals (task 046b):** Ontology Administrator loses Create on `sprk_budgetrevision` and keeps Write and Delete. Basic User loses AppendTo on `sprk_reportcard`, provided no §5.1 feature needs it on Basic User. The apply script gets an explicit removal step with the same fail-closed reads and read-back of every business-unit copy. UAC-r2 applies it on dev.
+- **Secure from creation (task 049):** a project the wizard creates as secure is secure from creation. The wizard's create declares the intent in one optional field, validated on the server. RecordCreationService handles it like an isolated create, and provisioning does only what is left.
+- **049 backstop:** the record-busy answer on `/no-access/enforce` and `/assigned-access/sync` stays a 500 ProblemDetails with a message and trace id. The restricted-root and ledger-root scans take the ordered read and the recent-change window, like the first scan. Removals by the reconciliation job stay report-only until UAC-r2's gate G-8 (#2574).
