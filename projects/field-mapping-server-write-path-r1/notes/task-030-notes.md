@@ -34,7 +34,7 @@ Line numbers are at `dc08e14990`; re-grep before use.
   own (D3, UAC-r2 review). Decide D4's justification, and wait for task 033's system mapping reader (D5). Several
   sub-tasks, comparable to 018a/018b/018c.
 
-## 2. Office To Do: what converting it involves (not started)
+## 2. Office To Do: what converting it involves (done in 030a: section 5)
 
 This half is implementable without core changes, following the 018b quick-create adapter
 (`OfficeService.QuickCreateViaCreationServiceAsync`):
@@ -72,5 +72,79 @@ This is an 018b-sized change on its own.
 ## 4. Gates
 
 Nothing was built or published, so there is no publish-size delta and no CVE result. No test was added or changed.
+
+## 5. Task 030a: Office To Do through the unified create (done)
+
+Coordinator go-ahead for 030a; 030b stays outside the service as the owner's named exception (decisions.md, owner direction
+2026-11-06). 030a is the adapter only. It makes no service-core change, and the document save, new-version save
+(`existingDocumentId` + `isNewVersion`) and re-file (`documentId`) paths are untouched.
+
+### What changed
+
+- `OfficeService.CreateTodoAsync` is a thin adapter over `RecordCreationService.CreateAsync`. It runs as the caller
+  (`RecordCreationPrincipal.ForCaller`, WhoAmI under the caller's token) with the mapping source inferred
+  (`RecordCreationMapping.ForCaller`).
+  - The request becomes a Web API payload: name, state, scores, description, due date (`yyyy-MM-dd`), the regarding lookup
+    with the ADR-024 pair and name, the best-effort record type, the document and email carriers, and the Assigned To contact.
+  - With no assignee, the caller's linked contact is a post-mapping default on Assigned To, so a profile can still fill it.
+    The `todo_assignee_unset` warning is logged when nothing was written.
+  - The service derives the I-1 stamps, sets Access Permission, decides the owner (record first, then carriers), stamps the
+    creator person and makes the one app-only create.
+- `ResolveTodoOwnerTeamAsync`, the old entity build, its stamp calls, the `IGenericEntityService.CreateAsync` call, and the
+  now-unused `CoreAncestorResolver` dependency are deleted.
+- `TodoSourceAccessFilter.DeniedReasonCode`, `DeniedDetail` and `Deny` are now internal, so the route renders the service's
+  refusal with the filter's own builder.
+- The endpoint's `SdapProblemException` catch maps an `OFFICE_009` tagged `source_record_inaccessible` to `Deny`.
+
+### Refusal map (NFR-07; the codes the pane maps are unchanged)
+
+| Service refusal | Response |
+|---|---|
+| `NotFoundOrDenied` (no AppendTo on, or no such, record regarding / carrier / assignee) | 403 `OFFICE_009`, reasonCode `source_record_inaccessible`, the filter's one detail: the same body as the route filter's refusal (only `correlationId` differs) |
+| `OwnerUnresolved` | 403 `OFFICE_022`, the same detail texts as before (record vs carrier-only) |
+| any other (stamp underivable or unavailable, Forbidden, Invalid, Unavailable, ...) | 403 `OFFICE_010` (the route's generic refusal, as before) |
+
+The To Do regarding check's uniform refusal is 403, not 404. The filter's remarks give the reason, and 030a keeps it. The
+coordinator's brief said "uniform 404", so this was flagged.
+
+### Tests
+
+- New: `tests/integration/contract/Api/Office/OfficeTodoCreateThroughServiceContractTests.cs` (9 cases).
+  - One app-only create through the service, none through `IGenericEntityService`; WhoAmI asked; the owner from the resolver.
+  - A matter-to-To-Do profile fills an empty column, and the user's value wins.
+  - Four uniform-body refusals compared byte for byte with the filter's own deny: a regarding record without AppendTo, a
+    missing one, and the document, email and assignee without AppendTo (the last three are one parameterised case).
+  - `OFFICE_022` and `OFFICE_010` are pinned.
+- New host: `OfficeTodoRecordCreationHost.cs`. It is the caller's Dataverse (`OfficeCallerDataverseDouble`) seeded for
+  `sprk_todo`, plus `RecordCreationWriteCapture` over the app-only writer.
+- `OfficeCallerDataverseDouble` (shared, minimal) gains `OpenTables`: an unlisted row in an open table exists with full
+  rights unless listed in `NoAppendTo` / `Missing`. The To Do suites name fresh ids per test.
+- Existing suites converted, factories only, with test bodies unchanged:
+  - `OfficeTodoRegardingContractTests` (`TodoRegardingTestWebAppFactory`) and
+    `OfficeTodoSourceAuthorizationContractTests` (`TodoSourceAccessTestWebAppFactory`).
+  - `CreatedEntities` is now the service's create viewed as the SDK entity, because the capture seam moved.
+- `OfficeRecordOwnershipTests.CreateTodo_WithARecordAndADocument_...`: the requester and the creator person are now asserted as
+  the WhoAmI caller, with the oid carried as `CallerObjectId`. The seam moved, as in task 031 (ADR-028).
+- Failing first: with the old `OfficeService`, `OfficeEndpoints` and `TodoSourceAccessFilter` restored, 7 of the 9 new cases
+  fail. The 2 that pass are the `OFFICE_022` / `OFFICE_010` pins, which are code-preservation pins.
+- ArchTests:
+  - `RecordOwnerAssignmentCensusTests`: the `OfficeService.cs` `sprk_todo` create row, the `CreateTodoAsync` owner-write row and
+    the `ResolveTodoOwnerTeamAsync` person-bearing row are removed with comments.
+  - `FeatureRolePrivilegeGuardTests`: Office To Do rows added for what the service now asks as the caller: Append on
+    `sprk_todo`, AppendTo (Deep) on matter, project, invoice, document, communication and contact, and AppendTo on the record
+    type. The `OfficeService.cs` line citations moved by the six deleted lines.
+  - `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`'s Office To Do matrix row was updated to match.
+
+### Section 11
+
+No new production surface: no endpoint, service, DI registration, package or column. Three `TodoSourceAccessFilter` members
+widened from private to internal, so the route reuses the one refusal body instead of copying it. Test-only additions are the
+host file and the double's `OpenTables`.
+
+### Known limits
+
+- A To Do filed only under a document or email carrier reads no mapping source: no profile applies, as on the events route.
+- A requested assignee the caller may not AppendTo is now refused with the uniform body. Before, only Read was asked.
+- A refusal of kind Forbidden, Invalid or Unavailable is the generic `OFFICE_010`, as every other failure was before.
 
 rework: none task 030
