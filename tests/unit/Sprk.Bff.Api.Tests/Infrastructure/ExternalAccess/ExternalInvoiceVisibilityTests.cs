@@ -31,7 +31,7 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 /// reads it as "not set", so a test fails. Each rule leg is proven for a CIAM contact and for a flagged-external systemuser.
 /// </summary>
 [Trait("category", "external-access")]
-public sealed class ExternalInvoiceVisibilityTests
+public sealed partial class ExternalInvoiceVisibilityTests
 {
     private const int Restricted = 100000002;
     private const int Standard = 100000000;

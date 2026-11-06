@@ -252,6 +252,21 @@ public static class FinanceModule
         services.AddScoped<SubmissionCommitGate>();
         services.AddScoped<IJobHandler, InvoiceSubmissionProcessingJobHandler>();
 
+        // The rules re-run after Set firm (ebilling-r1 task 095d-2b-1; EB-D-185..187; notes/095d-2b-1.md). Unconditional (flag rule above;
+        // the handler reads the kill switch, so a queued message never dead-letters NoHandler). Scoped like their scoped dependencies.
+        //   * InvoiceSubmissionProcessor (concrete) - the re-run calls EvaluateFromReadAsync, which is not on IInvoiceSubmissionProcessor (the
+        //     049 seam the handler tests fake). Existing: the interface registration above. Extension: widening the 049 seam would put a
+        //     re-run-only entry point on every fake of it. Cost of nothing: InvoiceSubmissionRerun cannot be resolved, so no re-run runs.
+        //   * InvoiceSubmissionRerun (concrete, ADR-010: one implementation) - the re-run's evaluation and its one commit (095d-2a-2). Existing:
+        //     the persister (writes an intake once) and InvoiceCorrectionReevaluation (one field's diff). Extension: neither may re-evaluate a
+        //     committed outcome. Cost of nothing: the job handler cannot be built, and the rerun-pending hold never lifts.
+        //   * InvoiceSubmissionRerunJobHandler (Services/Ai/Jobs: the re-run can call AI coding, uac-r2 Q7) - the queued, retried run Set firm
+        //     enqueues. Existing: the 049 handler. Extension: its "never re-evaluate a linked submission" invariant. Cost of nothing: Set
+        //     firm's enqueued message dead-letters NoHandler and the invoice stays held for ever.
+        services.AddScoped<InvoiceSubmissionProcessor>();
+        services.AddScoped<InvoiceSubmissionRerun>();
+        services.AddScoped<IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.InvoiceSubmissionRerunJobHandler>();
+
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)
         // ============================================================================

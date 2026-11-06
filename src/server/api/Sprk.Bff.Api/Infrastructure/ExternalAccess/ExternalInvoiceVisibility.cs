@@ -275,6 +275,11 @@ internal static class ExternalInvoiceVisibility
     /// <list type="bullet">
     /// <item>a submission with NO firm (<c>sprk_vendororg</c> blank) is withheld from every external caller, whatever its source or
     /// invoice (<see cref="InvoiceHiddenReason.FirmMissing"/>); this is decided first;</item>
+    /// <item>ebilling-r1 task 095d-2b-1 (uac-r2 2026-11-05 conditions 1 and 2): so is a submission whose firm is set but whose outcome is not
+    /// yet decided with it, i.e. its stored reason is still <see cref="Sprk.Bff.Api.Services.Finance.Submission.SubmissionReasonCodes.FirmMissing"/>
+    /// (same reason). Set firm writes the firm and leaves that reason; only the re-run's one commit replaces it (in the transaction that sets
+    /// <c>rulesRerun</c> = completed and clears the rerun-pending marker), so the withhold lifts exactly when the re-run commits, and a failed,
+    /// refused or dead-lettered re-run keeps it;</item>
     /// <item>a submission WITH an invoice is decided by the invoice predicate (<see cref="DecideAsync"/>), as before;</item>
     /// <item>one WITHOUT an invoice (Received, Processing, or a terminal outcome that produced none) is decided by its own
     /// source, by channel (the shared <see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel"/> enum):
@@ -303,7 +308,8 @@ internal static class ExternalInvoiceVisibility
         // (0) With NO firm (sprk_vendororg blank, as an internal from-email row may be): withheld from every external caller, whatever
         //     its source, decided before the invoice, channel and document below (a firmless row belongs to none of the caller's firms).
         //     No source or invoice read is spent on it.
-        foreach (var firmless in page.Where(HasNoFirm).ToList())
+        //     095d-2b-1: a firm set by Set firm but not yet decided with (the re-run has not committed) is withheld the same way.
+        foreach (var firmless in page.Where(s => HasNoFirm(s) || IsUndecidedForFirm(s)).ToList())
         {
             withheld[firmless.SubmissionId] = InvoiceHiddenReason.FirmMissing;
             page.Remove(firmless);
@@ -368,6 +374,11 @@ internal static class ExternalInvoiceVisibility
         // Blank, Guid.Empty or a link that is not a GUID (ExternalDocumentNarrowing.UnreadableLink): no firm can be named.
         static bool HasNoFirm(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView s) =>
             s.FirmId is not { } firm || firm == Guid.Empty || firm == ExternalDocumentNarrowing.UnreadableLink;
+
+        // 095d-2b-1: the stored reason is still the firm hold's (the firm markers the re-run alone replaces). sprk_outcomereasoncode is not
+        // field-secured, so an app-only or caller read returns it as stored.
+        static bool IsUndecidedForFirm(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView s) =>
+            string.Equals(s.OutcomeReasonCode, Sprk.Bff.Api.Services.Finance.Submission.SubmissionReasonCodes.FirmMissing, StringComparison.Ordinal);
     }
 
     private const string StoredFileCommunicationValue =
@@ -382,6 +393,9 @@ internal static class ExternalInvoiceVisibility
     private const string SubmissionDocumentValue = "_sprk_document_value";
     private const string SubmissionChannel = "sprk_channel";
     private const string SubmissionFirmValue = "_sprk_vendororg_value";
+
+    /// <summary>095d-2b-1: the stored outcome reason (a submission still held for its firm is withheld, <see cref="DecideSubmissionsAsync"/>).</summary>
+    private const string SubmissionReasonValue = "sprk_outcomereasoncode";
 
     /// <summary>
     /// The Stored Files of <paramref name="asked"/> (094, 095), every row (review round 4a):
@@ -561,6 +575,10 @@ internal static class ExternalInvoiceVisibility
     private static bool IsSet(IReadOnlyDictionary<string, JsonElement> row, string column) =>
         row.TryGetValue(column, out var value) && value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined);
 
+    /// <summary>A text column: <c>null</c> when absent, null or not a string.</summary>
+    private static string? TextOf(IReadOnlyDictionary<string, JsonElement> row, string column) =>
+        row.TryGetValue(column, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
     /// <summary>An integer column (an option value): <c>null</c> when absent, null or not a 32-bit integer.</summary>
     private static int? IntOf(IReadOnlyDictionary<string, JsonElement> row, string column) =>
         row.TryGetValue(column, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var i)
@@ -639,7 +657,7 @@ internal static class ExternalInvoiceVisibility
     private static async Task<IReadOnlyDictionary<Guid, Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionView>> ReadSubmissionViewsAsync(
         IReadOnlyList<Guid> ids, CommunicationOpenThreadGate.RowQuery query, CancellationToken ct)
     {
-        var columns = new[] { SubmissionIdField, SubmissionInvoiceValue, SubmissionDocumentValue, SubmissionChannel, SubmissionFirmValue };
+        var columns = new[] { SubmissionIdField, SubmissionInvoiceValue, SubmissionDocumentValue, SubmissionChannel, SubmissionFirmValue, SubmissionReasonValue };
         var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(ids, (chunk, c) => query(SubmissionSet,
             $"$select={string.Join(",", columns)}" +
             $"&$filter={string.Join(" or ", chunk.Select(id => $"{SubmissionIdField} eq {id:D}"))}&$top={chunk.Length}", c), ct)
@@ -659,6 +677,7 @@ internal static class ExternalInvoiceVisibility
                     DocumentId = LinkOf(row, SubmissionDocumentValue),
                     ChannelValue = IntOf(row, SubmissionChannel),
                     FirmId = LinkOf(row, SubmissionFirmValue),
+                    OutcomeReasonCode = TextOf(row, SubmissionReasonValue),
                 };
             }
         }
@@ -814,7 +833,8 @@ internal enum InvoiceHiddenReason
     SourceKindUnknown,
 
     /// <summary>A SUBMISSION with no firm (<c>sprk_vendororg</c> blank, null or not a GUID): withheld from every external caller,
-    /// whatever its source (095c P2 precondition). It hides the submission only, never its invoice.</summary>
+    /// whatever its source (095c P2 precondition). Since 095d-2b-1 also one whose firm is set but whose stored reason is still the firm
+    /// hold's (the re-run after Set firm has not committed). It hides the submission only, never its invoice.</summary>
     FirmMissing,
 }
 

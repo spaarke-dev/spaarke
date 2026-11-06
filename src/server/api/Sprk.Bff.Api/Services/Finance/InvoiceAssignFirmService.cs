@@ -21,6 +21,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -121,9 +122,11 @@ public static class AssignFirmCodes
 /// <param name="DecisionId">The Set-firm decision id (derived from the submission).</param>
 /// <param name="TrackingNumber">The number the submission and invoice now hold.</param>
 /// <param name="PreviousTrackingNumber">The no-firm number it gave up.</param>
-/// <param name="RulesRerun">Always <c>pending</c> after an apply in 095d-1 (the re-run is 095d-2).</param>
+/// <param name="RulesRerun">The stored decision's <c>rulesRerun</c> (EB-D-187 Q8): <c>pending</c> until the queued re-run commits, then
+/// <c>completed</c>. Read from the stored decision, never derived.</param>
 /// <param name="DecisionRecordId">095d-1c: the Decision Record written (or found) for the decision; set on success only. Not rendered by the route.</param>
-/// <param name="FailedStep">095d-1c, <see cref="AssignFirmOutcome.Incomplete"/> only: the step that did not finish (<c>record</c> or <c>filing</c>).</param>
+/// <param name="FailedStep">095d-1c, <see cref="AssignFirmOutcome.Incomplete"/> only: the step that did not finish (<c>record</c>, <c>filing</c>,
+/// or, since 095d-2b-1, <c>rerun</c>: the re-run job could not be queued).</param>
 public sealed record AssignFirmResult(
     AssignFirmOutcome Outcome,
     int Status,
@@ -276,9 +279,15 @@ internal sealed record AssignFirmStoredDecision(
 /// that cannot be confirmed is <c>failedStep</c> <c>filing</c>), and the record names the stored decider. The repeat never applies twice (its
 /// builder throws). Rows applied with no record yet are listed by <c>Set-EbillingInvoiceFirmHoldColumn.ps1 -Verify</c> (INFO inside its window,
 /// FAIL after it).</para>
-/// <para><b>Not in 095d-1.</b> No Signal is closed: the firm_missing Signal is shared (ontology-r1 16.7), so <c>ResolvedSignalIds</c> is
-/// empty, its set is in the facts, and 095d-2 closes it as ConditionCleared after the re-run. <c>rulesRerun</c> stays "pending" (095d-2).
-/// No AI call.</para>
+/// <para><b>The re-run (095d-2b-1).</b> After the record, while the stored <c>rulesRerun</c> is <c>pending</c>, ONE re-run job is queued for
+/// the submission (<see cref="InvoiceSubmissionRerunJobHandler"/>, payload the submission and the decision id). A failed enqueue is 503
+/// <see cref="AssignFirmCodes.Incomplete"/> with <c>failedStep</c> <c>rerun</c>; the repeat (which finds the record already written) queues it
+/// again. Queuing twice is safe: the re-run commits once (its own gate on <c>rulesRerun</c>, the 049 lock, row versions). Once the re-run has
+/// committed (<c>rulesRerun</c> completed), a repeat queues nothing. The response's <c>rulesRerun</c> is the stored value. Only the
+/// invoice's own submission carries the decision, so it is the only one queued: another linked submission has no stored decision and the
+/// re-run would refuse it. Set firm never runs the re-run itself and never clears the marker.</para>
+/// <para><b>Not here.</b> No Signal is closed: the firm_missing Signal is shared (ontology-r1 16.7), so <c>ResolvedSignalIds</c> is
+/// empty, its set is in the facts, and the re-run's after-commit steps (095d-2b-2) close it as ConditionCleared. No AI call.</para>
 /// </remarks>
 public sealed class InvoiceAssignFirmService
 {
@@ -339,6 +348,7 @@ public sealed class InvoiceAssignFirmService
     private readonly Func<InvoiceCoreRecord, Guid, CancellationToken, Task<InvoiceFirmLink>> _firmLink;
     private readonly Func<DecisionCoreRecord, Guid, string?, CancellationToken, Task<DecisionCallerRefusal>> _closeRights;
     private readonly Func<Guid, CancellationToken, Task<CoreAncestorResult>> _filing;
+    private readonly Func<Guid, Guid, CancellationToken, Task> _enqueueRerun;
     private readonly ILogger<InvoiceAssignFirmService> _logger;
 
     /// <summary>082c-2: whether <see cref="InvoiceReviewDetail.Column"/> exists (the process-wide probe; a test sets its own).</summary>
@@ -353,6 +363,7 @@ public sealed class InvoiceAssignFirmService
         InvoiceSubmissionService submissions,
         CoreAncestorResolver coreAncestors,
         CallerRecordAccessProbe probe,
+        JobSubmissionService jobs,
         ILogger<InvoiceAssignFirmService> logger)
         : this(
             entities,
@@ -366,8 +377,17 @@ public sealed class InvoiceAssignFirmService
             (invoiceId, ct) => (coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors)))
                 .ResolveStampsAsync(InvoiceReviewReadService.InvoiceEntity, invoiceId, ct, CoreAncestorIntent.ReadOnly),
             logger,
-            null)
+            null,
+            EnqueueRerun(jobs ?? throw new ArgumentNullException(nameof(jobs))))
     {
+    }
+
+    /// <summary>095d-2b-1: the re-run job of a submission, submitted through the real queue (the indexing job's enqueue pattern).</summary>
+    internal static Func<Guid, Guid, CancellationToken, Task> EnqueueRerun(JobSubmissionService jobs)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+        return (submissionId, decisionId, ct) =>
+            jobs.SubmitJobAsync(InvoiceSubmissionRerunJobHandler.BuildJob(submissionId, decisionId, correlationId: null), ct);
     }
 
     /// <summary>The seam the unit tests use: every check that is not a Dataverse read of this service's own is passed as a call (103's pattern).</summary>
@@ -382,8 +402,11 @@ public sealed class InvoiceAssignFirmService
         Func<DecisionCoreRecord, Guid, string?, CancellationToken, Task<DecisionCallerRefusal>> closeRights,
         Func<Guid, CancellationToken, Task<CoreAncestorResult>> filing,
         ILogger<InvoiceAssignFirmService> logger,
-        TimeProvider? time)
+        TimeProvider? time,
+        Func<Guid, Guid, CancellationToken, Task>? enqueueRerun = null)
     {
+        // 095d-2b-1: the unit-test seam defaults to "queued" (the record tests predate the re-run); the public constructor passes the queue.
+        _enqueueRerun = enqueueRerun ?? ((_, _, _) => Task.CompletedTask);
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _allocator = allocator ?? throw new ArgumentNullException(nameof(allocator));
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
@@ -803,7 +826,32 @@ public sealed class InvoiceAssignFirmService
             _logger.LogInformation("Set firm on invoice {InvoiceId}: Decision Record {RecordId} ({State}).", invoiceId, recorded.RecordId, recordState);
         }
 
-        return Assigned(outcome, submissionId, stored.TrackingNumber, stored.PreviousTrackingNumber) with { DecisionRecordId = recorded.RecordId };
+        return await QueueRerunAsync(invoiceId, submissionId, stored, outcome, recorded.RecordId, callerUserId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 095d-2b-1, after the record: while the stored <c>rulesRerun</c> is pending, queue the submission's re-run (one job, the decision id in
+    /// its payload). A failed enqueue is <see cref="AssignFirmOutcome.Incomplete"/> at step <c>rerun</c> (503): the firm is set and recorded,
+    /// and the repeat queues it again. A completed re-run queues nothing. The answer carries the stored <c>rulesRerun</c>.
+    /// </summary>
+    private async Task<AssignFirmResult> QueueRerunAsync(
+        Guid invoiceId, Guid submissionId, AssignFirmStoredDecision stored, AssignFirmOutcome outcome, Guid recordId, Guid? callerUserId, CancellationToken ct)
+    {
+        if (string.Equals(stored.RulesRerun, RulesRerunPending, StringComparison.Ordinal))
+        {
+            try
+            {
+                await _enqueueRerun(submissionId, stored.DecisionId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return Incomplete(invoiceId, submissionId, IncompleteStepRerun, ex.GetType().Name, callerUserId);
+            }
+
+            _logger.LogInformation("Set firm on invoice {InvoiceId}: the rules re-run of submission {SubmissionId} is queued.", invoiceId, submissionId);
+        }
+
+        return Assigned(outcome, submissionId, stored.TrackingNumber, stored.PreviousTrackingNumber, stored.RulesRerun) with { DecisionRecordId = recordId };
     }
 
     /// <summary>
@@ -1282,9 +1330,9 @@ public sealed class InvoiceAssignFirmService
 
     // ── Results ──
 
-    private static AssignFirmResult Assigned(AssignFirmOutcome outcome, Guid submissionId, string trackingNumber, string previous) =>
+    private static AssignFirmResult Assigned(AssignFirmOutcome outcome, Guid submissionId, string trackingNumber, string previous, string rulesRerun) =>
         new(outcome, StatusCodes.Status200OK, "ok", SubmissionId: submissionId, DecisionId: DecisionIdFor(submissionId),
-            TrackingNumber: trackingNumber, PreviousTrackingNumber: previous, RulesRerun: RulesRerunPending);
+            TrackingNumber: trackingNumber, PreviousTrackingNumber: previous, RulesRerun: rulesRerun);
 
     /// <summary>The allocator's refusals (095d-1a outcomes): each a stable code; nothing was written.</summary>
     private static AssignFirmResult FromRefused(string? reason, Guid submissionId) => reason switch
@@ -1308,8 +1356,14 @@ public sealed class InvoiceAssignFirmService
     /// <summary>095d-1c <c>failedStep</c>: on a repeat, the recorder's filing (the invoice's derived core stamp) could not be confirmed before the record.</summary>
     internal const string IncompleteStepFiling = "filing";
 
-    /// <summary>The one sentence of every <see cref="AssignFirmOutcome.Incomplete"/> answer: no id, no exception text.</summary>
+    /// <summary>095d-2b-1 <c>failedStep</c>: the decision is recorded, but the re-run job could not be queued.</summary>
+    internal const string IncompleteStepRerun = "rerun";
+
+    /// <summary>The sentence of the <c>record</c> and <c>filing</c> <see cref="AssignFirmOutcome.Incomplete"/> answers: no id, no exception text.</summary>
     internal const string IncompleteDetail = "The firm was set, but its decision was not recorded. Repeat the request to finish it.";
+
+    /// <summary>095d-2b-1: the sentence of the <c>rerun</c> <see cref="AssignFirmOutcome.Incomplete"/> answer: no id, no exception text.</summary>
+    internal const string IncompleteRerunDetail = "The firm was set and recorded, but the check of its billing rules could not be started. Repeat the request to finish it.";
 
     /// <summary>
     /// 095d-1c: the apply committed and <paramref name="step"/> did not finish. 503 with the step and the fixed sentence; the log carries the
@@ -1330,8 +1384,8 @@ public sealed class InvoiceAssignFirmService
                 invoiceId, step, cause);
         }
 
-        return new AssignFirmResult(AssignFirmOutcome.Incomplete, StatusCodes.Status503ServiceUnavailable, AssignFirmCodes.Incomplete, IncompleteDetail,
-            SubmissionId: submissionId, FailedStep: step);
+        return new AssignFirmResult(AssignFirmOutcome.Incomplete, StatusCodes.Status503ServiceUnavailable, AssignFirmCodes.Incomplete,
+            step == IncompleteStepRerun ? IncompleteRerunDetail : IncompleteDetail, SubmissionId: submissionId, FailedStep: step);
     }
 
     private AssignFirmResult Unavailable(Guid invoiceId, string step, Exception ex)

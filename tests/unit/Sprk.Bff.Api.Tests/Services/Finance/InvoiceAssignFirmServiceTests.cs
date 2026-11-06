@@ -171,10 +171,29 @@ public sealed partial class InvoiceAssignFirmServiceTests
             (_, _, _, _) => { Calls.Add("rights"); return Task.FromResult(CloseRights); },
             (_, _) => { Calls.Add("filing"); return Task.FromResult(Filing); },
             Log,
-            new FixedTime(Now))
+            new FixedTime(Now),
+            (submission, decision, _) =>
+            {
+                // 095d-2b-1: the re-run's enqueue; kept out of Calls so the 1b/1c order assertions are unchanged.
+                EnqueueAttempts.Add((submission, decision));
+                if (OnEnqueue?.Invoke() is { } fault)
+                {
+                    return Task.FromException(fault);
+                }
+
+                Enqueued.Add((submission, decision));
+                return Task.CompletedTask;
+            })
         {
             ReviewDetailProbe = ReviewDetailProbe,
         };
+
+        /// <summary>095d-2b-1: every enqueue of the re-run asked (submission, decision), and those that were queued.</summary>
+        public readonly List<(Guid Submission, Guid Decision)> EnqueueAttempts = [];
+        public readonly List<(Guid Submission, Guid Decision)> Enqueued = [];
+
+        /// <summary>095d-2b-1: a fault the next enqueue throws (null: queued).</summary>
+        public Func<Exception?>? OnEnqueue;
 
         /// <summary>082c-2: whether the review detail column exists (fixed per test; never the process-wide probe).</summary>
         public ReviewDetailColumnProbe ReviewDetailProbe = ReviewDetailColumnProbe.Fixed(present: true);

@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 /// containment tests (<see cref="ObservationQuoteContainmentTests"/>), which this re-run does not change: it keeps the stored coding of every
 /// line whose code set does not change (<see cref="RerunLineCoding"/>).
 /// </remarks>
-public sealed class InvoiceSubmissionRerunTests
+public sealed partial class InvoiceSubmissionRerunTests
 {
     private static readonly Guid SubmissionId = Guid.Parse("04900000-0000-4000-8000-0000000000b1");
     private static readonly Guid Firm = Guid.Parse("04900000-0000-4000-8000-0000000000f1");
@@ -802,7 +802,11 @@ public sealed class InvoiceSubmissionRerunTests
             _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
         };
 
-        public Task<InvoiceSubmissionRerunResult> RunAsync(Guid? decisionId = null, bool finalDelivery = false)
+        public Task<InvoiceSubmissionRerunResult> RunAsync(Guid? decisionId = null, bool finalDelivery = false) =>
+            Rerun().RunAsync(SubmissionId, decisionId ?? DecisionId, finalDelivery);
+
+        /// <summary>The re-run over this world (095d-2b-1: the job handler tests call it through the handler).</summary>
+        public InvoiceSubmissionRerun Rerun()
         {
             var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
@@ -831,7 +835,7 @@ public sealed class InvoiceSubmissionRerunTests
             {
                 ReviewDetailProbe = ReviewDetailColumnProbe.Fixed(true),
             };
-            return rerun.RunAsync(SubmissionId, decisionId ?? DecisionId, finalDelivery);
+            return rerun;
         }
 
         private EntityCollection Retrieve(QueryExpression query)
