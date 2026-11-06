@@ -22,6 +22,7 @@
 - 046c: all five add-on holders get Core User (done 17:30Z).
 - The root team's Console User was removed (done 18:11Z). Get Started is left as is; no root-cause change (owner).
 - ebilling EB-D-200 = option D (via ebilling).
+- Partners (the SPA) SEE reviewer-added lines and reviewer reasons while an invoice is In Review (owner, typed here; supersedes EB-D-192's In Review clause). ebilling records it; 165c keeps only the submission-link check; reasons are shown through a typed invoice-module projection, never a partner Read on the Decision Record table.
 
 ## The next dev deploy (owner: wait for 049)
 - Contents: master incl. #2560 (`b6dee2e590`), #2596 (`972929fd69`), `0f6618094b` (043), #2577 (`f34993dc78`), #2592 (046b, auto-merge), #2582 (audit flags), #2589 (docs), plus 049; code pages: LegalWorkspace, SpaarkeAi, CreateProjectWizard, AI.Widgets.
