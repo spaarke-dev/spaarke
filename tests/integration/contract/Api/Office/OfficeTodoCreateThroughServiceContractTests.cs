@@ -316,6 +316,53 @@ public class OfficeTodoCreateThroughServiceContractTests
     }
 
     /// <summary>
+    /// Fix round 2: a check that faulted (here the I-1 stamp read) is TRANSIENT. The route keeps 403 OFFICE_010, but its detail
+    /// tells the user to try again instead of the generic "Failed to create the To Do.", and carries none of the fault.
+    /// </summary>
+    [Fact]
+    public async Task Post_Todo_WhenACheckFaults_IsOffice010_WithTheTryAgainDetail_AndNothingIsCreated()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory();
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new CreateTodoRequest
+        {
+            Name = "Stamp read faults",
+            RegardingEntityType = "Invoice",
+            RegardingRecordId = Guid.NewGuid(),
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        json.RootElement.GetProperty("errorCode").GetString().Should().Be("OFFICE_010");
+        json.RootElement.GetProperty("title").GetString().Should().Be("Cannot Create Entity");
+        json.RootElement.GetProperty("detail").GetString().Should().Be(
+            "The To Do could not be created right now, and nothing was saved. Try again in a moment. "
+            + "If it keeps failing, contact your administrator.");
+        AssertNothingCreated(factory);
+    }
+
+    /// <summary>Control: a refusal a retry would not clear keeps the route's generic detail.</summary>
+    [Fact]
+    public async Task Post_Todo_WhenTheCallerMayNotCreateToDos_IsTheGenericOffice010_NotTheTryAgainDetail()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory();
+        factory.RecordCreation.CallerDataverse.Held.Remove("prvCreatesprk_Todo");
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new CreateTodoRequest
+        {
+            Name = "No create right",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = Guid.NewGuid(),
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        json.RootElement.GetProperty("errorCode").GetString().Should().Be("OFFICE_010");
+        json.RootElement.GetProperty("detail").GetString().Should().Be("Failed to create the To Do.");
+        AssertNothingCreated(factory);
+    }
+
+    /// <summary>
     /// The one refusal detail also covers the assignee case, without naming any record (one string for every denial).
     /// </summary>
     [Fact]
