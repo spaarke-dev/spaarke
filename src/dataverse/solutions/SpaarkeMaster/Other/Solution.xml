@@ -500,6 +500,7 @@
       <RootComponent type="66" schemaName="sprk_Spaarke.SpeDocumentViewer" behavior="0" />
       <RootComponent type="66" schemaName="sprk_Spaarke.Visuals.VisualHost" behavior="0" />
       <RootComponent type="66" schemaName="sprk_Sprk.SemanticSearchControl" behavior="0" />
+      <RootComponent type="70" id="{169feee6-7a77-4d00-9e27-ffc27bee6262}" behavior="0" />
       <RootComponent type="70" id="{42e542c8-47bf-f111-aaaf-0022482913fc}" behavior="0" />
       <RootComponent type="70" id="{5d02ed7f-89be-f111-aaaf-0022482913fc}" behavior="0" />
       <RootComponent type="70" id="{5f02ed7f-89be-f111-aaaf-0022482913fc}" behavior="0" />
