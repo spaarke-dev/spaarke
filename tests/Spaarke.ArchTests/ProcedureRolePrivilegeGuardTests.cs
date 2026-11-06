@@ -12,18 +12,16 @@ namespace Spaarke.ArchTests;
 /// <c>sprk_procedureassignment</c>. <c>sprk_procedureversion.sprk_procedure</c> is an alternate-key column and cannot be field-secured, so a
 /// holder could re-parent or create versions directly in Dataverse, outside I-P1 (no overlap) and I-P5 (billing admin + Write).</item>
 /// <item><b>Until uac-r2 task 191</b> (uac-r2 2026-10-21, round 113 item 3): no role holds ANY privilege on <c>sprk_procedure</c>,
-/// <c>sprk_procedureversion</c> or <c>sprk_procedureassignment</c>. Flagged-external systemusers hold the same roles as internal users
-/// through their business unit's default team, so any grant would reach them; Procedures are internal-only. Task 191 replaces this rule
+/// <c>sprk_procedureversion</c> or <c>sprk_procedureassignment</c>; Procedures are internal-only. Task 191 replaces this rule
 /// (delete <see cref="UntilTask191"/> and its control then, with uac-r2's agreement). <b>One exception</b> (<see cref="AllowedBeforeTask191"/>,
 /// ebilling-r1 task 089e, owner 2026-11-04: "Add to role file + apply on dev"): "Spaarke Billing Administrator" holds Read on
 /// <c>sprk_procedure</c> at Deep, so a billing admin can remove and preview a Procedure override (the routes ask the caller's own Read on that
-/// Procedure). That role is assigned to users directly, never to a team (uac-r2 K-1, its deploy script's <c>-Verify</c>), so it does not reach
-/// a flagged-external user through a default team. Any other role, privilege or depth on the Procedure tables is still reported.</item>
+/// Procedure). The guard requires that no team holds this role (uac-r2 K-1, its deploy script's <c>-Verify</c>). Any other role, privilege
+/// or depth on the Procedure tables is still reported.</item>
 /// <item><b>Until uac-r2 task 191, the Stored File too</b> (ebilling-r1 task 086; ontology-r1 088 gate K-d): no role holds ANY privilege on
 /// <c>sprk_storedfile</c>. Its rows are written and served only by the BFF (StoredFileService); the one grant is the Secure Record Owner
 /// role's Read at Basic (config/secure-record-owner-role.json, applied by script, held only by the Secure Record Owners team), which is
-/// not a source role file. A flagged-external user in a reader business unit already has COLUMN read on its secured columns, so a table
-/// privilege through any Spaarke role would give them the rows.</item>
+/// not a source role file.</item>
 /// </list>
 /// </summary>
 /// <remarks>
