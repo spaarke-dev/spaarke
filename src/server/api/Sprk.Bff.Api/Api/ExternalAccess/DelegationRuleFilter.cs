@@ -127,6 +127,23 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
     internal static bool MayManageAccess(AccessRights rights)
         => (rights & (AccessRights.Write | AccessRights.Share)) == (AccessRights.Write | AccessRights.Share);
 
+    /// <summary>
+    /// The delegation decision over one rights answer, as a deny code: <see cref="DenyWriteRequired"/> without Write (asked
+    /// first, so a caller holding neither keeps the long-standing code), <see cref="DenyShareRequired"/> with Write but not
+    /// <see cref="MayManageAccess"/> (unless <paramref name="writeSuffices"/>), else <c>null</c> (allowed). The ONE decision:
+    /// this filter and the secure-from-creation create (field-mapping-server-write-path-r1 task 049, <c>RecordCreationService</c>,
+    /// which asks it over the caller's rights on the record as it will be created) both call it.
+    /// </summary>
+    internal static string? RefusalFor(AccessRights rights, bool writeSuffices = false)
+        => (rights & AccessRights.Write) != AccessRights.Write
+            ? DenyWriteRequired
+            : !writeSuffices && !MayManageAccess(rights)
+                ? DenyShareRequired
+                : null;
+
+    /// <summary>The detail of a denial whose rights check could not be completed (a fault is a denial, ADR-003).</summary>
+    internal const string CheckFailedDetail = "The caller's access to the target record could not be determined.";
+
     /// <summary>The one user-facing sentence for both record-rights refusals: it names the whole rule.</summary>
     internal const string RightsRequiredDetail =
         "To change who else can access this record you need Write access to it and the Share privilege on its table " +
@@ -228,13 +245,13 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                 "[DELEGATION] DENIED on {Route} for {Target}: the caller access check threw. Fail closed.",
                 route, target.Value);
 
-            return Deny(httpContext, DenyCheckFailed,
-                "The caller's access to the target record could not be determined.");
+            return Deny(httpContext, DenyCheckFailed, CheckFailedDetail);
         }
 
-        // ONE answer decides both halves (task 179): the rights RetrievePrincipalAccess returned for this record. Write is
-        // checked first, so a caller holding neither keeps the long-standing write_required code.
-        if ((rights & AccessRights.Write) != AccessRights.Write)
+        // ONE answer decides both halves (task 179): the rights RetrievePrincipalAccess returned for this record, through the
+        // one decision (RefusalFor). Write is checked first, so a caller holding neither keeps the long-standing write_required code.
+        var refusal = RefusalFor(rights, target.Value.WriteSuffices);
+        if (refusal == DenyWriteRequired)
         {
             _logger.LogWarning(
                 "[DELEGATION] DENIED on {Route} for {Target}: caller holds {Rights}, which does not include " +
@@ -244,7 +261,7 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
             return Deny(httpContext, DenyWriteRequired, RightsRequiredDetail);
         }
 
-        if (!target.Value.WriteSuffices && !MayManageAccess(rights))
+        if (refusal == DenyShareRequired)
         {
             _logger.LogWarning(
                 "[DELEGATION] DENIED on {Route} for {Target}: caller holds {Rights}, which includes Write but not " +
@@ -479,6 +496,14 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
     /// deny code (ADR-003) and the correlation id (ADR-019).
     /// </summary>
     private static IResult Deny(HttpContext httpContext, string reasonCode, string detail)
+        => DenyResult(reasonCode, detail, httpContext.TraceIdentifier);
+
+    /// <summary>
+    /// The denial shape (403 ProblemDetails with <c>reasonCode</c> and <c>traceId</c>), for a caller that has the trace id
+    /// but not the request: the secure-from-creation create on <c>POST /api/v1/child-records/{table}</c> (task 049) refuses
+    /// in exactly this shape.
+    /// </summary>
+    internal static IResult DenyResult(string reasonCode, string detail, string traceId)
         => Results.Problem(
             statusCode: StatusCodes.Status403Forbidden,
             title: "Forbidden",
@@ -487,6 +512,6 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
             extensions: new Dictionary<string, object?>
             {
                 ["reasonCode"] = reasonCode,
-                ["traceId"] = httpContext.TraceIdentifier
+                ["traceId"] = traceId
             });
 }

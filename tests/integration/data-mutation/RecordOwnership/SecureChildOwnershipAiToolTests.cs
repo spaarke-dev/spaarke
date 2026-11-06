@@ -1042,6 +1042,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             [Directory.SecureBu] = Directory.GeneralBu,
         };
 
+        /// <summary>Task 049 fix round 2: the teams the caller is a member of (<c>teammembership_association</c>).</summary>
+        public HashSet<Guid> TeamMemberships { get; } = new();
+
         /// <summary>Ontology task 126: every <c>UnderOrEqual</c> question asked (candidate, ancestor).</summary>
         public List<(Guid Candidate, Guid Ancestor)> UnderQuestions { get; } = new();
 
@@ -1324,6 +1327,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                             new { Name = $"prvCreate{schema}", PrivilegeType = "Create" },
                             new { Name = $"prvAppend{schema}", PrivilegeType = "Append" },
                             new { Name = $"prvAppendTo{schema}", PrivilegeType = "AppendTo" },
+                            // Task 049 fix round 2: the delegation rule's Write and Share (the secure-from-creation gate).
+                            new { Name = $"prvWrite{schema}", PrivilegeType = "Write" },
+                            new { Name = $"prvShare{schema}", PrivilegeType = "Share" },
                         },
                     });
                 }
@@ -1350,6 +1356,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                     OwnershipType = OwnershipOf(table),
                 });
             }
+
+            // Task 049 fix round 2: the caller's team memberships ("systemusers(me)/teammembership_association?…").
+            if (path.Contains("/teammembership_association", StringComparison.Ordinal))
+                return Ok(new { value = TeamMemberships.Select(t => new { teamid = t.ToString("D") }) });
 
             // A row read as the caller: "{set}({id})?$select=…".
             var rowId = Guid.Parse(path[(path.IndexOf('(') + 1)..path.IndexOf(')')]);

@@ -110,6 +110,48 @@ public partial class SecureRootInheritanceWriterTests
         _fixture.IsSecureOf(_writes.Single().Id).Should().BeTrue("still secure — never a business-unit-visible row");
     }
 
+    // Fix round 3: the messages of a create that is NOT a secure-from-creation intent are unchanged, word for word.
+
+    [Fact]
+    public async Task ChildRecordRoute_NonIntentMessages_AreUnchanged_WhenTheCreatorCannotBeShared()
+    {
+        var (secure, _) = Matters();
+        _fixture.FailShareForPrincipal = Creator;
+
+        var removed = await CreateWorkAssignmentThroughTheRoute(secure, AppCreatesIntoTheWorld().Object);
+
+        RouteDetail(removed).Should().Be(
+            "The work assignment is filed under a secure record, so it is created secure and shared to you, and that share could not be " +
+            "made, so the new work assignment was removed again. Nothing was created. Try again in a few minutes.");
+    }
+
+    [Fact]
+    public async Task ChildRecordRoute_NonIntentMessages_AreUnchanged_WhenTheRowIsStranded()
+    {
+        var (secure, _) = Matters();
+        _fixture.FailShareForPrincipal = Creator;
+        World.DeletesFail = true;
+
+        var result = await CreateWorkAssignmentThroughTheRoute(secure, AppCreatesIntoTheWorld().Object);
+
+        RouteBody(result).GetProperty("warnings").EnumerateArray().Select(w => w.GetString()).Should().ContainSingle().Which.Should().Be(
+            "The work assignment was created as a secure record, but it could not be shared to you and could not be removed again " +
+            "(sdap.provision.creator_share_failed); it is shared to you automatically once that step succeeds (it is retried every few minutes).");
+    }
+
+    [Fact]
+    public async Task ChildRecordRoute_NonIntentMessages_AreUnchanged_WhenTheContainerFails()
+    {
+        var (secure, _) = Matters();
+        _fixture.SpeContainerCreationSucceeds = false;
+
+        var result = await CreateWorkAssignmentThroughTheRoute(secure, AppCreatesIntoTheWorld().Object);
+
+        RouteBody(result).GetProperty("warnings").EnumerateArray().Select(w => w.GetString()).Should().ContainSingle().Which.Should().Be(
+            "The work assignment was created as a secure record shared to you, but securing it could not be finished yet (sdap.provision.container_creation_failed); it is " +
+            "completed automatically within a few minutes.");
+    }
+
     [Fact]
     public async Task ChildRecordRoute_AWorkAssignmentUnderAnOrdinaryMatter_StaysOrdinary()
     {

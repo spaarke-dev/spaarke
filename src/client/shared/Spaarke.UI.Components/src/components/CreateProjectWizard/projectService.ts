@@ -28,6 +28,7 @@ import {
 import { discoverNavProps, findNavProp, cleanGuid } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 import { syncAssignedAccess } from '../../services/assignedAccessSync';
+import { createRecordViaBffWithWarnings, routesChildWritesThroughBff } from '../../utils/adapters/bffChildWriteAdapter';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -44,6 +45,11 @@ export interface ICreateProjectResult {
   errorMessage?: string;
   /** Non-fatal warnings (e.g. field-mapping profile fetch failures). Empty when none. */
   warnings: string[];
+  /**
+   * Task 049 fix round 2: the project was created secure from creation (the BFF create with `secure=true`), so the
+   * provisioning call that follows only does what is left — its `already_provisioned` answer is then success.
+   */
+  securedAtCreate?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -364,8 +370,29 @@ export class ProjectService {
 
     try {
       console.info('[ProjectService] createRecord payload:', JSON.stringify(entity, null, 2));
-      // IDataService.createRecord returns Promise<string> (just the id)
-      const projectId = await this._dataService.createRecord('sprk_project', entity);
+      // Task 049 fix round 2: a project the wizard creates as secure is secure from creation. Where this service's
+      // creates go through the BFF (InAppWizardHost decorates the data service), the intent goes with the create; the
+      // standalone code page's undecorated Xrm.WebApi path is unchanged (task 022).
+      const securedAtCreate =
+        !!formValues.isSecure &&
+        routesChildWritesThroughBff(this._dataService) &&
+        !!this._authenticatedFetch &&
+        typeof this._bffBaseUrl === 'string';
+      let projectId: string;
+      if (securedAtCreate) {
+        const created = await createRecordViaBffWithWarnings(
+          this._authenticatedFetch!,
+          this._bffBaseUrl!,
+          'sprk_project',
+          entity,
+          { secure: true }
+        );
+        projectId = created.id;
+        warnings.push(...created.warnings);
+      } else {
+        // IDataService.createRecord returns Promise<string> (just the id)
+        projectId = await this._dataService.createRecord('sprk_project', entity);
+      }
       console.info('[ProjectService] createRecord success, projectId:', projectId);
 
       // Task 142 (owner Q5 + R3): the project's "Assigned *" people get their access now — unless it is about to be
@@ -380,6 +407,7 @@ export class ProjectService {
         projectName: formValues.projectName.trim(),
         success: true,
         warnings,
+        ...(securedAtCreate ? { securedAtCreate: true } : {}),
       };
     } catch (err) {
       console.error('[ProjectService] createRecord error:', err);
