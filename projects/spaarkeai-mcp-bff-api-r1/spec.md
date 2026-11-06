@@ -325,7 +325,8 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
 - ❌ MUST NOT attach the external-plane (`ExternalCollaboration`) policy to any workforce MCP tool or the B-3 route.
 - ❌ MUST NOT change `SignalReadService`'s read rules or `DecisionCommitService`'s validation, idempotency or execution order.
 - ❌ MUST NOT add a hand-rolled `BackgroundService` or any background work (ADR-052).
-- ❌ MUST NOT use an unqualified "playbook" or the word "Finding" in user-facing Copilot text (tool descriptions, widget copy, skill text) until ontology §3 rules on them.
+- ❌ MUST NOT use an unqualified "playbook" in user-facing Copilot text (tool descriptions, widget copy, skill text) until ontology §3 rules on it.
+- ✅ MUST use "Finding" as the user word for a **billing** Work Item (an invoice or invoice-line review result) in billing link-outs. Generic rows stay "Work Item". "Finding" is never an entity or code name (owner ruling D-208, 2026-11-06; ontology §3 commit `644904d5c3`).
 - ❌ MUST NOT add a second billing-refusal check: the MCP commit calls the extracted capability, so D-207's refusal applies automatically. One MCP test proves a billing Signal returns the mapped refusal and writes nothing.
 - ✅ MUST keep the commit invariants byte-for-byte through the B-1 extraction, and state each one in the B-1 PR (ontology's list):
   - the commit order: (1a) readability as the caller → uniform 404; ledger replay; (1c) app-only Signal read; (1c-billing); `PrepareAsync`; (1c′) `CallerMayDecideAsync`; preflight; writes; locks released in `finally`;
