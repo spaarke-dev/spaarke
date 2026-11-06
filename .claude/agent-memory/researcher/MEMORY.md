@@ -19,6 +19,7 @@
 - [Power Pages vs Entra External ID (2026-07-17)](power-pages-vs-entra-external-id-portal-2026-07-17.md) — external portal choice
 
 ## Word add-in / Office / Teams
+- [NAA web/new Outlook fallback + redirect (2026-11-03)](naa-web-newoutlook-fallback-redirect-2026-11-03.md) — createNestable falls back to std PCA w/ SAME config; brk-multihub redirectUri = AADSTS7000471; use https redirect; isSetSupported gate; WebView2 cookies
 - [TAC INVALID_PRIVILEGE (2026-10-29)](teams-admin-center-invalid-privilege-2026-10-29.md) — undocumented code = "no admin role" page; licence/propagation community-only; New-TeamsApp/Graph alternatives
 - [Teams upload icon error + disabled Add (2026-10-29)](teams-app-upload-icon-invalid-and-add-disabled-2026-10-29.md) — "too small" undocumented; Add disabled = Available-to/org-wide custom setting
 - [NAA pre-auth of Teams/broker IDs (2026-10-29)](naa-preauthorized-teams-clients-2026-10-29.md) — not needed (docs explicit); IDs are Teams-SSO only; broker undocumented
@@ -147,3 +148,4 @@
 - [A9 dev Entra setup (2026-10-19)](entra-multitenant-api-a9-dev-setup-2026-10-19.md) — v2 token delta; AzureAd:Audience risk
 - [MCP server in .NET BFF + Copilot DA widget (2026-11-05)](mcp-server-dotnet-bff-copilot-widget-2026-11-05.md) — C# SDK 2.3.1 + official Extensions.Apps (experimental MCPEXP003); stateless default; Entra SSO setup; no .NET Entra+widget MS sample; Dataverse MCP now 16 tools (invoke_api)
 - [Copilot as Spaarke surface + Frontier (2026-11-05)](copilot-as-spaarke-surface-and-frontier-2026-11-05.md) — MCP Apps = summary+handoff not workspace (UX guide says no whole-SaaS); OpenUrlDialog preview; 3 MCP registration models; Frontier = tenant opt-in, NOT an ISV program; 9 tenant tests
+- [Law-dept benchmarks + OCG provisions (2026-11-03)](law-dept-benchmarks-ocg-2026-11-03.md) — ACC 2025 medians by revenue band; RRR rates; CNA/Allianz/PSU/DE OCG text; all use 0.1-hr increments
