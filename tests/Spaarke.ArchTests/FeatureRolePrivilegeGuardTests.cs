@@ -505,7 +505,7 @@ public class FeatureRolePrivilegeGuardTests
         new(AiAdmin, RoleKind.AddOn, [], [], null),
         new(OntologyAdmin, RoleKind.AddOn, [], [],
             NoBffFeature + "ontology administration writes run as the user on its own routes, so Dataverse asks each right itself "
-            + "(OntologyAdminCallerBoundaryGuardTests); it is also the cleanup role for the writer-only tables (MustNotHold)."),
+            + "(OntologyAdminCallerBoundaryGuardTests); it is also the cleanup role for the writer-only tables: Delete, and Budget Revision Write, never Create or Write on a Signal or Decision Record (MustNotHold)."),
         new("Spaarke Access Administrator", RoleKind.AddOn, [], [],
             NoBffFeature + "contact-organization membership writes, whose privileges ContactOrganizationMembershipWriterGuardTests pins "
             + "against config/contact-organization-membership-role.json."),
@@ -587,11 +587,20 @@ public class FeatureRolePrivilegeGuardTests
     /// <summary>What no person role holds (task 046b). A person role is every role file but the app users' role.</summary>
     internal static readonly IReadOnlyList<MustNotHoldRule> MustNotHold =
     [
-        new("Writer-only tables (owner 2026-11-05; ontology D-204): no person role creates, writes or deletes a Signal or Decision Record, "
-            + "or writes or deletes a Budget Revision; Spaarke Ontology Administrator is the designated cleanup role (ontology D-160)",
+        // Task 044 (ontology D-204, D-210): Create and Write on a Signal or Decision Record are the rights that can set the core pair,
+        // so no person role holds them, with no exception (SignalWriterRoleGuardTests pins the exact allow-list over every role file).
+        new("Writer-only tables, Create and Write (owner 2026-11-05; ontology D-204, D-210): no person role creates or writes a Signal "
+            + "or Decision Record, with no exception",
             [
-                "prvCreatesprk_Signal", "prvWritesprk_Signal", "prvDeletesprk_Signal",
-                "prvCreatesprk_DecisionRecord", "prvWritesprk_DecisionRecord", "prvDeletesprk_DecisionRecord",
+                "prvCreatesprk_Signal", "prvWritesprk_Signal",
+                "prvCreatesprk_DecisionRecord", "prvWritesprk_DecisionRecord",
+            ],
+            [],
+            "projects/field-mapping-server-write-path-r1/notes/decisions.md:830; docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md:186"),
+        new("Writer-only tables, cleanup (owner 2026-11-05; ontology D-160, D-204): no person role deletes a Signal or Decision Record, "
+            + "or writes or deletes a Budget Revision; Spaarke Ontology Administrator is the designated cleanup role",
+            [
+                "prvDeletesprk_Signal", "prvDeletesprk_DecisionRecord",
                 "prvWritesprk_BudgetRevision", "prvDeletesprk_BudgetRevision",
             ],
             [OntologyAdmin],
@@ -1085,7 +1094,7 @@ public class FeatureRolePrivilegeGuardTests
 
     // ── Must not hold (task 046b) ──────────────────────────────────────────────────────────────────────────────────────
 
-    [Fact(DisplayName = "046b: no person role holds a privilege it must not (writer-only tables, except the Ontology Administrator cleanup role; invoice line Create)")]
+    [Fact(DisplayName = "046b: no person role holds a privilege it must not (writer-only tables: Create/Write with no exception, Delete and Budget Revision writes except the Ontology Administrator cleanup role; invoice line Create)")]
     public void PersonRolesHoldNothingTheyMustNot()
     {
         var personRoles = PersonRoles(SolutionsDirectory);
@@ -1363,7 +1372,8 @@ public class FeatureRolePrivilegeGuardTests
 
             AddPrivilege(dir, Console, "prvwritesprk_signal", "Deep");
             AddPrivilege(dir, Basic, "prvCreatesprk_BillingEvent", "Basic");
-            AddPrivilege(dir, OntologyAdmin, "prvCreatesprk_Signal", "Global"); // excepted: the cleanup role
+            AddPrivilege(dir, OntologyAdmin, "prvCreatesprk_Signal", "Global"); // task 044: Create/Write on Signal has no exception
+            AddPrivilege(dir, OntologyAdmin, "prvDeletesprk_Signal", "Global"); // must-not-fire: Delete is the cleanup role's exception
             AddPrivilege(dir, Writer, "prvDeletesprk_Signal", "Global");         // the app users' role is not a person role
             AddPrivilege(dir, OntologyAdmin, "prvCreatesprk_BudgetRevision", "Deep"); // fix round 2: the cleanup role does not create one
 
@@ -1377,11 +1387,12 @@ public class FeatureRolePrivilegeGuardTests
 
             var found = ForbiddenHeld(PersonRoles(root), MustNotHold).Order(StringComparer.Ordinal).ToList();
 
-            Assert.Equal(4, found.Count);
+            Assert.Equal(5, found.Count);
             Assert.StartsWith("Spaarke Added Elsewhere: prvDeletesprk_DecisionRecord at Basic", found[0], StringComparison.Ordinal);
             Assert.StartsWith("Spaarke Basic User: prvCreatesprk_BillingEvent at Basic", found[1], StringComparison.Ordinal);
             Assert.StartsWith("Spaarke Console User: prvWritesprk_Signal at Deep", found[2], StringComparison.Ordinal);
             Assert.StartsWith("Spaarke Ontology Administrator: prvCreatesprk_BudgetRevision at Deep", found[3], StringComparison.Ordinal);
+            Assert.StartsWith("Spaarke Ontology Administrator: prvCreatesprk_Signal at Global", found[4], StringComparison.Ordinal);
         }
         finally
         {
