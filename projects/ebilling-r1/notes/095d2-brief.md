@@ -101,13 +101,13 @@ Rejected: running it synchronously; extending the 049 handler (its "linked or te
   - **Q2:** accepted. A changed reason set closes the Signal as Superseded (record-free) and opens episode n+1, and only on a real change. The age restarts, which is accepted. A stored Override or Return set that names the superseded Signal closes it as `LeftAsIs`, not as a failure, so retries don't loop. Part 2b can proceed.
 - **Q7:** the handler goes in `Services/Ai/Jobs/` if the re-run can call AI coding, and in `Services/Jobs/Handlers/` if it never does. Decide after the owner answers Q3. All of these are acceptance criteria in the POML.
 
-- **Owner, 2026-11-05 (D-148, D-149, D-150).**
+- **Owner, 2026-11-05 (EB-D-185, EB-D-186, EB-D-187).**
   - Q3: no re-read. The AI read has no firm input except an optional vendor-name hint, and the guidelines are applied by the rules, which re-run. Re-code changed lines only. So the handler goes in `Services/Ai/Jobs/`.
-  - Q4: reset any decisions made before D-148.
+  - Q4: reset any decisions made before EB-D-185.
   - Q5: hold, don't auto-reject.
   - Q6: hold for review.
   - Q8: `completed`, not `done`.
-  - D-148: no line decision, Override or approval without a firm, or while the re-run is pending. Slice 095d-0 builds that gate.
+  - EB-D-185: no line decision, Override or approval without a firm, or while the re-run is pending. Slice 095d-0 builds that gate.
 
 ## 5. Files
 

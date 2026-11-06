@@ -142,12 +142,12 @@
     <criterion>ontology Q2: a changed reason set closes the Signal as Superseded (record-free) and opens episode n+1, only when the reason set actually changed
       (must-not-fire: an unchanged set re-run supersedes nothing). A stored Override or Return set naming the superseded Signal closes it as LeftAsIs
       (HumanDecisionSignalClose ~:104), not as a failure: test that a retry does not loop on 503.</criterion>
-    <criterion>Owner answers 2026-11-05 (decisions-log D-148, D-149, D-150), binding:
-      - Q3 (D-149): the document is never re-read; AI coding re-runs only on lines whose code set changes once the firm's own codes count; STOP if a rule needs an AI fact the rows lack. The re-run can therefore call AI coding, so the handler lives in Services/Ai/Jobs/ (uac-r2 Q7, Path C comply).
-      - Q4 (D-150): decisions made before D-148 are reset to the re-run's derivation, their records kept as history (with D-148 no new ones can exist).
-      - Q5/Q6 (D-150): a new hold or a would-be auto-reject holds the invoice for review (Blocked); stamp removed; Override available.
-      - Q8 (D-150): rulesRerun values are "pending" and "completed" (not "done"); the re-run sets "completed" when it commits, and BuildDecision's hashed values are unchanged.
-      - D-148: decision gating on "no firm / held for firm / re-run pending" is owned by slice 095d-0 (InvoiceFirmGate). 095d-2 does not add its own gate; it only moves rulesRerun to "completed", which opens the gate.</criterion>
+    <criterion>Owner answers 2026-11-05 (decisions-log EB-D-185, EB-D-186, EB-D-187), binding:
+      - Q3 (EB-D-186): the document is never re-read; AI coding re-runs only on lines whose code set changes once the firm's own codes count; STOP if a rule needs an AI fact the rows lack. The re-run can therefore call AI coding, so the handler lives in Services/Ai/Jobs/ (uac-r2 Q7, Path C comply).
+      - Q4 (EB-D-187): decisions made before EB-D-185 are reset to the re-run's derivation, their records kept as history (with EB-D-185 no new ones can exist).
+      - Q5/Q6 (EB-D-187): a new hold or a would-be auto-reject holds the invoice for review (Blocked); stamp removed; Override available.
+      - Q8 (EB-D-187): rulesRerun values are "pending" and "completed" (not "done"); the re-run sets "completed" when it commits, and BuildDecision's hashed values are unchanged.
+      - EB-D-185: decision gating on "no firm / held for firm / re-run pending" is owned by slice 095d-0 (InvoiceFirmGate). 095d-2 does not add its own gate; it only moves rulesRerun to "completed", which opens the gate.</criterion>
     <criterion>ontology 2026-11-05 (D-201 82aaf456dd), part 2b:
       (1) When re-coding changes a line Signal's reason set, Superseded plus episode n+1. When it's unchanged, the same Signal stays open and only sprk_lastevaluated is refreshed. Test both.
       (2) A new hold raises its Signal through SignalWriter with the D-13 key. A would-be auto-reject turned hold must NOT claim a Decision Record on its Signal, because no decision was made.</criterion>
