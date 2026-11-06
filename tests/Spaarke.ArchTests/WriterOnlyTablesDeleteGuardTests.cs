@@ -19,6 +19,13 @@ namespace Spaarke.ArchTests;
 /// <c>IGenericEntityService.DeleteAsync</c>, <c>DataverseWebApiClient.DeleteAsync</c>) either asks the check or is listed below with the
 /// reason its table is fixed in code. A new delete path is therefore caught here and has to decide. <b>Closed list, no baseline</b>: a
 /// listed member that now asks the check, or no longer sends a delete, fails the test.</para>
+/// <para><b>Exempt: the method that implements a scanned API's <c>DeleteAsync</c></b> (task 049 fix round 1; narrowed in fix round 3).
+/// A decorator of <c>IDataverseUserClient</c> (e.g. <c>CallerMetadataReadMemo</c>) implements <c>DeleteAsync</c> by passing the caller's
+/// path on to the client it wraps. It chooses no table: its callers do, and the scan already sees each of them at its own call to that
+/// API. So a call to a scanned API's <c>DeleteAsync</c> is not counted when the calling member IS the method that implements it: the
+/// target of the type's interface map for an interface API, or an override of the class API's virtual <c>DeleteAsync</c>. The exemption
+/// is by that method's identity, not by its name: another member that deletes is still counted, including an extra <c>DeleteAsync</c>
+/// overload on the same type and an override of any other virtual that calls <c>base.DeleteAsync</c>.</para>
 /// <para><b>One list.</b> The refusal equals the registry flag table by table, agrees with the update refusal and the chat create
 /// tool's check, and its compiled body reads the flag (it cannot become a hand-written list).</para>
 /// <para><b>Limit.</b> The scan sees only those three APIs; a future delete on another API (the Dataverse SDK client directly, a raw
@@ -137,20 +144,49 @@ public class WriterOnlyTablesDeleteGuardTests
     [Fact(DisplayName = "048 fix 2 control: a member that deletes without the check is found; one that asks it, or is listed, is not")]
     public void Detector_MustFireAndMustNotFire()
     {
-        var fixtures = new[] { typeof(WriterOnlyDeleteControlNoCheck), typeof(WriterOnlyDeleteControlWithCheck), typeof(WriterOnlyDeleteControlWebApiNoCheck) };
+        var fixtures = new[]
+        {
+            typeof(WriterOnlyDeleteControlNoCheck), typeof(WriterOnlyDeleteControlWithCheck), typeof(WriterOnlyDeleteControlWebApiNoCheck),
+            typeof(WriterOnlyDeleteControlForwardingDecorator), typeof(WriterOnlyDeleteControlOverloadDecorator),
+            typeof(WriterOnlyDeleteControlWebApiSubclass),
+        };
         var types = fixtures.SelectMany(IlCallScan.WithNested).ToList();
         var deleters = DeletersOf(types);
         var askers = AskersOf(types);
 
-        // Must fire: a delete through the generic entity service, and one through the Web API client, without the check.
+        // Must fire: a delete through the generic entity service, and one through the Web API client, without the check; a
+        // decorator's OTHER member that deletes through the client it wraps; an extra DeleteAsync(Guid) OVERLOAD on a decorator
+        // (the same name as the interface method, so only the method's identity tells them apart); and a subclass's override of
+        // ANOTHER virtual that calls base.DeleteAsync on a fixed table. Must not fire: a decorator's own DeleteAsync, forwarding
+        // to that client, and a subclass's override of the base virtual DeleteAsync (the exemption).
         Assert.Equal(
-            new[] { $"{nameof(WriterOnlyDeleteControlNoCheck)}.Delete", $"{nameof(WriterOnlyDeleteControlWebApiNoCheck)}.Delete" },
+            new[]
+            {
+                $"{nameof(WriterOnlyDeleteControlForwardingDecorator)}.Purge",
+                $"{nameof(WriterOnlyDeleteControlNoCheck)}.Delete",
+                $"{nameof(WriterOnlyDeleteControlOverloadDecorator)}.DeleteAsync",
+                $"{nameof(WriterOnlyDeleteControlWebApiNoCheck)}.Delete",
+                $"{nameof(WriterOnlyDeleteControlWebApiSubclass)}.UpdateAsync",
+            },
             MissingDeleteCheck(deleters, askers, []).Select(m => $"{m.Type.Name}.{m.Method}").Order(StringComparer.Ordinal).ToArray());
+        Assert.DoesNotContain((typeof(WriterOnlyDeleteControlForwardingDecorator), "DeleteAsync"), deleters);
+        Assert.DoesNotContain((typeof(WriterOnlyDeleteControlWebApiSubclass), "DeleteAsync"), deleters);
+
+        // The real decorator is exempt through its interface map.
+        var memo = DeletersOf(IlCallScan.WithNested(typeof(Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient).Assembly
+            .GetTypes().Single(t => t.Name == "CallerMetadataReadMemo")).ToList());
+        Assert.DoesNotContain(memo, m => m.Method == "DeleteAsync");
 
         // Must not fire when listed; the member that asks the check is never named.
         Assert.Equal(
             new[] { $"{nameof(WriterOnlyDeleteControlWebApiNoCheck)}.Delete" },
-            MissingDeleteCheck(deleters, askers, [(typeof(WriterOnlyDeleteControlNoCheck), "Delete")]).Select(m => $"{m.Type.Name}.{m.Method}").ToArray());
+            MissingDeleteCheck(deleters, askers,
+                    [
+                        (typeof(WriterOnlyDeleteControlNoCheck), "Delete"), (typeof(WriterOnlyDeleteControlForwardingDecorator), "Purge"),
+                        (typeof(WriterOnlyDeleteControlOverloadDecorator), "DeleteAsync"),
+                        (typeof(WriterOnlyDeleteControlWebApiSubclass), "UpdateAsync"),
+                    ])
+                .Select(m => $"{m.Type.Name}.{m.Method}").ToArray());
     }
 
     /// <summary>The detector: each deleting member that does not ask the delete check and is not listed.</summary>
@@ -165,15 +201,52 @@ public class WriterOnlyTablesDeleteGuardTests
             .ToList();
     }
 
-    /// <summary>Each (outermost type, source member) whose compiled body sends a delete through a scanned API.</summary>
+    /// <summary>The APIs whose <c>DeleteAsync</c> the scan counts.</summary>
+    private static readonly IReadOnlyList<Type> ScannedDeleteApis =
+        [typeof(IDataverseUserClient), typeof(IGenericEntityService), typeof(DataverseWebApiClient)];
+
+    /// <summary>
+    /// Each (outermost type, source member) whose compiled body sends a delete through a scanned API, except a type's own
+    /// <c>DeleteAsync</c> forwarding to the API that type implements (see the class remarks).
+    /// </summary>
     internal static IReadOnlySet<(Type Type, string Method)> DeletersOf(IEnumerable<Type> types) =>
         IlCallScan.MethodReferences(types)
-            .Where(r => r.Target.Name == "DeleteAsync"
-                        && (r.Target.DeclaringType == typeof(IDataverseUserClient)
-                            || r.Target.DeclaringType == typeof(IGenericEntityService)
-                            || r.Target.DeclaringType == typeof(DataverseWebApiClient)))
-            .Select(r => (IlCallScan.Outermost(r.Caller), CoreRecordPairUpdateCheckGuardTests.SourceMember(r.Caller, r.CallerMethod)))
+            .Where(r => r.Target.Name == "DeleteAsync" && ScannedDeleteApis.Contains(r.Target.DeclaringType!))
+            .Select(r => (Caller: r.Caller, CallerMethod: r.CallerMethod,
+                Member: CoreRecordPairUpdateCheckGuardTests.SourceMember(r.Caller, r.CallerMethod), Api: r.Target.DeclaringType!))
+            .Where(d => !IsTheApisOwnForwardingDelete(d.Caller, d.CallerMethod, d.Api))
+            .Select(d => (IlCallScan.Outermost(d.Caller), d.Member))
             .ToHashSet();
+
+    /// <summary>
+    /// Whether the calling body belongs to the method that implements <paramref name="api"/>'s <c>DeleteAsync</c>: for an interface
+    /// API the target of the type's interface map for a <c>DeleteAsync</c> of that interface, for a class API an override of its
+    /// virtual <c>DeleteAsync</c>. Decided by the method's metadata identity, never by its name alone.
+    /// </summary>
+    private static bool IsTheApisOwnForwardingDelete(Type caller, MethodBase callerMethod, Type api)
+    {
+        if (IlCallScan.SourceMethod(caller, callerMethod) is not MethodInfo source || source.Name != "DeleteAsync"
+            || source.DeclaringType is not { } type || type == api || !api.IsAssignableFrom(type))
+        {
+            return false;
+        }
+
+        if (api.IsInterface)
+        {
+            var map = type.GetInterfaceMap(api);
+            for (var i = 0; i < map.TargetMethods.Length; i++)
+            {
+                if (map.InterfaceMethods[i].Name == "DeleteAsync" && map.TargetMethods[i].HasSameMetadataDefinitionAs(source))
+                    return true;
+            }
+
+            return false;
+        }
+
+        var baseDefinition = source.GetBaseDefinition();
+        return baseDefinition.Name == "DeleteAsync" && baseDefinition.DeclaringType == api
+               && !baseDefinition.HasSameMetadataDefinitionAs(source);
+    }
 
     /// <summary>Each (outermost type, source member) whose compiled body asks <c>RecordTableRules.RefuseWriterOnlyTableDelete</c>.</summary>
     internal static IReadOnlySet<(Type Type, string Method)> AskersOf(IEnumerable<Type> types) =>
@@ -193,6 +266,72 @@ internal static class WriterOnlyDeleteControlNoCheck
 internal static class WriterOnlyDeleteControlWebApiNoCheck
 {
     internal static Task Delete(DataverseWebApiClient client, string entitySet, Guid id) => client.DeleteAsync(entitySet, id);
+}
+
+/// <summary>
+/// A decorator of the caller's client (as <c>CallerMetadataReadMemo</c>). MUST NOT FIRE: its own <c>DeleteAsync</c> forwards to the
+/// client it wraps. MUST FIRE: <see cref="Purge"/>, another member, deletes through that client.
+/// </summary>
+internal sealed class WriterOnlyDeleteControlForwardingDecorator(IDataverseUserClient inner) : IDataverseUserClient
+{
+    public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
+        inner.GetAsync(relativePath, cancellationToken);
+
+    public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) =>
+        inner.PostAsync(absoluteApiPath, jsonBody, cancellationToken);
+
+    public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, bool preferRepresentation,
+        CancellationToken cancellationToken) =>
+        inner.PostAsync(absoluteApiPath, jsonBody, preferRepresentation, cancellationToken);
+
+    public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken) =>
+        inner.PatchAsync(relativePath, jsonBody, cancellationToken);
+
+    public async Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
+        await inner.DeleteAsync(relativePath, cancellationToken);
+
+    internal Task<DataverseUserResponse> Purge(string relativePath) => inner.DeleteAsync(relativePath, CancellationToken.None);
+}
+
+/// <summary>
+/// A decorator whose interface <c>DeleteAsync</c> forwards (MUST NOT FIRE) but which also has an extra <c>DeleteAsync(Guid)</c> overload
+/// that deletes a fixed writer-only table (MUST FIRE: the overload is not the interface method, whatever its name).
+/// </summary>
+internal sealed class WriterOnlyDeleteControlOverloadDecorator(IDataverseUserClient inner) : IDataverseUserClient
+{
+    public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
+        inner.GetAsync(relativePath, cancellationToken);
+
+    public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) =>
+        inner.PostAsync(absoluteApiPath, jsonBody, cancellationToken);
+
+    public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, bool preferRepresentation,
+        CancellationToken cancellationToken) =>
+        inner.PostAsync(absoluteApiPath, jsonBody, preferRepresentation, cancellationToken);
+
+    public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken) =>
+        inner.PatchAsync(relativePath, jsonBody, cancellationToken);
+
+    public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
+        inner.DeleteAsync(relativePath, cancellationToken);
+
+    internal Task<DataverseUserResponse> DeleteAsync(Guid signalId) =>
+        inner.DeleteAsync($"sprk_signals({signalId:D})", CancellationToken.None);
+}
+
+/// <summary>
+/// A subclass of the Web API client. Its override of the base virtual <c>DeleteAsync</c> forwards (MUST NOT FIRE); its override of
+/// ANOTHER virtual, <c>UpdateAsync</c>, calls <c>base.DeleteAsync</c> on a fixed table (MUST FIRE).
+/// </summary>
+internal sealed class WriterOnlyDeleteControlWebApiSubclass(
+    Microsoft.Extensions.Configuration.IConfiguration configuration,
+    Microsoft.Extensions.Logging.ILogger<DataverseWebApiClient> logger) : DataverseWebApiClient(configuration, logger)
+{
+    public override Task DeleteAsync(string entitySetName, Guid id, CancellationToken cancellationToken = default) =>
+        base.DeleteAsync(entitySetName, id, cancellationToken);
+
+    public override Task UpdateAsync(string entitySetName, Guid id, object entity, CancellationToken cancellationToken = default) =>
+        base.DeleteAsync("sprk_signals", id, cancellationToken);
 }
 
 /// <summary>MUST NOT FIRE: asks the check first.</summary>

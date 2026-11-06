@@ -543,6 +543,44 @@
             <displayname description="Counts Toward Suppression" languagecode="1033" />
           </displaynames>
         </attribute>
+        <attribute PhysicalName="sprk_CreatedByPerson">
+          <Type>lookup</Type>
+          <Name>sprk_createdbyperson</Name>
+          <LogicalName>sprk_createdbyperson</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>1</IsSecured>
+          <IntroducedVersion>1.2.3.1</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <LookupStyle>single</LookupStyle>
+          <LookupTypes />
+          <displaynames>
+            <displayname description="Created By (Person)" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="The PERSON who asked for this record. Stamped by the BFF only (field-secured by scripts/Set-ChildRecordCreatorPersonSchema.ps1, which task 081 extends): createdby is the BFF application user for a record the BFF creates app-only, so this column is what records the person. ebilling-r1 task 080 (O-23; D-173 shape)." languagecode="1033" />
+          </Descriptions>
+        </attribute>
         <attribute PhysicalName="sprk_CurrentVersion">
           <Type>lookup</Type>
           <Name>sprk_currentversion</Name>

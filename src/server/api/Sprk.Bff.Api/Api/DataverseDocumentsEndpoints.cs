@@ -912,8 +912,8 @@ public static class DataverseDocumentsEndpoints
         IMembershipEventPublisher membershipEventPublisher,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
         Spaarke.Dataverse.IGenericEntityService genericEntityService,
-        Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe accessProbe,
-        RecordContainerResolver containerResolver,
+        [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe accessProbe,
+        [FromServices] RecordContainerResolver containerResolver,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)

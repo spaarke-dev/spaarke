@@ -11,7 +11,8 @@
     A copy is removed only when ALL of these hold:
       1. It is a registered worktree directly under .claude\worktrees and is NOT locked (Claude Code locks a copy
          while its agent runs).
-      2. It has been idle for at least -MinIdleHours: the newest of its HEAD commit time and its reflog write time.
+      2. It has been idle for at least -MinIdleHours: the newest of its HEAD commit time and its newest reflog entry
+         (the entry's timestamp: `git gc` rewrites reflog files, so their file time says nothing).
       3. Its HEAD commit is reachable from a branch that is not its own and not another agent copy's branch, i.e. the
          parent session has merged the work. With -Project, that branch must be work/<Project> (local or origin) and
          the commit must not already be on master (so another project's copies, whose work reached work/<Project>
@@ -107,18 +108,15 @@ function Test-Harvested([hashtable]$wt) {
 }
 
 function Get-IdleTime([hashtable]$wt) {
-    # hours since the copy last moved: newest of the HEAD commit and the reflog (checkout, commit, reset)
+    # hours since the copy last moved: newest of the HEAD commit and the newest reflog ENTRY (checkout, commit, reset).
+    # The entry's own timestamp, not the logs/HEAD file time: `git gc` (reflog expire) rewrites every reflog file in
+    # the repo, which made every copy look active (found 2026-11-05).
     $ct = & git -C $wt.Path log -1 --format=%ct 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $ct) { return $null }
-    $newest = [DateTimeOffset]::FromUnixTimeSeconds([long]$ct).UtcDateTime
-    $gitDir = & git -C $wt.Path rev-parse --path-format=absolute --git-dir 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $gitDir) { return $null }
-    $reflog = Join-Path ($gitDir -replace '/', '\') 'logs\HEAD'
-    if (Test-Path -LiteralPath $reflog) {
-        $t = (Get-Item -LiteralPath $reflog -Force).LastWriteTimeUtc
-        if ($t -gt $newest) { $newest = $t }
-    }
-    return ([DateTime]::UtcNow - $newest).TotalHours
+    $newest = [long]$ct
+    $gd = & git -C $wt.Path reflog -1 --date=unix --format=%gd 2>$null
+    if ($LASTEXITCODE -eq 0 -and "$gd" -match '\{(\d+)\}') { $newest = [Math]::Max($newest, [long]$Matches[1]) }
+    return ([DateTime]::UtcNow - [DateTimeOffset]::FromUnixTimeSeconds($newest).UtcDateTime).TotalHours
 }
 
 # --- classify --------------------------------------------------------------------------------------------------------
