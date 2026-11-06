@@ -44,6 +44,7 @@ import type { RecordFamilyAction } from './RecordFamilyModal';
 import {
   buildPushRequest,
   groupRowsByTable,
+  isNoFilingEdgeRefusal,
   PUSH_FAILED_TEXT,
   pushFieldMappings,
   type IPushError,
@@ -62,8 +63,12 @@ export interface RecordFamilyActionPanelProps {
   rows: IFamilySelection[];
   /** Host-supplied `authenticatedFetch` (ADR-028: never a token). */
   authenticatedFetch: ResponseFetchFn;
-  /** Called once after an apply, with the totals; the host may refresh what it shows. */
-  onApplied?: (result: { updatedCount: number; failedCount: number }) => void;
+  /**
+   * Called once after an apply that wrote or attempted something, with the totals over the tables whose push completed. A
+   * table whose request failed is not counted in either total (nothing is known of it); `failedTables` names those tables.
+   * Not called when every request failed.
+   */
+  onApplied?: (result: { updatedCount: number; failedCount: number; failedTables: string[] }) => void;
   /** The `--sprk-ui-scale` factor, forwarded to the shell. */
   uiScale?: number;
 }
@@ -79,17 +84,32 @@ const TITLES: Readonly<Record<RecordFamilyAction, string>> = {
   assignedTo: 'Update Assigned To',
 };
 
+/** What the preview found, kept through the apply. */
+interface IReview {
+  groups: IPreviewGroup[];
+  skippedNoWriteCount: number;
+  truncated: boolean;
+  /** Ticked records the server will not update (not children of the source for this person). */
+  refusedCount: number;
+  /** Tables no Filing edge joins to the source: their ticked records cannot be pushed to. */
+  unsupportedTables: string[];
+}
+
 type Phase =
   | { kind: 'previewing' }
   | { kind: 'failed' }
-  | { kind: 'review'; groups: IPreviewGroup[]; skippedNoWriteCount: number; truncated: boolean }
-  | { kind: 'applying'; groups: IPreviewGroup[]; skippedNoWriteCount: number; truncated: boolean }
+  | ({ kind: 'review' } & IReview)
+  | ({ kind: 'applying' } & IReview)
   | {
       kind: 'done';
       updatedCount: number;
       failedCount: number;
       errors: IPushError[];
       names: ReadonlyMap<string, string | null>;
+      /** Tables whose apply request failed as a whole: nothing is known of what was written there. */
+      failedTables: string[];
+      /** Tables where at least one record was updated. */
+      updatedTables: string[];
     };
 
 /** The changes one target table's preview listed. */
@@ -135,28 +155,46 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
   const styles = useStyles();
   const [phase, setPhase] = React.useState<Phase>({ kind: 'previewing' });
   const includeAssignedTo = action === 'assignedTo';
+  // The preview depends on WHICH record is the source, not on the object the host passed: a host that re-creates `source`
+  // on every render must not re-run the preview (and reset a review in progress).
+  const sourceTable = source.table;
+  const sourceId = source.id;
 
   // The preview runs when the panel opens (and again if it is reopened for other rows). It writes nothing.
   React.useEffect(() => {
     if (!open) return undefined;
     let cancelled = false;
+    const from: IPushSource = { table: sourceTable, id: sourceId };
     setPhase({ kind: 'previewing' });
     (async () => {
       try {
-        const groups: IPreviewGroup[] = [];
-        let skippedNoWriteCount = 0;
-        let truncated = false;
+        const review: IReview = {
+          groups: [],
+          skippedNoWriteCount: 0,
+          truncated: false,
+          refusedCount: 0,
+          unsupportedTables: [],
+        };
         for (const { table, ids } of groupRowsByTable(rows)) {
-          const response = await pushFieldMappings(
-            authenticatedFetch,
-            buildPushRequest(source, table, { preview: true, includeAssignedTo, childIds: ids })
-          );
+          let response;
+          try {
+            response = await pushFieldMappings(
+              authenticatedFetch,
+              buildPushRequest(from, table, { preview: true, includeAssignedTo, childIds: ids })
+            );
+          } catch (error) {
+            // No Filing edge joins this table to the source: reported for this table; the other tables still preview.
+            if (!isNoFilingEdgeRefusal(error)) throw error;
+            review.unsupportedTables.push(table);
+            continue;
+          }
           if (!response.preview) throw new Error('The server did not treat the request as a preview.');
-          groups.push({ table, changes: response.changes });
-          skippedNoWriteCount += response.skippedNoWriteCount;
-          truncated = truncated || response.truncated;
+          review.groups.push({ table, changes: response.changes });
+          review.skippedNoWriteCount += response.skippedNoWriteCount;
+          review.truncated = review.truncated || response.truncated;
+          review.refusedCount += response.refusedChildIds.length;
         }
-        if (!cancelled) setPhase({ kind: 'review', groups, skippedNoWriteCount, truncated });
+        if (!cancelled) setPhase({ kind: 'review', ...review });
       } catch (error) {
         console.warn('[RecordFamilyActionPanel] preview failed', error);
         if (!cancelled) setPhase({ kind: 'failed' });
@@ -165,19 +203,29 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
     return () => {
       cancelled = true;
     };
-  }, [open, rows, source, authenticatedFetch, includeAssignedTo]);
+  }, [open, rows, sourceTable, sourceId, authenticatedFetch, includeAssignedTo]);
 
   const confirm = React.useCallback(async () => {
     if (phase.kind !== 'review') return;
-    const { groups, skippedNoWriteCount, truncated } = phase;
-    setPhase({ kind: 'applying', groups, skippedNoWriteCount, truncated });
-    try {
-      let updatedCount = 0;
-      let failedCount = 0;
-      const errors: IPushError[] = [];
-      for (const group of groups) {
-        const ids = changedIds(group);
-        if (ids.length === 0) continue;
+    const review: IReview = {
+      groups: phase.groups,
+      skippedNoWriteCount: phase.skippedNoWriteCount,
+      truncated: phase.truncated,
+      refusedCount: phase.refusedCount,
+      unsupportedTables: phase.unsupportedTables,
+    };
+    setPhase({ kind: 'applying', ...review });
+    // Each table is applied on its own: a table whose request fails is named, and what the other tables wrote is still
+    // reported (and handed to onApplied).
+    let updatedCount = 0;
+    let failedCount = 0;
+    const errors: IPushError[] = [];
+    const failedTables: string[] = [];
+    const updatedTables: string[] = [];
+    for (const group of review.groups) {
+      const ids = changedIds(group);
+      if (ids.length === 0) continue;
+      try {
         const response = await pushFieldMappings(
           authenticatedFetch,
           buildPushRequest(source, group.table, { preview: false, includeAssignedTo, childIds: ids })
@@ -185,15 +233,22 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
         updatedCount += response.updatedCount;
         failedCount += response.failedCount;
         errors.push(...response.errors);
+        if (response.updatedCount > 0) updatedTables.push(group.table);
+      } catch (error) {
+        console.warn('[RecordFamilyActionPanel] apply failed for a table', error);
+        failedTables.push(group.table);
       }
-      const names = new Map<string, string | null>();
-      for (const g of groups) for (const c of g.changes) names.set(c.recordId.toLowerCase(), c.name);
-      setPhase({ kind: 'done', updatedCount, failedCount, errors, names });
-      onApplied?.({ updatedCount, failedCount });
-    } catch (error) {
-      console.warn('[RecordFamilyActionPanel] apply failed', error);
-      setPhase({ kind: 'failed' });
     }
+    const attempted = review.groups.filter(g => changedIds(g).length > 0).length;
+    if (failedTables.length > 0 && failedTables.length === attempted) {
+      // Every request failed: nothing is known to have been written. One fixed text (ADR-019).
+      setPhase({ kind: 'failed' });
+      return;
+    }
+    const names = new Map<string, string | null>();
+    for (const g of review.groups) for (const c of g.changes) names.set(c.recordId.toLowerCase(), c.name);
+    setPhase({ kind: 'done', updatedCount, failedCount, errors, names, failedTables, updatedTables });
+    onApplied?.({ updatedCount, failedCount, failedTables });
   }, [phase, authenticatedFetch, source, includeAssignedTo, onApplied]);
 
   const reviewing = phase.kind === 'review' || phase.kind === 'applying';
@@ -269,8 +324,28 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
                 </MessageBarBody>
               </MessageBar>
             )}
+            {phase.refusedCount > 0 && (
+              <MessageBar intent="warning">
+                <MessageBarBody>
+                  {phase.refusedCount === 1
+                    ? '1 selected record cannot be updated from this record, so it is not listed.'
+                    : `${phase.refusedCount} selected records cannot be updated from this record, so they are not listed.`}
+                </MessageBarBody>
+              </MessageBar>
+            )}
+            {phase.unsupportedTables.length > 0 && (
+              <MessageBar intent="warning">
+                <MessageBarBody>
+                  {`Records of ${phase.unsupportedTables.join(', ')} cannot be updated from this record, so they are not listed.`}
+                </MessageBarBody>
+              </MessageBar>
+            )}
             {valueCount === 0 ? (
-              <Text>Nothing to update: the selected records already have the current values.</Text>
+              <Text>
+                {phase.refusedCount > 0 || phase.unsupportedTables.length > 0 || phase.skippedNoWriteCount > 0
+                  ? 'Nothing to update among the records that can be updated.'
+                  : 'Nothing to update: the selected records already have the current values.'}
+              </Text>
             ) : (
               <>
                 <Text className={styles.muted}>
@@ -323,7 +398,7 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
 
         {phase.kind === 'done' && (
           <>
-            <MessageBar intent={phase.failedCount > 0 ? 'warning' : 'success'}>
+            <MessageBar intent={phase.failedCount > 0 || phase.failedTables.length > 0 ? 'warning' : 'success'}>
               <MessageBarBody>
                 {phase.updatedCount === 1 ? '1 record was updated.' : `${phase.updatedCount} records were updated.`}
                 {phase.failedCount > 0 &&
@@ -332,6 +407,17 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
                     : ` ${phase.failedCount} records were not updated.`)}
               </MessageBarBody>
             </MessageBar>
+            {phase.failedTables.length > 0 && (
+              <MessageBar intent="error">
+                <MessageBarBody>
+                  {`Not completed: ${phase.failedTables.join(', ')}. `}
+                  {phase.updatedTables.length > 0
+                    ? `Updated: ${phase.updatedTables.join(', ')}. `
+                    : 'Nothing was updated in the other tables. '}
+                  Close this window and try again for the rest.
+                </MessageBarBody>
+              </MessageBar>
+            )}
             {phase.errors.length > 0 && (
               <Table aria-label="Records that were not updated" size="small">
                 <TableHeader>

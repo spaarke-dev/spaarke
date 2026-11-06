@@ -13,13 +13,11 @@
 
 import { cleanGuid } from '../../utils/guid';
 import type { ResponseFetchFn } from '../../utils/fetchTypes';
+import { isApiError } from '../../utils/thrownFetchError';
 import type { IFamilySelection } from './recordFamilyService';
 
 /** The BFF route (`FieldMappingEndpoints`). */
 export const PUSH_PATH = '/api/v1/field-mappings/push';
-
-/** The only family kind a push supports (ontology 3b: Push and Update Assigned To are Filing-only). */
-export const PUSH_KIND = 'Filing';
 
 /** ADR-019: fixed, actionable text; the cause is never rendered. */
 export const PUSH_FAILED_TEXT = 'The update could not be completed. Close this window and try again.';
@@ -39,7 +37,6 @@ export interface IPushRequest {
   preview?: boolean;
   includeAssignedTo?: boolean;
   childIds?: string[];
-  kind?: string;
 }
 
 /** One value a preview says would change. `flags` are the Assigned-To policies the change meets. */
@@ -74,9 +71,27 @@ export interface IPushResponse {
   skippedRuleCount: number;
   changes: IPushPreviewChange[];
   errors: IPushError[];
+  /** Preview: ticked ids the server will not update (not children of the source for this person). */
+  refusedChildIds: string[];
 }
 
-/** The request body for one target table. Ids are canonicalized (ADR-044); `kind` is always Filing. */
+/** A push the server answered with a non-2xx status (a fetch that RETURNS failures). The body is never read or shown. */
+export class PushRequestError extends Error {
+  constructor(public readonly status: number) {
+    super(`The push request failed (${status}).`);
+    this.name = 'PushRequestError';
+  }
+}
+
+/**
+ * True when the server refused a push because no Filing edge joins the source to that table (409): the records of that
+ * table cannot be pushed to. Reached from either fetch shape: a returned 409 ({@link PushRequestError}) or a thrown `ApiError`.
+ */
+export function isNoFilingEdgeRefusal(err: unknown): boolean {
+  return (err instanceof PushRequestError && err.status === 409) || isApiError(err, 409);
+}
+
+/** The request body for one target table. Ids are canonicalized (ADR-044). The server always uses the Filing family. */
 export function buildPushRequest(
   source: IPushSource,
   targetEntity: string,
@@ -88,7 +103,6 @@ export function buildPushRequest(
     targetEntity,
     preview: options.preview,
     includeAssignedTo: options.includeAssignedTo,
-    kind: PUSH_KIND,
   };
   if (options.childIds) request.childIds = options.childIds.map(cleanGuid);
   return request;
@@ -147,6 +161,9 @@ export function parsePushResponse(body: unknown): IPushResponse {
     skippedRuleCount: count(b.skippedRuleCount),
     changes: Array.isArray(b.changes) ? b.changes.map(asChange) : [],
     errors: Array.isArray(b.errors) ? b.errors.map(asError) : [],
+    refusedChildIds: Array.isArray(b.refusedChildIds)
+      ? b.refusedChildIds.filter((id): id is string => typeof id === 'string')
+      : [],
   };
 }
 
@@ -157,6 +174,6 @@ export async function pushFieldMappings(fetchFn: ResponseFetchFn, request: IPush
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   });
-  if (!res.ok) throw new Error(`The push request failed (${res.status}).`);
+  if (!res.ok) throw new PushRequestError(res.status);
   return parsePushResponse(await res.json());
 }

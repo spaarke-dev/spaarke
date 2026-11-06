@@ -7,11 +7,12 @@ export type { RecordFamilyActionPanelProps } from './RecordFamilyActionPanel';
 export {
   buildPushRequest,
   groupRowsByTable,
+  isNoFilingEdgeRefusal,
   parsePushResponse,
   pushFieldMappings,
   PUSH_FAILED_TEXT,
-  PUSH_KIND,
   PUSH_PATH,
+  PushRequestError,
 } from './recordFamilyPushService';
 export type {
   IPushError,
