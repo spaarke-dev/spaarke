@@ -482,6 +482,12 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
     - the new episode starts its own first-detected date (the Worklist age restarts; accepted);
     - a stored Override or Return set that names the superseded Signal closes it as `LeftAsIs` (resolved otherwise), not a failure (`HumanDecisionSignalClose` ~:104), so a retry does not loop on 503;
     - the 114b filter matches on policy + subject and so carries over to the new episode.
+  - **ebilling D-148, D-149, D-150 (owner 2026-11-05, relayed by ebilling; ontology notes, no change to the rulings above).**
+    - **D-148, no substantive invoice decision without a firm.** While an invoice has no firm, is held for its firm, or its post-Set-firm re-run is pending, line decisions (single and batch), every Override and approve refuse 409 and write nothing (`ebilling.line_decision.firm_missing`, `ebilling.override.firm_missing`, `ebilling.approve.firm_missing`). Return stays open. Slice 095d-0.
+      - The 114b no-firm Override case can no longer occur; the D-201 filter stays (two linked submissions and other Procedure Signals still need it). Ontology asks that 114b's firm_missing test now assert the 409 with no Decision Record written and no Signal closed, rather than be deleted.
+      - DI-139 (c): for such an invoice the modal's only useful actions are Set firm (or Open Invoice Review) and Return.
+    - **D-149:** the re-run does not re-read the document; the rules re-run and lines whose code set changes are re-coded. A line Signal whose reason set changes follows Q2 (Superseded + episode n+1).
+    - **D-150:** a new hold or a would-be auto-reject holds the invoice for review; `rulesRerun` is `pending` or `completed`. A Signal it raises goes through `SignalWriter` like any other (D-13 key, D-12 lifecycle).
 
 ## D-202 — Record-rule policy code: `BRR-{recordRulePolicyId:N}` (ontology position, 2026-11-03)
 
