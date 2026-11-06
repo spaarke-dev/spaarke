@@ -193,9 +193,6 @@ public sealed class InvoiceCorrectionReevaluation
         "sprk_matter", "sprk_project", "sprk_regardingworkassignment",
     ];
 
-    private static readonly string[] CorrectionColumns =
-        ["sprk_fieldname", "sprk_aivalue", "sprk_finalvalue", "sprk_outcometype", "sprk_invoiceline", "sprk_reviewedon", "createdon"];
-
     private readonly IGenericEntityService _entities;
     private readonly Func<BillingEvaluationRequest, CancellationToken, Task<BillingLoadedFacts>> _load;
     private readonly Func<BillingEvaluationRequest, BillingLoadedFacts, BillingEvaluationResult> _evaluate;
@@ -344,7 +341,7 @@ public sealed class InvoiceCorrectionReevaluation
 
     /// <summary>The ids of the field's Corrected / Confirmed rows (on its line), for a field with no findings step.</summary>
     private async Task<IReadOnlyList<Guid>> ReadFollowedAsync(CorrectionApplied applied, CancellationToken ct) =>
-        (await ReadCorrectionsAsync(applied.InvoiceId, ct).ConfigureAwait(false))
+        (await ReadCorrectionsAsync(_entities, applied.InvoiceId, ct).ConfigureAwait(false))
             .Where(r => r.IsLabel && r.Field == applied.Field && r.LineId == applied.LineId)
             .Select(r => r.Id)
             .ToList();
@@ -430,7 +427,7 @@ public sealed class InvoiceCorrectionReevaluation
     /// permanent write refusal), exactly as the persister and 049 do (<see cref="AdminAttentionText.Merge"/>: only the Signal segment is replaced, the other
     /// segments and any administrator text stay). Nothing is set when no refusal is stored or the text would not change.
     /// </summary>
-    private static void SetAdminAttention(Entity update, string? currentAttention, JsonObject root)
+    internal static void SetAdminAttention(Entity update, string? currentAttention, JsonObject root)
     {
         if (AdminAttentionText.FromFindings(root) is null)
         {
@@ -464,8 +461,8 @@ public sealed class InvoiceCorrectionReevaluation
             throw new CorrectionFirmMissingException();
         }
 
-        var lines = await ReadLinesAsync(applied.InvoiceId, ct).ConfigureAwait(false);
-        var rows = await ReadCorrectionsAsync(applied.InvoiceId, ct).ConfigureAwait(false);
+        var lines = await ReadLinesAsync(_entities, applied.InvoiceId, ct).ConfigureAwait(false);
+        var rows = await ReadCorrectionsAsync(_entities, applied.InvoiceId, ct).ConfigureAwait(false);
         var json = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
         if (string.IsNullOrWhiteSpace(json) || JsonNode.Parse(json) is not JsonObject root)
         {
@@ -500,7 +497,7 @@ public sealed class InvoiceCorrectionReevaluation
         var latest = labels[^1];
         var previous = labels.Take(labels.Count - 1).LastOrDefault(r => patchedIds.Contains(r.Id));
         var preValue = previous is not null ? previous.Final : fieldRows[0].Ai;
-        var verified = rows.Where(r => r.IsLabel).Select(r => (r.LineId, r.Field)).ToHashSet();
+        var verified = VerifiedOf(rows);
 
         // A timekeeper or date correction of a fee line also diffs the roster match and the rate: from the pair the findings were last patched with.
         StoredLine? correctedLine = correctedIndex is { } at ? lines[at] : null;
@@ -852,7 +849,7 @@ public sealed class InvoiceCorrectionReevaluation
             throw new InvalidOperationException("The submission has no stored findings.");
         }
 
-        var lines = await ReadLinesAsync(applied.InvoiceId, ct).ConfigureAwait(false);
+        var lines = await ReadLinesAsync(_entities, applied.InvoiceId, ct).ConfigureAwait(false);
         var pending = root[PendingSignalChangesMember] as JsonObject;
         var ruleChanges = (pending?["rule"] as JsonArray ?? []).OfType<JsonObject>().ToList();
         var systemLines = (pending?["system"] as JsonArray ?? []).OfType<JsonObject>()
@@ -1108,10 +1105,6 @@ public sealed class InvoiceCorrectionReevaluation
         }
     }
 
-    // ── The request, rebuilt from the stored rows ──
-
-    private sealed record CorrectionRow(Guid Id, Guid? LineId, string Field, string? Ai, string? Final, bool IsLabel);
-
     // ── Reads ──
 
     private async Task<Entity?> ReadInvoiceAsync(Guid invoiceId, CancellationToken ct)
@@ -1126,77 +1119,10 @@ public sealed class InvoiceCorrectionReevaluation
         return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
     }
 
-    /// <summary>The invoice's fee and expense lines by index (<c>sprk_linesequence</c> - 1, the persister's key); Adjustment lines are not evaluated.</summary>
-    private async Task<IReadOnlyDictionary<int, StoredLine>> ReadLinesAsync(Guid invoiceId, CancellationToken ct)
-    {
-        var query = new QueryExpression(InvoiceReviewReadService.LineEntity)
-        {
-            ColumnSet = new ColumnSet(InvoiceReviewReadService.LineColumns),
-            Criteria = new FilterExpression(LogicalOperator.And),
-        };
-        query.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, ConditionOperator.Equal, invoiceId);
-        query.AddOrder(InvoiceSubmissionPersister.LineSequence, OrderType.Ascending);
-        var lines = new Dictionary<int, StoredLine>();
-        foreach (var row in await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false))
-        {
-            if (row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value is not ((int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense)
-                || row.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) is not { } sequence || sequence < 1)
-            {
-                continue;
-            }
-
-            JsonObject? extraction = null;
-            if (row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence) is { Length: > 0 } text)
-            {
-                try
-                {
-                    extraction = JsonNode.Parse(text) as JsonObject;
-                }
-                catch (JsonException)
-                {
-                    extraction = null;
-                }
-            }
-
-            var status = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value;
-            var decided = status is (int)InvoiceLineStatus.Accepted or (int)InvoiceLineStatus.Reduced or (int)InvoiceLineStatus.Disallowed;
-            if (!lines.TryAdd(sequence - 1, new StoredLine(sequence - 1, row, extraction, decided)))
-            {
-                throw new InvalidOperationException("Two lines of the invoice share a sequence.");
-            }
-        }
-
-        return lines;
-    }
-
-    /// <summary>Every correction row of the invoice, oldest first (the order the correction service reads them in).</summary>
-    private async Task<IReadOnlyList<CorrectionRow>> ReadCorrectionsAsync(Guid invoiceId, CancellationToken ct)
-    {
-        var query = new QueryExpression(InvoiceLineDecisionService.CorrectionEntity)
-        {
-            ColumnSet = new ColumnSet(CorrectionColumns),
-            Criteria = new FilterExpression(LogicalOperator.And),
-        };
-        query.Criteria.AddCondition("sprk_invoice", ConditionOperator.Equal, invoiceId);
-        query.AddOrder($"{InvoiceLineDecisionService.CorrectionEntity}id", OrderType.Ascending);
-        var rows = await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false);
-        return rows
-            .OrderBy(r => r.GetAttributeValue<DateTime?>("sprk_reviewedon") ?? r.GetAttributeValue<DateTime?>("createdon") ?? DateTime.MinValue)
-            .ThenBy(r => r.GetAttributeValue<DateTime?>("createdon"))
-            .Select(r => new CorrectionRow(
-                r.Id,
-                r.GetAttributeValue<EntityReference>("sprk_invoiceline")?.Id,
-                r.GetAttributeValue<string>("sprk_fieldname") ?? string.Empty,
-                r.GetAttributeValue<string>("sprk_aivalue"),
-                r.GetAttributeValue<string>("sprk_finalvalue"),
-                r.GetAttributeValue<OptionSetValue>("sprk_outcometype")?.Value is InvoiceCorrectionService.OutcomeCorrected or InvoiceCorrectionService.OutcomeConfirmed))
-            .ToList();
-    }
-
     private Task<Entity?> ReadSubmissionAsync(Guid invoiceId, CancellationToken ct) => ReadSubmissionAsync(_entities, invoiceId, ct);
 
     /// <summary>The invoice's latest submission (its findings JSON, version and administrator text), read app-only.</summary>
-    private static async Task<Entity?> ReadSubmissionAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
+    internal static async Task<Entity?> ReadSubmissionAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
     {
         var query = new QueryExpression(InvoiceReviewReadService.SubmissionEntity)
         {

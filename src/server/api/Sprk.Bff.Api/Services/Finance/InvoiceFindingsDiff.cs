@@ -1,6 +1,10 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Finance.Submission;
@@ -40,6 +44,87 @@ internal static class InvoiceFindingsDiff
             .SelectMany(g => g.LineIndexes.Select(line => (g.Gap.ProcedureId, g.Gap.Kind, line))
                 .Concat(g.AppliesToInvoice ? [(g.Gap.ProcedureId, g.Gap.Kind, -1)] : []))
             .ToHashSet();
+
+    // ── The reads both kinds of change share (task 164a-4a: moved from InvoiceCorrectionReevaluation, unchanged apart from the store passed in) ──
+
+    /// <summary>One correction row of the invoice as the diff reads it: its line (none for a header field), field, AI and final value, and whether it is a
+    /// label (Corrected or Confirmed individually).</summary>
+    internal sealed record CorrectionRow(Guid Id, Guid? LineId, string Field, string? Ai, string? Final, bool IsLabel);
+
+    private static readonly string[] CorrectionColumns =
+        ["sprk_fieldname", "sprk_aivalue", "sprk_finalvalue", "sprk_outcometype", "sprk_invoiceline", "sprk_reviewedon", "createdon"];
+
+    /// <summary>The invoice's fee and expense lines by index (<c>sprk_linesequence</c> - 1, the persister's key); Adjustment lines are not evaluated.
+    /// App-only, through <paramref name="entities"/>.</summary>
+    internal static async Task<IReadOnlyDictionary<int, StoredLine>> ReadLinesAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
+    {
+        var query = new QueryExpression(InvoiceReviewReadService.LineEntity)
+        {
+            ColumnSet = new ColumnSet(InvoiceReviewReadService.LineColumns),
+            Criteria = new FilterExpression(LogicalOperator.And),
+        };
+        query.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, ConditionOperator.Equal, invoiceId);
+        query.AddOrder(InvoiceSubmissionPersister.LineSequence, OrderType.Ascending);
+        var lines = new Dictionary<int, StoredLine>();
+        foreach (var row in await InvoiceReviewReadService.ReadPagedAsync(entities, query, ct).ConfigureAwait(false))
+        {
+            if (row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value is not ((int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense)
+                || row.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) is not { } sequence || sequence < 1)
+            {
+                continue;
+            }
+
+            JsonObject? extraction = null;
+            if (row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence) is { Length: > 0 } text)
+            {
+                try
+                {
+                    extraction = JsonNode.Parse(text) as JsonObject;
+                }
+                catch (JsonException)
+                {
+                    extraction = null;
+                }
+            }
+
+            var status = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value;
+            var decided = status is (int)InvoiceLineStatus.Accepted or (int)InvoiceLineStatus.Reduced or (int)InvoiceLineStatus.Disallowed;
+            if (!lines.TryAdd(sequence - 1, new StoredLine(sequence - 1, row, extraction, decided)))
+            {
+                throw new InvalidOperationException("Two lines of the invoice share a sequence.");
+            }
+        }
+
+        return lines;
+    }
+
+    /// <summary>Every correction row of the invoice, oldest first (the order the correction service reads them in). App-only, through <paramref name="entities"/>.</summary>
+    internal static async Task<IReadOnlyList<CorrectionRow>> ReadCorrectionsAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
+    {
+        var query = new QueryExpression(InvoiceLineDecisionService.CorrectionEntity)
+        {
+            ColumnSet = new ColumnSet(CorrectionColumns),
+            Criteria = new FilterExpression(LogicalOperator.And),
+        };
+        query.Criteria.AddCondition("sprk_invoice", ConditionOperator.Equal, invoiceId);
+        query.AddOrder($"{InvoiceLineDecisionService.CorrectionEntity}id", OrderType.Ascending);
+        var rows = await InvoiceReviewReadService.ReadPagedAsync(entities, query, ct).ConfigureAwait(false);
+        return rows
+            .OrderBy(r => r.GetAttributeValue<DateTime?>("sprk_reviewedon") ?? r.GetAttributeValue<DateTime?>("createdon") ?? DateTime.MinValue)
+            .ThenBy(r => r.GetAttributeValue<DateTime?>("createdon"))
+            .Select(r => new CorrectionRow(
+                r.Id,
+                r.GetAttributeValue<EntityReference>("sprk_invoiceline")?.Id,
+                r.GetAttributeValue<string>("sprk_fieldname") ?? string.Empty,
+                r.GetAttributeValue<string>("sprk_aivalue"),
+                r.GetAttributeValue<string>("sprk_finalvalue"),
+                r.GetAttributeValue<OptionSetValue>("sprk_outcometype")?.Value is InvoiceCorrectionService.OutcomeCorrected or InvoiceCorrectionService.OutcomeConfirmed))
+            .ToList();
+    }
+
+    /// <summary>The fields a reviewer has seen (any Corrected / Confirmed row), by line (none for a header field): the <c>verified</c> set of a basis.</summary>
+    internal static IReadOnlySet<(Guid? LineId, string Field)> VerifiedOf(IReadOnlyList<CorrectionRow> rows) =>
+        rows.Where(r => r.IsLabel).Select(r => (r.LineId, r.Field)).ToHashSet();
 
     // ── The patch ──
 
