@@ -52,6 +52,7 @@ public class ProcedureReaderRedactionGuardTests
         typeof(BillingDecisionRecorder),
         typeof(InvoiceReviewService),
         typeof(InvoiceCorrectionReevaluation),
+        typeof(InvoiceFindingsDiff), // 164a-3: the findings and plan patch moved here from InvoiceCorrectionReevaluation
         typeof(InvoiceCorrectionService),
         typeof(InvoiceAdjustmentService),
         typeof(InvoiceApprovalService),
