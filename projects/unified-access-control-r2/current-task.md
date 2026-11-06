@@ -30,6 +30,7 @@
   - 049: notes passage removed, and the branch history rewritten (squash + force-with-lease).
   - 046c (Basic User read-only): conditions 1–7 in its POML; inventory and dry run come to me privately before the owner.
 - **ebilling (`-c7`):**
+  - 095d-2a-2 (`7316036f5c`, `741a4fccaf`, `0bd7d49f89`) APPROVED 2026-11-06 with no F findings. K1 (line attach between the re-check and the transaction) waits on their invoice row-version answer. K2: a refused-count in the job result in 2b. K3: the result's RerunState stays non-partner-visible.
   - 164a create-only refusal: separate flag + derived `GenericCreateRefused`, conditions accepted.
   - EB-D-196: quote may stay in Signal evidence (B), with the containment test.
   - `sprk_firmhold` re-run-pending value OK. Conditions: unknown value fails closed, only the re-run clears it, no human Update profile (verified on dev: only the 2 BFF app users), tests. Backfill count 0.
