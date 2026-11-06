@@ -35,6 +35,21 @@ const ACCESS_DENIED_PATTERNS: readonly RegExp[] = [
 const BFF_CHILD_RECORD_DENIED = 'child_record.denied';
 
 /**
+ * The reason codes of the rights gate on a secure-from-creation create (`DelegationRuleFilter.DenyWriteRequired`,
+ * `DenyShareRequired`, `DenyCheckFailed`): the caller lacks the access needed to create a secure project, or the check
+ * could not be completed. The two refusals share one plain sentence; a check that could not be completed has its own,
+ * because it says nothing about the caller's access.
+ */
+const SECURE_CREATE_DENIED_CODES: ReadonlySet<string> = new Set([
+  'sdap.access.deny.delegation_write_required',
+  'sdap.access.deny.delegation_share_required',
+  'sdap.access.deny.delegation_check_failed',
+]);
+
+/** `DelegationRuleFilter.DenyCheckFailed`: the rights check could not be completed (a fault, not a refusal of access). */
+const SECURE_CREATE_CHECK_FAILED = 'sdap.access.deny.delegation_check_failed';
+
+/**
  * The privilege a refusal names, as Dataverse writes it: `prvAppendToContact`, `prvCreatesprk_Project`, or the filled
  * "does not have AppendToAccess right(s)" form, or the SecLib "AccessRights: AppendToAccess" form. AppendTo is listed
  * before Append (it starts with it).
@@ -112,6 +127,21 @@ export function describeWebApiCreateError(err: unknown, recordNoun: string): IWe
 
   if (reasonCodeOf(err) === BFF_CHILD_RECORD_DENIED) {
     return { message: neutralSentence(recordNoun), isAccessDenied: true };
+  }
+
+  const reason = reasonCodeOf(err);
+  if (reason === SECURE_CREATE_CHECK_FAILED) {
+    return {
+      message: `Whether you can create a secure ${recordNoun} could not be checked. Try again in a moment, or create it without Secure.`,
+      isAccessDenied: true,
+    };
+  }
+
+  if (reason !== undefined && SECURE_CREATE_DENIED_CODES.has(reason)) {
+    return {
+      message: `You don't have the access needed to create a secure ${recordNoun}. You can create it without Secure, or ask an administrator.`,
+      isAccessDenied: true,
+    };
   }
 
   if ((code !== undefined && ACCESS_DENIED_CODES.has(code)) || ACCESS_DENIED_PATTERNS.some(p => p.test(raw))) {
