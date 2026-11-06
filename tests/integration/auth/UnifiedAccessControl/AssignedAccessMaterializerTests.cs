@@ -792,6 +792,73 @@ public class AssignedAccessMaterializerTests
         _h.Grants.ActiveRowsOf(_matter, second).Should().ContainSingle();
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Field-mapping-server-write-path-r1 task 049b — the one-subject pass (the create's maker grant, UAC-r2 ruling)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private Task<AssignedAccessOutcome> SyncOnly(Guid contact)
+        => _h.Materializer.MaterializeAsync(
+            new AssignedAccessRequest(Matter, _matter, AssignedAccessTrigger.Inline, null, RevokeOnChange: false,
+                new[] { TestTenant }, OnlySubject: new AssignedSubject(AssignedSubjectKind.Contact, contact)),
+            CancellationToken.None);
+
+    [Fact]
+    public async Task AOneSubjectPass_GrantsThatSubjectOnly_AndTheFullPassAfterIt_WritesNothingMoreForIt()
+    {
+        var (maker, makerUser) = _h.LinkedContact();
+        var external = _h.Contact();
+        var firm = Guid.NewGuid();
+        _h.Store.Assign(Matter, _matter, "sprk_assignedtointernal", maker);
+        _h.Store.Assign(Matter, _matter, Attorney1, external);
+        _h.Store.Assign(Matter, _matter, LawFirm1, firm);
+
+        var outcome = await SyncOnly(maker);
+
+        outcome.Complete.Should().BeTrue();
+        outcome.Entries.Should().ContainSingle().Which.SubjectId.Should().Be(maker);
+        ShareMask(makerUser).Should().Be(CollaborateMask);
+        _h.Grants.WriteCount.Should().Be(0, "no other subject is granted, external grants included");
+        _h.Store.RowsOf(_matter, external).Should().BeEmpty();
+        _h.Store.RowsOf(_matter, firm).Should().BeEmpty();
+
+        // The full pass (the queued one) grants the rest and finds the maker's access in place: idempotent for it.
+        var shareWrites = _h.Shares.Writes.Count;
+        var makersRows = _h.Store.Writes.Count(w => w.Target.Contains(maker.ToString("D"), StringComparison.OrdinalIgnoreCase));
+        var full = await Sync(trigger: AssignedAccessTrigger.Inline);
+
+        full.Complete.Should().BeTrue();
+        _h.Grants.ActiveRowsOf(_matter, external).Should().ContainSingle();
+        _h.Grants.ActiveRowsOf(_matter, organizationId: firm).Should().ContainSingle();
+        _h.Shares.Writes.Count.Should().Be(shareWrites, "the maker's share is already there");
+        _h.Store.RowsOf(_matter, maker).Should().ContainSingle().Which.State.Should().Be(AssignedAccessState.Shared);
+        full.Entries.Single(e => e.SubjectId == maker).Action.Should().Be(AssignedAccessAction.None);
+        _h.Store.Writes.Count(w => w.Target.Contains(maker.ToString("D"), StringComparison.OrdinalIgnoreCase))
+            .Should().Be(makersRows);
+    }
+
+    [Fact]
+    public async Task AOneSubjectPass_NeverSettlesAnEndedAssignment_TheFullPassStillRevokesIt()
+    {
+        var earlier = _h.Contact();
+        var (maker, _) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, earlier);
+        await Sync();
+        _h.Grants.ActiveRowsOf(_matter, earlier).Should().ContainSingle();
+
+        _h.Store.Assign(Matter, _matter, Attorney1, maker);
+        var outcome = await SyncOnly(maker);
+
+        _h.Grants.ActiveRowsOf(_matter, earlier).Should().ContainSingle("a one-subject pass removes nothing");
+        LedgerRow(earlier, Attorney1).State.Should().Be(AssignedAccessState.Granted);
+        outcome.Entries.Should().NotContain(e =>
+            e.Action == AssignedAccessAction.Revoked || e.Action == AssignedAccessAction.WouldRevoke);
+
+        await Sync();
+
+        _h.Grants.ActiveRowsOf(_matter, earlier).Should().BeEmpty("the full pass keeps revoke-on-change");
+        LedgerRow(earlier, Attorney1).State.Should().Be(AssignedAccessState.Revoked);
+    }
+
     [Fact]
     public async Task ClearingOneField_DoesNotRevoke_WhenAnotherRegistryColumnStillNamesTheSubject()
     {

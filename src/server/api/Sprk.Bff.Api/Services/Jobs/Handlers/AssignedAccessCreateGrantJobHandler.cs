@@ -54,7 +54,8 @@ public sealed class AssignedAccessCreateGrantJobHandler : IJobHandler
     public const string JobTypeName = "AssignedAccessCreateGrant";
 
     /// <summary>The longest the create waits for the enqueue (the <c>GateDecisionRecordEnqueuer</c> bound). A slower or
-    /// failed enqueue runs the pass inline, as before.</summary>
+    /// failed enqueue runs the pass inline, as before, except after a maker-only inline grant (task 049b), where the
+    /// reconciliation job completes it.</summary>
     public static readonly TimeSpan EnqueueTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>A pass that could not take the root's lease within <see cref="LockWait"/>.</summary>

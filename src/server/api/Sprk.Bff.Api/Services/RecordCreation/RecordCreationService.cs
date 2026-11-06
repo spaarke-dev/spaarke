@@ -1912,15 +1912,37 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
-    /// The I-12 L1 "Assigned *" pass of a created root. Inline when the root's "for" person is its maker's own linked contact
-    /// (task 049 fix round 1, UAC-r2 ruling: the maker's own Assigned-To share stays immediate); otherwise queued
-    /// (<see cref="QueueAssignedAccessGrantAsync"/>), and inline again when nothing could be queued (as before task 049).
-    /// Never throws; a fault is the reconciliation job's.
+    /// The I-12 L1 "Assigned *" pass of a created root. When the root's "for" person is its maker's own linked contact, the
+    /// maker's own subject is granted inline (task 049 fix round 1, UAC-r2 ruling: the maker's own Assigned-To share stays
+    /// immediate), and then the full pass is queued (task 049b, UAC-r2 ruling: every other subject, external grants included,
+    /// takes the queued path; the full pass finds the maker's access already in place and writes nothing for it). Otherwise
+    /// the full pass is queued (<see cref="QueueAssignedAccessGrantAsync"/>), and runs inline when nothing could be queued
+    /// (as before task 049). Never throws; a fault is the reconciliation job's.
     /// </summary>
+    /// <remarks>Task 049b, enqueue failure in the maker case: the rest is NOT run inline (that pass is the latency 049b
+    /// removes). It is logged, and <see cref="AssignedAccessReconciliationJob"/> grants it within one cycle.</remarks>
     private async Task GrantAssignedAccessAsync(string table, Guid id, RecordTableRule rule, Decision decision, string correlationId)
     {
-        if (await ForPersonIsTheMakerAsync(table, id, rule, decision).ConfigureAwait(false)
-            || !await QueueAssignedAccessGrantAsync(table, id, decision.GrantorOid, correlationId).ConfigureAwait(false))
+        if (await MakersForPersonContactAsync(table, id, rule, decision).ConfigureAwait(false) is { } makersContact)
+        {
+            await AssignedAccessMaterializer.RunAfterWriteAsync(
+                _scopes, table, id, writtenColumns: null, decision.GrantorOid, _logger, CancellationToken.None,
+                onlySubject: new AssignedSubject(AssignedSubjectKind.Contact, makersContact)).ConfigureAwait(false);
+
+            if (!await QueueAssignedAccessGrantAsync(table, id, decision.GrantorOid, correlationId, runsInlineOnFailure: false)
+                    .ConfigureAwait(false))
+            {
+                _logger.LogWarning(
+                    "[ASSIGNED-ACCESS] {Table} {Id}: only the maker's own assigned subject was evaluated in the request; the " +
+                    "create-time pass for the other assigned subjects was not queued, so the assigned-access reconciliation " +
+                    "job completes it (correlationId={CorrelationId}).", table, id, correlationId);
+            }
+
+            return;
+        }
+
+        if (!await QueueAssignedAccessGrantAsync(table, id, decision.GrantorOid, correlationId, runsInlineOnFailure: true)
+                .ConfigureAwait(false))
         {
             await AssignedAccessMaterializer.RunAfterWriteAsync(
                 _scopes, table, id, writtenColumns: null, decision.GrantorOid, _logger, CancellationToken.None).ConfigureAwait(false);
@@ -1928,43 +1950,43 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
-    /// Task 049 fix round 1 (UAC-r2 ruling): whether the created root's "for" person (<see cref="RecordTableRule.ForPerson"/>,
-    /// Assigned To) is its maker's linked contact, as <see cref="IIdentityNormalizationService.ResolveAsync"/> answers it: the
-    /// resolver the chat and Office adapters fill that column from (cached). Only a root that sets the column asks. Fails
-    /// closed: no maker, no resolver in this host, or a lookup that faults, outlasts
-    /// <see cref="AssignedAccessCreateGrantJobHandler.EnqueueTimeout"/> or answers no contact is <c>false</c>, so the pass is
+    /// Task 049 fix round 1 (UAC-r2 ruling): the created root's "for" person (<see cref="RecordTableRule.ForPerson"/>,
+    /// Assigned To) when it is its maker's linked contact, as <see cref="IIdentityNormalizationService.ResolveAsync"/>
+    /// answers it: the resolver the chat and Office adapters fill that column from (cached); otherwise <c>null</c>. Only a
+    /// root that sets the column asks. Fails closed: no maker, no resolver in this host, or a lookup that faults, outlasts
+    /// <see cref="AssignedAccessCreateGrantJobHandler.EnqueueTimeout"/> or answers no contact is <c>null</c>, so the pass is
     /// queued and never granted inline on a guess.
     /// </summary>
-    private async Task<bool> ForPersonIsTheMakerAsync(string table, Guid id, RecordTableRule rule, Decision decision)
+    private async Task<Guid?> MakersForPersonContactAsync(string table, Guid id, RecordTableRule rule, Decision decision)
     {
         if (rule.ForPerson is not { } forPerson
             || !string.Equals(forPerson.RelatedTable, "contact", StringComparison.OrdinalIgnoreCase)
             || decision.MakerSystemUserId is not { } maker || maker == Guid.Empty)
         {
-            return false;
+            return null;
         }
 
         var assignee = decision.Item?.Lookups
             .FirstOrDefault(l => string.Equals(l.Column, forPerson.Column, StringComparison.OrdinalIgnoreCase))?.RecordId;
         if (assignee is not { } forPersonId || forPersonId == Guid.Empty)
-            return false;
+            return null;
 
         try
         {
             using var scope = _scopes.CreateScope();
             if (scope.ServiceProvider.GetService<IIdentityNormalizationService>() is not { } identity)
-                return false;
+                return null;
 
             using var timeout = new CancellationTokenSource(AssignedAccessCreateGrantJobHandler.EnqueueTimeout);
             var person = await identity.ResolveAsync(maker, timeout.Token).ConfigureAwait(false);
-            return person.ContactId is { } contact && contact == forPersonId;
+            return person.ContactId is { } contact && contact == forPersonId ? forPersonId : null;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 "[ASSIGNED-ACCESS] The maker of {Table} {Id} could not be matched to its Assigned To ({ExceptionType}); the " +
                 "create-time pass is queued.", table, id, ex.GetType().Name);
-            return false;
+            return null;
         }
     }
 
@@ -1973,9 +1995,11 @@ internal sealed partial class RecordCreationService
     /// created project, matter or work assignment (<see cref="AssignedAccessCreateGrantJobHandler"/>), so the create returns
     /// without it. Create only: every update path keeps its inline pass. The message names the root, the grantor and the
     /// cache tenants, never the assignees. Returns <c>false</c> when nothing was queued (another table, no queue in this
-    /// host, a failed or slow send), and the caller then runs the pass inline, as before.
+    /// host, a failed or slow send); the caller then runs the pass inline, as before, unless it is the maker case (task 049b,
+    /// <paramref name="runsInlineOnFailure"/> <c>false</c>), which leaves it to the reconciliation job.
     /// </summary>
-    private async Task<bool> QueueAssignedAccessGrantAsync(string table, Guid id, string? grantorOid, string correlationId)
+    private async Task<bool> QueueAssignedAccessGrantAsync(
+        string table, Guid id, string? grantorOid, string correlationId, bool runsInlineOnFailure)
     {
         if (!AssignedAccessMaterializer.TryParseRootLogicalName(table, out var rootType))
             return false;
@@ -2002,8 +2026,9 @@ internal sealed partial class RecordCreationService
         catch (Exception ex)
         {
             _logger.LogWarning(
-                "[ASSIGNED-ACCESS] The create-time grant of {Table} {Id} could not be queued ({ExceptionType}); it runs inline " +
-                "(correlationId={CorrelationId}).", table, id, ex.GetType().Name, correlationId);
+                "[ASSIGNED-ACCESS] The create-time grant of {Table} {Id} could not be queued ({ExceptionType}); {Fallback} " +
+                "(correlationId={CorrelationId}).", table, id, ex.GetType().Name,
+                runsInlineOnFailure ? "it runs inline" : "the assigned-access reconciliation job completes it", correlationId);
             return false;
         }
     }
