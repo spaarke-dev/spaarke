@@ -192,6 +192,8 @@ Numbers consumed: `MAT-000035` to `MAT-000055`. Deleting the rows does not retur
   - No warnings were returned.
 - **The first call took 12.6 s.** This is a cold start after the profile was created; the warm-ups below absorb it.
 
+**Telemetry caveat (#2158):** App Insights on the dev BFF drops whole requests, with their traces and dependencies, so it has only 12 of the 33 server creates in these windows. The client's 33 logged 201s and the Dataverse read-back (33 `FMSWP-021-*` matters created by the BFF identity) are the evidence for the counts. The step timings below come from the operations that were kept, and the access gate for these windows reads "no failure in the observed telemetry" (UAC-r2).
+
 ## Where the time goes
 
 **1. The grant runs inside the request when the maker is the matter's Assigned To.**
