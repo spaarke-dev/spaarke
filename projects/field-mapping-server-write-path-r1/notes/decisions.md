@@ -845,3 +845,7 @@ Basic User keeps AppendTo on `sprk_reportcard`. The ruling removed it only if no
 ## 2026-11-06 — Communication send, reply and re-file need Core User (owner, in fm's session)
 
 Basic User is not raised for communication send, reply or re-file (task 046b gaps G11 and G12). These features need Core User, like the other add-on rulings of 2026-11-05. A caller who holds Basic User only is refused with the routes' normal 403. The gaps stay in the guard's baseline, marked "owner ruled: not granted", so any change to them is a deliberate one. Removal R1 was applied on dev on 2026-11-06 (UAC-r2, from `e6c0c94fa3`).
+
+## 2026-11-06 — Basic User is read-only on Spaarke tables (owner, in fm's session)
+
+On every Spaarke table (`sprk_*`), Spaarke Basic User holds Read only. Creating, updating, deleting, filing, assigning or sharing Spaarke records needs Core User. Platform privileges that Dataverse needs for any user are not affected. Task 046c applies the rule: the role file, a removal through the reviewed `-Remove` step (run by UAC-r2 under the owner's go), and a guard.

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046c" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Basic User is read-only on Spaarke tables: role file, removal through the reviewed -Remove step, and a guard (owner 2026-11-06)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>046b is merged (it brings Set-FeatureRolePrivileges.ps1 -Remove and the feature matrix). The live removal is UAC-r2's, in its session, under the owner's go; this task never writes to Dataverse.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security role change on a role every user holds, a live removal script run, and an ArchTest guard.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Per-feature reasoning over every Spaarke-table privilege the role carries, and a public-repo confidentiality line.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes role XML, the declared set, the ArchTest guard, doc §5.1 and notes; no src/server file.</parallel-reason>
+    <deps>046b</deps>
+    <tags>security, roles, dataverse, testing, docs</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>The owner ruled on 2026-11-06 that Spaarke Basic User is read-only (notes/decisions.md, "Basic User is read-only on Spaarke tables"). On every Spaarke table (sprk_*), Basic User may hold Read only. Features that create, update, delete, file, assign or share Spaarke records need Core User, in line with the 2026-11-05 and 2026-11-06 rulings. Step 1: inventory every privilege other than Read that Spaarke Basic User.xml holds on a sprk_* table. For each, name the feature that would ask it of a Basic-only caller (from §5.1 and the code paths that run as the caller), and confirm that Core User covers that feature. Give the inventory to the main session in the final report only, never in a committed file. If a feature turns out to be meant for Basic-only users, stop and report it for an owner ruling. Step 2: remove those privileges from the role file and add them to the removals block of config/feature-role-privileges.json, so they go through the reviewed -Remove step. Step 3: add a guard that Basic User holds nothing but Read on any sprk_* table, with must-fire and must-not-fire controls and a seeded proof, and update §5.1 (Basic User: read-only on Spaarke tables). Platform (non-sprk) privileges that Dataverse needs for any user stay as they are and are out of scope. Step 4: run the dry run and -Remove -Verify against dev (GETs only) and give the planned removals to UAC-r2 by message.</prompt>
+  <role>SPAARKE platform developer, Dataverse security roles and ArchTest guards. Security fails closed. Follow ADRs strictly.</role>
+  <goal>Basic User holds only Read on Spaarke tables, in the repo and, after UAC-r2's run, on dev; the guard keeps it that way; and no feature meant for Basic-only users is lost without an owner ruling.</goal>
+
+  <context>
+    <background>Basic User is the role every user holds. 046b recorded that the add-on roles (Office Add In User, AI Analysis User, Console User) need Core User, and that communication send, reply and re-file need Core User (gaps G11/G12, "owner ruled: not granted"). This task makes the read-only rule explicit for Spaarke tables. 046b's removal R2 (Basic User AppendTo on sprk_reportcard) was dropped only because send and re-file asked for it. Under this ruling those features need Core User, so the privilege comes off here.</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Basic User.xml</file>
+      <file role="modify">config/feature-role-privileges.json (removals block)</file>
+      <file role="modify">tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs</file>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md §5.1</file>
+      <file role="canonical-reference">scripts/Set-FeatureRolePrivileges.ps1 -Remove (046b)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-11-06">Read-only applies to sprk_* tables only. Platform privileges are out of scope. A feature found to need a non-Read Basic User privilege for Basic-only users is escalated, never kept quietly.</constraint>
+    <constraint source="no live writes">This task never writes to Dataverse. The dry run (GETs only) may run against dev with a delegated token held in memory; never write a token to a file. -Remove -Apply is UAC-r2's, in its session.</constraint>
+    <constraint source="confidentiality (repo is public)">Files state the rule (Basic User is read-only on Spaarke tables) and gaps only. They never list the privileges being removed as holdings, never name teams or principals, and never describe an exposure. The inventory goes in the final report and to UAC-r2 by message.</constraint>
+    <constraint source="CLAUDE.md §16">The new guard ships with must-fire and must-not-fire controls and a seeded-drift proof. The role file changes in the same commit as the guard, so no ratchet baseline is needed.</constraint>
+    <constraint source="ADR-038">KEEP paths only (tests/Spaarke.ArchTests/**).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Inventory and per-feature check (report only).</step>
+    <step order="2">Role file plus removals block.</step>
+    <step order="3">Guard, controls, §5.1.</step>
+    <step order="4">Dry run and -Remove -Verify against dev (GETs only); planned removals to UAC-r2.</step>
+    <step order="5">ArchTests build (0 warnings) and full run; Pester 5.7.1 script tests.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: Spaarke Basic User.xml holds no privilege other than Read on any sprk_* table, and the guard fails when a seeded copy adds one.</criterion>
+    <criterion testable="true">AC2: every removed privilege is in the removals block; the dry run against dev lists exactly those and makes zero writes.</criterion>
+    <criterion testable="true">AC3: every removed privilege's feature is shown to be covered by Core User, or the task stopped for an owner ruling.</criterion>
+    <criterion testable="true">AC4: no committed file lists the removed privileges as holdings or names teams or principals.</criterion>
+    <criterion testable="true">AC5: ArchTests build 0 warnings and pass in full; Sprk.Bff.Api.Tests not run.</criterion>
+  </acceptance-criteria>
+
+  <notes>Added 2026-11-06 from the owner's ruling in fm's session.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
