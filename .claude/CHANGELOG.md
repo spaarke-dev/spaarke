@@ -7,6 +7,17 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-05 — Finished sub-agent worktrees are cleaned up (FAILURE-MODES G-25); Stop/PostToolUse hooks run from the repo root
+
+On 2026-11-04, 123 sub-agent copies under the main checkout's `.claude\worktrees` hung VS Code and Claude sessions opened there.
+
+- **`scripts/worktree/Clean-AgentWorktrees.ps1`** (new): removes a copy only when it is unlocked, idle ≥ 12 h, clean, and its commits are on another branch (`-Project` = merged into `work/<slug>`), through `Remove-WorktreeSafe.ps1` one path per call; removes empty unregistered folders; lists everything else for a human. Pester: `tests/scripts/Clean-AgentWorktrees.Tests.ps1` (CI `agent-guard-tests`).
+- **`devops-project-archive`**: Step 5.5 removes the project's finished agent copies. The project worktree is still kept.
+- **`.claude/settings.json`**: the `post-edit-lint.sh` and `task-quality-gate.sh` hooks now `cd "${CLAUDE_PROJECT_DIR}"` first. They used repo-relative paths, so they failed (`No such file or directory`, exit 127) whenever a session's working directory was not the repo root.
+- **Test fix**: `tests/scripts/Remove-WorktreeSafe.Tests.ps1` "validates every path first" passed two paths through `pwsh -File`, which binds one string `"a,b"`, so it tested a single missing path. It now uses `-Command` and asserts the refusal names the real path.
+- **`.claude/FAILURE-MODES.md`**: G-25.
+
+---
 ###### 2026-11-03 — Skill authoring standard: 500-line cap, conditional branches in `references/`, length guard
 
 Our template said "under 200 lines, cap 400", but 25 skills were over 400 and nothing enforced it. A whole SKILL.md loads on every invocation: provision-environment alone was 229 KB (~57k tokens). Checked against Anthropic's skill-authoring guidance (keep SKILL.md under 500 lines; progressive disclosure; a contents list atop long reference files, which Claude may only preview; match freedom to the task; checklists with validate → fix → re-validate loops).
