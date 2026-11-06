@@ -36,7 +36,7 @@ using Xunit;
 
 namespace Sprk.Bff.Api.IntegrationTests.Signals;
 
-public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.WorklistFactory>
+public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.WorklistFactory>
 {
     private const string Route = "/api/v1/signals/worklist";
     private const int Decide = 100000000;
@@ -1430,8 +1430,10 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         var body = await OkAsync(world, Alice);
         ShouldKeepTheEarlierInvoice(body, kept, storedLines: 5);
         ShouldWithholdTheEarlierInvoice(body, withheld, unreadable.ToString("D"));
-        world.Requests.Should().NotContain(r => r.StartsWith(BillingEventRead, StringComparison.Ordinal) || r.StartsWith(SubmissionRead, StringComparison.Ordinal),
-            "an invoice id needs neither the event nor the submission");
+        world.Requests.Should().NotContain(r => r.StartsWith(SubmissionRead, StringComparison.Ordinal), "an invoice id needs no submission");
+        // Task 174 (D-207): the Duplicate rule still needs no event for an invoice id, but both line items now name their invoice
+        // (invoiceReview), which is the one batched read of the line's invoice (both Signals share the one line).
+        world.Requests.Count(r => r.StartsWith(BillingEventRead, StringComparison.Ordinal)).Should().Be(1, "task 174's one read, for invoiceReview");
     }
 
     [Fact]

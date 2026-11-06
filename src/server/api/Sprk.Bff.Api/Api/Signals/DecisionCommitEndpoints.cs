@@ -33,7 +33,8 @@ public static class DecisionCommitEndpoints
             .WithSummary("Record one decision on a Signal: actions, Next steps, messages, then the one Decision Record")
             .WithDescription("200 with the record id, the steps and the Signals closed (a repeated review id returns its first "
                 + "outcome). 403 when the caller is unresolved or lacks a right an action needs; 404 when a Signal or its core "
-                + "record is not readable; 409 when a Signal is no longer open or the review is in progress; 422 when the review "
+                + "record is not readable; 409 when a Signal is no longer open, the review is in progress, or a Signal is an invoice or "
+                + "invoice-line item (decision.decided_in_invoice_review: decided in Invoice Review only); 422 when the review "
                 + "is invalid; 500 when a step failed (no record; the writes that landed are listed); 503 when the route cannot "
                 + "check the review id.")
             .Accepts<DecisionReview>("application/json")
