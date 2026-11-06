@@ -11,7 +11,7 @@
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; peers take the owner's go for their own live writes in their sessions. |
-| **Active work** | None in code. **PR #2577 MERGED** as `f34993dc78` (POST /api/v1/documents: the caller needs Create on sprk_document, in the caller's BU container); worktree C:/wtdc removed; fm was told and adds the "Summarize Files (unfiled document)" matrix row in 046b. No uncommitted files. |
+| **Active work** | **#2560** (a mirrored share on a hard-deny row carries Read only): worktree C:/wt2560, branch `task/uac-2560-hard-deny-mirror-read` from f34993dc78, with an Opus implementer running. Then: adversarial review twice (security), publish-size delta, PR. Earlier: **PR #2577 MERGED** as `f34993dc78` (POST /api/v1/documents: the caller needs Create on sprk_document, in the caller's BU container); worktree C:/wtdc removed; fm was told and adds the "Summarize Files (unfiled document)" matrix row in 046b. No uncommitted files. |
 | **Dev state** | BFF = **0f53e053bf** since 2026-11-05T21:39:06Z (gate PASS; record `notes/deploy-gate-2026-11-05-0f53e053bf.md`; gate script `$TEMP/uacmerge/uacg/gate0f5.sh`). Rollback snapshot `deploy/rollback/wwwroot-20261105T213757Z` = 909754869f. Dev SPA = b083d62183. 046b role additions are live (below). The root default team "Spaarke" holds Console User + Basic User only. |
 | **Next action** | 1. (Done: #2577 merged.) 2. (Done: nightly on 0f53e053bf clean; sent to ontology 02:5xZ; census now 5, after the root-team change.) 3. (Done 02:35Z: 046b R1 removed on dev from `e6c0c94fa3`; -Remove -Verify and -Verify PASS.) Review the 046b PR when fm sends it; G11/G12: owner ruled in fm's session "not granted (Core User required)"; 12 entries stay in the ratchet; fm's final round checks that send and re-file answer a not-held probe with 403, not 500. 4. Review fm 049b when the head SHA arrives (~3–4 h from 01:00Z). 5. Then ONE combined deploy (owner's go naming the SHA; every peer re-OKs the combined SHA, ontology included; avoid restarts 02:20–03:00Z). |
 
@@ -32,6 +32,14 @@
     - record-busy stays a 500 ProblemDetails;
     - **secure from creation** (PRIVATE wording): the wizard's create declares secure intent (`secure=true`, only sprk_project/sprk_workassignment), runs the isolated-create path, and the Assigned-To pass runs after isolation. D1: ask the SAME rights as DelegationRuleFilter (Write + Share), as the caller, reusing its predicate, same 403. D2: the wizard treats `already_provisioned` as success after an intent create; the server answers it ONLY when the share and the container both exist (test). A3 unchanged.
     - When reviewing: check D1's predicate extraction carefully (the likeliest F).
+  - **046c (after 046b merges): Basic User read-only on sprk_* (owner ruling in fm's session, fm decisions `d24514a6a9`).** fm sends the inventory and the dry run privately. My conditions:
+    - non-human principals (app users, service identities) that get writes through the default team: a stop;
+    - human Basic holders without Core, by count and kind;
+    - their 14-day writes;
+    - ownership stays valid on Read;
+    - the rollback list generated before the apply;
+    - its own window, apart from the deploy, with a ≥2 h denied-privilege watch;
+    - a guard with controls.
   - 044 field-security profile still owed (owner go here).
 - **ebilling** (`-c7`): master PR coming (082c-3, 114, 095d-0, 095d-2/2a, EB-D-188 Add line). My checklist:
   - the pre-P2 table; the `sprk_trackingscope` re-grep; the runbook lines; prevseq MappingProtectedColumns; C22; the full integration suites;
