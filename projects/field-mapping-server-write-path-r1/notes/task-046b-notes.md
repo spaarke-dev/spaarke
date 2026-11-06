@@ -29,7 +29,7 @@ Nothing for G3 or G9 and nothing from Part D went into a role file.
 - G1's AppendTo: the ruling says it files a KPI assessment under a report card. New feature rows "KPI assessment (filed under a report card)" [Core]: Create and Append on `sprk_kpiassessment` (Basic), AppendTo on `sprk_reportcard` (Deep); evidence `ChildRecordEndpoints.cs:70-85` (`sprk_kpiassessment` is a create table, the secure-record ribbon's "New KPI Assessment") and `SecureChildLineage.cs:302-303` (a KPI assessment is filed under a matter, project or report card). Without the row, removing the AppendTo would fail nothing.
 - G6: the Write went on Office Add In User, so the version-save row's set is now Basic User + Office Add In User (it was Basic User alone).
 - G3: accepted, not applied. The baseline entry stays, its reason updated.
-- G9: stays in the baseline; it joins the Part D list.
+- G9: stayed in the baseline in the first pass; dropped in fix round 2 (below): a run that can write documents is Core User's only.
 - G10: removed from the baseline, the gap table and the Decision commit Write row (seven subjects remain). Recorded in the doc and the test comment: no role change; invoice-line Signals are decided in the invoice review; the Console route will refuse them (#2572, ontology DI-139).
 - Office To Do and the Console Do lane: Core-only (doc rows; test comments). Console User alone is checked against the Decide lane only (below).
 - Create on `sprk_billingevent`: "none, by design (BFF-written, ebilling D-18)" in the doc (new row) and a `MustNotHold` rule (no person role holds it). The doc notes that ebilling hides the model-driven "New Billing Event" button in its own ribbon deploy.
@@ -46,48 +46,18 @@ Nothing for G3 or G9 and nothing from Part D went into a role file.
 
 | Add-on | Checked alone against |
 |---|---|
-| Office Add In User | Office save, Office version save, Office quick create, Event (typed route) |
-| AI Analysis User | Analysis from a playbook, Analysis run, Analysis run (writing playbook) |
-| Console User | Decision commit and Decision actions, the Decide lane: Write on the subject is not asked of it alone for event, To Do and work assignment subjects (the Do lane's subjects, `SignalReadService.cs:229-234`; the Do lane stays Core-only) |
+| Office Add In User | Ruled not standalone in fix round 2 (below): not checked alone. Its features, still checked with a base role: Office save, Office version save, Office quick create, Event (typed route) |
+| AI Analysis User | Ruled not standalone in fix round 2 (below): not checked alone. Its features, still checked with Basic User: Analysis from a playbook, Analysis run (not the writing run: Core User's only) |
+| Console User | Ruled in fix round 2 (below) to need Core User: not checked alone. Its features are checked with Core User: Decision commit and Decision actions (the Do lane stays Core-only) |
 | Billing Administrator | Billing: Procedure override (its row was already alone) |
 | AI Analysis Admin | Playbook administration (rows: Create and Share on `sprk_analysisplaybook`, asked of the caller, `PlaybookEndpoints.cs:27,107,120,176`, `PlaybookAuthorizationFilter.cs:55-75,166,172`; Write for the edit routes and Read for a clone's source, added in fix round 2) |
 | Ontology Administrator | none in this matrix: its routes write as the user, so Dataverse asks each right itself (`OntologyAdminCallerBoundaryGuardTests`) |
 | Access Administrator | none in this matrix: membership writes, pinned by `ContactOrganizationMembershipWriterGuardTests` |
 | Reporting Access Admin, Author, Viewer | none in this matrix: the reporting routes admit a caller by the role itself (`ReportingAuthorizationFilter.cs`) |
 
-### The gap list (for UAC-r2, one owner decision; nothing applied)
+### The gap list (withdrawn in fix round 2)
 
-39 gaps (38 at first write, D39 added in fix round 1), each in `KnownGaps` with its held depth. Evidence paths are under `src/server/api/Sprk.Bff.Api/` unless stated.
-
-| # | Role (alone) | Privilege | Depth needed | Held | Feature | Evidence |
-|---|---|---|---|---|---|---|
-| D1 | Office Add In User | `prvAppendTosprk_Todo` | Deep | none | Office save to a To Do | `Api/Office/OfficeEndpoints.cs:185-194`; `Api/Filters/EntityAccessFilter.cs:94,115-155,273-282` |
-| D2 | Office Add In User | `prvReadContact` | Deep | Basic | Office quick create, the assignee | `Api/Filters/QuickCreateSourceAccessFilter.cs:310-345`; `Services/Office/OfficeService.cs:2437-2455` |
-| D3 | Office Add In User | `prvAppendTosprk_RecordType_Ref` | Basic | none | Office quick create, a project's record type | `Services/Office/OfficeService.cs:2408-2419` |
-| D4 | Office Add In User | `prvReadsprk_Todo` | Deep | none | Office quick create from a To Do | `Api/Filters/QuickCreateSourceAccessFilter.cs:246-260`; `Api/Filters/EntityAccessFilter.cs:115-155` |
-| D5 | Office Add In User | `prvAppendTosprk_RecordType_Ref` | Basic | none | Event (typed route), the record type | `Api/Events/EventEndpoints.cs:949`; `Services/Dataverse/CallerWriteAuthorization.cs:390-409` |
-| D6 | Office Add In User | `prvAppendTosprk_analysis` | Deep | none | Event (typed route) regarding an analysis | `Api/Events/EventEndpoints.cs:131,378-405`; `src/server/shared/Spaarke.Dataverse/Models.cs:1439-1449` |
-| D7 | AI Analysis User | `prvReadsprk_Document` | Deep | none | Analysis from a playbook | `Api/Filters/AnalysisAuthorizationFilter.cs:152,781-788` |
-| D8 | AI Analysis User | `prvAppendTosprk_Document` | Deep | none | Analysis from a playbook | `Api/Filters/AnalysisAuthorizationFilter.cs:152,781-788` |
-| D9 | AI Analysis User | `prvReadsprk_Document` | Deep | none | Analysis run | `Api/Ai/AnalysisEndpoints.cs:115-120`; `Api/Filters/AnalysisAuthorizationFilter.cs:26-28,943-952` |
-| D10 | AI Analysis User | `prvWritesprk_Document` | Deep | none | Analysis run, writing playbook (G9; with Basic User too) | `Api/Ai/AnalysisEndpoints.cs:118-120`; `Api/Filters/AnalysisAuthorizationFilter.cs:922-952,970` |
-| D11-D14 | Console User | `prvReadsprk_Matter`, `prvReadsprk_Project`, `prvReadsprk_WorkAssignment`, `prvReadsprk_ServiceRequest` | Deep | none | Decision commit: read the core record | `Services/Signals/SignalCoreRecordAccess.cs:239-247`; `Services/Dataverse/CoreAncestorResolver.cs:67-73` |
-| D15-D18 | Console User | `prvAppendTosprk_Matter`, `prvAppendTosprk_Project`, `prvAppendTosprk_WorkAssignment`, `prvAppendTosprk_ServiceRequest` | Deep | none | Decision commit: AppendTo on the core record | `Services/Signals/DecisionCallerRights.cs:61`; `Services/Dataverse/CoreAncestorResolver.cs:67-73` |
-| D19-D22 | Console User | `prvWritesprk_Matter`, `prvWritesprk_Project`, `prvWritesprk_Communication`, `prvWritesprk_Invoice` | Deep | none | Decision commit: Write on the subject (Decide lane) | `Services/Signals/DecisionCallerRights.cs:42,67-83`; `Services/Signals/SignalWriter.cs:503-507` |
-| D23 | Console User | `prvAppendToTransactionCurrency` | Basic | none | Create budget: the currency | `Services/Signals/Actions/DecisionActionExecutors.cs:700` |
-| D24-D27 | Console User | `prvCreatesprk_Todo`, `prvCreatesprk_Event`, `prvCreatesprk_WorkAssignment`, `prvCreatesprk_Budget` | Basic | none | Add To Do, create event, assign task, assign work, create budget | `Services/Signals/Actions/DecisionActionExecutors.cs:217,588,1247,1321,1355,1386,1449` |
-| D28-D31 | Console User | `prvAppendsprk_Todo`, `prvAppendsprk_Event`, `prvAppendsprk_WorkAssignment`, `prvAppendsprk_Budget` | Basic | none | The same actions: the created row is filed under the core | `Services/Signals/Actions/DecisionActionExecutors.cs:1278-1281,1299`; `Services/Signals/Actions/DecisionRouteCores.cs:74-85` |
-| D32 | Console User | `prvAppendTosprk_RecordType_Ref` | Basic | none | The same actions and the budget inquiry: the record type | `Services/Signals/Actions/DecisionActionExecutors.cs:1281`; `Services/Signals/Actions/BudgetInquiryExecutor.cs:348` |
-| D33 | Console User | `prvWritesprk_Budget` | Deep | none | Revise budget | `Services/Signals/Actions/DecisionActionExecutors.cs:523` |
-| D34 | Console User | `prvAppendToContact` | Deep | none | Add To Do, assign work, assign task (the assignee) | `Services/Signals/Actions/DecisionActionExecutors.cs:880,1254-1255,1323,1399,1451` |
-| D35 | Console User | `prvAppendTosprk_EventType_Ref` | Global | none | Assign task: the Task event type | `Services/Signals/Actions/DecisionActionExecutors.cs:1462-1463` |
-| D36-D37 | Console User | `prvCreatesprk_ServiceRequest`, `prvAppendsprk_ServiceRequest` | Basic | none | Budget inquiry | `Services/Signals/Actions/BudgetInquiryExecutor.cs:146,181,276-282` |
-| D38 | Console User | `prvAppendTosprk_Organization` | Deep | none | Budget inquiry: the outside firm | `Services/Signals/Actions/BudgetInquiryExecutor.cs:181,352` |
-| D39 | Office Add In User | `prvReadsprk_Document` | Deep | none | Office version save: the "Save as version" offer on a name collision | `Api/Office/OfficeEndpoints.cs:547-605` |
-
-Also open for the same batch: **G9** (Basic User + AI Analysis User, Write on `sprk_document` at Deep, held none; D10 is the same privilege for the add-on alone).
-
-Decisions for the owner with this list: whether the Console's Decide lane is meant for Console User alone at all (28 of 38), or Console User stays a companion of a base role in practice; and whether D1-D6 belong on Office Add In User or the add-in's Office save to a To Do and the regarding-an-analysis event stay Core-only.
+The first pass listed 39 gaps (D1-D39) for Office Add In User, AI Analysis User and Console User checked alone, for the owner's one decision. The owner ruled (2026-11-05) that none of the three is standalone, so no gap is open for any of them alone and the list, its `KnownGaps` entries and doc §5.1's gap summary are gone. `KnownGaps` now holds one entry, G3 (accepted, not applied).
 
 ## Part B - the apply script
 
@@ -189,7 +159,7 @@ Branch `task/fm-046b`. No Dataverse write was made and `-Apply` was not run; the
 
 ## Fix round 2 (playbook administration rows, role-file duplicates, apply script hardening)
 
-Branch `task/fm-046b`. No Dataverse write was made and `-Apply` was not run. The script's apply path is shown against a test double only (no network, no token).
+Branch `task/fm-046b`. No Dataverse write was made and `-Apply` was not run by this task. The script's apply path is shown against a test double only (no network, no token).
 
 | Item | Outcome |
 |---|---|
@@ -216,4 +186,24 @@ Not touched: `ProcedureRolePrivilegeGuardTests.cs` and `scripts/ebilling/*` (cop
 
 ### Verification (fix round 2)
 
-`dotnet build tests/Spaarke.ArchTests --no-incremental`: 0 Warning(s), 0 Error(s). `FeatureRolePrivilegeGuardTests`: 22 / 22 (20 before; added `ASecondFileNamedForAnyRoleFails` and `MustNotHoldNamesRealTables`). Whole `Spaarke.ArchTests`: 1962 / 1962 passed (1960 before; the two added tests). `Sprk.Bff.Api.Tests` not run (no `src/server` change).
+`dotnet build tests/Spaarke.ArchTests --no-incremental`: 0 Warning(s), 0 Error(s). `FeatureRolePrivilegeGuardTests`: 22 / 22 (20 before; added `ASecondFileNamedForAnyRoleFails` and `MustNotHoldNamesRealTables`). Whole `Spaarke.ArchTests`: 1962 / 1962 passed after the first part (1960 before; the two added tests); 1965 / 1965 after the second part (items 10-13: three more tests). `Sprk.Bff.Api.Tests` not run (no `src/server` change).
+
+### Fix round 2, second part (owner rulings 2026-11-05: standalone exceptions and two removals; `decisions.md`, "Standalone add-on rulings, two role removals, ...")
+
+| Item | Outcome |
+|---|---|
+| 10. Standalone exceptions | Done. `StandaloneExceptions` in `FeatureRolePrivilegeGuardTests` lists Office Add In User, AI Analysis User and Console User, each with its reason; `ExpectedStandaloneExceptions` pins the list literally (`TheStandaloneExceptionsArePinned`: an added or dropped role, no reason, or a role that is not an add-on with features fails). The three are no longer repeated alone (`AloneRows` skips the exceptions); every other add-on stays checked alone. `RemovingAStandaloneExceptionBringsItsGapsBack` takes each exception away in turn and shows that gaps come back for that role (must-fire), and shows none with the exceptions (must-not-fire). The `KnownGaps` entries for the three roles alone, D39 included, are deleted; the baseline keeps G3 only. G9 is dropped: the "Analysis run (writing playbook, Basic User + AI Analysis User)" row is deleted (the Core User row stays), and the AI Analysis User class no longer names it. Doc §5.1: role model, gap table (G9 row gone), the standalone gap summary (replaced by the ruling), the Roles-meant column of the Office, analysis and Decision commit rows. This notes file: Part D table, the gap list section. |
+| 11. Removal 1 | Done. `prvCreatesprk_BudgetRevision` is out of `Spaarke Ontology Administrator.xml` (Write and Delete stay). The writer-only `MustNotHold` rule no longer lists Create on `sprk_budgetrevision`; a new rule forbids Create on it for every person role with no exception. Seeded: Create put back in the role file fails the guard (3 tests: the must-not-hold check on the real files, the seeded role-file test, the removals test). |
+| 12. Removal 2 | Done. Checked first: the "Report Card wizard" and "KPI assessment" rows are [Core] only, and no declared row asks `prvAppendTosprk_ReportCard` of a role set that includes Basic User (the event regarding-types list has no report card), so nothing blocked it. `prvAppendTosprk_ReportCard` is out of `Spaarke Basic User.xml`. `MustNotHoldRule` gained an optional `Only` list; the new rule (`prvAppendTosprk_ReportCard`, Only Basic User) fires on Basic User and not on Core User, which keeps it. Seeded: the privilege put back in Basic User fails the guard; the seeded role-file test covers both removals. |
+| 13. Script removal step | Done. `config/feature-role-privileges.json` has a separate `removals` block (role, table, privilege, `expectedDepth`, gap, feature) with the two removals. `scripts/Set-FeatureRolePrivileges.ps1 -Remove` acts on that block only: dry run by default, `-Remove -Apply`, `-Remove -Verify`. The add path never reads the block and never removes. RemovePrivilegeRole is a Web API action bound to the role (the repo's reviewed scripts `Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1` and `ebilling/Deploy-EbillingBillingAdminRole.ps1` call it with the body `{ Privilege: { @odata.type: Microsoft.Dynamics.CRM.privilege, privilegeid } }`; the same shape is used, one call per privilege on the root role). Same fail-closed reads, the root-business-unit and single-root-role checks, the settle loop, the read-back that the privilege is absent on the root role and every business-unit copy, and the applied / not-applied summary. A privilege held at a depth other than `expectedDepth` is not removed (exit 1, nothing changed); the config is refused before connecting when the role XML still holds a listed privilege or a privilege is both added and removed; after the removal the root role is compared with its state before and any other difference fails the run. `-Verify` (plain or `-Remove`) fails while a removal is pending or a copy still holds a removed privilege. |
+
+Proofs for items 10-13: the same seeded fail-before method as above (role files and the exception entry edited in place, restored with `git checkout` or from a saved copy). The script is shown against the test double only (`tests/scripts/Set-FeatureRolePrivileges.Tests.ps1`, now 32 cases, 14 of which fail on the previous script): `-Remove` dry run; `-Remove -Apply` sends one RemovePrivilegeRole whose body names only the listed privilege; the add path with a removals block present makes no RemovePrivilegeRole call; `-Remove` reads and writes none of the adds; `-Remove -Verify` and plain `-Verify`; nothing pending; a copy that still holds it; a role outside the root business unit; a depth other than expected; the role file still holding the privilege; both added and removed; a copy that never drops it; a failed read-back; a failed RemovePrivilegeRole; a platform that also drops another privilege. `Parser::ParseFile` on the script: 0 errors.
+
+## Applied on dev
+
+- 2026-11-05, spaarkedev1, run by UAC-r2 under the owner's go, from `98813dcaa2`.
+- Dry run: 8 changes (G1 x3, G2, G4, G6, G7, G8). G5 was already live.
+- `-Apply`: exit 0, and every business-unit copy read back.
+- `-Verify`: exit 0, PASS.
+- Observed: AddPrivilegesRole raises an existing lower-depth row to the requested depth in place (Basic -> Deep), with no separate removal.
+- The removals (items 11-13) are not yet applied. UAC-r2 runs `-Remove` after the re-check.

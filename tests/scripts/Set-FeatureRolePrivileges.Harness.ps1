@@ -12,6 +12,8 @@
 #   failPostOn  roleId         the AddPrivilegesRole POST on that role fails
 #   noPropagate [roleId]       copies that never receive the root role's change (the read-back never settles)
 #   failReadOf  roleId         a privilege read of that role fails once any POST was made (the read-back cannot be completed)
+#   failRemoveOn roleId        the RemovePrivilegeRole POST on that role fails
+#   removeAlsoDrops [privId]   RemovePrivilegeRole also drops these privileges from the root role (a platform that removes more than asked)
 # Every request is appended to $env:FRP_LOG as one JSON line {Method, Uri}. Any route the script does not use throws, so a new,
 # unplanned call fails a test instead of passing silently.
 
@@ -23,17 +25,31 @@ foreach ($rid in $global:Scn.held.Keys) { $global:Held[$rid] = @{} + $global:Scn
 function az { 'fake-token' }
 function Start-Sleep { param([int]$Seconds, [int]$Milliseconds) }   # the settle wait costs no time here
 
-function Write-FrpLog([string]$Method, [string]$Uri) {
-    (@{ Method = $Method; Uri = $Uri } | ConvertTo-Json -Compress) | Add-Content -LiteralPath $env:FRP_LOG -Encoding UTF8
+function Write-FrpLog([string]$Method, [string]$Uri, [string]$Body = '') {
+    (@{ Method = $Method; Uri = $Uri; Body = $Body } | ConvertTo-Json -Compress) | Add-Content -LiteralPath $env:FRP_LOG -Encoding UTF8
 }
 
 function Invoke-RestMethod {
     param([string]$Uri, $Headers, [string]$Method = 'Get', $Body)
-    Write-FrpLog $Method $Uri
+    Write-FrpLog $Method $Uri $(if ($Body) { [Text.Encoding]::UTF8.GetString($Body) } else { '' })
     $rel = $Uri -replace '^https://[^/]+/api/data/v9\.2/', ''
     $decoded = [uri]::UnescapeDataString($rel)
     $s = $global:Scn
 
+    if ($Method -eq 'Post' -and $decoded -match '^roles\(([^)]+)\)/Microsoft\.Dynamics\.CRM\.RemovePrivilegeRole$') {
+        $rid = $Matches[1]
+        if ($s.failRemoveOn -eq $rid) { throw 'The remote server returned an error: (500) Internal Server Error.' }
+        $b = [Text.Encoding]::UTF8.GetString($Body) | ConvertFrom-Json
+        $drop = @(@($b.Privilege.privilegeid) + @($s.removeAlsoDrops) | Where-Object { $_ })
+        foreach ($id in $drop) {
+            $global:Held[$rid].Remove($id)
+            foreach ($copy in @($s.roles | Where-Object { $_.root -eq $rid -and $_.id -ne $rid })) {
+                if (@($s.noPropagate) -notcontains $copy.id) { $global:Held[$copy.id].Remove($id) }
+            }
+        }
+        $global:PostMade = $true
+        return $null
+    }
     if ($Method -eq 'Post') {
         if ($decoded -notmatch '^roles\(([^)]+)\)/Microsoft\.Dynamics\.CRM\.AddPrivilegesRole$') { throw "Unplanned POST: $decoded" }
         $rid = $Matches[1]

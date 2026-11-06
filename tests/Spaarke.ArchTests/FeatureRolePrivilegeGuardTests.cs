@@ -110,7 +110,8 @@ public class FeatureRolePrivilegeGuardTests
         privileges.Select(p => new Requirement(feature, roles, p, minDepth, evidence)).ToArray();
 
     /// <summary>The declared feature permission table (task 046). Add a row when a feature asks a new privilege of its caller.
-    /// <see cref="Requirements"/> is this table plus each add-on's rows alone (<see cref="RoleClasses"/>).</summary>
+    /// <see cref="Requirements"/> is this table plus each add-on's rows alone (<see cref="RoleClasses"/>), except the ruled exceptions
+    /// (<see cref="StandaloneExceptions"/>).</summary>
     private static readonly IReadOnlyList<Requirement> Declared =
     [
         // Create wizards, through POST /api/v1/child-records/{table} (RecordCreationService as the caller). AppendTo on bind targets:
@@ -248,8 +249,8 @@ public class FeatureRolePrivilegeGuardTests
         // (I-6): Deep.
         .. For("Analysis run (writing playbook)", [Core], "Deep",
             Bff + "Api/Ai/AnalysisEndpoints.cs:118-120; " + Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:922-952,970", "prvWritesprk_Document"),
-        .. For("Analysis run (writing playbook, Basic User + AI Analysis User)", [Basic, AiUser], "Deep",
-            Bff + "Api/Ai/AnalysisEndpoints.cs:118-120; " + Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:922-952,970", "prvWritesprk_Document"),
+        // G9 dropped (owner 2026-11-05, decisions.md:836): a run that can write documents is asked of Core User only; Basic User with AI
+        // Analysis User is not meant for it, so there is no row for that set.
         // Any other run: Read on every document, and the playbook-use decision (Read on the playbook unless it is public).
         .. For("Analysis run", [Core], "Deep",
             Bff + "Api/Ai/AnalysisEndpoints.cs:115-120; " + Bff + "Api/Filters/AnalysisAuthorizationFilter.cs:26-28,943-952", "prvReadsprk_Document"),
@@ -388,8 +389,7 @@ public class FeatureRolePrivilegeGuardTests
         new(Office, RoleKind.AddOn,
             ["Office save", "Office version save", "Office quick create (Office Add In User)", "Event (typed route, Office Add In User)"], [], null),
         new(AiUser, RoleKind.AddOn,
-            ["Analysis from a playbook (Basic User + AI Analysis User)", "Analysis run (Basic User + AI Analysis User)",
-             "Analysis run (writing playbook, Basic User + AI Analysis User)"], [], null),
+            ["Analysis from a playbook (Basic User + AI Analysis User)", "Analysis run (Basic User + AI Analysis User)"], [], null),
         // The Console's Decide lane. The Do lane stays Core-only (owner 2026-11-05): its subjects are events, To Dos and work
         // assignments (src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs:229-234), so Write on them is not asked
         // of Console User alone.
@@ -416,90 +416,92 @@ public class FeatureRolePrivilegeGuardTests
     /// <summary>The feature name of a declared feature's rows repeated for an add-on alone.</summary>
     internal static string AloneFeature(string feature, string role) => $"{feature} [{role} alone]";
 
-    /// <summary>Each add-on's features repeated with the add-on as the only role (standalone add-ons, owner 2026-11-05).</summary>
-    internal static IEnumerable<Requirement> AloneRows(IReadOnlyList<Requirement> declared, IReadOnlyList<RoleClass> classes) =>
+    /// <summary>The add-ons ruled NOT standalone (owner 2026-11-05): each is not meant to be held alone, so its features are not repeated
+    /// with it as the only role. An explicit list, pinned by <see cref="TheStandaloneExceptionsArePinned"/>; every other add-on stays
+    /// checked alone. Role to reason.</summary>
+    internal static readonly IReadOnlyDictionary<string, string> StandaloneExceptions = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [Office] = "Ruled not standalone (owner 2026-11-05): not meant to be held alone; a base role is held with it.",
+        [AiUser] = "Ruled not standalone (owner 2026-11-05): not meant to be held alone; a base role is held with it.",
+        [Console] = "Ruled not standalone (owner 2026-11-05): needs Spaarke Core User.",
+    };
+
+    /// <summary>The exception list as the owner ruled it, literal so that adding or dropping an exception fails the pin.</summary>
+    internal static readonly string[] ExpectedStandaloneExceptions =
+        ["Spaarke Office Add In User", "Spaarke AI Analysis User", "Spaarke Console User"];
+
+    /// <summary>What is wrong with the exception list: a role in it that is not expected, an expected role missing, a role that is not an
+    /// add-on with features to repeat, or no reason.</summary>
+    internal static List<string> StandaloneExceptionProblems(
+        IReadOnlyDictionary<string, string> exceptions, IReadOnlyCollection<string> expected, IReadOnlyList<RoleClass> classes)
+    {
+        var problems = new List<string>();
+        problems.AddRange(exceptions.Keys.Where(r => !expected.Contains(r, StringComparer.Ordinal))
+            .Select(r => $"{r}: ruled not standalone in the code, but not in the owner's list ({string.Join(", ", expected)})"));
+        problems.AddRange(expected.Where(r => !exceptions.ContainsKey(r)).Select(r => $"{r}: ruled not standalone, but is checked alone"));
+        foreach (var (role, reason) in exceptions)
+        {
+            var c = classes.FirstOrDefault(x => x.Role == role);
+            if (c is null || c.Kind != RoleKind.AddOn) problems.Add($"{role}: a standalone exception names a role that is not a classified add-on");
+            else if (c.AloneFrom.Length == 0) problems.Add($"{role}: a standalone exception for an add-on with no features to repeat");
+            if (string.IsNullOrWhiteSpace(reason)) problems.Add($"{role}: a standalone exception has no reason");
+        }
+
+        return problems;
+    }
+
+    /// <summary>Each add-on's features repeated with the add-on as the only role (standalone add-ons, owner 2026-11-05), except the add-ons
+    /// in <paramref name="exceptions"/>.</summary>
+    internal static IEnumerable<Requirement> AloneRows(
+        IReadOnlyList<Requirement> declared, IReadOnlyList<RoleClass> classes, IReadOnlyCollection<string> exceptions) =>
         from c in classes
-        where c.Kind == RoleKind.AddOn
+        where c.Kind == RoleKind.AddOn && !exceptions.Contains(c.Role, StringComparer.Ordinal)
         from feature in c.AloneFrom
         from r in declared
         where r.Feature == feature && !c.AloneExcept.Contains(r.Privilege, StringComparer.OrdinalIgnoreCase)
         select r with { Feature = AloneFeature(feature, c.Role), Roles = [c.Role] };
 
     /// <summary>The declared table plus each add-on's rows alone: what the guard checks.</summary>
-    internal static readonly IReadOnlyList<Requirement> Requirements = [.. Declared, .. AloneRows(Declared, RoleClasses)];
+    internal static readonly IReadOnlyList<Requirement> Requirements = [.. Declared, .. AloneRows(Declared, RoleClasses, StandaloneExceptions.Keys.ToArray())];
 
-    /// <summary>A rule that no person role holds any of <paramref name="Privileges"/> at any depth, except the roles named.</summary>
-    internal sealed record MustNotHoldRule(string Rule, string[] Privileges, string[] Except, string Evidence);
+    /// <summary>A rule that no person role holds any of <paramref name="Privileges"/> at any depth, except the roles named. With
+    /// <paramref name="Only"/> set, the rule covers just those roles.</summary>
+    internal sealed record MustNotHoldRule(string Rule, string[] Privileges, string[] Except, string Evidence, string[]? Only = null);
 
     /// <summary>What no person role holds (task 046b). A person role is every role file but the app users' role.</summary>
     internal static readonly IReadOnlyList<MustNotHoldRule> MustNotHold =
     [
-        new("Writer-only tables (owner 2026-11-05; ontology D-204): no person role creates, writes or deletes a Signal, Decision Record "
-            + "or Budget Revision; Spaarke Ontology Administrator is the designated cleanup role (ontology D-160)",
+        new("Writer-only tables (owner 2026-11-05; ontology D-204): no person role creates, writes or deletes a Signal or Decision Record, "
+            + "or writes or deletes a Budget Revision; Spaarke Ontology Administrator is the designated cleanup role (ontology D-160)",
             [
                 "prvCreatesprk_Signal", "prvWritesprk_Signal", "prvDeletesprk_Signal",
                 "prvCreatesprk_DecisionRecord", "prvWritesprk_DecisionRecord", "prvDeletesprk_DecisionRecord",
-                "prvCreatesprk_BudgetRevision", "prvWritesprk_BudgetRevision", "prvDeletesprk_BudgetRevision",
+                "prvWritesprk_BudgetRevision", "prvDeletesprk_BudgetRevision",
             ],
             [OntologyAdmin],
             "projects/field-mapping-server-write-path-r1/notes/decisions.md:830; docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md:186"),
+        // Fix round 2 (owner 2026-11-05, decisions.md:836): the cleanup role writes and deletes a Budget Revision but does not create one.
+        new("Budget Revision create: only the writer creates one; the cleanup role writes and deletes (owner 2026-11-05)",
+            ["prvCreatesprk_BudgetRevision"], [],
+            "projects/field-mapping-server-write-path-r1/notes/decisions.md:836; docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md:186"),
+        // Fix round 2 (owner 2026-11-05, decisions.md:836): Spaarke Basic User holds no AppendTo on a report card; no feature in the
+        // matrix asks it on a role set with Basic User (the KPI assessment's AppendTo is Core User's).
+        new("Spaarke Basic User: no AppendTo on sprk_reportcard (owner 2026-11-05)",
+            ["prvAppendTosprk_ReportCard"], [],
+            "projects/field-mapping-server-write-path-r1/notes/decisions.md:836; docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md:199",
+            [Basic]),
         new("Invoice line (sprk_billingevent) create: none, by design (BFF-written, ebilling D-18)",
             ["prvCreatesprk_BillingEvent"], [], "projects/ebilling-r1/notes/decisions-log.md:24"),
     ];
 
-    private const string PartD =
-        "Part D (task 046b): the add-on alone lacks it. Waits on the owner's one decision on the standalone add-on gap list, through unified-access-control-r2.";
-
     /// <summary>The ratchet: today's gaps (tasks 046 and 046b), each with the change it waits on. Remove an entry when its change
     /// lands. G1, G2 and G4-G8 were applied to the role files by task 046b (owner rulings 2026-11-05); G10 was withdrawn (no role
-    /// change: invoice-line Signals are decided in the invoice review, #2572).</summary>
+    /// change: invoice-line Signals are decided in the invoice review, #2572); G9 and the standalone gaps of Office Add In User, AI
+    /// Analysis User and Console User are not gaps (those three are ruled not standalone, <see cref="StandaloneExceptions"/>).</summary>
     internal static readonly IReadOnlyList<KnownGap> KnownGaps =
     [
         new("Office save (Basic User)", "prvAppendToContact", "Basic",
             "G3. Accepted, not applied (owner 2026-11-05): Spaarke Basic User is unchanged; Office Add In User carries it (G4)."),
-        new("Analysis run (writing playbook, Basic User + AI Analysis User)", "prvWritesprk_Document", "none",
-            "G9. In the standalone add-on gap list (task 046b) for the owner's one decision through UAC-r2: Write on sprk_document at Deep for AI Analysis User, or a run that can write documents is Core User only."),
-        // Part D (task 046b): each add-on alone (owner 2026-11-05: add-ons are standalone). Every entry waits on the owner's one
-        // decision through unified-access-control-r2; no role file changes for them until then.
-        new("Office save [Spaarke Office Add In User alone]", "prvAppendTosprk_Todo", "none", PartD),
-        new("Office version save [Spaarke Office Add In User alone]", "prvReadsprk_Document", "none", PartD),
-        new("Office quick create (Office Add In User) [Spaarke Office Add In User alone]", "prvReadContact", "Basic", PartD),
-        new("Office quick create (Office Add In User) [Spaarke Office Add In User alone]", "prvAppendTosprk_RecordType_Ref", "none", PartD),
-        new("Office quick create (Office Add In User) [Spaarke Office Add In User alone]", "prvReadsprk_Todo", "none", PartD),
-        new("Event (typed route, Office Add In User) [Spaarke Office Add In User alone]", "prvAppendTosprk_RecordType_Ref", "none", PartD),
-        new("Event (typed route, Office Add In User) [Spaarke Office Add In User alone]", "prvAppendTosprk_analysis", "none", PartD),
-        new("Analysis from a playbook (Basic User + AI Analysis User) [Spaarke AI Analysis User alone]", "prvReadsprk_Document", "none", PartD),
-        new("Analysis from a playbook (Basic User + AI Analysis User) [Spaarke AI Analysis User alone]", "prvAppendTosprk_Document", "none", PartD),
-        new("Analysis run (Basic User + AI Analysis User) [Spaarke AI Analysis User alone]", "prvReadsprk_Document", "none", PartD),
-        new("Analysis run (writing playbook, Basic User + AI Analysis User) [Spaarke AI Analysis User alone]", "prvWritesprk_Document", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvReadsprk_Matter", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvReadsprk_Project", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvReadsprk_WorkAssignment", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvReadsprk_ServiceRequest", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvAppendTosprk_Matter", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvAppendTosprk_Project", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvAppendTosprk_WorkAssignment", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvAppendTosprk_ServiceRequest", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvWritesprk_Matter", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvWritesprk_Project", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvWritesprk_Communication", "none", PartD),
-        new("Decision commit (Console) [Spaarke Console User alone]", "prvWritesprk_Invoice", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvAppendToTransactionCurrency", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvCreatesprk_Todo", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvCreatesprk_Event", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvCreatesprk_WorkAssignment", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvCreatesprk_Budget", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvAppendsprk_Todo", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvAppendsprk_Event", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvAppendsprk_WorkAssignment", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvAppendsprk_Budget", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvAppendTosprk_RecordType_Ref", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvWritesprk_Budget", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvAppendToContact", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvAppendTosprk_EventType_Ref", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvCreatesprk_ServiceRequest", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvAppendsprk_ServiceRequest", "none", PartD),
-        new("Decision actions (Console) [Spaarke Console User alone]", "prvAppendTosprk_Organization", "none", PartD),
     ];
 
     private static readonly string[] DepthOrder = ["Basic", "Local", "Deep", "Global"];
@@ -759,7 +761,8 @@ public class FeatureRolePrivilegeGuardTests
         Assert.True(files.Count >= 13, $"Found only {files.Count} role files under {RolesDirectory} (expected >= 13).");
         _ = LoadRoles(RolesDirectory, files); // each file parses, holds privileges and names its own role
 
-        var problems = ClassificationProblems(files, RoleClasses, Declared, Requirements);
+        var problems = ClassificationProblems(files, RoleClasses, Declared, Requirements, StandaloneExceptions.Keys.ToArray());
+        problems.AddRange(StandaloneExceptionProblems(StandaloneExceptions, ExpectedStandaloneExceptions, RoleClasses));
         Assert.True(problems.Count == 0,
             "Classify every role file in RoleClasses (base, add-on or the app users' role). An add-on may be held without a base role "
             + "(owner, 2026-11-05), so it names the declared features it exists for (checked with it alone) or says why no feature in "
@@ -801,9 +804,9 @@ public class FeatureRolePrivilegeGuardTests
             new("A5", RoleKind.AddOn, [], [], "no feature of its own"),      // must-not-fire: says why
             new("Gone", RoleKind.AddOn, [], [], "x"),                        // must-fire: no file
         };
-        var all = declared.Concat(AloneRows(declared, classes)).ToArray();
+        var all = declared.Concat(AloneRows(declared, classes, [])).ToArray();
 
-        var problems = ClassificationProblems(["B", "A1", "A2", "A3", "A4", "A5", "New"], classes, declared, all);
+        var problems = ClassificationProblems(["B", "A1", "A2", "A3", "A4", "A5", "New"], classes, declared, all, []);
 
         Assert.Equal(
             new[]
@@ -817,13 +820,61 @@ public class FeatureRolePrivilegeGuardTests
             },
             problems);
         Assert.Single(all, r => r.Feature == AloneFeature("F-base", "A1")); // prvB is excepted for A1
-        Assert.Empty(ClassificationProblems(RoleFileNames(RolesDirectory), RoleClasses, Declared, Requirements)); // must-not-fire
+        Assert.Empty(ClassificationProblems(RoleFileNames(RolesDirectory), RoleClasses, Declared, Requirements, StandaloneExceptions.Keys.ToArray())); // must-not-fire
+
+        // A ruled exception is not checked alone, and needs no row alone and no NotInMatrix reason (A1 as an exception).
+        var excepted = new RoleClass[] { new("B", RoleKind.Base, [], [], null), new("A1", RoleKind.AddOn, ["F-base"], [], null) };
+        Assert.Empty(AloneRows(declared, excepted, ["A1"]));
+        Assert.Empty(ClassificationProblems(["B", "A1"], excepted, declared, declared, ["A1"]));
+        Assert.NotEmpty(AloneRows(declared, excepted, [])); // must-fire: without the exception the rows alone are there
+    }
+
+    [Fact(DisplayName = "046b fix round 2: the add-ons ruled not standalone are exactly Office Add In User, AI Analysis User and Console User; any other, or one dropped, fails")]
+    public void TheStandaloneExceptionsArePinned()
+    {
+        Assert.Equal(new[] { "Spaarke Office Add In User", "Spaarke AI Analysis User", "Spaarke Console User" }, ExpectedStandaloneExceptions); // the pin is literal
+        Assert.Empty(StandaloneExceptionProblems(StandaloneExceptions, ExpectedStandaloneExceptions, RoleClasses)); // must-not-fire: the real list
+
+        // must-fire: another add-on added to the list (it would escape the alone check)
+        var more = new Dictionary<string, string>(StandaloneExceptions) { [BillingAdmin] = "x" };
+        Assert.Contains(StandaloneExceptionProblems(more, ExpectedStandaloneExceptions, RoleClasses),
+            p => p.StartsWith($"{BillingAdmin}: ruled not standalone in the code", StringComparison.Ordinal));
+        // must-fire: an exception dropped
+        var fewer = StandaloneExceptions.Where(kv => kv.Key != Console).ToDictionary(kv => kv.Key, kv => kv.Value);
+        Assert.Equal(new[] { $"{Console}: ruled not standalone, but is checked alone" }, StandaloneExceptionProblems(fewer, ExpectedStandaloneExceptions, RoleClasses));
+        // must-fire: no reason; a base role as an exception
+        Assert.Contains(StandaloneExceptionProblems(new Dictionary<string, string>(StandaloneExceptions) { [Office] = " " }, ExpectedStandaloneExceptions, RoleClasses),
+            p => p == $"{Office}: a standalone exception has no reason");
+        Assert.Contains(StandaloneExceptionProblems(new Dictionary<string, string>(StandaloneExceptions) { [Core] = "x" }, ExpectedStandaloneExceptions, RoleClasses),
+            p => p == $"{Core}: a standalone exception names a role that is not a classified add-on");
+    }
+
+    [Fact(DisplayName = "046b fix round 2: taking an exception away brings that add-on's gaps back (Office Add In User, AI Analysis User, Console User); with the exceptions there are none")]
+    public void RemovingAStandaloneExceptionBringsItsGapsBack()
+    {
+        var roles = LoadRoles(RolesDirectory, Declared.SelectMany(r => r.Roles).Concat(RoleClasses.Select(c => c.Role)));
+
+        // must-not-fire: with the exceptions, the three are not checked alone, and the real requirements have no gap outside the baseline
+        Assert.DoesNotContain(Requirements, r => r.Roles.Length == 1 && StandaloneExceptions.ContainsKey(r.Roles[0]));
+        Assert.Empty(Ratchet(Gaps(Requirements, roles), KnownGaps).Unlisted);
+
+        // must-fire: take each exception away in turn
+        foreach (var role in StandaloneExceptions.Keys)
+        {
+            var without = StandaloneExceptions.Keys.Where(k => k != role).ToArray();
+            var rows = AloneRows(Declared, RoleClasses, without).ToArray();
+            Assert.NotEmpty(rows);
+            var gaps = Gaps(rows, roles);
+            Assert.True(gaps.Count > 0, $"{role}: no gap came back with its exception removed.");
+            Assert.All(gaps, g => Assert.Equal(new[] { role }, g.Roles));
+        }
     }
 
     /// <summary>What is wrong with the role classification: files not classified, classes with no file, add-ons neither checked
     /// alone nor explained, features or exceptions that name nothing.</summary>
     internal static List<string> ClassificationProblems(
-        IReadOnlyCollection<string> roleFiles, IReadOnlyList<RoleClass> classes, IReadOnlyList<Requirement> declared, IReadOnlyList<Requirement> all)
+        IReadOnlyCollection<string> roleFiles, IReadOnlyList<RoleClass> classes, IReadOnlyList<Requirement> declared, IReadOnlyList<Requirement> all,
+        IReadOnlyCollection<string> exceptions)
     {
         var problems = new List<string>();
         problems.AddRange(roleFiles.Where(f => !classes.Any(c => c.Role == f)).Select(f => $"{f}: role file not classified in RoleClasses"));
@@ -842,6 +893,8 @@ public class FeatureRolePrivilegeGuardTests
             problems.AddRange(c.AloneExcept
                 .Where(p => !declared.Any(r => c.AloneFrom.Contains(r.Feature) && Same(r.Privilege, p)))
                 .Select(p => $"{c.Role}: AloneExcept names {p}, which none of its AloneFrom features asks"));
+            if (exceptions.Contains(c.Role, StringComparer.Ordinal))
+                continue; // ruled not standalone: no row alone, no reason in the matrix (StandaloneExceptionProblems checks the exception)
             var alone = all.Any(r => r.Roles.Length == 1 && r.Roles[0] == c.Role);
             var reason = !string.IsNullOrWhiteSpace(c.NotInMatrix);
             if (!alone && !reason)
@@ -867,6 +920,7 @@ public class FeatureRolePrivilegeGuardTests
             Assert.NotEmpty(rule.Privileges);
             Assert.All(rule.Privileges, p => Assert.StartsWith("prv", p, StringComparison.Ordinal));
             Assert.All(rule.Except, role => Assert.True(personRoles.ContainsKey(role), $"'{role}' is excepted from a rule but is not a person role file."));
+            Assert.All(rule.Only ?? [], role => Assert.True(personRoles.ContainsKey(role), $"'{role}' is named by a rule but is not a person role file."));
             Assert.Empty(MissingEvidencePaths(rule.Evidence, SourceScan.RepoRoot));
         });
 
@@ -956,7 +1010,7 @@ public class FeatureRolePrivilegeGuardTests
                         [role] = new Dictionary<string, string>(real[role], StringComparer.OrdinalIgnoreCase) { [privilege.ToLowerInvariant()] = "Basic" },
                     };
                     var found = ForbiddenHeld(seeded, [rule]);
-                    var expected = rule.Except.Contains(role, StringComparer.Ordinal)
+                    var expected = rule.Except.Contains(role, StringComparer.Ordinal) || (rule.Only is not null && !rule.Only.Contains(role, StringComparer.Ordinal))
                         ? Array.Empty<string>()
                         : new[] { $"{role}: {privilege} at Basic — {rule.Rule}" };
                     if (!found.SequenceEqual(expected))
@@ -988,6 +1042,8 @@ public class FeatureRolePrivilegeGuardTests
             AddPrivilege(dir, Basic, "prvCreatesprk_BillingEvent", "Basic");
             AddPrivilege(dir, OntologyAdmin, "prvCreatesprk_Signal", "Global"); // excepted: the cleanup role
             AddPrivilege(dir, Writer, "prvDeletesprk_Signal", "Global");         // the app users' role is not a person role
+            AddPrivilege(dir, OntologyAdmin, "prvCreatesprk_BudgetRevision", "Deep"); // fix round 2: the cleanup role does not create one
+            AddPrivilege(dir, Basic, "prvAppendTosprk_ReportCard", "Deep");           // fix round 2: seeded back on Basic User
 
             // K1 (fix round 1): a role file in ANY other solution's Roles folder is a person role too.
             var other = Path.Combine(root, "SomeOtherSolution", "src", "Roles");
@@ -999,10 +1055,12 @@ public class FeatureRolePrivilegeGuardTests
 
             var found = ForbiddenHeld(PersonRoles(root), MustNotHold).Order(StringComparer.Ordinal).ToList();
 
-            Assert.Equal(3, found.Count);
+            Assert.Equal(5, found.Count);
             Assert.StartsWith("Spaarke Added Elsewhere: prvDeletesprk_DecisionRecord at Basic", found[0], StringComparison.Ordinal);
-            Assert.StartsWith("Spaarke Basic User: prvCreatesprk_BillingEvent at Basic", found[1], StringComparison.Ordinal);
-            Assert.StartsWith("Spaarke Console User: prvWritesprk_Signal at Deep", found[2], StringComparison.Ordinal);
+            Assert.StartsWith("Spaarke Basic User: prvAppendTosprk_ReportCard at Deep", found[1], StringComparison.Ordinal);
+            Assert.StartsWith("Spaarke Basic User: prvCreatesprk_BillingEvent at Basic", found[2], StringComparison.Ordinal);
+            Assert.StartsWith("Spaarke Console User: prvWritesprk_Signal at Deep", found[3], StringComparison.Ordinal);
+            Assert.StartsWith("Spaarke Ontology Administrator: prvCreatesprk_BudgetRevision at Deep", found[4], StringComparison.Ordinal);
         }
         finally
         {
@@ -1080,7 +1138,7 @@ public class FeatureRolePrivilegeGuardTests
     internal static List<string> ForbiddenHeld(IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> personRoles, IReadOnlyList<MustNotHoldRule> rules) =>
         (from rule in rules
          from role in personRoles.Keys.Order(StringComparer.Ordinal)
-         where !rule.Except.Contains(role, StringComparer.Ordinal)
+         where !rule.Except.Contains(role, StringComparer.Ordinal) && (rule.Only is null || rule.Only.Contains(role, StringComparer.Ordinal))
          from privilege in rule.Privileges
          where personRoles[role].ContainsKey(privilege)
          select $"{role}: {privilege} at {personRoles[role][privilege]} — {rule.Rule}").ToList();
@@ -1178,6 +1236,69 @@ public class FeatureRolePrivilegeGuardTests
         {
             Directory.Delete(dir, recursive: true);
         }
+    }
+
+    internal sealed record Removal(string Gap, string Role, string Table, string Privilege, string ExpectedDepth);
+
+    /// <summary>The config's "removals" block (fix round 2): privileges the owner ruled off a role. Only <c>-Remove</c> reads it.</summary>
+    internal static IReadOnlyList<Removal> LoadRemovals(string path)
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        return doc.RootElement.GetProperty("removals").EnumerateArray().Select(c => new Removal(
+            c.GetProperty("gap").GetString()!, c.GetProperty("role").GetString()!, c.GetProperty("table").GetString()!,
+            c.GetProperty("privilege").GetString()!, c.GetProperty("expectedDepth").GetString()!)).ToList();
+    }
+
+    /// <summary>Each removal whose role file still holds the privilege, that names an unknown depth, or that is listed twice or also added.</summary>
+    internal static List<string> RemovalProblems(
+        IReadOnlyList<Removal> removals, IReadOnlyList<RuledChange> changes, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> roles)
+    {
+        var problems = new List<string>();
+        var seen = new HashSet<(string, string)>();
+        foreach (var r in removals)
+        {
+            var key = (r.Role, r.Privilege.ToLowerInvariant());
+            if (!seen.Add(key)) problems.Add($"{r.Role}: {r.Privilege} — removed more than once");
+            if (changes.Any(c => c.Role == r.Role && Same(c.Privilege, r.Privilege))) problems.Add($"{r.Role}: {r.Privilege} — both added and removed");
+            if (Rank(r.ExpectedDepth) < 0) problems.Add($"{r.Role}: {r.Privilege} — expectedDepth {r.ExpectedDepth} is not a depth");
+            if (roles.TryGetValue(r.Role, out var held) && held.TryGetValue(r.Privilege, out var level))
+                problems.Add($"{r.Role}: {r.Privilege} — role file still holds it at {level}, the config removes it");
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "046b fix round 2: the config's removals are absent from the role files and forbidden by a must-not-hold rule; putting one back fails both")]
+    public void RemovalsAreAbsentFromTheRoleFilesAndForbidden()
+    {
+        var removals = LoadRemovals(RuledChangesPath);
+        var changes = LoadRuledChanges(RuledChangesPath);
+        Assert.Equal(2, removals.Count);
+        var personRoles = PersonRoles(SolutionsDirectory);
+        var roles = LoadRoles(RolesDirectory, removals.Select(r => r.Role));
+
+        // must-not-fire: the repo as it is
+        Assert.Empty(RemovalProblems(removals, changes, roles));
+        Assert.Empty(ForbiddenHeld(personRoles, MustNotHold));
+
+        foreach (var r in removals)
+        {
+            // each removed privilege is covered by a must-not-hold rule for that role, so the role file cannot get it back unseen
+            var seededRole = new Dictionary<string, string>(personRoles[r.Role], StringComparer.OrdinalIgnoreCase) { [r.Privilege] = r.ExpectedDepth };
+            var seeded = new Dictionary<string, IReadOnlyDictionary<string, string>>(personRoles) { [r.Role] = seededRole };
+            Assert.Contains(ForbiddenHeld(seeded, MustNotHold), f => f.StartsWith($"{r.Role}: {r.Privilege} at {r.ExpectedDepth}", StringComparison.Ordinal));
+
+            // must-fire: the role file holds it again
+            var seededRoles = new Dictionary<string, IReadOnlyDictionary<string, string>>(roles) { [r.Role] = seededRole };
+            Assert.Single(RemovalProblems(removals, changes, seededRoles), p => p.StartsWith($"{r.Role}: {r.Privilege} — role file still holds it", StringComparison.Ordinal));
+        }
+
+        // must-fire: listed twice, also added, a bad depth
+        var first = removals[0];
+        Assert.Contains(RemovalProblems([first, first], changes, roles), p => p.EndsWith("removed more than once", StringComparison.Ordinal));
+        var added = changes.Append(new RuledChange("X", first.Role, first.Table, first.Privilege, "Deep", "None")).ToList();
+        Assert.Contains(RemovalProblems(removals, added, roles), p => p.EndsWith("both added and removed", StringComparison.Ordinal));
+        Assert.Contains(RemovalProblems([first with { ExpectedDepth = "Everywhere" }], changes, roles), p => p.Contains("is not a depth", StringComparison.Ordinal));
     }
 
     internal static IReadOnlyList<RuledChange> LoadRuledChanges(string path)

@@ -4,7 +4,8 @@
   "howToExtend": [
     "Add an entry only for a role change the owner ruled (cite the gap or decision in 'gap'). Gaps the owner has not ruled on stay in the guard's ratchet baseline, not here.",
     "'privilege' is the name from metadata (EntityDefinitions(LogicalName='x')/Privileges); 'table' is the logical name the script reads it from.",
-    "'depth' is the depth the role holds after the change; 'from' is the role file's depth before it ('None' when the role held none). The script only adds or raises to 'depth'; it never lowers and never removes."
+    "'depth' is the depth the role holds after the change; 'from' is the role file's depth before it ('None' when the role held none). The script only adds or raises to 'depth'; it never lowers and never removes.",
+    "'removals' is a separate block for the owner's removals: role, table, privilege and 'expectedDepth', the depth the privilege is held at now. Only `-Remove` reads it, and it removes exactly these privileges (RemovePrivilegeRole on the root role) and nothing else. The role files must NOT hold a listed privilege (the ArchTests check it)."
   ],
   "changes": [
     {
@@ -87,6 +88,24 @@
       "depth": "Deep",
       "from": "None",
       "feature": "Event (typed route) regarding a budget"
+    }
+  ],
+  "removals": [
+    {
+      "gap": "R1",
+      "role": "Spaarke Ontology Administrator",
+      "table": "sprk_budgetrevision",
+      "privilege": "prvCreatesprk_BudgetRevision",
+      "expectedDepth": "Deep",
+      "feature": "Budget Revision create: only the writer creates one (owner ruling 2026-11-05); the role keeps Write and Delete"
+    },
+    {
+      "gap": "R2",
+      "role": "Spaarke Basic User",
+      "table": "sprk_reportcard",
+      "privilege": "prvAppendTosprk_ReportCard",
+      "expectedDepth": "Deep",
+      "feature": "No feature in the matrix asks AppendTo on a report card of a role set with Basic User (owner ruling 2026-11-05)"
     }
   ]
 }
