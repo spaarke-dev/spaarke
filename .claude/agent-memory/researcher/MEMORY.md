@@ -113,6 +113,7 @@
 - [Word Copilot pane plugins/playbooks/add-in (2026-10-31)](word-copilot-pane-plugins-playbooks-addin-2026-10-31.md) — Plugins menu documented; Legal = 3 Cowork-named skills; no Copilot API for add-ins
 - [Cowork built-ins + specialist agents (2026-10-31)](cowork-builtin-skills-and-specialist-agent-patterns-2026-10-31.md) — 15 built-ins; no agent calls from Cowork; script egress blocked; R1 = persona panel in one skill
 - [Copilot as Spaarke surface + Frontier (2026-11-05)](copilot-as-spaarke-surface-and-frontier-2026-11-05.md) — MCP Apps = summary+handoff not workspace; Frontier = tenant opt-in, not ISV program
+- [Cowork monthly limit / spending policy (2026-11-05)](cowork-monthly-limit-spending-policy-2026-11-05.md) — Copilot>Cost Management>Configuration; per-user credits; resets 1st 00:00 UTC; default undocumented
 - [Cowork visual outputs (2026-11-05)](cowork-visual-outputs-2026-11-05.md) — file previews cited; Adaptive Card contract undocumented; App skill = Frontier
 - [Legal skill content sources (2026-10-31)](legal-skill-content-sources-2026-10-31.md) — OpenAgreements Apache best NDA/employment scaffold; ContractNLI CC BY; lawve-ai NC-ND
 - [Word vs Cowork legal boundary + onboarding (2026-10-31)](word-vs-cowork-legal-boundary-and-onboarding-2026-10-31.md) — Word desktop/USL vs Cowork credits; no shared playbook object or handoff
