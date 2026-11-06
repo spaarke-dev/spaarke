@@ -16,14 +16,19 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// for every line whose code set does not change.
 /// </summary>
 /// <remarks>
-/// <para><b>Sources.</b> The header: the values and confidences as READ (<c>provenance.header</c>, EB-D-170) and the section totals
-/// (<c>provenance.sectionTotals</c>). The timekeeper summary names (<c>provenance.timekeeperSummary</c>). Each fee and expense line: its
-/// columns as <see cref="InvoiceSubmissionPersister.BuildLines"/> wrote them (a value correction is in the column and feeds the re-run, Q4),
-/// its <c>sprk_extractionconfidence</c> (confidence, page, box, repair and the <c>dateMissing</c> flag), and its coding block with the
-/// observation quotes from <c>provenance.observations</c>.</para>
-/// <para><b>Fail closed.</b> A submission stored before task 095d-2a-1 has none of the re-run facts, and a fact that cannot be read is not
-/// guessed: the result is <see cref="Result.NotRerunnable"/> with a stable reason, logged with <c>Permanent=true</c> (an operator matter, not
-/// a retry). Nothing is written here, so the hold stays.</para>
+/// <para><b>Sources.</b> The header: the values and confidences as READ (<c>provenance.header</c>, EB-D-170), except that a field a reviewer
+/// corrected or confirmed takes its invoice column (the correction wrote it there; <c>InvoiceCorrectionReevaluation</c>'s header rule), and
+/// the section totals and total due as exact numbers (<c>provenance.sectionTotals</c>). The timekeeper summary names
+/// (<c>provenance.timekeeperSummary</c>). Each fee and expense line: its columns as <see cref="InvoiceSubmissionPersister.BuildLines"/> wrote
+/// them (a value correction is in the column and feeds the re-run, Q4), where a number is the exact one read (<c>fields.&lt;name&gt;.exact</c>)
+/// unless the column no longer equals its 2-decimal rounding (a correction, so the column wins); its <c>sprk_extractionconfidence</c>
+/// (confidence, page, box, repair and the <c>dateMissing</c> flag, which a corrected or confirmed date overrides); and its coding block with
+/// the observation quotes from <c>provenance.observations</c>.</para>
+/// <para><b>Fail closed.</b> A submission stored without the re-run facts (before task 095d-2a-1, or with a firm) is
+/// <see cref="FactsMissing"/>; stored rows that do not agree with them (another line count, a line whose extraction JSON was not written
+/// because it was over the column, a missing header or field entry, a quote without its observation) are <see cref="StoredRowsInconsistent"/>.
+/// A fact is never guessed. Either refusal is logged with <c>Permanent=true</c> (an operator matter, not a retry); nothing is written here, so
+/// the hold stays.</para>
 /// <para><b>Not rebuilt</b> (no step 1c-5 reads them): the firm name, client and matter names, the firm's matter reference, the PO as quoted,
 /// a fee line's title value, the page count and the row boxes. Text columns hold at most 100 characters (the persister's cap).</para>
 /// <para><b>Logs (ADR-015).</b> Ids, counts and reason codes only; never a name, a quote or a value.</para>
@@ -46,6 +51,13 @@ internal static class StoredSubmissionRead
         InvoiceSubmissionPersister.LineExtractionConfidence,
     ];
 
+    /// <summary>The invoice columns the rebuild reads: the header fields a reviewer may correct, where the correction writes them.</summary>
+    internal static readonly string[] InvoiceColumns =
+    [
+        InvoiceReviewService.InvInvoiceNumber, InvoiceReviewService.InvInvoiceDate, InvoiceSubmissionPersister.InvoiceBillingPeriodStart,
+        InvoiceSubmissionPersister.InvoiceBillingPeriodEnd, InvoiceSubmissionPersister.InvoiceCurrency, InvoiceReviewService.InvTotalAmount,
+    ];
+
     /// <summary>The rebuild's answer: the read and the stored coding, or the reason it is refused.</summary>
     internal sealed record Result(ExtractedInvoice? Read, StoredCoding? Coding, string? RefusalReason)
     {
@@ -58,15 +70,21 @@ internal static class StoredSubmissionRead
     }
 
     /// <summary>
-    /// Rebuilds the read and the stored coding of <paramref name="submissionId"/> from its findings JSON and its invoice's lines (any order;
-    /// Adjustment and other non fee/expense lines are skipped, as the evaluation skips them). A refusal is logged with <c>Permanent=true</c>.
+    /// Rebuilds the read and the stored coding of <paramref name="submissionId"/> from its findings JSON, its invoice (<see cref="InvoiceColumns"/>)
+    /// and the invoice's lines (any order; Adjustment and other non fee/expense lines are skipped, as the evaluation skips them). A refusal is
+    /// logged with <c>Permanent=true</c>.
     /// </summary>
-    internal static Result Rebuild(Guid submissionId, string? findingsJson, IEnumerable<Entity> lines, ILogger logger)
+    /// <param name="verified">The (line id or null for the header, field name) pairs a reviewer corrected or confirmed: every correction row
+    /// of the invoice whose outcome is Corrected or Confirmed, as <c>InvoiceCorrectionReevaluation</c> reads them.</param>
+    internal static Result Rebuild(
+        Guid submissionId, string? findingsJson, Entity invoice, IEnumerable<Entity> lines, IReadOnlySet<(Guid? LineId, string Field)> verified, ILogger logger)
     {
+        ArgumentNullException.ThrowIfNull(invoice);
         ArgumentNullException.ThrowIfNull(lines);
+        ArgumentNullException.ThrowIfNull(verified);
         ArgumentNullException.ThrowIfNull(logger);
 
-        var result = RebuildCore(findingsJson, lines);
+        var result = RebuildCore(findingsJson, invoice, lines, verified);
         if (result.RefusalReason is { } reason)
         {
             logger.LogError(
@@ -83,13 +101,20 @@ internal static class StoredSubmissionRead
         return result;
     }
 
-    private static Result RebuildCore(string? findingsJson, IEnumerable<Entity> lineRows)
+    private static Result RebuildCore(
+        string? findingsJson, Entity invoice, IEnumerable<Entity> lineRows, IReadOnlySet<(Guid? LineId, string Field)> verified)
     {
         var facts = ExtractionProvenance.ParseRerunFacts(findingsJson);
         var provenance = ExtractionProvenance.ParseSubmission(findingsJson);
         if (facts is null || provenance is null || !provenance.HasExtraction)
         {
             return Result.NotRerunnable(FactsMissing);
+        }
+
+        // Every header field intake read is stored (EB-D-170); one that is not is not read as "the document showed none".
+        if (ExtractionProvenance.HeaderFieldNames.Any(name => !provenance.Header.ContainsKey(name)))
+        {
+            return Result.NotRerunnable(StoredRowsInconsistent);
         }
 
         JsonObject root;
@@ -117,7 +142,8 @@ internal static class StoredSubmissionRead
             }
         }
 
-        if (stored.Count == 0 || stored.Keys.Last() != stored.Count - 1)
+        // Exactly the lines intake stored (zero allowed): a trailing row missing is not a shorter invoice.
+        if (stored.Count != facts.LineCount || (stored.Count > 0 && stored.Keys.Last() != stored.Count - 1))
         {
             return Result.NotRerunnable(StoredRowsInconsistent);
         }
@@ -128,8 +154,17 @@ internal static class StoredSubmissionRead
         var rowIndex = new Dictionary<InvoiceLineType, int>();
         foreach (var (index, row) in stored)
         {
+            // An empty column is a line whose extraction JSON intake did not write (over the column's 100,000 characters) or that was cleared:
+            // the stored rows do not hold what intake judged, so the re-run is refused, never rebuilt without the line's facts.
             if (ParseObject(row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence)) is not { } extraction
-                || extraction[ExtractionProvenance.LineDateMissingMember] is not JsonValue flag || !flag.TryGetValue<bool>(out var dateMissing))
+                || extraction["fields"] is not JsonObject fields
+                || ExtractionProvenance.ExactLineFieldNames.Any(name => fields[name] is not JsonObject))
+            {
+                return Result.NotRerunnable(StoredRowsInconsistent);
+            }
+
+            if (extraction[ExtractionProvenance.LineDateMissingMember] is not JsonValue flag || !flag.TryGetValue<bool>(out var dateMissing)
+                || ExtractionProvenance.ExactLineFieldNames.Any(name => !((JsonObject)fields[name]!).ContainsKey(ExtractionProvenance.ExactMember)))
             {
                 return Result.NotRerunnable(FactsMissing);
             }
@@ -138,7 +173,7 @@ internal static class StoredSubmissionRead
                 ? InvoiceLineType.Fee
                 : InvoiceLineType.Expense;
             rowIndex[type] = rowIndex.TryGetValue(type, out var n) ? n + 1 : 0;
-            lines.Add(Line(row, extraction, type, rowIndex[type], dateMissing));
+            lines.Add(Line(row, fields, type, rowIndex[type], dateMissing && !verified.Contains((row.Id, ResolutionFieldNames.Date))));
 
             if (StoredLineCoding.Parse(index, extraction["coding"] as JsonObject, quotes[index].ToList()) is not { } lineCoding)
             {
@@ -161,7 +196,7 @@ internal static class StoredSubmissionRead
 
         var read = new ExtractedInvoice
         {
-            Header = Header(provenance, facts),
+            Header = Header(provenance, facts, invoice, verified),
             Lines = lines,
             TimekeeperSummary = facts.TimekeeperSummaryNames.Select(name => new ExtractedTimekeeperSummaryRow
             {
@@ -181,15 +216,28 @@ internal static class StoredSubmissionRead
 
     // ── Header ──
 
-    private static ExtractedInvoiceHeader Header(ExtractionProvenance.SubmissionProvenance provenance, ExtractionProvenance.RerunFacts facts)
+    private static ExtractedInvoiceHeader Header(
+        ExtractionProvenance.SubmissionProvenance provenance, ExtractionProvenance.RerunFacts facts, Entity invoice,
+        IReadOnlySet<(Guid? LineId, string Field)> verified)
     {
-        ExtractionProvenance.HeaderField? Read(string name) => provenance.Header.TryGetValue(name, out var field) ? field : null;
+        ExtractionProvenance.HeaderField Read(string name) => provenance.Header[name];
 
-        ExtractedInvoiceField<string?> TextField(string name) => new() { Value = Read(name)?.Value, Confidence = Read(name)?.Confidence };
+        // As InvoiceCorrectionReevaluation's header rule: a field a reviewer corrected or confirmed is its column (the correction wrote it
+        // there); any other is the value the analyzer read. The confidence stays the analyzer's.
+        string? Value(string name) => verified.Contains(((Guid?)null, name)) ? ColumnText(invoice, name) : Read(name).Value;
 
-        ExtractedInvoiceField<DateOnly?> DateField(string name) => new() { Value = DateOf(Read(name)?.Value), Confidence = Read(name)?.Confidence };
+        ExtractedInvoiceField<string?> TextField(string name) => new() { Value = Value(name), Confidence = Read(name).Confidence };
+
+        ExtractedInvoiceField<DateOnly?> DateField(string name) => new() { Value = DateOf(Value(name)), Confidence = Read(name).Confidence };
 
         ExtractedInvoiceField<decimal?> Total(string name) => new() { Value = facts.SectionTotals[name].Value, Confidence = facts.SectionTotals[name].Confidence };
+
+        // The total due: the exact number read (the header entry is "0.00" text), or the invoice's total once a reviewer corrected or confirmed it.
+        var totalDue = Total(ResolutionFieldNames.TotalDue);
+        if (verified.Contains(((Guid?)null, ResolutionFieldNames.TotalDue)))
+        {
+            totalDue = totalDue with { Value = invoice.GetAttributeValue<Money>(InvoiceReviewService.InvTotalAmount)?.Value };
+        }
 
         return new ExtractedInvoiceHeader
         {
@@ -205,19 +253,33 @@ internal static class StoredSubmissionRead
             FeesTotal = Total(ResolutionFieldNames.FeesTotal),
             ExpensesTotal = Total(ResolutionFieldNames.ExpensesTotal),
             AdjustmentsTotal = Total(ResolutionFieldNames.AdjustmentsTotal),
-            TotalDue = new() { Value = DecimalOf(Read(ResolutionFieldNames.TotalDue)?.Value), Confidence = Read(ResolutionFieldNames.TotalDue)?.Confidence },
+            TotalDue = totalDue,
             Currency = TextField(BillingFieldNames.Currency),
         };
     }
 
+    /// <summary>A header field's invoice column as invariant text (dates <c>yyyy-MM-dd</c>), as <c>InvoiceCorrectionReevaluation</c> reads it.</summary>
+    private static string? ColumnText(Entity invoice, string name) => name switch
+    {
+        BillingFieldNames.FirmInvoiceNumber => invoice.GetAttributeValue<string>(InvoiceReviewService.InvInvoiceNumber),
+        BillingFieldNames.InvoiceDate => DateText(invoice, InvoiceReviewService.InvInvoiceDate),
+        BillingFieldNames.BillingPeriodStart => DateText(invoice, InvoiceSubmissionPersister.InvoiceBillingPeriodStart),
+        BillingFieldNames.BillingPeriodEnd => DateText(invoice, InvoiceSubmissionPersister.InvoiceBillingPeriodEnd),
+        BillingFieldNames.Currency => invoice.GetAttributeValue<string>(InvoiceSubmissionPersister.InvoiceCurrency),
+        _ => null,
+    };
+
+    private static string? DateText(Entity row, string column) =>
+        row.GetAttributeValue<DateTime?>(column) is { } date ? date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : null;
+
     // ── Lines ──
 
-    private static ExtractedInvoiceLine Line(Entity row, JsonObject extraction, InvoiceLineType type, int rowIndex, bool dateMissing)
+    private static ExtractedInvoiceLine Line(Entity row, JsonObject fields, InvoiceLineType type, int rowIndex, bool dateMissing)
     {
-        var fields = extraction["fields"] as JsonObject ?? new JsonObject();
         var isFee = type == InvoiceLineType.Fee;
         var quantity = row.GetAttributeValue<decimal?>(InvoiceSubmissionPersister.LineQuantity);
         var rate = row.GetAttributeValue<Money>(InvoiceSubmissionPersister.LineRate)?.Value;
+        var amount = row.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value;
         var date = row.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate) is { } stamp ? DateOnly.FromDateTime(stamp) : (DateOnly?)null;
 
         return new ExtractedInvoiceLine
@@ -227,16 +289,30 @@ internal static class StoredSubmissionRead
             Date = Field(fields, ResolutionFieldNames.Date, dateMissing ? null : date, DateOf),
             TimekeeperAsBilled = Field(fields, ResolutionFieldNames.TimekeeperAsBilled, row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTimekeeper), s => s),
             TitleAsBilled = Field<string?>(fields, "TitleAsBilled", null, s => s),
-            Hours = Field(fields, ResolutionFieldNames.Hours, isFee ? quantity : null, DecimalOf),
-            Rate = Field(fields, ResolutionFieldNames.Rate, isFee ? rate : null, DecimalOf),
-            Quantity = Field(fields, ResolutionFieldNames.Quantity, isFee ? null : quantity, DecimalOf),
-            UnitCost = Field(fields, ResolutionFieldNames.UnitCost, isFee ? null : rate, DecimalOf),
-            Amount = Field(fields, ResolutionFieldNames.Amount, row.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value, DecimalOf),
+            Hours = Field(fields, ResolutionFieldNames.Hours, Exact(fields, ResolutionFieldNames.Hours, isFee ? quantity : null), DecimalOf),
+            Rate = Field(fields, ResolutionFieldNames.Rate, Exact(fields, ResolutionFieldNames.Rate, isFee ? rate : null), DecimalOf),
+            Quantity = Field(fields, ResolutionFieldNames.Quantity, Exact(fields, ResolutionFieldNames.Quantity, isFee ? null : quantity), DecimalOf),
+            UnitCost = Field(fields, ResolutionFieldNames.UnitCost, Exact(fields, ResolutionFieldNames.UnitCost, isFee ? null : rate), DecimalOf),
+            Amount = Field(fields, ResolutionFieldNames.Amount, Exact(fields, ResolutionFieldNames.Amount, amount), DecimalOf),
             Narrative = Field(fields, BillingFieldNames.Narrative, row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineDescription), s => s),
             TaskCodeAsBilled = Field(fields, BillingFieldNames.BilledTaskCode, row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTaskCodeAsBilled), s => s),
             ActivityCodeAsBilled = Field(fields, BillingFieldNames.BilledActivityCode, row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineActivityCodeAsBilled), s => s),
             ExpenseCodeAsBilled = Field(fields, BillingFieldNames.BilledExpenseCode, row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExpenseCodeAsBilled), s => s),
         };
+    }
+
+    /// <summary>
+    /// A number as intake judged it: the exact value read (<c>fields.&lt;name&gt;.exact</c>) while the 2-decimal column still holds its rounding
+    /// (either midpoint rule), else the column (a reviewer's correction wrote it, or no value was read). The caller has checked the member is there.
+    /// </summary>
+    private static decimal? Exact(JsonObject fields, string name, decimal? column)
+    {
+        if (DecimalNode(((JsonObject)fields[name]!)[ExtractionProvenance.ExactMember]) is not { } exact || column is not { } stored)
+        {
+            return column;
+        }
+
+        return stored == Math.Round(exact, 2, MidpointRounding.AwayFromZero) || stored == Math.Round(exact, 2, MidpointRounding.ToEven) ? exact : stored;
     }
 
     /// <summary>One line field: the column's value, with the confidence, page, box, repair and returned value the extraction JSON kept.</summary>
@@ -380,7 +456,10 @@ internal sealed record StoredCoding(InvoiceCodingResult? Coded, string? HoldReas
     internal static StoredCoding? From(JsonObject root, IReadOnlyList<StoredLineCoding> lines)
     {
         var quoteCount = lines.Sum(l => l.Coded?.Observations.Count ?? 0);
-        if (lines.All(l => l.Coded is null))
+
+        // With no line, whether intake coded is the invoice-level set (written only for a coded outcome); All() on no line would say "uncoded".
+        var uncoded = lines.Count == 0 ? root["codeSet"] is not JsonObject : lines.All(l => l.Coded is null);
+        if (uncoded)
         {
             // D-126: intake could not code; its pipeline finding names the hold and its cause.
             var holds = (root["pipelineFindings"] as JsonArray ?? []).OfType<JsonObject>()

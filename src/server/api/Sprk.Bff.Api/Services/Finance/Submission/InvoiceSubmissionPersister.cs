@@ -1452,6 +1452,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     // ── Row builders (internal for tests) ──
 
     /// <summary>
+    /// Task 095d-2a-1 (EB-D-189, review L6): whether intake stores the re-run facts (<see cref="ExtractionProvenance.RerunFacts"/> and the
+    /// lines' exact numbers). Only a submission held for its firm can be re-run after Set firm, so only it carries them; an intake with a firm
+    /// stores nothing new. The <c>dateMissing</c> line flag is written on every line (a boolean, not a fact the size review concerns).
+    /// </summary>
+    internal static bool StoresRerunFacts(SubmissionEvaluationOutcome outcome) =>
+        HoldReasonsOf(outcome).Contains(SubmissionReasonCodes.FirmMissing);
+
+    /// <summary>
     /// 082c-2: the hold reasons <paramref name="outcome"/> stores, as reason codes: <see cref="SubmissionReasonCodes.FirmMissing"/> for a
     /// submission with no firm (the invoice's own firm hold, <see cref="FillInvoice"/>), the terminal reason code, and the two Procedure
     /// holds of either channel (an Internal hold's terminal reason is <c>Blocked</c>). The same reasons the stored-state readers
@@ -1898,7 +1906,8 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// <summary>
     /// The line's <c>sprk_extractionconfidence</c> (FR-04, notes section 5): per field its analyzer confidence, 046's combined confidence,
     /// page, box and repair; plus the <c>coding</c> block (code set id / name / source / needs review, codes, refused codes, firm-code
-    /// mismatch). No extracted value is repeated here except a repaired value's original.
+    /// mismatch). No extracted value is repeated here except a repaired value's original and, on a submission that can be re-run after Set
+    /// firm (<see cref="StoresRerunFacts"/>), the exact numbers the 2-decimal columns round (task 095d-2a-1; numbers only, never text).
     /// </summary>
     internal static string BuildExtractionConfidence(
         ExtractedInvoiceLine line, ResolvedInvoiceLine resolution, LineCodingResult? coding, SubmissionEvaluationOutcome outcome)
@@ -1956,6 +1965,17 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
                     ["confidence"] = o.Confidence,
                 }).ToArray()),
             };
+        }
+
+        // Task 095d-2a-1 (EB-D-189, review L1/L6): the exact numbers read, for a submission that can be re-run after Set firm only. The columns
+        // hold two decimals, so the re-run would otherwise judge 0.125 hours as 0.13. Numbers only (uac-r2 condition 1).
+        if (StoresRerunFacts(outcome))
+        {
+            ((JsonObject)fields[ResolutionFieldNames.Hours]!)[ExtractionProvenance.ExactMember] = line.Hours.Value;
+            ((JsonObject)fields[ResolutionFieldNames.Rate]!)[ExtractionProvenance.ExactMember] = line.Rate.Value;
+            ((JsonObject)fields[ResolutionFieldNames.Quantity]!)[ExtractionProvenance.ExactMember] = line.Quantity.Value;
+            ((JsonObject)fields[ResolutionFieldNames.UnitCost]!)[ExtractionProvenance.ExactMember] = line.UnitCost.Value;
+            ((JsonObject)fields[ResolutionFieldNames.Amount]!)[ExtractionProvenance.ExactMember] = line.Amount.Value;
         }
 
         // EB-D-170: the analyzer and API version that read the line, and the Action and version that coded it, so a correction names its source.
@@ -2135,7 +2155,7 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             ["signalPlan"] = SignalPlanJson(outcome, invoiceId, out planRefusals),
 
             // EB-D-170: the header's home for provenance: the pair, and the header fields as read (a correction of one still names what the AI read).
-            [ExtractionProvenance.Member] = ExtractionProvenance.ForSubmission(outcome.Read!, outcome.Coding, outcome.Resolution),
+            [ExtractionProvenance.Member] = ExtractionProvenance.ForSubmission(outcome.Read!, outcome.Coding, outcome.Resolution, StoresRerunFacts(outcome)),
         };
         if (planRefusals.Count > 0)
         {

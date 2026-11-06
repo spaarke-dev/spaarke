@@ -18,10 +18,12 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// correction and a later correction of the same field must still name what the AI read.</para>
 /// <para>Values are invariant text and never logged (ADR-015). A line or submission stored before EB-D-170 has no <c>provenance</c> member;
 /// the parsers return null for it, and the correction service refuses an extracted-field correction there with a stable 409.</para>
-/// <para><b>Re-run facts (task 095d-2a-1, EB-D-189 option A).</b> The submission's <c>provenance</c> also carries the section totals with their
-/// confidences, the timekeeper summary names and the observation quotes; a line's extraction JSON carries a <c>dateMissing</c> flag. With the
-/// stored rows they rebuild the read for the re-run after Set firm (<see cref="StoredSubmissionRead"/>), so the document is never re-read.
-/// Names and quotes are written only into the field-secured findings JSON, never into the line column, never logged and never indexed.</para>
+/// <para><b>Re-run facts (task 095d-2a-1, EB-D-189 option A).</b> For a submission that can be re-run after Set firm (held for its firm,
+/// <see cref="InvoiceSubmissionPersister.StoresRerunFacts"/>) the submission's <c>provenance</c> also carries the section totals and total due
+/// with their confidences, the timekeeper summary names, the observation quotes and the line count; each of its lines' extraction JSON carries
+/// the exact numbers read (<c>fields.&lt;name&gt;.exact</c>). Every line carries a <c>dateMissing</c> flag. With the stored rows they rebuild the
+/// read for the re-run (<see cref="StoredSubmissionRead"/>), so the document is never re-read. Names and quotes are written only into the
+/// field-secured findings JSON, never into the line column (numbers and flags only), never logged and never indexed.</para>
 /// </summary>
 internal static class ExtractionProvenance
 {
@@ -54,10 +56,10 @@ internal static class ExtractionProvenance
     }
 
     /// <summary>
-    /// The submission-level object: the pair, the Action pair when coded, the header fields as read, and (task 095d-2a-1, EB-D-189) the AI
-    /// facts the re-run after Set firm rebuilds the read from (<see cref="RerunFacts"/>).
+    /// The submission-level object: the pair, the Action pair when coded, the header fields as read, and (task 095d-2a-1, EB-D-189), when
+    /// <paramref name="rerunFacts"/>, the AI facts the re-run after Set firm rebuilds the read from (<see cref="RerunFacts"/>).
     /// </summary>
-    internal static JsonObject ForSubmission(ExtractedInvoice read, InvoiceCodingResult? coding, InvoiceResolutionResult? resolution)
+    internal static JsonObject ForSubmission(ExtractedInvoice read, InvoiceCodingResult? coding, InvoiceResolutionResult? resolution, bool rerunFacts)
     {
         var node = Source(read);
         AddAction(node, coding is not null);
@@ -72,15 +74,29 @@ internal static class ExtractionProvenance
             [ResolutionFieldNames.TotalDue] = Field(Text(header.TotalDue.Value), header.TotalDue.Confidence, resolution, ResolutionFieldNames.TotalDue),
         };
         node[HeaderMember] = fields;
-        AddRerunFacts(node, read, coding);
+        if (rerunFacts)
+        {
+            AddRerunFacts(node, read, coding);
+        }
+
         return node;
     }
 
     // ── Task 095d-2a-1 (EB-D-189, option A): the AI facts the re-run after Set firm needs and the rows do not hold ──
 
-    /// <summary>The header section totals as read: <c>{ FeesTotal | ExpensesTotal | AdjustmentsTotal: { value, confidence } }</c>, numbers only.
-    /// The arithmetic check (046) reads them.</summary>
+    /// <summary>The header section totals and total due as read: <c>{ FeesTotal | ExpensesTotal | AdjustmentsTotal | TotalDue: { value,
+    /// confidence } }</c>, exact numbers only (the header's <c>TotalDue</c> entry is "0.00" text). The arithmetic check (046) reads them.</summary>
     internal const string SectionTotalsMember = "sectionTotals";
+
+    /// <summary>The number of lines intake read and stored (fee and expense rows, sequence 1..N); the rebuild requires exactly that many.</summary>
+    internal const string LineCountMember = "lineCount";
+
+    /// <summary>The member of a line's <c>fields.&lt;name&gt;</c> that holds the exact number read (the columns hold two decimals).</summary>
+    internal const string ExactMember = "exact";
+
+    /// <summary>The line fields whose exact number is stored (<see cref="ExactMember"/>): the ones the 2-decimal columns round.</summary>
+    internal static readonly string[] ExactLineFieldNames =
+        [ResolutionFieldNames.Hours, ResolutionFieldNames.Rate, ResolutionFieldNames.Quantity, ResolutionFieldNames.UnitCost, ResolutionFieldNames.Amount];
 
     /// <summary>The invoice's timekeeper summary names, as read (the non-blank ones, in document order). The roster match (046) reads them.</summary>
     internal const string TimekeeperSummaryMember = "timekeeperSummary";
@@ -93,8 +109,9 @@ internal static class ExtractionProvenance
     /// date, FR-04), so the re-run gives the resolution and the rules no date, as intake did. A flag, never a value.</summary>
     internal const string LineDateMissingMember = "dateMissing";
 
-    /// <summary>The section totals' names, under the resolution spellings.</summary>
-    internal static readonly string[] SectionTotalNames = [ResolutionFieldNames.FeesTotal, ResolutionFieldNames.ExpensesTotal, ResolutionFieldNames.AdjustmentsTotal];
+    /// <summary>The section totals' names (and the total due), under the resolution spellings.</summary>
+    internal static readonly string[] SectionTotalNames =
+        [ResolutionFieldNames.FeesTotal, ResolutionFieldNames.ExpensesTotal, ResolutionFieldNames.AdjustmentsTotal, ResolutionFieldNames.TotalDue];
 
     /// <summary>
     /// Adds the three re-run members to the submission's provenance. Names and quotes are text, so they are written ONLY here, in the
@@ -108,8 +125,10 @@ internal static class ExtractionProvenance
             [ResolutionFieldNames.FeesTotal] = Total(header.FeesTotal),
             [ResolutionFieldNames.ExpensesTotal] = Total(header.ExpensesTotal),
             [ResolutionFieldNames.AdjustmentsTotal] = Total(header.AdjustmentsTotal),
+            [ResolutionFieldNames.TotalDue] = Total(header.TotalDue),
         };
 
+        node[LineCountMember] = read.Lines.Count;
         node[TimekeeperSummaryMember] = new JsonArray(TimekeeperSummaryNamesOf(read).Select(name => (JsonNode)JsonValue.Create(name)!).ToArray());
 
         var observations = new JsonArray();
@@ -148,12 +167,34 @@ internal static class ExtractionProvenance
     /// <summary>One section total as read.</summary>
     internal sealed record SectionTotal(decimal? Value, decimal? Confidence);
 
-    /// <summary>One stored observation quote.</summary>
-    internal sealed record ObservationQuote(int Line, InvoiceLineObservationType Type, string QuotedText);
+    /// <summary>One stored observation quote. Its <see cref="object.ToString"/> never prints the quoted text (ADR-015: a record is easy to log).</summary>
+    internal sealed record ObservationQuote(int Line, InvoiceLineObservationType Type, string QuotedText)
+    {
+        private bool PrintMembers(System.Text.StringBuilder builder)
+        {
+            builder.Append("Line = ").Append(Line.ToString(CultureInfo.InvariantCulture)).Append(", Type = ").Append(Type)
+                .Append(", QuotedText = [").Append(QuotedText.Length.ToString(CultureInfo.InvariantCulture)).Append(" characters]");
+            return true;
+        }
+    }
 
-    /// <summary>The re-run facts of a submission (task 095d-2a-1): present only on a submission persisted with them.</summary>
+    /// <summary>
+    /// The re-run facts of a submission (task 095d-2a-1): present only on a submission persisted with them. Its <see cref="object.ToString"/>
+    /// prints counts only, never a name or a quote.
+    /// </summary>
     internal sealed record RerunFacts(
-        IReadOnlyDictionary<string, SectionTotal> SectionTotals, IReadOnlyList<string> TimekeeperSummaryNames, IReadOnlyList<ObservationQuote> Observations);
+        IReadOnlyDictionary<string, SectionTotal> SectionTotals, IReadOnlyList<string> TimekeeperSummaryNames, IReadOnlyList<ObservationQuote> Observations,
+        int LineCount)
+    {
+        private bool PrintMembers(System.Text.StringBuilder builder)
+        {
+            builder.Append("SectionTotals = ").Append(SectionTotals.Count.ToString(CultureInfo.InvariantCulture))
+                .Append(", TimekeeperSummaryNames = ").Append(TimekeeperSummaryNames.Count.ToString(CultureInfo.InvariantCulture))
+                .Append(", Observations = ").Append(Observations.Count.ToString(CultureInfo.InvariantCulture))
+                .Append(", LineCount = ").Append(LineCount.ToString(CultureInfo.InvariantCulture));
+            return true;
+        }
+    }
 
     /// <summary>
     /// The re-run facts in the findings JSON's <c>provenance</c>, or null when any of the three members is missing or unreadable (a submission
@@ -164,7 +205,8 @@ internal static class ExtractionProvenance
         if (ReadMember(findingsJson) is not { } element
             || !element.TryGetProperty(SectionTotalsMember, out var totalsElement) || totalsElement.ValueKind != JsonValueKind.Object
             || !element.TryGetProperty(TimekeeperSummaryMember, out var namesElement) || namesElement.ValueKind != JsonValueKind.Array
-            || !element.TryGetProperty(ObservationsMember, out var quotesElement) || quotesElement.ValueKind != JsonValueKind.Array)
+            || !element.TryGetProperty(ObservationsMember, out var quotesElement) || quotesElement.ValueKind != JsonValueKind.Array
+            || Int(element, LineCountMember) is not { } lineCount || lineCount < 0)
         {
             return null;
         }
@@ -205,7 +247,7 @@ internal static class ExtractionProvenance
             quotes.Add(new ObservationQuote(line, type, text));
         }
 
-        return new RerunFacts(totals, names, quotes);
+        return new RerunFacts(totals, names, quotes, lineCount);
     }
 
     private static JsonObject Source(ExtractedInvoice read) => new()

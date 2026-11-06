@@ -17,11 +17,12 @@ using ProcessorHarness = Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceS
 namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 
 /// <summary>
-/// Ebilling-r1 task 095d-2a-1 (EB-D-189, option A; uac-r2's conditions): intake stores the four AI facts the re-run after Set firm needs (the
-/// section totals with their confidences, the timekeeper summary names, a per-line "no date" flag and the observation quotes). Names and
-/// quotes go only into the field-secured <c>sprk_findingsjson</c>; the line column carries the flag only; nothing is logged but counts. The
-/// read rebuilt from the stored rows evaluates exactly as the document read did, and a submission stored without the facts refuses the
-/// re-run fail-closed.
+/// Ebilling-r1 task 095d-2a-1 (EB-D-189, option A; uac-r2's conditions): an intake held for its firm stores the AI facts the re-run after Set
+/// firm needs (the section totals and total due with their confidences, the timekeeper summary names, the observation quotes, the line count
+/// and each line's exact numbers; every line also carries a "no date" flag). An intake with a firm stores none of them. Names and quotes go
+/// only into the field-secured <c>sprk_findingsjson</c>; the line column carries numbers and flags; nothing is logged but counts. The read
+/// rebuilt from the stored rows (rounded as Dataverse stores them) evaluates exactly as the document read did, and stored rows that do not
+/// hold the facts refuse the re-run fail-closed.
 /// </summary>
 public partial class InvoiceSubmissionPersisterTests
 {
@@ -32,6 +33,8 @@ public partial class InvoiceSubmissionPersisterTests
     private const string Quote = "QUOTESENTINEL motion";
 
     private static readonly DateOnly RerunInvoiceDate = new(2026, 6, 1);
+
+    private static readonly IReadOnlySet<(Guid? LineId, string Field)> NoneVerified = new HashSet<(Guid? LineId, string Field)>();
 
     private static ExtractedInvoice RerunRead(IReadOnlyList<ExtractedInvoiceLine> lines) => new()
     {
@@ -51,7 +54,7 @@ public partial class InvoiceSubmissionPersisterTests
             FeesTotal = InvoiceSubmissionProcessorTests.F<decimal?>(1500.125m, 0.91m),
             ExpensesTotal = InvoiceSubmissionProcessorTests.F<decimal?>(null, 0.4m),
             AdjustmentsTotal = InvoiceSubmissionProcessorTests.F<decimal?>(-25.5m, 0.7m),
-            TotalDue = InvoiceSubmissionProcessorTests.F<decimal?>(1474.63m, 0.95m),
+            TotalDue = InvoiceSubmissionProcessorTests.F<decimal?>(1474.625m, 0.95m),
             Currency = InvoiceSubmissionProcessorTests.F<string?>("USD"),
         },
         Lines = lines,
@@ -75,15 +78,31 @@ public partial class InvoiceSubmissionPersisterTests
         Amount = InvoiceSubmissionProcessorTests.F<decimal?>(1000m),
     };
 
-    /// <summary>Two fee lines: line 0 dated, line 1 read with NO date; both carry a block-billing observation quoting <see cref="Quote"/>.</summary>
+    /// <summary>
+    /// Four lines, each with a block-billing observation quoting <see cref="Quote"/>: line 0 dated; line 1 read with NO date and a repaired rate;
+    /// line 2 a fee of 0.125 hours; line 3 an expense of 100 at 0.655, billed 66.00. Lines 2 and 3 carry numbers the 2-decimal columns round.
+    /// </summary>
     private static IReadOnlyList<ExtractedInvoiceLine> RerunLines() =>
     [
         InvoiceSubmissionProcessorTests.FeeLine() with { Narrative = InvoiceSubmissionProcessorTests.F<string?>("Drafted the " + Quote + ".") },
         InvoiceSubmissionProcessorTests.FeeLine() with
         {
+            RowIndex = 1,
             Date = InvoiceSubmissionProcessorTests.F<DateOnly?>(null, 0.2m),
             Narrative = InvoiceSubmissionProcessorTests.F<string?>("Revised the " + Quote + "."),
             Rate = InvoiceSubmissionProcessorTests.F<decimal?>(500m) with { Repair = ExtractedValueRepair.RateFromTimekeeperSummary, ReturnedValue = null },
+        },
+        InvoiceSubmissionProcessorTests.FeeLine(hours: 0.125m, amount: 62.5m) with
+        {
+            RowIndex = 2,
+            Narrative = InvoiceSubmissionProcessorTests.F<string?>("Reviewed the " + Quote + "."),
+        },
+        InvoiceSubmissionProcessorTests.ExpenseLine("E101", amount: 66.00m) with
+        {
+            RowIndex = 0,
+            Quantity = InvoiceSubmissionProcessorTests.F<decimal?>(100m),
+            UnitCost = InvoiceSubmissionProcessorTests.F<decimal?>(0.655m),
+            Narrative = InvoiceSubmissionProcessorTests.F<string?>("Copies of the " + Quote + "."),
         },
     ];
 
@@ -94,46 +113,94 @@ public partial class InvoiceSubmissionPersisterTests
         return ai.Object;
     }
 
+    private static readonly InvoiceLineObservation BlockBillingQuote =
+        new() { Type = InvoiceLineObservationType.BlockBilling, Confidence = 0.9m, QuotedText = Quote };
+
     /// <summary>The intake of a firmless submission (095c-3) over <see cref="RerunRead"/>, coded with a block-billing observation per line.</summary>
-    private static ProcessorHarness NoFirmIntake(params BillingRuleCandidate[] rules)
+    private static ProcessorHarness NoFirmIntake(IReadOnlyList<ExtractedInvoiceLine>? lines = null, ILogger? logger = null)
     {
-        var read = RerunRead(RerunLines());
-        var harness = new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal, Rules = rules, Ai = ReadingAi(read), Lines = read.Lines };
+        var read = RerunRead(lines ?? RerunLines());
+        var harness = new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal, Ai = ReadingAi(read), Lines = read.Lines, Logger = logger };
         harness.Row.Attributes.Remove("sprk_vendororg");
-        harness.Coding.Observations = [new InvoiceLineObservation { Type = InvoiceLineObservationType.BlockBilling, Confidence = 0.9m, QuotedText = Quote }];
+        harness.Coding.Observations = [BlockBillingQuote];
         return harness;
     }
 
-    /// <summary>Persists a firmless intake and returns the store, the stored line rows (in line order) and the stored findings JSON text.</summary>
-    private static async Task<(Store Store, List<Entity> Lines, string Findings)> PersistNoFirmIntakeAsync(CapturingLogger? logger = null)
+    /// <summary>What a firmless intake stored: the line rows (in line order, rounded as Dataverse stores them), the findings JSON, the invoice.</summary>
+    private sealed record StoredIntake(Store Store, List<Entity> Lines, string Findings, Entity Invoice);
+
+    /// <summary>Persists a firmless intake.</summary>
+    private static async Task<StoredIntake> PersistNoFirmIntakeAsync(CapturingLogger? logger = null, IReadOnlyList<ExtractedInvoiceLine>? lines = null)
     {
-        var outcome = await NoFirmIntake().RunAsync();
+        var outcome = await NoFirmIntake(lines, logger).RunAsync();
         var store = NoFirmStore(logger is null ? null : new Store { Logger = logger });
         (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
         var requests = store.Transactions.Single();
-        var lines = requests.Select(Target).Where(e => e.LogicalName == "sprk_billingevent").ToList();
-        return (store, lines, Target(requests[^1]).GetAttributeValue<string>("sprk_findingsjson"));
+        var rows = requests.Select(Target).ToList();
+        return new StoredIntake(
+            store,
+            AsDataverseStores(rows.Where(e => e.LogicalName == "sprk_billingevent")),
+            rows.Single(e => e.LogicalName == "sprk_invoicesubmission").GetAttributeValue<string>("sprk_findingsjson"),
+            rows.Single(e => e.LogicalName == "sprk_invoice"));
     }
+
+    /// <summary>The rows as Dataverse returns them: the decimal and currency columns hold two decimals (review L1: the rebuild must not trust them).</summary>
+    private static List<Entity> AsDataverseStores(IEnumerable<Entity> rows) => rows.Select(row =>
+    {
+        var copy = new Entity(row.LogicalName, row.Id);
+        foreach (var (key, value) in row.Attributes)
+        {
+            copy[key] = value switch
+            {
+                decimal number => Math.Round(number, 2, MidpointRounding.AwayFromZero),
+                Money money => new Money(Math.Round(money.Value, 2, MidpointRounding.AwayFromZero)),
+                _ => value,
+            };
+        }
+
+        return copy;
+    }).ToList();
+
+    private static Entity Copy(Entity row)
+    {
+        var copy = new Entity(row.LogicalName, row.Id);
+        foreach (var (key, value) in row.Attributes)
+        {
+            copy[key] = value;
+        }
+
+        return copy;
+    }
+
+    private static StoredSubmissionRead.Result Rebuild(
+        StoredIntake intake, string? findings = null, IEnumerable<Entity>? lines = null, Entity? invoice = null,
+        IReadOnlySet<(Guid? LineId, string Field)>? verified = null, ILogger? logger = null) =>
+        StoredSubmissionRead.Rebuild(Submission, findings ?? intake.Findings, invoice ?? intake.Invoice, lines ?? intake.Lines, verified ?? NoneVerified, logger ?? new CapturingLogger());
 
     private static JsonElement Provenance(string findings) => JsonDocument.Parse(findings).RootElement.GetProperty(ExtractionProvenance.Member);
 
-    // ── (a) the section totals ──
+    private static JsonObject LineFields(Entity line) => JsonNode.Parse(line.GetAttributeValue<string>("sprk_extractionconfidence"))!["fields"]!.AsObject();
 
-    [Fact(DisplayName = "095d-2a-1 (a): the section totals are stored with their confidences, as exact numbers, in the findings provenance; never on a line")]
+    // ── (a) the section totals, the total due and the line count ──
+
+    [Fact(DisplayName = "095d-2a-1 (a): the section totals and total due are stored with their confidences, as exact numbers, in the findings provenance, with the line count; never on a line")]
     public async Task SectionTotals_AreStoredInTheFindings_WithTheirConfidences()
     {
-        var (_, lines, findings) = await PersistNoFirmIntakeAsync();
+        var intake = await PersistNoFirmIntakeAsync();
 
-        var totals = Provenance(findings).GetProperty(ExtractionProvenance.SectionTotalsMember);
+        var provenance = Provenance(intake.Findings);
+        var totals = provenance.GetProperty(ExtractionProvenance.SectionTotalsMember);
         totals.GetProperty(ResolutionFieldNames.FeesTotal).GetProperty("value").GetDecimal().Should().Be(1500.125m, "the exact number read, not rounded text");
         totals.GetProperty(ResolutionFieldNames.FeesTotal).GetProperty("confidence").GetDecimal().Should().Be(0.91m);
         totals.GetProperty(ResolutionFieldNames.AdjustmentsTotal).GetProperty("value").GetDecimal().Should().Be(-25.5m);
         totals.GetProperty(ResolutionFieldNames.AdjustmentsTotal).GetProperty("confidence").GetDecimal().Should().Be(0.7m);
+        totals.GetProperty(ResolutionFieldNames.TotalDue).GetProperty("value").GetDecimal().Should().Be(1474.625m, "review L4: the total due as a number, not the header's 0.00 text");
+        provenance.GetProperty(ExtractionProvenance.LineCountMember).GetInt32().Should().Be(4);
 
         // Must-not-fire: a total the document does not show stays null (with the analyzer's confidence that it is absent), never 0.
         totals.GetProperty(ResolutionFieldNames.ExpensesTotal).GetProperty("value").ValueKind.Should().Be(JsonValueKind.Null);
         totals.GetProperty(ResolutionFieldNames.ExpensesTotal).GetProperty("confidence").GetDecimal().Should().Be(0.4m);
-        lines.Should().OnlyContain(l => !l.GetAttributeValue<string>("sprk_extractionconfidence").Contains(ExtractionProvenance.SectionTotalsMember));
+        intake.Lines.Should().OnlyContain(l => !l.GetAttributeValue<string>("sprk_extractionconfidence").Contains(ExtractionProvenance.SectionTotalsMember));
     }
 
     // ── (b) the timekeeper summary names ──
@@ -141,13 +208,13 @@ public partial class InvoiceSubmissionPersisterTests
     [Fact(DisplayName = "095d-2a-1 (b): the timekeeper summary names are stored in the findings only (blank names dropped); no line column holds them")]
     public async Task TimekeeperSummaryNames_AreStoredInTheFindingsOnly()
     {
-        var (_, lines, findings) = await PersistNoFirmIntakeAsync();
+        var intake = await PersistNoFirmIntakeAsync();
 
-        Provenance(findings).GetProperty(ExtractionProvenance.TimekeeperSummaryMember).EnumerateArray().Select(n => n.GetString())
+        Provenance(intake.Findings).GetProperty(ExtractionProvenance.TimekeeperSummaryMember).EnumerateArray().Select(n => n.GetString())
             .Should().Equal("Jane Smith", SummaryOnlyName);
 
         // Must-not-fire: no line row, in any column, holds a name that is only on the summary (uac-r2 condition 1).
-        lines.Should().OnlyContain(l => !l.Attributes.Values.OfType<string>().Any(v => v.Contains(SummaryOnlyName, StringComparison.Ordinal)));
+        intake.Lines.Should().OnlyContain(l => !l.Attributes.Values.OfType<string>().Any(v => v.Contains(SummaryOnlyName, StringComparison.Ordinal)));
     }
 
     // ── (c) the per-line "no date" flag ──
@@ -155,13 +222,13 @@ public partial class InvoiceSubmissionPersisterTests
     [Fact(DisplayName = "095d-2a-1 (c): a line read with no date is flagged dateMissing on its extraction JSON (its event date is the invoice date); a dated line is not")]
     public async Task ALineReadWithNoDate_IsFlagged_ADatedLineIsNot()
     {
-        var (_, lines, _) = await PersistNoFirmIntakeAsync();
+        var intake = await PersistNoFirmIntakeAsync();
 
         bool Flag(Entity line) => JsonNode.Parse(line.GetAttributeValue<string>("sprk_extractionconfidence"))![ExtractionProvenance.LineDateMissingMember]!.GetValue<bool>();
 
-        Flag(lines[1]).Should().BeTrue();
-        lines[1].GetAttributeValue<DateTime>("sprk_eventdate").Should().Be(RerunInvoiceDate.ToDateTime(TimeOnly.MinValue), "FR-04: the column holds the invoice date");
-        Flag(lines[0]).Should().BeFalse("must-not-fire: the line was read with its date");
+        Flag(intake.Lines[1]).Should().BeTrue();
+        intake.Lines[1].GetAttributeValue<DateTime>("sprk_eventdate").Should().Be(RerunInvoiceDate.ToDateTime(TimeOnly.MinValue), "FR-04: the column holds the invoice date");
+        Flag(intake.Lines[0]).Should().BeFalse("must-not-fire: the line was read with its date");
     }
 
     // ── (d) the observation quotes ──
@@ -169,14 +236,14 @@ public partial class InvoiceSubmissionPersisterTests
     [Fact(DisplayName = "095d-2a-1 (d): the observation quotes are stored in the findings only; the line keeps the observation's type and confidence, never its text")]
     public async Task ObservationQuotes_AreStoredInTheFindingsOnly()
     {
-        var (_, lines, findings) = await PersistNoFirmIntakeAsync();
+        var intake = await PersistNoFirmIntakeAsync();
 
-        var quotes = Provenance(findings).GetProperty(ExtractionProvenance.ObservationsMember).EnumerateArray().ToList();
+        var quotes = Provenance(intake.Findings).GetProperty(ExtractionProvenance.ObservationsMember).EnumerateArray().ToList();
         quotes.Select(q => (q.GetProperty("line").GetInt32(), q.GetProperty("type").GetString(), q.GetProperty("quotedText").GetString()))
-            .Should().Equal((0, "BlockBilling", Quote), (1, "BlockBilling", Quote));
+            .Should().Equal((0, "BlockBilling", Quote), (1, "BlockBilling", Quote), (2, "BlockBilling", Quote), (3, "BlockBilling", Quote));
 
         // Must-not-fire: the line column carries numbers and flags only (uac-r2 condition 1).
-        foreach (var line in lines)
+        foreach (var line in intake.Lines)
         {
             var extraction = line.GetAttributeValue<string>("sprk_extractionconfidence");
             extraction.Should().NotContain("QUOTESENTINEL");
@@ -185,22 +252,106 @@ public partial class InvoiceSubmissionPersisterTests
         }
     }
 
-    // ── never logged ──
+    // ── (e) the exact numbers (review L1) ──
 
-    [Fact(DisplayName = "095d-2a-1: no log line of intake, the rebuild or the re-run coding carries a stored name or quote (counts only, ADR-015)")]
+    [Fact(DisplayName = "095d-2a-1 (e): each line's exact numbers are stored in its extraction JSON (numbers only), so the 2-decimal columns are not what the re-run judges")]
+    public async Task ExactNumbers_AreStoredOnTheLines()
+    {
+        var intake = await PersistNoFirmIntakeAsync();
+
+        LineFields(intake.Lines[2])[ResolutionFieldNames.Hours]![ExtractionProvenance.ExactMember]!.GetValue<decimal>().Should().Be(0.125m);
+        intake.Lines[2].GetAttributeValue<decimal>("sprk_quantity").Should().Be(0.13m, "the setup: the column rounds");
+        LineFields(intake.Lines[3])[ResolutionFieldNames.UnitCost]![ExtractionProvenance.ExactMember]!.GetValue<decimal>().Should().Be(0.655m);
+        LineFields(intake.Lines[3])[ResolutionFieldNames.Quantity]![ExtractionProvenance.ExactMember]!.GetValue<decimal>().Should().Be(100m);
+
+        // A field the line type does not have is stored as a JSON null, never a guess.
+        LineFields(intake.Lines[3])[ResolutionFieldNames.Hours]![ExtractionProvenance.ExactMember].Should().BeNull();
+        foreach (var line in intake.Lines)
+        {
+            foreach (var name in ExtractionProvenance.ExactLineFieldNames)
+            {
+                LineFields(line)[name]!.AsObject().ContainsKey(ExtractionProvenance.ExactMember).Should().BeTrue();
+                LineFields(line)[name]![ExtractionProvenance.ExactMember]?.GetValueKind().Should().Be(JsonValueKind.Number, "numbers only (uac-r2 condition 1)");
+            }
+        }
+    }
+
+    // ── review L6: only an intake held for its firm stores them ──
+
+    [Fact(DisplayName = "095d-2a-1 (L6) must-not-fire: an intake with a firm stores none of the re-run facts (no totals, names, quotes, line count or exact numbers)")]
+    public async Task AnIntakeWithAFirm_StoresNoRerunFacts()
+    {
+        var read = RerunRead(RerunLines());
+        var harness = new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal, Ai = ReadingAi(read), Lines = read.Lines };
+        harness.Coding.Observations = [BlockBillingQuote];
+        var outcome = await harness.RunAsync();
+        outcome.Submission!.FirmId.Should().NotBeNull("the setup");
+        var store = new Store();
+        (await store.Build().PersistAsync(outcome, null)).Status.Should().Be(SubmissionPersistStatus.Committed);
+        var rows = store.Transactions.Single().Select(Target).ToList();
+        var findings = rows.Single(e => e.LogicalName == "sprk_invoicesubmission").GetAttributeValue<string>("sprk_findingsjson");
+
+        var provenance = Provenance(findings);
+        foreach (var member in new[] { ExtractionProvenance.SectionTotalsMember, ExtractionProvenance.TimekeeperSummaryMember, ExtractionProvenance.ObservationsMember, ExtractionProvenance.LineCountMember })
+        {
+            provenance.TryGetProperty(member, out _).Should().BeFalse(member);
+        }
+
+        findings.Should().NotContain(SummaryOnlyName).And.NotContain("QUOTESENTINEL");
+        var lines = rows.Where(e => e.LogicalName == "sprk_billingevent").ToList();
+        lines.Should().HaveCount(4);
+        lines.Should().OnlyContain(l => !l.GetAttributeValue<string>("sprk_extractionconfidence").Contains("\"" + ExtractionProvenance.ExactMember + "\""));
+
+        // The flag is on every line, with a firm or without (the simpler rule; a boolean).
+        lines.Should().OnlyContain(l => l.GetAttributeValue<string>("sprk_extractionconfidence").Contains(ExtractionProvenance.LineDateMissingMember));
+
+        // Must-fire control: the same read without a firm stores them.
+        var firmless = await PersistNoFirmIntakeAsync();
+        Provenance(firmless.Findings).TryGetProperty(ExtractionProvenance.LineCountMember, out _).Should().BeTrue();
+        ExtractionProvenance.ParseRerunFacts(findings).Should().BeNull("a firm intake cannot be re-run, so the rebuild refuses it as facts missing");
+    }
+
+    // ── never logged, never printed ──
+
+    [Fact(DisplayName = "095d-2a-1: no log line of intake, the rebuild, the re-run coding or the re-run evaluation (processor, rejection rule, rules) carries a stored name or quote (counts only, ADR-015)")]
     public async Task TheStoredFacts_AreNeverLogged()
     {
         var logger = new CapturingLogger();
-        var (_, lines, findings) = await PersistNoFirmIntakeAsync(logger);
-        var rebuilt = StoredSubmissionRead.Rebuild(Submission, findings, lines, logger);
+        var intake = await PersistNoFirmIntakeAsync(logger);
+        var rebuilt = Rebuild(intake, logger: logger);
         rebuilt.IsRerunnable.Should().BeTrue("the setup");
-        var coding = new RerunLineCoding(new InvoiceSubmissionProcessorTests.FakeCoding(), (_, _) => Task.FromResult<ResolvedCodeSet?>(null), rebuilt.Coding!, logger);
-        await coding.CodeLinesAsync(InvoiceSubmissionProcessor.BuildCodingRequest(FirmSnapshot(), rebuilt.Read!));
+
+        // The re-run evaluation, with every step's logger (the processor, the rejection rule, the rule evaluator) writing to the same logger.
+        BillingRuleCandidate[] rules = [Version("BILL-AI", RuleType.AiObservation), Version("BILL-TK", RuleType.ApprovedTimekeeper)];
+        var rerun = new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal, Rules = rules, Ai = new Mock<IInvoiceAi>(MockBehavior.Strict).Object, Logger = logger };
+        var coding = new RerunLineCoding(rerun.Coding, (_, _) => Task.FromResult<ResolvedCodeSet?>(null), rebuilt.Coding!, logger);
+        var outcome = await rerun.Build().EvaluateFromReadAsync(FirmSnapshot(), rebuilt.Read!, finalDelivery: false, coding);
+        outcome.Evaluation!.Findings.Should().Contain(f => f.ValuesRead.Any(v => v.Value == Quote), "the setup: the quote is in the evaluation");
 
         logger.Entries.Should().NotBeEmpty("the setup: the steps log");
         logger.Entries.Should().Contain(e => e.Message.Contains("2 summary names", StringComparison.Ordinal), "must-fire: the count is logged");
+        logger.Entries.Should().Contain(e => e.Message.Contains("Re-run coding", StringComparison.Ordinal), "the setup: the re-run coding logged");
         logger.Entries.Should().NotContain(e => e.Message.Contains(SummaryOnlyName, StringComparison.Ordinal)
             || e.Message.Contains("Jane Smith", StringComparison.Ordinal) || e.Message.Contains("QUOTESENTINEL", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "095d-2a-1 (X4): ToString() of the new records never prints a stored name or quote")]
+    public async Task TheNewRecords_NeverPrintANameOrAQuote()
+    {
+        var intake = await PersistNoFirmIntakeAsync();
+        var facts = ExtractionProvenance.ParseRerunFacts(intake.Findings)!;
+        var rebuilt = Rebuild(intake);
+
+        var quote = new ExtractionProvenance.ObservationQuote(0, InvoiceLineObservationType.BlockBilling, Quote);
+        quote.ToString().Should().NotContain("QUOTESENTINEL").And.Contain("Line = 0").And.Contain("20 characters");
+        quote.QuotedText.Should().Be(Quote, "the value itself is unchanged");
+
+        foreach (var printed in new[] { facts.ToString(), facts.Observations[0].ToString(), rebuilt.ToString(), rebuilt.Coding!.ToString(), rebuilt.Read!.ToString() })
+        {
+            printed.Should().NotContain("QUOTESENTINEL").And.NotContain(SummaryOnlyName).And.NotContain("Jane Smith");
+        }
+
+        facts.ToString().Should().Contain("TimekeeperSummaryNames = 2").And.Contain("Observations = 4").And.Contain("LineCount = 4");
     }
 
     // ── the rebuild ──
@@ -211,23 +362,29 @@ public partial class InvoiceSubmissionPersisterTests
         return SubmissionSnapshot.Read(withFirm.Row).Snapshot!;
     }
 
-    [Fact(DisplayName = "095d-2a-1: the read rebuilt from the stored rows (no document read) evaluates with the firm exactly as the document read does, quotes and no-date lines included")]
+    [Fact(DisplayName = "095d-2a-1: the read rebuilt from the stored rows (rounded as Dataverse stores them; no document read) evaluates with the firm exactly as the document read does")]
     public async Task TheRebuiltRead_EvaluatesAsTheDocumentReadDoes_WithoutReadingTheDocument()
     {
-        BillingRuleCandidate[] rules = [Version("BILL-AI", RuleType.AiObservation), Version("BILL-TK", RuleType.ApprovedTimekeeper)];
-        var (_, lines, findings) = await PersistNoFirmIntakeAsync();
+        BillingRuleCandidate[] rules =
+        [
+            Version("BILL-AI", RuleType.AiObservation), Version("BILL-TK", RuleType.ApprovedTimekeeper), Version("BILL-INC", RuleType.TimeIncrement),
+        ];
+        var intake = await PersistNoFirmIntakeAsync();
 
-        var rebuilt = StoredSubmissionRead.Rebuild(Submission, findings, lines, new CapturingLogger());
+        var rebuilt = Rebuild(intake);
         rebuilt.IsRerunnable.Should().BeTrue();
         rebuilt.Read!.Lines[1].Date.Value.Should().BeNull("the stored flag restores the missing date");
         rebuilt.Read.Lines[0].Date.Value.Should().Be(new DateOnly(2026, 5, 20));
         rebuilt.Read.Lines[1].Rate.Repair.Should().Be(ExtractedValueRepair.RateFromTimekeeperSummary);
+        rebuilt.Read.Lines[2].Hours.Value.Should().Be(0.125m, "review L1: the exact hours, not the column's 0.13");
+        rebuilt.Read.Lines[3].UnitCost.Value.Should().Be(0.655m, "review L1: the exact unit cost, not the column's 0.66");
         rebuilt.Read.Header.FeesTotal.Value.Should().Be(1500.125m);
+        rebuilt.Read.Header.TotalDue.Value.Should().Be(1474.625m, "review L4: from the stored number, not the 0.00 header text");
         rebuilt.Read.TimekeeperSummary.Select(r => r.Name.Value).Should().Equal("Jane Smith", SummaryOnlyName);
 
         // The document read, with the firm.
         var direct = new ProcessorHarness { Channel = InvoiceSubmissionChannel.Internal, Rules = rules, Ai = ReadingAi(RerunRead(RerunLines())), Lines = RerunLines() };
-        direct.Coding.Observations = [new InvoiceLineObservation { Type = InvoiceLineObservationType.BlockBilling, Confidence = 0.9m, QuotedText = Quote }];
+        direct.Coding.Observations = [BlockBillingQuote];
         var expected = await direct.RunAsync();
 
         // The re-run: the rebuilt read through the same steps, with an AI that fails any call (no ReadInvoiceAsync), and the stored coding.
@@ -244,7 +401,7 @@ public partial class InvoiceSubmissionPersisterTests
         JsonSerializer.Serialize(actual.EvaluationRequest).Should().Be(JsonSerializer.Serialize(expected.EvaluationRequest));
         JsonSerializer.Serialize(actual.Evaluation!.Findings).Should().Be(JsonSerializer.Serialize(expected.Evaluation.Findings));
         JsonSerializer.Serialize(actual.PipelineFindings).Should().Be(JsonSerializer.Serialize(expected.PipelineFindings));
-        JsonSerializer.Serialize(rerun.Resolution.Input).Should().Be(JsonSerializer.Serialize(direct.Resolution.Input), "the resolution sees the same totals, names and dates");
+        JsonSerializer.Serialize(rerun.Resolution.Input).Should().Be(JsonSerializer.Serialize(direct.Resolution.Input), "the resolution sees the same totals, names, dates and numbers");
 
         // The persister's builders give the same stored copy (the invoice name aside: the firm name is not a stored fact and decides no rule).
         static string Stored(SubmissionEvaluationOutcome outcome)
@@ -257,14 +414,73 @@ public partial class InvoiceSubmissionPersisterTests
         Stored(actual).Should().Be(Stored(expected));
     }
 
+    [Fact(DisplayName = "095d-2a-1 (L2): an invoice intake stored with no lines and coded is rebuilt coded, not refused")]
+    public async Task AZeroLineCodedInvoice_IsRebuilt()
+    {
+        var intake = await PersistNoFirmIntakeAsync(lines: []);
+        Provenance(intake.Findings).GetProperty(ExtractionProvenance.LineCountMember).GetInt32().Should().Be(0, "the setup");
+        JsonNode.Parse(intake.Findings)!["codeSet"].Should().NotBeNull("the setup: intake coded the invoice");
+
+        var rebuilt = Rebuild(intake);
+
+        rebuilt.IsRerunnable.Should().BeTrue();
+        rebuilt.Read!.Lines.Should().BeEmpty();
+        rebuilt.Coding!.Coded.Should().NotBeNull("with no line, the invoice-level set says intake coded");
+        rebuilt.Coding.Coded!.Lines.Should().BeEmpty();
+        rebuilt.Coding.HoldReasonCode.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "095d-2a-1 (L1): a number a reviewer corrected (the column no longer its exact value's rounding) is the column; an untouched one is the exact value")]
+    public async Task ACorrectedNumber_IsTheColumn_AnUntouchedOneTheExactValue()
+    {
+        var intake = await PersistNoFirmIntakeAsync();
+        var lines = intake.Lines.Select(Copy).ToList();
+        lines[2]["sprk_quantity"] = 0.5m;
+        lines[3]["sprk_rate"] = new Money(0.70m);
+
+        var rebuilt = Rebuild(intake, lines: lines);
+
+        rebuilt.Read!.Lines[2].Hours.Value.Should().Be(0.5m);
+        rebuilt.Read.Lines[3].UnitCost.Value.Should().Be(0.70m);
+        rebuilt.Read.Lines[3].Quantity.Value.Should().Be(100m, "must-not-fire: an untouched number keeps its exact value");
+        rebuilt.Read.Lines[0].Hours.Value.Should().Be(1.5m);
+    }
+
+    [Fact(DisplayName = "095d-2a-1 (L3): a header field or line date a reviewer corrected or confirmed is its column; an unverified one is the value read")]
+    public async Task ACorrectedOrConfirmedField_IsItsColumn()
+    {
+        var intake = await PersistNoFirmIntakeAsync();
+        var invoice = Copy(intake.Invoice);
+        invoice["sprk_invoicedate"] = new DateTime(2026, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+        invoice["sprk_totalamount"] = new Money(1400m);
+        var verified = new HashSet<(Guid? LineId, string Field)>
+        {
+            (null, BillingFieldNames.InvoiceDate),
+            (null, ResolutionFieldNames.TotalDue),
+            (intake.Lines[1].Id, ResolutionFieldNames.Date),
+        };
+
+        var corrected = Rebuild(intake, invoice: invoice, verified: verified);
+        var unverified = Rebuild(intake, invoice: invoice);
+
+        corrected.Read!.Header.InvoiceDate.Value.Should().Be(new DateOnly(2026, 6, 15));
+        corrected.Read.Header.TotalDue.Value.Should().Be(1400m);
+        corrected.Read.Lines[1].Date.Value.Should().Be(RerunInvoiceDate, "a corrected or confirmed date overrides the stored no-date flag");
+        corrected.Read.Header.BillingPeriodStart.Value.Should().Be(new DateOnly(2026, 5, 1), "must-not-fire: a field nobody verified");
+
+        unverified.Read!.Header.InvoiceDate.Value.Should().Be(RerunInvoiceDate, "must-not-fire: the value read, whatever the column holds");
+        unverified.Read.Header.TotalDue.Value.Should().Be(1474.625m);
+        unverified.Read.Lines[1].Date.Value.Should().BeNull();
+    }
+
     // ── fail closed: a submission stored without the facts ──
 
-    /// <summary>A stored copy as intake wrote it before task 095d-2a-1: no re-run member on the findings provenance, no flag on the lines.</summary>
+    /// <summary>A stored copy without the re-run facts (as intake wrote it before task 095d-2a-1, or with a firm): <paramref name="only"/> one, or all.</summary>
     private static (string Findings, List<Entity> Lines) AsStoredBefore(string findings, List<Entity> lines, string? only = null)
     {
         var root = JsonNode.Parse(findings)!.AsObject();
         var provenance = root[ExtractionProvenance.Member]!.AsObject();
-        foreach (var member in new[] { ExtractionProvenance.SectionTotalsMember, ExtractionProvenance.TimekeeperSummaryMember, ExtractionProvenance.ObservationsMember })
+        foreach (var member in new[] { ExtractionProvenance.SectionTotalsMember, ExtractionProvenance.TimekeeperSummaryMember, ExtractionProvenance.ObservationsMember, ExtractionProvenance.LineCountMember })
         {
             if (only is null || only == member)
             {
@@ -274,19 +490,22 @@ public partial class InvoiceSubmissionPersisterTests
 
         var stripped = lines.Select(l =>
         {
-            var copy = new Entity(l.LogicalName, l.Id);
-            foreach (var (key, value) in l.Attributes)
-            {
-                copy[key] = value;
-            }
-
+            var copy = Copy(l);
+            var extraction = JsonNode.Parse(l.GetAttributeValue<string>("sprk_extractionconfidence"))!.AsObject();
             if (only is null || only == ExtractionProvenance.LineDateMissingMember)
             {
-                var extraction = JsonNode.Parse(l.GetAttributeValue<string>("sprk_extractionconfidence"))!.AsObject();
                 extraction.Remove(ExtractionProvenance.LineDateMissingMember);
-                copy["sprk_extractionconfidence"] = extraction.ToJsonString();
             }
 
+            if (only is null || only == ExtractionProvenance.ExactMember)
+            {
+                foreach (var name in ExtractionProvenance.ExactLineFieldNames)
+                {
+                    extraction["fields"]![name]!.AsObject().Remove(ExtractionProvenance.ExactMember);
+                }
+            }
+
+            copy["sprk_extractionconfidence"] = extraction.ToJsonString();
             return copy;
         }).ToList();
         return (root.ToJsonString(), stripped);
@@ -297,15 +516,17 @@ public partial class InvoiceSubmissionPersisterTests
     [InlineData(ExtractionProvenance.SectionTotalsMember)]
     [InlineData(ExtractionProvenance.TimekeeperSummaryMember)]
     [InlineData(ExtractionProvenance.ObservationsMember)]
+    [InlineData(ExtractionProvenance.LineCountMember)]
     [InlineData(ExtractionProvenance.LineDateMissingMember)]
+    [InlineData(ExtractionProvenance.ExactMember)]
     public async Task ASubmissionStoredWithoutTheFacts_RefusesTheRerun_FailClosed(string? missing)
     {
-        var (store, lines, findings) = await PersistNoFirmIntakeAsync();
-        var transactions = store.Transactions.Count;
-        var (older, olderLines) = AsStoredBefore(findings, lines, missing);
+        var intake = await PersistNoFirmIntakeAsync();
+        var transactions = intake.Store.Transactions.Count;
+        var (older, olderLines) = AsStoredBefore(intake.Findings, intake.Lines, missing);
         var logger = new CapturingLogger();
 
-        var result = StoredSubmissionRead.Rebuild(Submission, older, olderLines, logger);
+        var result = Rebuild(intake, findings: older, lines: olderLines, logger: logger);
 
         result.IsRerunnable.Should().BeFalse();
         result.RefusalReason.Should().Be(StoredSubmissionRead.FactsMissing);
@@ -313,26 +534,62 @@ public partial class InvoiceSubmissionPersisterTests
         result.Coding.Should().BeNull();
         logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Which.Message
             .Should().Contain("Permanent=True").And.Contain(StoredSubmissionRead.FactsMissing);
-        store.Transactions.Should().HaveCount(transactions, "the rebuild writes nothing, so the hold stays");
+        intake.Store.Transactions.Should().HaveCount(transactions, "the rebuild writes nothing, so the hold stays");
 
         // Must-not-fire: the same submission as stored now is re-runnable, and logs no refusal.
         var control = new CapturingLogger();
-        StoredSubmissionRead.Rebuild(Submission, findings, lines, control).IsRerunnable.Should().BeTrue();
+        Rebuild(intake, logger: control).IsRerunnable.Should().BeTrue();
         control.Entries.Should().NotContain(e => e.Level == LogLevel.Error);
     }
 
-    [Fact(DisplayName = "095d-2a-1: stored rows that cannot be read back consistently (a line sequence gap, a quote without its observation) are not re-runnable")]
-    public async Task InconsistentStoredRows_AreNotRerunnable()
+    [Theory(DisplayName = "095d-2a-1: stored rows that do not agree with the stored facts are not re-runnable (stored_rows_inconsistent, never facts_missing)")]
+    [InlineData("trailing row missing")]
+    [InlineData("first row missing")]
+    [InlineData("quote without its observation")]
+    [InlineData("header entry missing")]
+    [InlineData("line fields missing")]
+    [InlineData("line extraction JSON not written (over 100,000 characters)")]
+    public async Task InconsistentStoredRows_AreNotRerunnable(string inconsistency)
     {
-        var (_, lines, findings) = await PersistNoFirmIntakeAsync();
+        var intake = await PersistNoFirmIntakeAsync();
+        var findings = JsonNode.Parse(intake.Findings)!.AsObject();
+        var lines = intake.Lines.Select(Copy).ToList();
+        switch (inconsistency)
+        {
+            case "trailing row missing":
+                // Its quote goes too, so only the stored line count can tell (the rows left are contiguous and every quote has its line).
+                lines.RemoveAt(lines.Count - 1);
+                var quotes = findings[ExtractionProvenance.Member]![ExtractionProvenance.ObservationsMember]!.AsArray();
+                foreach (var quote in quotes.Where(q => q!["line"]!.GetValue<int>() == lines.Count).ToList())
+                {
+                    quotes.Remove(quote);
+                }
 
-        // A gap in the line sequence (a line row missing).
-        StoredSubmissionRead.Rebuild(Submission, findings, [lines[1]], new CapturingLogger()).RefusalReason.Should().Be(StoredSubmissionRead.StoredRowsInconsistent);
+                break;
+            case "first row missing":
+                lines.RemoveAt(0);
+                break;
+            case "quote without its observation":
+                findings[ExtractionProvenance.Member]![ExtractionProvenance.ObservationsMember]!.AsArray()
+                    .Add(new JsonObject { ["line"] = 0, ["type"] = "VagueDescription", ["quotedText"] = "x" });
+                break;
+            case "header entry missing":
+                findings[ExtractionProvenance.Member]![ExtractionProvenance.HeaderMember]!.AsObject().Remove(BillingFieldNames.Currency);
+                break;
+            case "line fields missing":
+                var extraction = JsonNode.Parse(lines[0].GetAttributeValue<string>("sprk_extractionconfidence"))!.AsObject();
+                extraction.Remove("fields");
+                lines[0]["sprk_extractionconfidence"] = extraction.ToJsonString();
+                break;
+            default:
+                // The persister leaves the column unset when the JSON is over 100,000 characters (BuildLines).
+                lines[0].Attributes.Remove("sprk_extractionconfidence");
+                break;
+        }
 
-        // A quote with no observation on its line.
-        var root = JsonNode.Parse(findings)!.AsObject();
-        root[ExtractionProvenance.Member]![ExtractionProvenance.ObservationsMember]!.AsArray()
-            .Add(new JsonObject { ["line"] = 0, ["type"] = "VagueDescription", ["quotedText"] = "x" });
-        StoredSubmissionRead.Rebuild(Submission, root.ToJsonString(), lines, new CapturingLogger()).RefusalReason.Should().Be(StoredSubmissionRead.StoredRowsInconsistent);
+        var result = Rebuild(intake, findings: findings.ToJsonString(), lines: lines);
+
+        result.RefusalReason.Should().Be(StoredSubmissionRead.StoredRowsInconsistent, inconsistency);
+        Rebuild(intake).IsRerunnable.Should().BeTrue("must-not-fire: the rows as stored");
     }
 }

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -1009,6 +1010,11 @@ public class InvoiceSubmissionProcessorTests
         /// <summary>082c-2: the job's <c>IsFinalDelivery</c> (false by default: an earlier delivery).</summary>
         public bool FinalDelivery { get; init; }
 
+        /// <summary>095d-2a-1 (review X5): one logger the processor, the rejection rule and the rule evaluator all write to (none by default).</summary>
+        public ILogger? Logger { get; init; }
+
+        private ILogger<T> LoggerFor<T>() => Logger is null ? NullLogger<T>.Instance : new ForwardingLogger<T>(Logger);
+
         public Task<SubmissionEvaluationOutcome> RunAsync() => Build().EvaluateAsync(Row, LoadDocument, FinalDelivery);
 
         /// <summary>The document loader the harness hands the processor (counts the loads).</summary>
@@ -1042,7 +1048,7 @@ public class InvoiceSubmissionProcessorTests
                         throw fault;
                     }
 
-                    var result = Evaluator().Evaluate(request, Loaded([.. Rules]) with { Procedures = Procedures ?? NoProcedures() });
+                    var result = Evaluator(LoggerFor<InvoiceComplianceEvaluator>()).Evaluate(request, Loaded([.. Rules]) with { Procedures = Procedures ?? NoProcedures() });
 
                     // A row written outside the publish path: the evaluation gate would downgrade the consequence, so the decider's
                     // own guard is proved by restoring Reject after the gate (defence in depth, as 073's DecideAsync warns about).
@@ -1050,9 +1056,9 @@ public class InvoiceSubmissionProcessorTests
                         ? result with { RulesByVersion = result.RulesByVersion.ToDictionary(r => r.Key, r => r.Value with { Consequence = Reject }) }
                         : result);
                 },
-                new SubmissionRejectionRule(settings.Object, NullLogger<SubmissionRejectionRule>.Instance),
+                new SubmissionRejectionRule(settings.Object, LoggerFor<SubmissionRejectionRule>()),
                 monitor,
-                NullLogger<InvoiceSubmissionProcessor>.Instance,
+                LoggerFor<InvoiceSubmissionProcessor>(),
                 Entities.Object);
 
             return sut;
@@ -1099,6 +1105,17 @@ public class InvoiceSubmissionProcessorTests
             AnalyzerId = "test",
             ApiVersion = "test",
         };
+    }
+
+    /// <summary>095d-2a-1: an <see cref="ILogger{T}"/> that writes to one shared logger, so a test sees every step's log lines in one place.</summary>
+    internal sealed class ForwardingLogger<T>(ILogger inner) : ILogger<T>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => inner.BeginScope(state);
+
+        public bool IsEnabled(LogLevel logLevel) => inner.IsEnabled(logLevel);
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            inner.Log(logLevel, eventId, state, exception, formatter);
     }
 
     /// <summary>046 at its interface: combined confidence = the analyzer confidence (0 when none), every timekeeper matched unless told otherwise.</summary>
