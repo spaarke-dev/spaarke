@@ -290,3 +290,14 @@ ontology turns on Dataverse auditing on dev for the Spaarke tables and changeabl
 
 - **`sprk_invoicesubmission.sprk_findingsjson` stays audited** (owner, 2026-11-06, in this session). Once ebilling's option A ships, it holds timekeeper names and AI-quoted text. The owner accepted that past values persist in change history and that any later erasure must cover change history too. This replaces uac-r2's earlier position (column auditing off) and narrows the option-A condition "not logged" to application logs.
 - **Change history stays System Administrator only.** On dev, no Spaarke role holds `prvReadRecordAuditHistory` or `prvReadAuditSummary`, so audit history exposes no field-secured value to anyone who couldn't already read it. Before any non-admin role is given those privileges, test that audit history hides field-secured values from a user without the field profile. Without that test, granting them would undo field security for the 102 secured columns.
+
+## 2026-11-06: An AI-flagged quote from a line's own narrative may stay in Signal evidence (EB-D-189 condition 1 scope)
+
+ebilling found that before 095d-2a-2, an AI observation quote already reached `sprk_signal.sprk_evidencerefs`, a column that is not field-secured. uac-r2 ruled that condition 1 ("names and quotes only in field-secured `sprk_findingsjson`") covers the re-run's stored members, not this quote.
+- **Why:** the quote is kept only when it occurs inside the line's own narrative (`LineCodingGuard`). The narrative (`sprk_billingevent.sprk_description`) is not field-secured. Every role that reads Signals comes with a role that reads billing events at the same depth. The Signal is filed under the line's own core record. So the quote adds only the label that the text was flagged, for people who can already read the line.
+- **Conditions:**
+  - a must-fire test proves a quote outside the line's narrative never reaches the evidence or the review read;
+  - the dependency is recorded where the containment check lives;
+  - evidence text is not logged or indexed;
+  - the review read stays internal.
+- **Revisit when:** the narrative becomes field-secured, or a role that reads Signals no longer comes with billing-event Read. The quote then becomes non-citable.
