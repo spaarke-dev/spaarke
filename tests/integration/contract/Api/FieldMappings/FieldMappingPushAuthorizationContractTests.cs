@@ -869,6 +869,8 @@ public class FieldMappingPushAuthorizationContractTests
         {
             Id = Guid.NewGuid(), Name = $"{sourceField}->{targetField}", SourceField = sourceField, SourceFieldType = sourceType,
             TargetField = targetField, TargetFieldType = targetType, MappingType = 0, ExecutionOrder = 1, IsActive = true,
+            // Task 040 (FR-23): a push applies Copy rules set to Manual Refresh; a rule left at One Time is not pushed.
+            SyncMode = Spaarke.Dataverse.SyncMode.ManualRefresh,
         };
 
         private static Dictionary<string, JsonElement> Relationship(
