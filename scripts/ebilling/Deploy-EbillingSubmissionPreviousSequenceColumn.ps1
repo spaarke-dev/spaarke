@@ -99,6 +99,7 @@ function New-WholeNumberDef([string]$Schema, [string]$Display, [string]$Text, [i
         DisplayName   = New-Label $Display
         Description   = New-Label $Text
         RequiredLevel = @{ Value = 'None' }
+        IsAuditEnabled = @{ Value = $true }
         Format        = 'None'
         MinValue      = $Min
         MaxValue      = $Max
