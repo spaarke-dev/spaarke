@@ -337,6 +337,62 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         AllItems(await OkAsync(world, Bob)).Should().BeEmpty();
     }
 
+    // Task 044 fix (ontology D-210): a no-core row the caller's read returned is confirmed by ONE batched app-only read of the pair.
+    // A row whose stored pair is present (whole or half) is left out, as an unreadable core is; a failed read leaves out every no-core row.
+
+    [Fact]
+    public async Task NoCoreRows_AreConfirmedByOneBatchedAppOnlyReadOfThePairColumns_AndAGenuineNoPairRowStays()
+    {
+        var world = new World();
+        var todos = Enumerable.Range(0, 3).Select(_ => world.Todo(owner: Alice, readers: [Alice])).ToList();
+        var signals = todos.Select(t => world.Signal(Do, core: null, subject: (TodoType, t))).ToList();
+
+        var body = await OkAsync(world, Alice);
+
+        AllItems(body).Select(i => i.GetProperty("signalId").GetGuid()).Should().BeEquivalentTo(signals);
+        world.SignalPairReads.Should().ContainSingle("one batched query, never one read per row")
+            .Which.Ids.Should().BeEquivalentTo(signals);
+        world.SignalPairReads[0].Columns.Should().BeEquivalentTo(["sprk_corerecordtype", "sprk_corerecordid"]);
+    }
+
+    public static IEnumerable<object?[]> HiddenPairs() => [[true, true], [true, false], [false, true]];
+
+    [Theory]
+    [MemberData(nameof(HiddenPairs))]
+    public async Task ADoRowWhosePairTheCallersReadDoesNotReturn_IsLeftOut_NeverOwnerOnly(bool typeHalf, bool idHalf)
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Bob]);
+        var todo = world.Todo(owner: Alice, readers: [Alice]);
+        var hidden = world.Signal(Do, core: null, subject: (TodoType, todo));
+        world.StoredPairOnly[hidden] = (typeHalf ? MatterType : null, idHalf ? m : null);
+        var genuine = world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice])));
+        _factory.Logs.Warnings.Clear();
+
+        var body = await OkAsync(world, Alice);
+
+        AllItems(body).Select(i => i.GetProperty("signalId").GetGuid()).Should().Equal(genuine);
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("the app-only read returned one; left out", StringComparison.Ordinal));
+        _factory.Logs.Warnings.Should().NotContain(w => w.Contains(m.ToString("D"), StringComparison.OrdinalIgnoreCase)
+            || w.Contains(hidden.ToString("D"), StringComparison.OrdinalIgnoreCase), "no id or column value in the message text");
+    }
+
+    [Fact]
+    public async Task WhenTheAppOnlyPairReadFails_EveryNoCoreRowIsLeftOut_AndCoreRowsStay()
+    {
+        var world = new World();
+        var m = world.Matter(readers: [Alice]);
+        var withCore = world.Signal(Decide, core: (MatterType, m));
+        world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice])));
+        world.FaultPairRead = true;
+        _factory.Logs.Warnings.Clear();
+
+        var body = await OkAsync(world, Alice);
+
+        AllItems(body).Select(i => i.GetProperty("signalId").GetGuid()).Should().Equal(withCore);
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("app-only read of the core-record pair faulted", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task DoRowWithAnUntypedSubject_IsJudgedByWhicheverDoTableHoldsIt()
     {
@@ -2500,6 +2556,16 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             ZoneCodeOfUser[user] = EasternZoneCode;
         }
 
+        /// <summary>Task 044 fix (D-210): the pair the BFF's own read returns for a Signal whose caller-read row carries none (a pair the
+        /// caller's read does not return). Absent: the app-only read returns the row's own pair.</summary>
+        public Dictionary<Guid, (Guid? Type, Guid? Id)> StoredPairOnly { get; } = [];
+
+        /// <summary>Task 044 fix: every app-only <c>sprk_signal</c> query (ids, columns), to prove the re-read is one batched query.</summary>
+        public List<(Guid[] Ids, string[] Columns)> SignalPairReads { get; } = [];
+
+        /// <summary>Task 044 fix: the app-only pair read throws, like a Dataverse timeout (other app-only Signal reads are unaffected).</summary>
+        public bool FaultPairRead { get; set; }
+
         public EntityCollection AppOnly(QueryExpression q)
         {
             if (q.EntityName == "sprk_policy")
@@ -2507,11 +2573,32 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 lock (PolicyReads) PolicyReads.Add(q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToArray());
             }
 
+            if (q.EntityName == "sprk_signal" && q.ColumnSet.Columns.Order().SequenceEqual(["sprk_corerecordid", "sprk_corerecordtype"]))
+            {
+                lock (SignalPairReads) SignalPairReads.Add((q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToArray(), [.. q.ColumnSet.Columns]));
+                if (FaultPairRead) throw new TimeoutException("app-only read of the pair timed out");
+            }
+
             if (q.EntityName == "sprk_policy" && FaultPolicyReadFrom > 0 && PolicyReads.Count >= FaultPolicyReadFrom)
                 throw new TimeoutException("app-only read of sprk_policy timed out");
             if (FaultAppOnlyTables.Contains(q.EntityName)) throw new TimeoutException($"app-only read of {q.EntityName} timed out");
             switch (q.EntityName)
             {
+                case "sprk_signal" when q.ColumnSet.Columns.Order().SequenceEqual(["sprk_corerecordid", "sprk_corerecordtype"]):
+                    var pairs = new EntityCollection();
+                    foreach (var (id, _, row) in Signals.Where(s => q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_signalid" && c.Values.Contains(s.Id))))
+                    {
+                        var stored = new Entity("sprk_signal", id);
+                        var (type, core) = StoredPairOnly.TryGetValue(id, out var hidden)
+                            ? hidden
+                            : (row.GetValueOrDefault("_sprk_corerecordtype_value") as Guid?,
+                               Guid.TryParse(row.GetValueOrDefault("sprk_corerecordid") as string, out var c) ? c : (Guid?)null);
+                        if (type is { } t) stored["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", t);
+                        if (core is { } cid) stored["sprk_corerecordid"] = cid.ToString("D");
+                        pairs.Entities.Add(stored);
+                    }
+
+                    return pairs;
                 case "businessunit":
                     return SecureTeamExists
                         ? new EntityCollection([new Entity("businessunit", SecureBuId) { ["name"] = SecureRecordOwnerTeam.DefaultBusinessUnitName }])

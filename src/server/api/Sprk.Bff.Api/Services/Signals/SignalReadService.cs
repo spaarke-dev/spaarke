@@ -361,6 +361,9 @@ public sealed class SignalReadService
                 return coreFailure;
             }
 
+            // (6b) The no-core rows the caller's read returned are confirmed by the BFF's own batched read of the pair.
+            var noCoreLeftOut = await NoCoreRowsWithAStoredPairAsync(rows, ct).ConfigureAwait(false);
+
             var candidates = new List<SignalRow>();
             foreach (var row in rows)
             {
@@ -371,8 +374,9 @@ public sealed class SignalReadService
 
                 if (row.HasNoCore)
                 {
-                    // D-35: no core record → Do lane only (and then only if the subject is the caller's, step 7).
-                    if (lane == DecisionLane.Do)
+                    // D-35: no core record → Do lane only (and then only if the subject is the caller's, step 7). A row whose stored
+                    // pair the app-only read returned, or could not confirm, is left out (6b), as an unreadable core is.
+                    if (lane == DecisionLane.Do && !noCoreLeftOut.Contains(row.SignalId))
                     {
                         candidates.Add(row);
                     }
@@ -919,6 +923,73 @@ public sealed class SignalReadService
         }
 
         return new CoreAccess(readable, null);
+    }
+
+    /// <summary>
+    /// (6b) Ontology D-210: the Do-lane rows the caller's read returned with neither half of the core-record pair, re-read app-only in one batched
+    /// <c>in</c> query on <c>sprk_signalid</c> (<see cref="IdChunk"/> ids per query), selecting only the two pair columns. Returns the
+    /// rows to leave out: a row whose stored pair is present (whole or half), a row the app-only read did not return, and, when the
+    /// read fails, every such row (fail closed). The same rule as <see cref="SignalCoreRecordAccess.AuthorizeAsync"/>: only an app-only
+    /// read that succeeds with neither half is "no core record". Each left-out row logs
+    /// <see cref="SignalAccessEvents.CorePairPresentAppOnly"/> or <see cref="SignalAccessEvents.CorePairAppOnlyReadFailed"/> with the
+    /// Signal id and lane as scope fields only. Decide-lane no-core rows are never candidates (D-35), so they are not re-read.
+    /// </summary>
+    private async Task<HashSet<Guid>> NoCoreRowsWithAStoredPairAsync(IReadOnlyList<SignalRow> rows, CancellationToken ct)
+    {
+        var leftOut = new HashSet<Guid>();
+        var noCore = rows.Where(r => r.HasNoCore && r.Lane == DecisionLane.Do).Select(r => r.SignalId).Distinct().ToArray();
+        if (noCore.Length == 0)
+        {
+            return leftOut;
+        }
+
+        var confirmed = new HashSet<Guid>();
+        try
+        {
+            foreach (var chunk in noCore.Chunk(IdChunk))
+            {
+                var query = new QueryExpression(SignalCoreRecordAccess.SignalTable)
+                {
+                    ColumnSet = new ColumnSet(SignalCoreRecordAccess.CoreRecordTypeColumn, SignalCoreRecordAccess.CoreRecordIdColumn),
+                };
+                query.Criteria.AddCondition("sprk_signalid", ConditionOperator.In, chunk.Cast<object>().ToArray());
+                var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+                foreach (var stored in result.Entities.Where(e => chunk.Contains(e.Id)))
+                {
+                    if (SignalCoreRecordAccess.HasAnyPairHalf(stored))
+                    {
+                        leftOut.Add(stored.Id);
+                        using (_logger.BeginScope(SignalAccessEvents.Fields(stored.Id, DecisionLane.Do)))
+                        {
+                            _logger.LogWarning(SignalAccessEvents.CorePairPresentAppOnly,
+                                "Signal read: the caller's read returned no core-record pair and the app-only read returned one; left out.");
+                        }
+                    }
+                    else
+                    {
+                        confirmed.Add(stored.Id);
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(SignalAccessEvents.CorePairAppOnlyReadFailed,
+                "Signal read: the app-only read of the core-record pair faulted ({ExceptionType}); every no-core row is left out.", ex.GetType().Name);
+            confirmed.Clear();
+        }
+
+        foreach (var id in noCore.Where(id => !confirmed.Contains(id) && !leftOut.Contains(id)))
+        {
+            leftOut.Add(id);
+            using (_logger.BeginScope(SignalAccessEvents.Fields(id, DecisionLane.Do)))
+            {
+                _logger.LogWarning(SignalAccessEvents.CorePairAppOnlyReadFailed,
+                    "Signal read: the app-only read of the core-record pair did not confirm the row; left out.");
+            }
+        }
+
+        return leftOut;
     }
 
     // ---------------------------------------------------------------------------------------------------------------
