@@ -83,6 +83,7 @@ internal sealed class CorrectionProcedureGapException()
 /// <c>raiseFingerprint</c> is set (equal fingerprints: a refresh, no close); a <c>system</c> entry closes or refreshes that line's system Signal from
 /// the system findings re-mapped from the patched JSON. The D-125 coding hold clears when no undecided line lacks a code set: its
 /// <c>pipelineFindings[]</c> entry goes and the invoice's system Signal is closed (or refreshed when another invoice-level system finding remains).
+/// The rule reconcile is <see cref="InvoiceRuleSignalReconciler"/> (task 164a-4b: shared with Add line's Signals step, moved here unchanged).
 /// The member is removed (and the hold entry with it) in one row-version-conditional write after every Signal is done, so a failure part-way leaves
 /// it for the repeat; every close and write is idempotent. Then any undecided line still Pending with a recorded code set is re-derived.</para>
 /// <para><b>073 presentation.</b> Both sides of the plan diff are mapped with 073's STORED decisions (each finding's <c>consequence</c> /
@@ -867,19 +868,20 @@ public sealed class InvoiceCorrectionReevaluation
                 pipeline.Remove(hold);
             }
 
-            var refused = new List<(SignalWriteRequest Request, string Code)>();
+            var signals = new InvoiceRuleSignalReconciler(
+                _lifecycle, _closeSignal, _logger, SignalLogContext.Correction, applied.InvoiceId, $"Correction of {applied.Field}");
             foreach (var change in ruleChanges)
             {
-                await ReconcileRuleAsync(applied, root, change, refused, ct).ConfigureAwait(false);
+                await signals.ReconcileRuleAsync(root, change, ct).ConfigureAwait(false);
             }
 
             if (systemLines.Count > 0 || clearHold)
             {
-                await ReconcileSystemAsync(applied, root, lines, systemLines, clearHold, refused, ct).ConfigureAwait(false);
+                await ReconcileSystemAsync(applied, signals, root, lines, systemLines, clearHold, ct).ConfigureAwait(false);
             }
 
             root.Remove(PendingSignalChangesMember);
-            RecordWriteRefusals(root, refused);
+            InvoiceRuleSignalReconciler.RecordWriteRefusals(root, signals.Refused);
             var update = new Entity(InvoiceReviewReadService.SubmissionEntity, submission.Id)
             {
                 RowVersion = version.ToString(CultureInfo.InvariantCulture),
@@ -889,7 +891,7 @@ public sealed class InvoiceCorrectionReevaluation
             await _entities.ExecuteTransactionAsync(
                 [new UpdateRequest { Target = update, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches }], ct).ConfigureAwait(false);
             _logger.LogInformation("Correction of {Field} on invoice {InvoiceId}: Signals reconciled ({Rule} rule changes, {System} lines with system changes, coding hold cleared: {Hold}, {Refused} refused).",
-                applied.Field, applied.InvoiceId, ruleChanges.Count, systemLines.Count, clearHold, refused.Count);
+                applied.Field, applied.InvoiceId, ruleChanges.Count, systemLines.Count, clearHold, signals.Refused.Count);
         }
 
         await RederivePendingAsync(applied, root, lines, ct).ConfigureAwait(false);
@@ -898,63 +900,14 @@ public sealed class InvoiceCorrectionReevaluation
     private static bool IsCoded(JsonObject? extraction) =>
         extraction?["coding"] is JsonObject coding && Text(coding, "codeSetId") is { Length: > 0 };
 
-    /// <summary>One <c>rule</c> entry: no raise → close the latest open episode (ConditionCleared); a raise → write the plan entry of <c>raiseFingerprint</c>, which the lifecycle refreshes (same fingerprint) or supersedes (another). A raise with no matching plan entry closes the old episode instead.</summary>
-    private async Task ReconcileRuleAsync(
-        CorrectionApplied applied, JsonObject root, JsonObject change, List<(SignalWriteRequest, string)> refused, CancellationToken ct)
-    {
-        if (Text(change, "policyCode") is not { Length: > 0 } policyCode || Text(change, "subjectEntity") is not { Length: > 0 } entity
-            || !Guid.TryParse(Text(change, "subjectId"), out var subjectId))
-        {
-            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: a pending Signal change names no policy or subject; skipped.", applied.Field, applied.InvoiceId);
-            return;
-        }
-
-        var close = Text(change, "closeFingerprint");
-        var raise = Text(change, "raiseFingerprint");
-        if (close is not null && raise is null)
-        {
-            // Raise null: the group is gone, so the latest open episode is closed whatever its fingerprint. A member that survived a failed clear can
-            // read close fp0 / raise null while the open episode already carries fp1 (a repeat wrote it); matching fp0 would leave that episode open.
-            // Raise set (fp0 -> fp1 while it still fires): nothing is cleared here; the lifecycle write below supersedes the open fp0 episode and opens
-            // the next, as SignalEpisodeLifecycle and the system path do (#2507 F1).
-            await CloseClearedAsync(policyCode, entity, subjectId, fingerprint: null, ct).ConfigureAwait(false);
-        }
-
-        if (raise is null)
-        {
-            return;
-        }
-
-        var key = PlanKey(policyCode, entity, subjectId.ToString("D"));
-        var entry = (root["signalPlan"] as JsonArray ?? []).OfType<JsonObject>()
-            .FirstOrDefault(e => PlanKey(Text(e, "policyCode"), Text(e, "subjectEntity"), Text(e, "subjectId")) == key);
-        if (entry is null || !string.Equals(Text(entry, "fingerprint"), raise, StringComparison.Ordinal))
-        {
-            // By construction the plan holds the entry B2b-1 recorded; anything else is not raised (nothing to raise it from).
-            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: no plan entry of policy {PolicyCode} on {Subject} {SubjectId} matches the change; not raised.",
-                applied.Field, applied.InvoiceId, policyCode, entity, subjectId);
-
-            // Nothing will supersede the old episode, so it is closed here (of the stored fingerprint only).
-            if (close is not null && !string.Equals(close, raise, StringComparison.Ordinal))
-            {
-                await CloseClearedAsync(policyCode, entity, subjectId, close, ct).ConfigureAwait(false);
-            }
-
-            return;
-        }
-
-        var planned = InvoiceSubmissionAfterSteps.StoredFindings.ParsePlanEntry(entry);
-        await WriteAsync(applied, planned.Request, planned.Fingerprint, refused, ct).ConfigureAwait(false);
-    }
-
     /// <summary>
     /// The <c>system</c> entries and the coding hold: the system findings are re-mapped from the patched JSON (<see cref="InvoiceSubmissionAfterSteps.StoredFindings.SystemFindings"/>)
     /// under the system policy 049 reads; each named line's Signal, and the invoice's when the hold clears, is closed when none of its findings is left,
     /// else refreshed. A system policy that is not usable wrote no system Signal (049), so nothing is reconciled.
     /// </summary>
     private async Task ReconcileSystemAsync(
-        CorrectionApplied applied, JsonObject root, IReadOnlyDictionary<int, StoredLine> lines, IReadOnlyList<int> systemLines, bool clearHold,
-        List<(SignalWriteRequest, string)> refused, CancellationToken ct)
+        CorrectionApplied applied, InvoiceRuleSignalReconciler signals, JsonObject root, IReadOnlyDictionary<int, StoredLine> lines,
+        IReadOnlyList<int> systemLines, bool clearHold, CancellationToken ct)
     {
         var stored = InvoiceSubmissionAfterSteps.StoredFindings.Parse(root.ToJsonString())
             ?? throw new InvalidOperationException("The stored findings could not be read back.");
@@ -983,93 +936,12 @@ public sealed class InvoiceCorrectionReevaluation
             var left = findings.Where(f => f.Subject.LineIndex == line).ToList();
             if (left.Count == 0)
             {
-                await CloseClearedAsync(rule.PolicyCode, entity, subjectId, fingerprint: null, ct).ConfigureAwait(false);
+                await signals.CloseClearedAsync(rule.PolicyCode, entity, subjectId, fingerprint: null, ct).ConfigureAwait(false);
                 continue;
             }
 
             var mapping = BillingFindingSignalMapper.MapAll(left, rules, subjects).Single();
-            await WriteAsync(applied, mapping.Request, mapping.Fingerprint, refused, ct).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// Closes the latest episode of (policy, subject) as ConditionCleared (record-free, as <c>SignalReevaluationJob</c> closes a cleared condition) when
-    /// it is open and, if <paramref name="fingerprint"/> is given, carries it. Already resolved, absent, or another fingerprint: nothing is written.
-    /// </summary>
-    private async Task CloseClearedAsync(string policyCode, string entity, Guid subjectId, string? fingerprint, CancellationToken ct)
-    {
-        var latest = await _lifecycle.LatestEpisodeAsync(policyCode, entity, subjectId, ct).ConfigureAwait(false);
-        if (latest is not { IsResolved: false } open
-            || (fingerprint is not null && !string.Equals(open.Fingerprint, fingerprint, StringComparison.Ordinal)))
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(open.RowVersion))
-        {
-            throw new InvalidOperationException("The open Signal was read without a row version.");
-        }
-
-        var outcome = await _closeSignal(open.Id, open.RowVersion, SignalWriter.ResolutionConditionCleared, policyCode, ct).ConfigureAwait(false);
-        if (outcome != SignalCloseOutcome.Closed)
-        {
-            throw new InvalidOperationException("The Signal changed while it was being closed.");
-        }
-    }
-
-    /// <summary>One write through the option-a lifecycle (B2b: a resolved latest episode reopens as n+1). A permanent refusal (049 F1-3) is recorded and the step goes on; a retryable failure fails the step.</summary>
-    private async Task WriteAsync(
-        CorrectionApplied applied, SignalWriteRequest request, string fingerprint, List<(SignalWriteRequest, string)> refused, CancellationToken ct)
-    {
-        SignalStep step;
-        try
-        {
-            step = await _lifecycle.WriteAsync(request, fingerprint, SignalLogContext.Correction, applied.InvoiceId, ResolvedEpisodeRule.ReopenAsNextEpisode, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            && InvoiceSubmissionAfterSteps.PermanentWriteRefusal(request, ex) is { } code)
-        {
-            step = new SignalStep(false, null, code);
-        }
-
-        if (step.RefusedCode is { } refusedCode)
-        {
-            _logger.LogError("Correction of {Field} on invoice {InvoiceId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} is refused permanently ({Code}); recorded in the findings.",
-                applied.Field, applied.InvoiceId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, refusedCode);
-            refused.Add((request, refusedCode));
-        }
-
-        if (step.FailureCode is { } failure)
-        {
-            throw new InvalidOperationException($"A Signal write did not complete ({failure}).");
-        }
-    }
-
-    /// <summary>The writer's permanent refusals, in 049's <see cref="InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember"/> shape, once each.</summary>
-    private static void RecordWriteRefusals(JsonObject root, IReadOnlyList<(SignalWriteRequest Request, string Code)> refused)
-    {
-        if (refused.Count == 0)
-        {
-            return;
-        }
-
-        if (root[InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] is not JsonArray stored)
-        {
-            root[InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = stored = [];
-        }
-
-        foreach (var (request, code) in refused)
-        {
-            var entry = new JsonObject
-            {
-                ["policyCode"] = request.PolicyCode,
-                ["subject"] = new JsonObject { ["entity"] = request.SubjectEntityLogicalName, ["id"] = request.SubjectId.ToString("D") },
-                ["code"] = code,
-            };
-            if (!stored.Any(e => JsonNode.DeepEquals(e, entry)))
-            {
-                stored.Add(entry);
-            }
+            await signals.WriteAsync(mapping.Request, mapping.Fingerprint, ct).ConfigureAwait(false);
         }
     }
 
