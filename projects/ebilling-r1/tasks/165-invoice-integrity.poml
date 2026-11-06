@@ -20,27 +20,24 @@
     The classes are uac-r2's.
     - (a) Written only on a path users cannot reach. Evidence: the live role privileges, plus the generic-path refusals.
     - (b) Field-secured, Writers only for writes.
-    - (c) Re-derived or checked by the BFF, so that a user edit has no effect.
-    Live dev facts (2026-11-06):
-    - Spaarke Core User holds Write and Create on sprk_invoicesubmission and Write on sprk_invoice.
-    - No user role holds Write on sprk_billingevent.
-    - sprk_invoicesubmission.sprk_outcomereasoncode is not field-secured.
+    - (c) Re-derived or checked by the BFF.
+    The live facts and the per-column classification are kept outside the repository and shared with uac-r2 by message (public-repo rule: no mechanism of an open gap in public text).
     Wording in commits, notes and the PR stays neutral: "decides only from server-written sources". Never describe a sequence of steps.</prompt>
 
   <goal>Every hold, approval, AP export and spend decision reads only class (a), (b) or (c) sources.</goal>
 
   <scope>
     165a (FIRST; uac-r2 priority):
-    - Inventory every sprk_invoicesubmission column that a hold, approval, AP export or visibility decision reads, and classify each. Include `FinanceBaseValues.HeldSubmissionConditions`, `InvoiceApprovalService.IsHeldAsync`, `InvoiceOpenHolds`, the submission's `sprk_invoice` link, its reason, status and firm, and the re-run and persister reads.
+    - Inventory every sprk_invoicesubmission column that a hold, approval, AP export or visibility decision reads, and classify each (a), (b) or (c). Keep the table and its evidence outside the repository until the fix is live; the repo notes carry only a neutral summary.
     - Fix every column outside (a), (b) and (c). Choose per column:
       - field-secure it, Writers only, with the `sprk_sourceemaildocument` mechanics (SpaarkeMaster source, a script with -WhatIf, apply and -Verify, the owner's go for the dev apply);
       - or re-derive or cross-check it from a class (a) or (b) source, for example the outcome the persister recorded in the field-secured `sprk_findingsjson`, or the invoice's field-secured `sprk_firmhold`.
-    - The held set must not be shrinkable by a user edit: a must-fire test for each hold source.
+    - A must-fire test for each hold source, each with a must-not-fire control.
     165b:
     - (1) Approval refuses a line of unknown origin: the task 164 criterion "approval refuses a line of unknown origin", moved here in full.
     - (2) Status: approval, AP export and spend count an invoice as Approved, Sent to AP or Paid only when the matching server-written record exists, and otherwise refuse or hold it (409, a distinct code). The records: the approve Decision Record; the export batch or its record for Sent to AP; the paid record. Verify that each one is class (a) or (b). Spend (`FinanceBaseValues`) is ontology-r1's code: make the minimal change and list it for their review.
     - (3) Totals: approval and AP export check that the stored invoice totals equal `InvoiceTotalsCalculator` over the lines, and refuse on a mismatch (409, a distinct code).
-    - (4) Pending spend (a confirmed defect found in the 165a review, not a known limit): both pending-spend paths (`FinanceBaseValues.cs` ~:416 anti-join, `FinanceRollupService.cs` ~:344) exclude every invoice `InvoiceBlockedHold` holds, so a user edit of a submission's status, reason code or link cannot make a held invoice count as pending spend. ontology-r1 owns `FinanceBaseValues`: minimal change, listed for their review. Must-fire per path with a must-not-fire control; one seed.
+    - (4) Pending spend: both pending-spend paths (`FinanceBaseValues`, `FinanceRollupService`) exclude every invoice `InvoiceBlockedHold` holds, so pending spend is decided from the same server-written sources as the hold. ontology-r1 owns `FinanceBaseValues`: minimal change, listed for their review. Must-fire per path with a must-not-fire control; one seed.
     Merge note: 165a puts the invoice's own-submission selection in one helper; 164a-4a moved `ReadSubmissionAsync` into `InvoiceFindingsDiff`. Whichever merges second calls the helper there.
   </scope>
 
@@ -67,9 +64,9 @@
       - One seed: drop the check.
       - Wording in commits, the PR and notes stays neutral: "approval refuses a line of unknown origin".</criterion>
     <criterion>165a ships first, in the same release as EB-D-200, and in every case before AP export is turned on in any environment (uac-r2 2026-11-06).</criterion>
-    <criterion>The notes hold a table of every submission column read by a hold, approval, AP export or visibility decision, with the reader file:line, the class and the evidence. No column is left outside (a), (b) or (c).</criterion>
+    <criterion>A table of every submission column read by a hold, approval, AP export or visibility decision, with the reader file:line, the class and the evidence, is kept outside the repository and sent to uac-r2; the repo notes say only that every column is class (a), (b) or (c). No column is left outside (a), (b) or (c).</criterion>
     <criterion>Must-fire, one for each of these, each with a must-not-fire control:
-      - a hold source edited by a user does not release the hold;
+      - each hold source holds (must-fire) and its server-written release releases (control);
       - a line of unknown origin is refused at approval;
       - a status set without its record is refused or held at approval, AP export and spend;
       - a stored total that differs from the line-derived total is refused at approval and AP export.
