@@ -97,7 +97,7 @@ public sealed partial class SignalReadRouteTests
         HasNoInvoiceReview(body, unreadableSignal).Should().BeTrue();
         Item(body, noInvoiceSignal).GetRawText().Should().NotContain("\"invoiceId\":null");
         LineInvoiceReads(world).Should().Be(1);
-        var warnings = _factory.Logs.Warnings.Where(w => w.Contains("no readable parent invoice", StringComparison.Ordinal)).ToList();
+        var warnings = _factory.Logs.Warnings.Where(w => w.Contains("the caller cannot read the line, or the line has no invoice", StringComparison.Ordinal)).ToList();
         warnings.Should().ContainSingle();
         warnings[0].Should().Contain(noInvoice.ToString("D")).And.Contain(unreadable.ToString("D")).And.NotContain(good.ToString("D"));
     }
@@ -129,7 +129,11 @@ public sealed partial class SignalReadRouteTests
         HasNoInvoiceReview(body, line2).Should().BeTrue();
         HasNoInvoiceReview(body, matterSignal).Should().BeTrue();
         InvoiceReviewOf(body, invoiceSignal)!.Value.GetProperty("invoiceId").GetGuid().Should().Be(invoice, "an invoice item needs no read");
-        _factory.Logs.Warnings.Count(w => w.Contains("parent invoices of 2 invoice line item(s) could not be read", StringComparison.Ordinal))
-            .Should().Be(1);
+        // ONE warning for the whole fault, from the read helper, labelled for this read (not the D-176 Duplicate sentence).
+        var faults = _factory.Logs.Warnings.Where(w => w.Contains("Worklist invoice-line read: the caller's read of sprk_billingevent", StringComparison.Ordinal)).ToList();
+        faults.Should().ContainSingle();
+        faults[0].Should().Contain("invoiceReview is omitted");
+        _factory.Logs.Warnings.Should().NotContain(w => w.Contains("Duplicate earlier-invoice check", StringComparison.Ordinal), "there is no Duplicate here");
+        _factory.Logs.Warnings.Where(w => w.Contains("sprk_billingevent", StringComparison.Ordinal)).Should().ContainSingle("one warning, not two");
     }
 }

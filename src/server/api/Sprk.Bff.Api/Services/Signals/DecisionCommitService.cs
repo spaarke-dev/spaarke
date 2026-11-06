@@ -240,8 +240,9 @@ public static class DecisionCommitReasons
 
     /// <summary>Task 174 (D-207, ebilling EB-D-194): a Signal whose subject is an invoice or an invoice line is decided only in
     /// Invoice Review, never through this route (409). Raised after the readability check and the app-only read of the Signals,
-    /// before the caller-rights probe, any lock-protected step, any write and the Decision Record.</summary>
-    public const string DecidedInInvoiceReview = "decision.decided_in_invoice_review";
+    /// before the caller-rights probe, any executor, any write and the Decision Record. Never raised for a review that is already
+    /// RECORDED (a decision made before D-207): see the step (1c-billing) comment.</summary>
+    public const string DecidedInInvoiceReview = "ontology.decision.decided_in_invoice_review";
 
     /// <summary>The replay-repair warning for <see cref="SignalSubjectMissing"/> (the sibling of <c>signal_close_not_authorized</c>).</summary>
     public const string ReplaySubjectMissingWarning = "signal_subject_missing";
@@ -976,7 +977,11 @@ public sealed class DecisionCommitService
         // comes from the rows just read, no new read and no new caller-token ask), and before PrepareAsync, the caller-rights probe
         // (FR-51: a person role holds only Read on sprk_billingevent, D-90, so that probe would answer a misleading 403), any
         // executor and every write. A Signal whose subject cannot be derived is not billing here and keeps its current refusal.
-        if (rows.Any(r => IsBillingSubject(r.SubjectEntity)))
+        // A review that is already RECORDED is not refused: it is a decision made before D-207, and finishing its closes (this branch
+        // when the ledger forgot but the record stays; a ledger replay never reaches this step, CommitLeasedAsync) must still complete.
+        // "Recorded" is decided only from what the server stored: the review's Decision Record found by (caller, review id) in (1b),
+        // already checked to cover exactly these Signals and this content (F1), never anything in the request body.
+        if (existingRecord is null && rows.Any(r => IsBillingSubject(r.SubjectEntity)))
         {
             return new DecisionCommitResult
             {

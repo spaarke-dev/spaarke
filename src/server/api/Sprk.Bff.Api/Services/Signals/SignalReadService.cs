@@ -116,8 +116,8 @@ public sealed record WorklistCoreRecord(string RecordType, Guid RecordId, string
 /// (omitted, never withheld by name).</param>
 /// <param name="InvoiceReview">Task 174 (D-207): set only on a billing item, an item whose subject is an invoice or an invoice line, so
 /// the Console can open Invoice Review on the right invoice (billing decisions are made there, never through the commit route).
-/// Null on every other item, and on a billing item whose invoice cannot be named (a line with no readable parent invoice, or a fault
-/// reading it): never an <c>invoiceId</c> that is not known.</param>
+/// Null on every other item, and on a billing item whose invoice cannot be named (the caller cannot read the line, the line has no
+/// invoice, or the read of the lines faulted): never an <c>invoiceId</c> that is not known.</param>
 public sealed record WorklistItemRow(
     Guid SignalId,
     string Lane,
@@ -1671,13 +1671,14 @@ public sealed class SignalReadService
     /// <summary>One lookup column of the rows the CALLER's batched read returns (In lists of at most <see cref="WitnessIdChunk"/> ids):
     /// id → the lookup's value; a row without it is absent. Null on a fault (<see cref="EarlierInvoiceReadability.ReadAsCallerAsync"/>).</summary>
     private async Task<Dictionary<Guid, Guid>?> CallerLookupAsync(
-        string entitySet, string key, string lookup, IEnumerable<Guid> ids, string table, CancellationToken ct)
+        string entitySet, string key, string lookup, IEnumerable<Guid> ids, string table, CancellationToken ct,
+        string check = EarlierInvoiceReadability.DuplicateCheck, string consequence = EarlierInvoiceReadability.DuplicateConsequence)
     {
         var found = new Dictionary<Guid, Guid>();
         foreach (var chunk in ids.Distinct().Chunk(WitnessIdChunk))
         {
             var rows = await _earlierInvoices.ReadAsCallerAsync(
-                _user, $"{entitySet}?$select={key},{lookup}&$filter={InFilter(key, chunk)}", table, ct).ConfigureAwait(false);
+                _user, $"{entitySet}?$select={key},{lookup}&$filter={InFilter(key, chunk)}", table, ct, check, consequence).ConfigureAwait(false);
             if (rows is null)
             {
                 return null;
@@ -1765,9 +1766,9 @@ public sealed class SignalReadService
     /// Task 174 (D-207): the parent invoice (<c>sprk_billingevent.sprk_invoice</c>) of every invoice-LINE subject among
     /// <paramref name="rows"/>, in ONE batched read as the caller (<see cref="CallerLookupAsync"/>: In lists of at most
     /// <see cref="WitnessIdChunk"/> ids, so a response of more lines than that reads one more per chunk). A line the caller cannot read, or
-    /// that has no invoice, is absent from the answer. No line subjects: an empty answer and no read. Null on a fault (the read helper
-    /// logged the table and error code; this logs once what it cost), which the Duplicate rule treats as before (D-176) and
-    /// <see cref="ApplyInvoiceReview"/> as "no invoiceReview on any line". Never throws and never fails the worklist.
+    /// that has no invoice, is absent from the answer. No line subjects: an empty answer and no read. Null on a fault, logged ONCE by the
+    /// read helper (the table, the error code and what it costs: no invoiceReview on any line and no line-level Duplicate detail), which the
+    /// Duplicate rule treats as before (D-176) and <see cref="ApplyInvoiceReview"/> as "no invoiceReview on any line". Never fails the worklist.
     /// </summary>
     private async Task<Dictionary<Guid, Guid>?> ReadLineInvoicesAsync(
         IEnumerable<VisibleRow> rows, IReadOnlyDictionary<Guid, CatalogRow> catalog, CancellationToken ct)
@@ -1782,34 +1783,19 @@ public sealed class SignalReadService
             return [];
         }
 
-        string? thrown = null;
-        Dictionary<Guid, Guid>? invoiceOfLine = null;
-        try
-        {
-            invoiceOfLine = await CallerLookupAsync(
-                BillingEventEntitySet, "sprk_billingeventid", EarlierInvoiceReadability.InvoiceColumn, lines, BillingEventTable, ct)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            thrown = ex.GetType().Name;
-        }
-
-        if (invoiceOfLine is null)
-        {
-            _logger.LogWarning(
-                "Signal read: the parent invoices of {Count} invoice line item(s) could not be read ({Fault}); those items have no invoiceReview (D-207).",
-                lines.Count, thrown ?? "read fault");
-        }
-
-        return invoiceOfLine;
+        // ReadAsCallerAsync never throws (it logs a fault once, with this label) and answers null for any fault.
+        return await CallerLookupAsync(
+            BillingEventEntitySet, "sprk_billingeventid", EarlierInvoiceReadability.InvoiceColumn, lines, BillingEventTable, ct,
+            check: "Worklist invoice-line read",
+            consequence: "invoiceReview is omitted on invoice-line items and a line-level Duplicate's earlier-invoice detail is withheld (D-207, D-176, fail closed)")
+            .ConfigureAwait(false);
     }
 
     /// <summary>
     /// Task 174 (D-207): gives each billing item (a Signal whose subject, by its catalog type, is an invoice or an invoice line) the
     /// invoice Invoice Review opens on. An invoice subject names itself. A line subject's parent invoice comes from
     /// <paramref name="invoiceOfLine"/> (<see cref="ReadLineInvoicesAsync"/>). A line with no known parent (not returned, no invoice) is left
-    /// without the member and named once, by id, at Warning; when the read faulted (<paramref name="invoiceOfLine"/> is null) every line is
+    /// without the member and named once, by id, at Warning (the caller cannot read the line, or the line has no invoice); when the read faulted (<paramref name="invoiceOfLine"/> is null) every line is
     /// left without it. The member is never emitted without an invoice id.
     /// </summary>
     private List<VisibleRow> ApplyInvoiceReview(
@@ -1845,7 +1831,7 @@ public sealed class SignalReadService
 
         if (orphans.Count > 0)
         {
-            _logger.LogWarning("Signal read: {Count} invoice line item(s) have no readable parent invoice and no invoiceReview (D-207): {LineIds}.",
+            _logger.LogWarning("Signal read: {Count} invoice line item(s) have no invoiceReview (D-207): the caller cannot read the line, or the line has no invoice: {LineIds}.",
                 orphans.Count, string.Join(',', orphans.Select(l => l.ToString("D"))));
         }
 
