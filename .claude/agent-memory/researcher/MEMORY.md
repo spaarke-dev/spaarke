@@ -142,3 +142,4 @@
 - [Dataverse duplicate detection API (2026-10-15)](dataverse-duplicate-detection-api-default-2026-10-15.md) — suppressed by default
 - [xms_edov claim (2026-10-23)](entra-xms-edov-claim-2026-10-23.md) — needs email claim; absent vs false undocumented
 - [A9 dev Entra setup (2026-10-19)](entra-multitenant-api-a9-dev-setup-2026-10-19.md) — v2 token delta; AzureAd:Audience risk
+- [Law-dept benchmarks + OCG provisions (2026-11-03)](law-dept-benchmarks-ocg-2026-11-03.md) — ACC 2025 medians by revenue band; RRR rates; CNA/Allianz/PSU/DE OCG text; all use 0.1-hr increments
