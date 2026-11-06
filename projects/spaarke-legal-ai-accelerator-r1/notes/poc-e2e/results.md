@@ -130,3 +130,20 @@ If A imports directly and B doesn't, the preamble is the trigger.
 | `Audit Pack.xlsx` | Renders (Excel for the web): 4 sheets, coloured rating cells. **Polish:** "Topics by rating" bars were all red, and the second chart sat at column L, off screen (gap #17, fixed) | — |
 
 Gap #14 (white text in the preview) **does not affect our dashboard**: its CSS switches text and background together.
+
+## Act 4: the two surfaces together (2026-11-06, Claude via Chrome; Word steps 1–2 are the owner's)
+
+Steps 1 and 2 (Word side) are with the owner. For step 2, Claude uploaded `kit-held/Act 4 - counterparty response/Brightwater Mutual NDA - Brightwater response (tracked).docx` to the matter folder (SharePoint REST, 49 KB).
+
+| Step | Routed to | Result | Credits |
+|---|---|---|---|
+| 2 (Cowork) "Summarize their redlines" | Legal for Cowork `summarize-redlines` | **All 4 tracked changes found**, matching the key: residuals added, aggregated-data use, term 3 → 2 years, Delaware → California. For each: impact, beneficiary and clause locator. **Not rated against the playbook** (no RED/YELLOW): Microsoft's skill reports what changed, not whether it is acceptable (gap #19). It opened our Act 3 Clean Revised as the base and **flagged that the untracked text doesn't match**. That is correct: the kit built the response from its own idealized draft (gap #20) | 32 |
+| 3 `draft-legal-memo` | Legal for Cowork `draft-legal-memo` (Word + SharePoint connectors) | Memo to Dana Whitfield (taken from the business request), in the **template's six sections**, "Draft for counsel review", saved to the matter folder after one approval. Valid `.docx`: 124 paragraphs, 18 footnotes citing sources, 2 tables. **Policy applied:** NDA-3.5 (no residuals), NDA-3.3 (General Counsel approval in writing for the non-solicit), NDA-4.2 for the revised draft (Legal approval, then a VP signs), NDA-5.1 (store within 5 business days). It raised NDA-4.3 (General Counsel approval) only conditionally, if Brightwater's residuals clause stays. That is right for the revised draft; the key's NDA-4.3 is for the original draft. It also found the response file, noted its date (9 November, three days ahead) and flagged it for review rather than treating it as Brightwater's answer | not taken |
+| 4 `explain-legal-concepts` | Legal for Cowork `explain-legal-concepts` | A plain-English explanation of residuals quoting Brightwater's 8.1, and a 248-word email to sales, **in chat only** as asked. Its sources line says it **didn't read the policy** and quoted it from the memo instead (gap #21) | not taken |
+| 5 PDF path: `nda-review` on `b16 - Oakhollow … .pdf` | **Our `nda-review`** | Made a Word copy from the PDF text ("same wording, plainer formatting"), planned 8 changes (5 edits, 3 comments), and asked: "please ask Oakhollow for their Word version before anything goes back to them". Built all 5 outputs and `check_outputs` passed. Internal: 8 revisions, 8 comments, 8 linked summary rows; external: 8 revisions, no comments; clean: none. **It saved only to the Cowork task folder**, not beside the PDF in the Inbox. Score: **6 of 7** key topics, plus 1 extra YELLOW (housekeeping: confirm the signatory and effective date). The miss is again `nda.representatives` RED vs YELLOW (gap #16, same wording, same misreading). Policy NDA-3.1 (5-year term) is not raised, as expected (gap #18) | 166 |
+
+**What Act 4 shows:**
+- Microsoft's skills **consume our grounding well**: the format template and the policy were applied, sources were footnoted, and the work was saved in the matter folder.
+- The policy reaches the attorney through `draft-legal-memo`, not through `nda-review`. That is one answer to gap #18: compose the skills rather than add policy reading to `nda-review`.
+- No skill rates a counterparty's markup against the playbook (gap #19). That is the next obvious Spaarke skill: "respond to markup".
+- The PDF path works, with a clear warning. The redline is built on a reconstruction, so formatting differs from the original.
