@@ -39,6 +39,7 @@
   - 049: notes passage removed, and the branch history rewritten (squash + force-with-lease).
   - 046c (Basic User read-only): conditions 1–7 in its POML; inventory and dry run come to me privately before the owner.
 - **ebilling (`-c7`):**
+  - **096b (EB-D-201, after 164a):** `sprk_invoice` and `sprk_billingevent` leave `ChildRecordEndpoints.CreateTables`; the ribbon "New billing event" and `SecureChildNewCommandAgreementTests` change in the same change; `RefileTables` is untouched. Scope ACCEPTED. Pending from ebilling: the diff, then file:line proof that the 052 wizard and the 095 paths create app-only, BEFORE the role -WhatIf to drop user Create on `sprk_invoice` goes to the owner. The BFF and ribbon deploy in one window via me; #1973 closes once the build is on dev.
   - 095d-2b-1 `4f113d72e2` APPROVED 2026-11-06: the withhold is keyed on the app-only `sprk_firmhold`, the invoice is withheld while the re-run is pending, and I verified every external path myself. An outcome reply by email must respect the withhold if one is ever added.
   - 095d-2a-2 (`7316036f5c`, `741a4fccaf`, `0bd7d49f89`) APPROVED 2026-11-06 with no F findings. K1 (line attach between the re-check and the transaction) waits on their invoice row-version answer. K2: a refused-count in the job result in 2b. K3: the result's RerunState stays non-partner-visible.
   - 164a create-only refusal: separate flag + derived `GenericCreateRefused`, conditions accepted.
