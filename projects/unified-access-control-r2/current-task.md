@@ -4,7 +4,7 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-06 ~07:00Z (checkpoint #98: #2560 committed locally, two adversarial reviews running; a test-host gap from #2577 is being identified).
+> **Last Updated**: 2026-11-06 ~17:35Z (checkpoint #99: 20669df6a9 deployed to dev and gate PASS; owner rulings on 046c and the root team; the root-team census is done and its removal waits on the owner's go).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -14,7 +14,14 @@
 | **Active work** | None in code. **#2560 MERGED** (PR #2598, `b6dee2e590`; issue closed); C:/wt2560 and C:/wtfm removed. Waiting on: fm 049 round-3 SHA; ebilling 095d-2a-2 SHA and the 095a column-security pre-apply ping. |
 | **Also in flight** | #2577 test-host fix MERGED (#2596, `972929fd69`). |
 | **Dev state** | BFF = **20669df6a9** (since 2026-11-06 16:44:51Z) plus the `sprk_spaarkeai` bundle at the same SHA (16:54:04Z). G-8 revoke-on-change ON. 226 settings. |
-| **Next action** | Dev is on **`20669df6a9`** (live 16:44:51Z; gate PASS, `notes/deploy-gate-2026-11-06-20669df6a9.md`; rollback `0f53e053bf`, snapshot `wwwroot-20261106T164219Z.zip`). Open: organic traffic for the fm and ontology route checks; the 02:30Z nightly (ontology); answer fm on 044 P1/P2; the 046c add-on holders list goes to the owner (word-add-in asked). |
+| **Next action** | 1. **Root team "Spaarke" (09fbf21c, root BU 06fbf21c) holds Console User (teamrole 2c969f10).** The owner chose "remove after census". CENSUS DONE: enabled humans in the root BU are `# Spaarke Get Started` (bc067eb1: NO direct roles, so it gets Basic and Console only through the team; it is the census finding's principal); Ralph root 1d02f31c (has Console User DIRECTLY plus System Administrator, so unaffected); and the Microsoft Support User and Delegated Admin. The ~146 app users lose a human role they shouldn't have. NEXT: ask the owner for the GO to disassociate Console User from team 09fbf21c (`DELETE teams(09fbf21c-1872-f011-b4cb-7c1e52671ad0)/teamroles_association(51c924e2-bdbe-f111-a05b-3833c5e9614d)/$ref`), and whether `# Spaarke Get Started` should get Console User directly (default: no). Then read back, and the census should drop to 0. 2. 046c: owner ruling "all five get Core User": DONE 17:30Z (role f8ce167c, BU cb15f587; read-back OK for 49f89867, bcebc56c, b0cd2d30, 4c9917c2, e44317a0). Tell fm and word-add-in; also tell them the root account 1d02f31c holds System Administrator. 046c's own apply is fm's, with the owner's go in their session; I review the PR after its fix round and asked for a step-order check. 3. Open: organic traffic for the fm and ontology route checks (ontology reads its own); the 02:30Z nightly (ontology). |
+
+## Decisions this session (2026-11-06, owner here)
+- W3 direction: named exceptions plus guards; no core redesign in R1; no given-id input in the core (fm recorded it at `5e4f4be3aa`).
+- Deploy go for 20669df6a9 (done).
+- 046c: all five add-on holders get Core User (done 17:30Z).
+- The root team's Console User is removed after a census (census done; removal waits on the go).
+- ebilling EB-D-200 = option D (via ebilling).
 
 ## The next dev deploy (owner: wait for 049)
 - Contents: master incl. #2560 (`b6dee2e590`), #2596 (`972929fd69`), `0f6618094b` (043), #2577 (`f34993dc78`), #2592 (046b, auto-merge), #2582 (audit flags), #2589 (docs), plus 049; code pages: LegalWorkspace, SpaarkeAi, CreateProjectWizard, AI.Widgets.
