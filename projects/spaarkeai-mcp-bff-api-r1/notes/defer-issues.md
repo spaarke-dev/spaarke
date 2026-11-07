@@ -51,6 +51,36 @@ Decide with the Copilot surface's owner. `spaarkeai-mcp-bff-api-r1` replaces thi
 
 ## In Progress
 
+### ISS-002 — ComposeProfileDispatcher may null the originating request's HttpContext
+
+| Field | Value |
+|---|---|
+| **Status** | In Progress (investigation and fix running; owner: "investigate fully, do not defer") |
+| **Urgency** | now |
+| **Filed** | 2026-11-07 |
+| **Source** | Read-only investigation for task 010 (option C analysis), 2026-11-06 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2620 |
+
+**Description**
+
+`ComposeProfileDispatcher.cs:130-134` sets `IHttpContextAccessor.HttpContext` inside `Task.Run`. In ASP.NET Core 10.0.14 the setter clears the existing AsyncLocal holder's context. That holder flowed into the task from the originating Compose save request, so code later in that request may read a null context intermittently. That code comes after `ComposeService.cs:2323`. A null context would make caller-dependent paths fail closed. No test proves it yet.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeProfileDispatcher.cs:88`, `:117-134`
+- `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:2323`
+
+**Suggested fix**
+
+Reproduce it with a test first. If it is real, never mutate the shared holder inside the task: use an explicit detached context, or `ExecutionContext.SuppressFlow()` plus a fresh holder.
+
+**Estimated effort**: 0.5–1 day
+**Blockers**: none
+**Related**: task 010 option C (owner, 2026-11-06); Compose owners review the fix PR
+
+---
+
+
 *None.*
 
 ---
