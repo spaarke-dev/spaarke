@@ -16,7 +16,7 @@
 
 ## 🔔 Owner questions open
 
-1. **SpaarkeMaster 1.3.0.0** (merged #2595 → `5d3c0abac2`, NOT published): set spaarkedev1 to 1.3.0.0 → publish dry run → real → ACME 1.2.3.1→1.3.0.0 stage-and-upgrade → `Test-RolePrivilegeExpectations.ps1` with `spaarkemaster-1.3.0.0.json`. Brings ACME's second writer profile (Firm Reason Writers). Option: wait for ebilling's 095a master PR (secures `sprk_invoicesubmission.sprk_sourceemaildocument`) and publish 1.3.0.0 from that commit.
+1. **SpaarkeMaster 1.3.0.0 → ACME: ONTOLOGY IS RUNNING IT** (owner GO given directly in the ontology session, 2026-11-07). Do NOT start it here, even if the owner confirms in this session — tell them ontology is on it (avoids a double run). Ontology's plan: ebilling 095a check → publish workflow dry run → publish=true from master (≥ d53d67f604) → `Import-SpaarkeMasterPackage.ps1 -WhatIf` (StageAndUpgrade 1.2.3.1 → 1.3.0.0) → real → `Test-RolePrivilegeExpectations.ps1` (`spaarkemaster-1.3.0.0.json`) → writer Firm Reason membership → holder sweep → healthz. Read-only facts sent to them: published latest = 1.2.4.0; ACME 1.2.3.1 managed; the four removed components hold 0 rows on ACME. Await their result; record it in the ACME run log.
 2. **#2618** — customer default team contact-owner role vs ontology writer least privilege (options in the issue; recommend option 1).
 3. Add `isuseraccessauditenabled` to the H6 org-settings contract (ACME off, dev on; recommend yes) + org-audit section in the role check.
 4. #2443 read-only check of the production workforce + CIAM clients.
