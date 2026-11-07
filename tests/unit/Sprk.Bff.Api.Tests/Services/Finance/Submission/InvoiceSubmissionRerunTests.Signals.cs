@@ -2,6 +2,9 @@ using System.Data;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
@@ -141,6 +144,30 @@ public sealed partial class InvoiceSubmissionRerunTests
         stale.GetAttributeValue<EntityReference>("sprk_decisionrecord").Should().BeNull();
     }
 
+    [Fact(DisplayName = "095d-2b-2 (Q2 must-not-fire): an invoice-level finding InvoiceOpenHolds does not count (an invoice-number mismatch) keeps the shared Signal out of the ConditionCleared close although ReasonsAsync is empty - no ConditionCleared close, no link")]
+    public async Task AnInvoiceLevelFindingThatIsNoHoldReason_NeverClosesTheSharedSignal()
+    {
+        var world = await CommittedAsync();
+        world.EditFindings(root => ((JsonArray)root["pipelineFindings"]!).Add(new JsonObject
+        {
+            ["reasonCode"] = SubmissionReasonCodes.InvoiceNumberMismatch,
+            ["values"] = new JsonObject { ["typed"] = "INV-100", ["read"] = "INV-101" },
+        }));
+        var shared = world.AddSignal(SystemCode, BillingFindingSignalMapper.InvoiceEntity, InvoiceId, 1, "fp-firm-missing");
+        (await world.OpenHoldReasonsAsync())
+            .Should().BeEmpty("the setup: the mismatch is no hold reason, so only the group guard keeps the close out");
+
+        var result = await world.Rerun().RemapSignalsAsync(SubmissionId);
+
+        result.Status.Should().Be(InvoiceSubmissionRerunSignalsStatus.Done);
+        result.ConditionCleared.Should().BeFalse();
+        world.SignalCloses.Should().NotContain(c => c.Resolution == SignalWriter.ResolutionConditionCleared,
+            "the group is not empty: a lifecycle write (Q2), never a ConditionCleared close");
+        world.Links.Should().BeEmpty();
+        shared.GetAttributeValue<EntityReference>("sprk_decisionrecord").Should().BeNull();
+        world.SignalsOf(SystemCode, InvoiceId).Should().Contain(e => !e.Resolved, "the mismatch keeps a shared Signal open");
+    }
+
     // ── Q1 must-not-fire: only this run's close is linked ──
 
     [Fact(DisplayName = "095d-2b-2 (Q1 must-not-fire): a shared Signal another path resolved before the step is not linked and not closed again")]
@@ -197,6 +224,37 @@ public sealed partial class InvoiceSubmissionRerunTests
         retry.Status.Should().Be(InvoiceSubmissionRerunSignalsStatus.Done);
         world.SignalCloses.Should().Equal((shared.Id, SignalWriter.ResolutionConditionCleared));
         world.Links.Should().Equal((shared.Id, AssignFirmRecord, (Guid?)null, (Guid?)Reviewer));
+    }
+
+    [Theory(DisplayName = "095d-2b-2 (K2): a link answered NotApplicable (re-closed by a person after this run's close) or ForeignLink (another record) is final - the run is done, but the result does not report a ConditionCleared close and the log says what happened")]
+    [InlineData(SignalRecordLinkOutcome.NotApplicable)]
+    [InlineData(SignalRecordLinkOutcome.ForeignLink)]
+    public async Task ALinkThatDoesNotLand_IsNotReportedAsCleared(SignalRecordLinkOutcome how)
+    {
+        var world = await CommittedAsync();
+        var shared = world.AddSignal(SystemCode, BillingFindingSignalMapper.InvoiceEntity, InvoiceId, 1, "fp-firm-missing");
+        world.BeforeLink = id =>
+        {
+            var row = world.SignalRow(id);
+            if (how == SignalRecordLinkOutcome.NotApplicable)
+            {
+                row["sprk_resolutiontype"] = new OptionSetValue(SignalWriter.ResolutionActed); // a person's decision re-closed it
+            }
+            else
+            {
+                row["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", Guid.NewGuid()); // another record is linked
+            }
+        };
+
+        var result = await world.Rerun().RemapSignalsAsync(SubmissionId);
+
+        result.Status.Should().Be(InvoiceSubmissionRerunSignalsStatus.Done);
+        result.ConditionCleared.Should().BeFalse("only a Linked or AlreadyLinked close is reported");
+        world.SignalCloses.Should().Equal((shared.Id, SignalWriter.ResolutionConditionCleared));
+        world.Links.Should().BeEmpty();
+        world.Logger.Entries.Should().NotContain(e => e.Message.Contains("closed ConditionCleared"));
+        world.Logger.Entries.Should().Contain(e => e.Message.Contains("was not linked") && e.Message.Contains(how.ToString()));
+        world.RerunState().Should().Be(InvoiceSubmissionRerun.StateDone);
     }
 
     [Fact(DisplayName = "095d-2b-2 (brief R10): the assign-firm record not found yet is a retry; nothing is closed")]
@@ -317,7 +375,7 @@ public sealed partial class InvoiceSubmissionRerunTests
 
     // ── The job: a Signal fault never lifts or adds a hold ──
 
-    [Fact(DisplayName = "095d-2b-2 (job): a Signal fault on the final delivery dead-letters (Poisoned); the commit's hold and review state stand, the state stays committed, and a replay finishes")]
+    [Fact(DisplayName = "095d-2b-2 (job): a Signal fault on the final delivery dead-letters (Poisoned); the faulting run and the replay leave the invoice (its firm hold, status, review detail), its lines and the submission's reason code as the commit left them; the state stays committed until the replay finishes")]
     public async Task ASignalFaultOnTheFinalDelivery_LeavesTheHold_AndAReplayFinishes()
     {
         var world = await World.SeedAsync();
@@ -333,17 +391,22 @@ public sealed partial class InvoiceSubmissionRerunTests
         var invoice = world.Row(InvoiceId);
         invoice.GetAttributeValue<OptionSetValue>(InvoiceReviewDetail.Column).Value.Should().Be(InvoiceReviewDetail.WaitingForBillingTerms, "the commit's hold stands");
         invoice.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(InvoiceStatusCodes.InReview);
-        var heldBefore = world.Snapshot().Where(kv => kv.Key.StartsWith(InvoiceId.ToString("D"), StringComparison.Ordinal)).ToList();
+        // The faulting run itself: what RemapSignals found on entry (after the commit) is what it left.
+        var atEntry = harness.RemapEntrySnapshots.Should().ContainSingle("the Signal steps ran once, after the commit").Subject;
+        atEntry.Keys.Should().Contain(
+            [$"{InvoiceId:D}.{InvoiceFirmHold.InvoiceHoldColumn}", $"{InvoiceId:D}.statuscode", $"{SubmissionId:D}.{InvoiceSubmissionPersister.SubmissionReasonCode}"],
+            "the setup: the snapshot holds the firm hold, the status and the reason code");
+        world.HoldSnapshot().Should().Equal(atEntry, "the faulting Signal step wrote no hold column");
 
         world.SignalWriteFault = null;
-        var replay = await new JobHarness(world).ProcessAsync(final: false);
+        var replayHarness = new JobHarness(world);
+        var replay = await replayHarness.ProcessAsync(final: false);
 
         replay.Status.Should().Be(JobStatus.Completed);
         world.RerunState().Should().Be(InvoiceSubmissionRerun.StateDone);
         world.Applied.Should().ContainSingle("the replay never commits a second time");
-        world.Snapshot().Where(kv => kv.Key.StartsWith(InvoiceId.ToString("D"), StringComparison.Ordinal)
-            && !kv.Key.EndsWith(".versionnumber", StringComparison.Ordinal)).Should().Equal(
-                heldBefore.Where(kv => !kv.Key.EndsWith(".versionnumber", StringComparison.Ordinal)), "the Signal steps never write the invoice");
+        replayHarness.RemapEntrySnapshots.Should().ContainSingle().Which.Should().Equal(atEntry, "nothing moved the hold between the runs");
+        world.HoldSnapshot().Should().Equal(atEntry, "the Signal steps never write the invoice, a line or the reason code");
     }
 
     [Fact(DisplayName = "095d-2b-2 (job): a refused Signal step is Poisoned with Permanent=true and counted; the commit stands")]
@@ -396,6 +459,33 @@ public sealed partial class InvoiceSubmissionRerunTests
 
         /// <summary>Runs just before a close is applied (another path acting between the read and the close).</summary>
         public Action<Guid>? BeforeClose { get; set; }
+
+        /// <summary>Runs just before a link is applied (another path acting between the close and the link).</summary>
+        public Action<Guid>? BeforeLink { get; set; }
+
+        /// <summary>What a Signal step must never write: every attribute of the invoice (its firm hold, status, review detail) and of its lines,
+        /// and the submission's reason code and processing status. Row versions are left out.</summary>
+        public Dictionary<string, string> HoldSnapshot()
+        {
+            var rows = new HashSet<string>(LineIds.Select(l => l.ToString("D"))) { InvoiceId.ToString("D") };
+            var submission = new HashSet<string>
+            {
+                $"{SubmissionId:D}.{InvoiceSubmissionPersister.SubmissionReasonCode}", $"{SubmissionId:D}.{InvoiceSubmissionPersister.SubmissionStatus}",
+            };
+            return Snapshot()
+                .Where(kv => !kv.Key.EndsWith(".versionnumber", StringComparison.Ordinal)
+                    && (rows.Contains(kv.Key[..36]) || submission.Contains(kv.Key)))
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+        }
+
+        /// <summary><see cref="InvoiceOpenHolds.ReasonsAsync"/> over this world as stored now (the read the Signal step makes).</summary>
+        public async Task<IReadOnlySet<string>> OpenHoldReasonsAsync()
+        {
+            var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+            entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((QueryExpression query, CancellationToken _) => Retrieve(query));
+            return await InvoiceOpenHolds.ReasonsAsync(entities.Object, Row(InvoiceId), CancellationToken.None);
+        }
 
         public Guid? AssignFirmRecordId { get; set; } = AssignFirmRecord;
 
@@ -530,6 +620,8 @@ public sealed partial class InvoiceSubmissionRerunTests
             {
                 return Task.FromException<SignalRecordLinkOutcome>(fault);
             }
+
+            BeforeLink?.Invoke(signalId);
 
             var row = _rows[signalId];
             var linked = row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id;

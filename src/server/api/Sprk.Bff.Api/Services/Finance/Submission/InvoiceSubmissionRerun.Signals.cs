@@ -428,8 +428,17 @@ public sealed partial class InvoiceSubmissionRerun
             return;
         }
 
-        run.ConditionCleared = true;
-        _logger.LogInformation("Re-run of submission {SubmissionId}: shared Signal {SignalId} closed ConditionCleared; assign-firm record {RecordId} link: {Link}.",
+        if (link is SignalRecordLinkOutcome.Linked or SignalRecordLinkOutcome.AlreadyLinked)
+        {
+            run.ConditionCleared = true;
+            _logger.LogInformation("Re-run of submission {SubmissionId}: shared Signal {SignalId} closed ConditionCleared; assign-firm record {RecordId} link: {Link}.",
+                run.SubmissionId, latest.Id, recordId, link);
+            return;
+        }
+
+        // NotApplicable or ForeignLink: the Signal is no longer this run's ConditionCleared close to report (it was re-closed, or carries another
+        // record). Final, so the run goes on; the result does not claim the close.
+        _logger.LogInformation("Re-run of submission {SubmissionId}: shared Signal {SignalId} was not linked to assign-firm record {RecordId} ({Link}); it is left as it is and the close is not reported.",
             run.SubmissionId, latest.Id, recordId, link);
     }
 
