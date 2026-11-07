@@ -138,6 +138,51 @@ internal static class CreateTimeFieldMapping
         ApplyAll(ordered, target, source, protectedAttributes, warnings, logger, moneyAttributes, callerSupplied, mappedColumns);
     }
 
+    /// <summary>
+    /// The push entry point (field-mapping-server-write-path-r1 task 040, FR-23): applies the COPY rules, in
+    /// <c>ExecutionOrder</c>, onto <paramref name="target"/>, OVERWRITING what it holds — a push is the deliberate re-sync, so
+    /// there is no supplied-column snapshot. It is the same <c>ApplyRule</c> the fill-only path runs, so a Copy value is
+    /// computed by the same code on a create and on a push (the parity test pins it): the regarding pair and resolver
+    /// fields and <paramref name="protectedAttributes"/> are refused with the same warnings, a null source value is skipped,
+    /// a lookup source is copied as a reference, a Text/Memo target is rendered as text (option set label, Yes/No, ISO-8601).
+    /// A rule of any other mapping type (Default, Concat, Template) is never applied: it is counted, not warned about and
+    /// never an error. A faulting rule becomes a warning and never escapes.
+    /// </summary>
+    /// <param name="rules">The profile's rules; the caller has already chosen the sync mode it pushes.</param>
+    /// <param name="target">The record being written; what it holds is overwritten by a mapped value.</param>
+    /// <param name="source">The source record (typed), or null when it could not be read.</param>
+    /// <param name="protectedAttributes">Target columns a rule may not write; such a rule is skipped with a warning.</param>
+    /// <param name="warnings">Receives one warning per refused or failed rule (no exception text).</param>
+    /// <param name="logger">Receives a faulting rule's detail.</param>
+    /// <param name="mappedColumns">When given, every target column a rule WROTE (the rule's trimmed target field).</param>
+    /// <param name="faultedColumns">When given, every target column whose rule THREW (logged to <paramref name="logger"/>), so a
+    /// caller can tell a fault from a refusal.</param>
+    /// <returns>How many rules were NOT Copy rules and so were not applied.</returns>
+    internal static int ApplyCopyOverwrite(
+        IEnumerable<FieldMappingRuleEntity> rules,
+        Entity target,
+        Entity? source,
+        IReadOnlySet<string> protectedAttributes,
+        List<string> warnings,
+        ILogger logger,
+        ISet<string>? mappedColumns = null,
+        ISet<string>? faultedColumns = null)
+    {
+        var notCopy = 0;
+        var copyRules = new List<FieldMappingRuleEntity>();
+        foreach (var rule in rules)
+        {
+            if (rule.MappingType == MappingTypeCopy)
+                copyRules.Add(rule);
+            else
+                notCopy++;
+        }
+
+        ApplyAll(copyRules, target, source, protectedAttributes, warnings, logger, moneyAttributes: null,
+            callerSupplied: new HashSet<string>(StringComparer.OrdinalIgnoreCase), written: mappedColumns, faulted: faultedColumns);
+        return notCopy;
+    }
+
     private static void ApplyAll(
         IEnumerable<FieldMappingRuleEntity> rules,
         Entity target,
@@ -147,7 +192,8 @@ internal static class CreateTimeFieldMapping
         ILogger logger,
         IReadOnlySet<string>? moneyAttributes,
         IReadOnlySet<string> callerSupplied,
-        ISet<string>? written)
+        ISet<string>? written,
+        ISet<string>? faulted = null)
     {
         foreach (var rule in rules.OrderBy(r => r.ExecutionOrder))
         {
@@ -163,6 +209,7 @@ internal static class CreateTimeFieldMapping
                     "[RECORD-CREATE] Field-mapping rule {RuleId} ({SourceField} -> {TargetField}) threw; skipped.",
                     rule.Id, rule.SourceField, rule.TargetField);
                 warnings.Add($"Field-mapping rule \"{rule.SourceField}\" -> \"{rule.TargetField}\" failed and was skipped.");
+                faulted?.Add(rule.TargetField?.Trim() ?? string.Empty);
             }
         }
     }
