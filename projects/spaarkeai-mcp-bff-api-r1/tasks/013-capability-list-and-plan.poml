@@ -4,7 +4,7 @@
     <title>B-1 decision capability: list and plan</title>
     <phase>A BFF rework</phase>
     <gate>after 017</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; creates a service and modifies endpoints (.cs)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -123,7 +123,17 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Design §7 names the list operation DecisionCapability.ListDecideAsync. Keep the list unfiltered; category partitioning is 022's (parity with laneCountFilters.ts).</notes>
+  <notes>Design §7 names the list operation DecisionCapability.ListDecideAsync. Keep the list unfiltered; category partitioning is 022's (parity with laneCountFilters.ts).
+
+Completion (2026-11-07, commits 51f124bb6d + review fix ffe5b3a84f):
+- DecisionCapability (Services/Signals, sealed partial) + IDecisionCapability: ListDecideAsync(ClaimsPrincipal?, ct, set = Lanes), GetPlanAsync(HttpContext?, Guid, ct), GetSuppressionAsync(HttpContext?, Guid, ct); no HttpRequest, IResult or MCP SDK type in a signature. The worklist, plan and suppression endpoints are thin adapters through DecisionResultMapper (new typed overloads for DecisionPlanReadResult / SuppressionReadResult). Registered scoped in SignalsModule. Caller guard: no context or no authenticated identity is UserContextRequired (401, same reasonCode on the tool error) before any Dataverse call. Deviations and decisions: notes/decisions.md "2026-11-07 — Task 013".
+- Escalation triggers: neither fired. The plan-read stamp call, arguments and position are unchanged (last, only on a returned plan); 011 baselines 63/63 (53 plan/suppression/decision + 10 worklist), no golden file edited.
+- Tests: new DecisionCapabilityCallerTests (tests/integration/auth/Signals), DecisionCapabilityListPlanTests + DecisionCapabilityFixtures (tests/unit/domain/Signals), mapper parity rows. Fail-before: guard removed fails 9/10 caller tests; stamp moved above the inquiry check fails 4 DoLanePrivacy cases; reason-based no-caller match fails the new mapper test. Signals domain/auth/contract filter 2939/2939; SignalReadRouteTests (integration, incl. 10 worklist baselines, 503 too_many_signals, batched count) 128/128; ArchTests 1973/1973 (RouteAuthorizationGuard 93/93 after the ledger fix); full unit suite: stopped after about 80 min on a machine shared with another session's test run; 40 failures, all outside Signals (Compose, Office, Documents, Insights, ExternalAccess, an eval harness), each after 1.5 to 18 min, i.e. host timeouts under contention. A sample of 23 of those re-run alone passed 23/23.
+- Build: Sprk.Bff.Api 0 warnings, 0 errors (TreatWarningsAsErrors).
+- Publish size (dotnet publish -c Release, framework-dependent linux-x64, Compress-Archive Optimal over deploy/api-publish/*, PDBs included, fresh short-path worktrees C:\wt013m / C:\wt013b, 191 files each side): master d53d67f604 = 39.26 MB (41,162,509 B); branch 51f124bb6d = 39.24 MB (41,147,135 B); branch vs master -15,374 B. Task delta vs 017's measured 21882337f7 (41,143,201 B): about +3.9 KB. Under 55/60 MB. dotnet list package --vulnerable --include-transitive: no vulnerable packages.
+- Quality gates: adversarial review (opus), one pass: no production defect; F3 x2 fixed (stamp-not-written on the 503 inquiry paths now pinned; stale ledger line citation), K2 fixed (no-caller worklist matched by reference). Known limits: K1, the guard and stamp read the passed HttpContext while Dataverse reads use IHttpContextAccessor; same object on REST; 020/022 must pass the ambient context over a stateless host (FR-01). K3, the plan/suppression baseline host registers the capability by hand (the worklist host uses the real Program DI). K4, no golden for suppression.200 / partition-undetermined (pre-existing from 011; arms identical by inspection); result records have public constructors. Self review K4: per-request construction of the scoped capability (note for 014); ?? throw in the Ok factories. adr-check: ADR-001/002 WP-6/008/009/013/019/028/029/038/052 compliant; ADR-010 warning: IDecisionCapability has one implementation, kept per the POML and design §8 B-1 as the seam two hosts consume and 022-024 tool tests substitute (path C reasoning, no violation).
+- Not done here: "full Work Item row" (goal text) left to 023 with 015's projection (decisions.md). The PR for ontology review is the main session's (brief: push only); the ontology review is noted in both commit bodies. Master sync: origin/master 23567b2f93 touches DecisionActionCatalogTests, DoLanePrivacyTests, SignalSuppressionTests; a trial merge-tree is clean.
+rework: fix-round-1 task 013</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

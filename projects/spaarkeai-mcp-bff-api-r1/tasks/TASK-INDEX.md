@@ -16,7 +16,7 @@
 | 011 | Contract baseline for signal, plan and decision routes | A | ✅ [done] | none | Group A | sonnet / high | FULL |
 | 012 | B-4b thread ICallerContext through decision slice — cancelled 2026-11-07 (owner option C: `ICallerContext` deferred; MCP tools use the request `HttpContext`) | A | 🚫 [cancelled] | — | — | opus / high | FULL |
 | 017 | B-2 one decision result mapper | A | ✅ [done] | 011 | Group A | opus / high | FULL |
-| 013 | B-1 decision capability: list and plan | A | 🔲 [open] | 011, 017 | Group B | opus / high | FULL |
+| 013 | B-1 decision capability: list and plan | A | ✅ [done] | 011, 017 | Group B | opus / high | FULL |
 | 014 | B-1 decision capability: commit | A | 🔲 [open] | 013 | Group C | opus / high | FULL |
 | 016 | B-3 decision lookup search and REST route | A | 🔲 [open] | 013 | Group C | opus / high | FULL |
 | 015 | B-5 slim summary, privilege flag and paging cursor | A | 🔲 [open] | 013, 014 | Group D | sonnet / high | FULL |
