@@ -41,7 +41,24 @@
  * (button hidden) but the cache is warm for the next invocation. This is the
  * documented pattern for async EnableRules.
  *
- * ## `pushUpdates(primaryControl)` — action
+ * ## `pushUpdates(primaryControl)` — action (v1.2.0: opens the Family view)
+ *
+ * Opens the `sprk_recordfamily` code page as a `navigateTo` dialog
+ * (`pageType: "webresource"`, `target: 2`) with the data
+ * `entityName=<logical name>&id=<record id>`; the page hosts `RecordFamilyModal`
+ * for the current record (field-mapping-server-write-path-r1 task 075, spec
+ * FR-35). Nothing is pushed from this script any more: the person reviews the
+ * record's Family in the modal, and pushing happens only from the modal's
+ * actions (task 040). Unsaved form edits are saved first (a failed save shows the
+ * platform error and opens nothing). The form is refreshed when the dialog closes, as the
+ * wizard dialogs do (`sprk_wizard_commands.js` `openWizardDialog`).
+ *
+ * ### Legacy direct-push flow (NOT called; kept until task 040)
+ *
+ * The flow below is what `pushUpdates` did through v1.1.0. Its helper
+ * functions are still in this file, unreferenced, because task 040 lands the
+ * modal's Push action and the merge/deploy order of 075 vs 040 is an owner
+ * decision. Delete them with 040 (or when 075 is deployed after 040).
  *
  * 1. Opens a confirm dialog per FR-B3-02.
  * 2. On confirm, re-queries profiles for the current entity and resolves each
@@ -100,7 +117,9 @@
  *   parsed from the BFF ProblemDetails payload.
  * - Plain JS — NO npm imports, NO ES modules, NO bundler, NO `@spaarke/auth`.
  * - ADR-006 — webresource is an approved surface for ribbon-adjacent host
- *   scripting; no PCF or Code Page needed for this rule.
+ *   scripting. The Family view itself is a Code Page (`sprk_recordfamily`),
+ *   launched from here with `navigateTo` (ADR-050: a ribbon script has no
+ *   React host).
  *
  * # Version
  *
@@ -109,6 +128,10 @@
  *          replaced broken `credentials: "include"` cookie approach with
  *          MSAL silent → SSO → popup token chain (mirrors
  *          `sprk_communication_send.js`).
+ * v1.2.0 — `pushUpdates` opens the Family view (`sprk_recordfamily` dialog)
+ *          instead of pushing directly (task 075, FR-35). `hasSourceProfile`
+ *          unchanged. The direct-push helpers are retained, unreferenced,
+ *          until task 040.
  *
  * @namespace Spaarke.FieldMapping.Push
  */
@@ -126,12 +149,12 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
     // -----------------------------------------------------------------------
 
     /** Version for diagnostic logging. */
-    ns.VERSION = "1.1.0";
+    ns.VERSION = "1.2.0";
 
     /** Cache-key prefix for the visibility-check sessionStorage entries. */
     var CACHE_KEY_PREFIX = "sprk_fieldmapping_hasSource_";
 
-    /** Cache-key prefix for the targets list (populated by hasSourceProfile). */
+    /** [LEGACY - delete with task 040] Cache-key prefix for the targets list (written by queryHasSourceProfile, read only by the legacy push). */
     var TARGETS_CACHE_KEY_PREFIX = "sprk_fieldmapping_targets_";
 
     /**
@@ -144,7 +167,18 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
     /** Dataverse environment variable schema name for the BFF base URL. */
     var BFF_BASE_URL_ENV_VAR = "sprk_BffApiBaseUrl";
 
-    /** Push endpoint path (relative to base URL). */
+    /** Web resource name of the Family code page that `pushUpdates` opens (task 075). */
+    var FAMILY_PAGE_WEBRESOURCE = "sprk_recordfamily";
+
+    /** Dialog options for the Family view (modal dialog, same chrome as the wizard dialogs). */
+    var FAMILY_DIALOG_OPTIONS = {
+        target: 2,
+        width: { value: 70, unit: "%" },
+        height: { value: 80, unit: "%" },
+        title: "Family"
+    };
+
+    /** [LEGACY - kept until task 040] Push endpoint path (relative to base URL). */
     var PUSH_ENDPOINT_PATH = "/api/v1/field-mappings/push";
 
     /**
@@ -224,7 +258,8 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
                     var entities = (result && result.entities) || [];
                     var has = entities.length > 0;
                     safeSessionSet(cacheKey, has ? "true" : "false");
-                    // Cache the target recordtype GUIDs for pushUpdates to reuse.
+                    // [LEGACY - delete with task 040 together with TARGETS_CACHE_KEY_PREFIX]
+                    // Cache the target recordtype GUIDs for the legacy direct push to reuse.
                     var targetsCacheKey = TARGETS_CACHE_KEY_PREFIX + entityName + "_" + formId;
                     var targetRtIds = entities
                         .map(function (e) { return e["_sprk_targetrecordtype_value"]; })
@@ -254,7 +289,8 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
     // -----------------------------------------------------------------------
 
     /**
-     * Ribbon Action: confirm → sequential per-target push → aggregate toast.
+     * Ribbon Action: open the Family view (a code-page dialog hosting
+     * RecordFamilyModal) for the current record. Pushes nothing (FR-35).
      *
      * @param {object} primaryControl - Form execution context
      */
@@ -270,29 +306,72 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
             var recordIdRaw = primaryControl.data.entity.getId();
             if (!entityName || !recordIdRaw) {
                 Xrm.Navigation.openAlertDialog({
-                    text: "Record must be saved before pushing field-mapping updates."
+                    text: "Record must be saved before opening its family."
                 });
                 return;
             }
             var recordId = String(recordIdRaw).replace(/[{}]/g, "");
-            var formId = recordIdRaw;
 
-            Xrm.Navigation.openConfirmDialog({
-                title: "Push Updates",
-                text: "This will push field-mapping updates from this record to related child records. Continue?"
-            }).then(function (result) {
-                if (!result || !result.confirmed) {
-                    return;
+            // Refresh the form whenever the dialog closes (confirmed, cancelled or errored),
+            // as sprk_wizard_commands.js openWizardDialog does.
+            var refreshForm = function () {
+                if (primaryControl && primaryControl.data) {
+                    primaryControl.data.refresh();
                 }
-                executePushForAllTargets(entityName, recordId, formId);
-            });
+            };
+
+            var openFamily = function () {
+                try {
+                    Xrm.Navigation.navigateTo(
+                        {
+                            pageType: "webresource",
+                            webresourceName: FAMILY_PAGE_WEBRESOURCE,
+                            data: "entityName=" + encodeURIComponent(entityName) +
+                                "&id=" + encodeURIComponent(recordId)
+                        },
+                        FAMILY_DIALOG_OPTIONS
+                    ).then(refreshForm, refreshForm);
+                } catch (err) {
+                    console.error("[FieldMapping.Push v" + ns.VERSION + "] open family error:", err);
+                    Xrm.Navigation.openAlertDialog({
+                        text: "Unable to open the family view. See console for details."
+                    });
+                }
+            };
+
+            // The Family view reads the SAVED record from the server, so unsaved edits are saved
+            // first (the same way the form's own Save does). A failed save is shown with the
+            // platform error and the Family view is NOT opened.
+            var entity = primaryControl.data.entity;
+            var isDirty = typeof entity.getIsDirty === "function" && entity.getIsDirty() === true;
+            if (isDirty && typeof primaryControl.data.save === "function") {
+                primaryControl.data.save().then(openFamily, function (saveErr) {
+                    console.error("[FieldMapping.Push v" + ns.VERSION + "] save before family failed:", saveErr);
+                    Xrm.Navigation.openErrorDialog({
+                        message: (saveErr && saveErr.message) ||
+                            "The record could not be saved, so its family was not opened."
+                    });
+                });
+                return;
+            }
+            openFamily();
         } catch (err) {
             console.error("[FieldMapping.Push v" + ns.VERSION + "] pushUpdates error:", err);
             Xrm.Navigation.openAlertDialog({
-                text: "Unable to start push. See console for details."
+                text: "Unable to open the family view. See console for details."
             });
         }
     };
+
+    // -----------------------------------------------------------------------
+    // LEGACY direct-push helpers - NOT called from pushUpdates (task 075).
+    // Kept until task 040 lands the modal's Push action; delete with 040.
+    // Exceptions below that stay: resolveRecordTypeRefForEntity, escapeODataString,
+    // safeSessionGet and safeSessionSet are also used by hasSourceProfile (the enable rule).
+    // TARGETS_CACHE_KEY_PREFIX is still referenced by queryHasSourceProfile (above), whose
+    // targets-cache WRITE is the legacy part (only the legacy push read it): task 040 deletes
+    // that write together with the constant.
+    // -----------------------------------------------------------------------
 
     /**
      * Orchestrate the full push flow: resolve targets, resolve BFF base URL,
