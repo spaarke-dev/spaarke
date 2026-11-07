@@ -112,11 +112,35 @@ public class CreateDocumentRequest
     /// </summary>
     [JsonIgnore]
     public bool RestrictedBySubmission { get; set; }
+
+    /// <summary>
+    /// The record the new document is filed to (its association lookup), written IN the create
+    /// (field-mapping-server-write-path-r1 task 030b, FR-18, word gaps G1/G2). Set only through
+    /// <see cref="DocumentAssociationMap.TryApply(CreateDocumentRequest, string?, Guid?)"/>; null files the document nowhere.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why in the create.</b> A document has no stamp column of its own: its root (write-path invariant I-1) is read
+    /// from this lookup, and its owner (I-6) is decided over it. Written in a follow-up update, a document existed, however
+    /// briefly, filed nowhere, and stayed so when that update failed.</para>
+    /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
+    /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen association would
+    /// file a document to a record whose AppendTo nobody checked.</para>
+    /// </remarks>
+    [JsonIgnore]
+    public DocumentAssociationBind? Association { get; set; }
 }
 
 /// <summary>
-/// The ONE place that maps a caller-supplied association type onto an
-/// <see cref="UpdateDocumentRequest"/>'s lookup field.
+/// One <c>sprk_document</c> association lookup and the record it points at, as a create writes it (task 030b):
+/// <c>document[Field.LogicalName] = EntityReference(Field.TargetEntityLogicalName, RecordId)</c>.
+/// </summary>
+/// <param name="Field">The lookup, always an entry of <see cref="DocumentLinkFields.All"/>.</param>
+/// <param name="RecordId">The record the document is filed to.</param>
+public sealed record DocumentAssociationBind(DocumentLinkField Field, Guid RecordId);
+
+/// <summary>
+/// The ONE place that maps a caller-supplied association type onto a document's lookup field: an
+/// <see cref="UpdateDocumentRequest"/>'s, or (task 030b) the association a <see cref="CreateDocumentRequest"/> is created with.
 /// </summary>
 /// <remarks>
 /// <para>Created 2026-09-03 (unified-access-control-r2 item 7). It replaces <b>four</b> hand-written
@@ -149,7 +173,7 @@ public static class DocumentAssociationMap
 {
     /// <summary>
     /// Every association spelling a caller may send, mapped to the entity's logical name. The ONE alias table:
-    /// <see cref="TryApply"/> resolves through it, and so does record ownership (task 080), which needs the
+    /// <see cref="TryApply(UpdateDocumentRequest, string?, Guid?)"/> resolves through it, and so does record ownership (task 080), which needs the
     /// target's logical name to read its business unit. Two tables would drift exactly the way the four
     /// switches this class replaced did.
     /// </summary>
@@ -245,6 +269,46 @@ public static class DocumentAssociationMap
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// The association column a create writes for each logical name, the same column
+    /// <see cref="TryApply(UpdateDocumentRequest, string?, Guid?)"/>'s property is written to
+    /// (<c>DataverseServiceClientImpl.UpdateDocumentAsync</c>). Event, To Do and contact are in the <c>sprk_related*</c> family.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> AssociationColumnByLogicalName =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_matter"] = "sprk_matter",
+            ["sprk_project"] = "sprk_project",
+            ["sprk_invoice"] = "sprk_invoice",
+            ["sprk_workassignment"] = "sprk_workassignment",
+            ["sprk_event"] = "sprk_relatedevent",
+            ["sprk_todo"] = "sprk_relatedtodo",
+            ["contact"] = "sprk_relatedcontact",
+        };
+
+    /// <summary>
+    /// Field-mapping-server-write-path-r1 task 030b (FR-18): put the association on the CREATE, so the document is filed
+    /// from its first write. Same spellings and same columns as the update overload; the column is the
+    /// <see cref="DocumentLinkFields.All"/> entry, so its target table is the verified one.
+    /// </summary>
+    /// <returns>As the update overload: <see langword="false"/> when the type has no <c>sprk_document</c> column or the id
+    /// is empty, and nothing is set.</returns>
+    public static bool TryApply(CreateDocumentRequest request, string? entityTypeOrAlias, Guid? recordId)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!recordId.HasValue || recordId.Value == Guid.Empty)
+            return false;
+
+        if (ToLogicalName(entityTypeOrAlias) is not { } logicalName
+            || !AssociationColumnByLogicalName.TryGetValue(logicalName, out var column))
+            return false;
+
+        var field = DocumentLinkFields.All.Single(f => string.Equals(f.LogicalName, column, StringComparison.Ordinal));
+        request.Association = new DocumentAssociationBind(field, recordId.Value);
+        return true;
     }
 }
 

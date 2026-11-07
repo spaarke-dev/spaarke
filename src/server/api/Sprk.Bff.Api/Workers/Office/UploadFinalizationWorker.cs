@@ -656,6 +656,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             CreatedByPersonId = payload.CreatedByPersonId,
         };
 
+        // Task 030b (FR-18): the association is part of the create, the same column the owner question above was asked over
+        // (shared with attachment children so they inherit the same "File to" association).
+        ApplyAssociationLookup(createRequest, payload.AssociationType, payload.AssociationId);
+
         // Task 130 (#2126): an Email or Attachment document is created linked to the email's communication the save
         // carried, or Restricted when it carried none — the same rule as the save's own create.
         var createdRestricted = OfficeDocumentPersistence.IsEmailDerived(payload.ContentType)
@@ -677,7 +681,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             "Document record created in Dataverse: DocumentId={DocumentId}",
             documentId);
 
-        // Step 2: Update the document with SPE pointers and association lookups
+        // Step 2: Update the document with SPE pointers and metadata (never the association: task 030b, it is in the create)
         var updateRequest = new Spaarke.Dataverse.UpdateDocumentRequest
         {
             GraphDriveId = driveId,
@@ -689,10 +693,6 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             FileType = ExtractFileExtension(payload.FileName),
             HasFile = true
         };
-
-        // Set entity association lookup based on AssociationType (shared with attachment children
-        // so they inherit the same "File to" association).
-        ApplyAssociationLookup(updateRequest, payload.AssociationType, payload.AssociationId);
 
         // Set email-specific fields if this is an email save
         if (payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
@@ -1182,17 +1182,13 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     }
 
     /// <summary>
-    /// Process a single attachment: upload to SPE and create child Document record.
-    /// </summary>
-    /// <summary>
-    /// Applies the Matter/Project/Invoice association lookup (from the save's AssociationType +
-    /// AssociationId) onto an <see cref="Spaarke.Dataverse.UpdateDocumentRequest"/>. Shared by the
-    /// parent email document and its attachment children so attachments inherit the same "File to"
-    /// association as the email. No-op when there is no association. Account/Contact have no document
-    /// lookup field yet (see UpdateDocumentRequest).
+    /// Applies the save's association (AssociationType + AssociationId) onto the CREATE of a document this worker makes
+    /// (task 030b, FR-18: in the create, never a follow-up update). Shared by the fallback create and the attachment
+    /// children so attachments inherit the same "File to" association as the email. No-op when there is no association;
+    /// a type with no <c>sprk_document</c> column (account) is logged and the document is created unassociated.
     /// </summary>
     private void ApplyAssociationLookup(
-        Spaarke.Dataverse.UpdateDocumentRequest request,
+        Spaarke.Dataverse.CreateDocumentRequest request,
         string? associationType,
         Guid? associationId)
     {
@@ -1204,14 +1200,17 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // association while the very same token applied fine in OfficeDocumentPersistence.
         if (!DocumentAssociationMap.TryApply(request, associationType, associationId))
         {
+            // No id exists yet (the create follows), and the name is not logged: it can come from a received email.
             _logger.LogWarning(
-                "Association type {AssociationType} has no sprk_document lookup — document {DocumentId} " +
-                "will be created UNASSOCIATED. Known gap: account (no column exists).",
-                associationType,
-                request.GraphItemId);
+                "Association type {AssociationType} has no sprk_document lookup — the document will be " +
+                "created UNASSOCIATED. Known gap: account (no column exists).",
+                associationType);
         }
     }
 
+    /// <summary>
+    /// Process a single attachment: upload to SPE and create child Document record.
+    /// </summary>
     private async Task ProcessSingleAttachmentAsync(
         EmailAttachmentInfo attachment,
         Guid parentDocumentId,
@@ -1280,6 +1279,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             CreatedByPersonId = createdByPersonId, // task 146 c1-r1 — the person who saved the parent email
         };
 
+        // Task 030b (FR-18): inherit the parent email's "File to" association (Matter/Project/Invoice) IN the create, so
+        // the attachment document is filed to the same record as the .eml from its first write.
+        ApplyAssociationLookup(createRequest, associationType, associationId);
+
         // Task 130 (#2126, UAC D7 T8): the child is created linked to its parent email's communication — or Restricted
         // when the parent email could not be identified (the parent itself was created Restricted). In the create.
         var createdRestricted = OfficeDocumentPersistence.ApplyEmailCommunicationOutcome(createRequest, relatedCommunicationId);
@@ -1325,10 +1328,6 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             // Copy parent email's internetMessageId for relationship tracking
             EmailParentId = internetMessageId
         };
-
-        // Inherit the parent email's "File to" association (Matter/Project/Invoice) so the attachment
-        // Documents file to the same record as the .eml.
-        ApplyAssociationLookup(updateRequest, associationType, associationId);
 
         await _documentService.UpdateDocumentAsync(childDocumentIdStr, updateRequest, cancellationToken);
 
