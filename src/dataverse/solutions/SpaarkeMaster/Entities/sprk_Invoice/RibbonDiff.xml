@@ -56,6 +56,9 @@
         <Button Id="sprk.ApExport.Invoice.Form.MarkPaid.Button" Command="sprk.ApExport.Invoice.Form.MarkPaid.Command" LabelText="$LocLabels:sprk.ApExport.MarkPaid.LabelText" Alt="$LocLabels:sprk.ApExport.MarkPaid.LabelText" ToolTipTitle="$LocLabels:sprk.ApExport.MarkPaid.LabelText" ToolTipDescription="$LocLabels:sprk.ApExport.MarkPaid.ToolTipDescription" ModernImage="Accept" Sequence="110" TemplateAlias="o1" />
       </CommandUIDefinition>
     </CustomAction>
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.NewRecord.Hide" Location="Mscrm.Form.sprk_invoice.NewRecord" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.SaveAndNew.Hide" Location="Mscrm.Form.sprk_invoice.SaveAndNew" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_invoice.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_invoice.NewRecord" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Activate.Hide" Location="Mscrm.Form.sprk_invoice.Activate" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Deactivate.Hide" Location="Mscrm.Form.sprk_invoice.Deactivate" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Re-activate.Hide" Location="Mscrm.Form.sprk_invoice.Re-activate" />

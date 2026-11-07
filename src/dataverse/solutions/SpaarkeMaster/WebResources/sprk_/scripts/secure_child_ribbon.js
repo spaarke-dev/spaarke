@@ -17,9 +17,10 @@
  *       sprk_communication -> the Communication page in compose mode (sent through the BFF),
  *       sprk_budget, sprk_kpiassessment -> POST /api/v1/child-records/{table} (no wizard of their own),
  *       then the new row opens.
- *     sprk_billingevent is served (its native "+ New" is hidden like any other) but has NO create here: ebilling-r1 task
- *     164a-1 (uac-r2 Q6) - an invoice line's new rows have one server-side owner (extraction, a line decision, Add line in
- *     the invoice's review), and the BFF refuses its generic create.
+ *     sprk_billingevent is NOT served: ebilling-r1 task 096b (EB-D-201; before it 164a-1, uac-r2 Q6) - an invoice line's new
+ *     rows have one server-side owner (extraction, a line decision, Add line in the invoice's review), so its platform
+ *     "+ New" is hidden outright in the sprk_BillingEvent RibbonDiff and this script carries no command for it. The
+ *     sprk_invoice entry opens the Invoice wizard (a submission): invoices are created only by submission.
  *
  * FAIL CLOSED (ADR-003): the native "+ New" is allowed ONLY when the host is a project / matter / work assignment whose
  * sprk_issecure was read (through Xrm.WebApi) and is false, or a party (contact, organization, account - never an
@@ -27,7 +28,8 @@
  * document, an invoice, an analysis, a budget: its secure ancestor is not known here) hides the native command and shows
  * the BFF one, which is right for any host: the BFF files the new record under whatever it names and decides its owner.
  *
- * Not a security boundary on its own: the Create privilege is NOT removed (owner round 28); a native create that slips
+ * Not a security boundary on its own: the Create privilege is NOT removed (owner round 28; EB-D-201 narrows this for
+ * sprk_invoice only: see projects/ebilling-r1/notes/096b-close-direct-create.md); a native create that slips
  * past (an API client, an import) is re-owned by the reconcile job's recent-changes pass every 2 minutes.
  *
  * Libraries on every command and rule, in order (ribbon commands do not load form libraries):
@@ -91,7 +93,7 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
 
     /** Every child table this script serves (the template's per-entity instances must stay within it). */
     ns.TABLES = ["sprk_todo", "sprk_event", "sprk_invoice", "sprk_reportcard", "sprk_document", "sprk_communication", "sprk_budget",
-        "sprk_kpiassessment", "sprk_billingevent"];
+        "sprk_kpiassessment"];
 
     var DIALOG_OPTIONS = { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" } };
     var COMPOSE_OPTIONS = { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } };

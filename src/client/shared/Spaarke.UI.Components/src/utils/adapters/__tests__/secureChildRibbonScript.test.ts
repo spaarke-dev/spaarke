@@ -27,6 +27,9 @@ interface IRibbon {
   nativeNewAllowed(primaryControl: unknown): boolean | Promise<boolean>;
   newChildAvailable(primaryControl: unknown): boolean | Promise<boolean>;
   newChild(primaryControl: unknown, selectedControl: unknown, childTable: string): void;
+  TABLES: string[];
+  WIZARDS: Record<string, { page: string }>;
+  CREATE_THEN_OPEN: Record<string, unknown>;
 }
 
 interface IHarness {
@@ -259,6 +262,17 @@ describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
   it('the billing event subgrid on an invoice still hides the platform "+ New" (the hide is kept; only the create is gone)', async () => {
     const h = harness({ flag: false });
     await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf('sprk_invoice')))).resolves.toBe(false);
+  });
+
+  // ebilling-r1 task 096b (EB-D-201): the billing event is no longer a served table; its platform "+ New" is hidden outright in the
+  // sprk_BillingEvent RibbonDiff. The invoice entry stays and opens the Invoice wizard (a submission).
+  it('does not serve sprk_billingevent, and still serves sprk_invoice through the Invoice wizard', () => {
+    const h = harness({ flag: true });
+    expect(h.ribbon.TABLES).not.toContain('sprk_billingevent');
+    expect(h.ribbon.TABLES).toContain('sprk_invoice');
+    expect(h.ribbon.WIZARDS.sprk_invoice.page).toBe('sprk_createinvoicewizard');
+    expect(h.ribbon.CREATE_THEN_OPEN.sprk_billingevent).toBeUndefined();
+    expect(h.ribbon.CREATE_THEN_OPEN.sprk_invoice).toBeUndefined();
   });
 
   it('a BFF refusal shows the server message and opens nothing', async () => {

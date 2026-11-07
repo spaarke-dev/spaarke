@@ -107,7 +107,7 @@ $NativeCommandId = 'Mscrm.AddNewRecordFromSubGridStandard'
 
 # The child tables this change serves (Spaarke.SecureChild.Ribbon.TABLES; Merge-SecureChildRibbon.ps1 -Entity).
 $Tables = @('sprk_todo', 'sprk_event', 'sprk_invoice', 'sprk_reportcard', 'sprk_document', 'sprk_communication', 'sprk_budget',
-    'sprk_kpiassessment', 'sprk_billingevent')
+    'sprk_kpiassessment')
 
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv
 if (-not $token) { throw 'No az CLI token for the environment - run az login as an administrator of it.' }
@@ -183,6 +183,7 @@ foreach ($form in $forms) {
         $where = "$($form.objecttypecode) '$($form.name)' -> $child"
         if ($PartyHosts -contains $form.objecttypecode) { Ok "$where (party host: platform + New kept)" }
         elseif ($child -eq 'sprk_analysis') { Ok "$where (AnalysisRibbons hides the platform + New)" }
+        elseif ($child -eq 'sprk_billingevent') { Ok "$where (the platform + New is hidden outright, SpaarkeMaster sprk_BillingEvent RibbonDiff; invoice lines are created only by submission and Add line)" }
         elseif ($Tables -contains $child) { Ok "$where (served)" }
         else { Fail "$where is NOT served: its platform + New would create a user-owned child under or through a secure record" }
     }

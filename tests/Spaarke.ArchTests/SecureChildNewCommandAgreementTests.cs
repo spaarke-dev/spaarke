@@ -33,6 +33,7 @@ public class SecureChildNewCommandAgreementTests
     private static string DeployFile => Path.Combine(Root, "scripts", "Deploy-SecureChildNewCommands.ps1");
     private static string ChildRecordEndpointsFile => Path.Combine(Root, "src", "server", "api", "Sprk.Bff.Api", "Api", "ChildRecordEndpoints.cs");
     private static string AnalysisRibbonFile => Path.Combine(Root, "infrastructure", "dataverse", "ribbon", "AnalysisRibbons", "Entities", "sprk_analysis", "RibbonDiff.xml");
+    private static string BillingEventRibbonFile => Path.Combine(Root, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", "sprk_BillingEvent", "RibbonDiff.xml");
 
     /// <summary>
     /// EVERY subgrid of an ownership-child table on an active main form (live inventory, spaarkedev1, read-only, 2026-10-04;
@@ -90,10 +91,16 @@ public class SecureChildNewCommandAgreementTests
         var served = ScriptTables();
         var analysisHidesNative = File.ReadAllText(AnalysisRibbonFile)
             .Contains("Location=\"Mscrm.SubGrid.sprk_analysis.AddNewStandard\"", StringComparison.Ordinal);
+        // ebilling-r1 task 096b (EB-D-201): an invoice line's platform "+ New" is hidden outright (no replacement: lines are created only
+        // by submission and Add line), read from the SpaarkeMaster source of the table's ribbon.
+        var billingEventHidesNative = File.ReadAllText(BillingEventRibbonFile)
+            .Contains("Location=\"Mscrm.SubGrid.sprk_billingevent.AddNewStandard\"", StringComparison.Ordinal);
 
         var uncovered = ChildSubgridsOnMainForms
             .Where(s => !PartyHosts.Contains(s.Host))
-            .Where(s => !served.Contains(s.Child) && !(s.Child == "sprk_analysis" && analysisHidesNative))
+            .Where(s => !served.Contains(s.Child)
+                && !(s.Child == "sprk_analysis" && analysisHidesNative)
+                && !(s.Child == "sprk_billingevent" && billingEventHidesNative))
             .Select(s => $"{s.Host} -> {s.Child}")
             .ToList();
 
@@ -154,12 +161,12 @@ public class SecureChildNewCommandAgreementTests
     }
 
     /// <summary>
-    /// ebilling-r1 task 164a-1 (uac-r2 Q6): served tables with NO ribbon create, by design. The script still hides their
-    /// platform "+ New" (the served table's enable rule), but a new row has one server-side owner elsewhere, and the BFF refuses
-    /// the table's generic create (<c>RecordTableRule.GenericCreateRefused</c>). An invoice line is created by extraction, a line
-    /// decision or Add line in the invoice's review.
+    /// ebilling-r1 task 096b (EB-D-201; before it 164a-1, uac-r2 Q6): tables the script does NOT serve and whose platform "+ New" is
+    /// hidden outright in the SpaarkeMaster source (<see cref="BillingEventRibbonFile"/>), because a new row has one server-side owner
+    /// elsewhere and the BFF refuses the table's generic create (<c>RecordTableRule.GenericCreateRefused</c>). An invoice line is
+    /// created by extraction, a line decision or Add line in the invoice's review.
     /// </summary>
-    private static readonly string[] ServedWithNoRibbonCreate = { "sprk_billingevent" };
+    private static readonly string[] HiddenOutrightWithNoRibbonCreate = { "sprk_billingevent" };
 
     [Fact]
     public void EveryServedTable_HasACreateSurface_AndEveryCreateThenOpenTable_IsOnTheBffCreateRoute()
@@ -175,19 +182,36 @@ public class SecureChildNewCommandAgreementTests
         var ownBranches = new[] { "sprk_document", "sprk_communication" }
             .Where(t => script.Contains($"childTable === \"{t}\"", StringComparison.Ordinal)).ToArray();
 
-        var withoutSurface = ScriptTables().Except(wizards).Except(createThenOpen).Except(ownBranches).Except(ServedWithNoRibbonCreate).ToList();
+        var withoutSurface = ScriptTables().Except(wizards).Except(createThenOpen).Except(ownBranches).ToList();
         Assert.True(withoutSurface.Count == 0, "Served with no create surface: " + string.Join(", ", withoutSurface));
 
-        // The no-create tables are served (their platform "+ New" stays hidden), have no create surface here, and are refused by the
-        // BFF's generic create, so the exception cannot outlive its reason.
-        Assert.All(ServedWithNoRibbonCreate, t =>
+        // The no-create tables are not served, have no create surface here, have their platform "+ New", "New" and "Save & New" hidden
+        // outright, and are refused by the BFF's generic create, so the exception cannot outlive its reason.
+        var billingEventRibbon = File.ReadAllText(BillingEventRibbonFile);
+        Assert.All(HiddenOutrightWithNoRibbonCreate, t =>
         {
-            Assert.Contains(t, ScriptTables());
+            Assert.DoesNotContain(t, ScriptTables());
             Assert.DoesNotContain(t, wizards);
             Assert.DoesNotContain(t, createThenOpen);
+            Assert.DoesNotContain(t, Sprk.Bff.Api.Api.ChildRecordEndpoints.CreateTables);
             Assert.True(Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Find(t) is { GenericCreateRefused: true },
-                $"{t} is served with no ribbon create only while the BFF refuses its generic create.");
+                $"{t} has no ribbon create only while the BFF refuses its generic create.");
+            foreach (var location in new[] { "Mscrm.Form.{0}.NewRecord", "Mscrm.Form.{0}.SaveAndNew", "Mscrm.HomepageGrid.{0}.NewRecord",
+                         "Mscrm.SubGrid.{0}.AddNewStandard", "Mscrm.SubGrid.{0}.NewRecord" })
+            {
+                Assert.Contains($"Location=\"{string.Format(location, t)}\"", billingEventRibbon, StringComparison.Ordinal);
+            }
+
+            // No create command is left behind in the ribbon (the earlier "New Billing Event" button).
+            Assert.DoesNotContain("sprk.SecureChild.", billingEventRibbon, StringComparison.Ordinal);
         });
+
+        // EB-D-201: an invoice is created only by submission, so the route's create set holds neither invoice table, while the invoice
+        // keeps its Invoice wizard entry (a submission) and its re-file.
+        Assert.DoesNotContain("sprk_invoice", Sprk.Bff.Api.Api.ChildRecordEndpoints.CreateTables);
+        Assert.Contains("sprk_invoice", wizards);
+        Assert.DoesNotContain("sprk_invoice", createThenOpen);
+        Assert.Contains("sprk_invoice", Sprk.Bff.Api.Api.ChildRecordEndpoints.RefileTables);
 
         var createTables = Quoted(Regex.Match(File.ReadAllText(ChildRecordEndpointsFile),
             @"CreateTables\s*=\s*new HashSet<string>\(StringComparer\.OrdinalIgnoreCase\)\s*\{(?<list>[^}]*)\}").Groups["list"].Value);
