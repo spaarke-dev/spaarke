@@ -4,7 +4,7 @@
     <title>Office /api/office/todo and Office document save through the service, with the association set in the create (FR-18)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>019 complete</gate>
-    <status>not-started</status>
+    <status>in-progress (030a done; 030b re-scoped below)</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, office, documents; touches a worker that creates documents (data-mutation); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -115,7 +115,123 @@
     <criterion testable="true">BFF build 0 errors; Office contract tests (OfficeTodo*, OfficeSaveDocumentStamp*, OfficeQuickCreate*), OfficeVersionSave data-mutation tests, OfficeRecordOwnershipTests, SecureChildOwnershipAiToolTests* and RouteAuthorizationGuardTests pass unchanged; publish-size delta and CVE result recorded in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-18. Office Invoice quick-create was done in task 018. If document save keeps a pointer-only update, the determination and evidence are recorded in the task notes, and the live check is task 036.</notes>
+  <notes>Spec FR-18. Office Invoice quick-create was done in task 018. If document save keeps a pointer-only update, the determination and evidence are recorded in the task notes, and the live check is task 036.
+    Split (notes/task-030-notes.md section 3): 030a, the Office To Do, is done (notes section 5). The document-save half above is
+    SUPERSEDED by the 030b section below (W3 direction, notes/decisions.md 2026-11-06). Read 030b, not the document parts above.</notes>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+       030b: Office document save, re-scoped under the W3 direction (owner, reviewed by UAC-r2, 2026-11-06).
+       Supersedes every document-save part of the prompt, goal, steps and acceptance criteria above.
+       ═══════════════════════════════════════════════════════════════════════════════════════════════════════ -->
+  <subtask id="030b" status="in-progress">
+    <title>Office document save: the association in the existing create call, pinned by guards (named exception to RecordCreationService)</title>
+    <rigor>FULL</rigor>
+    <direction source="notes/decisions.md 2026-11-06 W3 direction, bullet 030">
+      The document save stays OUTSIDE RecordCreationService as a named exception: no given-id input, no pinned-owner input
+      and no other change to the service. The association moves INTO the existing create call. Guards pin that only the
+      server writes the narrowing and pointer columns, that the save calls the invariant-owner classes (stamp and owner),
+      and that a given document id that already exists is refused, never updated.
+    </direction>
+
+    <scope>
+      <in>The three Office sprk_document create sites: OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync (the save),
+        UploadFinalizationWorker.CreateDocumentRecordAsync (the worker's fallback create) and
+        UploadFinalizationWorker.ProcessSingleAttachmentAsync (each attachment child).</in>
+      <in>The shared create contract: CreateDocumentRequest gains one server-only ([JsonIgnore]) association member;
+        DocumentAssociationMap gains a TryApply overload for the create; DataverseServiceClientImpl.CreateDocumentAsync stages
+        it in the same create entity.</in>
+      <out>RecordCreationService (no change); field mapping for Office documents (not applied: named exception);
+        the version save and re-file paths; EmailAttachmentProcessor (not an Office path); the SPE pointer, email-archive and
+        parent-document columns, which stay in the follow-up update (W3 ruling covers the association only).</out>
+    </scope>
+
+    <invariant-owners>
+      <owner invariant="I-1 (stamp)">A document carries no stamp column: CoreAncestorResolver derives its root from its typed
+        association column (CoreAncestorResolver.IntermediateRootColumns["sprk_document"]). The save's part of I-1 is writing
+        that column in the create, through the one map (DocumentAssociationMap).</owner>
+      <owner invariant="I-6 (owner)">IRecordOwnershipResolver.ResolveOwnerAsync over OfficeDocumentPersistence.DocumentOwnershipOf,
+        asked over the same association the create writes; the worker's carried OwningTeamId still wins.</owner>
+      <owner invariant="I-19 / task 189 / task 095 (narrowing)">OfficeDocumentPersistence.ApplyEmailCommunicationOutcome, the one
+        setter of the create's narrowing members (unchanged).</owner>
+    </invariant-owners>
+
+    <acceptance-criteria>
+      <criterion id="AC-1" testable="true">Save: CreateDocumentWithSpePointersAsync with a TargetEntity of a supported type makes
+        exactly one CreateDocumentAsync call, whose request's Association names the column DocumentAssociationMap maps that type to
+        and the target id, and exactly one UpdateDocumentAsync call, whose request sets none of the seven association lookups
+        (Matter, Project, Invoice, WorkAssignment, Event, Todo, Contact). Covered for every accepted spelling (13).</criterion>
+      <criterion id="AC-2" testable="true">Worker: the fallback create and each attachment child carry the payload's association in
+        the create, and no UpdateDocumentAsync request from the worker sets an association lookup.</criterion>
+      <criterion id="AC-3" testable="true">Staging: DataverseServiceClientImpl stages Association onto the created entity as
+        [column] = EntityReference(target table, id) (sprk_matter to sprk_matter; event to sprk_relatedevent / sprk_event; contact to
+        sprk_relatedcontact / contact); no Association writes no association column; an empty id is refused before any write.</criterion>
+      <criterion id="AC-4" testable="true">Column agreement: for every spelling except contact, the create's column equals the
+        column the owner question and the update path use (RecordReparent.ParentChangesOf over the update overload); contact maps to
+        sprk_relatedcontact; every create column is in DocumentLinkFields.All with the same target; every matter / project / work
+        assignment column is in CoreAncestorResolver.IntermediateRootColumns["sprk_document"].</criterion>
+      <criterion id="AC-5" testable="true">Owner: the save's create carries the team it was handed; the worker's create carries the
+        carried OwningTeamId when present (the resolver is not asked), and otherwise the team ResolveOwnerAsync returns for a
+        question whose lookups hold the same association column and id as the create.</criterion>
+      <criterion id="AC-6" testable="true">No index column (FR-40): no create or update request on these paths sets SearchIndexName,
+        SearchIndexed or the index lifecycle dates.</criterion>
+      <criterion id="AC-7" testable="true">Negative, unsupported type: an association type with no sprk_document column (account, an
+        unknown string) or an empty id puts no association on the create and none on the update; the save still succeeds and the
+        existing warning is logged (unchanged behaviour).</criterion>
+      <criterion id="AC-8" testable="true">Negative, given id that already exists: when CreateDocumentAsync refuses the pre-assigned
+        id (a duplicate-key fault), CreateDocumentWithSpePointersAsync throws and makes no UpdateDocumentAsync call: the existing
+        row is never written. The save then takes its existing failure path.</criterion>
+      <criterion id="AC-9" testable="true">Negative, wire: a JSON body naming association, id, owningTeamId, createdByPersonId,
+        relatedCommunicationId, accessPermission, accessInheritanceRecord or restrictedBySubmission binds none of them onto
+        CreateDocumentRequest.</criterion>
+      <criterion id="AC-10" testable="true">No change to RecordCreationService, the worker's idempotency check, content dedup or the
+        version-save path; no new endpoint, DI registration or package.</criterion>
+      <criterion id="AC-11" testable="true">BFF build 0 errors / 0 warnings; filtered BFF tests (Office | RecordCreation |
+        RecordOwnership) and tests/Spaarke.ArchTests pass. Existing Office suites pass unchanged except test fixtures that follow
+        the association from the update to the create, with no assertion weakened.</criterion>
+    </acceptance-criteria>
+
+    <guards file="tests/Spaarke.ArchTests/OfficeDocumentSaveGuardTests.cs">
+      <guard id="G1" name="association in the create">In OfficeDocumentPersistence.cs and UploadFinalizationWorker.cs, every
+        DocumentAssociationMap.TryApply / ApplyAssociationLookup target is a CreateDocumentRequest, no association lookup property
+        is set, and at least 3 apply sites are found.
+        <must-fire>TryApply on an UpdateDocumentRequest; updateRequest.MatterLookup = id; an initializer setting ProjectLookup.</must-fire>
+        <must-not-fire>TryApply on a new CreateDocumentRequest; on a parameter typed CreateDocumentRequest; a commented-out update apply.</must-not-fire></guard>
+      <guard id="G2" name="the create stages the association">DataverseServiceClientImpl.CreateDocumentAsync calls
+        StageDocumentAssociation(document, request).
+        <must-fire>a body without the call; the call in another method; a commented-out call.</must-fire>
+        <must-not-fire>a body with the call.</must-not-fire></guard>
+      <guard id="G3" name="the save calls the owner class">OfficeService.cs and UploadFinalizationWorker.cs ask ResolveOwnerAsync over
+        OfficeDocumentPersistence.DocumentOwnershipOf (at least 2 and 1 sites), and every Office create request sets OwningTeamId in
+        its initializer.
+        <must-fire>a create request without OwningTeamId; a file whose owner question is not built by DocumentOwnershipOf.</must-fire>
+        <must-not-fire>a create request with OwningTeamId; ResolveOwnerAsync(OfficeDocumentPersistence.DocumentOwnershipOf(...) with {...}).</must-not-fire></guard>
+      <guard id="G4" name="only the server writes the narrowing and pointer columns">CreateDocumentRequest's members without
+        [JsonIgnore] are exactly Name, ContainerId and Description; the Office save body (SaveRequest and the types it carries) has no
+        member named for a pointer, narrowing, owner or new-document id (ExistingDocumentId is the version-save target and is allowed).
+        <must-fire>a type with a server-only member lacking [JsonIgnore]; a body type with a GraphItemId or AccessPermission member.</must-fire>
+        <must-not-fire>the same types with the attribute / without those members.</must-not-fire></guard>
+      <guard id="G5" name="a given id is created, never upserted">DataverseServiceClientImpl.CreateDocumentAsync creates with
+        CreateAsync and has no Upsert; in server code only OfficeDocumentPersistence.cs sets Id in a CreateDocumentRequest initializer;
+        every assignment of preAssignedDocumentId in OfficeService.cs is Guid.NewGuid() or null.
+        <must-fire>a body with UpsertAsync or an UpsertRequest; a CreateDocumentRequest initializer with Id in another file;
+          preAssignedDocumentId = request.Document.Id.</must-fire>
+        <must-not-fire>a body with CreateAsync; preAssignedDocumentId = Guid.NewGuid().</must-not-fire></guard>
+    </guards>
+
+    <tests>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/OfficeDocumentCreateAssociationTests.cs (AC-1, 2, 5, 6, 7, 8)</file>
+      <file role="new">tests/unit/domain/Dataverse/DocumentAssociationCreateStagingTests.cs (AC-3, 4, 9)</file>
+      <file role="new">tests/Spaarke.ArchTests/OfficeDocumentSaveGuardTests.cs (G1-G5)</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs (the fake world reads the association from the create)</file>
+    </tests>
+
+    <known-limits>
+      <limit>No field mapping on Office-saved documents (named exception; FR-18's "mapping if profiled" does not hold for them).</limit>
+      <limit>The pointer, email-archive and parent-document columns stay in the follow-up update; a failure between the create and
+        that update leaves a row with its association, owner and narrowing but without its pointer (unchanged).</limit>
+      <limit>Guards G1, G3 and G5 are source scans: they see the shapes their controls pin, not every possible spelling.</limit>
+    </known-limits>
+  </subtask>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
