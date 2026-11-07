@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
-using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -73,19 +72,9 @@ public static class DecisionPlanEndpoints
         CancellationToken ct)
     {
         var decision = await signalAccess.AuthorizeAsync(signalId, ct);
-        if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
-        {
-            return CallerUnresolved(httpContext);
-        }
-
-        if (decision.Outcome == SignalAccessOutcome.Unavailable)
-        {
-            return AccessUnavailable(httpContext);
-        }
-
         if (decision.Outcome != SignalAccessOutcome.Allowed)
         {
-            return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+            return DecisionResultMapper.ToHttp(decision.Outcome, httpContext);
         }
 
         // The caller may read this Signal and its core record, so the count is theirs to see. The count is trimmed to the Signals the
@@ -102,60 +91,20 @@ public static class DecisionPlanEndpoints
             // #1661 round 2 K5: a data condition, not a fault. A retry does not change it, so the caller is not told to retry; the
             // Signal's secure family cannot be known, so its count is never answered (never one from across the wall).
             logger.LogWarning("Suppression count withheld: the secure-family partition of Signal {SignalId} is undetermined; answering 503.", signalId);
-            return Results.Problem(
-                title: "Service Unavailable",
-                detail: "The suppression count is not available for this Signal because the secure records it belongs to cannot be determined.",
-                statusCode: StatusCodes.Status503ServiceUnavailable,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = PartitionUndeterminedReasonCode,
-                    ["correlationId"] = httpContext.TraceIdentifier,
-                });
+            return DecisionResultMapper.SuppressionPartitionUndetermined(httpContext);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             // AFTER Allowed: the caller is authorized, so this is a fault of ours, not a denial. A timeout (a cancellation the caller did
             // not ask for) is the same. 503 with the trace id, never a guessed count and never the uniform 404 (that answer is for "not yours").
             logger.LogError(ex, "Suppression count failed for an authorized caller (Signal {SignalId}); answering 503.", signalId);
-            return Results.Problem(
-                title: "Service Unavailable",
-                detail: "The suppression count could not be read. Try again.",
-                statusCode: StatusCodes.Status503ServiceUnavailable,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = SuppressionUnavailableReasonCode,
-                    ["correlationId"] = httpContext.TraceIdentifier,
-                });
+            return DecisionResultMapper.SuppressionUnavailable(httpContext);
         }
 
         return status is null
-            ? ProblemDetailsHelper.UniformRecordNotFound(httpContext)
+            ? DecisionResultMapper.RecordNotFound(httpContext)
             : Results.Ok(SuppressionResponse.From(signalId, status));
     }
-
-    /// <summary>A no-core Signal's subject, or a Do-lane Signal's "mine" read, could not be answered because of a fault: 503, never the
-    /// uniform 404 (that is for "not yours").</summary>
-    private static IResult AccessUnavailable(HttpContext httpContext) =>
-        Results.Problem(
-            title: "Service Unavailable",
-            detail: "This item could not be checked right now. Try again.",
-            statusCode: StatusCodes.Status503ServiceUnavailable,
-            extensions: new Dictionary<string, object?>
-            {
-                ["reasonCode"] = AccessUnavailableReasonCode,
-                ["correlationId"] = httpContext.TraceIdentifier,
-            });
-
-    private static IResult CallerUnresolved(HttpContext httpContext) =>
-        Results.Problem(
-            title: "Forbidden",
-            detail: "The caller could not be resolved to a Dataverse user.",
-            statusCode: StatusCodes.Status403Forbidden,
-            extensions: new Dictionary<string, object?>
-            {
-                ["reasonCode"] = CallerUnresolvedReasonCode,
-                ["correlationId"] = httpContext.TraceIdentifier,
-            });
 
     internal static async Task<IResult> GetDecisionPlanAsync(
         Guid signalId,
@@ -168,34 +117,15 @@ public static class DecisionPlanEndpoints
         [FromServices] DecisionParameterSources? parameterSources = null)
     {
         var decision = await signalAccess.AuthorizeAsync(signalId, ct);
-        if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
-        {
-            return CallerUnresolved(httpContext);
-        }
-
-        if (decision.Outcome == SignalAccessOutcome.Unavailable)
-        {
-            return AccessUnavailable(httpContext);
-        }
-
         if (decision.Outcome != SignalAccessOutcome.Allowed || decision.Lane is not { } lane || decision.PolicyVersionId is not { } versionId)
         {
-            return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+            return DecisionResultMapper.ToHttp(decision.Outcome, httpContext);
         }
 
         var resolution = await planService.GetAsync(versionId, lane, ct);
         if (resolution.Plan is not { } plan)
         {
-            return Results.Problem(
-                title: "Unprocessable Entity",
-                detail: "This Signal's decision plan does not resolve against the action catalog, so no actions can be offered.",
-                statusCode: StatusCodes.Status422UnprocessableEntity,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = PlanRefusedReasonCode,
-                    ["reason"] = resolution.RefusalReason,
-                    ["correlationId"] = httpContext.TraceIdentifier,
-                });
+            return DecisionResultMapper.PlanRefused(resolution.RefusalReason, httpContext);
         }
 
         // Task 154 (D-111): an OPEN inquiry's "Record the outcome" To Do is completed by recording the disposition, never by Mark
@@ -207,7 +137,7 @@ public static class DecisionPlanEndpoints
             var inquiry = await signalAccess.CheckSubjectTodoInquiryAsync(decision, ct);
             if (inquiry == InquiryOutcomeTodoCheck.Unavailable)
             {
-                return AccessUnavailable(httpContext);
+                return DecisionResultMapper.AccessUnavailable(httpContext);
             }
 
             if (inquiry == InquiryOutcomeTodoCheck.OpenInquiry)

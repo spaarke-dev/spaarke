@@ -58,28 +58,7 @@ public static class SignalReadEndpoints
         }
 
         var result = await signalRead.ReadAsync(worklistSet, httpContext.User, ct);
-        return result.Outcome switch
-        {
-            SignalReadOutcome.Ok when result.Response is { } body => Results.Ok(body),
-            SignalReadOutcome.CallerUnresolved => Results.Problem(
-                title: "Forbidden",
-                detail: "The caller could not be resolved to a Dataverse user.",
-                statusCode: StatusCodes.Status403Forbidden,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = DecisionPlanEndpoints.CallerUnresolvedReasonCode,
-                    ["correlationId"] = httpContext.TraceIdentifier,
-                }),
-            _ => Results.Problem(
-                title: "Service Unavailable",
-                detail: "The worklist could not be read. Try again.",
-                statusCode: StatusCodes.Status503ServiceUnavailable,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = WorklistUnavailableReasonCode,
-                    ["correlationId"] = httpContext.TraceIdentifier,
-                }),
-        };
+        return DecisionResultMapper.ToHttp(result, httpContext);
     }
 
     internal static bool TryParseSet(string? value, out WorklistSet set)

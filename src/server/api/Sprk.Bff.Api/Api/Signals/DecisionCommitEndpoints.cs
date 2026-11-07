@@ -1,4 +1,3 @@
-using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Signals;
 
 namespace Sprk.Bff.Api.Api.Signals;
@@ -34,7 +33,7 @@ public static class DecisionCommitEndpoints
             .WithDescription("200 with the record id, the steps and the Signals closed (a repeated review id returns its first "
                 + "outcome). 403 when the caller is unresolved or lacks a right an action needs; 404 when a Signal or its core "
                 + "record is not readable; 409 when a Signal is no longer open, the review is in progress, or a Signal is an invoice or "
-                + "invoice-line item (ontology.decision.decided_in_invoice_review: decided in Invoice Review only); 422 when the review "
+                + $"invoice-line item ({DecisionCommitReasons.DecidedInInvoiceReview}: decided in Invoice Review only); 422 when the review "
                 + "is invalid; 500 when a step failed (no record; the writes that landed are listed); 503 when the route cannot "
                 + "check the review id.")
             .Accepts<DecisionReview>("application/json")
@@ -55,66 +54,6 @@ public static class DecisionCommitEndpoints
         CancellationToken ct)
     {
         var result = await commits.CommitAsync(signalId, review, httpContext, ct);
-        return ToHttp(result, httpContext);
-    }
-
-    internal static IResult ToHttp(DecisionCommitResult result, HttpContext httpContext)
-    {
-        switch (result.Status)
-        {
-            case DecisionCommitStatus.Recorded:
-                return Results.Ok(result);
-            case DecisionCommitStatus.NotFound:
-                return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
-            case DecisionCommitStatus.CallerUnresolved:
-                return Problem(StatusCodes.Status403Forbidden, "Forbidden", "The caller could not be resolved to a Dataverse user.",
-                    DecisionPlanEndpoints.CallerUnresolvedReasonCode, httpContext, result: null);
-        }
-
-        var status = result.Status switch
-        {
-            DecisionCommitStatus.Forbidden => StatusCodes.Status403Forbidden,
-            DecisionCommitStatus.Conflict or DecisionCommitStatus.InProgress => StatusCodes.Status409Conflict,
-            DecisionCommitStatus.Refused => StatusCodes.Status422UnprocessableEntity,
-            DecisionCommitStatus.Unavailable => StatusCodes.Status503ServiceUnavailable,
-            _ => StatusCodes.Status500InternalServerError,
-        };
-        var title = status switch
-        {
-            StatusCodes.Status403Forbidden => "Forbidden",
-            StatusCodes.Status409Conflict => "Conflict",
-            StatusCodes.Status422UnprocessableEntity => "Unprocessable Entity",
-            StatusCodes.Status503ServiceUnavailable => "Service Unavailable",
-            _ => "The decision was not recorded",
-        };
-        return Problem(status, title, result.Detail ?? title, result.ReasonCode, httpContext, result);
-    }
-
-    private static IResult Problem(int status, string title, string detail, string? reasonCode, HttpContext httpContext, DecisionCommitResult? result)
-    {
-        var extensions = new Dictionary<string, object?>
-        {
-            ["reasonCode"] = reasonCode,
-            ["correlationId"] = httpContext.TraceIdentifier,
-        };
-        if (result is not null)
-        {
-            extensions["reviewId"] = result.ReviewId;
-            extensions["actionCode"] = result.ActionCode;
-            if (result.Status == DecisionCommitStatus.Failed)
-            {
-                // D-17: the user sees which writes landed.
-                extensions["failedStep"] = result.FailedStep;
-                extensions["landed"] = result.Landed;
-                extensions["possiblyLanded"] = result.PossiblyLanded;
-                extensions["steps"] = result.Steps;
-                extensions["recordMayExist"] = result.RecordMayExist;
-                extensions["sentButNotRecorded"] = result.SentButNotRecorded;
-                extensions["resumable"] = result.Resumable;
-                extensions["replayed"] = result.Replayed;
-            }
-        }
-
-        return Results.Problem(title: title, detail: detail, statusCode: status, extensions: extensions);
+        return DecisionResultMapper.ToHttp(result, httpContext);
     }
 }

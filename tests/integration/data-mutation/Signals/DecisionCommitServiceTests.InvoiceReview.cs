@@ -49,7 +49,7 @@ public sealed partial class DecisionCommitServiceTests
         AssertNoRightsAskedAndNothingWritten(rig, "an invoice or line is decided in Invoice Review");
 
         // The route's own mapping: 409 ProblemDetails with the reason code, never today's 403 SubjectWriteMissing.
-        var reply = DecisionCommitEndpoints.ToHttp(result, Http());
+        var reply = DecisionResultMapper.ToHttp(result, Http());
         var problem = reply.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
         problem.StatusCode.Should().Be(StatusCodes.Status409Conflict);
         problem.ProblemDetails.Extensions["reasonCode"].Should().Be("ontology.decision.decided_in_invoice_review");

@@ -3979,7 +3979,7 @@ public sealed partial class DecisionCommitServiceTests
     [InlineData(DecisionCommitStatus.Failed, 500)]
     public void EachOutcome_IsOneHttpStatus(DecisionCommitStatus status, int http)
     {
-        var reply = DecisionCommitEndpoints.ToHttp(new DecisionCommitResult { Status = status, ReviewId = Guid.NewGuid() }, Http());
+        var reply = DecisionResultMapper.ToHttp(new DecisionCommitResult { Status = status, ReviewId = Guid.NewGuid() }, Http());
 
         ((Microsoft.AspNetCore.Http.IStatusCodeHttpResult)reply).StatusCode.Should().Be(http);
     }
@@ -3988,7 +3988,7 @@ public sealed partial class DecisionCommitServiceTests
     public void AFailure_TellsTheUserWhichWritesLanded()
     {
         var landed = new DecisionCommitRef("sprk_budgetrevision", RevisionId);
-        var reply = DecisionCommitEndpoints.ToHttp(new DecisionCommitResult
+        var reply = DecisionResultMapper.ToHttp(new DecisionCommitResult
         {
             Status = DecisionCommitStatus.Failed,
             ReviewId = Guid.NewGuid(),
@@ -4008,7 +4008,7 @@ public sealed partial class DecisionCommitServiceTests
     [Fact]
     public void ANotFound_IsTheUniform404_WithNothingAboutTheReview()
     {
-        var reply = DecisionCommitEndpoints.ToHttp(new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = Guid.NewGuid(), Detail = "secret" }, Http());
+        var reply = DecisionResultMapper.ToHttp(new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = Guid.NewGuid(), Detail = "secret" }, Http());
 
         var problem = reply.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject.ProblemDetails;
         problem.Detail.Should().NotContain("secret");
