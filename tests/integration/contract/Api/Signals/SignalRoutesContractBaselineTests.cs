@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -120,6 +121,10 @@ public sealed partial class DecisionCommitServiceTests
                     new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), NullLogger<SignalSuppressionService>.Instance));
                 builder.Services.AddSingleton(rig.User.Object);
                 builder.Services.AddSingleton(rig.Service());
+                // Task 013 (B-1): the plan and suppression routes now call the decision capability, registered as SignalsModule registers
+                // it. This host maps no worklist route, so the capability's list collaborator is a stateless placeholder that is never called.
+                builder.Services.AddSingleton((SignalReadService)RuntimeHelpers.GetUninitializedObject(typeof(SignalReadService)));
+                builder.Services.AddScoped<IDecisionCapability, DecisionCapability>();
 
                 builder.WebHost.UseTestServer();
                 _app = builder.Build();

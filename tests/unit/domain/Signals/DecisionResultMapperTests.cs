@@ -179,6 +179,91 @@ public sealed class DecisionResultMapperTests
         AssertKnownToolError(DecisionResultMapper.ToToolError(reasonCode!, status), DecisionPlanEndpoints.PartitionUndeterminedReasonCode, 503);
     }
 
+    // ── Task 013: the capability's plan and suppression results ────────────────────────────────────────────────────
+
+    public static TheoryData<string, int, string> PlanResults => new()
+    {
+        { "caller-unresolved", 403, DecisionPlanEndpoints.CallerUnresolvedReasonCode },
+        { "not-found", 404, ProblemDetailsHelper.RecordUnavailableReasonCode },
+        { "allowed-without-lane", 404, ProblemDetailsHelper.RecordUnavailableReasonCode },
+        { "access-unavailable", 503, DecisionPlanEndpoints.AccessUnavailableReasonCode },
+        { "refused", 422, DecisionPlanEndpoints.PlanRefusedReasonCode },
+        { "inquiry-check-unavailable", 503, DecisionPlanEndpoints.AccessUnavailableReasonCode },
+        { "user-context-required", 401, Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserClientErrorCodes.UserContextRequired },
+    };
+
+    [Theory]
+    [MemberData(nameof(PlanResults))]
+    public void ToToolError_PlanReadFailure_MatchesTheRestAnswer(string name, int httpStatus, string reasonCode)
+    {
+        var result = name switch
+        {
+            "caller-unresolved" => DecisionPlanReadResult.NotAllowed(SignalAccessOutcome.CallerUnresolved),
+            "not-found" => DecisionPlanReadResult.NotAllowed(SignalAccessOutcome.NotFound),
+            "allowed-without-lane" => DecisionPlanReadResult.NotAllowed(SignalAccessOutcome.Allowed),
+            "access-unavailable" => DecisionPlanReadResult.NotAllowed(SignalAccessOutcome.Unavailable),
+            "refused" => DecisionPlanReadResult.Refused("unknown_action_code"),
+            "inquiry-check-unavailable" => DecisionPlanReadResult.AccessUnavailable,
+            _ => DecisionPlanReadResult.UserContextRequired,
+        };
+
+        AssertKnownToolError(DecisionResultMapper.ToToolError(result), reasonCode, httpStatus);
+        Rest(DecisionResultMapper.ToHttp(result, Http())).Should().Be((httpStatus, reasonCode));
+    }
+
+    public static TheoryData<string, int, string> SuppressionResults => new()
+    {
+        { "caller-unresolved", 403, DecisionPlanEndpoints.CallerUnresolvedReasonCode },
+        { "not-allowed", 404, ProblemDetailsHelper.RecordUnavailableReasonCode },
+        { "access-unavailable", 503, DecisionPlanEndpoints.AccessUnavailableReasonCode },
+        { "count-not-found", 404, ProblemDetailsHelper.RecordUnavailableReasonCode },
+        { "partition-undetermined", 503, DecisionPlanEndpoints.PartitionUndeterminedReasonCode },
+        { "unavailable", 503, DecisionPlanEndpoints.SuppressionUnavailableReasonCode },
+        { "user-context-required", 401, Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserClientErrorCodes.UserContextRequired },
+    };
+
+    [Theory]
+    [MemberData(nameof(SuppressionResults))]
+    public void ToToolError_SuppressionReadFailure_MatchesTheRestAnswer(string name, int httpStatus, string reasonCode)
+    {
+        var result = name switch
+        {
+            "caller-unresolved" => SuppressionReadResult.NotAllowed(SignalAccessOutcome.CallerUnresolved),
+            "not-allowed" => SuppressionReadResult.NotAllowed(SignalAccessOutcome.NotFound),
+            "access-unavailable" => SuppressionReadResult.NotAllowed(SignalAccessOutcome.Unavailable),
+            "count-not-found" => SuppressionReadResult.NotFound,
+            "partition-undetermined" => SuppressionReadResult.PartitionUndetermined,
+            "unavailable" => SuppressionReadResult.Unavailable,
+            _ => SuppressionReadResult.UserContextRequired,
+        };
+
+        AssertKnownToolError(DecisionResultMapper.ToToolError(result), reasonCode, httpStatus);
+        Rest(DecisionResultMapper.ToHttp(result, Http())).Should().Be((httpStatus, reasonCode));
+    }
+
+    [Fact]
+    public void ToToolError_WorklistWithNoSignedInCaller_IsUserContextRequired_NotTheSingle403()
+    {
+        const string code = Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserClientErrorCodes.UserContextRequired;
+
+        AssertKnownToolError(DecisionResultMapper.ToToolError(DecisionCapability.UserContextRequiredReadResult), code, 401);
+        Rest(DecisionResultMapper.ToHttp(DecisionCapability.UserContextRequiredReadResult, Http())).Should().Be((401, code));
+        Rest(DecisionResultMapper.ToHttp(SignalReadResult.CallerUnresolved, Http()))
+            .Should().Be((403, DecisionPlanEndpoints.CallerUnresolvedReasonCode), "the service's own unresolved caller keeps the single 403");
+    }
+
+    [Fact]
+    public void ToToolError_PlanOrSuppressionReadWithABody_IsNoError()
+    {
+        var plan = new DecisionPlanResponse(Guid.NewGuid(), "Decide", Guid.NewGuid(), [], [], [], null);
+        var suppression = new SuppressionResponse(Guid.NewGuid(), 0, 0, 3, 30, null, true);
+
+        DecisionResultMapper.ToToolError(DecisionPlanReadResult.Ok(plan)).Should().BeNull();
+        DecisionResultMapper.ToToolError(SuppressionReadResult.Ok(suppression)).Should().BeNull();
+        DecisionResultMapper.ToHttp(DecisionPlanReadResult.Ok(plan), Http()).Should().BeOfType<Ok<DecisionPlanResponse>>().Which.Value.Should().BeSameAs(plan);
+        DecisionResultMapper.ToHttp(SuppressionReadResult.Ok(suppression), Http()).Should().BeOfType<Ok<SuppressionResponse>>().Which.Value.Should().BeSameAs(suppression);
+    }
+
     // ── Negative cases ────────────────────────────────────────────────────────────────────────────────────────────
 
     [Theory]

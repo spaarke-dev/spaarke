@@ -131,6 +131,11 @@ public static class SignalsModule
         // Task 043 (K4): the server-side plan-read time the commit route uses as the review start (ITenantCache, a singleton).
         services.AddSingleton<DecisionPlanReadStamp>();
 
+        // spaarkeai-mcp-bff-api-r1 task 013 (B-1, FR-10 option C): the decision capability, the one entry point the worklist,
+        // decision-plan and suppression routes and the MCP tools (tasks 022-024) call. Scoped like the request-caller services it runs;
+        // unconditional like the routes that use it (bff-extensions.md F.1). An interface because two hosts consume it (REST, MCP).
+        services.AddScoped<IDecisionCapability, DecisionCapability>();
+
         // RuleBodyDescriber (task 026, FR-48): the read-side plain-language description of a rule body. Stateless over the
         // compiler and the shared sysadmin entity service, both singletons.
         services.AddSingleton<RuleBodyDescriber>();

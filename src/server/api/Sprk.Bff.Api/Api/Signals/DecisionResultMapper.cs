@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -28,6 +29,9 @@ public sealed record DecisionToolError(string ReasonCode, string Message, int St
 /// <see cref="DecisionActionReasons"/>, the route constants on <see cref="DecisionPlanEndpoints"/> and
 /// <see cref="SignalReadEndpoints"/>, <see cref="ProblemDetailsHelper.RecordUnavailableReasonCode"/>); this class adds none. REST
 /// and MCP take the status of a commit result from the same switch, so the two hosts cannot disagree.</para>
+/// <para><b>No caller (task 013).</b> A capability call with no request context or no authenticated caller answers
+/// <c>UserContextRequired</c> (<see cref="DataverseUserClientErrorCodes.UserContextRequired"/>, 401) on both hosts. A REST request never
+/// reaches it (the routes' <c>RequireAuthorization</c> answers 401 first, so no baseline moves); an MCP tool can.</para>
 /// <para><b>Placement justification (CLAUDE.md section 10; .claude/constraints/bff-extensions.md).</b> It replaces mapping statics
 /// that lived in the three Signals endpoint classes; it is a static class with no DI registration, no package and no AI-internal
 /// type. The MCP side needs no caller context (spec FR-10 as amended 2026-11-07, option C).</para>
@@ -63,6 +67,10 @@ public static class DecisionResultMapper
         StatusCodes.Status503ServiceUnavailable, "Service Unavailable", "The suppression count could not be read. Try again.",
         DecisionPlanEndpoints.SuppressionUnavailableReasonCode);
 
+    private static readonly FixedProblem UserContextRequiredProblem = new(
+        StatusCodes.Status401Unauthorized, "Unauthorized", "The request has no signed-in caller.",
+        DataverseUserClientErrorCodes.UserContextRequired);
+
     // ── REST ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary><c>GET /api/v1/signals/worklist</c>. The internal reason of an <see cref="SignalReadOutcome.Unavailable"/> result
@@ -71,6 +79,7 @@ public static class DecisionResultMapper
         result.Outcome switch
         {
             SignalReadOutcome.Ok when result.Response is { } body => Results.Ok(body),
+            _ when IsUserContextRequired(result) => Problem(UserContextRequiredProblem, httpContext),
             SignalReadOutcome.CallerUnresolved => Problem(CallerUnresolvedProblem, httpContext),
             _ => Problem(WorklistUnavailableProblem, httpContext),
         };
@@ -86,6 +95,29 @@ public static class DecisionResultMapper
             SignalAccessOutcome.CallerUnresolved => Problem(CallerUnresolvedProblem, httpContext),
             SignalAccessOutcome.Unavailable => Problem(AccessUnavailableProblem, httpContext),
             _ => ProblemDetailsHelper.UniformRecordNotFound(httpContext),
+        };
+
+    /// <summary><c>GET /api/v1/signals/{signalId}/decision-plan</c>: the capability's plan read (task 013).</summary>
+    public static IResult ToHttp(DecisionPlanReadResult result, HttpContext httpContext) =>
+        result.Outcome switch
+        {
+            DecisionPlanReadOutcome.Ok when result.Plan is { } plan => Results.Ok(plan),
+            DecisionPlanReadOutcome.UserContextRequired => Problem(UserContextRequiredProblem, httpContext),
+            DecisionPlanReadOutcome.NotAllowed => ToHttp(result.Access, httpContext),
+            DecisionPlanReadOutcome.Refused => PlanRefused(result.RefusalReason, httpContext),
+            _ => AccessUnavailable(httpContext),
+        };
+
+    /// <summary><c>GET /api/v1/signals/{signalId}/suppression</c>: the capability's suppression read (task 013).</summary>
+    public static IResult ToHttp(SuppressionReadResult result, HttpContext httpContext) =>
+        result.Outcome switch
+        {
+            SuppressionReadOutcome.Ok when result.Suppression is { } suppression => Results.Ok(suppression),
+            SuppressionReadOutcome.UserContextRequired => Problem(UserContextRequiredProblem, httpContext),
+            SuppressionReadOutcome.NotAllowed => ToHttp(result.Access, httpContext),
+            SuppressionReadOutcome.NotFound => RecordNotFound(httpContext),
+            SuppressionReadOutcome.PartitionUndetermined => SuppressionPartitionUndetermined(httpContext),
+            _ => SuppressionUnavailable(httpContext),
         };
 
     /// <summary>The uniform 404 (<see cref="ProblemDetailsHelper.UniformRecordNotFound"/>), for a read that found nothing after the
@@ -148,6 +180,7 @@ public static class DecisionResultMapper
         result.Outcome switch
         {
             SignalReadOutcome.Ok when result.Response is not null => null,
+            _ when IsUserContextRequired(result) => ToToolError(UserContextRequiredProblem),
             SignalReadOutcome.CallerUnresolved => ToToolError(CallerUnresolvedProblem),
             _ => ToToolError(WorklistUnavailableProblem),
         };
@@ -159,6 +192,29 @@ public static class DecisionResultMapper
             SignalAccessOutcome.CallerUnresolved => ToToolError(CallerUnresolvedProblem),
             SignalAccessOutcome.Unavailable => ToToolError(AccessUnavailableProblem),
             _ => ToToolError(ProblemDetailsHelper.RecordUnavailableReasonCode, StatusCodes.Status404NotFound),
+        };
+
+    /// <summary>The plan read for a tool (task 013): null when the plan was returned, otherwise the error the REST route's answer carries.</summary>
+    public static DecisionToolError? ToToolError(DecisionPlanReadResult result) =>
+        result.Outcome switch
+        {
+            DecisionPlanReadOutcome.Ok when result.Plan is not null => null,
+            DecisionPlanReadOutcome.UserContextRequired => ToToolError(UserContextRequiredProblem),
+            DecisionPlanReadOutcome.NotAllowed => ToToolError(result.Access),
+            DecisionPlanReadOutcome.Refused => ToToolError(PlanRefusedProblem),
+            _ => ToToolError(AccessUnavailableProblem),
+        };
+
+    /// <summary>The suppression read for a tool (task 013): null when the count was returned, otherwise the REST route's code and status.</summary>
+    public static DecisionToolError? ToToolError(SuppressionReadResult result) =>
+        result.Outcome switch
+        {
+            SuppressionReadOutcome.Ok when result.Suppression is not null => null,
+            SuppressionReadOutcome.UserContextRequired => ToToolError(UserContextRequiredProblem),
+            SuppressionReadOutcome.NotAllowed => ToToolError(result.Access),
+            SuppressionReadOutcome.NotFound => ToToolError(ProblemDetailsHelper.RecordUnavailableReasonCode, StatusCodes.Status404NotFound),
+            SuppressionReadOutcome.PartitionUndetermined => ToToolError(PartitionUndeterminedProblem),
+            _ => ToToolError(SuppressionUnavailableProblem),
         };
 
     /// <summary>A commit result for a tool: null when the decision was recorded, otherwise the REST route's reason code and status.</summary>
@@ -220,6 +276,12 @@ public static class DecisionResultMapper
 
     private static DecisionToolError ToToolError(FixedProblem problem) => ToToolError(problem.ReasonCode, problem.Status);
 
+    /// <summary>The capability's no-caller worklist answer (<see cref="DecisionCapability.UserContextRequiredReadResult"/>): the single-403
+    /// outcome tagged with <c>UserContextRequired</c>, a reason <see cref="SignalReadService"/> never sets on that outcome.</summary>
+    private static bool IsUserContextRequired(SignalReadResult result) =>
+        result.Outcome == SignalReadOutcome.CallerUnresolved
+        && string.Equals(result.Reason, DataverseUserClientErrorCodes.UserContextRequired, StringComparison.Ordinal);
+
     private static IResult Problem(FixedProblem problem, HttpContext httpContext) =>
         Results.Problem(
             title: problem.Title,
@@ -272,6 +334,8 @@ public static class DecisionResultMapper
     private static readonly IReadOnlyDictionary<string, string> FixMessages = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         // Access, worklist, plan and suppression routes.
+        [DataverseUserClientErrorCodes.UserContextRequired] =
+            "Spaarke could not see who is signed in, so nothing was read. Sign in again with your Spaarke work account, then retry.",
         [DecisionPlanEndpoints.CallerUnresolvedReasonCode] =
             "Your Spaarke user could not be identified. Sign in again with your Spaarke work account, then retry.",
         [ProblemDetailsHelper.RecordUnavailableReasonCode] =

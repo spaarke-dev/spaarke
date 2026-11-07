@@ -411,12 +411,14 @@ public sealed class DoLanePrivacyTests
 
     private static Task<IResult> PlanRoute(SignalCoreRecordAccess access) =>
         DecisionPlanEndpoints.GetDecisionPlanAsync(
-            SignalId, Http(), access,
-            new DecisionPlanService(new Mock<IGenericEntityService>(MockBehavior.Strict).Object, NullLogger<DecisionPlanService>.Instance),
-            new RuleBodyDescriber(
-                new PolicyVersionValidator(new RuleBodySchemaValidator(), new PredicateCompiler(new RuleBodySchemaValidator(), TimeProvider.System),
-                    NullLogger<PolicyVersionValidator>.Instance),
-                new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance),
+            SignalId, Http(),
+            DecisionCapabilityFixtures.Capability(
+                access,
+                new DecisionPlanService(new Mock<IGenericEntityService>(MockBehavior.Strict).Object, NullLogger<DecisionPlanService>.Instance),
+                new RuleBodyDescriber(
+                    new PolicyVersionValidator(new RuleBodySchemaValidator(), new PredicateCompiler(new RuleBodySchemaValidator(), TimeProvider.System),
+                        NullLogger<PolicyVersionValidator>.Instance),
+                    new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance)),
             CancellationToken.None);
 
     private static Task<IResult> SuppressionRoute(World world, Guid actingAs)
@@ -429,7 +431,7 @@ public sealed class DoLanePrivacyTests
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             NullLogger<SignalSuppressionService>.Instance);
         return DecisionPlanEndpoints.GetSuppressionAsync(
-            SignalId, Http(), access, strict, world.Client, NullLogger<SignalSuppressionService>.Instance, CancellationToken.None);
+            SignalId, Http(), DecisionCapabilityFixtures.Capability(access, suppression: strict, caller: world.Client), CancellationToken.None);
     }
 
     /// <summary>The plan route with the version's plan readable (configuration, the BFF's own read).</summary>
@@ -439,19 +441,21 @@ public sealed class DoLanePrivacyTests
         entities.Setup(e => e.RetrieveAsync("sprk_policyversion", VersionId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_policyversion", VersionId) { ["sprk_decisionplan"] = planJson });
         return DecisionPlanEndpoints.GetDecisionPlanAsync(
-            SignalId, Http(), access,
-            new DecisionPlanService(entities.Object, NullLogger<DecisionPlanService>.Instance),
-            new RuleBodyDescriber(
-                new PolicyVersionValidator(new RuleBodySchemaValidator(), new PredicateCompiler(new RuleBodySchemaValidator(), TimeProvider.System),
-                    NullLogger<PolicyVersionValidator>.Instance),
-                new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance),
+            SignalId, Http(),
+            DecisionCapabilityFixtures.Capability(
+                access,
+                new DecisionPlanService(entities.Object, NullLogger<DecisionPlanService>.Instance),
+                new RuleBodyDescriber(
+                    new PolicyVersionValidator(new RuleBodySchemaValidator(), new PredicateCompiler(new RuleBodySchemaValidator(), TimeProvider.System),
+                        NullLogger<PolicyVersionValidator>.Instance),
+                    new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance)),
             CancellationToken.None);
     }
 
     private static DecisionPlanResponse Plan(IResult result) =>
         result.Should().BeOfType<Ok<DecisionPlanResponse>>().Subject.Value!;
 
-    private static HttpContext Http() => new DefaultHttpContext { TraceIdentifier = "trace-150" };
+    private static HttpContext Http() => DecisionCapabilityFixtures.SignedIn("trace-150");
 
     private static Microsoft.AspNetCore.Mvc.ProblemDetails Problem(IResult result) =>
         result.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails;

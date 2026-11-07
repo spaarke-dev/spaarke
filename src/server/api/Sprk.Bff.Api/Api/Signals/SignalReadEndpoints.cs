@@ -43,9 +43,11 @@ public static class SignalReadEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
+    /// <summary>The route over <see cref="IDecisionCapability.ListDecideAsync"/> (task 013, B-1): only the <c>set</c> validation and the
+    /// HTTP shaping (<see cref="DecisionResultMapper"/>) are here.</summary>
     internal static async Task<IResult> GetWorklistAsync(
         HttpContext httpContext,
-        SignalReadService signalRead,
+        IDecisionCapability decisions,
         CancellationToken ct,
         string? set = null)
     {
@@ -57,7 +59,7 @@ public static class SignalReadEndpoints
             });
         }
 
-        var result = await signalRead.ReadAsync(worklistSet, httpContext.User, ct);
+        var result = await decisions.ListDecideAsync(httpContext.User, ct, worklistSet);
         return DecisionResultMapper.ToHttp(result, httpContext);
     }
 

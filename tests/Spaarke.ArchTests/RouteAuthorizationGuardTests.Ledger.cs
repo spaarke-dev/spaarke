@@ -2208,14 +2208,17 @@ public partial class RouteAuthorizationGuardTests
             + "(DataverseWebApiService.cs:343-350) and sends MSCRMCallerID through DataverseImpersonation.ApplyAsSystemUser "
             + "(:205-207); an unresolvable caller is 403 before any query (EventEndpoints.cs:341-498). The query is the gate."),
         new HandlerDecision("GET /api/v1/signals/{signalId:guid}/decision-plan", "GetDecisionPlanAsync", "IDataverseUserClient",
-            new[] { "SignalCoreRecordAccess.AuthorizeAsync" },
-            "Ontology task 036: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:169), which reads "
+            new[] { "DecisionCapability.GetPlanAsync", "SignalCoreRecordAccess.AuthorizeAsync" },
+            "Ontology task 036; spaarkeai-mcp-bff-api-r1 task 013 (B-1) moved the body, unchanged, into DecisionCapability.GetPlanAsync, which "
+            + "the handler calls (DecisionPlanEndpoints.cs:78) and which MCP's plan tool shares. After a no-caller guard (no context or no "
+            + "authenticated identity: UserContextRequired, nothing read) its first act is SignalCoreRecordAccess.AuthorizeAsync "
+            + "(DecisionCapability.cs:100), which reads "
             + "the Signal (SignalCoreRecordAccess.cs:164) and then its core record (:216), or for a no-core Do Signal its subject row "
             + "(:281; a thrown or faulted read is Unavailable, :286/:291), through IDataverseUserClient AS THE CALLER; for a Do-lane Signal "
             + "it then runs ConfirmDoLaneMineAsync (:314, called at :230/:296), the worklist's own \"mine\" read of the subject AS THE CALLER "
             + "(:342-343; D-141): not the caller's own work is NotFound, a fault Unavailable. "
-            + "Anything but Allowed returns before the plan is read (uniform 404 at DecisionPlanEndpoints.cs:180-182, caller_unresolved 403 at :170-172, "
-            + "a subject-read or \"mine\" fault 503 at :175-177)."),
+            + "Anything but Allowed returns before the plan is read (DecisionCapability.cs:101-104; mapped by DecisionResultMapper to the uniform 404, "
+            + "the caller_unresolved 403 or the subject-read or \"mine\" fault 503)."),
         new HandlerDecision("POST /api/v1/signals/{signalId:guid}/decision", "CommitDecisionAsync", "IDataverseUserClient",
             new[] { "DecisionCommitService.CommitAsync", "SignalCoreRecordAccess.AuthorizeAsync" },
             "Ontology task 043: the handler calls DecisionCommitService.CommitAsync (DecisionCommitEndpoints.cs:56), whose first I/O is "
@@ -2233,13 +2236,15 @@ public partial class RouteAuthorizationGuardTests
             + "resolves, secure-if-any; D-129, uac-r2 F1), taken as returned and asked only AFTER that check (:1069), so the answer never shows "
             + "whether a row exists (a refusal is 422, a resolver fault 503: :1071-1085)."),
         new HandlerDecision("GET /api/v1/signals/{signalId:guid}/suppression", "GetSuppressionAsync", "IDataverseUserClient",
-            new[] { "SignalCoreRecordAccess.AuthorizeAsync" },
-            "Ontology task 034: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:75), "
+            new[] { "DecisionCapability.GetSuppressionAsync", "SignalCoreRecordAccess.AuthorizeAsync" },
+            "Ontology task 034; spaarkeai-mcp-bff-api-r1 task 013 (B-1) moved the body, unchanged, into DecisionCapability.GetSuppressionAsync, "
+            + "which the handler calls (DecisionPlanEndpoints.cs:69). After the no-caller guard its first act is SignalCoreRecordAccess.AuthorizeAsync "
+            + "(DecisionCapability.cs:169), "
             + "the same decision as decision-plan: the Signal, then its core record of any type, read AS THE CALLER through IDataverseUserClient "
-            + "(a no-core Do Signal needs the caller's own read of the Signal and its subject, D-35 as amended by D-129), and for a Do-lane Signal the same \"mine\" read (D-141). Anything but Allowed returns the uniform 404 (:86-88) / caller_unresolved 403 (:76-78) / subject-or-\"mine\"-fault 503 (:81-83) before the count is "
+            + "(a no-core Do Signal needs the caller's own read of the Signal and its subject, D-35 as amended by D-129), and for a Do-lane Signal the same \"mine\" read (D-141). Anything but Allowed returns the uniform 404 / caller_unresolved 403 / subject-or-\"mine\"-fault 503 (DecisionCapability.cs:170-173) before the count is "
             + "read. The count is the caller's: the grain's Signal ids are read through the caller's own IDataverseUserClient and the app-only rows are "
             + "trimmed to that set before anything is counted; Decision-Record facts are read app-only for those rows only. For a Do item the count is the "
-            + "item's person's own (D-145a): the handler passes decision.CallerContactId (DecisionPlanEndpoints.cs:98, set from the \"mine\" read at "
+            + "item's person's own (D-145a): the capability passes decision.CallerContactId (DecisionCapability.cs:182, set from the \"mine\" read at "
             + "SignalCoreRecordAccess.cs:381/:386), and a \"mine\" caller who is not that person (owner, creator, assigner) gets a 200 empty status "
             + "that counts toward nothing (SignalSuppressionService.cs:918-922), not a 404. Only the counts and the "
             + "suppressed-until date are returned. A fault after Allowed is a 503 problem with the trace id, never the 404 (that is for not-yours). Lives in the already-governed DecisionPlanEndpoints.cs, so the file count is unchanged."),
@@ -2283,8 +2288,10 @@ public partial class RouteAuthorizationGuardTests
             + "The version create (:902), the old version's sprk_inforceto stamp (:987, the only PATCH of a version, :967-968) and the pointer "
             + "move (:1008) all run AS THE CALLER, row-version conditional; only then is the job's single-policy pass run as the evaluator (:929)."),
         new HandlerDecision("GET /api/v1/signals/worklist", "GetWorklistAsync", "IDataverseUserClient",
-            new[] { "SignalReadService.ReadAsync" },
-            "Ontology task 038: the handler's only I/O is SignalReadService.ReadAsync (SignalReadEndpoints.cs:60). It resolves the caller "
+            new[] { "DecisionCapability.ListDecideAsync", "SignalReadService.ReadAsync" },
+            "Ontology task 038; spaarkeai-mcp-bff-api-r1 task 013 (B-1): the handler's only I/O is DecisionCapability.ListDecideAsync "
+            + "(SignalReadEndpoints.cs:62), which, after the no-caller guard (UserContextRequired, nothing read), calls SignalReadService.ReadAsync "
+            + "(DecisionCapability.cs:89). It resolves the caller "
             + "with WhoAmI AS THE CALLER (SignalReadService.cs:310, ResolveMineCallerAsync; WhoAmI at :1035; unresolved: the single 403 at SignalReadEndpoints.cs:64), runs the "
             + "worklist FetchXML as the caller (:333), keeps a row only when the caller's own batched read of its catalog-named core "
             + "table returns its core id (:900; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
