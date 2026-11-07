@@ -21,6 +21,8 @@
  *     rows have one server-side owner (extraction, a line decision, Add line in the invoice's review), so its platform
  *     "+ New" is hidden outright in the sprk_BillingEvent RibbonDiff and this script carries no command for it. The
  *     sprk_invoice entry opens the Invoice wizard (a submission): invoices are created only by submission.
+ *     For sprk_invoice the platform "+ New" is closed on EVERY host (ns.NATIVE_NEW_CLOSED; the RibbonDiff also hides
+ *     AddNewStandard / NewRecord) and the Invoice wizard is the one "New" on every host, whether the host is secure or not.
  *
  * FAIL CLOSED (ADR-003): the native "+ New" is allowed ONLY when the host is a project / matter / work assignment whose
  * sprk_issecure was read (through Xrm.WebApi) and is false, or a party (contact, organization, account - never an
@@ -71,6 +73,14 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
      * and the platform "+ New" would create an unfiled email by hand: so neither is offered.
      */
     ns.NO_NEW_HOSTS = { sprk_billingexport: true };
+
+    /**
+     * ebilling-r1 task 096b (EB-D-201): tables whose platform "+ New" is closed on EVERY host, secure or not, because their
+     * new rows have one server-side owner. For these, nativeNewAllowed answers false and newChildAvailable answers true on any
+     * saved host (the wizard files it): sprk_invoice -> the Invoice wizard, which creates an invoice only by submission.
+     * The ribbon passes the table as a string parameter; a call with none (the Add KPI command) behaves as before.
+     */
+    ns.NATIVE_NEW_CLOSED = { sprk_invoice: true };
 
     /** Wizard code pages (envelope: entityType / entityId / bffBaseUrl - sprk_wizard_commands.js). */
     ns.WIZARDS = {
@@ -143,9 +153,12 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
     /**
      * EnableRule added to the native subgrid "+ New" (Mscrm.AddNewRecordFromSubGridStandard): true ONLY when the host is
      * a root read as NOT secure. A host that is not a form record (no parent) keeps the native command - it prefills
-     * nothing. Returns a promise (UCI waits for it).
+     * nothing. Returns a promise (UCI waits for it). `table` (optional): a table in NATIVE_NEW_CLOSED never allows it.
      */
-    ns.nativeNewAllowed = function (primaryControl) {
+    ns.nativeNewAllowed = function (primaryControl, table) {
+        if (table && ns.NATIVE_NEW_CLOSED[table]) {
+            return false;
+        }
         var host = ns.hostOf(primaryControl);
         if (host && ns.NO_NEW_HOSTS[host.entity]) {
             return false;
@@ -156,9 +169,12 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
         return ns.hostSecureFlag(primaryControl).then(function (flag) { return flag === false; });
     };
 
-    /** EnableRule for the "New <thing>" command: the exact complement of nativeNewAllowed (one of the two is shown), except NO_NEW_HOSTS, where neither is. */
-    ns.newChildAvailable = function (primaryControl) {
+    /** EnableRule for the "New <thing>" command: the exact complement of nativeNewAllowed (one of the two is shown), except NO_NEW_HOSTS, where neither is. A NATIVE_NEW_CLOSED table shows it on every saved host. */
+    ns.newChildAvailable = function (primaryControl, table) {
         var host = ns.hostOf(primaryControl);
+        if (host && table && ns.NATIVE_NEW_CLOSED[table]) {
+            return !ns.NO_NEW_HOSTS[host.entity];
+        }
         if (!host || ns.PARTIES[host.entity] || ns.NO_NEW_HOSTS[host.entity]) {
             return false;
         }

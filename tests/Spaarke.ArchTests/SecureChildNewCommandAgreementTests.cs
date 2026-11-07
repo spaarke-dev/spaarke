@@ -34,6 +34,8 @@ public class SecureChildNewCommandAgreementTests
     private static string ChildRecordEndpointsFile => Path.Combine(Root, "src", "server", "api", "Sprk.Bff.Api", "Api", "ChildRecordEndpoints.cs");
     private static string AnalysisRibbonFile => Path.Combine(Root, "infrastructure", "dataverse", "ribbon", "AnalysisRibbons", "Entities", "sprk_analysis", "RibbonDiff.xml");
     private static string BillingEventRibbonFile => Path.Combine(Root, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", "sprk_BillingEvent", "RibbonDiff.xml");
+    private static string InvoiceRibbonFile => Path.Combine(Root, "src", "dataverse", "solutions", "SpaarkeMaster", "Entities", "sprk_Invoice", "RibbonDiff.xml");
+    private static string ScriptMasterCopyFile => Path.Combine(Root, "src", "dataverse", "solutions", "SpaarkeMaster", "WebResources", "sprk_", "scripts", "secure_child_ribbon.js");
 
     /// <summary>
     /// EVERY subgrid of an ownership-child table on an active main form (live inventory, spaarkedev1, read-only, 2026-10-04;
@@ -221,6 +223,78 @@ public class SecureChildNewCommandAgreementTests
 
         var stamped = Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables;
         Assert.All(createThenOpen, t => Assert.Contains(t, stamped));
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 096b (EB-D-201): no user-reachable path creates an invoice outside the submission operation. Every platform
+    /// "New" of the invoice is hidden in the SpaarkeMaster source: the three earlier hides (form New, form Save and New, homepage
+    /// grid New) and the two subgrid ones (AddNewStandard, NewRecord), by the exact ids the billing event's hides use.
+    /// </summary>
+    [Fact]
+    public void TheInvoiceRibbon_HidesEveryPlatformNew_FormGridAndSubgrid()
+    {
+        var hides = XDocument.Load(InvoiceRibbonFile).Descendants("HideCustomAction")
+            .ToDictionary(h => (string)h.Attribute("HideActionId")!, h => (string)h.Attribute("Location")!, StringComparer.Ordinal);
+
+        foreach (var (id, location) in new[]
+                 {
+                     ("sprk.Mscrm.Form.sprk_invoice.NewRecord.Hide", "Mscrm.Form.sprk_invoice.NewRecord"),
+                     ("sprk.Mscrm.Form.sprk_invoice.SaveAndNew.Hide", "Mscrm.Form.sprk_invoice.SaveAndNew"),
+                     ("sprk.Mscrm.HomepageGrid.sprk_invoice.NewRecord.Hide", "Mscrm.HomepageGrid.sprk_invoice.NewRecord"),
+                     ("sprk.Mscrm.SubGrid.sprk_invoice.AddNewStandard.Hide", "Mscrm.SubGrid.sprk_invoice.AddNewStandard"),
+                     ("sprk.Mscrm.SubGrid.sprk_invoice.NewRecord.Hide", "Mscrm.SubGrid.sprk_invoice.NewRecord"),
+                 })
+        {
+            Assert.True(hides.TryGetValue(id, out var actual), $"The invoice ribbon does not carry the hide {id}.");
+            Assert.Equal(location, actual);
+        }
+    }
+
+    /// <summary>
+    /// ebilling-r1 task 096b (EB-D-201): the Invoice wizard ("New Invoice", a submission) is the one "New" of an invoice subgrid on every
+    /// host, and the platform subgrid "+ New" is closed on every host. Both rules receive the table, the script closes the tables in
+    /// <c>NATIVE_NEW_CLOSED</c> before it reads any host flag, and the template and the invoice ribbon pass it.
+    /// </summary>
+    [Fact]
+    public void TheInvoiceWizardCommand_IsAvailableOnEveryHost_AndThePlatformSubgridNew_IsClosedOnEveryHost()
+    {
+        var script = File.ReadAllText(ScriptFile);
+        Assert.Equal(new[] { "sprk_invoice" }, ScriptMapKeys("NATIVE_NEW_CLOSED"));
+        Assert.Contains("sprk_invoice", ScriptTables());
+
+        string Body(string name) => Regex.Match(script, $@"ns\.{name}\s*=\s*function[^{{]*\{{(?<body>.*?)\n    \}};", RegexOptions.Singleline)
+            .Groups["body"].Value;
+        Assert.Matches(@"function \(primaryControl, table\)", Regex.Match(script, @"ns\.nativeNewAllowed\s*=\s*function[^{]*").Value);
+        Assert.Matches(@"function \(primaryControl, table\)", Regex.Match(script, @"ns\.newChildAvailable\s*=\s*function[^{]*").Value);
+        // The closed table is answered before the flag is read: no host (secure, not secure, unreadable, a party) re-opens it.
+        Assert.True(Body("nativeNewAllowed").IndexOf("NATIVE_NEW_CLOSED", StringComparison.Ordinal)
+            < Body("nativeNewAllowed").IndexOf("hostSecureFlag", StringComparison.Ordinal));
+        Assert.True(Body("newChildAvailable").IndexOf("NATIVE_NEW_CLOSED", StringComparison.Ordinal)
+            < Body("newChildAvailable").IndexOf("hostSecureFlag", StringComparison.Ordinal));
+
+        // The table reaches both rules: the template for every entity ({{entity}}), the invoice ribbon for sprk_invoice.
+        foreach (var (file, value) in new[] { (TemplateFile, "{{entity}}"), (InvoiceRibbonFile, "sprk_invoice") })
+        {
+            var rules = XDocument.Load(file).Descendants("CustomRule").ToList();
+            foreach (var function in new[] { "nativeNewAllowed", "newChildAvailable" })
+            {
+                var rule = rules.Single(r => (string?)r.Attribute("FunctionName") == $"Spaarke.SecureChild.Ribbon.{function}");
+                Assert.Equal(new[] { "PrimaryControl" }, rule.Elements("CrmParameter").Select(p => (string)p.Attribute("Value")!));
+                Assert.Equal(new[] { value }, rule.Elements("StringParameter").Select(p => (string)p.Attribute("Value")!));
+            }
+        }
+
+        // The invoice's "New Invoice" command opens the wizard and is enabled by the table-aware rule alone.
+        var invoiceRibbon = XDocument.Load(InvoiceRibbonFile);
+        var command = invoiceRibbon.Descendants("CommandDefinition").Single(c => (string?)c.Attribute("Id") == "sprk.SecureChild.sprk_invoice.New.Command");
+        Assert.Equal(new[] { "sprk.SecureChild.sprk_invoice.NewAvailable.EnableRule" }, command.Descendants("EnableRule").Select(r => (string)r.Attribute("Id")!));
+        Assert.Contains(command.Descendants("StringParameter"), p => (string?)p.Attribute("Value") == "sprk_invoice");
+    }
+
+    [Fact]
+    public void TheWebResource_AndItsSpaarkeMasterCopy_AreIdentical()
+    {
+        Assert.Equal(File.ReadAllText(ScriptFile).ReplaceLineEndings(), File.ReadAllText(ScriptMasterCopyFile).ReplaceLineEndings());
     }
 
     [Fact]

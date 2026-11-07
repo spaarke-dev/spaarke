@@ -185,6 +185,54 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
         DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage("sprk_signal").Should().Contain("signal");
     }
 
+    // ── ebilling-r1 task 096b (EB-D-201): an invoice is created only by submission; this tool never creates one ──────────────
+    // The block lives in the handler, not in the registry's GenericCreateOnlyRefused flag (which would also refuse the Office
+    // quick create and the service seams), so the registry rule is asserted unchanged below.
+
+    [Fact(DisplayName = "096b (must fire): chat execute refuses an invoice, before any Dataverse call")]
+    public async Task CreateRecordTool_AnInvoice_IsRefused()
+    {
+        _user.Held.UnionWith(["prvCreatesprk_invoice", "prvAppendsprk_invoice", "prvAppendTosprk_invoice"]);
+
+        var result = await CreateRecord("sprk_invoice", Lookup("sprk_matter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed, "the sprk_document hard block's refusal shape");
+        result.ErrorMessage.Should().Be(DataverseCreateRecordHandler.InvoiceCreateBlockedMessage("sprk_invoice"));
+        result.ErrorMessage.Should().Contain("sprk_invoice").And.Contain("REJECTED").And.Contain("Do NOT retry")
+            .And.Contain("Create Invoice wizard");
+        _appCreates.Should().BeEmpty("the row is never created by the application");
+        _user.Posts.Should().BeEmpty("nor as the caller");
+        _reads.Should().BeEmpty("refused before any Dataverse call, metadata included");
+        _user.PrivilegeQuestions.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "096b (must fire): chat validate refuses an invoice, before the confirmation")]
+    [InlineData("sprk_invoice")]
+    [InlineData("SPRK_Invoice")]
+    public void CreateRecordTool_AnInvoice_IsRefusedBeforeTheConfirmation(string table)
+    {
+        var result = Handler().ValidateChat(CreateContext(table, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter)),
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)));
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Should().Be(DataverseCreateRecordHandler.InvoiceCreateBlockedMessage("sprk_invoice"));
+        _reads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "096b (must not fire): the registry rule for the invoice is unchanged (the service still creates it as the caller); only this tool refuses")]
+    public void TheInvoiceRegistryRule_IsNotMarkedCreateRefused()
+    {
+        var rule = Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Find("sprk_invoice");
+        rule.Should().NotBeNull();
+        rule!.GenericCreateRefused.Should().BeFalse();
+        DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter("sprk_invoice").Should().BeFalse();
+        DataverseCreateRecordHandler.IsInvoiceCreate("sprk_invoice").Should().BeTrue();
+        DataverseCreateRecordHandler.IsInvoiceCreate("sprk_invoicesubmission").Should().BeFalse();
+        DataverseCreateRecordHandler.IsInvoiceCreate("sprk_billingevent").Should().BeFalse();
+    }
+
     [Fact]
     public async Task CreateRecord_AnOrdinaryRegistryTable_IsStillCreated_MustNotFire()
     {

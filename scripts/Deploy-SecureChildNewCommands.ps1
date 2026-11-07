@@ -117,6 +117,32 @@ $Failures = [System.Collections.Generic.List[string]]::new()
 function Fail([string] $text) { $Failures.Add($text); Write-Host "  FAIL  $text" -ForegroundColor Red }
 function Ok([string] $text) { Write-Host "  ok    $text" }
 function Info([string] $text) { Write-Host "  ..    $text" }
+function Unverified([string] $text) { $script:Unverified.Add($text); Write-Host "  ??    UNVERIFIED  $text" -ForegroundColor Yellow }
+$Unverified = [System.Collections.Generic.List[string]]::new()
+
+# ebilling-r1 task 096b (EB-D-201): the platform "New" of these tables is hidden OUTRIGHT, by HideCustomAction rows in the
+# SpaarkeMaster RibbonDiff (sprk_BillingEvent, sprk_Invoice), imported by a different path than this script. The hide id is
+# "sprk.<Location>.Hide" (a ribbondiffs row, diffid = the HideActionId). A subgrid reported "ok" because its table is "hidden
+# outright" is only ok when the live environment holds that hide, so -Verify reads it (ribbondiffs, unmanaged), the same table
+# infrastructure/dataverse/ribbon/Test-RibbonExportCurrent.ps1 reads.
+$HiddenNewLocations = @{
+    sprk_billingevent = @('Mscrm.Form.sprk_billingevent.NewRecord', 'Mscrm.Form.sprk_billingevent.SaveAndNew',
+        'Mscrm.HomepageGrid.sprk_billingevent.NewRecord', 'Mscrm.SubGrid.sprk_billingevent.AddNewStandard',
+        'Mscrm.SubGrid.sprk_billingevent.NewRecord')
+    sprk_invoice      = @('Mscrm.Form.sprk_invoice.NewRecord', 'Mscrm.Form.sprk_invoice.SaveAndNew',
+        'Mscrm.HomepageGrid.sprk_invoice.NewRecord', 'Mscrm.SubGrid.sprk_invoice.AddNewStandard',
+        'Mscrm.SubGrid.sprk_invoice.NewRecord')
+}
+
+# 'present' | 'absent' | 'unknown' (the read failed: the answer is not known, never 'present').
+function Get-LiveHideState([string] $entity, [string] $location) {
+    $hideId = "sprk.$location.Hide"
+    $filter = [uri]::EscapeDataString("entity eq '$entity' and ismanaged eq false and diffid eq '$hideId'")
+    try {
+        $rows = @((Invoke-RestMethod -Headers $Headers -Uri "$Api/ribbondiffs?`$select=diffid&`$filter=$filter").value)
+    } catch { return 'unknown' }
+    if ($rows.Count -gt 0) { return 'present' } else { return 'absent' }
+}
 
 function Get-LiveRibbon([string] $entity) {
     $r = Invoke-RestMethod -Headers $Headers -Uri "$Api/RetrieveEntityRibbon(EntityName='$entity',RibbonLocationFilter=Microsoft.Dynamics.CRM.RibbonLocationFilters'All')"
@@ -159,6 +185,24 @@ if (-not $live) {
     if ($Verify) { Fail "$ScriptName differs from $ScriptFile" } else { Info "$ScriptName differs from the repository file (-Apply updates it)" }
 } else { Ok "$ScriptName matches the repository file" }
 
+# ── Platform "New" hidden outright (ebilling-r1 task 096b, EB-D-201): the live hides ───────────────────────────────
+# An invoice is created only by submission and an invoice line only by extraction, a line decision and Add line, so every
+# platform "New" of these two tables is hidden. -Verify fails if the environment lacks a hide, and reports UNVERIFIED (not ok)
+# when it cannot read them.
+$HideState = @{}
+Write-Host 'Platform New hidden outright (live hides)'
+foreach ($hiddenTable in ($HiddenNewLocations.Keys | Sort-Object)) {
+    foreach ($location in $HiddenNewLocations[$hiddenTable]) {
+        $state = Get-LiveHideState $hiddenTable $location
+        $HideState["$hiddenTable|$location"] = $state
+        switch ($state) {
+            'present' { Ok "$location is hidden (live)" }
+            'absent' { if ($Verify) { Fail "$location is NOT hidden in the environment (import the SpaarkeMaster $hiddenTable RibbonDiff)" } else { Info "$location is not hidden yet (the SpaarkeMaster $hiddenTable RibbonDiff import adds it)" } }
+            default { if ($Verify) { Unverified "$location : the live hide could not be read (ribbondiffs)" } else { Info "$location : the live hide could not be read" } }
+        }
+    }
+}
+
 # ── Live subgrid inventory (r1c): every ownership-child subgrid on an active main form is served ──────────────────
 # The ownership-child tables (RecordOwnershipResolver.OwnershipParentEntities without the four roots); sprk_analysis is
 # served by AnalysisRibbons; party hosts keep the platform "+ New".
@@ -183,7 +227,20 @@ foreach ($form in $forms) {
         $where = "$($form.objecttypecode) '$($form.name)' -> $child"
         if ($PartyHosts -contains $form.objecttypecode) { Ok "$where (party host: platform + New kept)" }
         elseif ($child -eq 'sprk_analysis') { Ok "$where (AnalysisRibbons hides the platform + New)" }
-        elseif ($child -eq 'sprk_billingevent') { Ok "$where (the platform + New is hidden outright, SpaarkeMaster sprk_BillingEvent RibbonDiff; invoice lines are created only by submission and Add line)" }
+        elseif ($child -eq 'sprk_billingevent') {
+            # Ok only when the live environment holds the subgrid hides; otherwise failed or unverified, never ok.
+            $subgridStates = @('AddNewStandard', 'NewRecord') | ForEach-Object { $HideState["sprk_billingevent|Mscrm.SubGrid.sprk_billingevent.$_"] }
+            if ($subgridStates -contains 'absent') { if ($Verify) { Fail "$where : the platform + New is NOT hidden in the environment" } else { Info "$where (the platform + New is hidden outright once the SpaarkeMaster sprk_BillingEvent RibbonDiff is imported)" } }
+            elseif ($subgridStates -contains 'unknown') { if ($Verify) { Unverified "$where : the hide of the platform + New could not be read" } else { Info "$where (hidden outright in the SpaarkeMaster sprk_BillingEvent RibbonDiff; live hide not read)" } }
+            else { Ok "$where (the platform + New is hidden outright - live hides present; invoice lines are created only by submission and Add line)" }
+        }
+        elseif ($child -eq 'sprk_invoice') {
+            # Served by the Invoice wizard (a submission); its platform + New is hidden outright in the live ribbon as well (EB-D-201).
+            $subgridStates = @('AddNewStandard', 'NewRecord') | ForEach-Object { $HideState["sprk_invoice|Mscrm.SubGrid.sprk_invoice.$_"] }
+            if ($subgridStates -contains 'absent') { if ($Verify) { Fail "$where : the platform + New is NOT hidden in the environment" } else { Info "$where (served; the platform + New is hidden once the SpaarkeMaster sprk_Invoice RibbonDiff is imported)" } }
+            elseif ($subgridStates -contains 'unknown') { if ($Verify) { Unverified "$where : the hide of the platform + New could not be read" } else { Info "$where (served; live hide not read)" } }
+            else { Ok "$where (served; the platform + New is hidden - live hides present)" }
+        }
         elseif ($Tables -contains $child) { Ok "$where (served)" }
         else { Fail "$where is NOT served: its platform + New would create a user-owned child under or through a secure record" }
     }
@@ -278,9 +335,15 @@ if ($Apply) {
 '@
 }
 
+if ($Unverified.Count -gt 0) {
+    Write-Host "$($Unverified.Count) check(s) UNVERIFIED (could not be read; not counted as passed): $($Unverified -join ' ; ')" -ForegroundColor Yellow
+}
 if ($Failures.Count -gt 0) {
     Write-Host "$($Failures.Count) check(s) failed." -ForegroundColor Red
     if ($Verify) { exit 1 }
+} elseif ($Unverified.Count -gt 0) {
+    Write-Host 'No check failed, but the unverified ones above are not confirmed.' -ForegroundColor Yellow
+    if ($Verify) { exit 2 }
 } else {
     Write-Host 'All checks passed.'
 }

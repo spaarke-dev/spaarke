@@ -59,6 +59,8 @@
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.NewRecord.Hide" Location="Mscrm.Form.sprk_invoice.NewRecord" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.SaveAndNew.Hide" Location="Mscrm.Form.sprk_invoice.SaveAndNew" />
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_invoice.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_invoice.NewRecord" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_invoice.AddNewStandard.Hide" Location="Mscrm.SubGrid.sprk_invoice.AddNewStandard" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_invoice.NewRecord.Hide" Location="Mscrm.SubGrid.sprk_invoice.NewRecord" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Activate.Hide" Location="Mscrm.Form.sprk_invoice.Activate" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Deactivate.Hide" Location="Mscrm.Form.sprk_invoice.Deactivate" />
     <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_invoice.Re-activate.Hide" Location="Mscrm.Form.sprk_invoice.Re-activate" />
@@ -253,6 +255,7 @@
       <EnableRule Id="sprk.SecureChild.sprk_invoice.NativeNewAllowed.EnableRule">
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
           <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="sprk_invoice" />
         </CustomRule>
       </EnableRule>
       <EnableRule Id="sprk.SecureChild.sprk_invoice.NewAvailable.EnableRule">
@@ -260,6 +263,7 @@
         <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
         <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js" FunctionName="Spaarke.SecureChild.Ribbon.newChildAvailable" Default="false">
           <CrmParameter Value="PrimaryControl" />
+          <StringParameter Value="sprk_invoice" />
         </CustomRule>
       </EnableRule>
       <EnableRule Id="sprk.ThemeMenu.Invoice.EnableRule">

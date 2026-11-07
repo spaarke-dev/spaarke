@@ -24,8 +24,8 @@ const HOST_ID = 'a1470000-0000-4000-8000-000000000001';
 const NEW_ID = 'b1470000-0000-4000-8000-000000000002';
 
 interface IRibbon {
-  nativeNewAllowed(primaryControl: unknown): boolean | Promise<boolean>;
-  newChildAvailable(primaryControl: unknown): boolean | Promise<boolean>;
+  nativeNewAllowed(primaryControl: unknown, table?: string): boolean | Promise<boolean>;
+  newChildAvailable(primaryControl: unknown, table?: string): boolean | Promise<boolean>;
   newChild(primaryControl: unknown, selectedControl: unknown, childTable: string): void;
   TABLES: string[];
   WIZARDS: Record<string, { page: string }>;
@@ -202,6 +202,38 @@ describe('sprk_secure_child_ribbon.js — which "New" a subgrid shows (task 147 
     await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf('sprk_billingexport')))).resolves.toBe(false);
     await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf('sprk_billingexport')))).resolves.toBe(false);
     expect(h.reads).toEqual([]);
+  });
+
+  // ebilling-r1 task 096b (EB-D-201): the invoice's platform "+ New" is closed on EVERY host; the Invoice wizard is the one "New".
+  it.each(['sprk_project', 'sprk_matter', 'sprk_workassignment'])(
+    'a %s read as NOT secure offers NO platform "+ New" for an invoice and shows the Invoice wizard command (must fire); a to-do keeps the platform one (must not fire)',
+    async root => {
+      const h = harness({ flag: false });
+      await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf(root), 'sprk_invoice'))).resolves.toBe(false);
+      await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf(root), 'sprk_invoice'))).resolves.toBe(true);
+      expect(h.reads).toEqual([]); // the answer does not depend on the flag
+
+      await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf(root), 'sprk_todo'))).resolves.toBe(true);
+      await expect(Promise.resolve(h.ribbon.newChildAvailable(formOf(root), 'sprk_todo'))).resolves.toBe(false);
+    }
+  );
+
+  it.each(['sprk_event', 'contact', 'sprk_organization', 'account'])(
+    'an invoice subgrid on a %s host: no platform "+ New", the Invoice wizard command shows',
+    async host => {
+      const h = harness({ flag: 'throw' });
+      expect(h.ribbon.nativeNewAllowed(formOf(host), 'sprk_invoice')).toBe(false);
+      expect(h.ribbon.newChildAvailable(formOf(host), 'sprk_invoice')).toBe(true);
+    }
+  );
+
+  it('an invoice on an unsaved host or on the AP export batch still offers no "New" (the wizard needs a saved host; the batch offers none)', async () => {
+    const h = harness({ flag: false });
+    const unsaved = { data: { entity: { getId: () => '', getEntityName: () => 'sprk_matter' } } };
+    expect(h.ribbon.newChildAvailable(unsaved, 'sprk_invoice')).toBe(false);
+    expect(h.ribbon.nativeNewAllowed(unsaved, 'sprk_invoice')).toBe(false);
+    expect(h.ribbon.newChildAvailable(formOf('sprk_billingexport'), 'sprk_invoice')).toBe(false);
+    expect(h.ribbon.nativeNewAllowed(formOf('sprk_billingexport'), 'sprk_invoice')).toBe(false);
   });
 
   it('an unsaved host keeps the platform command (it prefills nothing) and offers no BFF command', () => {
