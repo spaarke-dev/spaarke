@@ -4,6 +4,7 @@ using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -684,7 +685,8 @@ public sealed class InvoiceContextService
         {
             ColumnSet = new ColumnSet(
                 InvoiceTotalsService.LineInvoiceLookup, InvoiceTotalsService.LineStatus, InvoiceTotalsService.LineAmount,
-                InvoiceTotalsService.LineApprovedAmount, LineAdjustmentReason),
+                InvoiceTotalsService.LineApprovedAmount, LineAdjustmentReason,
+                InvoiceSubmissionPersister.LineExtractionConfidence), // with the invoice above: the reviewer-added rule reads both (164a re-check)
             Criteria = new FilterExpression(LogicalOperator.And),
             PageInfo = new PagingInfo { PageNumber = 1, Count = PageSize },
         };
@@ -707,6 +709,12 @@ public sealed class InvoiceContextService
 
         foreach (var row in rows)
         {
+            // A line the reviewer added was never billed by the firm, so it is not the firm's own disallowance (164a re-check).
+            if (ExtractionProvenance.IsReviewerAdded(row))
+            {
+                continue;
+            }
+
             var billed = row.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value ?? 0m;
             switch ((InvoiceLineStatus?)row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value)
             {

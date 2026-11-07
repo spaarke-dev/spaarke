@@ -77,9 +77,8 @@ internal static class ExtractionProvenance
     /// <summary>
     /// True ONLY for a row Add line created on the invoice it is on now (164a-2 F1, the one read every money or exemption decision uses): the column
     /// says <c>provenance.source = "reviewer"</c>, its <c>decisionId</c> parses, the row names its invoice (<c>sprk_invoice</c>), AND the row's id is
-    /// <see cref="AddedLineIdFor"/>(that invoice, that decision). The column is not field-secured, so the marker alone proves nothing: anyone who may
-    /// write a line could copy it onto an intake line and take that line out of billed, fees, expenses and the percent base. The id cannot be set by
-    /// writing a field, and a line moved to another invoice no longer matches (164a fix round K2), so it is an ordinary line there. False for an empty
+    /// <see cref="AddedLineIdFor"/>(that invoice, that decision). The column is not field-secured, so the marker alone is not proof of who wrote the line; the
+    /// derived row id decides. The id is derived, not read from a field, and a line moved to another invoice no longer matches (164a fix round K2), so it is an ordinary line there. False for an empty
     /// or unreadable column, no <c>provenance</c>, another source (ordinal), a missing or unparsable decision id, no invoice on the row, and an id that
     /// does not match. Every reader of this rule reads <c>sprk_invoice</c> with the line.
     /// </summary>

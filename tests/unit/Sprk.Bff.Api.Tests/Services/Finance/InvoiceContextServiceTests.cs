@@ -8,6 +8,7 @@ using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance;
@@ -514,6 +515,46 @@ public class InvoiceContextServiceTests
         AllConditions(q).Single(c => c.AttributeName == "sprk_invoice").Values.Cast<Guid>()
             .Should().NotContain(superseded, "a Superseded invoice was never decided");
         context.DisallowHistory.Data!.DisallowedAmount.Should().Be(340m);
+    }
+
+    private static Entity ReviewerAddedDisallowLine(Guid owner, InvoiceLineStatus status, decimal billed)
+    {
+        var decision = Guid.NewGuid();
+        var e = DisallowLine(owner, status, billed, null, "Added by the reviewer");
+        e.Id = ExtractionProvenance.AddedLineIdFor(owner, decision);
+        e["sprk_extractionconfidence"] = ExtractionProvenance.ForReviewerAddedLine(decision);
+        return e;
+    }
+
+    [Fact(DisplayName = "164a re-check: a Disallowed or Reduced reviewer-added line is not the firm's own disallowance (must fire)")]
+    public async Task Disallow_SkipsAReviewerAddedLine()
+    {
+        var h = FullFixture();
+        h.DisallowLines.Add(ReviewerAddedDisallowLine(SiblingA, InvoiceLineStatus.Disallowed, 777m));
+        h.DisallowLines.Add(ReviewerAddedDisallowLine(SiblingA, InvoiceLineStatus.Reduced, 900m));
+
+        var disallow = (await h.Service().GetAsync(InvoiceId, Caller))!.DisallowHistory.Data!;
+
+        disallow.DisallowedCount.Should().Be(2);
+        disallow.DisallowedAmount.Should().Be(340m, "the firm never billed the added line");
+        disallow.ReducedCount.Should().Be(2);
+        var q = h.Queries.Single(x => Classify(x) == Kind.Disallow);
+        q.ColumnSet.Columns.Should().Contain(["sprk_extractionconfidence", "sprk_invoice"], "the reviewer-added rule reads both");
+    }
+
+    [Fact(DisplayName = "164a re-check: an intake Disallowed line, and a copied marker on a row whose id is not derived, still count (must not fire)")]
+    public async Task Disallow_StillCountsAnIntakeLine_AndAMarkerWithoutTheDerivedId()
+    {
+        var h = FullFixture();
+        h.DisallowLines.Add(DisallowLine(SiblingA, InvoiceLineStatus.Disallowed, 60m, null, "Intake"));
+        var copied = DisallowLine(SiblingB, InvoiceLineStatus.Disallowed, 25m, null, "Marker only");
+        copied["sprk_extractionconfidence"] = ExtractionProvenance.ForReviewerAddedLine(Guid.NewGuid());
+        h.DisallowLines.Add(copied);
+
+        var disallow = (await h.Service().GetAsync(InvoiceId, Caller))!.DisallowHistory.Data!;
+
+        disallow.DisallowedCount.Should().Be(4);
+        disallow.DisallowedAmount.Should().Be(425m);
     }
 
     [Fact]

@@ -122,3 +122,5 @@ Branch `task/ebilling-164a`. Tests are in `InvoiceLineAddServiceTests.FixRound.c
 **Merge points with 165a.** `InvoiceCorrectionReevaluation.ReadSubmissionAsync` (165a has its own own-submission read in `InvoiceReviewReadService`; consolidate at merge, not copied here), `CorrectionWorld`, `ApprovalWorld` and `InvoiceCorrectionEndToEndTests` (the same derived-id lines).
 
 **Behaviour choices made in the fix round.** A repeat on an invoice no longer In Review answers 200 `alreadyApplied` with totals computed from the rows (no write); `addLine` stays `committed`. A repeat while a correction is pending or the firm is held, with the invoice In Review, runs steps 7 and 9. A held lock is still 409 busy.
+
+**Known limit (re-check K2).** On an In Review repeat while the firm is held or a correction is pending, steps 7 and 9 run, and step 9 raises the stored `pendingSignalChanges.rule` entries from the first commit. The Set-firm re-run supersedes them later, and the writes are conditional.

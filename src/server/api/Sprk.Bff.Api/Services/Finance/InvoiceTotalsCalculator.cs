@@ -214,7 +214,7 @@ public static class InvoiceTotalsCalculator
         InvoiceTotalsRefusal? negative = approved < 0m && billed >= 0m
             ? new InvoiceTotalsRefusal(
                 InvoiceTotalsRefusalCodes.ApprovedTotalNegative,
-                "The adjustments exceed the billed total: the approved total would be "
+                "The adjustments exceed billed plus added lines: the approved total would be "
                 + approved.ToString("0.00", CultureInfo.InvariantCulture) + ".")
             : null;
 
