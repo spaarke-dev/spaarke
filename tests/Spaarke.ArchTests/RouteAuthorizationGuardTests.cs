@@ -24,7 +24,7 @@ namespace Spaarke.ArchTests;
 ///   <c>ResourceAccessRequirement</c> policy, <see cref="ResourcePolicies"/>, also counts and is pinned in
 ///   <see cref="PolicyOnlyRoutes"/>.)</item>
 ///   <item><b>HandlerDecision</b> — a per-route declaration (<see cref="HandlerDecisions"/>) whose handler BODY
-///   (never its signature), followed through at most three named hops, reaches a decision seam. Verified in source,
+///   (never its signature), followed through at most two named hops (three for the routes in ThreeHopHandlerDecisionRoutes), reaches a decision seam. Verified in source,
 ///   not trusted.</item>
 ///   <item><b>Admin</b> — one of exactly four admin mechanisms (<see cref="AdminMechanisms"/>), on a route in
 ///   the pinned <see cref="AdminOnlyRoutes"/> set.</item>
@@ -101,9 +101,18 @@ public partial class RouteAuthorizationGuardTests
     //                    not live; TheDeadClosureRegistrationIsNotMapped fails if it gains a caller.
     // =============================================================================================
 
-    // Three since spaarkeai-mcp-bff-api-r1 task 014: the decision capability (B-1, spec FR-10) sits between the commit route and
-    // DecisionCommitService, the single owner of completion, so that route needs handler -> capability -> service -> access check.
-    private const int MaxHandlerDecisionHops = 3;
+    private const int MaxHandlerDecisionHops = 2;
+
+    // spaarkeai-mcp-bff-api-r1 task 014: the decision capability (B-1, spec FR-10) sits between the commit route and
+    // DecisionCommitService, the single owner of completion, so that route alone needs a third hop:
+    // handler -> DecisionCapability.CommitAsync -> DecisionCommitService.CommitAsync -> SignalCoreRecordAccess.AuthorizeAsync.
+    // Every other route keeps the two-hop limit (must-fire: a three-hop chain on any other route fails).
+    private const int MaxCapabilityHandlerDecisionHops = 3;
+
+    private static readonly IReadOnlySet<string> ThreeHopHandlerDecisionRoutes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "POST /api/v1/signals/{signalId:guid}/decision",
+    };
 
     private static readonly IReadOnlySet<string> PendingOwners = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -1681,9 +1690,10 @@ public partial class RouteAuthorizationGuardTests
                            + "be an authorization decision or a caller-context mechanism, listed with its reason");
         }
 
-        if (decision.Hops.Count > MaxHandlerDecisionHops)
+        var maxHops = ThreeHopHandlerDecisionRoutes.Contains(decision.Route) ? MaxCapabilityHandlerDecisionHops : MaxHandlerDecisionHops;
+        if (decision.Hops.Count > maxHops)
         {
-            return (false, $"{decision.Hops.Count} hops declared; at most {MaxHandlerDecisionHops}");
+            return (false, $"{decision.Hops.Count} hops declared; at most {maxHops}");
         }
 
         if (route.Unit is null || route.HandlerEnd <= route.HandlerStart)
@@ -1940,7 +1950,7 @@ public partial class RouteAuthorizationGuardTests
             + "REMEDY — in this order of preference:\n"
             + "  1. Attach a credited per-resource filter (CreditedForms) — e.g. .AddDocumentAuthorizationFilter(\"read\").\n"
             + "  2. If the decision lives in the handler, add a HandlerDecisions entry naming the handler, its seam and\n"
-            + "     up to three hops; the guard verifies the seam is reached.\n"
+            + "     up to two hops; the guard verifies the seam is reached.\n"
             + "  3. If the route is an operator surface, gate it with one of the four AdminMechanisms and pin it in\n"
             + "     AdminOnlyRoutes with the group's reason.\n"
             + "  4. If the route should not exist, DELETE it (owner round 10 item 1: no caller and not published).\n"
@@ -6502,7 +6512,10 @@ public partial class RouteAuthorizationGuardTests
         // A hop method with two overloads, only one of which reaches the seam.
         Assert.Contains("1 of 2", Problem(new HandlerDecision(route.Key, "Handle", "AuthorizationService", new[] { "FakeService.LoadAsync" }, "x")));
         // Too many hops.
-        Assert.Contains("at most", Problem(new HandlerDecision(route.Key, "Handle", "AuthorizationService", new[] { "A.B", "C.D", "E.F", "G.H" }, "x")));
+        Assert.Contains("at most", Problem(new HandlerDecision(route.Key, "Handle", "AuthorizationService", new[] { "A.B", "C.D", "E.F" }, "x")));
+        // Task 014: the one three-hop route (ThreeHopHandlerDecisionRoutes) still has a limit: a fourth hop fails.
+        Assert.Contains("at most 3", Problem(new HandlerDecision("POST /api/v1/signals/{signalId:guid}/decision", "Handle", "AuthorizationService",
+            new[] { "A.B", "C.D", "E.F", "G.H" }, "x")));
 
         // Task 167 integration (2026-10-05): a hop method whose return type is a generic over a TUPLE is parsed (it was
         // invisible: "declares no method"), and the seam is still required in it — a tuple-returning hop WITHOUT the seam
