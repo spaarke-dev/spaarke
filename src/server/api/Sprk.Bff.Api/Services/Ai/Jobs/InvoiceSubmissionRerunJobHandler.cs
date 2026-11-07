@@ -56,9 +56,12 @@ namespace Sprk.Bff.Api.Services.Ai.Jobs;
 /// <para><b>K3b (uac-r2).</b> <see cref="InvoiceSubmissionRerunResult.RerunState"/> is raw row data: this handler never logs it and never puts it
 /// in a <see cref="JobOutcome"/> (pinned by <c>InvoiceSubmissionRerunStateExposureGuardTests</c>).</para>
 /// <para><b>Logging (ADR-015).</b> Job, submission and invoice ids, codes and counts only.</para>
-/// <para><b>Seam for 095d-2b-2.</b> The after-commit Signal steps (the re-map, the shared Signal's ConditionCleared close and its link, the
-/// supersedes link, and moving the stored state on from <see cref="InvoiceSubmissionRerun.StateCommitted"/>) belong in
-/// <see cref="AfterCommitAsync"/>, after the totals.</para>
+/// <para><b>The Signal steps (095d-2b-2).</b> After the totals, <see cref="InvoiceSubmissionRerun.RemapSignalsAsync"/>: the re-run's Signals
+/// re-mapped (ontology Q2), the shared Signal closed ConditionCleared and linked to the assign-firm record when no hold reason is left (Q1, T19),
+/// and the stored state moved on from <see cref="InvoiceSubmissionRerun.StateCommitted"/> to <see cref="InvoiceSubmissionRerun.StateDone"/>
+/// last. They never write a hold, so a Signal fault leaves the hold as the commit left it: Done is Success, Retry is a retry (dead-lettered on
+/// the final delivery for a replay, the state still committed, with its own operator log: the commit is applied and the after-commit steps are
+/// incomplete), Refused is Poisoned (Permanent=true). Until the state is done the firm gate refuses decisions as re-run pending (EB-D-204).</para>
 /// </remarks>
 public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
 {
@@ -71,6 +74,7 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
     private static readonly JsonSerializerOptions PayloadOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true };
 
     private readonly Func<Guid, Guid, bool, CancellationToken, Task<InvoiceSubmissionRerunResult>> _run;
+    private readonly Func<Guid, CancellationToken, Task<InvoiceSubmissionRerunSignalsResult>> _remapSignals;
     private readonly IInvoiceTotalsService _totals;
     private readonly IIdempotencyService _locks;
     private readonly IOptionsMonitor<EbillingOptions> _ebilling;
@@ -84,13 +88,15 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
         IOptionsMonitor<EbillingOptions> ebilling,
         FinanceTelemetry telemetry,
         ILogger<InvoiceSubmissionRerunJobHandler> logger)
-        : this((rerun ?? throw new ArgumentNullException(nameof(rerun))).RunAsync, totals, locks, ebilling, telemetry, logger)
+        : this((rerun ?? throw new ArgumentNullException(nameof(rerun))).RunAsync, rerun.RemapSignalsAsync, totals, locks, ebilling, telemetry, logger)
     {
     }
 
-    /// <summary>The seam the unit tests use: the re-run is passed as its call (the service is sealed and concrete, ADR-010).</summary>
+    /// <summary>The seam the unit tests use: the re-run and its after-commit Signal steps are passed as their calls (the service is sealed and
+    /// concrete, ADR-010).</summary>
     internal InvoiceSubmissionRerunJobHandler(
         Func<Guid, Guid, bool, CancellationToken, Task<InvoiceSubmissionRerunResult>> run,
+        Func<Guid, CancellationToken, Task<InvoiceSubmissionRerunSignalsResult>> remapSignals,
         IInvoiceTotalsService totals,
         IIdempotencyService locks,
         IOptionsMonitor<EbillingOptions> ebilling,
@@ -98,6 +104,7 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
         ILogger<InvoiceSubmissionRerunJobHandler> logger)
     {
         _run = run ?? throw new ArgumentNullException(nameof(run));
+        _remapSignals = remapSignals ?? throw new ArgumentNullException(nameof(remapSignals));
         _totals = totals ?? throw new ArgumentNullException(nameof(totals));
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
         _ebilling = ebilling ?? throw new ArgumentNullException(nameof(ebilling));
@@ -234,7 +241,8 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
     /// <summary>
     /// The steps after the re-run's commit, repeatable from the stored state: the invoice totals through 016 (<see cref="IInvoiceTotalsService"/>,
     /// the one owner; the commit reset decided lines to the re-run's derivation, so the stored totals are stale). A fault is a retry; a refused
-    /// calculation writes nothing and is logged (a retry gives the same answer). 095d-2b-2 adds the Signal steps here, after the totals.
+    /// calculation writes nothing and is logged (a retry gives the same answer). Then the Signal steps (095d-2b-2,
+    /// <see cref="InvoiceSubmissionRerun.RemapSignalsAsync"/>), which move the stored state to done last.
     /// </summary>
     private async Task<JobOutcome> AfterCommitAsync(JobContract job, Guid submissionId, Stopwatch stopwatch, CancellationToken ct)
     {
@@ -252,15 +260,44 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
         {
             _logger.LogWarning("Re-run job {JobId}: the totals of invoice {InvoiceId} failed after the commit ({ExceptionType}); a retry recomputes them",
                 job.JobId, invoiceId, ex.GetType().Name);
-            return Transient(job, InvoiceSubmissionPersister.TotalsFailedCode, stopwatch);
+            return AfterCommitTransient(job, InvoiceSubmissionPersister.TotalsFailedCode, stopwatch);
         }
 
-        _logger.LogInformation("Re-run job {JobId}: submission {SubmissionId} re-run committed; totals of invoice {InvoiceId} recomputed",
-            job.JobId, submissionId, invoiceId);
-        return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+        InvoiceSubmissionRerunSignalsResult signals;
+        try
+        {
+            signals = await _remapSignals(submissionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Re-run job {JobId}: the Signal steps of submission {SubmissionId} faulted ({ExceptionType}); the state stays committed for a retry",
+                job.JobId, submissionId, ex.GetType().Name);
+            return AfterCommitTransient(job, InvoiceSubmissionRerun.SignalsUnavailableCode, stopwatch);
+        }
+
+        switch (signals.Status)
+        {
+            case InvoiceSubmissionRerunSignalsStatus.Done:
+            case InvoiceSubmissionRerunSignalsStatus.AlreadyDone:
+                _logger.LogInformation("Re-run job {JobId}: submission {SubmissionId} re-run committed; totals of invoice {InvoiceId} recomputed; Signals {Code}",
+                    job.JobId, submissionId, invoiceId, signals.Code);
+                return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+
+            case InvoiceSubmissionRerunSignalsStatus.Refused:
+                _telemetry.RecordRerunRefused(signals.Code);
+                _logger.LogError(
+                    "Re-run job {JobId}: the Signal steps of submission {SubmissionId} were refused ({Code}); the commit stands and the state stays committed, so decisions on the invoice stay refused as re-run pending until the data is repaired and the job is replayed (Permanent={Permanent}: operator, not retry)",
+                    job.JobId, submissionId, signals.Code, true);
+                return JobOutcome.Poisoned(job.JobId, JobType, signals.Code, job.Attempt, stopwatch.Elapsed);
+
+            case InvoiceSubmissionRerunSignalsStatus.Retry:
+            default:
+                return AfterCommitTransient(job, signals.Code, stopwatch);
+        }
     }
 
-    /// <summary>A transient outcome: Failure (the broker redelivers) until the final delivery, then Poisoned (dead-letter). Nothing was written.</summary>
+    /// <summary>A transient outcome BEFORE the commit (the re-run wrote nothing): Failure (the broker redelivers) until the final delivery, then
+    /// Poisoned (dead-letter); the marker keeps the invoice held for a replay.</summary>
     private JobOutcome Transient(JobContract job, string code, Stopwatch stopwatch)
     {
         if (!job.IsFinalDelivery)
@@ -268,7 +305,32 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
             return JobOutcome.Failure(job.JobId, JobType, code, job.Attempt, stopwatch.Elapsed);
         }
 
+        if (string.Equals(code, InvoiceSubmissionRerunCodes.Busy, StringComparison.Ordinal))
+        {
+            // K4 (095d-2b-2 re-check): the lock is taken before the stored state is read, so a Busy final delivery cannot say whether the row
+            // was already committed (a replay of a committed row runs only the after-commit steps). The wording holds for both.
+            _logger.LogError("Re-run job {JobId}: the final delivery found the submission busy ({Code}) and changed nothing; the message is dead-lettered and a replay finishes the re-run or its after-commit steps; until then decisions on the invoice stay refused as re-run pending",
+                job.JobId, code);
+            return JobOutcome.Poisoned(job.JobId, JobType, code, job.Attempt, stopwatch.Elapsed);
+        }
+
         _logger.LogError("Re-run job {JobId}: the final delivery failed ({Code}); the invoice stays held and the message is dead-lettered for a replay",
+            job.JobId, code);
+        return JobOutcome.Poisoned(job.JobId, JobType, code, job.Attempt, stopwatch.Elapsed);
+    }
+
+    /// <summary>A transient outcome AFTER the commit (the totals or the Signal steps did not finish; the commit stands and the stored state stays
+    /// <see cref="InvoiceSubmissionRerun.StateCommitted"/>): Failure until the final delivery, then Poisoned (dead-letter). Until a replay finishes
+    /// the steps the firm gate keeps the invoice's decisions refused as re-run pending (EB-D-204); the replay reads AlreadyCompleted and runs only
+    /// the after-commit steps.</summary>
+    private JobOutcome AfterCommitTransient(JobContract job, string code, Stopwatch stopwatch)
+    {
+        if (!job.IsFinalDelivery)
+        {
+            return JobOutcome.Failure(job.JobId, JobType, code, job.Attempt, stopwatch.Elapsed);
+        }
+
+        _logger.LogError("Re-run job {JobId}: the final delivery failed after the commit ({Code}); the commit is applied, the after-commit steps (totals, Signals) are incomplete and decisions stay refused as re-run pending; the message is dead-lettered and a replay finishes them",
             job.JobId, code);
         return JobOutcome.Poisoned(job.JobId, JobType, code, job.Attempt, stopwatch.Elapsed);
     }

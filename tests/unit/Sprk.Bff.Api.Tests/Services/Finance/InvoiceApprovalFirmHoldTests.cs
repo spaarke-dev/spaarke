@@ -112,11 +112,19 @@ public sealed class InvoiceApprovalFirmHoldTests
     [InlineData("pending")]
     [InlineData("running")]
     [InlineData("unreadable")]
+    [InlineData("signals-committed")]
     public async Task RerunPending_ApproveIs409_AndNothingIsWritten(string state)
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
-        w.LinkSubmission(state == "unreadable" ? InvoiceFirmGateTests.FindingsWithUnreadableAssignFirm() : InvoiceFirmGateTests.FindingsWithAssignFirm(state));
+        w.LinkSubmission(state switch
+        {
+            "unreadable" => InvoiceFirmGateTests.FindingsWithUnreadableAssignFirm(),
+            // 095d-2b-2 EB-D-204: the rules completed in the commit, the Signal steps have not finished (state committed): still pending.
+            "signals-committed" => InvoiceFirmGateTests.FindingsWithAssignFirm(
+                InvoiceAssignFirmService.RulesRerunCompleted, rerunState: InvoiceSubmissionRerun.StateCommitted),
+            _ => InvoiceFirmGateTests.FindingsWithAssignFirm(state),
+        });
         var signal = w.AddInvoiceSignal(BillingRuleCatalogue.SystemPolicyCode);
 
         var result = await w.ApproveAs(AliceUser);
@@ -129,14 +137,34 @@ public sealed class InvoiceApprovalFirmHoldTests
         w.Rows[("sprk_signal", signal)].GetAttributeValue<OptionSetValue>("sprk_signalstatus").Value.Should().Be(SignalWriter.SignalStatusOpen);
     }
 
-    [Fact(DisplayName = "095d-0 must-not-fire: approve of an invoice whose Set-firm re-run is 'completed' proceeds")]
+    [Fact(DisplayName = "095d-0 / EB-D-204 must-not-fire: approve of an invoice whose Set-firm re-run is 'completed' with the re-run state 'done' proceeds")]
     public async Task RerunCompleted_Approves()
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
-        w.LinkSubmission(InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted));
+        w.LinkSubmission(InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted, rerunState: InvoiceSubmissionRerun.StateDone));
 
         (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+    }
+
+    [Fact(DisplayName = "095d-2b-2 EB-D-204: on the committed row (rules completed, Signal steps not done) approve and Reject are 409 with the re-run sentence and Return to Firm proceeds (EB-D-197)")]
+    public async Task SignalStepsPending_RefusesApproveAndReject_ReturnProceeds()
+    {
+        ApprovalWorld Committed()
+        {
+            var w = new ApprovalWorld();
+            w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+            w.LinkSubmission(InvoiceFirmGateTests.FindingsWithAssignFirm(
+                InvoiceAssignFirmService.RulesRerunCompleted, rerunState: InvoiceSubmissionRerun.StateCommitted));
+            return w;
+        }
+
+        var approve = await Committed().ApproveAs(AliceUser);
+        (approve.Code, approve.Detail).Should().Be((InvoiceApprovalCodes.FirmMissing, InvoiceApprovalCodes.FirmRerunPendingDetail));
+        var reject = await Committed().RejectAs(AliceUser);
+        (reject.Code, reject.Detail).Should().Be(("ebilling.invoice.firm_missing", InvoiceRejectReturnCodes.RejectFirmDetailFor(InvoiceFirmGateResult.RerunPending)));
+        var returned = Committed();
+        (await returned.ReturnAs(AliceUser)).Outcome.Should().Be(InvoiceDecisionOutcome.Decided, "Return applies no guideline and pays no one");
     }
 
     [Fact(DisplayName = "095d-0: the approve sentences are one per gate state; the existing two are unchanged")]
@@ -268,7 +296,7 @@ public sealed class InvoiceApprovalFirmHoldTests
     {
         var completed = new ApprovalWorld();
         completed.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
-        completed.LinkSubmission(InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted));
+        completed.LinkSubmission(InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted, rerunState: InvoiceSubmissionRerun.StateDone));
         (await completed.RejectAs(AliceUser)).Outcome.Should().Be(InvoiceDecisionOutcome.Decided);
         completed.InvoiceStatus.Should().Be(InvoiceStatusCodes.Rejected);
 
@@ -370,7 +398,7 @@ public sealed class InvoiceApprovalFirmHoldTests
         (await pending.GetAs(AliceUser))!.Should().Match<InvoiceApprovalStateDto>(s => s.FirmNeeded && !s.CanApprove);
 
         var completed = new ApprovalWorld();
-        completed.LinkSubmission(InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted));
+        completed.LinkSubmission(InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted, rerunState: InvoiceSubmissionRerun.StateDone));
         (await completed.GetAs(AliceUser))!.Should().Match<InvoiceApprovalStateDto>(s => !s.FirmNeeded && s.CanApprove);
     }
 

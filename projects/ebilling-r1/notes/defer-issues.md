@@ -1453,6 +1453,8 @@ K1 (ontology): a D-96 re-file across core records withholds line Duplicates perm
 
 **Description**: the re-run is queued only by the Set firm request (a first apply, or a repeat that names the same firm and is accepted). When that enqueue is lost (503 `incomplete`, failedStep `rerun`) and the repeat then answers 409 `changed` or `no_submission`, or when the re-run was refused and its cause is fixed, nothing queues it again and the invoice stays held. Fix: an operator-only path (script or authenticated admin endpoint) that enqueues the re-run job for a submission whose stored `rulesRerun` is pending, from the stored decision id. The job is idempotent (the re-run commits once), so a second enqueue is safe.
 
+**Update (task 095d-2b-2 re-check, 2026-11-07)**: a repeat Set firm on a committed row (rules completed, `assignFirmRerun.state` not done) now queues the re-run job again, so a dead-lettered after-commit step can be finished from the same route (F4). A permanent Signal-step refusal after the commit (`Refused` in the job's after-commit steps) still leaves the row at state `committed`: decisions on the invoice stay refused as re-run pending until the data is repaired and the job is replayed, and the job's log now says so (K2). Check (g) reports such a row as "re-run committed, after-commit steps incomplete" (K3).
+
 **Entry-points**: `Services/Finance/InvoiceAssignFirmService.cs` (`QueueRerunAsync`, `JudgeRepeatAsync`); `Services/Ai/Jobs/InvoiceSubmissionRerunJobHandler.cs` (`BuildJob`); `scripts/ebilling/Set-EbillingInvoiceFirmHoldColumn.ps1` (check (g)).
 
 **Fails without it**: check (g) reports "recorded, re-run not done" with no supported action that clears it in those cases.

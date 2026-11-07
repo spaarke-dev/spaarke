@@ -709,7 +709,7 @@ public sealed partial class InvoiceSubmissionRerunTests
 
     /// <summary>The stored rows after Set firm, in memory: reads return copies; a transaction is applied all or nothing, every row version checked.
     /// Internal so task 165a's FR-20 hold tests can read the findings a real re-run commits (<see cref="InvoiceBlockedHoldTests"/>).</summary>
-    internal sealed class World
+    internal sealed partial class World
     {
         private readonly Dictionary<Guid, Entity> _rows = [];
 
@@ -850,6 +850,8 @@ public sealed partial class InvoiceSubmissionRerunTests
                 .ReturnsAsync((QueryExpression query, CancellationToken _) => Retrieve(query));
             entities.Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<OrganizationRequest>>(), It.IsAny<CancellationToken>()))
                 .Returns((IReadOnlyList<OrganizationRequest> requests, CancellationToken _) => Execute(requests));
+            entities.Setup(e => e.UpdateIfRowVersionMatchesAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+                .Returns((string entity, Guid id, string version, Dictionary<string, object> fields, CancellationToken _) => UpdateIfVersion(entity, id, version, fields));
 
             var locks = new Mock<IIdempotencyService>(MockBehavior.Strict);
             locks.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
@@ -868,7 +870,7 @@ public sealed partial class InvoiceSubmissionRerunTests
                 .Returns(Task.CompletedTask);
 
             var rerun = new InvoiceSubmissionRerun(
-                entities.Object, Processor.Build(), Processor.Coding, (_, _) => Task.FromResult(FirmCodeSet), locks.Object, Logger, Time)
+                entities.Object, Processor.Build(), Processor.Coding, (_, _) => Task.FromResult(FirmCodeSet), locks.Object, Logger, Time, SignalSeams())
             {
                 ReviewDetailProbe = ReviewDetailColumnProbe.Fixed(true),
             };
@@ -891,7 +893,9 @@ public sealed partial class InvoiceSubmissionRerunTests
                 _rows[attached.Id] = attached;
             }
 
-            var rows = _rows.Values.Where(r => r.LogicalName == query.EntityName && query.Criteria.Conditions.All(c => Matches(r, c)));
+            var rows = _rows.Values.Where(r => r.LogicalName == query.EntityName && (query.Criteria.FilterOperator == LogicalOperator.Or
+                ? query.Criteria.Conditions.Any(c => Matches(r, c))
+                : query.Criteria.Conditions.All(c => Matches(r, c))));
             return new EntityCollection(rows.Select(r => Project(r, query.ColumnSet)).ToList()) { MoreRecords = false };
         }
 
@@ -912,6 +916,12 @@ public sealed partial class InvoiceSubmissionRerunTests
             if (condition.AttributeName == $"{row.LogicalName}id")
             {
                 return condition.Values.Contains(row.Id);
+            }
+
+            if (condition.Operator == ConditionOperator.BeginsWith)
+            {
+                return row.Attributes.TryGetValue(condition.AttributeName, out var text) && text is string t
+                    && t.StartsWith((string)condition.Values[0], StringComparison.Ordinal);
             }
 
             return row.Attributes.TryGetValue(condition.AttributeName, out var value) && value switch

@@ -25,6 +25,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Signals;
 
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
@@ -165,7 +166,7 @@ public sealed record InvoiceSubmissionRerunResult(
 /// <see cref="StateCommitted"/>.</para>
 /// <para><b>Logs (ADR-015):</b> ids, counts and codes only.</para>
 /// </remarks>
-public sealed class InvoiceSubmissionRerun
+public sealed partial class InvoiceSubmissionRerun
 {
     /// <summary>The findings member that holds the re-run's own state (task 095d-2): <c>{ schema, decisionId, state, on, kind, reasonCode,
     /// recodedLines, resetLines: [{ line, lineId, previousStatus, previousApprovedAmount }] }</c>. Ids, codes and numbers only.</summary>
@@ -226,6 +227,9 @@ public sealed class InvoiceSubmissionRerun
     private readonly ILogger<InvoiceSubmissionRerun> _logger;
     private readonly TimeProvider _time;
 
+    /// <summary>The after-commit Signal steps' writer calls (095d-2b-2, <see cref="RemapSignalsAsync"/>); null in a test that runs the commit only.</summary>
+    private readonly RerunSignalSeams? _signals;
+
     /// <summary>Whether <see cref="InvoiceReviewDetail.Column"/> exists (the process-wide probe; a test sets its own).</summary>
     internal ReviewDetailColumnProbe ReviewDetailProbe { get; init; } = ReviewDetailColumnProbe.Shared;
 
@@ -235,8 +239,11 @@ public sealed class InvoiceSubmissionRerun
         ILineCodingService coding,
         CodeSetResolver codeSets,
         IIdempotencyService locks,
+        SignalWriter signals,
+        BillingDecisionRecorder recorder,
         ILogger<InvoiceSubmissionRerun> logger)
-        : this(entities, processor, coding, (codeSets ?? throw new ArgumentNullException(nameof(codeSets))).ResolveFirmCodesAsync, locks, logger, null)
+        : this(entities, processor, coding, (codeSets ?? throw new ArgumentNullException(nameof(codeSets))).ResolveFirmCodesAsync, locks, logger, null,
+            RerunSignalSeams.Of(entities, signals, recorder))
     {
     }
 
@@ -248,7 +255,8 @@ public sealed class InvoiceSubmissionRerun
         Func<IReadOnlyList<InvoiceLineToCode>, CancellationToken, Task<ResolvedCodeSet?>> firmCodeSet,
         IIdempotencyService locks,
         ILogger<InvoiceSubmissionRerun> logger,
-        TimeProvider? time)
+        TimeProvider? time,
+        RerunSignalSeams? signals = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
@@ -257,6 +265,7 @@ public sealed class InvoiceSubmissionRerun
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _time = time ?? TimeProvider.System;
+        _signals = signals;
     }
 
     /// <summary>
@@ -860,7 +869,7 @@ public sealed class InvoiceSubmissionRerun
     // ── Helpers ──
 
     /// <summary>The <see cref="StateMember"/> states this code knows; any other stored value is logged as "unknown" (it is row data).</summary>
-    private static readonly HashSet<string> KnownStates = new(StringComparer.Ordinal) { StateCommitted };
+    private static readonly HashSet<string> KnownStates = new(StringComparer.Ordinal) { StateCommitted, StateDone };
 
     /// <summary>The stored re-run state (<see cref="StateMember"/>'s <c>state</c>), or null when absent.</summary>
     private static string? StoredStateOf(JsonObject root) => StoredSubmissionRead.Text(root[StateMember] as JsonObject, "state");
