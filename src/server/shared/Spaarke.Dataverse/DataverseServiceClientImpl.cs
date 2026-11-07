@@ -1730,6 +1730,72 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>One <c>RetrieveEntityRequest</c> (attributes, published metadata), projected by <see cref="ColumnMetadataOf"/>.
+    /// A fault propagates: the caller fails closed.</remarks>
+    public async Task<IReadOnlyDictionary<string, ColumnMetadata>> GetColumnMetadataAsync(
+        string entityLogicalName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName.Trim().ToLowerInvariant(),
+            EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Attributes,
+        };
+
+        var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+            _serviceClient.Execute(request), ct).ConfigureAwait(false);
+        return ColumnMetadataOf(response.EntityMetadata);
+    }
+
+    /// <summary>
+    /// The columns of <paramref name="entity"/> as <see cref="ColumnMetadata"/>, keyed by logical name (case-insensitive): the
+    /// type's name, the update and field-security flags as stated, a text or memo column's maximum length, a number or Money
+    /// column's range, a lookup's target tables and a choice column's option values. Pure, and
+    /// <c>public static</c> for direct testability (the <see cref="MapToDocumentEntity"/> precedent).
+    /// </summary>
+    public static IReadOnlyDictionary<string, ColumnMetadata> ColumnMetadataOf(Microsoft.Xrm.Sdk.Metadata.EntityMetadata? entity)
+    {
+        var columns = new Dictionary<string, ColumnMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var attribute in entity?.Attributes ?? [])
+        {
+            if (attribute is null || string.IsNullOrWhiteSpace(attribute.LogicalName))
+                continue;
+
+            var maxLength = attribute switch
+            {
+                Microsoft.Xrm.Sdk.Metadata.StringAttributeMetadata text => text.MaxLength,
+                Microsoft.Xrm.Sdk.Metadata.MemoAttributeMetadata memo => memo.MaxLength,
+                _ => null,
+            };
+            (decimal? Min, decimal? Max) range = attribute switch
+            {
+                Microsoft.Xrm.Sdk.Metadata.IntegerAttributeMetadata whole => (whole.MinValue, whole.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.BigIntAttributeMetadata big => (big.MinValue, big.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.DecimalAttributeMetadata number => (number.MinValue, number.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.DoubleAttributeMetadata real => (DecimalOf(real.MinValue), DecimalOf(real.MaxValue)),
+                Microsoft.Xrm.Sdk.Metadata.MoneyAttributeMetadata money => (DecimalOf(money.MinValue), DecimalOf(money.MaxValue)),
+                _ => (null, null),
+            };
+            var targets = (attribute as Microsoft.Xrm.Sdk.Metadata.LookupAttributeMetadata)?.Targets?
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToArray();
+            var options = (attribute as Microsoft.Xrm.Sdk.Metadata.EnumAttributeMetadata)?.OptionSet?.Options?
+                .Where(o => o?.Value is not null)
+                .Select(o => o.Value!.Value)
+                .ToArray();
+            columns[attribute.LogicalName] = new ColumnMetadata(
+                attribute.LogicalName, attribute.AttributeType?.ToString(), attribute.IsValidForUpdate, attribute.IsSecured, maxLength,
+                range.Min, range.Max, targets, options);
+        }
+
+        return columns;
+
+        // A double bound as a decimal; null when no decimal holds it (the reader then treats the bound as not stated).
+        static decimal? DecimalOf(double? value) =>
+            value is { } real && double.IsFinite(real) && Math.Abs(real) < 7.9e28 ? (decimal)real : null;
+    }
+
     /// <summary>
     /// Maps a raw Dataverse <c>sprk_document</c> <see cref="Entity"/> to the read-model
     /// <see cref="DocumentEntity"/>. Pure (no ServiceClient / no I/O) and uses no instance state,
