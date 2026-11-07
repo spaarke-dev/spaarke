@@ -377,20 +377,96 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             || w.Contains(hidden.ToString("D"), StringComparison.OrdinalIgnoreCase), "no id or column value in the message text");
     }
 
+    // Fix round 2: a fault of the pair read answers 503 Unavailable, as the worklist's other steps do: never a shorter list presented as
+    // complete (uac-r2 F4-b, task 150). One summary warning with the count, never one per row.
+
     [Fact]
-    public async Task WhenTheAppOnlyPairReadFails_EveryNoCoreRowIsLeftOut_AndCoreRowsStay()
+    public async Task WhenTheAppOnlyPairReadFaults_TheWorklistIs503_NeverAShorterList_WithOneSummaryWarning()
     {
         var world = new World();
         var m = world.Matter(readers: [Alice]);
-        var withCore = world.Signal(Decide, core: (MatterType, m));
-        world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice])));
+        world.Signal(Decide, core: (MatterType, m));
+        for (var i = 0; i < 3; i++)
+        {
+            world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice])));
+        }
+
         world.FaultPairRead = true;
         _factory.Logs.Warnings.Clear();
+        _factory.Logs.WarningEvents.Clear();
+
+        var response = await GetAsync(world, Alice);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "a fault is not a denial: the list would be shorter than the caller's");
+        (await Problem(response)).GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+        _factory.Logs.WarningEvents.Count(e => e.Id == SignalAccessEvents.CorePairAppOnlyReadFailed.Id)
+            .Should().Be(1, "one summary warning, never one per row");
+        _factory.Logs.Warnings.Should().ContainSingle(w => w.Contains("app-only read of the core-record pair faulted", StringComparison.Ordinal))
+            .Which.Should().Contain("for 3 no-core rows");
+    }
+
+    [Fact]
+    public async Task ARequestedCancellationDuringTheAppOnlyPairRead_Propagates()
+    {
+        var world = new World();
+        world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice])));
+        using var cts = new CancellationTokenSource();
+        world.OnPairRead = () =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        };
+        _factory.World = world;
+        world.ActingAs = Alice;
+
+        using var scope = _factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<SignalReadService>();
+        var read = () => service.ReadAsync(WorklistSet.Lanes, new ClaimsPrincipal(new ClaimsIdentity("test")), cts.Token);
+
+        await read.Should().ThrowAsync<OperationCanceledException>("a requested cancellation is not a fault");
+        world.SignalPairReads.Should().ContainSingle("the cancellation came from the pair read");
+    }
+
+    // Fix round 2: the pair read succeeds but does not return a requested row: that row is left out, the others are listed.
+    // Must fire on a leftover loop that runs only on a fault (it would list the omitted row).
+    [Fact]
+    public async Task ARowThePairReadDoesNotReturn_IsLeftOut_TheOthersAreListed_AndTheReadFailedEventIsLogged()
+    {
+        var world = new World();
+        var signals = Enumerable.Range(0, 3)
+            .Select(_ => world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice]))))
+            .ToList();
+        world.PairReadOmits.Add(signals[1]);
+        _factory.Logs.Warnings.Clear();
+        _factory.Logs.WarningEvents.Clear();
 
         var body = await OkAsync(world, Alice);
 
-        AllItems(body).Select(i => i.GetProperty("signalId").GetGuid()).Should().Equal(withCore);
-        _factory.Logs.Warnings.Should().Contain(w => w.Contains("app-only read of the core-record pair faulted", StringComparison.Ordinal));
+        Ids(body).Should().BeEquivalentTo([signals[0], signals[2]]);
+        world.SignalPairReads.Should().ContainSingle().Which.Ids.Should().Contain(signals[1], "the row was asked for and not returned");
+        _factory.Logs.WarningEvents.Count(e => e.Id == SignalAccessEvents.CorePairAppOnlyReadFailed.Id).Should().Be(1);
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("did not return the row; left out", StringComparison.Ordinal));
+        _factory.Logs.Warnings.Should().NotContain(w => w.Contains(signals[1].ToString("D"), StringComparison.OrdinalIgnoreCase),
+            "no id in the message text");
+    }
+
+    // Fix round 2: IdChunk (100) ids per pair read. 101 rows are two reads (100 + 1) and all 101 are listed; 100 rows are one read.
+    // Must fire on a query of only the first chunk (row 101 would be unconfirmed, so left out).
+    [Theory]
+    [InlineData(100, new[] { 100 })]
+    [InlineData(101, new[] { 100, 1 })]
+    public async Task ThePairReadIsChunked_AtIdChunkIds_AndEveryChunkIsRead(int rowCount, int[] expectedChunks)
+    {
+        var world = new World();
+        var signals = Enumerable.Range(0, rowCount)
+            .Select(_ => world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice]))))
+            .ToList();
+
+        var body = await OkAsync(world, Alice);
+
+        Ids(body).Should().BeEquivalentTo(signals, "every no-core row the pair reads confirm is listed");
+        world.SignalPairReads.Select(r => r.Ids.Length).Should().Equal(expectedChunks);
+        world.SignalPairReads.SelectMany(r => r.Ids).Should().BeEquivalentTo(signals, "each row is asked for exactly once");
     }
 
     [Fact]
@@ -2566,6 +2642,12 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         /// <summary>Task 044 fix: the app-only pair read throws, like a Dataverse timeout (other app-only Signal reads are unaffected).</summary>
         public bool FaultPairRead { get; set; }
 
+        /// <summary>Task 044 fix round 2: the app-only pair read succeeds but does not return these Signals (deleted between reads).</summary>
+        public HashSet<Guid> PairReadOmits { get; } = [];
+
+        /// <summary>Task 044 fix round 2: runs on each app-only pair read before it answers (a test cancels the request here).</summary>
+        public Action? OnPairRead { get; set; }
+
         public EntityCollection AppOnly(QueryExpression q)
         {
             if (q.EntityName == "sprk_policy")
@@ -2576,6 +2658,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             if (q.EntityName == "sprk_signal" && q.ColumnSet.Columns.Order().SequenceEqual(["sprk_corerecordid", "sprk_corerecordtype"]))
             {
                 lock (SignalPairReads) SignalPairReads.Add((q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToArray(), [.. q.ColumnSet.Columns]));
+                OnPairRead?.Invoke();
                 if (FaultPairRead) throw new TimeoutException("app-only read of the pair timed out");
             }
 
@@ -2588,6 +2671,8 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                     var pairs = new EntityCollection();
                     foreach (var (id, _, row) in Signals.Where(s => q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_signalid" && c.Values.Contains(s.Id))))
                     {
+                        if (PairReadOmits.Contains(id)) continue;
+
                         var stored = new Entity("sprk_signal", id);
                         var (type, core) = StoredPairOnly.TryGetValue(id, out var hidden)
                             ? hidden
@@ -2916,6 +3001,9 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
     {
         public System.Collections.Concurrent.ConcurrentQueue<string> Warnings { get; } = new();
 
+        /// <summary>The EventId of each Warning, in the order logged (task 044 fix round 2 pins the pair-read events by id).</summary>
+        public System.Collections.Concurrent.ConcurrentQueue<EventId> WarningEvents { get; } = new();
+
         public ILogger CreateLogger(string categoryName) => new Logger(this);
 
         public void Dispose()
@@ -2930,7 +3018,11 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
             {
-                if (logLevel >= LogLevel.Warning) owner.Warnings.Enqueue(formatter(state, exception));
+                if (logLevel >= LogLevel.Warning)
+                {
+                    owner.Warnings.Enqueue(formatter(state, exception));
+                    owner.WarningEvents.Enqueue(eventId);
+                }
             }
         }
     }
