@@ -1445,6 +1445,10 @@ public sealed class OfficeVersionSaveWorld
             // sprk_filename. The fixture previously recorded it ONLY as FileName, so a save-created row had
             // no display name at all — invisible until the collision refusal began reporting one.
             Documents[id] = new DocumentRow { Id = id, FileName = request.Name, DocumentName = request.Name };
+            // Field-mapping task 030b: the save's association moved from the follow-up update into the CREATE
+            // (CreateDocumentRequest.Association), so the world files the row to its matter here, as Dataverse does.
+            if (request.Association is { Field.LogicalName: "sprk_matter" } association)
+                Documents[id].MatterId = association.RecordId;
             // Task 055: the SAVER holds rights on the document they just created. In real Dataverse that is
             // simply true — the row is created in their business unit and their role grants Read/Write on
             // sprk_document. This world granted rights ONLY through SeedDocument, so every save-created
@@ -1476,7 +1480,8 @@ public sealed class OfficeVersionSaveWorld
             row.FileSize = update.FileSize ?? row.FileSize;
             row.FilePath = update.FilePath ?? row.FilePath;
             row.CanonicalHash = update.CanonicalHash ?? row.CanonicalHash;
-            // Task 055: the ASSOCIATION the save writes. DocumentAssociationMap.TryApply puts it on the
+            // Task 055: the ASSOCIATION the save writes. (Since field-mapping task 030b the save puts it on the CREATE,
+            // read above; this line stays for any update that still carries one.) DocumentAssociationMap.TryApply put it on the
             // UPDATE (Spaarke.Dataverse/Models.cs:78-110) and DataverseServiceClientImpl:922-931 writes it to
             // sprk_matter — so a document saved to a matter genuinely IS filed to that matter. This world
             // discarded the lookups, so every save-created row was filed nowhere.

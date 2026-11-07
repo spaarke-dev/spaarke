@@ -316,6 +316,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // spaarkeai-word-add-in-r1 task 130 (#2126): the email link and the Restricted fallback, in this one write.
         StageDocumentCommunicationFields(document, request);
 
+        // field-mapping-server-write-path-r1 task 030b (FR-18): the association, in this one write, never a follow-up update.
+        StageDocumentAssociation(document, request);
+
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
 
@@ -361,6 +364,28 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             document[DocumentSubmissionMarkerColumn] = true;
         }
+    }
+
+    /// <summary>
+    /// Stages <see cref="CreateDocumentRequest.Association"/> onto the document <see cref="CreateDocumentAsync"/> creates, as
+    /// <c>[column] = EntityReference(target table, id)</c>, so the document is filed in its ONE create write
+    /// (field-mapping-server-write-path-r1 task 030b). No association writes nothing. Pure (no I/O), as
+    /// <see cref="StageDocumentCommunicationFields"/> is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">An association with an empty record id (refused before any write).</exception>
+    internal static void StageDocumentAssociation(Entity document, CreateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Association is not { } association)
+            return;
+
+        if (association.RecordId == Guid.Empty)
+            throw new InvalidOperationException("A document's association is created with the id of the record it is filed to (task 030b).");
+
+        document[association.Field.LogicalName] =
+            new EntityReference(association.Field.TargetEntityLogicalName, association.RecordId);
     }
 
     // Task 130: sprk_document.sprk_relatedcommunication → sprk_communication (DocumentLinkFields), and the document's own
