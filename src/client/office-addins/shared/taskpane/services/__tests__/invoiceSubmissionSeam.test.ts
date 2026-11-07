@@ -267,6 +267,32 @@ describe('buildInvoiceSubmissionInput', () => {
     });
   });
 
+  it.each([[''], ['   '], [null]])('EB-D-185: a blank firm (%j) is null on the input', blank => {
+    const input = buildInvoiceSubmissionInput({
+      target: { entityType: 'Matter', entityId: '6f1c0e8a-2b1d-4c7e-9a52-0d3f1b7e9c41' },
+      attachments: listed,
+      marking: { '1': 'invoice' },
+      firmId: blank,
+      firmInvoiceNumber: 'N',
+      poNumber: '',
+      mode: 'New',
+    });
+    expect(input).toHaveProperty('firmId', null);
+  });
+
+  it('EB-D-185 must-not-fire: a GUID firm is still canonicalized (braces, case)', () => {
+    const input = buildInvoiceSubmissionInput({
+      target: { entityType: 'Matter', entityId: '6f1c0e8a-2b1d-4c7e-9a52-0d3f1b7e9c41' },
+      attachments: listed,
+      marking: { '1': 'invoice' },
+      firmId: ' {8B0C6F1E-4C2A-4F7E-9A51-2F3D1C0E9B77} ',
+      firmInvoiceNumber: 'N',
+      poNumber: '',
+      mode: 'New',
+    });
+    expect(input.firmId).toBe('8b0c6f1e-4c2a-4f7e-9a51-2f3d1c0e9b77');
+  });
+
   it('Correction carries the invoice id; a PO number is kept', () => {
     const input = buildInvoiceSubmissionInput({
       target: { entityType: 'WorkAssignment', entityId: 'aaaa' },
