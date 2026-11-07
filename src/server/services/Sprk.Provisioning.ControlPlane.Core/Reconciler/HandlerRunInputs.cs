@@ -154,6 +154,7 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.RedisEndpoint)),     // T242: Redis__Endpoint
                 RunInput.Output(nameof(InterStepState.ContentSafetyEndpoint)),   // T246: AiSafety__ContentSafety__Endpoint
                 RunInput.Output(nameof(InterStepState.StorageBlobEndpoint)),   // T186 follow-up: SessionFileStore__BlobEndpoint
+                RunInput.Output(nameof(InterStepState.OntologyWriterClientId)),   // T266: Ontology__Writer__ManagedIdentityClientId
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),   // T245b: Dataverse__ServiceUrl / __EnvironmentUrl
                 RunInput.Output(nameof(InterStepState.SpeContainerId)),    // T227c: EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId

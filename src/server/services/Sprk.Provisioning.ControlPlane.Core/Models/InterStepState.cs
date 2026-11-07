@@ -185,6 +185,18 @@ public sealed class InterStepState
     public string? StorageBlobEndpoint { get; set; }
 
     /// <summary>
+    /// Client id of the stamp's ontology writer UAMI (H2a output — ARM output <c>ontologyWriterIdentityClientId</c>,
+    /// task 266 / #2605). The BFF's Signal and Decision Record writers authenticate only as this identity
+    /// (<c>Ontology__Writer__ManagedIdentityClientId</c>, written by H4b); H10 creates its Dataverse application user
+    /// and H7b S24 gives that user exactly the writer grants. Never the stamp UAMI (<see cref="MiClientId"/>).
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 266).</remarks>
+    [JsonPropertyName("ontologyWriterClientId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? OntologyWriterClientId { get; set; }
+
+    /// <summary>
     /// The AI Search indexes H2b built AND verified present on the stamp's own search service, in canonical-catalog
     /// order (H2b output — <c>ICanonicalIndexCatalog.CanonicalIndexNames</c>, the set its verifier checked). H4b sets
     /// it as the BFF's <c>AiSearch__AllowedIndexes__N</c> on both slots: customer environments have no

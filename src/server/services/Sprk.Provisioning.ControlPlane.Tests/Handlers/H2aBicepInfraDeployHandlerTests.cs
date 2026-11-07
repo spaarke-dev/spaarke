@@ -117,6 +117,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun.InterStepState.ContentSafetyEndpoint.Should().Be("https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/");
         // T186 follow-up - the storage blob endpoint H4b sets as SessionFileStore__BlobEndpoint.
         repo.LastWrittenRun.InterStepState.StorageBlobEndpoint.Should().Be("https://sprkacmeprod.blob.core.windows.net/");
+        repo.LastWrittenRun.InterStepState.OntologyWriterClientId.Should().Be("ontology-writer-client-id");
 
         // Each collaborator called exactly once.
         runner.CallCount.Should().Be(1);
@@ -664,6 +665,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             RedisEndpoint = "r.westus2.redis.azure.net:10000",
             ContentSafetyEndpoint = "https://cs.cognitiveservices.azure.com/",
             StorageBlobEndpoint = "https://x.blob.core.windows.net/",
+            OntologyWriterClientId = "ontology-writer-client",
             SignalRDeployed = false,
         };
         var runner = FakeBicepDeployRunner.Success(incomplete);
@@ -685,6 +687,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
     [InlineData(nameof(BicepDeployOutputs.RedisEndpoint))]
     [InlineData(nameof(BicepDeployOutputs.ContentSafetyEndpoint))]
     [InlineData(nameof(BicepDeployOutputs.StorageBlobEndpoint))]
+    [InlineData(nameof(BicepDeployOutputs.OntologyWriterClientId))]
     public async Task RunnerReturnsBlankStampOutput_FailsQuarantineRequired_NamingTheField(string blankField)
     {
         // Task 245a: the three outputs H2a now persists for downstream handlers are
@@ -710,6 +713,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             RedisEndpoint = blankField == nameof(BicepDeployOutputs.RedisEndpoint) ? "" : complete.RedisEndpoint,
             ContentSafetyEndpoint = blankField == nameof(BicepDeployOutputs.ContentSafetyEndpoint) ? "" : complete.ContentSafetyEndpoint,
             StorageBlobEndpoint = blankField == nameof(BicepDeployOutputs.StorageBlobEndpoint) ? "" : complete.StorageBlobEndpoint,
+            OntologyWriterClientId = blankField == nameof(BicepDeployOutputs.OntologyWriterClientId) ? "" : complete.OntologyWriterClientId,
             SignalRDeployed = false,
         };
         var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(outputs), FakeArmKeyVaultRefProbe.Match(),
@@ -981,6 +985,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         RedisEndpoint = "sprk-acme-prod-redis.westus2.redis.azure.net:10000",
         ContentSafetyEndpoint = "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/",
         StorageBlobEndpoint = "https://sprkacmeprod.blob.core.windows.net/",
+        OntologyWriterClientId = "ontology-writer-client-id",
         SignalRDeployed = signalRDeployed,
     };
 
