@@ -322,6 +322,45 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     }
 
     [Fact]
+    public async Task CreatePath_AStepTwoRefusal_StartsNoAppOnlySourceRead_EvenWhenTheProbeIgnoresCancellation_AndAnswersAllowed()
+    {
+        // UAC-r2 condition A2, the case fix round 2 left open: a probe that does not observe its token (it waits for the
+        // cancellation, then answers Allowed anyway). The app-only source read must still not start: the read checks the token
+        // between the probe's answer and the app-only retrieve.
+        MatterToEventProfile();
+        var request = EventUnder(OrdinaryMatter, extra: ("sprk_eventnumber", "EVT-1"), mappingSource: ("sprk_matter", OrdinaryMatter));
+        var expected = await Service().CreateAsync(request with { Mapping = null }, AsCaller(), CancellationToken.None);
+        _sourceReads.Clear();
+        _creates.Clear();
+        _journal.Clear();
+
+        var probeHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var probeSawCancellation = false;
+        _probe.BeforeAnswer = async (_, token) =>
+        {
+            probeHeld.TrySetResult();
+            var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (token.Register(() => cancelled.TrySetResult()))
+                await Task.WhenAny(cancelled.Task, Task.Delay(HoldLimit)).ConfigureAwait(false);
+            probeSawCancellation = token.IsCancellationRequested;
+            // no throw: the probe answers Allowed after its token was cancelled
+        };
+
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+        await Task.Delay(RoundTrip * 3);
+
+        probeHeld.Task.IsCompleted.Should().BeTrue("the probe was asked, and held, before step 2 refused");
+        probeSawCancellation.Should().BeTrue("the probe's token was cancelled when step 2 refused");
+        outcome.Refusal.Should().NotBeNull();
+        outcome.Refusal!.Kind.Should().Be(expected.Refusal!.Kind);
+        outcome.Refusal.Code.Should().Be(expected.Refusal.Code);
+        outcome.Refusal.Detail.Should().Be(expected.Refusal.Detail);
+        _sourceReads.Should().BeEmpty("an Allowed answer that arrives after cancellation starts no app-only source read");
+        _journal.Should().NotContain("source-read");
+        _creates.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task CreatePath_ASourceTheCallerMayNotRead_AnswersAsBefore_AndTheTargetColumnsReadBesideItIsCancelled()
     {
         // The target columns' read is asked beside the source's; when the source answers "unavailable" first, that read's
