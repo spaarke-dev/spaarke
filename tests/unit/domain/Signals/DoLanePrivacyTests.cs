@@ -6,11 +6,13 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Signals;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
@@ -261,22 +263,27 @@ public sealed class DoLanePrivacyTests
         // Adversarial pass 1 F1: a closed inquiry's To Do that went overdue must not be stuck (409 already_resolved on the
         // disposition, 409 disposition_required on Mark complete).
         var world = AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), Hint(Inquiry), inquiryState);
+        var cache = new Mock<ITenantCache>();
 
-        var plan = Plan(await PlanRoute(world.As(Alice), TodoPlan));
+        var plan = Plan(await PlanRoute(world.As(Alice), TodoPlan, Stamp(cache)));
 
         plan.Actions.Select(a => a.Code).Should().Equal("mark-complete", "reschedule", "reassign");
         world.Requests.Should().Contain(InquiryStateRead(Inquiry));
+        cache.Invocations.Should().ContainSingle("a returned plan starts the review (task 043 stamp)")
+            .Which.Method.Name.Should().Be(nameof(ITenantCache.SetAsync));
     }
 
     [Fact]
     public async Task WhenTheInquirysStateCannotBeRead_ThePlanIs503_NeverAGuess()
     {
         var world = AlicesTodo(InquiryDispositionService.TodoIdFor(Inquiry), Hint(Inquiry), inquiryReadFaults: true);
+        var cache = new Mock<ITenantCache>();
 
-        var problem = Problem(await PlanRoute(world.As(Alice), TodoPlan));
+        var problem = Problem(await PlanRoute(world.As(Alice), TodoPlan, Stamp(cache)));
 
         problem.Status.Should().Be(503);
         problem.Extensions["reasonCode"]!.ToString().Should().Be(DecisionPlanEndpoints.AccessUnavailableReasonCode);
+        cache.Invocations.Should().BeEmpty("no plan was shown, so no review started (spaarkeai-mcp-bff-api-r1 task 013: the stamp stays last)");
     }
 
     [Fact]
@@ -398,11 +405,13 @@ public sealed class DoLanePrivacyTests
             SubjectRowId = InquiryDispositionService.TodoIdFor(Inquiry), Notes = null, Subject = { [PersonColumn("sprk_todo")] = AliceContact },
             TodoMatter = MatterId, MatterInquiries = [Inquiry], InquiryListFails = fault,
         };
+        var cache = new Mock<ITenantCache>();
 
-        var problem = Problem(await PlanRoute(world.As(Alice), TodoPlan));
+        var problem = Problem(await PlanRoute(world.As(Alice), TodoPlan, Stamp(cache)));
 
         problem.Status.Should().Be(503);
         problem.Extensions["reasonCode"]!.ToString().Should().Be(DecisionPlanEndpoints.AccessUnavailableReasonCode);
+        cache.Invocations.Should().BeEmpty("no plan was shown, so no review started");
     }
 
     // =================================================================================================
@@ -435,7 +444,7 @@ public sealed class DoLanePrivacyTests
     }
 
     /// <summary>The plan route with the version's plan readable (configuration, the BFF's own read).</summary>
-    private static Task<IResult> PlanRoute(SignalCoreRecordAccess access, string planJson)
+    private static Task<IResult> PlanRoute(SignalCoreRecordAccess access, string planJson, DecisionPlanReadStamp? planReadStamp = null)
     {
         var entities = new Mock<IGenericEntityService>();
         entities.Setup(e => e.RetrieveAsync("sprk_policyversion", VersionId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -448,9 +457,14 @@ public sealed class DoLanePrivacyTests
                 new RuleBodyDescriber(
                     new PolicyVersionValidator(new RuleBodySchemaValidator(), new PredicateCompiler(new RuleBodySchemaValidator(), TimeProvider.System),
                         NullLogger<PolicyVersionValidator>.Instance),
-                    new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance)),
+                    new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance),
+                planReadStamp: planReadStamp),
             CancellationToken.None);
     }
+
+    /// <summary>The plan-read stamp (task 043) over the tenant cache at its boundary; the test reads what was written from the mock.</summary>
+    private static DecisionPlanReadStamp Stamp(Mock<ITenantCache> cache) =>
+        new(cache.Object, new FakeTimeProvider(), NullLogger<DecisionPlanReadStamp>.Instance);
 
     private static DecisionPlanResponse Plan(IResult result) =>
         result.Should().BeOfType<Ok<DecisionPlanResponse>>().Subject.Value!;

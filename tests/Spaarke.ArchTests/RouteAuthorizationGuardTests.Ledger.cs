@@ -2292,7 +2292,7 @@ public partial class RouteAuthorizationGuardTests
             "Ontology task 038; spaarkeai-mcp-bff-api-r1 task 013 (B-1): the handler's only I/O is DecisionCapability.ListDecideAsync "
             + "(SignalReadEndpoints.cs:62), which, after the no-caller guard (UserContextRequired, nothing read), calls SignalReadService.ReadAsync "
             + "(DecisionCapability.cs:89). It resolves the caller "
-            + "with WhoAmI AS THE CALLER (SignalReadService.cs:310, ResolveMineCallerAsync; WhoAmI at :1035; unresolved: the single 403 at SignalReadEndpoints.cs:64), runs the "
+            + "with WhoAmI AS THE CALLER (SignalReadService.cs:310, ResolveMineCallerAsync; WhoAmI at :1035; unresolved: the single 403 at DecisionResultMapper.cs:83), runs the "
             + "worklist FetchXML as the caller (:333), keeps a row only when the caller's own batched read of its catalog-named core "
             + "table returns its core id (:900; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
             + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:954-955). Nothing app-only is "

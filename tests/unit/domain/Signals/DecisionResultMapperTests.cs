@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Api.Signals;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -120,6 +121,17 @@ public sealed class DecisionResultMapperTests
     public void ToToolError_WorklistCallerUnresolved_IsTheSingle403()
     {
         var result = SignalReadResult.CallerUnresolved;
+
+        AssertKnownToolError(DecisionResultMapper.ToToolError(result), DecisionPlanEndpoints.CallerUnresolvedReasonCode, 403);
+        Rest(DecisionResultMapper.ToHttp(result, Http())).Should().Be((403, DecisionPlanEndpoints.CallerUnresolvedReasonCode));
+    }
+
+    [Fact]
+    public void ToToolError_WorklistCallerUnresolvedFromTheReadService_StaysTheSingle403_EvenWithTheUserContextRequiredReason()
+    {
+        // Only the capability's own no-caller answer is 401. A read-service CallerUnresolved that carries the client's error code
+        // as its reason (a token the client could not find) is still the single 403 it always was.
+        var result = SignalReadResult.CallerUnresolved with { Reason = DataverseUserClientErrorCodes.UserContextRequired };
 
         AssertKnownToolError(DecisionResultMapper.ToToolError(result), DecisionPlanEndpoints.CallerUnresolvedReasonCode, 403);
         Rest(DecisionResultMapper.ToHttp(result, Http())).Should().Be((403, DecisionPlanEndpoints.CallerUnresolvedReasonCode));

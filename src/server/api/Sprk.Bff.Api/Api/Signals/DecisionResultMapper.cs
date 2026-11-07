@@ -276,11 +276,11 @@ public static class DecisionResultMapper
 
     private static DecisionToolError ToToolError(FixedProblem problem) => ToToolError(problem.ReasonCode, problem.Status);
 
-    /// <summary>The capability's no-caller worklist answer (<see cref="DecisionCapability.UserContextRequiredReadResult"/>): the single-403
-    /// outcome tagged with <c>UserContextRequired</c>, a reason <see cref="SignalReadService"/> never sets on that outcome.</summary>
+    /// <summary>The capability's no-caller worklist answer: that one instance (<see cref="DecisionCapability.UserContextRequiredReadResult"/>),
+    /// by reference, so a <see cref="SignalReadOutcome.CallerUnresolved"/> that <see cref="SignalReadService"/> builds stays the single 403
+    /// whatever reason it may carry.</summary>
     private static bool IsUserContextRequired(SignalReadResult result) =>
-        result.Outcome == SignalReadOutcome.CallerUnresolved
-        && string.Equals(result.Reason, DataverseUserClientErrorCodes.UserContextRequired, StringComparison.Ordinal);
+        ReferenceEquals(result, DecisionCapability.UserContextRequiredReadResult);
 
     private static IResult Problem(FixedProblem problem, HttpContext httpContext) =>
         Results.Problem(
