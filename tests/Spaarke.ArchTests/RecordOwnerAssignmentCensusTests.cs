@@ -254,7 +254,9 @@ public class RecordOwnerAssignmentCensusTests
             + "by owner round 10 item 8 (2026-10-03) — unfiled communications (inbound, chat, outbound naming no record) "
             + "keep their creator as owner; filed ones are routed secure-if-any. The per-user master thread keys on the "
             + "message's owner and Direct-thread privacy rests on per-participant shares. It is filed only by joining a "
-            + "record thread, which re-derives its owner (ThreadResolver JOIN → ReparentAsync).",
+            + "record thread, which re-derives its owner (ThreadResolver JOIN → ReparentAsync). The registry names this "
+            + "rule UnfiledCommunicationKeepsCreator (the unified service refuses such a create); this file is its only "
+            + "creator on the chat path, pinned by InboundIngestionCreatorsGuardTests (task 034).",
             WaiverKind.Permanent),
         new CensusEntry("DirectThreadAccessService.cs", "sprk_communicationthread", 1, Disposition.Waived,
             "A Direct (two-party) thread has no regarding record and is private by per-participant shares — per-user by "
