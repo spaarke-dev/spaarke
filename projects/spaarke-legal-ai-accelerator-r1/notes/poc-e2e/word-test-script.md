@@ -105,12 +105,12 @@ the Term instructions starting `SNAPSHOT-TEST:`. Claude tells you when that's do
 
 | Test | Answer |
 |---|---|
-| R1 (A/B, topic count, compromise positions kept?) | |
-| R2 (how Attach from Cloud reached the team site) | |
-| R3 (tracked changes? comments?) | Claude scores it |
-| R4 (saved name; files created) | |
-| R1b (Topic ID line kept?) | |
-| R5 (offered? runs without attaching?) | |
-| R6 (copy or link; stale signal; delete or replace and clicks) | |
+| R1 (A/B, topic count, compromise positions kept?) | A; 24 topics plus General guidelines; Compromise Positions dropped |
+| R2 (how Attach from Cloud reached the team site) | SharePoint picker; Acme Company under Quick access |
+| R3 (tracked changes? comments?) | 20/24; with comments: 12 insertions, 17 deletions, 13 comments |
+| R4 (saved name; files created) | "Spaarke NDA – Mutual v1.1"; no OneDrive file |
+| R1b (Topic ID line kept?) | No, stripped |
+| R5 (offered? runs without attaching?) | Yes and yes |
+| R6 (copy or link; stale signal; delete or replace and clicks) | Copy; only "Last updated" date; no delete or replace in the chat UI |
 | R7 (skill or plain chat?) | |
 | G1, G2 | |

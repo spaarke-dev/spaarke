@@ -124,6 +124,24 @@ Screenshots are in OneDrive `Documents/Cowork/Test/POC-Act2/screens/`. The revie
       compelled-disclosure notice; return and destruction with certification.
     - Over-reach: deleted the whole non-solicit (§10) and the residuals section, including headings, without
       renumbering.
+- **R1b, topic id.** The "ids in Instructions" variant imports the same way, but **the "Topic ID: nda.term" line is
+  stripped** from Rules, though it is in the source. Topic ids can't travel through Word, so the template stays at
+  `topic_ids="none"`.
+- **R5, persistence.** In a new session the picker lists three playbooks, including v1.1. Picking it goes straight to
+  Run review **without asking for a file**: the saved playbook stands alone.
+- **R6, copy or link (2026-11-07).** Claude overwrote the library file in place, keeping the same item
+  (`6b17d5a3…`, version 2.0), with the Term instructions prefixed "SNAPSHOT-TEST:". The saved v1.1 Term rules **did
+  not change** (`R6-term.png`).
+  - **The saved playbook is a frozen copy taken at import.** Library updates never reach users who already saved it,
+    and each user re-imports.
+  - The library file was restored afterwards (RestoreByLabel 1.0 → version 3.0, 50,718 bytes, same item).
+  - **The only staleness signal is "Last updated on <date>"** in View all › Playbooks. There is no source link,
+    version or "newer available" notice. The stale "NDA - Mutual (Spaarke baseline)" (Nov 1) is the MVP layout
+    (Priority / Preferred position / Prohibited / Rationale in Rules) and **says 3 years where v1.1 says 2**. A user
+    who picks it gets the old position silently. The version in the card name (from the Title) is the only thing that
+    tells cards apart.
+  - **No delete or replace for a whole playbook in the chat UI.** View all › Playbooks lists the cards (name, date,
+    chevron), and the open card has only per-topic Delete topic. Stale cards accumulate.
 
 ## Act 3
 
