@@ -111,6 +111,45 @@ public sealed class RecordRepairColumnValueTests
             TheRestIsWritten(outcome, Amount, RecordRepairReason.MappedValueOutOfRange);
     }
 
+    [Theory]
+    [InlineData("Integer", 1501, false)]
+    [InlineData("Integer", 1500, true)] // must-not-fire: at the minimum
+    [InlineData("BigInt", 1501, false)]
+    [InlineData("BigInt", 1500, true)]
+    [InlineData("Decimal", 1501, false)]
+    [InlineData("Decimal", 1500, true)]
+    [InlineData("Double", 1501, false)]
+    [InlineData("Double", 1500, true)]
+    [InlineData("Money", 1501, false)]
+    [InlineData("Money", 1500, true)]
+    public async Task ANumberBelowItsColumnsMinimum_SkipsItsColumn(string columnType, int min, bool written)
+    {
+        _world.Map("sprk_matter", "sprk_event", NumberDefault("1500"), ClientTemplate());
+        _world.ColumnOverrides[("sprk_event", Amount)] = RepairWorld.Typed(Amount, columnType) with { MinValue = min };
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        if (written)
+            Field(outcome, Amount).State.Should().Be(RecordRepairFieldState.Repaired);
+        else
+            TheRestIsWritten(outcome, Amount, RecordRepairReason.MappedValueOutOfRange);
+    }
+
+    [Theory]
+    [InlineData("BigInt")]
+    [InlineData("Double")]
+    public async Task ANumberAboveItsColumnsMaximum_SkipsItsColumn(string columnType)
+    {
+        _world.Map("sprk_matter", "sprk_event", NumberDefault("1500"), ClientTemplate());
+        _world.ColumnOverrides[("sprk_event", Amount)] = RepairWorld.Typed(Amount, columnType) with { MaxValue = 1499 };
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        TheRestIsWritten(outcome, Amount, RecordRepairReason.MappedValueOutOfRange);
+    }
+
     // =====================================================================================
     // F1: a lookup to a table its column does not take
     // =====================================================================================
@@ -183,6 +222,24 @@ public sealed class RecordRepairColumnValueTests
             Written(Areas).Should().BeOfType<OptionSetValueCollection>().Which.Select(o => o.Value).Should().Equal(1, 2);
         else
             TheRestIsWritten(outcome, Areas, RecordRepairReason.MappedOptionNotAccepted);
+    }
+
+    [Fact]
+    public async Task AnEmptyMultiSelect_IsNotWritten_TheRestIs()
+    {
+        _world.Directory.Row("sprk_matter", RepairWorld.Matter)[Areas] = new OptionSetValueCollection();
+        _world.Map("sprk_matter", "sprk_event", new FieldMappingRuleEntity
+        {
+            Id = Guid.NewGuid(), Name = "areas", SourceField = Areas, TargetField = Areas,
+            TargetFieldType = CreateTimeFieldMapping.FieldTypeOptionSet, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+            ExecutionOrder = 1, IsActive = true,
+        }, ClientTemplate());
+        _world.ColumnOverrides[("sprk_event", Areas)] = RepairWorld.Typed(Areas, "Virtual") with { OptionValues = [1, 2, 3] };
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        TheRestIsWritten(outcome, Areas, RecordRepairReason.MappedOptionNotAccepted);
     }
 
     // ── helpers ────────────────────────────────────────────────────────────────────────────────────────────────
