@@ -3377,12 +3377,25 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(
-                exception: ex,
-                message: "[DATAVERSE] Error retrieving {EntityType} by alternate key. Keys: {AlternateKeys}",
-                entityLogicalName,
-                string.Join(", ", alternateKeyValues.Select(k => $"{k.Key}={k.Value}")));
+            // Key VALUES are never logged: several alternate keys carry person ids (#2292). Names and count only.
+            if (IsAlternateKeyNoMatch(ex))
+            {
+                // An absent row is an ordinary answer for probe-then-create callers, not an error (#2292).
+                _logger.LogDebug(
+                    "[DATAVERSE] {EntityType} alternate-key retrieve matched no row ({KeyCount} keys)",
+                    entityLogicalName,
+                    alternateKeyValues.Count);
+            }
+            else
+            {
+                _logger.LogError(
+                    exception: ex,
+                    message: "[DATAVERSE] Error retrieving {EntityType} by alternate key. Key names: {AlternateKeyNames}",
+                    entityLogicalName,
+                    string.Join(", ", alternateKeyValues.Select(k => k.Key)));
+            }
 
+            // Same wrapper for every failure, miss included — callers classify the inner chain.
             throw new InvalidOperationException(
                 $"Failed to retrieve {entityLogicalName} by alternate key: {ex.Message}", ex);
         }
@@ -3718,6 +3731,36 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 m.Contains("Entity Key", StringComparison.OrdinalIgnoreCase) ||
                 (m.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
                  && m.Contains("already exists", StringComparison.OrdinalIgnoreCase))))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// True when <paramref name="ex"/> (or any inner exception) is the Dataverse fault an <b>alternate-key</b>
+    /// retrieve raises when no row matches: <see cref="OrganizationServiceFault.ErrorCode"/> <c>0x80060891</c>
+    /// ("A record with the specified key values does not exist in … entity"). Walks the chain because
+    /// <see cref="RetrieveByAlternateKeyAsync"/> wraps every failure in one <see cref="InvalidOperationException"/>.
+    /// <para>
+    /// <b>Exact code, typed only.</b> <c>0x80060892</c> is one integer away and means duplicate / not-Active key
+    /// (<see cref="IsAlternateKeyDuplicate"/>), so no range or prefix match. No message fallback: Dataverse fault
+    /// messages are localized. The by-id "does not exist" code (<c>0x80040217</c>) is a different answer and is
+    /// not matched. This method does NOT match <see cref="RetrieveByAlternateKeyAsync"/>'s own
+    /// "not found with provided alternate key values" throw (a null response); callers that need it check it
+    /// separately.
+    /// </para>
+    /// <para>
+    /// Lets probe-then-create callers read a miss as "create" while any other fault still propagates
+    /// (#2292: <c>MembershipJunctionUpdater</c> dead-lettered every first-time membership event because it
+    /// string-matched the outer wrapper). Also used by <c>DocumentUrlIdentityResolution</c>.
+    /// </para>
+    /// </summary>
+    public static bool IsAlternateKeyNoMatch(Exception? ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is FaultException<OrganizationServiceFault> fault
+                && fault.Detail?.ErrorCode == unchecked((int)0x80060891))
                 return true;
         }
         return false;

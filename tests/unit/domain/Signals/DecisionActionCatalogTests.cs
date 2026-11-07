@@ -787,7 +787,7 @@ public class DecisionActionCatalogTests
     [Fact]
     public async Task ANoCoreDoItem_WhoseSubjectEntitySetLookupFaults_IsUnavailable_F4b()
     {
-        var entities = new Mock<IGenericEntityService>();
+        var entities = new Mock<IGenericEntityService>().WithNoStoredCorePair();
         entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("no answer"));
         var access = new SignalCoreRecordAccess(Users(signal: NoCoreDoRow(), core: Ok(new { createdon = "x" })), entities.Object, CallerWithAContact(), NullLogger<SignalCoreRecordAccess>.Instance);
 
@@ -1320,7 +1320,7 @@ public class DecisionActionCatalogTests
     private static SignalCoreRecordAccess Access(
         IDataverseUserClient users, string? coreTable = "sprk_matter", string coreSet = "sprk_matters", AppBudgets? budgets = null)
     {
-        var entitiesMock = budgets?.Mock ?? new Mock<IGenericEntityService>();
+        var entitiesMock = (budgets?.Mock ?? new Mock<IGenericEntityService>()).WithNoStoredCorePair();
         var entities = entitiesMock.Object;
         var typeRow = new Entity("sprk_recordtype_ref", CoreTypeId);
         if (coreTable is not null)

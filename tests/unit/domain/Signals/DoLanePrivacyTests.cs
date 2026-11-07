@@ -550,7 +550,7 @@ public sealed class DoLanePrivacyTests
                     return Task.FromResult(Answer(path));
                 });
 
-            var entities = new Mock<IGenericEntityService>();
+            var entities = new Mock<IGenericEntityService>().WithNoStoredCorePair();
             entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", MatterType, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Entity("sprk_recordtype_ref", MatterType) { ["sprk_recordlogicalname"] = "sprk_matter" });
             entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))

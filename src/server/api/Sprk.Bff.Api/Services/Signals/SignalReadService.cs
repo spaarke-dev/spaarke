@@ -158,7 +158,9 @@ public sealed record WorklistInvoiceReview(Guid InvoiceId, Guid? LineId);
 /// anything): (1) Dataverse trims the Signal read itself (the Signal's business unit and secure-child shares). (2) A row with a
 /// complete core pair is kept only when the caller's own batched read of the catalog-named core table returns its
 /// <c>sprk_corerecordid</c>; the table must be in uac-r2's <see cref="CoreAncestorResolver.CoreRecordEntities"/> (K2, as in
-/// <see cref="SignalCoreRecordAccess"/>). (3) A half pair is dropped. (4) A row with no core record is Do-lane only (D-35).
+/// <see cref="SignalCoreRecordAccess"/>). (3) A half pair is dropped. (4) A row with no core record is Do-lane only (D-35), and
+/// (step 6b, ontology D-210) is kept only when the BFF's own batched read of the Signal's two pair columns returns the row with
+/// neither half: a stored pair (whole or half) or a row that read does not return is dropped, as an unreadable core's row is.
 /// (5) A Do-lane row is kept only when the caller's own read of its subject, filtered to "mine", returns it
 /// (<see cref="DoLaneMineRules"/>); that read also proves the caller can read the subject (D-35 as amended by D-129). A dropped
 /// row leaves no trace: no count, no placeholder, no group.</para>
@@ -169,11 +171,12 @@ public sealed record WorklistInvoiceReview(Guid InvoiceId, Guid? LineId);
 /// <para><b>Group order.</b> The lanes follow D-42 and the secondary sets the configuration's order; in the Do lane the "Not filed"
 /// group (D-35) is always emitted last (HANDOFF 1.2, task 154).</para>
 /// <para><b>Fail closed, honestly.</b> A row the caller cannot read is dropped; a FAULT (a 5xx, throttling, an unparseable
-/// configuration, more than <see cref="MaxPages"/> pages) is <see cref="SignalReadOutcome.Unavailable"/>, never a shorter list
-/// presented as complete (uac-r2 F4-b: a fault is not a denial).</para>
+/// configuration, more than <see cref="MaxPages"/> pages, a faulted step-6b pair read) is <see cref="SignalReadOutcome.Unavailable"/>,
+/// never a shorter list presented as complete (uac-r2 F4-b: a fault is not a denial).</para>
 /// <para><b>Bounded queries</b> (POML escalation trigger 2): per page of Signals, one caller read per core type per
 /// <see cref="IdChunk"/> ids, one per Do-subject table per chunk, one per Decide-subject table per chunk, plus one
-/// catalog query; and, only for returned rows whose evidence carries detail, one caller read per witness table per
+/// catalog query; one app-only read of the two pair columns per <see cref="IdChunk"/> Do-lane no-core rows (step 6b; none when
+/// there are no such rows); and, only for returned rows whose evidence carries detail, one caller read per witness table per
 /// <see cref="WitnessIdChunk"/> ids (D-142) and the app-only secure-family placement of those Signals and the witnesses the caller
 /// reads (<see cref="SignalSuppressionService.WitnessDetailShownOnReadAsync"/>: it withholds, never adds); and, only for billing
 /// Duplicate rows (D-176, task 157), at most one billing-event read and one read of those events' invoices' core records (same-invoice
@@ -370,6 +373,15 @@ public sealed class SignalReadService
                 return coreFailure;
             }
 
+            // (6b) The no-core rows the caller's read returned are confirmed by the BFF's own batched read of the pair. A fault is 503.
+            var pairCheck = await NoCoreRowsWithAStoredPairAsync(rows, ct).ConfigureAwait(false);
+            if (pairCheck.Outcome is { } pairFailure)
+            {
+                return pairFailure;
+            }
+
+            var noCoreLeftOut = pairCheck.LeftOut;
+
             var candidates = new List<SignalRow>();
             foreach (var row in rows)
             {
@@ -380,8 +392,9 @@ public sealed class SignalReadService
 
                 if (row.HasNoCore)
                 {
-                    // D-35: no core record → Do lane only (and then only if the subject is the caller's, step 7).
-                    if (lane == DecisionLane.Do)
+                    // D-35: no core record → Do lane only (and then only if the subject is the caller's, step 7). A row whose stored
+                    // pair the app-only read returned, or that the read did not return, is left out (6b), as an unreadable core is.
+                    if (lane == DecisionLane.Do && !noCoreLeftOut.Contains(row.SignalId))
                     {
                         candidates.Add(row);
                     }
@@ -937,6 +950,97 @@ public sealed class SignalReadService
 
         return new CoreAccess(readable, null);
     }
+
+    /// <summary>
+    /// (6b) Ontology D-210: the Do-lane rows the caller's read returned with neither half of the core-record pair, re-read app-only in one batched
+    /// <c>in</c> query on <c>sprk_signalid</c> (<see cref="IdChunk"/> ids per query), selecting only the two pair columns. Returns the
+    /// rows to leave out when every query succeeds: a row whose stored pair is present (whole or half) and a row the app-only read did
+    /// not return. The same rule as <see cref="SignalCoreRecordAccess.AuthorizeAsync"/>: only an app-only read that succeeds with neither
+    /// half is "no core record". Each left-out row logs <see cref="SignalAccessEvents.CorePairPresentAppOnly"/> or
+    /// <see cref="SignalAccessEvents.CorePairAppOnlyReadFailed"/> with the Signal id and lane as scope fields only. When a query faults
+    /// (a timeout, throttling, a 5xx: anything but a requested cancellation, which propagates), the outcome is
+    /// <see cref="SignalReadOutcome.Unavailable"/> (503) with ONE warning carrying the count of rows it could not confirm, as the
+    /// worklist's other steps answer a fault: never a shorter list presented as complete (uac-r2 F4-b). A query that succeeds but returns
+    /// NONE of the ids it asked for gets the same answer (the service read cannot see the rows); a query that returns some of them drops
+    /// only the missing ones, as a row deleted between the two reads. Decide-lane no-core rows are
+    /// never candidates (D-35), so they are not re-read.
+    /// </summary>
+    private async Task<NoCorePairCheck> NoCoreRowsWithAStoredPairAsync(IReadOnlyList<SignalRow> rows, CancellationToken ct)
+    {
+        var leftOut = new HashSet<Guid>();
+        var noCore = rows.Where(r => r.HasNoCore && r.Lane == DecisionLane.Do).Select(r => r.SignalId).Distinct().ToArray();
+        if (noCore.Length == 0)
+        {
+            return new NoCorePairCheck(leftOut, null);
+        }
+
+        var confirmed = new HashSet<Guid>();
+        try
+        {
+            foreach (var chunk in noCore.Chunk(IdChunk))
+            {
+                var query = new QueryExpression(SignalCoreRecordAccess.SignalTable)
+                {
+                    ColumnSet = new ColumnSet(SignalCoreRecordAccess.CoreRecordTypeColumn, SignalCoreRecordAccess.CoreRecordIdColumn),
+                };
+                query.Criteria.AddCondition("sprk_signalid", ConditionOperator.In, chunk.Cast<object>().ToArray());
+                var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+                var returned = result.Entities.Where(e => chunk.Contains(e.Id)).ToList();
+                if (returned.Count == 0)
+                {
+                    // A whole chunk missing means the service read cannot see these rows (it is not the delete race a single missing id
+                    // among returned ones is), so a list without them would be incomplete: the same 503 a faulted query answers, with the
+                    // same reason. One summary warning, counts only. A chunk of one id whose Signal was deleted between the two reads lands
+                    // here too; that is accepted, because it is transient and the next read succeeds. Some-but-not-all returned stays a
+                    // dropped row (below), so one deletion race never blanks the Worklist.
+                    _logger.LogWarning(SignalAccessEvents.CorePairAppOnlyReadFailed,
+                        "Signal read: the app-only read of the core-record pair returned none of {ChunkCount} requested rows ({Count} no-core rows in all); unavailable.",
+                        chunk.Length, noCore.Length);
+                    return new NoCorePairCheck(leftOut, SignalReadResult.Unavailable("core_pair_read_failed"));
+                }
+
+                foreach (var stored in returned)
+                {
+                    if (SignalCoreRecordAccess.HasAnyPairHalf(stored))
+                    {
+                        leftOut.Add(stored.Id);
+                        using (_logger.BeginScope(SignalAccessEvents.Fields(stored.Id, DecisionLane.Do)))
+                        {
+                            _logger.LogWarning(SignalAccessEvents.CorePairPresentAppOnly,
+                                "Signal read: the caller's read returned no core-record pair and the app-only read returned one; left out.");
+                        }
+                    }
+                    else
+                    {
+                        confirmed.Add(stored.Id);
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // One summary warning, never one per row; type only, never the message (it can echo row content).
+            _logger.LogWarning(SignalAccessEvents.CorePairAppOnlyReadFailed,
+                "Signal read: the app-only read of the core-record pair faulted ({ExceptionType}) for {Count} no-core rows; unavailable.",
+                ex.GetType().Name, noCore.Length);
+            return new NoCorePairCheck(leftOut, SignalReadResult.Unavailable("core_pair_read_failed"));
+        }
+
+        foreach (var id in noCore.Where(id => !confirmed.Contains(id) && !leftOut.Contains(id)))
+        {
+            leftOut.Add(id);
+            using (_logger.BeginScope(SignalAccessEvents.Fields(id, DecisionLane.Do)))
+            {
+                _logger.LogWarning(SignalAccessEvents.CorePairAppOnlyReadFailed,
+                    "Signal read: the app-only read of the core-record pair did not return the row; left out.");
+            }
+        }
+
+        return new NoCorePairCheck(leftOut, null);
+    }
+
+    /// <summary>Step (6b)'s answer: the no-core rows to leave out, or the 503 a faulted query produces.</summary>
+    private sealed record NoCorePairCheck(HashSet<Guid> LeftOut, SignalReadResult? Outcome);
 
     // ---------------------------------------------------------------------------------------------------------------
     // (7) subjects: Do-lane "mine", the D-42 flag, the closed sets' assignee

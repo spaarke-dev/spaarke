@@ -646,7 +646,7 @@ public partial class SignalSuppressionTests
         var signal = s.Open(MatterId, Guid.NewGuid());
         var before = s.Queries;
         var todoSubject = Guid.NewGuid();
-        var entities = new Mock<IGenericEntityService>();
+        var entities = new Mock<IGenericEntityService>().WithNoStoredCorePair();
         entities.Setup(e => e.GetEntitySetNameAsync("sprk_todo", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_todos");
         var users = new Mock<IDataverseUserClient>();
         users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
@@ -1730,7 +1730,7 @@ public partial class SignalSuppressionTests
         Store s, DataverseUserResponse signalRow, DataverseUserResponse core, IEnumerable<Guid>? hide = null,
         Exception? listFault = null, DataverseUserResponse? listResponse = null)
     {
-        var entities = new Mock<IGenericEntityService>();
+        var entities = new Mock<IGenericEntityService>().WithNoStoredCorePair();
         entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", MatterType, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_recordtype_ref", MatterType) { ["sprk_recordlogicalname"] = "sprk_matter" });
         entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");

@@ -1,28 +1,22 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-11-06 ~05:40Z (main session checkpoint). Recovery: read Quick Recovery first.
-> **Done on master**: 001–006, 010–016, 017, 018, 037, 039, 038, 070–074, 043 + 046 (#2573, 0f6618094b), 048, 042c.
-> **Live on dev:** BFF master 0f53e053bf (042c + 048). 046b role additions (from 98813dcaa2, 2026-11-05) and removal R1 (from e6c0c94fa3, 2026-11-06 02:35Z) are applied by UAC-r2, and VERIFY PASS. Gate G-8 (`JobRevokeOnChangeEnabled`) has been ON on dev since 2026-11-06 04:02Z (#2574); the watch passed. The thread filing sweep dry run found 0 threads to reassign, so the apply was skipped.
-> **Next dev deploy:** one combined deploy of master with 049, plus the code pages Spaarke.UI.Components → LegalWorkspace, SpaarkeAi, AI.Widgets (CreateProjectWizard optional), BFF first. It needs the owner's go in uac-r2's session. The gate covers the 043 additions (analysis create 0 5xx; push with an unchanged 409 rate on non-analysis targets; child-records create 0 5xx).
+> **Last updated**: 2026-11-07 ~08:30Z (main session checkpoint). Recovery: read Quick Recovery first.
+> **Done on master**: 001–006, 010–018, 030a, 037–040, 042c, 043, 044, 046, 046b, 046c repo side, 048, 049, 070–075. #2610 (fb5738b60d), #2617 (cc11294300: 040+075+044).
+> **Live on dev:** BFF + Console at master 20669df6a9 (UAC-r2 is putting the batch #2292+#2610+#2617 to the owner). 046c APPLIED on dev 2026-11-07 (G17 03:33:12Z, R3 80 removals 03:36:46Z, -Verify PASS; UAC-r2 2 h watch PASS: 0 privilege faults, 0×403). Project to Matter profile kept (owner). 54 FMSWP-021 matters (cleanup list in notes/task-021-live.md).
+> **W3 direction:** named exceptions plus guards; no core redesign in R1 (decisions.md). Owner decisions 2026-11-07 in decisions.md.
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active** | uac-r2: `spaarke-wt-unified-access-control-r2-20`; ontology: `spaarke-wt-spaarke-ontology-platform-r1-38`; ebilling: `spaarke-wt-ebilling-r1-c7`.
-- **046b → PR #2592** (work branch head ad40add283 = 046b d7ab6de7dc + master 1f1c319480), auto-merge on. Verified: ArchTests 1973/1973, filtered comm tests 779/779, Pester 39/39. After merge: tell uac-r2 the SHA. Set TASK-INDEX 046b ✅ (done after merge, so the PR CI isn't re-triggered). Ebilling merge-second rule: whoever merges second takes 089e's ProcedureRolePrivilegeGuardTests.cs and Deploy-EbillingBillingAdminRole.ps1 in full and keeps one copy of the G5 privilege (ebilling told).
-- **049** (task/fm-049b, worktree agent-ab6391bd0d308344f, tip 598805e9ac + fix round 3 in progress): Parts A, B (secure-from-creation, D1 shared DelegationRuleFilter.RefusalFor, D2 already_provisioned) and C (scans) are merged. verify-suites 6890/0/7; publish delta +15,331 B (39.22 MB, 191/191), no CVE. Opus pass 2 done; **fix round 3 agent running** (items 1–9; item 10 = Basic doesn't cover a team-owned target, UAC-approved, invert the 2 new tests; item 11 = drop the stale "27 of 35" from the CommunicationThreadFilingSweepJob remarks). Then: a scoped re-check, then the **history rewrite** of task/fm-049b (one squashed commit from the merge base; old notes :508-513 text about a race must not survive) and deletion of remote task/fm-049c. **ASK THE USER before the force-push/delete.** Then the head SHA → uac-r2, merge into the work branch, PR, combined dev deploy, Project→Matter profile on dev, 021 re-measure.
-- **046c** (Basic User read-only on sprk_*; POML on the work branch, with uac-r2's pre-apply evidence, rollback and window conditions): starts after 046b merges.
-- **021**: wizard deploy waits on 049's re-measure (task/fm-021 d6dc73e9f6).
-- **033 must be re-scoped before it runs** (D-204).
-- **Private:** uac-r2 by message only. |
-| **Next Action** | 1. On the 049 fix round 3 report: scoped re-check → ask the user about the 049b rewrite + 049c delete → SHA to uac-r2.
-2. Watch PR #2592 → merge SHA to uac-r2 → TASK-INDEX 046b ✅ → start 046c.
-3. Owner open: live checks on dev (042c/048 refusals, 043) need the owner's go in THIS session; inactive playbook at analysis start; Family 1.0.56; 076; #2556. |
-| **Owner rulings 2026-11-06** (decisions.md) | R2 not applied; communication send/re-file needs Core User (G11/G12 not granted); Basic User is read-only on sprk_* (046c); G13 is not a gap (thread Read stays Basic, capped by a guard). |
-| **Open PRs** | #2592 (046b). #2387 (075, HOLD, ships with 040). |
-| **Issues** | #2574 (G-8, flipped on dev), #2590 (uac: root-BU project create), #2444, #2413, #2429, #2469, #1948. |
-| **Owner to do** | 076 live check. Leftover locked worktrees agent-aec6d06ca99a5a9f6 (075), agent-a7ed21b81867c4e2e (039): end of project via Remove-WorktreeSafe. Worktrees in use: agent-ae68466fd18cb8df3 (046b), agent-ab6391bd0d308344f (049b), agent-a3d88f8312b09e715 (049c), agent-a7d775a1f12d2a061 (043, done), agent-ada15efbfe379567a (046, done). |
+| **Work branch** | 8a50a12def (= master cc11294300 + 049b merge + task index). **PR #2619 OPEN with auto-merge (049b)**: do NOT push to the work branch until it merges (monitor bqgt6y9y9). This file is uncommitted until then: commit it after the merge. verify-suites PASS (Arch 1998, BFF 7086/0 fail); publish delta +2,432 B (39.26 MB); no CVE. |
+| **After #2619 merges** | Send UAC-r2 the master SHA (049b follows the current deploy batch, next window). Commit this checkpoint. |
+| **049c** | origin/task/fm-049c 47504e3dae (overlaps step 3's reads with step 2, a shared request-scoped metadata memo, step 5's two checks run together; local pre-create ~1620 → ~980 ms; live estimate still ~0.6–0.8 s over p95). Opus review: no production F; F3 weak timing assertion; K cancel the merged check on the caller's refusal. **fm-049c-fix1 RUNNING** (Sonnet; branch task/fm-049c-fix1). **Asked UAC-r2 to ack (A) the FR-04 probe now asked before step 2 and (B) the merged check asked concurrently** (POML escalation "an order, a check"). Then merge into the work branch → PR → deploy → re-measure (Debug-level step timing needed). If still over: propose 049d to the owner (cross-request metadata cache with short TTL; owner/post-create only with UAC-r2). |
+| **Deploy batch (UAC-r2)** | #2292 + #2610 + #2617 + the MCP spike commit; awaiting the owner's go in UAC-r2's session. #2617 client order: BFF → `sprk_recordfamily` (Deploy-WebResourceInline create + add to spaarke_core, read back) → `sprk_fieldmapping_push` v1.3.0 (Type 3). Live UI checks (a)–(d) (opens; push one FMSWP- child; K2 failed save opens nothing; no-Filing-edge 409) need either the owner clicking through or the owner's go to run them here. `Set-FieldMappingRuleSyncMode -Apply` stays out (owner review). |
+| **Owner questions open** | (1) After the deploy: who runs the Push Updates live UI checks (owner, or fm with the owner's go for FMSWP- writes)? (2) After the 049c re-measure: 049d if still over NFR-02. (3) Sync-mode -Apply on dev (28 Assigned-To rules → One-time, no behaviour change): review. |
+| **Re-scope pending** | 032 (mapping step in the persister; inputs notes/task-032-design-inputs.md; design to UAC-r2 + ebilling first), 030b (association in the existing create + guards; send to word-add-in for a content read), 034 (named exceptions + guards), 033 (likely dropped). |
+| **Filed this session** | #2612 (live check of who holds the Signal/DR writer roles), #2613 (stale vite build list in Build-AllClientComponents.ps1). Ontology filed #2611 (Rules.test.tsx load flake). |
+| **Gotchas this session** | Pester 6.2 is the machine default: `Import-Module Pester -MaximumVersion 5.99`. App Insights drops whole requests (#2158). `timeout 400 git commit`. Don't push to the work branch while its master PR is open. The mcp-bff session can't be messaged (permission mode); the owner relays. `git log --all --find-object` also searches refs/stash: use `--branches --remotes`. |
 
 ## How wave-2 agents are run (lessons)
 
@@ -44,4 +38,4 @@
 
 ## Next tasks
 
-049 → PR, then 046c, then 021's deploy. Then 019, 033 (before 052), 040, 050.
+049b PR → 049c (+ UAC-r2 ack) → deploy batch + live UI checks → 049c re-measure → 021 deploy (after the owner's NFR-02 call) → 032/030b/034 re-scopes → 019, 033 (before 052), 050.

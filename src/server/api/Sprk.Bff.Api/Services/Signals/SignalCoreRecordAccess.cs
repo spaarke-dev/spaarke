@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -210,6 +211,15 @@ public sealed class SignalCoreRecordAccess
 
             if (!hasType && string.IsNullOrWhiteSpace(coreIdText))
             {
+                // Ontology D-210 (field-mapping-server-write-path-r1 task 044): Signal access fails closed when the pair cannot be
+                // confirmed. The access check reads the pair app-only when the caller's read returns neither half, and denies when a
+                // pair exists (whole or half), exactly as an unreadable core. Only an app-only read that succeeds with neither half is
+                // "no core record"; an app-only read that fails denies.
+                if (!await AppOnlyReadFindsNoPairAsync(signalId, lane, ct).ConfigureAwait(false))
+                {
+                    return SignalAccessDecision.NotFound;
+                }
+
                 return await AuthorizeNoCoreRecordAsync(row, lane, policyVersionId, enforceDoLaneMine, ct).ConfigureAwait(false);
             }
 
@@ -263,6 +273,49 @@ public sealed class SignalCoreRecordAccess
             return SignalAccessDecision.NotFound;
         }
     }
+
+    /// <summary>
+    /// True only when the BFF's own (app-only) read of the Signal succeeds and returns neither half of the core-record pair. A pair,
+    /// whole or half, or a read that fails, is false, and the caller is denied as for an unreadable core. Logs
+    /// <see cref="SignalAccessEvents.CorePairPresentAppOnly"/> or <see cref="SignalAccessEvents.CorePairAppOnlyReadFailed"/> with the
+    /// Signal id and lane as structured scope fields only: the message text carries neither, and no column value is logged.
+    /// </summary>
+    private async Task<bool> AppOnlyReadFindsNoPairAsync(Guid signalId, DecisionLane lane, CancellationToken ct)
+    {
+        using var scope = _logger.BeginScope(SignalAccessEvents.Fields(signalId, lane));
+        try
+        {
+            var stored = await _entities
+                .RetrieveAsync(SignalTable, signalId, [CoreRecordTypeColumn, CoreRecordIdColumn], ct)
+                .ConfigureAwait(false);
+            if (stored is null)
+            {
+                _logger.LogWarning(SignalAccessEvents.CorePairAppOnlyReadFailed,
+                    "Signal access: the app-only read of the core-record pair returned no row; denying.");
+                return false;
+            }
+
+            if (HasAnyPairHalf(stored))
+            {
+                _logger.LogWarning(SignalAccessEvents.CorePairPresentAppOnly,
+                    "Signal access: the caller's read returned no core-record pair and the app-only read returned one; denying as an unreadable core.");
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(SignalAccessEvents.CorePairAppOnlyReadFailed,
+                "Signal access: the app-only read of the core-record pair faulted ({ExceptionType}); denying.", ex.GetType().Name);
+            return false;
+        }
+    }
+
+    /// <summary>Whether an app-only Signal row carries either half of the core-record pair (the worklist's batched check uses it too).</summary>
+    internal static bool HasAnyPairHalf(Entity stored) =>
+        (stored.GetAttributeValue<EntityReference>(CoreRecordTypeColumn) is { } type && type.Id != Guid.Empty)
+        || !string.IsNullOrWhiteSpace(stored.GetAttributeValue<string>(CoreRecordIdColumn));
 
     private async Task<SignalAccessDecision> AuthorizeNoCoreRecordAsync(
         JsonElement signalRow, DecisionLane lane, Guid policyVersionId, bool enforceDoLaneMine, CancellationToken ct)
@@ -702,4 +755,23 @@ public sealed class SignalCoreRecordAccess
 
     private static string? ReadString(JsonElement row, string name) =>
         row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+}
+
+/// <summary>
+/// Stable EventIds for the core-record pair's app-only re-read (field-mapping-server-write-path-r1 task 044; the 5033x range). Both are
+/// logged inside a scope whose only fields are <c>SignalId</c> and <c>Lane</c> (<see cref="Fields"/>); no column value is logged.
+/// </summary>
+public static class SignalAccessEvents
+{
+    /// <summary>Warning: the caller's read returned neither half of the core-record pair and the app-only read returned a pair (whole
+    /// or half); the Signal is denied as for an unreadable core (per-Signal routes) or left out (worklist).</summary>
+    public static readonly EventId CorePairPresentAppOnly = new(50330, nameof(CorePairPresentAppOnly));
+
+    /// <summary>Warning: the app-only read of the core-record pair failed (fault, throttle, no row); the Signal is denied (per-Signal
+    /// routes) or left out (worklist), never treated as having no core record.</summary>
+    public static readonly EventId CorePairAppOnlyReadFailed = new(50331, nameof(CorePairAppOnlyReadFailed));
+
+    /// <summary>The scope fields of both events: the Signal id and the lane, nothing else.</summary>
+    internal static IReadOnlyDictionary<string, object> Fields(Guid signalId, DecisionLane? lane) =>
+        new Dictionary<string, object> { ["SignalId"] = signalId, ["Lane"] = lane?.ToString() ?? "unknown" };
 }

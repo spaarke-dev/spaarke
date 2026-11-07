@@ -4,7 +4,7 @@
     <title>Create path within NFR-02: concurrent caller checks, assigned-access grant after the response (owner 2026-11-05)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
     <gate>Part B (grant move) waits on UAC-r2's written conditions in the notes; the live re-measure waits on a dev deploy (owner's go in UAC-r2's session)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes RecordCreationService's step order and timing on every create path (.cs, bff-api) and moves an access grant onto background work (security-adjacent, ADR-004/ADR-052).</rigor-reason>
     <model-tier>opus</model-tier>
