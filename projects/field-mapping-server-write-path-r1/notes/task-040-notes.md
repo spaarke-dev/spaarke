@@ -180,3 +180,22 @@ Known limits added in fix round 1 (left as is):
 - None outstanding from this task. The two wall-clock sensitive tests above and the ArchTest guards are reported, not changed.
 
 rework: 3 (the three ArchTests guards fixed after the first full run); fix round 1: 1
+
+## Live checks on dev (2026-11-07, after UAC-r2's deploy of cc11294300)
+
+The owner gave the go in fm's main session for new FMSWP- rows. Scripted HTTP through the dev BFF, with one delegated token per resource (the owner's admin account). No token is recorded here. The window ran 17:19:18–17:21:07Z.
+
+| Check | Request | Result |
+|---|---|---|
+| Setup | `POST /api/v1/child-records/sprk_matter` "FMSWP-075-push-src", attorney 1 = contact A | 201, 4147 ms, matter `33873a1a-dc61-481d-aae4-d736679305c6` |
+| Setup | `POST /api/v1/child-records/sprk_project` "FMSWP-075-push-child", filed under the matter by its regarding pair, attorney 1 = contact B (caller wins) | 201, 5919 ms, project `8c788447-7ae7-4886-ba44-4a91d61db52b`; read back with attorney 1 = B |
+| (b) preview, plain push | `push` preview, Matter → Project | 200, nothing to push: all 8 rules are Assigned-To rules (`skippedRuleCount` 8, warning "None of this profile's rules is set to be pushed.") |
+| (b) preview, Update Assigned To | `push` preview + `includeAssignedTo` | 200, 1 record, 1 change: `sprk_assignedattorney1` B → A |
+| (b) apply | `push` + `includeAssignedTo` + `childIds` [project] | 200, `updatedCount` 1, 5803 ms; read back attorney 1 = A |
+| (b) idempotent | the same preview again | 200, 0 changes |
+| (d) no Filing edge | `push` preview + `includeAssignedTo`, Project → Matter (a matter is never filed under a project) | **409** `field_mapping_parent_lookup_missing`, "Nothing was updated." |
+| (d) note | the same without `includeAssignedTo` | 200, "None of this profile's rules is set to be pushed." The no-rule answer comes before the edge test; nothing is read or written. **K4, known limit.** |
+
+(a) the Push Updates button opens the `sprk_recordfamily` page, and (c) a failed form save opens nothing. Both need a browser; the owner clicks through them.
+
+**Rows to clean up later:** matter `33873a1a-dc61-481d-aae4-d736679305c6` and project `8c788447-7ae7-4886-ba44-4a91d61db52b`. They join the FMSWP-021 cleanup list in `task-021-live.md`.
