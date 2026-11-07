@@ -30,23 +30,24 @@ internal sealed class InvoiceRuleSignalReconciler
     private readonly ILogger _logger;
     private readonly SignalLogContext _context;
     private readonly Guid _invoiceId;
-    private readonly string _label;
+    private readonly string? _field;
 
-    /// <param name="label">The log lines' subject, for example <c>Correction of Hours</c> or <c>Add line</c> (a field name or a fixed text; never a value).</param>
+    /// <param name="field">The corrected field (a field name, never a value): the log lines read "Correction of {Field} on invoice ..." as before the
+    /// move (164a fix round K3: the property stays <c>Field</c>). Null for Add line: "Add line on invoice ...".</param>
     internal InvoiceRuleSignalReconciler(
         SignalEpisodeLifecycle lifecycle,
         Func<Guid, string, int, string, CancellationToken, Task<SignalCloseOutcome>> closeSignal,
         ILogger logger,
         SignalLogContext context,
         Guid invoiceId,
-        string label)
+        string? field)
     {
         _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
         _closeSignal = closeSignal ?? throw new ArgumentNullException(nameof(closeSignal));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _context = context;
         _invoiceId = invoiceId;
-        _label = label;
+        _field = field;
     }
 
     /// <summary>The writer's permanent refusals of this run (049 F1-3): recorded in the findings by <see cref="RecordWriteRefusals"/>.</summary>
@@ -58,7 +59,15 @@ internal sealed class InvoiceRuleSignalReconciler
         if (Text(change, "policyCode") is not { Length: > 0 } policyCode || Text(change, "subjectEntity") is not { Length: > 0 } entity
             || !Guid.TryParse(Text(change, "subjectId"), out var subjectId))
         {
-            _logger.LogWarning("{Label} on invoice {InvoiceId}: a pending Signal change names no policy or subject; skipped.", _label, _invoiceId);
+            if (_field is not null)
+            {
+                _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: a pending Signal change names no policy or subject; skipped.", _field, _invoiceId);
+            }
+            else
+            {
+                _logger.LogWarning("Add line on invoice {InvoiceId}: a pending Signal change names no policy or subject; skipped.", _invoiceId);
+            }
+
             return;
         }
 
@@ -84,8 +93,16 @@ internal sealed class InvoiceRuleSignalReconciler
         if (entry is null || !string.Equals(Text(entry, "fingerprint"), raise, StringComparison.Ordinal))
         {
             // By construction the plan holds the entry B2b-1 recorded; anything else is not raised (nothing to raise it from).
-            _logger.LogWarning("{Label} on invoice {InvoiceId}: no plan entry of policy {PolicyCode} on {Subject} {SubjectId} matches the change; not raised.",
-                _label, _invoiceId, policyCode, entity, subjectId);
+            if (_field is not null)
+            {
+                _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: no plan entry of policy {PolicyCode} on {Subject} {SubjectId} matches the change; not raised.",
+                    _field, _invoiceId, policyCode, entity, subjectId);
+            }
+            else
+            {
+                _logger.LogWarning("Add line on invoice {InvoiceId}: no plan entry of policy {PolicyCode} on {Subject} {SubjectId} matches the change; not raised.",
+                    _invoiceId, policyCode, entity, subjectId);
+            }
 
             // Nothing will supersede the old episode, so it is closed here (of the stored fingerprint only).
             if (close is not null && !string.Equals(close, raise, StringComparison.Ordinal))
@@ -141,8 +158,16 @@ internal sealed class InvoiceRuleSignalReconciler
 
         if (step.RefusedCode is { } refusedCode)
         {
-            _logger.LogError("{Label} on invoice {InvoiceId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} is refused permanently ({Code}); recorded in the findings.",
-                _label, _invoiceId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, refusedCode);
+            if (_field is not null)
+            {
+                _logger.LogError("Correction of {Field} on invoice {InvoiceId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} is refused permanently ({Code}); recorded in the findings.",
+                    _field, _invoiceId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, refusedCode);
+            }
+            else
+            {
+                _logger.LogError("Add line on invoice {InvoiceId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} is refused permanently ({Code}); recorded in the findings.",
+                    _invoiceId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, refusedCode);
+            }
             Refused.Add((request, refusedCode));
         }
 

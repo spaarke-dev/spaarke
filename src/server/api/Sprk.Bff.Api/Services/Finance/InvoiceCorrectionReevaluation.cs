@@ -869,7 +869,7 @@ public sealed class InvoiceCorrectionReevaluation
             }
 
             var signals = new InvoiceRuleSignalReconciler(
-                _lifecycle, _closeSignal, _logger, SignalLogContext.Correction, applied.InvoiceId, $"Correction of {applied.Field}");
+                _lifecycle, _closeSignal, _logger, SignalLogContext.Correction, applied.InvoiceId, applied.Field);
             foreach (var change in ruleChanges)
             {
                 await signals.ReconcileRuleAsync(root, change, ct).ConfigureAwait(false);
