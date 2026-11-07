@@ -4,83 +4,48 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-06 ~17:35Z (checkpoint #99: 20669df6a9 deployed to dev and gate PASS; owner rulings on 046c and the root team; the root-team census is done and its removal waits on the owner's go).
+> **Last Updated**: 2026-11-07 ~04:20Z (checkpoint #100: 046c applied and the watch is running; the deploy batch is planned; the MCP spike rides along; #2292 merged; 164a, 044 r3 and 049b approved).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; a peer's go is never the owner's. |
-| **Active work** | None in code. **#2560 MERGED** (PR #2598, `b6dee2e590`; issue closed); C:/wt2560 and C:/wtfm removed. Waiting on: fm 049 round-3 SHA; ebilling 095d-2a-2 SHA and the 095a column-security pre-apply ping. |
-| **Also in flight** | #2577 test-host fix MERGED (#2596, `972929fd69`). |
-| **Dev state** | BFF = **20669df6a9** (since 2026-11-06 16:44:51Z) plus the `sprk_spaarkeai` bundle at the same SHA (16:54:04Z). G-8 revoke-on-change ON. 226 settings. |
-| **Next action** | 1. **Root team "Spaarke": Console User REMOVED 18:11:46Z** (owner go; read-back shows only Basic User left on the team). Census confirmed: 4 findings at 18:45Z (was 5); the remaining finding is the Basic User grant that 046c fixes. Work-branch docs merged to master via PR #2603 (`38aec72923`). `# Spaarke Get Started` (getstarted@): the owner said it is a special-purpose marketing account; leave it as is and change nothing (no license removal, no environment security group; self-service joining is correct behaviour). 2. 046c: owner ruling "all five get Core User": DONE 17:30Z (role f8ce167c, BU cb15f587; read-back OK for 49f89867, bcebc56c, b0cd2d30, 4c9917c2, e44317a0). Tell fm and word-add-in; also tell them the root account 1d02f31c holds System Administrator. 046c's own apply is fm's, with the owner's go in their session; I review the PR after its fix round and asked for a step-order check. 3. Open: organic traffic for the fm and ontology route checks (ontology reads its own); the 02:30Z nightly (ontology). |
+| **Running** | The 046c watch: background bash `watch046c_uac.sh` (scratchpad) checks every 30 min until **05:40Z**. When it ends, read its output, send the result to fm, then put the deploy batch to the owner. |
+| **Dev state** | BFF = **20669df6a9** (since 2026-11-06 16:44:51Z) + the `sprk_spaarkeai` bundle at that SHA. G-8 ON. 226 settings. **046c applied** (by fm, with the owner's go in fm's session): G17 at 03:33:12Z (3 Core User AppendTo raises), R3 at 03:36:46Z (80 Basic User removals; Basic = Read only), both -Verify PASS. Baseline before: 0×403, 0×5xx, 0 privilege faults, census 4. Rollback: `Set-FeatureRolePrivileges.ps1 -Restore -Gap R3 -Apply` (fm runs it, after telling me). A background identity that faults gets its own role, not a restore. |
+| **Next action** | 1. Watch result at 05:40Z. 2. Ask the owner for the batch deploy go (plan: scratchpad `deploy-batch-plan.md`). 3. Deploy: pre-checks, rollback snapshot, then BFF (master + MCP spike commit), then `sprk_recordfamily`, then `sprk_fieldmapping_push` v1.3.0. Then the gate, the spike gate, notices, one membership reconciliation back-fill, and a junction row count. fm runs the live UI checks (a) to (d). |
 
-## Decisions this session (2026-11-06, owner here)
-- W3 direction: named exceptions plus guards; no core redesign in R1; no given-id input in the core (fm recorded it at `5e4f4be3aa`).
-- Deploy go for 20669df6a9 (done).
-- 046c: all five add-on holders get Core User (done 17:30Z).
-- The root team's Console User was removed (done 18:11Z). Get Started is left as is; no root-cause change (owner).
-- ebilling EB-D-200 = option D (via ebilling).
-- MCP spike on dev (owner 2026-11-07, here: approach (a), then "dev/test environment so no risk -- there does not need to be a short time limit"): no time limit and no master-deploy pause. Every dev BFF deploy builds master + spike commit `5c9e301572` (merged, diff checked = spike files only; draft PR for CI) plus the spike gate (anonymous MCP routes -> 401, signed-in -> 2xx). This continues until mcp-bff-api says Phase 0 is done; after that, plain master.
-- 046c applied on dev by fm (owner go in fm's session): G17 at 03:33:12Z, R3 (80 Basic User removals) at 03:36:46Z, -Verify PASS. My watch runs to 05:40Z (scratchpad watch046c_uac.sh).
-- Partners (the SPA) SEE reviewer-added lines and reviewer reasons while an invoice is In Review (owner, typed here; supersedes EB-D-192's In Review clause). ebilling records it; 165c keeps only the submission-link check; reasons are shown through a typed invoice-module projection, never a partner Read on the Decision Record table.
+## The deploy batch (owner 2026-11-07: batch #2292 with 044)
+- Master: #2292 (`78d9c87864`, membership junction miss fixed; issue closed), #2610 (`fb5738b60d`: 030a Office To Do via RecordCreationService; 046c role source), **#2617** (040+075+044; open with auto-merge, waiting for its SHA from fm).
+- **MCP spike rides along** (owner: no time limit): every dev deploy = master + `5c9e301572`. mcp-bff-api merges the batch master SHA into `spike/spaarkeai-mcp-phase0` (draft PR #2615, never merged) and sends the SHA; I check the diff is spike files only. Spike gate: anonymous `/mcp/legal-operations` and `/mcp/spike-area-b` → 401, signed-in → 2xx. Send them the deployed SHA and read-back. Plain master after they say Phase 0 is done.
+- #2617 order: BFF first; then the `sprk_recordfamily` page (NEW; `Deploy-WebResourceInline.ps1`, add to `spaarke_core`, read back 1 row); then `sprk_fieldmapping_push` v1.3.0. Rollback: v1.2.x. Not in the batch: `Set-FieldMappingRuleSyncMode -Apply` (owner review), 049b (next window).
+- Pre-checks as before: 174/175 absent, no ebilling 095a code (the 095a gate: `sprk_sourceemaildocument` IsSecured must be read true by me first), `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` exit 0, `Ebilling__StoredFileReconcileEnabled` false, census.
+- Gate method: #2158 means telemetry drops whole requests, so counts are lower bounds; pair them with peer logs and a Dataverse read-back.
 
-## The next dev deploy (owner: wait for 049)
-- Contents: master incl. #2560 (`b6dee2e590`), #2596 (`972929fd69`), `0f6618094b` (043), #2577 (`f34993dc78`), #2592 (046b, auto-merge), #2582 (audit flags), #2589 (docs), plus 049; code pages: LegalWorkspace, SpaarkeAi, CreateProjectWizard, AI.Widgets.
-- **095a gate (2026-11-06):** no BFF that contains ebilling 095a goes to dev until I read `sprk_invoicesubmission.sprk_sourceemaildocument` IsSecured = true myself. It is false on dev today, with 0 rows populated. ebilling runs `Set-EbillingSourceEmailFieldSecurity.ps1` with the owner's go in their session. Readers membership: (a) Writers only (accepted; `-Verify` refuses a Readers row). Provisioning received the ordered prerequisite.
-- **164a-2 / invoice-row inventory (2026-11-06):** reviewed with ebilling; the detail is held privately (peer channel). Recommendation sent via ebilling; the owner decides through ebilling (EB-D-200 = option D). External scope keys on the submission's firm (confirm D-70).
-- **Pre-deploy check:** master must NOT carry ontology 174/175 (#2580/#2579; held unmerged until ebilling 112 is on dev). Stop if 174 is there.
-- Gate: gate0f5.sh set + fm 043 gates; ontology: `table_unsupported` per table (signal/decisionrecord/budgetrevision) baseline 0, writer codes 0, Undetermined 0, census unchanged (**5** since 2026-11-06 00:30Z); ebilling: `Set-ChildRecordCreatorPersonSchema.ps1 -Verify` exits 0, `Ebilling__StoredFileReconcileEnabled` stays false.
+## Decisions this session (owner, here)
+- 2026-11-06: W3 = named exceptions plus guards; 046c all five add-on holders get Core User (done); root team Console User removed (done; Get Started left as is); EB-D-200 option D.
+- Partners (SPA) SEE reviewer-added lines and reasons while In Review (supersedes EB-D-192's clause; ebilling recorded it as EB-D-202; reasons via a typed invoice-module projection in task 130, never partner Read on the DR table).
+- #2292: fix it (done, merged). Deploy: wait and batch with 044.
+- MCP spike on dev: approach (a), then no time limit (dev/test).
 
-## Reviews in flight / conditions sent
-- **fm (`-69`):**
-  - **044 (owner 2026-11-06, in fm's session):** no field security on the core pair. Scope: the fail-closed re-read (my conditions) plus a guard (Write/Create on Signal and Decision Record only for System Administrator and Ontology Administrator), auditing on both pair columns, and 052 flagging a pair changed after create. The script, profile and XML are reverted, so there is no apply step and no ordering rule. I review the re-read diff and the inventory.
-  - **032 (owner):** Matter mapping for extracted invoices, fill-only, inside InvoiceSubmissionPersister before its transaction (option 2). I review the design before code, with ebilling.
-  - **Live checks (owner-approved in fm):** the Project->Matter profile and the 021 re-measure. fm sends the UTC window, then I read the gate for the routes that had no traffic.
-  - **049 `e8da405eb0` APPROVED 2026-11-06** (rounds 3 and 4: Basic not counted, tests inverted, wording clean). fm opens the PR and merges, then sends the master SHA, then I put the combined deploy to the owner. Rebuild order: BFF, then UI.Components → LegalWorkspace / SpaarkeAi / AI.Widgets (CreateProjectWizard optional). Recommended via fm that the owner delete remote `task/fm-049c` (the old private passage is in public commits).
-  - 046b PR #2592 APPROVED (role diff matches dev exactly; auto-merge on).
-  - G13 thread Deep withdrawn (private threads); thread Read stays Basic.
-  - 049: rights gate option (b): Basic never counts for a team-owned target; invert the two 049-only tests.
-  - 049: notes passage removed, and the branch history rewritten (squash + force-with-lease).
-  - 046c (Basic User read-only): conditions 1–7 in its POML; inventory and dry run come to me privately before the owner.
-- **ebilling (`-c7`):**
-  - **165a:** the owner accepted the branch history; it lands fast. The external-visibility reader ruling went privately: a small class (c) change separate from 165a, pending a dev count of mismatches first. 164a: external-exposure facts sent; whether partners see In Review family rows is a product decision for the owner, via ebilling.
-  - **096b (EB-D-201, after 164a):** `sprk_invoice` and `sprk_billingevent` leave `ChildRecordEndpoints.CreateTables`; the ribbon "New billing event" and `SecureChildNewCommandAgreementTests` change in the same change; `RefileTables` is untouched. Scope ACCEPTED. Pending from ebilling: the diff, then file:line proof that the 052 wizard and the 095 paths create app-only, BEFORE the role -WhatIf to drop user Create on `sprk_invoice` goes to the owner. The BFF and ribbon deploy in one window via me; #1973 closes once the build is on dev.
-  - 095d-2b-1 `4f113d72e2` APPROVED 2026-11-06: the withhold is keyed on the app-only `sprk_firmhold`, the invoice is withheld while the re-run is pending, and I verified every external path myself. An outcome reply by email must respect the withhold if one is ever added.
-  - 095d-2a-2 (`7316036f5c`, `741a4fccaf`, `0bd7d49f89`) APPROVED 2026-11-06 with no F findings. K1 (line attach between the re-check and the transaction) waits on their invoice row-version answer. K2: a refused-count in the job result in 2b. K3: the result's RerunState stays non-partner-visible.
-  - 164a create-only refusal: separate flag + derived `GenericCreateRefused`, conditions accepted.
-  - EB-D-196: quote may stay in Signal evidence (B), with the containment test.
-  - `sprk_firmhold` re-run-pending value OK. Conditions: unknown value fails closed, only the re-run clears it, no human Update profile (verified on dev: only the 2 BFF app users), tests. Backfill count 0.
-  - #2591 field-security APPROVED (additions only; 43 IsSecured flips, 42 in Readers, blobpath writer-only).
-  - Master PR checklist unchanged (095d-2 hold, option-A conditions, EB-D-188 G5).
-  - Then the P2 migration, then my flip of `Ebilling__StoredFileReconcileEnabled` (owner go HERE).
-- **ontology (`-38`):**
-  - 0f53e053bf read CLOSED (gate, Worklist, nightly).
-  - #2580 (174) replay conditions met.
-  - 174 and 175 are held unmerged and ship as a pair after ebilling 112.
-  - #2582 audit flags merged; H6 covers org auditing; audit history stays SysAdmin only.
+## Reviews state
+- **fm (`-69`):** 044 r1-r3 APPROVED (`37946fc15c`); squashed into the work branch (847e6215d9) → #2617. 040 + 075 APPROVED (re-check clean; Report Card SyncMode 1 is correct). **049b + fix1 + fix2 `82f82c0668` APPROVED**: my ruling (b), an inline fallback with the grantor only when nothing was queued; it merges after #2617, then gets its own PR. 032: I review the design before code (fill-only Matter mapping in InvoiceSubmissionPersister). The live-check gate for fm's 2026-11-06 windows was PASS (33 creates read back).
+- **ebilling (`-c7`):** **164a `e7123d3fb7` APPROVED** (no F; Q1 accepted with the condition that system closes never carry a human decider; Q2, approved > billed, is a business question for the owner via ebilling; K1-K5 accepted). 165a lands; then **165c**: the submission link counts only if it equals `InvoiceIdFor(id)` (dev count 0 mismatches). 096b scope accepted (CreateTables minus invoice and billingevent, plus the ribbon and ArchTest; app-only proof before the role -WhatIf). 095d-2b-1, 095d-2a-2 and #2591 approved earlier. My flip of `Ebilling__StoredFileReconcileEnabled` needs the owner's go HERE.
+- **ontology (`-38`):** 044 co-approved; the BFF holding Ontology Service is intended (reads; the writer client does the writes). Writer identity for customer environments: provisioning S23 (BFF role) plus the writer-identity task (new UAMI per stamp, owner). 174/175 held until ebilling 112.
+- **mcp-bff-api (`-68`):** spike as above. A10 and B-4 auth diffs are still to come; production task 021 (CIAM/A9 refusal) is reviewed against FR-02.
 
 ## Owner items outstanding
-- Dev: application users with production-like names (`# spaarke-bff-api-prod`, `# JobsServiceProd`) hold System Administrator in DEV (fm 044 finding). Ask the owner whether those identities belong in dev.
-- ebilling: a hold-column item is fixed in ebilling task 165, ordered first and before AP export is turned on anywhere; ebilling tells the owner (detail held privately). 095d-2b-1 C1 and C2 resolved and approved (`4f113d72e2`).
-- ebilling: a line-validation item is fixed in 164a-4a; I review the 164 diff against conditions sent privately. Does the owner want tracking beyond 164?
-- Should customer environments turn on revoke-on-change (G-8) through provisioning?
-- Access-conferring registry (FR-24, task 041 seed): `sprk_reportcard` has 8 `sprk_assigned*` lookups but is not in the registry, so they confer nothing (report card access follows its parent). Should they confer access? Same class as the `sprk_servicerequest` follow-up. fm 040 seeds report-card push rules as plain data (SyncMode 1) and pins the seed to the registry both ways.
-- **Next dev deploy (owner 2026-11-06: batch #2292 with fm 044):** master has #2292 (`78d9c87864`) + #2610 (`fb5738b60d`: 030a Office To Do via RecordCreationService; 046c role SOURCE only, not applied). Waiting for 044's master PR (round 3 `37946fc15c` approved). Maybe also 040+075 (deploy the `sprk_recordfamily` page BEFORE `sprk_fieldmapping_push.js` v1.3.0; K2 live check at deploy) and 049b (my ruling (b): inline fallback with the grantor only on enqueue failure). Then put the combined deploy to the owner. After the deploy: one membership reconciliation run to back-fill, then a junction row-count check.
-- #2590: a project created app-only with no person lands in the root BU. Choose the rule (refuse vs route) and whether to move the dev row.
-- Column auditing on the writer-only tables' lookups (covered by ontology's flags? verify), 044 field-security profile, the person-path refusal uniformity question (private), the AP diagnostics batch, the VS Code agent-dir cleanup, word-add-in Office saves, 095a, click-test 195, Q1/Q4 (private), older: #2343, #2245, #2250, #2260, #2270, #2262, #2396, 191 F1/S4, 190 Apply, #2382, #2505; tasks 140/165/153.
+- Report card: should its 8 `sprk_assigned*` lookups confer access (registry FR-24)? Today no (it follows the parent).
+- Dev app users with prod-like names hold System Administrator (`# spaarke-bff-api-prod`, `# JobsServiceProd`).
+- G-8 for customer environments via provisioning; #2590 rule (refuse vs route); `Set-FieldMappingRuleSyncMode -Apply` review (fm).
+- Older: column auditing on writer-only lookups (verify ontology flags), AP diagnostics, VS Code agent-dir cleanup, word-add-in Office saves, click-test 195, #2343, #2245, #2250, #2260, #2270, #2262, #2396, 191 F1/S4, 190 Apply, #2382, #2505; tasks 140/165/153.
 
 ## Private items (never in issues/PRs/commits)
-- Core pair, lineage and update paths: merged in #2568 and deployed.
-- The push runs as the caller (#2253 K2); round-77 class Ks.
-- 049: secure-from-creation reasoning, the stale-add/removal race wording, and the Basic team-grant over-count stay in peer channels only.
-
-## Gate method
-- #2158: BFF telemetry drops whole requests (default OTel sampling), so gate counts are lower bounds; pair them with the peer's client logs and a Dataverse read-back. fm's 2026-11-06 20:44-21:12Z windows: 33 creates confirmed by read-back; no failure in the observed telemetry.
+- Open gaps stay in peer messages only: the ebilling hold-column item (165a), the line-origin item (164a), the submission-link readers (165c). The line: identifiers are fine in public; "X can still write Y today" for an open gap is not.
+- Earlier: core pair, lineage and update paths (fixed); 049 reasoning; the push runs as the caller.
 
 ## My own backlog
-#2585 (re-file whole-row read; hardening), #2576 (probe fault shown as denial), #2524, gate null-column hardening, SharePoint census, #2543, #2292, K-P1 for task 191; parked: 193 (C:/wt193), 197, #2427, 196a/196b; TASK-INDEX reconcile at 090.
+#2585, #2576, #2524, gate null-column hardening, SharePoint census, #2543, K-P1 for task 191; parked: 193 (C:/wt193), 197, #2427, 196a/196b; TASK-INDEX reconcile at 090.
 
 ## Peers
-uac-r2 `-20` (this session) · ebilling `-c7` · field-mapping `-69` · ontology `-38` · provisioning `-b8` · word-add-in `-7b` · website `spaarke-website-cb` · SPA R4 `spaarke-wt-spa-external-access-platform-ad`.
+uac-r2 `-20` (this session) · ebilling `-c7` · field-mapping `-69` · ontology `-38` · provisioning `-b8` · word-add-in `-7b` · mcp-bff-api `spaarke-wt-spaarkeai-mcp-bff-api-r1-68` · website `spaarke-website-cb` · SPA R4 `spaarke-wt-spa-external-access-platform-ad`.
