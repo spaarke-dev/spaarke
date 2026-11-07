@@ -947,3 +947,7 @@ These conditions are fixed in the design before any code, together with UAC-r2's
 - **C5, money guard:** the persister exposes its owned-column list, so the step loads no money or firm string (`InvoiceMoneyColumnsAppOnlyWriteGuardTests`). That guard joins the regression list.
 
 **What 032's code waits on:** 052a's metadata reader (`task/fm-052a`), and the persister layout in `work/ebilling-r1`.
+- **UAC-r2 follow-up (2026-11-07):**
+  - UAC-r2 backs the allow-list (C1). The proposed list needs sign-off from both ebilling-r1 and UAC-r2.
+  - The secure-source gate also maps nothing when the core record is the object of any active, well-formed No Access entry, internal walls included. It reuses `NoAccessListReader` and `NoAccessShareEnforcer.TryClassify`, keyed alongside the owner answer's secure-if-any. A failed read maps nothing.
+  - Must-fire and must-not-fire tests.
