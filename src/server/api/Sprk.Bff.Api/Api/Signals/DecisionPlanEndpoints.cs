@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -58,7 +59,40 @@ public static class DecisionPlanEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        // spaarkeai-mcp-bff-api-r1 task 016 (B-3, FR-07): the wizard's Person and Lookup search, scoped by the plan, read as the caller.
+        // Inherits this group's RequireAuthorization (the default workforce policy); never the ExternalCollaboration policy.
+        group.MapGet("/{signalId:guid}/lookup", SearchDecisionLookupAsync)
+            .WithName("SearchSignalDecisionLookup")
+            .WithSummary("Search the candidates for a person or lookup parameter of a Signal's decision plan")
+            .WithDescription("The table and its scope come from the Signal's decision plan for parameterCode, never from the caller: "
+                + "active contacts for a person, the active budgets of the Signal's matter for a budget (D-18), active organisations for a "
+                + "firm. Read as the caller, at most 25 by name. 404 when the Signal or its core record is not readable by the caller "
+                + "(as the decision-plan route); 403 when the caller cannot be resolved; 422 when parameterCode is not a person or lookup "
+                + "parameter of the plan or the plan does not resolve; 503 when the search could not be read.")
+            .Produces<DecisionLookupResponse>(200)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
+
+    /// <summary>The lookup route over <see cref="IDecisionLookupSearch.SearchAsync"/> (task 016, B-3): HTTP shaping only.</summary>
+    /// <remarks>
+    /// <para><b>Placement justification (CLAUDE.md section 10; .claude/constraints/bff-extensions.md).</b> The search needs the decision
+    /// plan and the caller's OBO Dataverse client, both BFF-only (spec "Placement Justification"). In this existing group so it inherits the
+    /// group's authorization and EndpointMappingExtensions is unchanged. The search service is <c>[FromServices]</c> so a host that maps
+    /// this group without registering it (the task 011 golden-baseline host) still starts; production registers it unconditionally
+    /// (SignalsModule).</para>
+    /// </remarks>
+    internal static async Task<IResult> SearchDecisionLookupAsync(
+        Guid signalId,
+        [FromQuery] string? parameterCode,
+        [FromQuery] string? query,
+        HttpContext httpContext,
+        [FromServices] IDecisionLookupSearch search,
+        CancellationToken ct) =>
+        DecisionResultMapper.ToHttp(await search.SearchAsync(httpContext, signalId, parameterCode, query, ct), httpContext);
 
     /// <summary>The suppression route over <see cref="IDecisionCapability.GetSuppressionAsync"/> (task 013, B-1): HTTP shaping only.</summary>
     internal static async Task<IResult> GetSuppressionAsync(

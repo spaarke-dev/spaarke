@@ -36,7 +36,7 @@ public sealed record DecisionToolError(string ReasonCode, string Message, int St
 /// that lived in the three Signals endpoint classes; it is a static class with no DI registration, no package and no AI-internal
 /// type. The MCP side needs no caller context (spec FR-10 as amended 2026-11-07, option C).</para>
 /// </remarks>
-public static class DecisionResultMapper
+public static partial class DecisionResultMapper
 {
     /// <summary>A REST answer whose title, detail and status do not depend on the result (the plan, suppression and worklist routes).</summary>
     private sealed record FixedProblem(int Status, string Title, string Detail, string ReasonCode);
