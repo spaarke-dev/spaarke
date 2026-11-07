@@ -372,7 +372,9 @@ public class OfficeDocumentPersistence
                 // free-text description for documents (FR-07 "Description" -> "Profile").
                 SaveContentType.Document => null,
                 _ => null
-            }
+            },
+            // Task 030b: the SPE pointer is part of the CREATE. The upload above ran first, so it is final here.
+            FilePointer = new DocumentFilePointer(driveId, itemId, webUrl),
         };
 
         // Task 030b (field-mapping-server-write-path-r1, FR-18, word gaps G1/G2): the association is part of the CREATE, so
@@ -403,16 +405,13 @@ public class OfficeDocumentPersistence
             LogCreatedRestricted(_logger, documentId, jobId, HasUsableMessageId(messageIdLookupKey));
         }
 
-        // Update with SPE pointers and additional metadata. Never the association (task 030b: it is in the create above).
+        // Update with the file metadata. Never the association or the SPE pointer (task 030b: both are in the create above).
         var updateRequest = new UpdateDocumentRequest
         {
-            GraphDriveId = driveId,
-            GraphItemId = itemId,
             FileName = fileName,
             FileSize = fileSize,
             MimeType = OfficeJobQueue.GetMimeType(request),
             HasFile = true,
-            FilePath = webUrl,  // SharePoint Embedded web URL (maps to sprk_filepath in Dataverse)
             CanonicalHash = canonicalHash  // FR-C3: stamp the content identity (null when unavailable)
         };
 

@@ -654,6 +654,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             OwningTeamId = owningTeamId,
             // Task 146 c1-r1 (owner round 13 item 9): the saving user, carried by SaveAsync with the team.
             CreatedByPersonId = payload.CreatedByPersonId,
+            // Task 030b: the SPE pointer is part of the CREATE; the item was uploaded before this runs.
+            FilePointer = new Spaarke.Dataverse.DocumentFilePointer(driveId, itemId, webUrl),
         };
 
         // Task 030b (FR-18): the association is part of the create, the same column the owner question above was asked over
@@ -681,15 +683,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             "Document record created in Dataverse: DocumentId={DocumentId}",
             documentId);
 
-        // Step 2: Update the document with SPE pointers and metadata (never the association: task 030b, it is in the create)
+        // Step 2: Update the document with its metadata (never the association or the SPE pointer: task 030b, both are in the create)
         var updateRequest = new Spaarke.Dataverse.UpdateDocumentRequest
         {
-            GraphDriveId = driveId,
-            GraphItemId = itemId,
             FileName = payload.FileName,
             FileSize = payload.FileSize,
             MimeType = payload.MimeType,
-            FilePath = webUrl,
             FileType = ExtractFileExtension(payload.FileName),
             HasFile = true
         };
@@ -710,7 +709,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         await _documentService.UpdateDocumentAsync(documentIdString, updateRequest, cancellationToken);
 
         _logger.LogInformation(
-            "Document record updated with SPE pointers and metadata: DocumentId={DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
+            "Document record updated with metadata (pointer written in the create): DocumentId={DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
             documentId,
             driveId,
             itemId);
@@ -1277,6 +1276,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Description = $"Email attachment from {parentFileName}",
             OwningTeamId = owningTeamId, // task 080 — the parent email's team
             CreatedByPersonId = createdByPersonId, // task 146 c1-r1 — the person who saved the parent email
+            // Task 030b: an attachment child carries its parent link and its SPE pointer in the create.
+            ParentDocumentLookup = parentDocumentId,
+            FilePointer = new DocumentFilePointer(driveId, fileHandle.Id, fileHandle.WebUrl),
         };
 
         // Task 030b (FR-18): inherit the parent email's "File to" association (Matter/Project/Invoice) IN the create, so
@@ -1300,21 +1302,17 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 _logger, childDocumentId, jobId, OfficeDocumentPersistence.HasUsableMessageId(internetMessageId));
         }
 
-        // Update child document with file info and parent relationship
+        // Update child document with file info and the parent's details (the parent link and the pointer are in the create)
         var updateRequest = new UpdateDocumentRequest
         {
             FileName = attachment.FileName,
             FileSize = attachment.SizeBytes,
             MimeType = attachment.MimeType,
             FileType = ExtractFileExtension(attachment.FileName),
-            GraphItemId = fileHandle.Id,
-            GraphDriveId = driveId,
-            FilePath = fileHandle.WebUrl,
             HasFile = true,
             DocumentType = DocumentTypeEmailAttachment,
 
-            // Parent relationship
-            ParentDocumentLookup = parentDocumentId,
+            // Parent relationship details
             ParentFileName = parentFileName,
             ParentGraphItemId = parentGraphItemId,
             RelationshipType = RelationshipTypeEmailAttachment,

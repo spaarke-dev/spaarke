@@ -46,6 +46,7 @@ public class OfficeDocumentCreateAssociationTests
 {
     private static readonly Guid RecordId = Guid.Parse("030b030b-0000-4000-8000-0000000000a1");
     private static readonly Guid SavedTeamId = Guid.Parse("030b030b-0000-4000-8000-0000000000e1");
+    private static readonly Guid ParentDocumentId = Guid.Parse("030b030b-0000-4000-8000-0000000000d0");
 
     // ── The save's create (OfficeDocumentPersistence) ──────────────────────────────────────────────────────────────
 
@@ -78,10 +79,13 @@ public class OfficeDocumentCreateAssociationTests
         created.Association.RecordId.Should().Be(RecordId);
         created.OwningTeamId.Should().Be(SavedTeamId, "AC-5: the team the save's owner question returned");
 
-        var update = world.Updates.Should().ContainSingle("one pointer update, as before").Subject.Update;
+        created.FilePointer.Should().Be(new DocumentFilePointer("drive1", "item1", "https://spe/web"),
+            "AC-12: the SPE pointer is part of the create (the upload ran first)");
+
+        var update = world.Updates.Should().ContainSingle("one metadata update, as before").Subject.Update;
         CarriesNoAssociation(update).Should().BeTrue("AC-1: no association update is issued");
         CarriesNoIndexColumn(update).Should().BeTrue("AC-6 (FR-40): the index columns are the pipeline's");
-        update.GraphItemId.Should().Be("item1", "the pointer stays in the update (W3 ruling covers the association only)");
+        CarriesNoPointerOrParent(update).Should().BeTrue("AC-12: the pointer is not written again by the update");
     }
 
     /// <summary>AC-7: a type with no sprk_document column, or none at all, files the document nowhere and the save goes on.</summary>
@@ -141,7 +145,10 @@ public class OfficeDocumentCreateAssociationTests
         created.Association.Should().Be(new DocumentAssociationBind(Column("sprk_matter"), RecordId));
         created.OwningTeamId.Should().Be(SavedTeamId, "a carried OwningTeamId wins (email attachment children match their parent)");
         world.Ownership.Requests.Should().BeEmpty("the carried team is used as is");
-        world.Updates.Should().NotBeEmpty().And.OnlyContain(u => CarriesNoAssociation(u.Update) && CarriesNoIndexColumn(u.Update));
+        created.FilePointer.Should().Be(new DocumentFilePointer("b!drive", "item-eml", null), "AC-12: the pointer is in the create");
+        created.ParentDocumentLookup.Should().BeNull("the email document has no parent");
+        world.Updates.Should().NotBeEmpty().And.OnlyContain(u =>
+            CarriesNoAssociation(u.Update) && CarriesNoIndexColumn(u.Update) && CarriesNoPointerOrParent(u.Update));
     }
 
     /// <summary>AC-5: with no carried owner, the owner class is asked over the SAME association the create writes.</summary>
@@ -174,8 +181,27 @@ public class OfficeDocumentCreateAssociationTests
             .And.OnlyContain(r => r.Association == new DocumentAssociationBind(Column("sprk_matter"), RecordId))
             .And.OnlyContain(r => r.OwningTeamId == SavedTeamId);
         world.Updates.Should().OnlyContain(u => CarriesNoAssociation(u.Update) && CarriesNoIndexColumn(u.Update));
-        world.Updates.Where(u => u.Update.ParentDocumentLookup != null).Should().HaveCount(2,
-            "each child's file and parent link stay in its update");
+    }
+
+    /// <summary>AC-13: an attachment child carries its parent link, and its SPE pointer, in the create; the update carries neither.</summary>
+    [Fact]
+    public async Task Worker_AttachmentChildren_CarryTheirParentLinkAndPointer_InTheCreate()
+    {
+        var world = new WorkerWorld();
+
+        (await world.Worker.ProcessAsync(Message(Payload(fallbackCreate: false)), CancellationToken.None)).IsSuccess.Should().BeTrue();
+
+        world.Creates.Should().HaveCount(2)
+            .And.OnlyContain(r => r.ParentDocumentLookup == ParentDocumentId)
+            .And.OnlyContain(r => r.FilePointer != null
+                                  && r.FilePointer.DriveId == "b!drive"
+                                  && r.FilePointer.ItemId.StartsWith("item-")
+                                  && r.FilePointer.WebUrl!.StartsWith("https://contoso.sharepoint.com/"));
+        world.Creates.Select(r => r.FilePointer!.ItemId).Should().OnlyHaveUniqueItems("each child points at its own upload");
+        world.Updates.Should().HaveCount(2).And.OnlyContain(u => CarriesNoPointerOrParent(u.Update),
+            "the parent link and the pointer are written once, in the create");
+        world.Updates.Should().OnlyContain(u => u.Update.ParentFileName == "Status.eml",
+            "the parent's descriptive details stay in the update");
     }
 
     /// <summary>AC-7 on the worker: an account association has no column; the children are created unassociated.</summary>
@@ -203,6 +229,9 @@ public class OfficeDocumentCreateAssociationTests
     private static bool CarriesNoIndexColumn(UpdateDocumentRequest update) =>
         update.SearchIndexName is null && update.SearchIndexed is null && update.SearchIndexedOn is null
         && update.SearchIndexQueuedOn is null && update.SearchIndexCompletedOn is null;
+
+    private static bool CarriesNoPointerOrParent(UpdateDocumentRequest update) =>
+        update.GraphDriveId is null && update.GraphItemId is null && update.FilePath is null && update.ParentDocumentLookup is null;
 
     private static bool NamesTheMatter(RecordOwnershipContext question) => Named(question).Contains(("sprk_matter", RecordId));
 
@@ -274,7 +303,7 @@ public class OfficeDocumentCreateAssociationTests
         TempFileLocation = "spe://b!drive/item-eml",
         FileName = "Status.eml",
         FileSize = 2048,
-        DocumentId = fallbackCreate ? null : Guid.Parse("030b030b-0000-4000-8000-0000000000d0"),
+        DocumentId = fallbackCreate ? null : ParentDocumentId,
         OwningTeamId = SavedTeamId,
         TriggerAiProcessing = false,
         RelatedCommunicationId = Guid.Parse("030b030b-0000-4000-8000-0000000000c0"),

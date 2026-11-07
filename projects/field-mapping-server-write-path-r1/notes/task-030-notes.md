@@ -209,9 +209,8 @@ the rest. No change to `RecordCreationService`.
   `OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync`, `UploadFinalizationWorker.CreateDocumentRecordAsync` (fallback)
   and `UploadFinalizationWorker.ProcessSingleAttachmentAsync` (each attachment child). `ApplyAssociationLookup` now takes a
   `CreateDocumentRequest`; its warning no longer logs a pointer as a "document id" and logs no name.
-- The SPE pointer, the email-archive columns and the child's parent link stay in the follow-up update. The W3 ruling moves the
-  association only; the pointer values exist at create time (the upload runs first), so keeping them in the update is the
-  owner's ruling, not a technical necessity (D4 in section 1).
+- Fix round (below): the SPE pointer, and an attachment child's parent link, also moved into the create. The email-archive
+  columns and the descriptive file metadata stay in the follow-up update.
 
 ### Invariant owners (how "the save calls the stamp and owner classes" is met)
 
@@ -256,11 +255,68 @@ After the change:
 - The filtered BFF run (`Office|RecordCreation|RecordOwnership|DocumentAssociation`): 3159 passed, 0 failed, 7 skipped.
 - The publish-size delta was not measured: this task adds no package and is not deployed.
 
+### Fix round: pointer and parent link in the create (coordinator, 2026-11-07)
+
+An attachment child carries its parent link in the create, and every Office create carries its SPE pointer.
+
+- **The pointer is final at create time.** All three creates run after the upload:
+  - the save gets the drive id, item id and web URL from its upload (dedup already reads them before the create);
+  - the worker's fallback create takes them from `TempFileLocation`, an upload that has already happened;
+  - each child takes them from its own `UploadSmallAsync` result.
+
+  Nothing later changes them. Other BFF creates already write the pointer and its bound copy in the create (inbound mail,
+  Compose, the communication archive), so the app user's create rights on these columns are an existing path.
+- **One parent-link surface.** The parent link uses task 034's `CreateDocumentRequest.ParentDocumentLookup` and its stager
+  `StageDocumentParent` (commit `9cbcf78759`, on this branch by fast-forward). This task adds no second property for it.
+- **Contract.** `CreateDocumentRequest.FilePointer` (`DocumentFilePointer(DriveId, ItemId, WebUrl)`), `[JsonIgnore]`.
+- **Staging.** `DataverseServiceClientImpl.StageDocumentFilePointer`, called from `CreateDocumentAsync` after
+  `StageDocumentParent`, writes:
+  - `sprk_graphdriveid`;
+  - `sprk_graphitemid` with `sprk_graphitemidbound` (the same value, in the same write, as task 171 requires);
+  - `sprk_filepath` when a URL is known.
+
+  A pointer without its drive or item id is refused before the write.
+- **Callers.**
+  - The save, the fallback and each child set `FilePointer`.
+  - Each child also sets `ParentDocumentLookup` on its create request.
+  - The updates no longer set `GraphDriveId`, `GraphItemId`, `FilePath` or `ParentDocumentLookup`.
+  - The parent's descriptive details (`ParentFileName`, `ParentGraphItemId`, `RelationshipType`) stay in the child's update.
+- **G6** (ArchTests):
+  - nothing in the two Office creator files sets `GraphDriveId` or `GraphItemId`;
+  - `ParentDocumentLookup` is set only on a `CreateDocumentRequest`. The member exists on both requests, so it is judged by
+    the innermost initializer, or by the variable's type;
+  - at least 3 creates set `FilePointer` and at least 1 sets `ParentDocumentLookup`;
+  - `CreateDocumentAsync` calls `StageDocumentFilePointer`. `StageDocumentParent` is pinned by 034's
+    `InboundIngestionCreatorsGuardTests`.
+
+  Controls:
+  - must fire: those members in an update initializer, or on an update variable.
+  - must not count: `FilePointer` on another type.
+  - must not fire: the create initializer (with a nested switch); a typed create variable; the version save's `FilePath`
+    refresh; `ParentGraphItemId`; a comparison; a comment; the stager call in the body.
+
+  G4's save-body deny list gains `FilePointer` and `ParentDocumentLookup`.
+
+Fail-first: I put back the save and worker as committed (unchanged since `581f034144`) and removed the
+`StageDocumentFilePointer` call. The two BFF test classes then failed 15 of 62:
+- the 13 save spellings (the pointer is not in the create);
+- the fallback pointer test;
+- the child parent-link test.
+
+G6 failed 2 of 17 guard tests.
+
+After the change, on top of task 034's branch (`427488f11d`):
+- BFF build: 0 errors, 0 warnings.
+- `tests/Spaarke.ArchTests`, in full: 2108 passed, 0 failed. This includes 034's guards.
+- The filtered BFF run (`Office|RecordCreation|RecordOwnership|DocumentAssociation|DocumentParent`): 3192 passed, 0 failed,
+  7 skipped.
+
 ### Known limits
 
 - Office-saved documents get no field mapping (named exception).
-- A failure between the create and the update leaves a row filed, owned and narrowed, without its pointer (unchanged).
+- A failure between the create and the update leaves a row with its association, owner, narrowing, pointer and parent link,
+  without its descriptive file metadata (name, size, MIME type, hash) and email-archive columns.
 - A refused given id leaves the stamped upload in SPE, as any failed create on this path does today.
-- G1, G3 and G5 are source scans: they see the shapes their controls pin.
+- G1, G3, G5 and G6 are source scans: they see the shapes their controls pin.
 - `EmailAttachmentProcessor` (inbound mail, not an Office path) still files its attachment documents by a follow-up update; out
   of scope here.

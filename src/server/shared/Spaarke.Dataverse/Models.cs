@@ -141,7 +141,29 @@ public class CreateDocumentRequest
     /// </remarks>
     [JsonIgnore]
     public Guid? ParentDocumentLookup { get; set; }
+
+    /// <summary>
+    /// The SharePoint Embedded file the new document points at, written IN the create (field-mapping-server-write-path-r1
+    /// task 030b): <c>sprk_graphdriveid</c>, <c>sprk_graphitemid</c> with its field-secured copy
+    /// (<see cref="DocumentPointerBinding.BoundItemIdColumn"/>, same write, same value), and <c>sprk_filepath</c> when known.
+    /// The Office creates set it: their upload runs before the create, so the pointer is final when the row is written.
+    /// Null for every other caller.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
+    /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and only the server places a file.
+    /// </remarks>
+    [JsonIgnore]
+    public DocumentFilePointer? FilePointer { get; set; }
 }
+
+/// <summary>
+/// The SharePoint Embedded file a <see cref="CreateDocumentRequest"/> points its new document at (task 030b).
+/// </summary>
+/// <param name="DriveId">The container's drive id (<c>sprk_graphdriveid</c>).</param>
+/// <param name="ItemId">The drive item id (<c>sprk_graphitemid</c> and its bound copy).</param>
+/// <param name="WebUrl">The item's web URL (<c>sprk_filepath</c>); null writes nothing.</param>
+public sealed record DocumentFilePointer(string DriveId, string ItemId, string? WebUrl);
 
 /// <summary>
 /// One <c>sprk_document</c> association lookup and the record it points at, as a create writes it (task 030b):

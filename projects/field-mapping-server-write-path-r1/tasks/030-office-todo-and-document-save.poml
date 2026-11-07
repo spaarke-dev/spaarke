@@ -141,8 +141,13 @@
         DocumentAssociationMap gains a TryApply overload for the create; DataverseServiceClientImpl.CreateDocumentAsync stages
         it in the same create entity.</in>
       <out>RecordCreationService (no change); field mapping for Office documents (not applied: named exception);
-        the version save and re-file paths; EmailAttachmentProcessor (not an Office path); the SPE pointer, email-archive and
-        parent-document columns, which stay in the follow-up update (W3 ruling covers the association only).</out>
+        the version save and re-file paths; EmailAttachmentProcessor (not an Office path; task 034 covers the inbound ingestors);
+        the email-archive columns and the descriptive file metadata, which stay in the follow-up update.</out>
+      <in>Fix round (coordinator, 2026-11-07): the SPE pointer (sprk_graphdriveid, sprk_graphitemid with its bound copy,
+        sprk_filepath) moves into the create of all three Office creates, because its value is final there (the upload runs
+        first); an attachment child carries its parent link (sprk_parentdocument) in the create. CreateDocumentRequest gains one
+        more server-only member (FilePointer), staged by DataverseServiceClientImpl.StageDocumentFilePointer; the parent link uses
+        task 034's existing surface (CreateDocumentRequest.ParentDocumentLookup, StageDocumentParent), never a second one.</in>
     </scope>
 
     <invariant-owners>
@@ -188,6 +193,14 @@
       <criterion id="AC-11" testable="true">BFF build 0 errors / 0 warnings; filtered BFF tests (Office | RecordCreation |
         RecordOwnership) and tests/Spaarke.ArchTests pass. Existing Office suites pass unchanged except test fixtures that follow
         the association from the update to the create, with no assertion weakened.</criterion>
+      <criterion id="AC-12" testable="true">Pointer: the save's create, the worker's fallback create and each attachment child's
+        create carry FilePointer(drive id, item id, web URL) for the item just uploaded; no UpdateDocumentRequest on these paths sets
+        GraphDriveId, GraphItemId or FilePath. The stager writes sprk_graphdriveid, sprk_graphitemid and sprk_graphitemidbound (same
+        value) and sprk_filepath when a URL is known; a pointer without its drive or item id is refused before any write.</criterion>
+      <criterion id="AC-13" testable="true">Parent link: each attachment child's create carries ParentDocumentLookup = the parent
+        document's id (task 034's create member, staged by StageDocumentParent as sprk_parentdocument); no child update sets
+        ParentDocumentLookup; the parent's descriptive details (ParentFileName, ParentGraphItemId, RelationshipType) stay in the
+        update. A JSON body naming filePointer or parentDocumentLookup binds neither (AC-9).</criterion>
     </acceptance-criteria>
 
     <guards file="tests/Spaarke.ArchTests/OfficeDocumentSaveGuardTests.cs">
@@ -216,20 +229,29 @@
         <must-fire>a body with UpsertAsync or an UpsertRequest; a CreateDocumentRequest initializer with Id in another file;
           preAssignedDocumentId = request.Document.Id.</must-fire>
         <must-not-fire>a body with CreateAsync; preAssignedDocumentId = Guid.NewGuid().</must-not-fire></guard>
+      <guard id="G6" name="the pointer and the parent link are in the create">In OfficeDocumentPersistence.cs and
+        UploadFinalizationWorker.cs nothing sets GraphDriveId or GraphItemId, and ParentDocumentLookup is set only on a
+        CreateDocumentRequest (innermost initializer, or the variable's type); at least 3 creates set FilePointer and at least 1
+        sets ParentDocumentLookup; DataverseServiceClientImpl.CreateDocumentAsync calls StageDocumentFilePointer(document, request)
+        (StageDocumentParent is pinned by task 034's InboundIngestionCreatorsGuardTests).
+        <must-fire>an update initializer or update variable setting GraphDriveId, GraphItemId or ParentDocumentLookup; FilePointer on
+          a type that is not a CreateDocumentRequest (not counted); a commented call or a call in another method.</must-fire>
+        <must-not-fire>FilePointer and ParentDocumentLookup in a create initializer (with a nested switch) or on a typed create
+          variable; the version save's FilePath refresh; ParentGraphItemId; a comparison; a comment; the stager call in the body.</must-not-fire></guard>
     </guards>
 
     <tests>
-      <file role="new">tests/integration/data-mutation/RecordOwnership/OfficeDocumentCreateAssociationTests.cs (AC-1, 2, 5, 6, 7, 8)</file>
-      <file role="new">tests/unit/domain/Dataverse/DocumentAssociationCreateStagingTests.cs (AC-3, 4, 9)</file>
-      <file role="new">tests/Spaarke.ArchTests/OfficeDocumentSaveGuardTests.cs (G1-G5)</file>
-      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs (the fake world reads the association from the create)</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/OfficeDocumentCreateAssociationTests.cs (AC-1, 2, 5, 6, 7, 8, 12, 13)</file>
+      <file role="new">tests/unit/domain/Dataverse/DocumentAssociationCreateStagingTests.cs (AC-3, 4, 9, 12, 13)</file>
+      <file role="new">tests/Spaarke.ArchTests/OfficeDocumentSaveGuardTests.cs (G1-G6)</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs (the fake world reads the association and the pointer from the create)</file>
     </tests>
 
     <known-limits>
       <limit>No field mapping on Office-saved documents (named exception; FR-18's "mapping if profiled" does not hold for them).</limit>
-      <limit>The pointer, email-archive and parent-document columns stay in the follow-up update; a failure between the create and
-        that update leaves a row with its association, owner and narrowing but without its pointer (unchanged).</limit>
-      <limit>Guards G1, G3 and G5 are source scans: they see the shapes their controls pin, not every possible spelling.</limit>
+      <limit>The email-archive columns and the descriptive file metadata (name, size, MIME type, hash, the parent's file name)
+        stay in the follow-up update.</limit>
+      <limit>Guards G1, G3, G5 and G6 are source scans: they see the shapes their controls pin, not every possible spelling.</limit>
     </known-limits>
   </subtask>
 

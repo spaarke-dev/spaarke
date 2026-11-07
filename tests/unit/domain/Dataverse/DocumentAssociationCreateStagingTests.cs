@@ -159,7 +159,9 @@ public class DocumentAssociationCreateStagingTests
               "accessPermission": 100000002,
               "accessInheritanceRecord": "{}",
               "restrictedBySubmission": true,
-              "association": { "field": { "logicalName": "sprk_matter", "schemaName": "sprk_Matter", "targetEntityLogicalName": "sprk_matter" }, "recordId": "{{RecordId}}" }
+              "association": { "field": { "logicalName": "sprk_matter", "schemaName": "sprk_Matter", "targetEntityLogicalName": "sprk_matter" }, "recordId": "{{RecordId}}" },
+              "filePointer": { "driveId": "b!other", "itemId": "01OTHER", "webUrl": "https://x" },
+              "parentDocumentLookup": "{{Guid.NewGuid()}}"
             }
             """;
 
@@ -175,6 +177,54 @@ public class DocumentAssociationCreateStagingTests
         bound.AccessInheritanceRecord.Should().BeNull();
         bound.RestrictedBySubmission.Should().BeFalse();
         bound.Association.Should().BeNull("the association is decided by server code only");
+        bound.FilePointer.Should().BeNull("only the server places a file");
+        bound.ParentDocumentLookup.Should().BeNull("the parent link is decided by server code only");
+    }
+
+    // ── AC-12: the file pointer in the create (the parent link's stager is task 034's, DocumentParentCreateStagingTests) ──
+
+    [Fact]
+    public void StageFilePointer_WritesThePointer_ItsBoundCopy_AndTheFilePath()
+    {
+        var request = NewRequest();
+        request.FilePointer = new DocumentFilePointer("b!drive", "01ITEM", "https://contoso.sharepoint.com/x.pdf");
+        var document = new Entity("sprk_document");
+
+        DataverseServiceClientImpl.StageDocumentFilePointer(document, request);
+
+        document["sprk_graphdriveid"].Should().Be("b!drive");
+        document[DocumentPointerBinding.ItemIdColumn].Should().Be("01ITEM");
+        document[DocumentPointerBinding.BoundItemIdColumn].Should().Be("01ITEM", "the bound copy goes with the pointer, same write");
+        document["sprk_filepath"].Should().Be("https://contoso.sharepoint.com/x.pdf");
+        document.Attributes.Should().HaveCount(4);
+    }
+
+    [Fact]
+    public void StageFilePointer_WithNone_WritesNoColumn_AndAPointerWithNoUrl_WritesNoFilePath()
+    {
+        var document = new Entity("sprk_document");
+        DataverseServiceClientImpl.StageDocumentFilePointer(document, NewRequest());
+        document.Attributes.Should().BeEmpty();
+
+        var request = NewRequest();
+        request.FilePointer = new DocumentFilePointer("b!drive", "01ITEM", null);
+        DataverseServiceClientImpl.StageDocumentFilePointer(document, request);
+        document.Attributes.Keys.Should().BeEquivalentTo("sprk_graphdriveid", "sprk_graphitemid", "sprk_graphitemidbound");
+    }
+
+    [Theory]
+    [InlineData("", "01ITEM")]
+    [InlineData("b!drive", " ")]
+    public void StageFilePointer_APointerMissingItsDriveOrItem_IsRefusedBeforeAnyWrite(string driveId, string itemId)
+    {
+        var request = NewRequest();
+        request.FilePointer = new DocumentFilePointer(driveId, itemId, null);
+        var document = new Entity("sprk_document");
+
+        var act = () => DataverseServiceClientImpl.StageDocumentFilePointer(document, request);
+
+        act.Should().Throw<InvalidOperationException>();
+        document.Attributes.Should().BeEmpty();
     }
 
     private static CreateDocumentRequest NewRequest() => new() { Name = "Brief", ContainerId = "b!c" };

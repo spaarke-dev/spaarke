@@ -322,6 +322,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // field-mapping-server-write-path-r1 task 034: an attachment's parent link, in this same write.
         StageDocumentParent(document, request);
 
+        // Task 030b: the SPE file pointer, in this same write.
+        StageDocumentFilePointer(document, request);
+
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
 
@@ -409,6 +412,32 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             throw new InvalidOperationException("A document's parent link is created with the id of its parent document (task 034).");
 
         document["sprk_parentdocument"] = new EntityReference("sprk_document", parentId);
+    }
+
+    /// <summary>
+    /// Stages <see cref="CreateDocumentRequest.FilePointer"/> onto the document <see cref="CreateDocumentAsync"/> creates:
+    /// <c>sprk_graphdriveid</c>, <c>sprk_graphitemid</c> with its bound copy, and <c>sprk_filepath</c> when a URL is known, so the
+    /// pointer is part of the ONE create write (task 030b). No pointer writes nothing. Pure (no I/O), as
+    /// <see cref="StageDocumentAssociation"/> is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A pointer without its drive or item id (refused before any write).</exception>
+    internal static void StageDocumentFilePointer(Entity document, CreateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.FilePointer is not { } pointer)
+            return;
+
+        if (string.IsNullOrWhiteSpace(pointer.DriveId) || string.IsNullOrWhiteSpace(pointer.ItemId))
+            throw new InvalidOperationException("A document's file pointer is created with both its drive id and its item id (task 030b).");
+
+        document["sprk_graphdriveid"] = pointer.DriveId;
+        document["sprk_graphitemid"] = pointer.ItemId;
+        // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
+        document[DocumentPointerBinding.BoundItemIdColumn] = pointer.ItemId;
+        if (!string.IsNullOrEmpty(pointer.WebUrl))
+            document["sprk_filepath"] = pointer.WebUrl;
     }
 
     // Task 130: sprk_document.sprk_relatedcommunication → sprk_communication (DocumentLinkFields), and the document's own

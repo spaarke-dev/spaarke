@@ -1449,6 +1449,13 @@ public sealed class OfficeVersionSaveWorld
             // (CreateDocumentRequest.Association), so the world files the row to its matter here, as Dataverse does.
             if (request.Association is { Field.LogicalName: "sprk_matter" } association)
                 Documents[id].MatterId = association.RecordId;
+            // Task 030b: the SPE pointer moved into the CREATE too (CreateDocumentRequest.FilePointer).
+            if (request.FilePointer is { } pointer)
+            {
+                Documents[id].DriveId = pointer.DriveId;
+                Documents[id].ItemId = pointer.ItemId;
+                Documents[id].FilePath = pointer.WebUrl;
+            }
             // Task 055: the SAVER holds rights on the document they just created. In real Dataverse that is
             // simply true — the row is created in their business unit and their role grants Read/Write on
             // sprk_document. This world granted rights ONLY through SeedDocument, so every save-created

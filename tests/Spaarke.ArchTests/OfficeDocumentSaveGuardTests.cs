@@ -20,6 +20,8 @@ namespace Spaarke.ArchTests;
 /// are <c>[JsonIgnore]</c>, and the Office save body names no pointer, narrowing, owner or new-document id;</item>
 /// <item><b>G5</b> a given document id is created, never upserted: the create never upserts, only the Office save sets a create's
 /// id, and that id is minted by the server.</item>
+/// <item><b>G6</b> every Office create carries its SPE pointer, and an attachment child carries its parent link, in the create;
+/// <c>CreateDocumentAsync</c> stages both.</item>
 /// </list>
 /// <para><b>Why source scans.</b> Every Office test mocks <c>IDocumentDataverseService</c>, and the real create runs only
 /// against a live org, so moving the association back into the update, or upserting a given id, would pass every behaviour
@@ -360,7 +362,8 @@ public class OfficeDocumentSaveGuardTests
     /// <summary>Member names the Office save body may never carry: the pointer, the narrowing, the owner and a new row's id.</summary>
     private static readonly HashSet<string> ServerOnlyNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "GraphDriveId", "GraphItemId", "DriveId", "ItemId", "FilePath", "GraphItemIdBound",
+        "GraphDriveId", "GraphItemId", "DriveId", "ItemId", "FilePath", "GraphItemIdBound", "FilePointer",
+        "ParentDocumentLookup",
         "AccessPermission", "AccessInheritance", "AccessInheritanceRecord", "RestrictedBySubmission", "RelatedCommunicationId",
         "OwningTeamId", "OwnerId", "OwningBusinessUnit", "CreatedByPersonId",
         "Id", "DocumentId", "PreAssignedDocumentId",
@@ -605,6 +608,162 @@ public class OfficeDocumentSaveGuardTests
             Guid? preAssignedDocumentId = null;
             preAssignedDocumentId = Guid.NewGuid();
             if (preAssignedDocumentId == null) { }
+            """));
+    }
+
+    // ── G6: the SPE pointer, and an attachment child's parent link, are in the create ───────────────────────────────
+
+    /// <summary>
+    /// Writes of the pointer and the parent link. <c>GraphDriveId</c> / <c>GraphItemId</c> exist only on the update request;
+    /// <c>FilePointer</c> only on the create; <c>ParentDocumentLookup</c> on both (task 034's create member and the update's), so
+    /// it is judged by the request it is set on. <c>FilePath</c> is not listed: the version save (<c>RecordNewVersionAsync</c>)
+    /// refreshes the URL of an existing row, which is not a create.
+    /// </summary>
+    private static readonly Regex PointerOrParentWrite = new(
+        @"(?:\b(?<var>\w+)\s*\.\s*)?\b(?<member>GraphDriveId|GraphItemId|ParentDocumentLookup|FilePointer)\s*=(?![=>])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex CreateInitializer = new(
+        @"\bnew\s+(?:[\w.]+\.)?CreateDocumentRequest\s*(?<open>\{)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex OtherInitializer = new(
+        @"\bnew\s+(?:[\w.]+\.)?(?!CreateDocumentRequest\b)\w+\s*(?:\([^)]*\))?\s*(?<open>\{)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    /// <summary>G6 over one file's source: the violations, and how many creates carry a pointer and a parent link.</summary>
+    internal static (IReadOnlyList<string> Violations, int PointerSites, int ParentSites) PointerAndParentScan(string source, string file)
+    {
+        var code = Code(source);
+
+        List<(int Start, int End, bool Create)> Spans(Regex initializer, bool create) =>
+            initializer.Matches(code)
+                .Select(m => (m.Groups["open"].Index, m.Groups["open"].Index + Block(code, m.Groups["open"].Index).Length, create))
+                .ToList();
+        var blocks = Spans(CreateInitializer, true).Concat(Spans(OtherInitializer, false)).ToList();
+
+        // A member write is typed by its variable; an initializer write by the innermost initializer it sits in.
+        bool OnCreate(Match write) => write.Groups["var"].Success
+            ? TypeOf(code, write.Groups["var"].Value, write.Index) == "CreateDocumentRequest"
+            : blocks.Where(b => write.Index > b.Start && write.Index < b.End).OrderByDescending(b => b.Start).FirstOrDefault().Create;
+
+        var violations = new List<string>();
+        int pointers = 0, parents = 0;
+        foreach (Match write in PointerOrParentWrite.Matches(code))
+        {
+            var onCreate = OnCreate(write);
+            switch (write.Groups["member"].Value)
+            {
+                case "FilePointer" when onCreate:
+                    pointers++;
+                    break;
+                case "ParentDocumentLookup" when onCreate:
+                    parents++;
+                    break;
+                case "FilePointer":
+                    break; // not a document create's member: not counted
+                default:
+                    violations.Add($"{file}:{SourceScan.LineOf(code, write.Index)}: written outside the create: {write.Value.Trim()}");
+                    break;
+            }
+        }
+
+        return (violations, pointers, parents);
+    }
+
+    [Fact(DisplayName = "Task 030b G6: every Office create carries its SPE pointer, and an attachment child its parent link, in the create")]
+    public void G6_ThePointerAndTheParentLinkAreInTheCreate()
+    {
+        var violations = new List<string>();
+        int pointers = 0, parents = 0;
+        foreach (var file in OfficeCreatorFiles)
+        {
+            var (fileViolations, filePointers, fileParents) = PointerAndParentScan(Read(file), file);
+            violations.AddRange(fileViolations);
+            pointers += filePointers;
+            parents += fileParents;
+        }
+
+        Assert.True(violations.Count == 0,
+            "An Office document's SPE pointer, and an attachment child's parent link, are part of its create (task 030b): set "
+            + "CreateDocumentRequest.FilePointer / ParentDocumentLookup, not the UpdateDocumentRequest members:\n  " + string.Join("\n  ", violations));
+        Assert.True(pointers >= 3,
+            $"Found {pointers} Office creates carrying FilePointer, expected at least 3 (the save, the fallback, each child).");
+        Assert.True(parents >= 1,
+            $"Found {parents} Office creates carrying ParentDocumentLookup, expected at least 1: an attachment child carries its parent link in the create.");
+    }
+
+    [Fact(DisplayName = "Task 030b G6 control: a pointer or parent link on an update fires; the create's members and the version URL do not")]
+    public void G6_Controls()
+    {
+        var (fired, firedPointers, firedParents) = PointerAndParentScan("""
+            var updateRequest = new UpdateDocumentRequest
+            {
+                GraphDriveId = driveId,
+                GraphItemId = fileHandle.Id,
+                ParentDocumentLookup = parentDocumentId,
+            };
+            updateRequest.ParentDocumentLookup = parentDocumentId;
+            var other = new OtherRequest { FilePointer = p };
+            """, "A.cs");
+        Assert.Equal(4, fired.Count);
+        Assert.Equal(0, firedPointers);
+        Assert.Equal(0, firedParents);
+
+        var (clean, pointers, parents) = PointerAndParentScan("""
+            var createRequest = new CreateDocumentRequest
+            {
+                Name = attachment.FileName,
+                Description = kind switch { 1 => "a", _ => null },
+                ParentDocumentLookup = parentDocumentId,
+                FilePointer = new DocumentFilePointer(driveId, fileHandle.Id, fileHandle.WebUrl),
+            };
+            var fallback = new Spaarke.Dataverse.CreateDocumentRequest { Name = "x" };
+            fallback.FilePointer = new Spaarke.Dataverse.DocumentFilePointer(driveId, itemId, webUrl);
+            var update = new UpdateDocumentRequest { FileSize = fileSize, ParentGraphItemId = parentGraphItemId };
+            update.FilePath = webUrl;   // the version save refreshes an existing row's URL
+            if (request.ParentDocumentLookup == null) { }
+            // updateRequest.GraphItemId = itemId;   (a comment)
+            """, "B.cs");
+        Assert.Empty(clean);
+        Assert.Equal(2, pointers);
+        Assert.Equal(1, parents);
+    }
+
+    private static readonly Regex StageFilePointerCall = new(
+        @"\bStageDocumentFilePointer\s*\(\s*\w+\s*,\s*request\s*\)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    internal static bool StagesFilePointer(string source)
+    {
+        var code = Code(source);
+        return MethodSpan(code, "CreateDocumentAsync") is { } span && StageFilePointerCall.IsMatch(code[span.Start..span.End]);
+    }
+
+    /// <remarks>The parent link's stager (<c>StageDocumentParent</c>) is task 034's and is pinned by
+    /// <c>InboundIngestionCreatorsGuardTests</c>; this guard pins the pointer's.</remarks>
+    [Fact(DisplayName = "Task 030b G6: DataverseServiceClientImpl.CreateDocumentAsync stages the SPE pointer in the create")]
+    public void G6_CreateDocumentAsync_StagesThePointer() =>
+        Assert.True(StagesFilePointer(Read(DataverseClientFile)),
+            $"{DataverseClientFile}: CreateDocumentAsync no longer calls StageDocumentFilePointer(document, request). Every Office "
+            + "document would be created without its SPE pointer, and no Office test notices because they all mock the create (task 030b).");
+
+    [Fact(DisplayName = "Task 030b G6 control: a commented call or a call in another method fires; the call passes")]
+    public void G6_StageControls()
+    {
+        Assert.False(StagesFilePointer("""
+            public async Task<string> CreateDocumentAsync(CreateDocumentRequest request, CancellationToken ct = default)
+            {
+                var document = new Entity("sprk_document");
+                // StageDocumentFilePointer(document, request);
+                return (await _serviceClient.CreateAsync(document, ct)).ToString();
+            }
+            public void Other(Entity document, CreateDocumentRequest request) { StageDocumentFilePointer(document, request); }
+            """));
+        Assert.True(StagesFilePointer("""
+            public async Task<string> CreateDocumentAsync(CreateDocumentRequest request, CancellationToken ct = default)
+            {
+                var document = new Entity("sprk_document");
+                StageDocumentFilePointer(document, request);
+                return (await _serviceClient.CreateAsync(document, ct)).ToString();
+            }
             """));
     }
 }
