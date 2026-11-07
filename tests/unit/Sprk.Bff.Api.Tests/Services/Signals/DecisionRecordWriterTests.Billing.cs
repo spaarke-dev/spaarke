@@ -611,8 +611,24 @@ public sealed partial class DecisionRecordWriterTests
             ["createdby"] = new EntityReference("systemuser", WriterUser),
         });
 
-        (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>())
-            .Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        // ebilling-r1 164a fix round K2: same reason, but the message says the content cannot be read, so a caller does not read it as proven
+        // other content (Add line answers id_reused only for DecisionRecordWriter.BillingOtherContentRefusal).
+        ex.Message.Should().Be(DecisionRecordWriter.BillingContentUnreadableRefusal);
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Billing_K2_ReadableOtherContent_IsTheOtherContentRefusal()
+    {
+        var h = BillingHarness();
+        h.Seeded.Add(StoredBillingRow("1111111111111111111111111111111111111111111111111111111111111111"));
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        ex.Message.Should().Be(DecisionRecordWriter.BillingOtherContentRefusal);
         h.Created.Should().BeEmpty();
     }
 

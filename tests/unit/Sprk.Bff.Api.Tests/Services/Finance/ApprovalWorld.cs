@@ -302,10 +302,12 @@ internal sealed class ApprovalWorld
         return contact;
     }
 
-    public Entity AddLine(InvoiceLineStatus? status, decimal amount = 100m, InvoiceLineCostType type = InvoiceLineCostType.Fee, string? extraction = null, decimal? approved = null)
+    public Entity AddLine(
+        InvoiceLineStatus? status, decimal amount = 100m, InvoiceLineCostType type = InvoiceLineCostType.Fee, string? extraction = null, decimal? approved = null,
+        Guid? id = null)
     {
-        var id = Guid.NewGuid();
-        var line = new Entity("sprk_billingevent", id)
+        var lineId = id ?? Guid.NewGuid(); // 164a fix round: a reviewer-added line has its derived id
+        var line = new Entity("sprk_billingevent", lineId)
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
             ["sprk_linesequence"] = Rows.Keys.Count(k => k.Table == "sprk_billingevent") + 1,
@@ -321,7 +323,7 @@ internal sealed class ApprovalWorld
         if (approved is not null) line["sprk_approvedamount"] = new Money(approved.Value);
         if (extraction is not null) line["sprk_extractionconfidence"] = extraction;
         Put(line);
-        H.Rows[("sprk_billingevent", id)] = new Entity("sprk_billingevent", id)
+        H.Rows[("sprk_billingevent", lineId)] = new Entity("sprk_billingevent", lineId)
         {
             [CoreEntity == "sprk_workassignment" ? "sprk_regardingworkassignment" : CoreEntity] = new EntityReference(CoreEntity, CoreId),
             ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),

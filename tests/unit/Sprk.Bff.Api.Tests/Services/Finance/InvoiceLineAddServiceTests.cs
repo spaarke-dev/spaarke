@@ -893,14 +893,14 @@ public sealed partial class InvoiceLineAddServiceTests
         add.World.Lines.Count(l => ExtractionProvenance.IsReviewerAdded(l)).Should().Be(2);
     }
 
-    [Fact(DisplayName = "T7 (I-2): the added line is Flagged, so approve counts it open until it is decided; Accept all Clean does not select it")]
-    public async Task T7_TheAddedLine_IsOpenForApprovalUntilDecided()
+    [Fact(DisplayName = "T7 (R10): the added line is created Flagged (the approval and Accept all Clean seam: T7_ApprovalWithAnAddedLine_...)")]
+    public async Task T7_TheAddedLine_IsCreatedFlagged()
     {
         var add = new AddLineWorld();
         (await add.Service().AddAsync(Expense(), CancellationToken.None)).Status.Should().Be(AddLineStatus.Applied);
         var row = add.World.Lines.Single(l => l.Id == ExpectedLineId());
 
         row.GetAttributeValue<OptionSetValue>("sprk_linestatus").Value.Should().Be((int)InvoiceLineStatus.Flagged,
-            "I-2 refuses approve while a line is Pending or Flagged; Accept all Clean selects Clean lines only");
+            "R10: created Flagged, so it is decided like any line before approval");
     }
 }
