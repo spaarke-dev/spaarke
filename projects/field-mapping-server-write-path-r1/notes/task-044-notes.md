@@ -1,7 +1,7 @@
 # Task 044 — the Signal / Decision Record core pair is written whole, only by the writers
 
 > Branches: `task/fm-044` (design), `task/fm-044-build` (the first build: field security), `task/fm-044-fix` (this
-> scope). Rigor FULL. Step mode prescriptive.
+> scope), `task/fm-044-fix2` (fix round 2 after the adversarial review, §10). Rigor FULL. Step mode prescriptive.
 > **Status (2026-11-06): re-scoped and built on `task/fm-044-fix`.** Nothing was written to any environment; the dev
 > checks were read-only.
 
@@ -42,13 +42,15 @@ The access check reads the pair app-only when the caller's read returns neither 
   When the caller's read returns neither half, the BFF reads the two pair columns of the Signal through the existing
   app-only `IGenericEntityService`. A pair, whole or half, is the same denial as an unreadable core
   (`SignalAccessDecision.NotFound`, the uniform 404): the route is not an existence oracle. An app-only read that fails
-  (fault, throttle, no row) also denies. Only an app-only read that succeeds with neither half takes the no-core path.
-  Cancellation propagates.
+  (fault, throttle, no row) also denies, with the same decision a fault of the route's own core-record read gives (one rule
+  per route; the uniform 404, known limit in §9). Only an app-only read that succeeds with neither half takes the no-core
+  path. Cancellation propagates.
 - **Worklist** (`SignalReadService`, step 6b). The Do-lane rows whose caller-read row has neither half are confirmed by
-  one batched app-only query: an `in` filter on `sprk_signalid`, selecting the two pair columns, `IdChunk` ids per query,
-  never one read per row. A row with a stored pair, or a row the read does not return, is left out, as an unreadable
-  core's row is. When the query fails, every no-core row is left out and core rows stay (fail closed). Decide-lane no-core
-  rows were never listed (D-35), so they are not re-read.
+  one batched app-only query: an `in` filter on `sprk_signalid`, selecting the two pair columns, `IdChunk` (100) ids per
+  query, never one read per row. A row with a stored pair, or a row the read does not return, is left out, as an
+  unreadable core's row is; the others are listed. A fault answers 503 Unavailable, as the Worklist's other steps do
+  (uac-r2 F4-b: never a shorter list presented as complete), with one summary warning carrying the count; a requested
+  cancellation propagates. Decide-lane no-core rows were never listed (D-35), so they are not re-read.
 - **Events.** `SignalAccessEvents.CorePairPresentAppOnly` (50330) and `CorePairAppOnlyReadFailed` (50331), Warning. Both
   are logged in a scope whose only fields are `SignalId` and `Lane`; the message text carries no id and no column value.
 - **Shape of the denial.** Per-Signal routes: the uniform 404 (Decide and Do alike). Worklist: the row is not listed,
@@ -83,7 +85,9 @@ Each set must EQUAL its allow-list: an extra role fails, and an allow-listed rol
 holds its privilege fails. The allow-lists are constants in the test, and role names appear only there. Must-fire
 controls: an extra role gains Create or Write on either table (several roles and depths), a role in another solution's
 `Roles` folder, the writer gaining Write on Decision Records (append-only depends on its absence), and the writer losing a
-privilege it must hold. Must-not-fire: today's role files.
+privilege it must hold. Must-not-fire: today's role files. Fix round 2: any `RolePrivilege` element that names a guarded
+privilege is a grant whatever its level says (empty, missing or repeated); a repo role file under one of the platform names
+on the allow-lists fails; and no `config/*.json` (the script-provisioned roles) names a guarded privilege.
 
 It complements 046b's `MustNotHold` (person roles only, with the cleanup role excepted): this guard also covers the app
 users' role and excepts no one.
@@ -135,3 +139,37 @@ measured in this fix round, per the brief). The new event ids live in the existi
   from the operator's session (§4).
 - **052's report** is specified, not built; it is task 052's work.
 - **Model-driven grids** show the pair as stored; nothing there writes it under the allow-list.
+- **K: a re-read fault on the per-Signal routes is the uniform 404, not 503** (UAC-r2 ruling, fix round 2). The rule is
+  one rule per route: a fault of the app-only re-read answers what a fault of the same route's core-record read answers.
+  In `SignalCoreRecordAccess.AuthorizeAsync` a core-record read fault (a 5xx, throttling, a thrown fault) is
+  `NotFound`, so the re-read fault is `NotFound` too, and a transient fault looks like "not found" on these two reads.
+  Pinned by `CorePairAppOnlyReadTests.AReReadFault_GivesTheSameDecisionAsACoreReadFault` (Do and Decide lanes, three
+  core-read faults). If the core-record read's fault ever becomes 503, the re-read follows it and the test says so.
+
+## 10. Fix round 2 (adversarial review; UAC-r2 agreed items 1-4)
+
+| Item | Outcome |
+|---|---|
+| 1. Worklist 6b fault | 503 Unavailable (`core_pair_read_failed`) through the step's own outcome, the mechanism the other steps use; a row is still left out only when the read succeeds and shows a pair or does not return the row. Class remarks list step 6b and its bounded query. |
+| 2. Missing-row and chunk route tests | (a) the fake omits one requested id: that row is left out, the others are listed, `CorePairAppOnlyReadFailed` is logged once. (b) 100 rows: one read; 101 rows: two reads (100 + 1), all 101 listed. |
+| 3. Summary warning | One warning with the count on a fault; the fault path returns before any per-row loop. Per-row events remain only for a row with a stored pair or a row the read did not return, each with its scope fields. |
+| 4. Role guard | (a) any element naming a guarded privilege is a grant (empty, missing, whitespace or repeated level); (b) a repo role file under a platform allow-list name fails, in any case; (c) no `config/*.json` names a guarded privilege (whole name, any case). Each has must-fire and must-not-fire controls. |
+| Per-Signal routes | The core-record read's fault is the uniform 404, so the re-read fault stays 404 (§9 known limit), pinned by a parity test. |
+
+Tests that failed first, against round 1 (`9159cfb376`):
+
+| Test | Round 1 | Round 2 |
+|---|---|---|
+| `WhenTheAppOnlyPairReadFaults_TheWorklistIs503_NeverAShorterList_WithOneSummaryWarning` | failed (200 with the no-core rows dropped) | pass |
+| `ARowThePairReadDoesNotReturn_IsLeftOut_...` | failed, on the log text only (round 1 already left the row out) | pass |
+| `ThePairReadIsChunked_...` (100, 101) | pass (round 1 already chunked) | pass |
+| `ARequestedCancellationDuringTheAppOnlyPairRead_Propagates` | pass (round 1 already propagated) | pass |
+| Role guard (a): empty, missing, whitespace and repeated levels; the seeded empty level | 6 of 7 element cases and the seeded-drift test failed (the guard skipped a blank level and read only the first of a repeated element; the repeated case whose first element has a level already passed) | pass |
+| Role guard (b): a role file named as a platform role | failed (not checked; run with (a) fixed, the platform seed alone fails) | pass |
+| Role guard (c): config scan | new guard; with the scan disabled its must-fire control fails; committed config passes | pass |
+
+Mutation checks on the round-2 code, each run and then reverted:
+
+- A leftover loop that runs only on a fault (the success-path loop disabled): the missing-row test fails (the omitted
+  row is listed).
+- Only the first chunk queried (`Take(1)`): the 101-row case fails (row 101 is not listed).
