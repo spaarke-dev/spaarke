@@ -237,3 +237,51 @@ Known limits (recorded, not fixed here):
   The answer precedence is unchanged. UAC-r2's acknowledgement is being sought by the main session.
 - **(K4)** The timing tests use wall-clock bounds (the CallerChecks and FieldMapping ones); the two ordering tests above do
   not.
+
+## 9. UAC-r2 acknowledgement (2026-11-07)
+
+UAC-r2 reviewed the two changes of round 1 that touch access questions and answered:
+
+- **(A) The FR-04 Read probe is now asked beside step 2 (before the step-2 checks): OK, with conditions.**
+  1. *Nothing from the early reads is returned, cached across requests, or logged with values.* The answers are held in
+     the request's own `MappingReadsPrefetch` and dropped when it is disposed; `CallerMetadataReadMemo` keeps schema only,
+     per request, and never an access answer or a record read. The log calls on the early-read path carry ids, table names
+     and reason codes only (message templates; no column values):
+     - `[RECORD-CREATE] the field-mapping profile {Source} -> {Table} could not be read; nothing was mapped` (Warning, with the exception)
+     - `[FIELD-MAPPING-SOURCE] This create carries no document decision for the caller; a document source maps nothing.` (Information; also in `IsDocumentShownAsync`, unreachable defence in depth)
+     - `[FIELD-MAPPING-SOURCE] The caller-rights probe threw for {EntityType}({RecordId}); no mapping.` (Warning, with the exception)
+     - `[FIELD-MAPPING-SOURCE] Caller may not read {EntityType}({RecordId}) ({Decision}, holds {Rights}); no mapping.` (Information)
+     - `[FIELD-MAPPING-SOURCE] Source {EntityType}({RecordId}) could not be read (system={IsSystem}); no mapping.` (Warning, with the exception)
+     - `[FIELD-MAPPING-SOURCE] The external document narrowing does not show the document source; no mapping.` (Information)
+     - `[FIELD-MAPPING-SOURCE] The document decision faulted; no mapping (fail closed).` (Warning, with the exception)
+
+     `TargetAttributesAsync`, `DropAppOnlyRefusedRules` and `CallerMetadataReadMemo` log nothing. A cancellation of the
+     request's token is rethrown before every one of these (`catch (OperationCanceledException) when (ct.IsCancellationRequested)`),
+     so a cancelled early read logs nothing. The same calls ran at step 3 before round 1; the early start adds no log call.
+     The four exception-bearing warnings attach the exception object (transport or service error text, as before); none
+     formats a source value.
+  2. *A step-2 refusal answers as before.* Pinned by `CreatePath_AStepTwoRefusal_AnswersAsBefore_WhileTheCallersReadProbeIsHeldInFlight_AndNoSourceIsReadAppOnly`
+     (below).
+  3. *The discarded app-only source read is accepted read-audit noise.* Known limit **(K)**, as recorded in section 8.
+- **(B) Extra concurrent load from the overlapped reads: OK with the round-1 cancellation.** A 429 from the extra load is
+  acceptable while the answer precedence is unchanged (it is: step 2's refusal answers first, as before).
+
+### 9.1 The in-flight pin (fix round 2)
+
+`CreatePath_AStepTwoRefusal_AnswersAsBefore_WhileTheCallersReadProbeIsHeldInFlight_AndNoSourceIsReadAppOnly`
+(`RecordCreationServiceMappingSeamTests.CreatePathTiming.cs`), a sibling of the faulting-reads test. The read probe double
+gained a `BeforeAnswer` gate (like the user double's), so the FR-04 probe on the caller-named matter is held (3 s) while step 2
+refuses a platform-owned column. It asserts:
+
+- (a) the refusal equals the same request's without a mapping source: kind, code, wording, the problem body, the steps;
+- (b) the held probe saw its token cancelled (the hold was not waited out); no app-only source read had started when the
+  create answered, nor 300 ms later. A control run first shows the probe would have allowed: the same request without the
+  refused column does the app-only source read;
+- (c) nothing created, no owner resolved;
+- (d) the answer is the step-2 one: the same status, below 500 and not 429; no exception left the call;
+- (e) the call returned in under half the hold (1.5 s).
+
+Passes on the round-1 code (it pins existing behaviour). Can fail, shown by two temporary breaks, each restored (not committed):
+
+- the prefetch's disposal does not cancel (`_cancel.Cancel()` removed): fails on (b), `probeCancelled` false, the create waited out the 3 s hold;
+- the prefetch's disposal lets the cancelled read's exception surface (the catch made unreachable): fails on (a), the create answered an `Unavailable` refusal instead of the step-2 `BlockedColumn` one.

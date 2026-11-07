@@ -245,6 +245,83 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     }
 
     [Fact]
+    public async Task CreatePath_AStepTwoRefusal_AnswersAsBefore_WhileTheCallersReadProbeIsHeldInFlight_AndNoSourceIsReadAppOnly()
+    {
+        // UAC-r2 condition A2: step 2 refuses while the FR-04 Read-as-caller probe on the named source is still in flight (held, and
+        // it would have ALLOWED). The refusal answers as with no mapping source; the held probe is cancelled and settled, the
+        // app-only source read (which only an Allowed probe starts) never starts, and nothing of the cancelled read surfaces.
+        MatterToEventProfile();
+        var request = EventUnder(OrdinaryMatter, extra: ("sprk_eventnumber", "EVT-1"), mappingSource: ("sprk_matter", OrdinaryMatter));
+        var expected = await Service().CreateAsync(request with { Mapping = null }, AsCaller(), CancellationToken.None);
+
+        // Control: the probe would allow Read on this matter - the same request without the refused column maps from it, so the
+        // app-only source read is what an Allowed probe starts.
+        var allowed = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter, mappingSource: ("sprk_matter", OrdinaryMatter)), AsCaller(), CancellationToken.None);
+        allowed.Succeeded.Should().BeTrue(allowed.Refusal?.Detail);
+        _sourceReads.Should().ContainSingle("control: an Allowed probe is followed by the app-only source read");
+        _sourceReads.Clear();
+        _creates.Clear();
+        _journal.Clear();
+        _user.Paths.Clear();
+
+        var probeHeld = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var probeCancelled = false;
+        var probeReleased = false;
+        _probe.BeforeAnswer = async (_, token) =>
+        {
+            probeHeld.TrySetResult();
+            try
+            {
+                await Task.Delay(HoldLimit, token).ConfigureAwait(false);
+                probeReleased = true; // the hold ran out: not cancelled
+            }
+            catch (OperationCanceledException)
+            {
+                probeCancelled = true;
+                throw;
+            }
+        };
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+        clock.Stop();
+        int sourceReadsWhenAnswered;
+        lock (_journal)
+            sourceReadsWhenAnswered = _sourceReads.Count;
+        await Task.Delay(RoundTrip * 3);
+
+        // (a) the same refusal as without a mapping source: status, code, wording.
+        expected.Refusal!.Code.Should().Be(RecordCreationRefusal.BlockedColumnCode);
+        outcome.Refusal.Should().NotBeNull("the step-2 refusal answered; the held read's cancellation did not replace it");
+        outcome.Refusal!.Kind.Should().Be(expected.Refusal.Kind);
+        outcome.Refusal.Code.Should().Be(expected.Refusal.Code);
+        outcome.Refusal.Detail.Should().Be(expected.Refusal.Detail);
+        JsonSerializer.Serialize(Problem(outcome, "sprk_event")).Should().Be(JsonSerializer.Serialize(Problem(expected, "sprk_event")));
+        outcome.Steps.Should().Equal(expected.Steps, "refused at step 2, recorded the same; step 3 never ran");
+
+        // (b) the probe was in flight when step 2 refused, and saw its token cancelled; no app-only source read, then or later.
+        probeHeld.Task.IsCompleted.Should().BeTrue("the probe was asked, and held, before step 2 refused");
+        probeCancelled.Should().BeTrue("the held probe's token was cancelled when the early reads were not taken");
+        probeReleased.Should().BeFalse("the hold was not waited out");
+        sourceReadsWhenAnswered.Should().Be(0, "the app-only source read starts only after an Allowed probe: not before the refusal");
+        _sourceReads.Should().BeEmpty("and not after it either");
+        _journal.Should().NotContain("source-read");
+
+        // (c) nothing created or written.
+        _creates.Should().BeEmpty();
+        _journal.Should().NotContain(["owner", "create"]);
+
+        // (d) nothing of the cancelled read surfaced as a different answer (a 5xx, a 429, another code).
+        var status = Problem(outcome, "sprk_event").Status;
+        status.Should().Be(Problem(expected, "sprk_event").Status);
+        status.Should().BeLessThan(StatusCodes.Status500InternalServerError).And.NotBe(StatusCodes.Status429TooManyRequests);
+
+        // (e) the call did not wait out the hold.
+        clock.Elapsed.Should().BeLessThan(HoldLimit / 2, "the create answered long before the held probe's hold would have run out");
+    }
+
+    [Fact]
     public async Task CreatePath_ASourceTheCallerMayNotRead_AnswersAsBefore_AndTheTargetColumnsReadBesideItIsCancelled()
     {
         // The target columns' read is asked beside the source's; when the source answers "unavailable" first, that read's

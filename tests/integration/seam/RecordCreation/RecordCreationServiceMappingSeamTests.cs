@@ -1426,10 +1426,22 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         /// <summary>Task 049c: the probe's round trip (a delayed double); zero answers at once, as before.</summary>
         public TimeSpan Delay { get; set; }
 
+        /// <summary>Task 049c (fix round 2): an ordering hook, awaited before the probe answers (with the probe's own token): a
+        /// gate double, so a test can hold the probe in flight and see whether it was cancelled. Set, it replaces <see cref="Delay"/>.</summary>
+        public Func<Guid, CancellationToken, Task>? BeforeAnswer { get; set; }
+
         public override Task<AccessRights> GetCallerRightsAsync(
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
-            return Delay > TimeSpan.Zero ? DelayedAsync() : Task.FromResult(Answer());
+            return BeforeAnswer is { } gate ? GatedAsync(gate)
+                : Delay > TimeSpan.Zero ? DelayedAsync()
+                : Task.FromResult(Answer());
+
+            async Task<AccessRights> GatedAsync(Func<Guid, CancellationToken, Task> hold)
+            {
+                await hold(recordId, ct).ConfigureAwait(false);
+                return Answer();
+            }
 
             AccessRights Answer()
             {
