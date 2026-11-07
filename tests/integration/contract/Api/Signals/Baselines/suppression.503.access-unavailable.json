@@ -1,0 +1,14 @@
+{
+  "case": "suppression.503.access-unavailable",
+  "status": 503,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.4\",\"title\":\"Service Unavailable\",\"status\":503,\"detail\":\"This item could not be checked right now. Try again.\",\"reasonCode\":\"ontology.signal.access_unavailable\",\"correlationId\":\"<volatile>\"}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.6.4",
+    "title": "Service Unavailable",
+    "status": 503,
+    "detail": "This item could not be checked right now. Try again.",
+    "reasonCode": "ontology.signal.access_unavailable",
+    "correlationId": "<volatile>"
+  }
+}

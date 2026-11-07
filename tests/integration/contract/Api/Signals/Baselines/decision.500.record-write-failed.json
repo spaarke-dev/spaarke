@@ -1,0 +1,99 @@
+{
+  "case": "decision.500.record-write-failed",
+  "status": 500,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.1\",\"title\":\"The decision was not recorded\",\"status\":500,\"detail\":\"The message was sent but the decision could not be recorded. This has been escalated; do not send it again.\",\"reasonCode\":\"ontology.decision.record_write_failed\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000033\",\"actionCode\":null,\"failedStep\":5,\"landed\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"},{\"entity\":\"sprk_budget\",\"id\":\"c0430000-0000-4000-8000-000000000040\"},{\"entity\":\"sprk_todo\",\"id\":\"c0430000-0000-4000-8000-000000000051\"},{\"entity\":\"sprk_servicerequest\",\"id\":\"c0430000-0000-4000-8000-000000000053\"},{\"entity\":\"sprk_communication\",\"id\":\"c0430000-0000-4000-8000-000000000054\"}],\"possiblyLanded\":[],\"steps\":[{\"key\":\"action:revise-budget\",\"code\":\"revise-budget\",\"phase\":2,\"status\":\"Done\",\"written\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"},{\"entity\":\"sprk_budget\",\"id\":\"c0430000-0000-4000-8000-000000000040\"}],\"possiblyWritten\":[],\"reasonCode\":null,\"detail\":null},{\"key\":\"next-step:add-todo#0\",\"code\":\"add-todo\",\"phase\":3,\"status\":\"Done\",\"written\":[{\"entity\":\"sprk_todo\",\"id\":\"c0430000-0000-4000-8000-000000000051\"}],\"possiblyWritten\":[],\"reasonCode\":null,\"detail\":null},{\"key\":\"action:send-budget-inquiry\",\"code\":\"send-budget-inquiry\",\"phase\":4,\"status\":\"Done\",\"written\":[{\"entity\":\"sprk_servicerequest\",\"id\":\"c0430000-0000-4000-8000-000000000053\"},{\"entity\":\"sprk_communication\",\"id\":\"c0430000-0000-4000-8000-000000000054\"}],\"possiblyWritten\":[],\"reasonCode\":null,\"detail\":null}],\"recordMayExist\":true,\"sentButNotRecorded\":true,\"resumable\":false,\"replayed\":false}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.6.1",
+    "title": "The decision was not recorded",
+    "status": 500,
+    "detail": "The message was sent but the decision could not be recorded. This has been escalated; do not send it again.",
+    "reasonCode": "ontology.decision.record_write_failed",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000033",
+    "actionCode": null,
+    "failedStep": 5,
+    "landed": [
+      {
+        "entity": "sprk_budgetrevision",
+        "id": "c0430000-0000-4000-8000-000000000052"
+      },
+      {
+        "entity": "sprk_budget",
+        "id": "c0430000-0000-4000-8000-000000000040"
+      },
+      {
+        "entity": "sprk_todo",
+        "id": "c0430000-0000-4000-8000-000000000051"
+      },
+      {
+        "entity": "sprk_servicerequest",
+        "id": "c0430000-0000-4000-8000-000000000053"
+      },
+      {
+        "entity": "sprk_communication",
+        "id": "c0430000-0000-4000-8000-000000000054"
+      }
+    ],
+    "possiblyLanded": [],
+    "steps": [
+      {
+        "key": "action:revise-budget",
+        "code": "revise-budget",
+        "phase": 2,
+        "status": "Done",
+        "written": [
+          {
+            "entity": "sprk_budgetrevision",
+            "id": "c0430000-0000-4000-8000-000000000052"
+          },
+          {
+            "entity": "sprk_budget",
+            "id": "c0430000-0000-4000-8000-000000000040"
+          }
+        ],
+        "possiblyWritten": [],
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "key": "next-step:add-todo#0",
+        "code": "add-todo",
+        "phase": 3,
+        "status": "Done",
+        "written": [
+          {
+            "entity": "sprk_todo",
+            "id": "c0430000-0000-4000-8000-000000000051"
+          }
+        ],
+        "possiblyWritten": [],
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "key": "action:send-budget-inquiry",
+        "code": "send-budget-inquiry",
+        "phase": 4,
+        "status": "Done",
+        "written": [
+          {
+            "entity": "sprk_servicerequest",
+            "id": "c0430000-0000-4000-8000-000000000053"
+          },
+          {
+            "entity": "sprk_communication",
+            "id": "c0430000-0000-4000-8000-000000000054"
+          }
+        ],
+        "possiblyWritten": [],
+        "reasonCode": null,
+        "detail": null
+      }
+    ],
+    "recordMayExist": true,
+    "sentButNotRecorded": true,
+    "resumable": false,
+    "replayed": false
+  }
+}

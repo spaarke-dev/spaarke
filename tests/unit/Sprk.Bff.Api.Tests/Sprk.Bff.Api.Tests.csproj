@@ -77,6 +77,9 @@
   -->
   <ItemGroup>
     <Compile Include="..\..\integration\contract\**\*.cs" LinkBase="ContractTests" />
+    <!-- spaarkeai-mcp-bff-api-r1 task 011: the worklist golden baselines are a part of SignalReadRouteTests and need its World fixture,
+         so they compile into Sprk.Bff.Api.IntegrationTests instead (see that csproj). GoldenContract.cs compiles into both. -->
+    <Compile Remove="..\..\integration\contract\Api\Signals\SignalWorklistRouteContractBaselineTests.cs" />
   </ItemGroup>
 
   <!--

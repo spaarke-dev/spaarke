@@ -1,0 +1,16 @@
+{
+  "case": "decision.409.signal-not-open",
+  "status": 409,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.10\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"This item was already resolved; nothing was done.\",\"reasonCode\":\"ontology.decision.signal_not_open\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000010\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+    "title": "Conflict",
+    "status": 409,
+    "detail": "This item was already resolved; nothing was done.",
+    "reasonCode": "ontology.decision.signal_not_open",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000010",
+    "actionCode": null
+  }
+}

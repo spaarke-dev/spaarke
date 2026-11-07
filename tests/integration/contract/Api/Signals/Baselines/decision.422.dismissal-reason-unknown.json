@@ -1,0 +1,16 @@
+{
+  "case": "decision.422.dismissal-reason-unknown",
+  "status": 422,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc4918#section-11.2\",\"title\":\"Unprocessable Entity\",\"status\":422,\"detail\":\"'not-mine' is not a dismissal reason for this lane.\",\"reasonCode\":\"ontology.decision.dismissal_reason_unknown\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000022\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc4918#section-11.2",
+    "title": "Unprocessable Entity",
+    "status": 422,
+    "detail": "'not-mine' is not a dismissal reason for this lane.",
+    "reasonCode": "ontology.decision.dismissal_reason_unknown",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000022",
+    "actionCode": null
+  }
+}

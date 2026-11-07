@@ -1,0 +1,16 @@
+{
+  "case": "decision.422.invalid-parameter",
+  "status": 422,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc4918#section-11.2\",\"title\":\"Unprocessable Entity\",\"status\":422,\"detail\":\"'Send budget inquiry' needs 'Subject'.\",\"reasonCode\":\"ontology.decision.invalid_parameter\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000019\",\"actionCode\":\"send-budget-inquiry\"}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc4918#section-11.2",
+    "title": "Unprocessable Entity",
+    "status": 422,
+    "detail": "'Send budget inquiry' needs 'Subject'.",
+    "reasonCode": "ontology.decision.invalid_parameter",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000019",
+    "actionCode": "send-budget-inquiry"
+  }
+}

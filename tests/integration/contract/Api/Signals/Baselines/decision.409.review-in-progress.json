@@ -1,0 +1,16 @@
+{
+  "case": "decision.409.review-in-progress",
+  "status": 409,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.10\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"This decision is already being recorded.\",\"reasonCode\":\"ontology.decision.review_in_progress\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000011\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+    "title": "Conflict",
+    "status": 409,
+    "detail": "This decision is already being recorded.",
+    "reasonCode": "ontology.decision.review_in_progress",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000011",
+    "actionCode": null
+  }
+}

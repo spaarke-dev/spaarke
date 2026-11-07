@@ -1,0 +1,16 @@
+{
+  "case": "decision.403.not-authorized",
+  "status": 403,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.4\",\"title\":\"Forbidden\",\"status\":403,\"detail\":\"You do not have permission to record a decision on this matter.\",\"reasonCode\":\"ontology.decision.not_authorized\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000006\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.4",
+    "title": "Forbidden",
+    "status": 403,
+    "detail": "You do not have permission to record a decision on this matter.",
+    "reasonCode": "ontology.decision.not_authorized",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000006",
+    "actionCode": null
+  }
+}
