@@ -613,6 +613,10 @@ public partial class RouteAuthorizationGuardTests
             + "denies with a 403, the wrong shape. The handler asks the caller's Read on the anchor through "
             + "CallerRecordAccessProbe.GetCallerRightsForAuthorizationGateAsync (an unknown id and a denied one take the same work, "
             + "#2137); no Read, an unknown record, a non-family table and any probe fault are the uniform 404."),
+        new GovernedFile("Api/Mcp/Spike/SpikeMcpEndpoints.cs", Scope.RouteLevelGate,
+            "SPIKE (spaarkeai-mcp-bff-api-r1 task 001, spike/spaarkeai-mcp-phase0 only, never merged): POST /mcp/legal-operations "
+            + "and POST /mcp/spike-area-b, two stateless MCP Streamable HTTP endpoints registered with the SDK's MapMcp on the "
+            + "application root, each with .RequireAuthorization() on its own chain. Neither takes a record id (see Waivers)."),
         new GovernedFile("Api/ExternalAccess/AssignedAccessSyncEndpoint.cs", Scope.GroupGated,
             "POST /assigned-access/sync, GET /assigned-access and POST /assigned-access/dismiss under the DelegationRuleFilter "
             + "admin group (task 142): the Assigned-To rule for one root record — Write on the RECORD; an unknown id and an "
@@ -1138,7 +1142,12 @@ public partial class RouteAuthorizationGuardTests
     // GET /api/finance/export-batches/candidates, POST /api/finance/export-batches, GET /api/finance/export-batches/{batchId}. Classified by GovernedFiles
     // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter on each route; the per-invoice decide right is asked inside the service
     // through the one authorization seam); .RequireEbillingEnabled is already in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 150;
+    //
+    // 150 -> 151 (2026-11-07, spaarkeai-mcp-bff-api-r1 task 001 SPIKE, spike/spaarkeai-mcp-phase0 only). Net +1:
+    // Api/Mcp/Spike/SpikeMcpEndpoints.cs, counted once the census vocabulary learned MapMcp (the SDK's MCP registration form).
+    // Classified by GovernedFiles (RouteLevelGate) and two Permanent waivers. The spike branch is never merged; production
+    // task 021 brings its own endpoint file and entry.
+    private const int ExpectedEndpointFileCount = 151;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1471,6 +1480,9 @@ public partial class RouteAuthorizationGuardTests
             "Ontology platform R1 task 044: PATCH /api/v1/events/{id}/due-assignee request SHAPE only (EventDueAssigneeWrite.ShapeProblem, "
             + "no I/O): at least a due date or an assignee. It runs before the route's RecordRouteAccessAuthorizationFilter(\"write\") "
             + "and decides nothing about any record."),
+        new NotAuthorizationForm("AddEndpointFilter(DisableResponseBufferingAsync)",
+            "spaarkeai-mcp-bff-api-r1 task 001 SPIKE: turns off response buffering so the MCP transport can stream an SSE answer "
+            + "(SpikeMcpEndpoints.cs:145-149, IHttpResponseBodyFeature.DisableBuffering, then next). No I/O; decides nothing."),
     };
 
     /// <summary>
@@ -3239,6 +3251,17 @@ public partial class RouteAuthorizationGuardTests
             + "the Assigned To prefill, resolved from the caller's own systemuserid (OfficeEndpoints.cs:1391, :1433), never "
             + "a client-supplied value. Takes no id. The contact the pane then POSTS is gated by QuickCreateSourceAccessFilter "
             + "(Read on assignedToContactId). If it ever takes an id or returns another person's data, re-classify."),
+        // SPIKE (spaarkeai-mcp-bff-api-r1 task 001, spike/spaarkeai-mcp-phase0 only, never merged): the two MapMcp routes.
+        Permanent("POST /mcp/legal-operations", PermanentBasis.CallerScopedOnly, "001",
+            "CALLER'S OWN IDENTITY: the route's tools are spike_echo, which returns the request's own text "
+            + "(SpikeMcpEndpoints.cs:153, :157-166), and spike_whoami, which runs WhoAmI AS THE CALLER through IDataverseUserClient "
+            + "(OBO, no app-only path; SpikeMcpEndpoints.cs:182-183) and returns only the caller's own systemuserid and claim "
+            + "presence flags (:208-233). The widget resources are compiled, embedded HTML (:243-317). Takes no record id. If a "
+            + "tool ever takes an id or reads another principal's data, re-classify."),
+        Permanent("POST /mcp/spike-area-b", PermanentBasis.CallerSuppliedContentOnly, "001",
+            "ECHO ONLY: the route's one tool, spike_echo_b, returns the request's own text with the route name and a timestamp "
+            + "(SpikeMcpEndpoints.cs:155, :157-166); the widget resources are compiled, embedded HTML (:243-317). Reads no stored "
+            + "record, index or file by any id. If a tool ever reads stored data, re-classify."),
         Permanent("GET /api/workspace/sections", PermanentBasis.ReferenceData, "167",
             "Static section catalog AvailableSections (WorkspaceLayoutEndpoints.cs:541-544). Compiled "
             + "configuration, no id."),
