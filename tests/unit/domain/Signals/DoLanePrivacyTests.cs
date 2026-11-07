@@ -414,9 +414,45 @@ public sealed class DoLanePrivacyTests
         cache.Invocations.Should().BeEmpty("no plan was shown, so no review started");
     }
 
+    // ---- spaarkeai-mcp-bff-api-r1 task 016: the reassign lookup sits behind the same gate ---------------------------------------
+
+    [Fact]
+    public async Task TheReassignLookup_SearchesContactsForTheAssignee_AndAnswersTheColleagueExactlyAsAnUnreadableSignal()
+    {
+        var alices = AlicesTodo(SubjectId, null);
+        var colleagues = new World("sprk_todo", hasCore: true) { Subject = { [PersonColumn("sprk_todo")] = AliceContact } };
+        var unreadable = new World("sprk_todo", hasCore: true) { SignalUnreadable = true };
+
+        var mine = await Lookup(alices.As(Alice), alices.Client);
+        var notMine = await Lookup(colleagues.As(Bob), colleagues.Client);
+        var none = await Lookup(unreadable.As(Bob), unreadable.Client);
+
+        mine.Outcome.Should().Be(DecisionLookupOutcome.Ok);
+        mine.Response!.Entity.Should().Be("contact");
+        mine.Response.Candidates.Select(c => c.Id).Should().Equal(BobContact);
+        alices.Requests.Should().ContainSingle(r => r.StartsWith("contacts?", StringComparison.Ordinal), "the assignee search is the caller's read");
+
+        notMine.Should().Be(none, "the colleague learns nothing a Signal they cannot read would not tell them");
+        notMine.Outcome.Should().Be(DecisionLookupOutcome.NotAllowed);
+        Problem(DecisionResultMapper.ToHttp(notMine, Http())).Should().BeEquivalentTo(Problem(DecisionResultMapper.ToHttp(none, Http())));
+        Problem(DecisionResultMapper.ToHttp(notMine, Http())).Status.Should().Be(404);
+        colleagues.Requests.Should().NotContain(r => r.StartsWith("contacts?", StringComparison.Ordinal), "nothing is searched past the gate");
+    }
+
     // =================================================================================================
     // Fixtures
     // =================================================================================================
+
+    /// <summary>The lookup search (task 016) for the To Do plan's <c>assignee</c>, with the version's plan readable.</summary>
+    private static Task<DecisionLookupResult> Lookup(SignalCoreRecordAccess access, IDataverseUserClient caller)
+    {
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.RetrieveAsync("sprk_policyversion", VersionId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_policyversion", VersionId) { ["sprk_decisionplan"] = TodoPlan });
+        return new DecisionLookupSearch(access, new DecisionPlanService(entities.Object, NullLogger<DecisionPlanService>.Instance), caller,
+                NullLogger<DecisionLookupSearch>.Instance)
+            .SearchAsync(Http(), SignalId, "assignee", "Bob", CancellationToken.None);
+    }
 
     private static Task<IResult> PlanRoute(SignalCoreRecordAccess access) =>
         DecisionPlanEndpoints.GetDecisionPlanAsync(
@@ -617,6 +653,12 @@ public sealed class DoLanePrivacyTests
                     })),
                     _ => Ok(new { value = rows }),
                 };
+            }
+
+            if (path.StartsWith("contacts?", StringComparison.Ordinal))
+            {
+                // spaarkeai-mcp-bff-api-r1 task 016: the reassign lookup's contact search, as the caller.
+                return Ok(new { value = new[] { new { contactid = BobContact.ToString("D"), fullname = "Bob Colleague", emailaddress1 = "bob@firm.example" } } });
             }
 
             if (path.Contains("&$filter=", StringComparison.Ordinal))

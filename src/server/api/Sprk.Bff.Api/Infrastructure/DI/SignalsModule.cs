@@ -135,6 +135,9 @@ public static class SignalsModule
         // decision-plan and suppression routes and the MCP tools (tasks 022-024) call. Scoped like the request-caller services it runs;
         // unconditional like the routes that use it (bff-extensions.md F.1). An interface because two hosts consume it (REST, MCP).
         services.AddScoped<IDecisionCapability, DecisionCapability>();
+        // spaarkeai-mcp-bff-api-r1 task 016 (B-3, FR-07): the plan-driven lookup search the lookup route and the MCP lookup tool (task 023)
+        // call. Scoped like the caller client it reads through; unconditional like the route; an interface because two hosts consume it.
+        services.AddScoped<IDecisionLookupSearch, DecisionLookupSearch>();
 
         // RuleBodyDescriber (task 026, FR-48): the read-side plain-language description of a rule body. Stateless over the
         // compiler and the shared sysadmin entity service, both singletons.

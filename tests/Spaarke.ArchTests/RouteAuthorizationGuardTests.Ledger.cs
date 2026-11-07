@@ -2252,6 +2252,18 @@ public partial class RouteAuthorizationGuardTests
             + "SignalCoreRecordAccess.cs:381/:386), and a \"mine\" caller who is not that person (owner, creator, assigner) gets a 200 empty status "
             + "that counts toward nothing (SignalSuppressionService.cs:918-922), not a 404. Only the counts and the "
             + "suppressed-until date are returned. A fault after Allowed is a 503 problem with the trace id, never the 404 (that is for not-yours). Lives in the already-governed DecisionPlanEndpoints.cs, so the file count is unchanged."),
+        new HandlerDecision("GET /api/v1/signals/{signalId:guid}/lookup", "SearchDecisionLookupAsync", "IDataverseUserClient",
+            new[] { "DecisionLookupSearch.SearchAsync", "SignalCoreRecordAccess.AuthorizeAsync" },
+            "spaarkeai-mcp-bff-api-r1 task 016 (B-3, FR-07): the handler calls DecisionLookupSearch.SearchAsync (DecisionPlanEndpoints.cs:95), "
+            + "whose first act after the no-caller guard (DecisionLookupSearch.cs:90; no context or no authenticated identity: UserContextRequired, "
+            + "nothing read) is SignalCoreRecordAccess.AuthorizeAsync (DecisionLookupSearch.cs:95; anything but Allowed returns at :98), the "
+            + "decision-plan route's own check: the Signal and its core record (or a no-core Do "
+            + "Signal's subject) read AS THE CALLER through IDataverseUserClient, and for a Do-lane Signal the \"mine\" read (D-141). Anything "
+            + "but Allowed returns before the plan or any lookup table is read (the uniform 404 / caller_unresolved 403 / fault 503, mapped by "
+            + "DecisionResultMapper exactly as the plan route). The table and scope come from the plan (DecisionPlanService) for the parameter "
+            + "code (DecisionLookupSearch.cs:104), never from the caller; the one lookup read is AS THE CALLER through IDataverseUserClient "
+            + "(DecisionLookupSearch.cs:134), budgets filtered to the Signal's matter (D-18, :238), the typed text an escaped literal (LIKE wildcards too), at most 25 rows. Inherits the Signals group's RequireAuthorization; no "
+            + "ExternalCollaboration policy. Lives in the already-governed DecisionPlanEndpoints.cs, so the file count is unchanged."),
         new HandlerDecision("GET /api/v1/ontology/admin/authoring/catalog", "GetCatalogAsync", "IDataverseUserClient",
             new[] { "OntologyAdminAuthoringService.GetCatalogAsync" },
             "Ontology task 101: the handler's only I/O is OntologyAdminAuthoringService.GetCatalogAsync (OntologyAdminAuthoringEndpoints.cs:68), "
