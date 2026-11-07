@@ -108,6 +108,7 @@
 - [EXO sidecar identity (2026-10-03)](exo-sidecar-identity-2026-10-03.md) — MI-FIC -AccessToken recommendation
 - [EXO RBAC-for-Apps design (2026-10-04)](exo-rbac-for-apps-design-2026-10-04.md) — cmdlet sequence, escalation, limits
 - [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization = primary .onmicrosoft.com
+- [EXO New-Mailbox app-only "server side error" (2026-10-16)](exo-newmailbox-apponly-server-side-error-2026-10-16.md) — real cause is in the REST innererror
 
 ## AI platform / models / competitors
 - [Legal enablement-kit deploy paths (2026-10-29)](copilot-legal-enablement-kit-deployment-paths-2026-10-29.md) — users upload/share Cowork skills+plugins (Claude auto-convert, MCP) w/o admin; Word legal not extensible; store 4-6 wks
