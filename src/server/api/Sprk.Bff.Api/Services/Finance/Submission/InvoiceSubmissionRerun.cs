@@ -104,6 +104,9 @@ public static class InvoiceSubmissionRerunCodes
 
     /// <summary>The persister's builders found the outcome inconsistent with the stored rows (a fault, never a partial commit).</summary>
     public const string OutcomeInconsistent = "ebilling.rerun.outcome_inconsistent";
+
+    /// <summary>EB-D-206: the predecessor lookup for the supersedes link could not be read (a retry; a missed link would be permanent).</summary>
+    public const string SupersedesReadFailed = "ebilling.rerun.supersedes_read_failed";
 }
 
 /// <summary>The typed outcome of <see cref="InvoiceSubmissionRerun.RunAsync"/>.</summary>
@@ -151,6 +154,12 @@ public sealed record InvoiceSubmissionRerunResult(
 /// a billed or corrected value). A line a reviewer decided before EB-D-185 is reset to that derivation (EB-D-187 / Q4): its decision columns are
 /// cleared; its correction rows and Decision Records are kept as history.</item>
 /// </list>
+/// <para><b>The supersedes link (EB-D-206, task 095d-2b-3).</b> The persister links no predecessor for a submission with no firm (095c-3). Once
+/// the firm is set, the invoice update above also carries <see cref="InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn"/> when the
+/// persister's own rule (<see cref="InvoiceSubmissionPersister.FindSupersededInvoiceAsync"/>, called, not copied) finds a predecessor with the
+/// re-run's two narrowings: only invoices created before this one are candidates, and a predecessor another invoice already supersedes is not
+/// linked. Only for a New submission, an outcome that is not an automatic rejection, an invoice with no link yet, and a submission with its
+/// firm. The predecessor's row is never written (D-43: a peer reference). A read fault is a retry, and nothing is written.</para>
 /// <para><b>Fail closed.</b> A refused, failed or partial re-run writes nothing, so the marker, the firm markers and the hold all stay
 /// (uac-r2 condition 2). Refusals (facts missing, stored rows inconsistent, findings unreadable, no or a foreign stored decision, a firm or
 /// marker mismatch, a line this submission does not own, a core record that differs, over the transaction ceiling) are logged
@@ -161,7 +170,7 @@ public sealed record InvoiceSubmissionRerunResult(
 /// <para><b>EB-D-187.</b> A new hold (a Procedure gap, a rule finding) holds the invoice for review; a finding that would auto-reject holds it
 /// (<see cref="SubmissionEvaluationKind.Blocked"/>), never rejects it. No Decision Record is written and the invoice status is never written.</para>
 /// <para><b>Idempotent.</b> A run that finds <c>rulesRerun</c> completed writes nothing (<see cref="InvoiceSubmissionRerunStatus.AlreadyCompleted"/>).</para>
-/// <para><b>Not here (095d-2b seams):</b> the queued job and its DI registration, the totals, the supersedes link, the rule and system Signal
+/// <para><b>Not here (095d-2b seams):</b> the queued job and its DI registration, the totals, the rule and system Signal
 /// re-map, the shared Signal's ConditionCleared close and its record link, the partner withhold, and moving <see cref="StateMember"/> on from
 /// <see cref="StateCommitted"/>.</para>
 /// <para><b>Logs (ADR-015):</b> ids, counts and codes only.</para>
@@ -204,7 +213,7 @@ public sealed partial class InvoiceSubmissionRerun
     private static readonly string[] InvoiceColumns =
     [
         .. StoredSubmissionRead.InvoiceColumns, "statecode", "statuscode", InvoiceTotalsService.VersionNumber,
-        InvoiceSubmissionPersister.InvoiceVendorOrg, InvoiceFirmHold.InvoiceHoldColumn,
+        InvoiceSubmissionPersister.InvoiceVendorOrg, InvoiceFirmHold.InvoiceHoldColumn, "createdon", InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn,
         .. InvoiceFamilyCoreRecordGuard.CoreRecordLookups[FinanceBaseValues.InvoiceEntity].Select(l => l.Column),
     ];
 
@@ -306,7 +315,7 @@ public sealed partial class InvoiceSubmissionRerun
     /// <summary>Everything the commit sends, built before any write.</summary>
     private sealed record Plan(
         Guid SubmissionId, Guid InvoiceId, IReadOnlyList<OrganizationRequest> Requests, SubmissionEvaluationKind Kind, string? ReasonCode,
-        int ResetLines, int RecodedLines, int? ReviewDetail, IReadOnlySet<Guid> LineIds);
+        int ResetLines, int RecodedLines, int? ReviewDetail, IReadOnlySet<Guid> LineIds, Guid? Supersedes);
 
     private sealed record State(
         Entity? Submission, Entity? Invoice, IReadOnlyList<Entity> Lines, IReadOnlySet<(Guid? LineId, string Field)> Verified,
@@ -458,12 +467,38 @@ public sealed partial class InvoiceSubmissionRerun
             return (null, Transient(submissionId, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.EvaluationFailed, outcome.ReasonCode ?? outcome.Kind.ToString(), null));
         }
 
+        // EB-D-206 (task 095d-2b-3): the automatic supersedes link the persister wrote none of for want of a firm (095c-3), found by the
+        // persister's own rule with the re-run's two narrowings and set on this commit's invoice update (never after the commit). Only for a New
+        // submission (a Correction's target is explicit, 097c), an outcome that is not an automatic rejection (the persister links none; it is
+        // held below), an invoice that names no predecessor yet, and a submission with its firm. A read fault is a retry: nothing is written.
+        Guid? supersedes = null;
+        if (snapshot.ResubmissionOfSubmissionId is null && outcome.Kind != SubmissionEvaluationKind.AutoRejected
+            && invoice.GetAttributeValue<EntityReference>(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn) is null && !snapshot.HasNoFirm)
+        {
+            if (invoice.GetAttributeValue<DateTime?>("createdon") is not { } createdOn)
+            {
+                return (null, Transient(submissionId, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.Unavailable, "createdon", null));
+            }
+
+            try
+            {
+                supersedes = await InvoiceSubmissionPersister.FindSupersededInvoiceAsync(
+                    _entities, _logger, submissionId, invoiceId, snapshot, snapshot.CoreRecord,
+                    new InvoiceSubmissionPersister.SupersedesRerunNarrowing(createdOn), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return (null, Transient(submissionId, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.SupersedesReadFailed, "supersedes", ex));
+            }
+        }
+
         // EB-D-187 (Q5): a finding that would auto-reject holds the invoice for review instead (the D-101 held set); nothing is rejected here.
         outcome = HeldInsteadOfRejected(outcome);
 
         var writeDetail = inReview && await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false);
         var input = new PlanInput(
-            submissionId, invoiceId, root, stored, outcome, state, submissionVersion, invoiceVersion, coding.RecodedLineCount, writeDetail, returnedToFirm);
+            submissionId, invoiceId, root, stored, outcome, state, submissionVersion, invoiceVersion, coding.RecodedLineCount, writeDetail, returnedToFirm,
+            supersedes);
         try
         {
             return BuildPlan(input);
@@ -483,7 +518,7 @@ public sealed partial class InvoiceSubmissionRerun
 
     private sealed record PlanInput(
         Guid SubmissionId, Guid InvoiceId, JsonObject Root, AssignFirmStoredDecision Stored, SubmissionEvaluationOutcome Outcome, State State,
-        string SubmissionVersion, string InvoiceVersion, int RecodedLines, bool WriteReviewDetail, bool InvoiceReturnedToFirm);
+        string SubmissionVersion, string InvoiceVersion, int RecodedLines, bool WriteReviewDetail, bool InvoiceReturnedToFirm, Guid? Supersedes);
 
     // ── The commit (built before any write) ──
 
@@ -545,7 +580,7 @@ public sealed partial class InvoiceSubmissionRerun
 
         return (new Plan(
             input.SubmissionId, input.InvoiceId, requests, outcome.Kind, terminal.ReasonCode, reset.Count, input.RecodedLines, detail,
-            stored.Values.Select(l => l.Id).ToHashSet()), null);
+            stored.Values.Select(l => l.Id).ToHashSet(), input.Supersedes), null);
     }
 
     /// <summary>
@@ -562,6 +597,12 @@ public sealed partial class InvoiceSubmissionRerun
             RowVersion = input.InvoiceVersion,
             [InvoiceFirmHold.InvoiceHoldColumn] = null,
         };
+
+        // EB-D-206: the supersedes link, in this conditional update; the predecessor's own row is never written (a peer reference, D-43).
+        if (input.Supersedes is { } predecessor)
+        {
+            invoice[InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn] = new EntityReference(FinanceBaseValues.InvoiceEntity, predecessor);
+        }
 
         int? detail = null;
         if (input.WriteReviewDetail)
@@ -767,6 +808,12 @@ public sealed partial class InvoiceSubmissionRerun
         _logger.LogInformation(
             "Re-run of submission {SubmissionId}: committed ({Kind}, {ReasonCode}); {LineCount} lines, {ResetCount} decisions reset, {RecodedCount} re-coded; marker cleared, rulesRerun completed.",
             plan.SubmissionId, plan.Kind, plan.ReasonCode, plan.Requests.Count - 2, plan.ResetLines, plan.RecodedLines);
+        if (plan.Supersedes is { } predecessor)
+        {
+            _logger.LogInformation("Re-run of submission {SubmissionId}: invoice {InvoiceId} supersedes invoice {PreviousId} (EB-D-206), in the same commit.",
+                plan.SubmissionId, plan.InvoiceId, predecessor);
+        }
+
         return new InvoiceSubmissionRerunResult(
             InvoiceSubmissionRerunStatus.Completed, InvoiceSubmissionRerunCodes.Completed, false, plan.SubmissionId, plan.Kind, plan.ReasonCode,
             plan.ResetLines, plan.RecodedLines, plan.ReviewDetail, StateCommitted);
