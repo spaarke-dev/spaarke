@@ -1,6 +1,6 @@
 # Current Task State - spaarkeai-mcp-bff-api-r1
 
-> **Last Updated**: 2026-11-06 (pipeline Step 5 dispatch)
+> **Last Updated**: 2026-11-07 (option C approved; 3 background agents running)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,37 +9,47 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Pipeline Step 5 — Wave 1 done except 010 (owner decision) ; spike dev deploy in progress via uac-r2 |
-| **Step** | Spike branch merged with uac-r2 batch master SHA `cc11294300` → new spike HEAD `72e300c40b` (diff == `5c9e301572` only, verified). NOT yet built/pushed/measured. |
+| **Task** | Pipeline Step 5. Owner approved **option C** on 2026-11-07: defer `ICallerContext`, amend FR-10, rework task 010 into a verification task, cancel 012, then 017 → 013. |
+| **Step** | Three background agents are running (see Active Lanes). The main session waits for them, then dispatches 017 and then 013. |
 | **Status** | in-progress |
-| **Next Action** | (1) In `C:/code_files/spaarke-wt-spaarkeai-mcp-phase0-spike`: `dotnet build`, `git push`, PR #2615 CI (Router + Client lint) green; re-measure publish delta (master `cc11294300` vs spike, procedure `.claude/constraints/azure-deployment.md` "BFF Publish-Size Per-Task Verification Rule") + `dotnet list package --vulnerable --include-transitive`; SendMessage uac-r2 (`spaarke-wt-unified-access-control-r2-20`) the SHA + numbers. (2) Owner to answer: task 010 → option C? (see below). |
+| **Next Action** | (1) When lane A returns, check its lint and drift results and the new deps (017 ← 011; 013 ← 011, 017), then dispatch task 017 via task-execute. Build-check, then 013. (2) When lane C returns green, SendMessage uac-r2 (`spaarke-wt-unified-access-control-r2-20`) the new spike HEAD SHA, with the diff vs master = 16 spike files + the ArchTests files. (3) When lane B returns, relay the ISS-002 verdict and PR to the owner and coordinate the Compose owners' review (worktrees `spaarke-wt-070/071/072`, branches `work/compose-r8-*`). |
 
-### Open owner decision — task 010 (asked 2026-11-06)
-Investigation recommends **C (defer ICallerContext)**: stateless MCP tools run inside the request (SDK 2.3.1 uses `context.RequestServices`, `PerSessionExecutionContext=false`), so tools call existing decision services exactly as REST does; no change to DataverseUserClient / WhoAmI memo / chat paths; WhoAmI stays 1/commit. If owner says yes: amend spec FR-10 (defer B-4), replace tasks 010+012 with one verification task (tests: tool sees request context + RequestServices; real DataverseUserClient behind fake wire handler; MCP T170 WhoAmIs==1; MCP plan stamp satisfies MCP commit; pin stateless + PerSessionExecutionContext=false; existing suites + 011 baselines unchanged), file ISS for probable defect `ComposeProfileDispatcher.cs:130-134` (sets accessor.HttpContext inside Task.Run → may null the originating request's context), then continue 017 → 013.
+## Active Lanes (background agents)
+- **A. rework-010-012** (opus): edits only `projects/spaarkeai-mcp-bff-api-r1/**`.
+  - spec FR-10 amended (B-4 deferred) plus related spec sections;
+  - `notes/decisions.md` entry;
+  - 010 rewritten as the MCP caller-path verification (it depends on 020/021/023/024 and comes before 025);
+  - 012 cancelled; POMLs and TASK-INDEX re-wired;
+  - Validate-TaskPoml and drift checks; commit and push.
+- **B. fix-iss-2620-compose** (opus): own worktree `C:/code_files/spaarke-wt-iss2620`, branch `fix/iss-2620-compose-dispatcher-httpcontext` from master.
+  - Repro test for `ComposeProfileDispatcher.cs:88,117-134` (accessor set inside `Task.Run`);
+  - fix if real, a sibling scan, code-review and adr-check, then a DRAFT PR.
+  - Owner: must not be deferred.
+- **C. spike-mapmcp-guard** (opus): spike worktree `C:/code_files/spaarke-wt-spaarkeai-mcp-phase0-spike`.
+  - Teaches the route scanner `MapMcp`, with must-fire and must-not-fire controls, as one ArchTests-only commit.
+  - Push, then PR #2615 CI.
+  - The guard commit is reusable later by task 021 (B-8).
 
-### Done this session (2026-11-06/07)
-- Wave 1: 011 ✅ (`b9d8f19b47`); 001 built (spike `5c9e301572`, notes `00c4ced7e3`); 010 escalated (no code).
-- Spike deploy terms (owner, in uac-r2's session): every uac-r2 dev deploy ships master + `5c9e301572` until we declare Phase 0 done; draft PR #2615 never merged (notes/decisions.md).
-- BFF split reassessment: no split now (`notes/drafts/bff-split-reassessment-2026-11-06.md`, `58ac89ed65`); full re-assessment due 2026-11-20 (other owners).
-- Leftover `stash@{0}` "lint-staged automatic backup" — owner to drop.
-
-### Critical Context
-- Owner chose (2026-11-06) to merge the held ontology PRs into this branch: #2580 `9423f37004` (merge `489f6508fc`) and #2579 `ab04492ab7` (merge `026b61554a`). The BFF builds with 0 warnings and 0 errors. Facts about their code: `notes/pre-pipeline-context.md`.
-- **STANDING (ontology condition):**
-  - NO dev BFF deploy from this branch until ontology's #2580/#2579 pair has deployed (it waits for ebilling task 112).
-  - Phase 0 live tests run from a separate spike branch cut from master. Deploys only with the owner's per-SHA go in uac-r2's session.
-  - Our master PR merges after their pair. Re-merge if their branches move (they merge, never rebase).
-- The D-207 order and replay guard are unchanged. The MCP commit goes only through `DecisionCommitService`.
-
----
+## State
+- Wave 1:
+  - 011 ✅ (`b9d8f19b47`).
+  - 001 built: spike `5c9e301572`, notes `00c4ced7e3`. Spike HEAD `72e300c40b` = master `cc11294300` + the spike. Publish delta +0.706 MB; no vulnerable packages.
+  - 010: being rewritten (lane A).
+- Spike deploy: uac-r2 deployed master `cc11294300` ALONE because the spike failed the Router ArchTests (run 42344104365). We acked on 2026-11-07. Terms: every uac-r2 dev deploy = master + spike until we declare Phase 0 done; PR #2615 is never merged.
+- ISS-002 → #2620 (labels `issue,now`), recorded in `notes/defer-issues.md` (`8c9dab7df6`).
+- BFF split reassessment: no split now (`58ac89ed65`).
 
 ## Open Owner Questions / Blockers
-- Billing review in Copilot (next slice) vs EB-D-194. It does not block v1.
+- Task 002 needs the owner as Global Admin (connector app registration).
+- Phase 0 live tests (003) wait until the spike is deployed.
+- Owner to drop the leftover `stash@{0}` "lint-staged automatic backup".
+- Billing review in Copilot (next slice) vs EB-D-194: does not block v1.
 
-## Where the standing decisions live
-- Standing directives: project `CLAUDE.md` §3 (binding rules §2, coordination §4, environment §5, gotchas §6).
-- Decision log: `notes/decisions.md` (owner decisions O-1 to O-26 in `design.md` §0; naming and cross-project agreements in `notes/coordination/2026-11-06-copilot-naming-and-ownership.md`).
-- Issues: `notes/defer-issues.md` (ISS-001 → #2575).
-- ADR-028 A10 is on this branch.
-- Reviews: ontology reviews `Services/Signals/**`, `Api/Signals/**` and the worklist route; uac-r2 reviews auth diffs (4 checks, spec FR-02).
-- Peer sessions: `spaarke-wt-spaarke-ontology-platform-r1-38`, `spaarke-wt-ebilling-r1-c7`, `spaarke-wt-spaarke-legal-ai-accelerator-80`, `spaarke-wt-unified-access-control-r2-20`.
+## Critical Context
+- **STANDING (ontology condition):**
+  - No dev BFF deploy from this branch until ontology's #2580/#2579 pair has deployed.
+  - Phase 0 live tests run from the spike branch only.
+  - Every deploy needs the owner's per-SHA go in uac-r2's session.
+  - Our master PR merges after their pair.
+- D-207 order and the replay guard are unchanged. The MCP commit goes only through `DecisionCommitService`.
+- Standing directives: project `CLAUDE.md` §3. Decisions: `notes/decisions.md`. Peers: `spaarke-wt-spaarke-ontology-platform-r1-38`, `spaarke-wt-ebilling-r1-c7`, `spaarke-wt-spaarke-legal-ai-accelerator-80`, `spaarke-wt-unified-access-control-r2-20`.
