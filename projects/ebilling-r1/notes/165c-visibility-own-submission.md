@@ -82,7 +82,7 @@ Filtered unit suite (`ExternalAccess|ExternalInvoiceVisibility|Finance|Submissio
 ArchTests: 2122 passed, 0 failed. BFF build: 0 warnings, 0 errors. Before the fixture updates the filtered suite had 13 failures, all
 fixtures whose invoice ids were not derived (section 2).
 
-Publish size: measured after the commit (section 5).
+Publish size: section 5.
 
 Step 9.5 (code-review, adr-check) not run here: the lead runs two adversarial passes after this task.
 
@@ -90,5 +90,19 @@ Not changed (out of scope, listed for the lead): other inline copies of the same
 `SubmissionOverrideService.cs` (:621, :760, :1661), `SubmissionEvaluationOutcome.cs:253`, `InvoiceSubmissionService.cs:846`,
 `SubmitInvoiceFromEmailOperation.cs:404`. A guard that refuses a new inline `InvoiceIdFor(...) ==` outside `InvoiceBlockedHold` would be an
 ArchTest source scan; not built (not asked by the POML).
+
+## 5. Publish size
+
+Fresh short-path worktrees, `dotnet publish -c Release src/server/api/Sprk.Bff.Api/` (framework-dependent, linux-x64), zipped with
+`Compress-Archive -CompressionLevel Optimal`, PDBs included (4 each), 191 files each.
+
+| Build | Zip | Uncompressed |
+|---|---|---|
+| master `23567b2f93` | 41,168,234 B (39.26 MiB) | 136,858,433 B |
+| this branch `86dbc05da4` | 41,451,523 B (39.53 MiB) | 137,737,217 B |
+| Delta | +283,289 B (+0.27 MiB) | +878,784 B |
+
+The delta includes all of `work/ebilling-r1` not yet on master; 165c adds no package, endpoint or registration. Below every threshold
+(+5 MB, 55 MB, 60 MB).
 
 rework: none task 165c
