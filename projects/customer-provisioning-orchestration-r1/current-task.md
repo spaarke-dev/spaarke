@@ -16,7 +16,7 @@
 
 ## 🔔 Owner questions open
 
-1. **SpaarkeMaster 1.3.0.0 → ACME: ONTOLOGY IS RUNNING IT** (owner GO given directly in the ontology session, 2026-11-07). Do NOT start it here, even if the owner confirms in this session — tell them ontology is on it (avoids a double run). Ontology's plan: ebilling 095a check → publish workflow dry run → publish=true from master (≥ d53d67f604) → `Import-SpaarkeMasterPackage.ps1 -WhatIf` (StageAndUpgrade 1.2.3.1 → 1.3.0.0) → real → `Test-RolePrivilegeExpectations.ps1` (`spaarkemaster-1.3.0.0.json`) → writer Firm Reason membership → holder sweep → healthz. Read-only facts sent to them: published latest = 1.2.4.0; ACME 1.2.3.1 managed; the four removed components hold 0 rows on ACME. Await their result; record it in the ACME run log.
+1. **SpaarkeMaster 1.3.0.0 → ACME: ONTOLOGY IS RUNNING IT** (owner GO given directly in the ontology session, 2026-11-07). Do NOT start it here, even if the owner confirms in this session — tell them ontology is on it (avoids a double run). Ontology's plan: ebilling 095a check → publish workflow dry run → publish=true from master (≥ d53d67f604) → `Import-SpaarkeMasterPackage.ps1 -WhatIf` (StageAndUpgrade 1.2.3.1 → 1.3.0.0) → real → `Test-RolePrivilegeExpectations.ps1` (`spaarkemaster-1.3.0.0.json`) → writer Firm Reason membership → holder sweep → healthz. Read-only facts sent to them: published latest = 1.2.4.0; ACME 1.2.3.1 managed; the four removed components hold 0 rows on ACME. **Status 2026-11-07:** 1.3.0.0 PUBLISHED from master d53d67f604 (dry run 42382907444, publish 42383123814; store latest = 1.3.0.0); ACME `-WhatIf` planned StageAndUpgrade; real import started 14:50Z. **Next action:** when ontology sends the read-back + role-expectation results, add a row to `notes/t186-acme-run-log.md` (no ids) and commit; nothing to run here.
 2. **#2618** — customer default team contact-owner role vs ontology writer least privilege (options in the issue; recommend option 1).
 3. Add `isuseraccessauditenabled` to the H6 org-settings contract (ACME off, dev on; recommend yes) + org-audit section in the role check.
 4. #2443 read-only check of the production workforce + CIAM clients.
@@ -30,7 +30,8 @@
 ## Ordering rules (live)
 
 - No stamp BFF with ebilling 092+ before SpaarkeMaster 1.3.0.0 is installed there AND 091 eBilling storage + `Finance:FileStore` settings are live (#2232).
-- No BFF with ebilling 095a before `sprk_invoicesubmission.sprk_sourceemaildocument` is secured (release or `scripts/ebilling/Set-EbillingSourceEmailFieldSecurity.ps1`).
+- No BFF with ebilling 095a on any stamp (ACME included) before `sprk_invoicesubmission.sprk_sourceemaildocument` is field-secured there: the lock ships in SpaarkeMaster **1.3.0.1** (not 1.3.0.0; reaches master with ebilling's single master PR, days away) or via ebilling's `-WhatIf`/apply/`-Verify` script as an ordered provisioning prerequisite (ebilling, 2026-11-07).
+- ebilling 166: after it reaches master, ebilling sends the master SHA + the exact profile grants on `sprk_totalamount` / `sprk_approvedtotal` (message only) → then the H7b check.
 - ACME BFF upgrade gated on A9 home sign-in (project CLAUDE.md §3); any BFF from master needs `Set-ExternalAccessContactSecuritySchema.ps1 -Apply` + `-Verify` first.
 - Never remove System Administrator from the BFF identities (relayed standing instruction).
 - Next stamp upgrade: run the role check (ontology) and confirm the businessunit→sprk_matter entity map is gone (field-mapping).
