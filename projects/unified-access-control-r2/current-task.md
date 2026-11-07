@@ -4,15 +4,15 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-07 ~15:00Z (checkpoint #101: batch deployed, cc11294300 on dev, gate PASS; membership back-fill 0 → 1699; spike held for CI).
+> **Last Updated**: 2026-11-07 ~20:45Z (checkpoint #102: 22487c6537 (049b + MCP spike) deployed, gate + spike gate PASS; 032 design answered; 096b dev cleanup read back).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; a peer's go is never the owner's. |
-| **Dev state** | BFF = master **cc11294300** (since 2026-11-07 14:22:09Z). `sprk_recordfamily` NEW (in spaarke_core); `sprk_fieldmapping_push` v1.3.0; `sprk_spaarkeai` at cc11294300 (CI). G-8 ON. 226 settings. 046c applied 11-07 03:33/03:36Z (watch PASS). Junction 1699 rows. Gate record: `notes/deploy-gate-2026-11-07-cc11294300.md`. Rollback: `deploy/rollback/wwwroot-20261107T142009Z.zip` (20669df6a9). Detached deploy worktree `C:/wtd1129`: remove with `Remove-WorktreeSafe.ps1` when no longer needed. |
-| **Next action** | 1. Wait for fm's live UI check times (a) to (d), then read the server side for those windows. 2. mcp-bff-api sends the spike SHA when PR #2615 is green (their Task 167 scanner fix, option a, with controls): check the diff = 16 spike files + ArchTests. 3. Next dev window = master ≥ d53d67f604 (049b) + the spike: put it to the owner. 4. Reviews as they arrive (below). |
+| **Dev state** | BFF = **22487c6537** (master d53d67f604 = 049b, plus the MCP spike from draft PR #2615) since 2026-11-07 20:06:34Z. `sprk_recordfamily`, `sprk_fieldmapping_push` v1.3.0 and `sprk_spaarkeai` are at cc11294300 (no client change since). G-8 ON. 226 settings. Junction 1700 rows. Gate records: `notes/deploy-gate-2026-11-07-cc11294300.md` and `-22487c6537.md`. Rollback: `deploy/rollback/wwwroot-20261107T200500Z.zip` (cc11294300). Detached worktree `C:/wtd2248`: remove with `Remove-WorktreeSafe.ps1`. |
+| **Next action** | 1. Read the server side for the owner's browser checks (a) and (c) when fm sends the times, and for word-add-in's three owner checks. 2. Next window = master with 049c (#2624) + the spike rebuilt on it (mcp-bff-api sends the SHA when green); owner go here. 3. Check the private 045 residual: can a user make an app-only playbook run execute a node they authored (system or scheduled trigger)? Then tell fm. 4. Reviews: fm 030b, 034, 045A design, 052; ebilling 096b route diff + app-only proof, 165a, 165c, 2b-2, the batch checklist; the 032 replies (ebilling Q-E5 and search path). |
 
 ## Next dev window (needs the owner's go here)
 - Content: master from d53d67f604 (049b via #2619; 049c if merged) + spike HEAD (green). Spike gate: anonymous `/mcp/legal-operations` and `/mcp/spike-area-b` → 401, signed-in → 2xx. Send mcp-bff-api the SHA and read-back.
@@ -24,10 +24,10 @@
 - Partners (SPA) SEE reviewer-added lines and reasons while In Review (EB-D-202; reasons via the typed invoice-module projection in task 130).
 - #2292: fixed, deployed, back-filled.
 - MCP spike on dev: no time limit; rides with each deploy once its CI is green.
-- 2026-11-07: "Deploy the batch now" → done as plain master (spike CI red).
+- 2026-11-07: "Deploy the batch now" → done as plain master (spike CI red). Then "Deploy now" for 22487c6537 (049b + spike): done, PASS.
 
 ## Reviews state
-- **fm (`-69`):** 044, 040+075, 049b fix2 approved and on master. 049c: (A) OK with conditions (no value logging; step-2 refusal shape unchanged, with a test; audit noise is a K), (B) OK with cancellation; merges after its fix2 (A2 in-flight-probe test). 033 dropped by the owner (Repair reader → 052). Coming: 045A, 030b, 034, **032 design first** (fill-only mapping in the invoice persister), 052.
+- **fm (`-69`):** 044, 040+075, 049b fix2 approved and on master. 049c: (A) OK with conditions (no value logging; step-2 refusal shape unchanged, with a test; audit noise is a K), (B) OK with cancellation; merges after its fix2 (A2 in-flight-probe test). 033 dropped by the owner (Repair reader → 052). **032 design answered** (approved with conditions: a role-depth pin in FeatureRolePrivilegeGuardTests; partner columns = module ReadableColumns, pending ebilling Q-E5 + search path; #2188 exemption Uses=1; metadata read per delivery; a REQUIRED secure-source gate (nothing mapped from a Secure core record); person lookups protected unless allow-listed). 045 private item: intended under #2257 round 123 (person runs impersonate, so Dataverse checks AppendTo). Coming: 045A, 030b (parent link in the create), 034, 052. Live checks (b) and (d) read back clean.
 - **ebilling (`-c7`):** 164a + follow-up `647ad48a8e` APPROVED (merged to work as eeac33b1c2 + 682dc4a661; the 166 guard got InvoiceLineAddService as Writer and InvoiceFindingsDiff as Reader, to look at in the batch diff). Coming: 165a, then **165c** (the link counts only if it equals `InvoiceIdFor(id)`), 096b, 2b-2, then the 130 projection.
 - **ontology (`-38`):** told them the "Signal writer access team" proposal is not mine (they ask fm). Roles alone cover Signal writers. 174/175 held until ebilling 112.
 - **mcp-bff-api (`-68`):** spike scanner fix in progress. A10, B-4 and production task 021 (FR-02) still to come.
