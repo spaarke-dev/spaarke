@@ -29,8 +29,10 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// </summary>
 public sealed class InvoiceReviewReadServiceTests
 {
-    private static readonly Guid InvoiceId = Guid.Parse("10000000-0000-4000-8000-0000000000a1");
     private static readonly Guid SubmissionId = Guid.Parse("10000000-0000-4000-8000-0000000000b1");
+
+    // Task 165a: the invoice's id derives from its own submission's (the review reads only that submission).
+    private static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
     private static readonly Guid FirmId = Guid.Parse("10000000-0000-4000-8000-0000000000f1");
     private static readonly Guid MatterId = Guid.Parse("10000000-0000-4000-8000-0000000000c1");
     private static readonly Guid PolicyId = Guid.Parse("10000000-0000-4000-8000-0000000000d1");
@@ -599,6 +601,27 @@ public sealed class InvoiceReviewReadServiceTests
         review.InvoiceFindings[0].Severity.Should().Be("Warning");
         review.Submission!.Decision.Should().Be("Rejected");
         review.Submission.PipelineFindings.Should().ContainSingle().Which.ReasonCode.Should().Be("invoice_number_mismatch");
+    }
+
+    [Fact(DisplayName = "165a F1 must-fire: a submission linked to the invoice that is not its own (its id does not derive the invoice's) is not shown")]
+    public async Task AnotherSubmission_IsNotShown()
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        // The same stored copy, on a submission whose id is another invoice's.
+        var other = new Entity("sprk_invoicesubmission", Guid.Parse("10000000-0000-4000-8000-0000000000b2"));
+        foreach (var attribute in SubmissionRow(FindingsJson()).Attributes)
+        {
+            other[attribute.Key] = attribute.Value;
+        }
+
+        w.Submission = other;
+
+        var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
+
+        review.Submission.Should().BeNull();
+        review.InvoiceFindings.Should().BeEmpty();
+        review.Lines.Single().LineFindings.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "100: a withheld group returns no values read and no suggestion (D-112)")]

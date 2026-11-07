@@ -9,7 +9,7 @@ public enum SubmissionDecisionOutcome
     /// <summary>Processing rejected the submission: the document was not an invoice that could be read, or the rejection rule rejected it.</summary>
     Rejected,
 
-    /// <summary>A reviewer returned a blocked internal submission's invoice to the firm (task 105 Return; D-143: the firm is notified, FR-39 Return to Firm).</summary>
+    /// <summary>A reviewer returned a blocked submission's invoice to the firm (task 105 Return; D-143: the firm is notified, FR-39 Return to Firm).</summary>
     Returned,
 }
 

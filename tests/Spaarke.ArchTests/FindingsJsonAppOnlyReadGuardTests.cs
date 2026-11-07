@@ -62,6 +62,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         // writes the patched findings and the addLine member in its one app-only ExecuteTransactionAsync, row-version conditioned; 164a-4b: its
         // Signals step (step 9) re-reads it the same way and clears the reconciled changes in one app-only, row-version-conditioned write
         typeof(InvoiceLineAddService),
+        typeof(InvoiceBlockedHold), // task 165a: reads it app-only (the IGenericEntityService its callers pass) for the recorded outcome the FR-20 hold decides from; never writes it
     ];
 
     /// <summary>

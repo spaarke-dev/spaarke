@@ -37,8 +37,8 @@
     - (1) Approval refuses a line of unknown origin: the task 164 criterion "approval refuses a line of unknown origin", moved here in full.
     - (2) Status: approval, AP export and spend count an invoice as Approved, Sent to AP or Paid only when the matching server-written record exists, and otherwise refuse or hold it (409, a distinct code). The records: the approve Decision Record; the export batch or its record for Sent to AP; the paid record. Verify that each one is class (a) or (b). Spend (`FinanceBaseValues`) is ontology-r1's code: make the minimal change and list it for their review.
     - (3) Totals: approval and AP export check that the stored invoice totals equal `InvoiceTotalsCalculator` over the lines, and refuse on a mismatch (409, a distinct code).
-    - (4) Pending spend: both pending-spend paths (`FinanceBaseValues`, `FinanceRollupService`) exclude every invoice `InvoiceBlockedHold` holds, so pending spend is decided from the same server-written sources as the hold. ontology-r1 owns `FinanceBaseValues`: minimal change, listed for their review. Must-fire per path with a must-not-fire control; one seed.
-    Merge note: 165a puts the invoice's own-submission selection in one helper; 164a-4a moved `ReadSubmissionAsync` into `InvoiceFindingsDiff`. Whichever merges second calls the helper there.
+    - (4) Pending spend (165a notes, open items; a confirmed defect, not a known limit): both pending-spend paths (`FinanceBaseValues`, `FinanceRollupService`; at 165a, `FinanceBaseValues.cs:416` and `FinanceRollupService.cs:344`) exclude every invoice `InvoiceBlockedHold` holds, so pending spend is decided from the same server-written sources as the hold. ontology-r1 owns `FinanceBaseValues`: minimal change, listed for their review. Must-fire per path with a must-not-fire control; one seed.
+    Merge note: 165a puts the invoice's own-submission selection in one helper (`InvoiceBlockedHold.ReadOwnSubmissionAsync`); 164a-4a's `InvoiceCorrectionReevaluation.ReadSubmissionAsync` (used by the correction follow-through, the unapplied-corrections read and Add line) calls it since the 165a merge.
   </scope>
 
   <acceptance-criteria>

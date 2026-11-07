@@ -1636,20 +1636,11 @@ public sealed class InvoiceCorrectionService
         return await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false);
     }
 
-    /// <summary>The latest submission's stored findings JSON (it carries the header provenance), or null.</summary>
-    private async Task<string?> ReadFindingsJsonAsync(Guid invoiceId, CancellationToken ct)
-    {
-        var query = new QueryExpression(InvoiceReviewReadService.SubmissionEntity)
-        {
-            ColumnSet = new ColumnSet(InvoiceSubmissionPersister.SubmissionFindingsJson, "createdon"),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            TopCount = 1,
-        };
-        query.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
-        query.AddOrder("createdon", OrderType.Descending);
-        return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault()
+    /// <summary>The invoice's own submission's stored findings JSON (it carries the header provenance), or null when that submission is not
+    /// linked (task 165a: never another submission linked to the invoice).</summary>
+    private async Task<string?> ReadFindingsJsonAsync(Guid invoiceId, CancellationToken ct) =>
+        (await InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, [InvoiceSubmissionPersister.SubmissionFindingsJson], ct).ConfigureAwait(false))
             ?.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
-    }
 
     private CorrectionResult ReadFailed(Guid invoiceId, Exception ex)
     {
