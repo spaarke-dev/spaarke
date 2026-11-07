@@ -205,6 +205,8 @@ public static class HandlerRunInputs
                 // T259 (ISS-010): the customer's business unit H10 created — H7b checks it is a direct child of the root
                 // and that both application users are in it (INCOMING-145 §6 T1/T3).
                 RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId)),
+                // T266 S24 (#2605): the ontology writer's App User (H10) — role and the two writer profiles.
+                RunInput.Output(nameof(InterStepState.OntologyWriterSystemUserId)),
             ],
             [HandlerIds.H8] =
             [

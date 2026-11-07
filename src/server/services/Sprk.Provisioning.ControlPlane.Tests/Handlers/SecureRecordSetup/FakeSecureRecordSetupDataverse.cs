@@ -45,6 +45,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// <summary>User-role associations are accepted but do not stick (S23 verify-phase test).</summary>
     internal bool UserRoleAssociationsIgnored { get; set; }
 
+    /// <summary>User-role associations of these users are accepted but do not stick (S23/S24 verify-phase tests).</summary>
+    internal HashSet<Guid> UserRoleAssociationsIgnoredFor { get; } = [];
+
     /// <summary>Profiles whose user/team associations are accepted but do not stick (verify-phase tests).</summary>
     internal HashSet<Guid> ProfileAssociationsIgnored { get; } = [];
 
@@ -101,6 +104,11 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     internal Guid OntologyRoleId { get; private set; }
     internal Guid BffAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f1");
     internal Guid MiAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f2");
+
+    /// <summary>T266 S24 (#2605): H10's ontology writer application user, in the customer unit, holding no role.</summary>
+    internal Guid WriterAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f3");
+    internal Guid OntologyWriterFieldWritersProfileId { get; private set; }
+    internal Guid OntologyWriterFirmReasonProfileId { get; private set; }
     internal static readonly string[] LockedTables = ["sprk_invoice", "sprk_matter", "sprk_project", "sprk_workassignment"];
 
     /// <summary>
@@ -109,8 +117,8 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// permissions on four tables (secured), the two identity-link profiles with their permissions on
     /// contact.sprk_externalobjectid and systemuser.sprk_primarycontact (secured) exactly as SpaarkeMaster ships them, the
     /// platform System Administrator profile (read/create/update on every secured column, as the platform grants it),
-    /// and H10's two application users IN the customer's own unit (T259 — a direct child of the root, with its default
-    /// team).
+    /// and H10's three application users IN the customer's own unit (T259 — a direct child of the root, with its default
+    /// team; T266 — the ontology writer's, holding no role) and the two ontology-writer profiles with no members.
     /// </summary>
     internal static FakeSecureRecordSetupDataverse NewEnvironment(SecureRecordOwnerRoleSet roleSet)
     {
@@ -184,11 +192,15 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         dv.RootOntologyRoleId = dv.AddRole(dv.RootUnitId, SecureRecordSetupProcedure.OntologyServiceRoleName);
         dv.UserApplicationId[dv.BffAppUser] = Guid.NewGuid();
         dv.UserApplicationId[dv.MiAppUser] = Guid.NewGuid();
+        dv.UserApplicationId[dv.WriterAppUser] = Guid.NewGuid();
         dv.CustomerUnitId = Guid.NewGuid();
         dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, CustomerUnitName, dv.RootUnitId));
         dv.CustomerDefaultTeamId = dv.AddTeam(dv.CustomerUnitId, CustomerUnitName, isDefault: true);
         dv.UserUnit[dv.BffAppUser] = dv.CustomerUnitId;
         dv.UserUnit[dv.MiAppUser] = dv.CustomerUnitId;
+        dv.UserUnit[dv.WriterAppUser] = dv.CustomerUnitId;
+        dv.OntologyWriterFieldWritersProfileId = dv.AddProfile(SecureRecordSetupProcedure.OntologyWriterFieldWritersProfileName);
+        dv.OntologyWriterFirmReasonProfileId = dv.AddProfile(SecureRecordSetupProcedure.OntologyWriterFirmReasonProfileName);
         dv.OntologyRoleId = dv.AddRole(dv.CustomerUnitId, SecureRecordSetupProcedure.OntologyServiceRoleName, parentRootRoleId: dv.RootOntologyRoleId);
         return dv;
     }
@@ -557,7 +569,7 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     public Task AssociateUserRoleAsync(SecureRecordSetupTarget target, Guid systemUserId, Guid roleId, CancellationToken cancellationToken)
     {
         Write($"AssociateUserRole {systemUserId} {roleId}");
-        if (!UserRoleAssociationsIgnored)
+        if (!UserRoleAssociationsIgnored && !UserRoleAssociationsIgnoredFor.Contains(systemUserId))
         {
             if (!UserRoles.TryGetValue(systemUserId, out var ids))
             {
