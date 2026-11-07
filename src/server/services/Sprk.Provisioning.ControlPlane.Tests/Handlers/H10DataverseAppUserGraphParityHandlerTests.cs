@@ -226,10 +226,14 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
     }
 
     [Fact]
-    public async Task T266_ARunWhoseH10CompletedBeforeTheWriter_ReRunsH10_AndCreatesTheWriterAppUser()
+    public async Task T266_ARunFromBeforeTheWriter_DoesNotShortCircuit_AndTellsTheOperatorToStartANewRun()
     {
-        // A run completed under the pre-T266 key (no app-user-set marker) must not short-circuit past the writer.
+        // As production leaves a pre-T266 run: H2a completed without the writer outputs and H10 completed under the old key
+        // (no app-user-set marker). H10 must not short-circuit past the missing writer, and the only fix is a new run - a
+        // resume never re-runs a completed H2a.
         var run = BuildRun();
+        run.InterStepState.OntologyWriterClientId = null;
+        run.InterStepState.OntologyWriterObjectId = null;
         var ids = string.Join("|", ThreeRoleFixture.Select(r => r.AppRoleId!.ToLowerInvariant()).OrderBy(i => i, StringComparer.Ordinal));
         var oldHash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(ids));
         var oldKey = $"appuser-{CustomerId}-g{Convert.ToHexString(oldHash, 0, 4).ToLowerInvariant()}";
@@ -244,10 +248,12 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), FakeGranter.Success(3),
             FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
 
-        (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None)).Should().BeOfType<HandlerResult.Success>();
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
 
-        creator.Requests.Should().ContainSingle(r => r.ApplicationId == WriterClientId);
-        repo.LastWrittenRun!.InterStepState.OntologyWriterSystemUserId.Should().Be(WriterSystemUserId);
+        failure.RejectionCode.Should().Be(H10Rejections.MissingOntologyWriterIdentity);
+        failure.Diagnostic.Should().Contain("start a new run").And.Contain("does not re-run a completed H2a");
+        creator.CallCount.Should().Be(0);
     }
 
     // ---------- AC-2 T2 verify fail ----------

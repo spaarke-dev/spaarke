@@ -126,6 +126,12 @@ public interface ISecureRecordSetupDataverse
     /// <summary>S23: the roles a systemuser holds directly.</summary>
     Task<IReadOnlyList<SecureSetupRole>> ListUserRolesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken);
 
+    /// <summary>S24: the teams a systemuser is a member of, its business unit's default team included (it inherits their roles).</summary>
+    Task<IReadOnlyList<SecureSetupTeam>> ListUserTeamsAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken);
+
+    /// <summary>S24: the field-security profiles a systemuser is a direct member of.</summary>
+    Task<IReadOnlyList<Guid>> ListUserProfilesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken);
+
     /// <summary>S7/S8/T4: the roles a team holds.</summary>
     Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken);
 

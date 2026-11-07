@@ -80,6 +80,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// <summary>Optional fault: thrown by every member whose name the predicate accepts.</summary>
     internal Func<string, Exception?>? Fault { get; set; }
 
+    /// <summary>Optional: runs after each recorded write - a change another actor makes between the read and the re-read.</summary>
+    internal Action<string>? OnWrite { get; set; }
+
     /// <summary>Optional fault thrown by <c>IsAttributeSecuredAsync</c> for the <c>"table.column"</c> keys the predicate accepts.</summary>
     internal Func<string, Exception?>? ColumnReadFault { get; set; }
 
@@ -322,6 +325,7 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             throw ex;
         }
         Writes.Add(description);
+        OnWrite?.Invoke(description);
     }
 
     // ---------------- reads ----------------
@@ -420,6 +424,22 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         return Task.FromResult<IReadOnlyList<SecureSetupRole>>(UserRoles.TryGetValue(systemUserId, out var ids)
             ? ids.Select(id => Roles.Single(r => r.Id == id)).ToArray()
             : []);
+    }
+
+    /// <summary>As Dataverse: the explicit memberships plus the default team of the user's own unit.</summary>
+    public Task<IReadOnlyList<SecureSetupTeam>> ListUserTeamsAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListUserTeamsAsync));
+        var unit = UserUnit.TryGetValue(systemUserId, out var u) ? u : (Guid?)null;
+        return Task.FromResult<IReadOnlyList<SecureSetupTeam>>(Teams
+            .Where(team => TeamMembers[team.Id].Contains(systemUserId) || (team.IsDefault && team.BusinessUnitId == unit))
+            .ToArray());
+    }
+
+    public Task<IReadOnlyList<Guid>> ListUserProfilesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+    {
+        Read(nameof(ListUserProfilesAsync));
+        return Task.FromResult<IReadOnlyList<Guid>>(ProfileUsers.Where(p => p.Value.Contains(systemUserId)).Select(p => p.Key).ToArray());
     }
 
     public Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken)

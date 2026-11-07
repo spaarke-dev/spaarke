@@ -284,8 +284,21 @@ public static class SecureRecordSetupRejectionCodes
     public const string OntologyWriterProfileHasOtherMember = "secure_setup.ontology_writer_profile_has_other_member";
 
     /// <summary>
-    /// S24: the re-read shows the ontology writer does not hold exactly its role, or is not the only member of both profiles,
-    /// after the writes (Resumable).
+    /// S24: the ontology writer is in a team other than its business unit's default team, or that default team holds a role
+    /// - the writer would inherit it (QuarantineRequired: nothing is removed here).
+    /// </summary>
+    public const string OntologyWriterTeamAccess = "secure_setup.ontology_writer_team_access";
+
+    /// <summary>
+    /// S24: the ontology writer is a direct member of a field-security profile other than the two ontology-writer profiles
+    /// (QuarantineRequired: nothing is removed here).
+    /// </summary>
+    public const string OntologyWriterHoldsOtherProfile = "secure_setup.ontology_writer_holds_other_profile";
+
+    /// <summary>
+    /// S24: the re-read after the writes shows the ontology writer without its role or a profile membership (Resumable: a
+    /// write not yet visible), or holding more than them - another role, another member, a team or another profile
+    /// (QuarantineRequired: nothing is removed here).
     /// </summary>
     public const string OntologyWriterNotConfigured = "secure_setup.ontology_writer_not_configured";
 

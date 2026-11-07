@@ -1552,6 +1552,86 @@ public sealed class SecureRecordSetupProcedureTests
         dv.Writes.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task S24_WriterInheritingARoleThroughATeam_IsQuarantined_NamingIt_AndNothingIsRemoved(bool defaultTeamHoldsTheRole)
+    {
+        // A user holds every role of every team it is in. Its unit's default team always counts; any other team never may.
+        var dv = NewEnv();
+        var admin = dv.AddRole(dv.CustomerUnitId, "System Administrator", roleTemplateId: SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId);
+        Guid team;
+        if (defaultTeamHoldsTheRole)
+        {
+            team = dv.CustomerDefaultTeamId;
+            dv.TeamRoles[team].Add(admin);
+        }
+        else
+        {
+            team = dv.AddTeam(dv.CustomerUnitId, "Matter Admins", isDefault: false);
+            dv.TeamMembers[team].Add(dv.WriterAppUser);
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterTeamAccess, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(team.ToString()).And.Contain(dv.WriterAppUser.ToString());
+        if (defaultTeamHoldsTheRole)
+        {
+            refused.Diagnostic.Should().Contain(admin.ToString());
+            dv.TeamRoles[team].Should().Contain(admin);
+        }
+        else
+        {
+            dv.TeamMembers[team].Should().Contain(dv.WriterAppUser);
+        }
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task S24_WriterInAnotherProfile_IsQuarantined_NamingIt_AndNothingIsRemoved()
+    {
+        var dv = NewEnv();
+        dv.ProfileUsers[dv.StandingGrantProfileId].Add(dv.WriterAppUser);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterHoldsOtherProfile,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(dv.StandingGrantProfileId.ToString());
+        dv.ProfileUsers[dv.StandingGrantProfileId].Should().Contain(dv.WriterAppUser);
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task S24_WriterGainingAccessBetweenTheReadAndTheReRead_IsQuarantined_NotResumable(bool role)
+    {
+        // Something else gives the writer more while H7b runs. A resume cannot take it away, so the verify refuses it the way
+        // the read half would have.
+        var dv = NewEnv();
+        var admin = dv.AddRole(dv.CustomerUnitId, "System Administrator", roleTemplateId: SecureRecordSetupProcedure.SystemAdministratorRoleTemplateId);
+        var team = dv.AddTeam(dv.CustomerUnitId, "Matter Admins", isDefault: false);
+        dv.OnWrite = description =>
+        {
+            if (description.StartsWith($"AssociateUserRole {dv.WriterAppUser}", StringComparison.Ordinal))
+            {
+                if (role)
+                {
+                    dv.UserRoles[dv.WriterAppUser] = [admin];
+                }
+                else
+                {
+                    dv.TeamMembers[team].Add(dv.WriterAppUser);
+                }
+            }
+        };
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.OntologyWriterNotConfigured,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(role ? admin.ToString() : team.ToString());
+    }
+
     [Fact]
     public async Task S24_RoleAssociationThatDoesNotStick_FailsTheStep_WithTheWriterCode()
     {

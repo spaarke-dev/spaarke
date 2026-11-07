@@ -1253,7 +1253,7 @@ Failure diagnostic surfaces to operator; run does not start until resolved.
   identity (ontology-platform FR-21): it holds `Spaarke Ontology Service` and the two ontology-writer field-security
   profiles in Dataverse (H10, H7b S24) and nothing else — no Azure role, no Graph app role, never System Administrator.
   H2a records its client id and principal id (`ontologyWriterClientId`, `ontologyWriterObjectId`) for H4b, H10 and H13.
-  A redeploy of `customer.bicep` keeps both identities on both slots; the template lists them together
+  A redeploy of `customer.bicep` keeps both identities on both slots; the template lists them together.
 
 Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + report on drift (per FR-34).
 
@@ -1614,9 +1614,14 @@ It then creates or adopts a **third** App User for the **ontology writer identit
 It refuses before any Dataverse call when the run lacks H2a's writer ids (`h10-missing-ontology-writer-identity`,
 Resumable) or the writer's client id is the stamp identity's (`h10-ontology-writer-is-stamp-identity`,
 QuarantineRequired); a writer App User in another unit is QuarantineRequired like the other two, and a failed create is
-`h10-ontology-writer-app-user-creation-failed` (Resumable). H10's idempotency key includes the App User set, so a run
-whose H10 completed before task 266 runs H10 again when it is dispatched; where a resume does not dispatch it, H7b S24
-refuses `secure_setup.ontology_writer_unresolved` — start a new run.
+`h10-ontology-writer-app-user-creation-failed` (Resumable). When H10 adopts an existing App User for the stamp identity
+or the writer, the row's `azureactivedirectoryobjectid` must already be that identity's principal id: an empty value or
+the client id fails H10 (nothing is rewritten) — correct the row, or delete it so H10 recreates it, then resume.
+
+**A run from before task 266 cannot get a writer.** Its H2a completed without the writer's ids, and a resume does not
+re-run a completed handler. H10 refuses `h10-missing-ontology-writer-identity` (its idempotency key includes the App
+User set, so an H10 completed before task 266 does not count as done), H4b refuses `h4b-per-env-input-missing` for the
+writer setting, and H7b S24 refuses `secure_setup.ontology_writer_unresolved`. Start a new run.
 
 Why the customer's own unit, not the root: `Spaarke Basic User` holds Read at **Deep** on project, matter
 and work assignment. Deep at the root reaches every child unit, the `Secure Record` unit included, so a user in the root
@@ -1933,12 +1938,16 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
   - QuarantineRequired when the writer is one of the BFF's own application users
     (`secure_setup.ontology_writer_is_bff_identity`), is outside the customer's unit
     (`secure_setup.ontology_writer_outside_customer_bu`), holds any other role
-    (`secure_setup.ontology_writer_holds_other_role`), or a writer profile has another member or any team
-    (`secure_setup.ontology_writer_profile_has_other_member`);
+    (`secure_setup.ontology_writer_holds_other_role`), would inherit a role through a team — it is in any team other
+    than its unit's default team, or that default team holds a role (`secure_setup.ontology_writer_team_access`) — is a
+    direct member of any other field-security profile (`secure_setup.ontology_writer_holds_other_profile`), or a writer
+    profile has another member or any team (`secure_setup.ontology_writer_profile_has_other_member`);
   - `secure_setup.ontology_writer_profile_unresolved` (Resumable) when a writer profile is missing or ambiguous: upgrade
     SpaarkeMaster (H6), then resume.
 
-  The verification failure is `secure_setup.ontology_writer_not_configured` (Resumable);
+  The verification failure is `secure_setup.ontology_writer_not_configured`: Resumable when the role or a membership is
+  not yet visible, QuarantineRequired when the re-read shows the writer holding more than them (another role, team,
+  profile or profile member appeared while H7b ran);
 - a check that `sprk_noaccessentry` is readable, and that the `Spaarke Access Administrator` role holds Read on it at
   Global while `Spaarke Core User` holds none (unified-access-control-r2 task 154; verified, never repaired — H7b
   refuses `secure_setup.no_access_entry_roles_incomplete` and names `scripts/Set-NoAccessEntryRolePrivileges.ps1`);
@@ -2882,10 +2891,10 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-22 | §6.5.2: `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0 before deploying a BFF that stamps a new table — the BFF trusts `sprk_createdbyperson` only on stamped tables, and only a field-secured column makes that safe; source guard `CreatorPersonColumnSecuredGuardTests` | #2273 fix round 1 (PR #2277) |
 | 2026-10-22 | §5 H3 row + §7.3 + §9 T7 + §12.3: `authenticationBehaviors.removeUnverifiedEmailClaim = true` set by H3 on every BFF registration (`appreg-unverified-email-claim-failed`) and verified by H13 trap T7 | `customer-provisioning-orchestration-r1` task 264 (#2001 from SPA-r3 ISS-013) |
 | 2026-10-22 | §9 T7 + §12.3 + H4b external-registration owner note: H13 trap T7 reads back `ExternalAccess__CustomerBusinessUnitId` on both slots (equal to H10's customer business unit) | `customer-provisioning-orchestration-r1` task 265 (#2265) |
-| 2026-11-07 | §6.5 settings + §7.2 H2a + H4b note + §7.7 H10 + H7b S24 + §9 T3/T7 + §12.3: the per-stamp ontology writer identity — H2a creates `mi-spaarke-{customerId}-{env}-ontology-writer` on both slots, H4b writes `Ontology__Writer__ManagedIdentityClientId`, H10 creates its App User with no role, H7b S24 (procedure v7) grants exactly `Spaarke Ontology Service` and the two writer profiles, H13 T7 reads the setting back and T3 checks the writer holds no Graph app role | `customer-provisioning-orchestration-r1` task 266 (#2605) |
 | 2026-10-23 | §6.5.2: contact access-level and identity bookkeeping columns are field-secured — `scripts/Set-ExternalAccessContactSecuritySchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the `sprk_identitycollision*` columns and adds three BFF-only columns; the H6 path for a new stamp applies once SpaarkeMaster 1.2.4.0 is published; §7.11: H7b S18 covers the plane and collision columns, S19 verifies the access-level lock and the whole standing-grant lock (Standing Grant Administrators 4/4/4; no other writer but System Administrator — `secure_setup.standing_grant_lock_other_writer`), S22 verifies the three BFF-only columns' locks once a release carries them; an H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the control plane is deployed | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice A) |
 | 2026-10-23 | §6.5.2 rollout note: rollout order — the contact security schema is applied and `-Verify` passes (stamp columns and proof reads) on every environment BEFORE a BFF build that requires the invite stamp is deployed; without the stamp columns every email bind (CIAM and Workforce) is refused; an email bind needs a current invite stamp (invited address and, for work accounts, the invited tenant unless `xms_edov` is boolean true); invites take an optional `invitedTenantId` (GUID); Workforce contacts never invited through the BFF, or invited before this release, need a re-invite naming their tenant | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice B) |
 | 2026-10-28 | §7.11 + §12.2: the customer owner teams step is **Phase 7a**, after Phase 7 (H10 creates the unit) and before Phase 8 — no longer "Phase 5d" before Phase 6; the Phase 6 BFF refuses ordinary hard-deny writes until its `-Verify` exits 0. The configuration-team seeders are future work (field-mapping task 004, H12b FR-39); until then an operator re-owns the rows | `unified-access-control-r2` task 194b R4b-4 |
+| 2026-11-07 | §6.5 settings + §7.2 H2a + H4b note + §7.7 H10 + H7b S24 + §9 T3/T7 + §12.3: the per-stamp ontology writer identity — H2a creates `mi-spaarke-{customerId}-{env}-ontology-writer` on both slots, H4b writes `Ontology__Writer__ManagedIdentityClientId`, H10 creates its App User with no role, H7b S24 (procedure v7) grants exactly `Spaarke Ontology Service` and the two writer profiles and refuses a writer that would hold more (directly, through a team, or through another profile), H10 refuses to adopt an App User whose `azureactivedirectoryobjectid` is not the principal id, H13 T7 reads the setting back and T3 checks the writer holds no Graph app role | `customer-provisioning-orchestration-r1` task 266 (#2605) |
 
 ---
 

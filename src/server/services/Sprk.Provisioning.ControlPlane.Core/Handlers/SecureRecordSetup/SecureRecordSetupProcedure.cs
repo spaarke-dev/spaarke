@@ -181,14 +181,14 @@ public sealed class SecureRecordSetupProcedure
     public const string OntologyServiceRoleName = "Spaarke Ontology Service";
 
     /// <summary>
-    /// S24 (#2605): Read/Create/Update on <c>sprk_createdbyperson</c> of the decision record, the signal and the budget
-    /// revision. Ships in SpaarkeMaster; its only member is the ontology writer's application user.
+    /// S24 (#2605): one of the two ontology-writer field-security profiles. Ships in SpaarkeMaster; its only member is the
+    /// ontology writer's application user.
     /// </summary>
     public const string OntologyWriterFieldWritersProfileName = "Spaarke Ontology Writer Field Writers";
 
     /// <summary>
-    /// S24 (#2605): Read/Create/Update on <c>sprk_signal.sprk_firmreason</c>. Ships in SpaarkeMaster (first published in
-    /// 1.3.0.0); its only member is the ontology writer's application user.
+    /// S24 (#2605): the other ontology-writer field-security profile. Ships in SpaarkeMaster (first published in 1.3.0.0); its
+    /// only member is the ontology writer's application user.
     /// </summary>
     public const string OntologyWriterFirmReasonProfileName = "Spaarke Ontology Writer Firm Reason Writers";
 
@@ -531,6 +531,23 @@ public sealed class SecureRecordSetupProcedure
                     "writer may. Who belongs there is an operator decision; nothing is removed here. Nothing was written.");
             }
             writerProfiles.Add((found[0], profileName, members));
+        }
+        // A user holds every role of every team it is in (its unit's default team included) and every profile it is a direct
+        // member of, so "exactly this role and these profiles" is checked through both, not only on the user (FR-21).
+        var (writerTeamAccess, writerOtherProfiles) = await OntologyWriterExtraAccessAsync(dv, t, writerUser, customerUnit.Id,
+            writerProfiles.Select(p => p.Id).ToArray(), ct).ConfigureAwait(false);
+        if (writerTeamAccess is not null)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterTeamAccess,
+                $"The {writerTeamAccess}. A user holds every role of every team it is in, so the writer would hold more than " +
+                $"'{OntologyServiceRoleName}' (FR-21). Team membership and team roles are operator decisions; nothing is removed " +
+                "here. Nothing was written.");
+        }
+        if (writerOtherProfiles is not null)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterHoldsOtherProfile,
+                $"The {writerOtherProfiles}. The writer belongs to the two ontology-writer profiles only (FR-21). Removing a " +
+                "membership is an operator decision; nothing is removed here. Nothing was written.");
         }
 
         // S4 (root half) — a role of this name in the ROOT unit is copied into every unit, so a unit created below would
@@ -1298,22 +1315,50 @@ public sealed class SecureRecordSetupProcedure
         {
             problems.Add($"BFF runtime user {runtimeUser} does not hold '{OntologyServiceRoleName}' ({ontologyRoleId}) after it was assigned");
         }
+        // S24 verify. A missing role or membership is a write not yet visible (Resumable). Anything MORE than that appeared
+        // between the read and now, and nothing here removes it (QuarantineRequired, like the read half).
         var writerProblems = new List<string>();
+        var writerExtras = new List<string>();
         var writerRoleIds = (await dv.ListUserRolesAsync(t, writerUser, ct).ConfigureAwait(false)).Select(r => r.Id).ToHashSet();
-        if (!writerRoleIds.SetEquals([ontologyRoleId]))
+        if (!writerRoleIds.Contains(ontologyRoleId))
         {
-            writerProblems.Add($"ontology writer user {writerUser} holds roles [{Ids(writerRoleIds)}], expected exactly " +
-                               $"'{OntologyServiceRoleName}' ({ontologyRoleId})");
+            writerProblems.Add($"ontology writer user {writerUser} does not hold '{OntologyServiceRoleName}' ({ontologyRoleId}) after it was assigned");
+        }
+        if (writerRoleIds.Any(id => id != ontologyRoleId))
+        {
+            writerExtras.Add($"ontology writer user {writerUser} holds roles [{Ids(writerRoleIds)}], expected exactly " +
+                             $"'{OntologyServiceRoleName}' ({ontologyRoleId})");
         }
         foreach (var profile in writerProfiles)
         {
             var members = (await dv.ListProfileUsersAsync(t, profile.Id, ct).ConfigureAwait(false)).Select(u => u.UserId).ToHashSet();
             var memberTeams = await dv.ListProfileTeamsAsync(t, profile.Id, ct).ConfigureAwait(false);
-            if (!members.SetEquals([writerUser]) || memberTeams.Count > 0)
+            if (!members.Contains(writerUser))
             {
-                writerProblems.Add($"'{profile.Name}' members are users [{Ids(members)}] and teams [{Ids(memberTeams)}], " +
-                                   $"expected only the ontology writer {writerUser}");
+                writerProblems.Add($"the ontology writer {writerUser} is not a member of '{profile.Name}' after it was added");
             }
+            if (members.Any(id => id != writerUser) || memberTeams.Count > 0)
+            {
+                writerExtras.Add($"'{profile.Name}' members are users [{Ids(members)}] and teams [{Ids(memberTeams)}], " +
+                                 $"expected only the ontology writer {writerUser}");
+            }
+        }
+        var (verifyTeamAccess, verifyOtherProfiles) = await OntologyWriterExtraAccessAsync(dv, t, writerUser, customerUnit.Id,
+            writerProfiles.Select(p => p.Id).ToArray(), ct).ConfigureAwait(false);
+        if (verifyTeamAccess is not null)
+        {
+            writerExtras.Add(verifyTeamAccess);
+        }
+        if (verifyOtherProfiles is not null)
+        {
+            writerExtras.Add(verifyOtherProfiles);
+        }
+        if (writerExtras.Count > 0)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.OntologyWriterNotConfigured,
+                "The ontology writer holds more than its role and its two profiles after the writes: " +
+                string.Join("; ", writerExtras.Concat(writerProblems).Concat(problems)) +
+                ". Something changed the writer between the read and the re-read; nothing is removed here - an operator decides.");
         }
         problems.AddRange(writerProblems);
         if (problems.Count > 0)
@@ -1482,6 +1527,39 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>A field permission's read/create/update, or "(none)" when there is no row.</summary>
     private static string Rights(SecureSetupFieldPermission? p)
         => p is null ? "(none)" : $"{p.CanRead}/{p.CanCreate}/{p.CanUpdate}";
+
+    /// <summary>
+    /// S24: what the ontology writer would hold beyond its own role and profiles - roles inherited through a team (any team
+    /// other than its unit's default team, or a role on that default team) and direct membership of any other profile.
+    /// Each is null when there is none.
+    /// </summary>
+    private static async Task<(string? TeamAccess, string? OtherProfiles)> OntologyWriterExtraAccessAsync(
+        ISecureRecordSetupDataverse dv, SecureRecordSetupTarget t, Guid writerUser, Guid customerUnitId,
+        IReadOnlyCollection<Guid> writerProfileIds, CancellationToken ct)
+    {
+        var teams = await dv.ListUserTeamsAsync(t, writerUser, ct).ConfigureAwait(false);
+        var otherTeams = teams.Where(team => !(team.IsDefault && team.BusinessUnitId == customerUnitId)).ToArray();
+        var inherited = new List<string>();
+        foreach (var team in teams.Where(team => team.IsDefault && team.BusinessUnitId == customerUnitId))
+        {
+            foreach (var role in await dv.ListTeamRolesAsync(t, team.Id, ct).ConfigureAwait(false))
+            {
+                inherited.Add($"'{role.Name}' {role.Id} through '{team.Name}' {team.Id}");
+            }
+        }
+        var teamAccess = otherTeams.Length > 0 || inherited.Count > 0
+            ? $"ontology writer user {writerUser} is in teams other than its unit's default team " +
+              $"[{string.Join(", ", otherTeams.Select(team => $"'{team.Name}' {team.Id}"))}] and inherits roles from that " +
+              $"default team [{string.Join(", ", inherited)}]"
+            : null;
+
+        var otherProfiles = (await dv.ListUserProfilesAsync(t, writerUser, ct).ConfigureAwait(false))
+            .Where(id => !writerProfileIds.Contains(id)).ToArray();
+        var profileAccess = otherProfiles.Length > 0
+            ? $"ontology writer user {writerUser} is a direct member of other field-security profiles [{Ids(otherProfiles)}]"
+            : null;
+        return (teamAccess, profileAccess);
+    }
 
     private static string Ids(IEnumerable<Guid> ids)
     {

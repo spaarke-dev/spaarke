@@ -223,7 +223,7 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         {
             // (1) Idempotency: look for an existing App User by applicationid — and the unit it is in.
             var existing = Values(await GetAsync(envUri, token,
-                $"systemusers?$filter=applicationid eq {applicationId:D}&$select=systemuserid,_businessunitid_value&$top=2",
+                $"systemusers?$filter=applicationid eq {applicationId:D}&$select=systemuserid,_businessunitid_value,azureactivedirectoryobjectid&$top=2",
                 cancellationToken).ConfigureAwait(false));
             if (existing.Count > 1)
             {
@@ -240,6 +240,20 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
                 {
                     // T259: never moved — a business-unit change strips every role of the user.
                     return new DataverseAppUserCreationOutcome.InForeignBusinessUnit(systemUserId.ToString("D"), unit ?? Guid.Empty);
+                }
+
+                // auth-v4 §10.4 on ADOPTION too: a row whose azureactivedirectoryobjectid is not the identity's principal id
+                // (empty, or its client id) passes every existence check yet 401s every app-only call. Never rewritten here.
+                var heldObjectId = OptionalId(existing[0], "azureactivedirectoryobjectid");
+                if (!string.IsNullOrWhiteSpace(request.SystemUserAzureActiveDirectoryObjectId)
+                    && heldObjectId != Guid.Parse(request.SystemUserAzureActiveDirectoryObjectId))
+                {
+                    var wantedObjectId = request.SystemUserAzureActiveDirectoryObjectId;
+                    return new DataverseAppUserCreationOutcome.Failure(
+                        $"The existing App User {systemUserId:D} (applicationid {applicationId:D}) has azureactivedirectoryobjectid " +
+                        $"'{heldObjectId?.ToString("D") ?? "(empty)"}', not the identity's principal id " +
+                        $"{wantedObjectId}: every app-only Dataverse call as this identity would fail. H10 never rewrites it - " +
+                        "correct the row (or delete it so H10 recreates it), then resume. Nothing was written.");
                 }
             }
             else

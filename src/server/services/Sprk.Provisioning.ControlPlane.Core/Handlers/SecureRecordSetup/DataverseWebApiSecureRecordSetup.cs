@@ -166,6 +166,14 @@ public sealed class DataverseWebApiSecureRecordSetup : ISecureRecordSetupDataver
         => Session(target).ListUserRolesAsync(systemUserId, cancellationToken);
 
     /// <inheritdoc/>
+    public Task<IReadOnlyList<SecureSetupTeam>> ListUserTeamsAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+        => Session(target).ListUserTeamsAsync(systemUserId, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<Guid>> ListUserProfilesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+        => Session(target).ListUserProfilesAsync(systemUserId, cancellationToken);
+
+    /// <inheritdoc/>
     public Task AssociateUserRoleAsync(SecureRecordSetupTarget target, Guid systemUserId, Guid roleId, CancellationToken cancellationToken)
         => Session(target).AssociateUserRoleAsync(systemUserId, roleId, cancellationToken);
 
@@ -409,6 +417,18 @@ internal sealed class SecureRecordSetupWebApi
                 $"systemusers({systemUserId})/systemuserroles_association?$select=roleid,name,_businessunitid_value,_parentrootroleid_value,_roletemplateid_value",
                 "Reading the user's roles", ct).ConfigureAwait(false))
             .Select(Role).ToArray();
+
+    internal async Task<IReadOnlyList<SecureSetupTeam>> ListUserTeamsAsync(Guid systemUserId, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"systemusers({systemUserId})/teammembership_association?$select=teamid,name,_businessunitid_value,isdefault",
+                "Reading the user's teams", ct).ConfigureAwait(false))
+            .Select(Team).ToArray();
+
+    internal async Task<IReadOnlyList<Guid>> ListUserProfilesAsync(Guid systemUserId, CancellationToken ct)
+        => (await GetAllValuesAsync(
+                $"systemusers({systemUserId})/systemuserprofiles_association?$select=fieldsecurityprofileid",
+                "Reading the user's field-security profiles", ct).ConfigureAwait(false))
+            .Select(r => Id(r, "fieldsecurityprofileid")).ToArray();
 
     internal async Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(Guid teamId, CancellationToken ct)
         => (await GetAllValuesAsync(

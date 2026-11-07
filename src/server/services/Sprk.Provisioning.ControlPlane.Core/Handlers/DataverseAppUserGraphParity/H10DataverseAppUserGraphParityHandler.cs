@@ -301,8 +301,9 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         if (string.IsNullOrWhiteSpace(interStep.OntologyWriterClientId) || string.IsNullOrWhiteSpace(interStep.OntologyWriterObjectId))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.MissingOntologyWriterIdentity,
-                "InterStepState.ontologyWriterClientId / ontologyWriterObjectId is not populated — H2a must deploy the ontology " +
-                "writer UAMI (customer.bicep, task 266) before H10. Nothing was written.",
+                "InterStepState.ontologyWriterClientId / ontologyWriterObjectId is not populated — H2a deploys the ontology " +
+                "writer UAMI (customer.bicep, task 266) before H10. A run whose H2a completed before task 266 never recorded " +
+                "it, and a resume does not re-run a completed H2a: start a new run. Nothing was written.",
                 cancellationToken).ConfigureAwait(false);
         }
         if (string.Equals(interStep.OntologyWriterClientId, interStep.MiClientId, StringComparison.OrdinalIgnoreCase))
