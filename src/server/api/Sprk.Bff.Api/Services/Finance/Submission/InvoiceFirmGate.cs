@@ -33,14 +33,15 @@ public enum InvoiceFirmGateResult
     /// <summary>The invoice is held for its firm (<see cref="InvoiceFirmNeed.Held"/>).</summary>
     HeldForFirm,
 
-    /// <summary>The firm was set (Set firm, 095d-1) and the billing-rules re-run for it (095d-2) has not completed. Also the answer when a stored
-    /// <c>assignFirm</c> member cannot be read (fail closed).</summary>
+    /// <summary>The firm was set (Set firm, 095d-1) and the billing-rules re-run for it (095d-2) has not finished: its rules have not completed,
+    /// or its after-commit Signal steps have not moved <c>assignFirmRerun.state</c> to done (EB-D-204). Also the answer when a stored
+    /// <c>assignFirm</c> member or the re-run's state cannot be read (fail closed).</summary>
     RerunPending,
 }
 
 /// <summary>
 /// EB-D-185 (owner rule; EB-D-190 adds Reject, EB-D-197 adds adjustments and corrections): while an invoice has no firm, is held for one, or its
-/// Set-firm re-run has not completed, no line decision, Override, approve, Reject, adjustment or correction is made on it. Return and Set firm
+/// Set-firm re-run has not finished (EB-D-204: its state is not done), no line decision, Override, approve, Reject, adjustment or correction is made on it. Return and Set firm
 /// itself are not gated by this (Return has <see cref="CheckForReturnAsync"/>).
 /// </summary>
 /// <remarks>
@@ -53,8 +54,14 @@ public enum InvoiceFirmGateResult
 /// <see cref="InvoiceFirmGateResult.HeldForFirm"/> (an unrecognised value fails closed; only blank passes). Only then the submissions: a pending
 /// re-run (EB-D-185 R2: before the hold test, since a Set-firm row still stores the firm_missing reason until 095d-2 rewrites it), then the
 /// firm_missing hold. This class only reads: nothing here clears or downgrades the marker; only the completed re-run (095d-2) does.</para>
+/// <para><b>EB-D-204.</b> The re-run is pending until <c>assignFirmRerun.state</c> is <see cref="InvoiceSubmissionRerun.StateDone"/>, not only
+/// until <c>rulesRerun</c> is completed: between the commit (state <see cref="InvoiceSubmissionRerun.StateCommitted"/>) and the end of the Signal
+/// re-map no reviewer decision lands, so a late or replayed Signal step cannot reopen a Signal a reviewer already closed. A Signal step that
+/// dead-letters leaves decisions refused until it is replayed (operator re-queue). The state is read from the same field-secured findings
+/// (<c>sprk_findingsjson</c>, app-only) as <c>assignFirm</c>.</para>
 /// <para><b>Fail closed.</b> A submission's findings that cannot be parsed at all are held (<see cref="InvoiceFirmGateResult.HeldForFirm"/>);
-/// an <c>assignFirm</c> member that is present but cannot be read is <see cref="InvoiceFirmGateResult.RerunPending"/>. Blank findings, or
+/// an <c>assignFirm</c> member that is present but cannot be read is <see cref="InvoiceFirmGateResult.RerunPending"/>, and so is a completed
+/// <c>rulesRerun</c> beside a re-run state that is absent, not an object, or not done. Blank findings, or
 /// findings with no <c>assignFirm</c> member (an invoice whose firm came with the intake, or a row from before Set firm), carry no re-run.</para>
 /// </remarks>
 public static class InvoiceFirmGate
@@ -165,7 +172,9 @@ public static class InvoiceFirmGate
     }
 
     /// <summary>True when one submission's stored findings carry an <c>assignFirm</c> member whose <c>rulesRerun</c> is not
-    /// <see cref="InvoiceAssignFirmService.RulesRerunCompleted"/>, or carry one that cannot be read (pure; fail closed).</summary>
+    /// <see cref="InvoiceAssignFirmService.RulesRerunCompleted"/>, or whose re-run state (<c>assignFirmRerun.state</c>) is not
+    /// <see cref="InvoiceSubmissionRerun.StateDone"/> (EB-D-204: committed, absent or any other value), or carry one that cannot be read
+    /// (pure; fail closed).</summary>
     public static bool IsRerunPending(string? findingsJson)
     {
         if (string.IsNullOrWhiteSpace(findingsJson))
@@ -180,8 +189,21 @@ public static class InvoiceFirmGate
                 return false; // not an object: InvoiceFirmHold already holds it (fail closed there)
             }
 
-            return AssignFirmStoredDecision.Read(root) is { } stored
-                && !string.Equals(stored.RulesRerun, InvoiceAssignFirmService.RulesRerunCompleted, StringComparison.Ordinal);
+            if (AssignFirmStoredDecision.Read(root) is not { } stored)
+            {
+                return false; // no Set firm on this submission: no re-run
+            }
+
+            if (!string.Equals(stored.RulesRerun, InvoiceAssignFirmService.RulesRerunCompleted, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            // EB-D-204: the rules completed in the commit; the re-run is still pending until its after-commit Signal steps moved the state to
+            // done (the commit writes both members in one write, so a completed rulesRerun with no state is an inconsistent row: pending).
+            return !(root[InvoiceSubmissionRerun.StateMember] is JsonObject state
+                && state["state"] is JsonValue value && value.TryGetValue<string>(out var text)
+                && string.Equals(text, InvoiceSubmissionRerun.StateDone, StringComparison.Ordinal));
         }
         catch (Exception ex) when (ex is FormatException or JsonException or ArgumentException or InvalidOperationException)
         {

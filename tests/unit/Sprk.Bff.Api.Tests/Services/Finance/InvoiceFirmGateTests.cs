@@ -20,18 +20,31 @@ public sealed class InvoiceFirmGateTests
     private static readonly Guid FirmId = Guid.Parse("0950aaaa-0000-4000-8000-0000000000f1");
     private static readonly DateTimeOffset Now = new(2026, 11, 5, 12, 0, 0, TimeSpan.Zero);
 
-    /// <summary>The findings of a submission whose firm was set through Set firm (095d-1): a real stored decision with <paramref name="rulesRerun"/>.</summary>
-    internal static string FindingsWithAssignFirm(string rulesRerun, Guid? firmId = null) =>
-        WithAssignFirm(new JsonObject { ["pipelineFindings"] = new JsonArray(), ["lineFindings"] = new JsonArray() }, rulesRerun, firmId).ToJsonString();
+    /// <summary><see cref="WithAssignFirm"/>'s <c>rerunState</c> for "no <c>assignFirmRerun</c> member at all".</summary>
+    internal const string NoRerunState = "<none>";
+
+    /// <summary>The findings of a submission whose firm was set through Set firm (095d-1): a real stored decision with <paramref name="rulesRerun"/>
+    /// (and the re-run's state, see <see cref="WithAssignFirm"/>).</summary>
+    internal static string FindingsWithAssignFirm(string rulesRerun, Guid? firmId = null, string? rerunState = null) =>
+        WithAssignFirm(new JsonObject { ["pipelineFindings"] = new JsonArray(), ["lineFindings"] = new JsonArray() }, rulesRerun, firmId, rerunState).ToJsonString();
 
     /// <summary>Adds the stored Set-firm decision (<c>assignFirm</c>) with <paramref name="rulesRerun"/> to <paramref name="findings"/>; it names
-    /// <paramref name="firmId"/> (this file's firm when null).</summary>
-    internal static JsonObject WithAssignFirm(JsonObject findings, string rulesRerun, Guid? firmId = null)
+    /// <paramref name="firmId"/> (this file's firm when null). <paramref name="rerunState"/> is the re-run's own <c>assignFirmRerun.state</c>
+    /// (<see cref="NoRerunState"/>: no member). Null writes what a FINISHED re-run leaves: with <c>rulesRerun</c> completed the state is done
+    /// (the commit writes both, and the Signal steps move the state to done, EB-D-204); with any other <c>rulesRerun</c> there is no state yet.</summary>
+    internal static JsonObject WithAssignFirm(JsonObject findings, string rulesRerun, Guid? firmId = null, string? rerunState = null)
     {
         var stored = new AssignFirmStoredDecision(
             Guid.NewGuid(), firmId ?? FirmId, null, "INV-7.3", null, "INV-7.1", 1, Guid.NewGuid(), Now,
             new InvoiceSubmissionAfterSteps.ResolvedSignalSet(Now.UtcDateTime, []), [], 0, rulesRerun);
         findings[InvoiceAssignFirmService.StoredDecisionMember] = stored.ToJson();
+        var state = rerunState
+            ?? (rulesRerun == InvoiceAssignFirmService.RulesRerunCompleted ? InvoiceSubmissionRerun.StateDone : NoRerunState);
+        if (state != NoRerunState)
+        {
+            findings[InvoiceSubmissionRerun.StateMember] = new JsonObject { ["schema"] = 1, ["decisionId"] = stored.DecisionId.ToString("D"), ["state"] = state };
+        }
+
         return findings;
     }
 
@@ -145,13 +158,55 @@ public sealed class InvoiceFirmGateTests
             .Should().ThrowAsync<TimeoutException>();
     }
 
-    [Fact(DisplayName = "095d-0 must-not-fire: a firm, no hold and a stored Set-firm decision with rulesRerun 'completed' is Open")]
+    [Fact(DisplayName = "095d-0 / EB-D-204 must-not-fire: a firm, no hold and a stored Set-firm decision with rulesRerun 'completed' and the re-run state 'done' is Open")]
     public async Task Completed_IsOpen()
     {
-        var entities = Entities(null, [Submission(FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted))]);
+        var findings = FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted, rerunState: InvoiceSubmissionRerun.StateDone);
+        var entities = Entities(null, [Submission(findings)]);
 
         (await InvoiceFirmGate.CheckAsync(entities.Object, Invoice(), CancellationToken.None)).Should().Be(InvoiceFirmGateResult.Open);
-        InvoiceFirmGate.IsRerunPending(FindingsWithAssignFirm("completed")).Should().BeFalse();
+        InvoiceFirmGate.IsRerunPending(findings).Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "095d-2b-2 EB-D-204 must-fire: rulesRerun 'completed' with the re-run state 'committed' (Signal steps not finished), absent, unknown, another casing, not a string or not an object is RerunPending")]
+    [InlineData("committed")]
+    [InlineData("absent")]
+    [InlineData("running")]
+    [InlineData("DONE")]
+    [InlineData("number")]
+    [InlineData("not-an-object")]
+    public async Task CompletedRules_WithTheSignalStepsNotDone_IsRerunPending(string how)
+    {
+        var findings = how switch
+        {
+            "committed" => FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted, rerunState: InvoiceSubmissionRerun.StateCommitted),
+            "absent" => FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted, rerunState: NoRerunState),
+            "number" => Edit(FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted), f => f[InvoiceSubmissionRerun.StateMember]!["state"] = 7),
+            "not-an-object" => Edit(FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted), f => f[InvoiceSubmissionRerun.StateMember] = "done"),
+            _ => FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted, rerunState: how),
+        };
+
+        (await InvoiceFirmGate.CheckAsync(Entities(null, [Submission(findings)]).Object, Invoice(), CancellationToken.None))
+            .Should().Be(InvoiceFirmGateResult.RerunPending, "EB-D-204: no decision lands between the commit and the end of the Signal re-map");
+        InvoiceFirmGate.IsRerunPending(findings).Should().BeTrue();
+
+        static string Edit(string json, Action<JsonObject> edit)
+        {
+            var root = JsonNode.Parse(json)!.AsObject();
+            edit(root);
+            return root.ToJsonString();
+        }
+    }
+
+    [Fact(DisplayName = "095d-2b-2 EB-D-204: Return's check is not the re-run gate - Return stays open on the committed row (EB-D-197: only Return and Set firm stay available)")]
+    public async Task Return_OnACommittedRerun_IsOpen()
+    {
+        var findings = FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted, rerunState: InvoiceSubmissionRerun.StateCommitted);
+
+        (await InvoiceFirmGate.CheckForReturnAsync(Entities(null, [Submission(findings, SubmissionReasonCodes.ProcedureGap)]).Object, Invoice(), CancellationToken.None))
+            .Should().Be(InvoiceFirmNeed.None);
+        (await InvoiceFirmGate.CheckAsync(Entities(null, [Submission(findings, SubmissionReasonCodes.ProcedureGap)]).Object, Invoice(), CancellationToken.None))
+            .Should().Be(InvoiceFirmGateResult.RerunPending, "control: the substantive decisions are refused on the same row");
     }
 
     [Theory(DisplayName = "095d-0 must-not-fire: a firm that came with the intake - no assignFirm member, blank findings, no submission at all - is Open")]
