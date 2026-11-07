@@ -1,5 +1,11 @@
 # Deploy log (spaarke-ontology-platform-r1)
 
+## 2026-11-06 — ACME: ontology writer identity provisioned (#2605); dev UAT test data for 160/161
+
+- **ACME (owner go given directly in this session; customer-provisioning could not apply it from theirs):** created the stamp's ontology writer identity, attached it to the BFF App Service (production and staging), set the writer app setting on both, and created its Dataverse application user in the customer business unit with the ontology service role and the writer field-security profile. Every step was read back; the role's holders are application users only. The BFF restarted; `/healthz` returned 200 afterwards.
+- **Pending on ACME:** the second writer profile does not exist until SpaarkeMaster 1.3.0.0 (upgrade awaiting the owner in customer-provisioning's session). Customer-provisioning's #2605 step adds it, and its bicep adopts the identity. Identifiers are in customer-provisioning's ACME run log, not here.
+- **Dev test data (UAT round 3, owner asked):** two `zz-` inbound communications classified as a fee or scope change, on MAT-34929-0040 (no budget) and REAL-2026-123456.01 (has a budget). The nightly evaluator (02:30Z) raises the "Fee or scope change, no budget revision" items; delete both rows after the owner's 160/161 checks.
+
 ## Task 111 - WizardShell consumer regression and deploy (2026-10-08)
 
 Environment: **spaarkedev1** (https://spaarkedev1.crm.dynamics.com) only. Owner approval D-71 (2026-10-08). BFF and other environments untouched.

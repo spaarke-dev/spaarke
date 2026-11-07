@@ -122,7 +122,7 @@ Raw findings as the owner reported them. Each becomes a refinement below once tr
 | 160 | Not reached: the budget inquiry is a step in the "Fee or scope change, no budget revision" item, and no such item is open on dev (all four resolved) | Owner re-check with a new item |
 | 161 | Not reached: same item ("Revise budget" step) | Owner re-check with a new item |
 | 162 | Not reached: the check is a file uploaded in the Create Work Assignment / Invoice / Project wizard appearing on the new record's Documents list | Owner re-check |
-| 163 | Server-side change; live since `58ffc37da3` (gate PASS) | Proposed: accept on tests + gate, or a non-admin Worklist check |
+| 163 | ✅ accepted by the owner on the tests and the deploy gate (live since `58ffc37da3`) | — |
 | 166 | ✅ pass (the budget is created and linked to the record) | — |
 
 **F-R3-1 (159 email footer):** the assign-task email footer reads "filed with Spaarke regarding sprk_matter {guid}" when the record's name is withheld. The owner rule (2026-10-23) is that the footer never shows a logical name or GUID. Fix: a neutral reference when the name is withheld.
