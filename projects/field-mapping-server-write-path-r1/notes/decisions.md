@@ -906,3 +906,9 @@ The send/reply thread read needs Basic. Record threads are owned by their record
 3. **046c dev apply: approved.** Core User gains its three AppendTo rights first and is verified; then Basic User's write rights on Spaarke tables are removed and verified. Rollback: `-Restore -Gap R3`. Users holding Basic plus an add-on without Core User are counted before the removal (2026-11-06 condition).
 4. **Stash `da43b8a2` (lint-staged automatic backup): drop it** once its content is confirmed committed.
 5. **mcp-bff re-merge:** the owner relays it; it does not hold this project.
+
+## 2026-11-07 — 033 dropped (owner, in fm's session)
+
+- The system creators of task 033 (generation, playbook, Signal, Decision) stay outside `RecordCreationService` as named exceptions under the W3 direction; ontology-r1 agreed that leaving the ledger writers out is valid. No field mapping goes into Signal or Decision Record rows.
+- 033's one piece another task needed (wiring the app-only column-metadata reader into Repair, including the Money attributes of #2124) moves into task 052.
+- Task 060's matrix names these creators as exceptions with guards.
