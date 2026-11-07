@@ -69,3 +69,12 @@ Evidence: `notes/spikes/phase0-spike-measurements.md`. Spike head `5c9e301572` o
   5. At the end, uac-r2 redeploys the then-current master.
   6. Auth uses the default workforce scheme only. T5 includes one negative check: a CIAM or A9 token returns 401.
 - **Order:** the 046c watch (until 05:40Z), then the batch deploy (its own owner go), its gate, and then our window. uac-r2 sends the batch master SHA. We merge it into `spike/spaarkeai-mcp-phase0`, push, wait for green CI, and the owner gives the per-SHA go in uac-r2's session.
+
+### Update 2026-11-06 (owner, in uac-r2's session): no time limit; master + spike on every dev deploy
+- The owner wrote: "this is a dev/test environment so no risk -- there does not need to be a short time limit". **The 24 h window is dropped, and master deploys do not pause.**
+- Until we declare Phase 0 done, every dev BFF deploy uac-r2 runs is **master + `5c9e301572`**. uac-r2 merges the spike commit onto the master SHA, checks that the diff is only the spike's files, and runs the spike gate with the usual server gate.
+- Our obligations:
+  - keep `5c9e301572` as one commit that cherry-picks cleanly onto master, and rebase it and send the new SHA if it conflicts;
+  - keep draft PR #2615 open and unmerged, for CI;
+  - tell uac-r2 when Phase 0 is done, so the next deploy is plain master.
+- The first combined deploy is uac-r2's queued batch (#2292/#2610/044) after the 046c watch. It needs its own owner go.
