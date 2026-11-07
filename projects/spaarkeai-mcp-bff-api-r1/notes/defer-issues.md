@@ -51,11 +51,26 @@ Decide with the Copilot surface's owner. `spaarkeai-mcp-bff-api-r1` replaces thi
 
 ## In Progress
 
+### ISS-003 — PrecedentAdminEndpoints background task may use a disposed request-scoped service (unconfirmed)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (found in passing; not confirmed) |
+| **Urgency** | soon |
+| **Filed** | 2026-11-07 |
+| **Source** | Sibling scan for ISS-002 (#2620 / PR #2622) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2623 |
+
+**Description**
+
+`Api/Insights/PrecedentAdminEndpoints.cs:294` starts a fire-and-forget `Task.Run` that uses `IPrecedentProjectionSync`. That service is request-scoped (`Infrastructure/DI/InsightsModule.cs:67`). If the task outlives the request, it can use disposed services. This is not caused by this project; the Precedents/Insights owners decide the fix (a fresh scope inside the task, or an ADR-004 job).
+
+
 ### ISS-002 — ComposeProfileDispatcher may null the originating request's HttpContext
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress (investigation and fix running; owner: "investigate fully, do not defer") |
+| **Status** | Fix in review: draft PR #2622 (`30b887c710`), defect CONFIRMED 2026-11-07 by a test that fails before the fix and passes after; awaiting Compose owners' review |
 | **Urgency** | now |
 | **Filed** | 2026-11-07 |
 | **Source** | Read-only investigation for task 010 (option C analysis), 2026-11-06 |

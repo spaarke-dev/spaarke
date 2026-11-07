@@ -119,3 +119,12 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
 - **A commit failure with a null or blank reason code** (none is built today) maps to the service's own default for that status (`step_failed`, `idempotency_unavailable`, `review_in_progress`, `not_authorized`), `signal_not_open` for Conflict, `review_invalid` for any other refusal, so a domain failure never becomes an exception. REST is unchanged (it keeps the null).
 - **Test scope beyond 011's inventory** (one test, `ToToolError_EveryDeclaredReasonCode_HasItsOwnFixMessage`): every `DecisionCommitReasons`/`DecisionActionReasons` constant has its own message. Justification: the goal is every code REST can return, and `gate_undeclared`, `step_failed` and the executors' own codes are returnable but not baselined; it also fails when 015 adds `ontology.worklist.cursor_invalid` without a message. `ontology.signal.partition_undetermined` (not baselined) has its own test.
 - **Finance drift (recorded, not changed; POML constraint).** Finance answers with an `errorCode` extension, not `reasonCode`: 30 `["errorCode"]` sites in 13 files under `Api/Finance/` (e.g. `ApExportEndpoints.cs`, `RuleSetEndpoints.cs`). A Finance MCP slice (design §17) must map through this mapper's vocabulary or fix that drift first.
+
+## 2026-11-07 — Spike route guard and uac-r2 approval
+
+- The spike failed the Router ArchTests: the scanner could not read `MapMcp`.
+- Guard commit `fdfd7b1d23` on `spike/spaarkeai-mcp-phase0` fixes it. The scanner now reads `MapMcp(path)` as one POST route, and the commit adds must-fire and must-not-fire controls.
+- The spike routes carry Permanent waivers: CallerScopedOnly for `legal-operations` and CallerSuppliedContentOnly for `spike-area-b`.
+- Spike HEAD `22487c6537` contains master `d53d67f604`. CI is green.
+- **uac-r2 approved it for the next dev window.** Deploying still needs the owner's go in their session.
+- **uac-r2 condition for task 021:** no Permanent waiver carries over. Real tool-level policies replace them, and the ledger entries are rebuilt from scratch. This is now a constraint in the 021 POML.
