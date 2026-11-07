@@ -26,7 +26,6 @@ public sealed class InvoiceApprovalProcedureHoldTests
     [Theory(DisplayName = "082c-2 C11/C14: each stored marker holds alone (the SPA reason, the pipeline finding, the line cause); unreadable findings are held by the firm check first (095c-4)")]
     [InlineData("reason-gap", InvoiceApprovalCodes.ProcedureGapDetail)]
     [InlineData("reason-unresolved", InvoiceApprovalCodes.ProceduresUnresolvedDetail)]
-    [InlineData("pipeline", InvoiceApprovalCodes.ProcedureGapDetail)]
     [InlineData("line", InvoiceApprovalCodes.ProcedureGapDetail)]
     public async Task EachStoredMarker_RefusesApprove(string marker, string detail)
     {
@@ -36,16 +35,9 @@ public sealed class InvoiceApprovalProcedureHoldTests
         {
             "reason-gap" => HoldForProcedures(w, SubmissionReasonCodes.ProcedureGap, null),
             "reason-unresolved" => HoldForProcedures(w, SubmissionReasonCodes.ProceduresUnresolved, null),
-            "pipeline" => HoldForProcedures(w, SubmissionReasonCodes.Blocked, GapPipeline),
             "line" => HoldForProcedures(w, null, """{"lineFindings":[{"line":0,"code":"rules.not_checked","message":"x","cause":"ebilling.submission.procedure_gap"}]}"""),
             _ => HoldForProcedures(w, null, "{not json"),
         };
-        if (marker == "pipeline")
-        {
-            // An Internal gap after 114's Override released its Blocked submission: the FR-20 hold is gone; the Procedure hold still refuses.
-            w.Rows.Values.Single(r => r.LogicalName == "sprk_invoicesubmission")["sprk_outcomereasoncode"] = null;
-        }
-
         var result = await w.ApproveAs(AliceUser);
 
         result.Outcome.Should().Be(ApprovalOutcome.Held, marker);
@@ -57,6 +49,41 @@ public sealed class InvoiceApprovalProcedureHoldTests
         var state = (await w.GetAs(AliceUser))!;
         state.CanApprove.Should().BeFalse();
         state.Held.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "082c-2 / 165a: an Internal gap (the pipeline marker, kind Blocked) is held by FR-20 first; the genuine Override release (Accepted, Overridden, the stamp) lifts both holds")]
+    public async Task InternalPipelineGap_HeldUntilTheOverrideRelease()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, approved: 100m);
+        // The persister's findings of an Internal gap: kind Blocked, the blocked reason, the gap as a pipeline finding.
+        var findings = System.Text.Json.Nodes.JsonNode.Parse(GapPipeline)!.AsObject();
+        findings["schema"] = 1;
+        findings["kind"] = nameof(SubmissionEvaluationKind.Blocked);
+        findings["reasonCode"] = SubmissionReasonCodes.Blocked;
+        var id = HoldForProcedures(w, SubmissionReasonCodes.Blocked, findings.ToJsonString());
+        var row = w.Rows[("sprk_invoicesubmission", id)];
+        row["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Rejected);
+        findings["invoiceId"] = InvoiceSubmissionPersister.InvoiceIdFor(id).ToString("D");
+        row["sprk_findingsjson"] = findings.ToJsonString();
+
+        var held = await w.ApproveAs(AliceUser);
+
+        held.Code.Should().Be(InvoiceApprovalCodes.Held, "an Internal gap is Blocked, so the FR-20 hold answers first");
+        InvoiceProcedureHold.ReasonsOf(row).Should().BeEquivalentTo([SubmissionReasonCodes.ProcedureGap], "the pipeline marker holds too");
+
+        // The Override release as SubmissionOverrideService writes it: status Accepted, code Overridden and the stamp, in one write.
+        findings[SubmissionOverrideService.OverrideMember] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["recordId"] = Guid.NewGuid().ToString("D"), ["bySystemUserId"] = Guid.NewGuid().ToString("D"),
+            ["on"] = "2026-11-06T10:00:00.0000000Z", ["reason"] = "negotiated",
+        };
+        row["sprk_findingsjson"] = findings.ToJsonString();
+        row["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted);
+        row["sprk_outcomereasoncode"] = SubmissionReasonCodes.Overridden;
+        InvoiceProcedureHold.ReasonsOf(row).Should().BeEmpty("task 114: the release lifts the Procedure hold");
+
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
     }
 
     [Fact(DisplayName = "082c-2 must not fire: a submission with no Procedure marker (a refused rule's line, no cause) approves")]

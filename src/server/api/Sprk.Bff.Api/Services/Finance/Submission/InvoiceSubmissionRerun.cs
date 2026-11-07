@@ -25,6 +25,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Signals;
 
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
@@ -69,7 +70,7 @@ public static class InvoiceSubmissionRerunCodes
     /// <summary>The submission or the invoice does not name the firm the stored decision set.</summary>
     public const string FirmMismatch = "ebilling.rerun.firm_mismatch";
 
-    /// <summary>The submission does not exist, or its invoice lookup is not the invoice it derives (a re-pointed lookup never reaches a marker).</summary>
+    /// <summary>The submission does not exist, or its invoice lookup is not the invoice it derives (a lookup to any other invoice never reaches a marker).</summary>
     public const string NotLinked = "ebilling.rerun.not_linked";
 
     /// <summary>The invoice does not carry the rerun-pending marker (<see cref="InvoiceFirmHold.InvoiceRerunPendingValue"/>).</summary>
@@ -165,7 +166,7 @@ public sealed record InvoiceSubmissionRerunResult(
 /// <see cref="StateCommitted"/>.</para>
 /// <para><b>Logs (ADR-015):</b> ids, counts and codes only.</para>
 /// </remarks>
-public sealed class InvoiceSubmissionRerun
+public sealed partial class InvoiceSubmissionRerun
 {
     /// <summary>The findings member that holds the re-run's own state (task 095d-2): <c>{ schema, decisionId, state, on, kind, reasonCode,
     /// recodedLines, resetLines: [{ line, lineId, previousStatus, previousApprovedAmount }] }</c>. Ids, codes and numbers only.</summary>
@@ -226,6 +227,9 @@ public sealed class InvoiceSubmissionRerun
     private readonly ILogger<InvoiceSubmissionRerun> _logger;
     private readonly TimeProvider _time;
 
+    /// <summary>The after-commit Signal steps' writer calls (095d-2b-2, <see cref="RemapSignalsAsync"/>); null in a test that runs the commit only.</summary>
+    private readonly RerunSignalSeams? _signals;
+
     /// <summary>Whether <see cref="InvoiceReviewDetail.Column"/> exists (the process-wide probe; a test sets its own).</summary>
     internal ReviewDetailColumnProbe ReviewDetailProbe { get; init; } = ReviewDetailColumnProbe.Shared;
 
@@ -235,8 +239,11 @@ public sealed class InvoiceSubmissionRerun
         ILineCodingService coding,
         CodeSetResolver codeSets,
         IIdempotencyService locks,
+        SignalWriter signals,
+        BillingDecisionRecorder recorder,
         ILogger<InvoiceSubmissionRerun> logger)
-        : this(entities, processor, coding, (codeSets ?? throw new ArgumentNullException(nameof(codeSets))).ResolveFirmCodesAsync, locks, logger, null)
+        : this(entities, processor, coding, (codeSets ?? throw new ArgumentNullException(nameof(codeSets))).ResolveFirmCodesAsync, locks, logger, null,
+            RerunSignalSeams.Of(entities, signals, recorder))
     {
     }
 
@@ -248,7 +255,8 @@ public sealed class InvoiceSubmissionRerun
         Func<IReadOnlyList<InvoiceLineToCode>, CancellationToken, Task<ResolvedCodeSet?>> firmCodeSet,
         IIdempotencyService locks,
         ILogger<InvoiceSubmissionRerun> logger,
-        TimeProvider? time)
+        TimeProvider? time,
+        RerunSignalSeams? signals = null)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
@@ -257,6 +265,7 @@ public sealed class InvoiceSubmissionRerun
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _time = time ?? TimeProvider.System;
+        _signals = signals;
     }
 
     /// <summary>
@@ -385,6 +394,9 @@ public sealed class InvoiceSubmissionRerun
         var inReview = invoice.GetAttributeValue<OptionSetValue>("statecode")?.Value == InvoiceStatusCodes.StateActive
             && invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value == InvoiceStatusCodes.InReview;
 
+        // Task 165a fix round 2: an invoice already Returned to Firm keeps its submission's Return stamp through the re-run (FindingsAfter).
+        var returnedToFirm = invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value == InvoiceStatusCodes.ReturnedToFirm;
+
         if (VersionOf(submission) is not { } submissionVersion || VersionOf(invoice) is not { } invoiceVersion)
         {
             return (null, Transient(submissionId, InvoiceSubmissionRerunStatus.Failed, InvoiceSubmissionRerunCodes.Unavailable, "version", null));
@@ -451,7 +463,7 @@ public sealed class InvoiceSubmissionRerun
 
         var writeDetail = inReview && await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false);
         var input = new PlanInput(
-            submissionId, invoiceId, root, stored, outcome, state, submissionVersion, invoiceVersion, coding.RecodedLineCount, writeDetail);
+            submissionId, invoiceId, root, stored, outcome, state, submissionVersion, invoiceVersion, coding.RecodedLineCount, writeDetail, returnedToFirm);
         try
         {
             return BuildPlan(input);
@@ -471,7 +483,7 @@ public sealed class InvoiceSubmissionRerun
 
     private sealed record PlanInput(
         Guid SubmissionId, Guid InvoiceId, JsonObject Root, AssignFirmStoredDecision Stored, SubmissionEvaluationOutcome Outcome, State State,
-        string SubmissionVersion, string InvoiceVersion, int RecodedLines, bool WriteReviewDetail);
+        string SubmissionVersion, string InvoiceVersion, int RecodedLines, bool WriteReviewDetail, bool InvoiceReturnedToFirm);
 
     // ── The commit (built before any write) ──
 
@@ -634,8 +646,8 @@ public sealed class InvoiceSubmissionRerun
 
     /// <summary>
     /// The submission's findings after the re-run: the members the new outcome derives (<see cref="InvoiceSubmissionPersister.BuildFindingsJson(SubmissionEvaluationOutcome, Guid)"/>)
-    /// replace the stored ones, so the three firm markers are replaced by the new state; the Override stamp is dropped; every other member is
-    /// kept, with <c>assignFirm.rulesRerun</c> = completed and the re-run's own state added.
+    /// replace the stored ones, so the three firm markers are replaced by the new state; the Override stamp is dropped, and the Return stamp too unless
+    /// the invoice is already Returned to Firm; every other member is kept, with <c>assignFirm.rulesRerun</c> = completed and the re-run's own state added.
     /// </summary>
     private JsonObject FindingsAfter(PlanInput input, JsonArray reset)
     {
@@ -665,7 +677,14 @@ public sealed class InvoiceSubmissionRerun
         }
 
         // Task 114 (R14): a re-hold removes the Override stamp in the same write; with the stamp gone InvoiceProcedureHold.IsReleased is false.
+        // Task 165a: the Return stamp too, so the recorded outcome this commit writes is the only release InvoiceBlockedHold reads. Fix round 2:
+        // except on an invoice already Returned to Firm, where the Return stands (the invoice stays returned), so its stamp is kept and the
+        // submission still reads Returned.
         root.Remove(SubmissionOverrideService.OverrideMember);
+        if (!input.InvoiceReturnedToFirm)
+        {
+            root.Remove(SubmissionOverrideService.ReturnMember);
+        }
 
         // The invoice-level Signal plan entries name the invoice as intake named it (the stored invoice name), not the rebuilt header's.
         if (invoiceName is JsonValue storedName && storedName.TryGetValue<string>(out var display))
@@ -850,7 +869,7 @@ public sealed class InvoiceSubmissionRerun
     // ── Helpers ──
 
     /// <summary>The <see cref="StateMember"/> states this code knows; any other stored value is logged as "unknown" (it is row data).</summary>
-    private static readonly HashSet<string> KnownStates = new(StringComparer.Ordinal) { StateCommitted };
+    private static readonly HashSet<string> KnownStates = new(StringComparer.Ordinal) { StateCommitted, StateDone };
 
     /// <summary>The stored re-run state (<see cref="StateMember"/>'s <c>state</c>), or null when absent.</summary>
     private static string? StoredStateOf(JsonObject root) => StoredSubmissionRead.Text(root[StateMember] as JsonObject, "state");

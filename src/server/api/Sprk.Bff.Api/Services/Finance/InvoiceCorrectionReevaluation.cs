@@ -349,7 +349,7 @@ public sealed class InvoiceCorrectionReevaluation
 
     /// <summary>
     /// After the last step: lists <paramref name="followed"/> in <see cref="AppliedCorrectionsMember"/> and removes the lines the status step re-derived
-    /// (<paramref name="derived"/>) from <see cref="PendingStatusLinesMember"/>, in one row-version-conditional write of the latest submission. Nothing is
+    /// (<paramref name="derived"/>) from <see cref="PendingStatusLinesMember"/>, in one row-version-conditional write of the invoice's own submission. Nothing is
     /// written when nothing changes (a repeat). Throws when the submission or its findings cannot be read (fail closed: the rows stay unapplied).
     /// </summary>
     private async Task<long> RecordFollowedThroughAsync(CorrectionApplied applied, IReadOnlyList<Guid> followed, IReadOnlySet<int>? derived, CancellationToken ct)
@@ -993,27 +993,22 @@ public sealed class InvoiceCorrectionReevaluation
 
     private Task<Entity?> ReadSubmissionAsync(Guid invoiceId, CancellationToken ct) => ReadSubmissionAsync(_entities, invoiceId, ct);
 
+    private static readonly string[] SubmissionReadColumns =
+        [InvoiceSubmissionPersister.SubmissionFindingsJson, InvoiceTotalsService.VersionNumber, InvoiceSubmissionPersister.SubmissionAdminAttention];
+
     /// <summary>
-    /// The invoice's OWN submission (its findings JSON, version and administrator text), read app-only: among the submissions linked to the invoice,
-    /// the one whose id derives the invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), never another linked row, however recent
-    /// (164a fix round F1). Null when it is not linked: every caller (the correction's follow-through, Add line's steps 1 and 9, the unapplied-correction
-    /// read) then writes nothing and fails closed. Task 165a has the same rule for the display readers; the two are consolidated at merge.
+    /// The invoice's OWN submission (its findings JSON, version and administrator text), read app-only through the shared selection
+    /// <see cref="InvoiceBlockedHold.ReadOwnSubmissionAsync"/> (task 165a): among the submissions linked to the invoice, the one whose id derives the
+    /// invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), never another linked row, however recent (164a fix round F1). Null when it is
+    /// not linked: every caller (the correction's follow-through, Add line's steps 1 and 9, the unapplied-correction read) then writes nothing and fails
+    /// closed, and the approval and line decisions refuse.
     /// </summary>
-    internal static async Task<Entity?> ReadSubmissionAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
-    {
-        var query = new QueryExpression(InvoiceReviewReadService.SubmissionEntity)
-        {
-            ColumnSet = new ColumnSet(InvoiceSubmissionPersister.SubmissionFindingsJson, InvoiceTotalsService.VersionNumber, InvoiceSubmissionPersister.SubmissionAdminAttention, "createdon"),
-            Criteria = new FilterExpression(LogicalOperator.And),
-        };
-        query.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
-        return (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities
-            .FirstOrDefault(s => s.Id != Guid.Empty && InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoiceId);
-    }
+    internal static Task<Entity?> ReadSubmissionAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct) =>
+        InvoiceBlockedHold.ReadOwnSubmissionAsync(entities, invoiceId, SubmissionReadColumns, ct);
 
     /// <summary>
     /// Fix round, part 3 (F-2): the Corrected / Confirmed correction rows of the invoice, of a field this follow-through handles (re-evaluated, or one that
-    /// feeds the totals, TotalDue included), that are not listed in the latest submission's <see cref="AppliedCorrectionsMember"/>: corrections whose value
+    /// feeds the totals, TotalDue included), that are not listed in the invoice's own submission's <see cref="AppliedCorrectionsMember"/>: corrections whose value
     /// was saved but whose follow-through (findings, status, Signals, totals) has not finished (the client stopped after a 503 Incomplete). A row of a line that
     /// <paramref name="lines"/> shows a reviewer has decided (Accepted, Reduced, Disallowed) is not listed: <see cref="InvoiceLineDecisionService"/> refuses to
     /// decide a line while one of its corrections is listed here, and the correction service refuses a decided line, so such a row was followed through before

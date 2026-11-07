@@ -78,9 +78,11 @@
     A stored member that cannot be read is FAIL in -Verify (what was applied cannot be known).
 
     (g) RECORDED, RE-RUN NOT DONE (task 095d-2b-1; EB-D-185..187). Read only, in every mode. After its Decision Record, Set firm queues the
-    rules re-run; the re-run's one commit sets the stored member's "rulesRerun" to "completed" (and clears the rerun-pending marker). A
-    submission whose Set firm is recorded (check (f) found its record) but whose "rulesRerun" is not "completed" is "recorded, re-run not
-    done": the invoice stays held and its submission withheld from partners. A lost enqueue (the BFF answered 503 incomplete, failedStep
+    rules re-run; the re-run's one commit sets the stored member's "rulesRerun" to "completed" (and clears the rerun-pending marker), and its
+    after-commit Signal steps then move "assignFirmRerun.state" from "committed" to "done" (EB-D-204). A submission whose Set firm is recorded
+    (check (f) found its record) but whose "rulesRerun" is not "completed", or whose "assignFirmRerun.state" is not "done", is "recorded, re-run
+    not done" (a committed one is reported as "re-run committed, after-commit steps incomplete"): the invoice stays held, decisions on it stay
+    refused as re-run pending, and its submission is withheld from partners. A lost enqueue (the BFF answered 503 incomplete, failedStep
     rerun) is queued again by a repeat of the Set firm that names the same firm, while the repeat is accepted (it answers 200 already
     assigned). When the repeat answers 409 changed or no submission, or the re-run job was refused (Permanent=true), no operator tool queues
     the re-run directly (issue #2601); a dead-lettered job's message is replayed by an operator from the dead-letter queue, and a refused
@@ -172,6 +174,9 @@ $DecisionRecordInvoiceLookup = '_sprk_regardinginvoice_value'
 # Task 095d-2b-1, check (g) (pinned by InvoiceFirmHoldFieldSecurityAgreementTests against InvoiceAssignFirmService)
 $RulesRerunMember = 'rulesRerun'
 $RulesRerunCompleted = 'completed'
+# EB-D-204 (095d-2b-2): the re-run is done only when the after-commit Signal steps moved assignFirmRerun.state to done (InvoiceFirmGate.IsRerunPending)
+$RerunStateMember = 'assignFirmRerun'
+$RerunStateDone = 'done'
 
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
 if (-not $token) { throw "No Dataverse token for $EnvironmentUrl. Run 'az login' and retry." }
@@ -614,7 +619,7 @@ function Get-AssignFirmStored($Submission) {
     $json = $Submission.sprk_findingsjson
     if ([string]::IsNullOrWhiteSpace($json)) { return $null }
     try { $root = $json | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
-    catch { return [pscustomobject]@{ Readable = $false; Kind = 'findings'; DecisionId = [Guid]::Empty; DecidedOn = [DateTimeOffset]::MinValue; RulesRerun = $null } }
+    catch { return [pscustomobject]@{ Readable = $false; Kind = 'findings'; DecisionId = [Guid]::Empty; DecidedOn = [DateTimeOffset]::MinValue; RulesRerun = $null; RerunState = $null } }
     if ($root -isnot [System.Collections.IDictionary] -or -not $root.ContainsKey($AssignFirmMember)) { return $null }
     $member = $root[$AssignFirmMember]
     $decisionId = [Guid]::Empty
@@ -635,7 +640,10 @@ function Get-AssignFirmStored($Submission) {
     }
     # (g): the BFF reads an absent rulesRerun as pending (AssignFirmStoredDecision.Read); only "completed" is done.
     $rulesRerun = if ($member -is [System.Collections.IDictionary] -and $member[$RulesRerunMember] -is [string]) { $member[$RulesRerunMember] } else { $null }
-    return [pscustomobject]@{ Readable = [bool]$readable; Kind = 'member'; DecisionId = $decisionId; DecidedOn = $decidedOn; RulesRerun = $rulesRerun }
+    # EB-D-204: the gate reads the re-run's own state beside the member; absent, not an object or not a string reads as not done.
+    $rerunNode = $root[$RerunStateMember]
+    $rerunState = if ($rerunNode -is [System.Collections.IDictionary] -and $rerunNode['state'] -is [string]) { $rerunNode['state'] } else { $null }
+    return [pscustomobject]@{ Readable = [bool]$readable; Kind = 'member'; DecisionId = $decisionId; DecidedOn = $decidedOn; RulesRerun = $rulesRerun; RerunState = $rerunState }
 }
 $nowUtc = [DateTimeOffset]::UtcNow
 $applied = 0; $recorded = 0; $insideWindow = 0; $overdue = 0; $unreadable = 0
@@ -683,9 +691,11 @@ if ($overdue -eq 0 -and $unreadable -eq 0) { Report 'OK' "(f) no Set firm is app
 # ── (g) RECORDED, RE-RUN NOT DONE: a recorded Set firm whose rules re-run has not committed (read only) ─────────────
 Write-Host "`n(g) Set firm recorded, re-run not done (window $RecordedNoRerunWindowMinutes min)"
 foreach ($row in $rerunRows) {
-    if ($row.Stored.RulesRerun -eq $RulesRerunCompleted) { $rerunDone++; continue }
+    if ($row.Stored.RulesRerun -eq $RulesRerunCompleted -and $row.Stored.RerunState -eq $RerunStateDone) { $rerunDone++; continue }
     $ageMinutes = [Math]::Floor(($nowUtc - $row.Stored.DecidedOn).TotalMinutes)
-    $what = "(g) invoice $($row.InvoiceId) (submission $($row.SubmissionId)): Set firm recorded $ageMinutes min ago, rules re-run not done - the invoice stays held; a repeat of the Set firm naming the same firm re-queues it while the BFF accepts the repeat (200 already assigned); on a 409 answer or a refused re-run no operator tool queues it directly (issue #2601); a dead-lettered job is replayed from the dead-letter queue"
+    # EB-D-204: a committed re-run whose after-commit steps have not finished is not done: decisions stay refused as re-run pending.
+    $notDone = if ($row.Stored.RulesRerun -eq $RulesRerunCompleted) { 're-run committed, after-commit steps incomplete' } else { 'rules re-run not done' }
+    $what = "(g) invoice $($row.InvoiceId) (submission $($row.SubmissionId)): Set firm recorded $ageMinutes min ago, $notDone - the invoice stays held; a repeat of the Set firm naming the same firm re-queues it while the BFF accepts the repeat (200 already assigned); on a 409 answer or a refused re-run no operator tool queues it directly (issue #2601); a dead-lettered job is replayed from the dead-letter queue"
     if ($ageMinutes -gt $RecordedNoRerunWindowMinutes) {
         $rerunOverdue++
         if ($Verify) { Report 'FAIL' "$what (older than the $RecordedNoRerunWindowMinutes-minute window)" } else { Report 'INFO' "$what (older than the window; -Verify fails on it)" }

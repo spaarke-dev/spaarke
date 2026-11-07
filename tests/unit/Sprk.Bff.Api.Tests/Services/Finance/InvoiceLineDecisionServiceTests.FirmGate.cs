@@ -20,8 +20,9 @@ public sealed partial class InvoiceLineDecisionServiceTests
 {
     // AfterSetFirm* are the REAL row Set firm leaves (EB-D-185 R2/R3): the invoice's own hold is the rerun-pending marker and the submission still
     // stores the firm_missing reason beside a pending assignFirm; the link to the submission is then intact, removed, or re-pointed.
-    // UnknownOwnValue is an unrecognised word in the invoice's own hold (fail closed).
-    public enum GateState { NoFirm, HeldOwnColumn, HeldBySubmission, RerunPending, RerunUnreadable, AfterSetFirm, AfterSetFirmUnlinked, AfterSetFirmRepointed, UnknownOwnValue }
+    // UnknownOwnValue is an unrecognised word in the invoice's own hold (fail closed). RerunSignalsPending (095d-2b-2, EB-D-204) is the row the re-run's
+    // commit leaves until its Signal steps finish: rulesRerun completed, the marker cleared, assignFirmRerun.state committed.
+    public enum GateState { NoFirm, HeldOwnColumn, HeldBySubmission, RerunPending, RerunUnreadable, AfterSetFirm, AfterSetFirmUnlinked, AfterSetFirmRepointed, UnknownOwnValue, RerunSignalsPending }
 
     public enum Route { SingleLine, MultiLine, AcceptAllClean }
 
@@ -81,6 +82,10 @@ public sealed partial class InvoiceLineDecisionServiceTests
                 break;
             case GateState.UnknownOwnValue:
                 w.Invoice["sprk_firmhold"] = "ebilling.submission.something_new";
+                break;
+            case GateState.RerunSignalsPending:
+                w.Submissions.Add(LinkedSubmission(w, InvoiceFirmGateTests.FindingsWithAssignFirm(
+                    InvoiceAssignFirmService.RulesRerunCompleted, rerunState: InvoiceSubmissionRerun.StateCommitted)));
                 break;
             case GateState.AfterSetFirm:
             case GateState.AfterSetFirmUnlinked:
@@ -189,7 +194,7 @@ public sealed partial class InvoiceLineDecisionServiceTests
 
     // ── Must-not-fire ──
 
-    [Theory(DisplayName = "095d-0 must-not-fire: a firm, no hold and a stored Set-firm decision whose rulesRerun is 'completed' - every route proceeds")]
+    [Theory(DisplayName = "095d-0 / EB-D-204 must-not-fire: a firm, no hold and a stored Set-firm decision whose rulesRerun is 'completed' with the re-run state 'done' - every route proceeds")]
     [InlineData(Route.SingleLine)]
     [InlineData(Route.MultiLine)]
     [InlineData(Route.AcceptAllClean)]
@@ -197,7 +202,8 @@ public sealed partial class InvoiceLineDecisionServiceTests
     {
         var (w, a, b, _, _) = GatedWorld(GateState.RerunPending);
         w.Submissions.Clear();
-        w.Submissions.Add(LinkedSubmission(w, InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted)));
+        w.Submissions.Add(LinkedSubmission(w, InvoiceFirmGateTests.FindingsWithAssignFirm(
+            InvoiceAssignFirmService.RulesRerunCompleted, rerunState: InvoiceSubmissionRerun.StateDone)));
 
         var result = await RunRouteAsync(w, route, a, b);
 

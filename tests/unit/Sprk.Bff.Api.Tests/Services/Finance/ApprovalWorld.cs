@@ -48,7 +48,9 @@ internal sealed class ApprovalWorld
     public static readonly Guid FirmId = Guid.Parse("03000000-0000-4000-8000-0000000000f1");
 
     /// <summary>The submission the invoice was created from: its id derives the invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), so the
-    /// readers that take only the invoice's own submission (164a fix round F1; task 165a) find a submission a test links under this id.</summary>
+    /// readers that take only the invoice's own submission (164a fix round F1; task 165a) find a submission a test links under this id. It is linked and
+    /// Accepted with its recorded findings naming the invoice, as the persister leaves it; the FR-20 hold (<see cref="InvoiceBlockedHold"/>) holds an
+    /// invoice whose own submission is not linked.</summary>
     public readonly Guid OwnSubmissionId = Guid.NewGuid();
     public readonly Guid InvoiceId;
     public readonly Guid ApprovalId = Guid.NewGuid();
@@ -142,6 +144,13 @@ internal sealed class ApprovalWorld
         Put(Contact(Bob, "Bob Brown", BobUser));
         Put(Contact(Carol, "Carol Clark", CarolUser));
         Put(Contact(Dan, "Dan Dawson", null));
+
+        Put(new Entity("sprk_invoicesubmission", OwnSubmissionId)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_findingsjson"] = RecordedFindings("Accepted", InvoiceId),
+        });
 
         Put(new Entity("sprk_invoiceapproval", ApprovalId)
         {
@@ -387,6 +396,10 @@ internal sealed class ApprovalWorld
     /// <summary>Task 095c-5: columns this environment does not have (a script not yet run): a query that names one faults, as Dataverse does.</summary>
     public readonly HashSet<string> MissingColumns = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Task 165a: the recorded findings the persister writes, reduced to what the FR-20 hold reads (<c>kind</c>, <c>invoiceId</c>).</summary>
+    public static string RecordedFindings(string kind, Guid invoiceId) =>
+        $$"""{"schema":1,"kind":"{{kind}}","invoiceId":"{{invoiceId:D}}"}""";
+
     /// <summary>A blocked submission (FR-20: held from approval until decided).</summary>
     public void Hold() => Put(new Entity("sprk_invoicesubmission", Guid.NewGuid())
     {
@@ -605,13 +618,56 @@ internal sealed class ApprovalWorld
         {
             // The Decision Records live in the writer's harness (F2 asks which lines have one).
             var source = query.EntityName == InvoiceReviewReadService.DecisionRecordEntity ? H.Created.AsEnumerable() : Rows.Values;
-            var rows = source
-                .Where(r => r.LogicalName == query.EntityName && Matches(r, query.Criteria) && query.LinkEntities.All(link => Joins(r, link)))
+            var rows = Ordered(
+                    source.Where(r => r.LogicalName == query.EntityName && Matches(r, query.Criteria) && query.LinkEntities.All(link => Joins(r, link))),
+                    query.Orders)
                 .Select(r => WithLinkColumns(Copy(r), query.LinkEntities))
                 .Take(query.TopCount ?? int.MaxValue)
                 .ToList();
             return Task.FromResult(new EntityCollection(rows) { MoreRecords = false });
         }
+    }
+
+    /// <summary>Task 165a: the query's <c>AddOrder</c>s applied before <c>TopCount</c>, as Dataverse does (an empty value sorts first ascending,
+    /// last descending); with no order, insertion order. A reader that takes "the latest" row is therefore seen taking it.</summary>
+    private static IEnumerable<Entity> Ordered(IEnumerable<Entity> rows, IEnumerable<OrderExpression> orders)
+    {
+        IOrderedEnumerable<Entity>? sorted = null;
+        foreach (var order in orders)
+        {
+            object? Key(Entity r) => order.AttributeName == r.LogicalName + "id" ? r.Id : r.Contains(order.AttributeName) ? r[order.AttributeName] : null;
+            sorted = (sorted, order.OrderType) switch
+            {
+                (null, OrderType.Ascending) => rows.OrderBy(Key, OrderComparer.Instance),
+                (null, _) => rows.OrderByDescending(Key, OrderComparer.Instance),
+                (_, OrderType.Ascending) => sorted.ThenBy(Key, OrderComparer.Instance),
+                _ => sorted.ThenByDescending(Key, OrderComparer.Instance),
+            };
+        }
+
+        return sorted ?? rows;
+    }
+
+    private sealed class OrderComparer : IComparer<object?>
+    {
+        public static readonly OrderComparer Instance = new();
+
+        public int Compare(object? x, object? y) => (Plain(x), Plain(y)) switch
+        {
+            (null, null) => 0,
+            (null, _) => -1,
+            (_, null) => 1,
+            (IComparable a, var b) => a.CompareTo(b),
+            _ => 0,
+        };
+
+        private static object? Plain(object? value) => value switch
+        {
+            OptionSetValue o => o.Value,
+            EntityReference r => r.Id,
+            Money m => m.Value,
+            _ => value,
+        };
     }
 
     /// <summary>A link's requested columns come back as <c>alias.column</c> aliased values, as Dataverse returns them.</summary>

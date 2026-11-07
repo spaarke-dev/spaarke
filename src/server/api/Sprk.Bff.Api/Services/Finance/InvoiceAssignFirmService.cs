@@ -769,7 +769,7 @@ public sealed class InvoiceAssignFirmService
             return Incomplete(invoiceId, submissionId, IncompleteStepRecord, "build mismatch");
         }
 
-        return await RecordAsync(invoiceId, submissionId, committed.Stored, AssignFirmOutcome.Assigned, callerUserId: null, ct).ConfigureAwait(false);
+        return await RecordAsync(invoiceId, submissionId, committed.Stored, committed.FindingsJson, AssignFirmOutcome.Assigned, callerUserId: null, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -796,13 +796,15 @@ public sealed class InvoiceAssignFirmService
             return Incomplete(invoiceId, submissionId, IncompleteStepFiling, filing.Code, callerUserId);
         }
 
-        return await RecordAsync(invoiceId, submissionId, stored, AssignFirmOutcome.AlreadyAssigned, callerUserId, ct).ConfigureAwait(false);
+        return await RecordAsync(
+            invoiceId, submissionId, stored, state.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson),
+            AssignFirmOutcome.AlreadyAssigned, callerUserId, ct).ConfigureAwait(false);
     }
 
     /// <summary>The one record write of Set firm: <see cref="BillingDecisionRecorder.RecordAsync"/> with <see cref="BuildDecision"/> of the stored
     /// decision. A refusal or a fault (including no answer) is <see cref="AssignFirmOutcome.Incomplete"/> at step <c>record</c>.</summary>
     private async Task<AssignFirmResult> RecordAsync(
-        Guid invoiceId, Guid submissionId, AssignFirmStoredDecision stored, AssignFirmOutcome outcome, Guid? callerUserId, CancellationToken ct)
+        Guid invoiceId, Guid submissionId, AssignFirmStoredDecision stored, string? findingsJson, AssignFirmOutcome outcome, Guid? callerUserId, CancellationToken ct)
     {
         BillingDecisionRecordResult recorded;
         try
@@ -826,18 +828,21 @@ public sealed class InvoiceAssignFirmService
             _logger.LogInformation("Set firm on invoice {InvoiceId}: Decision Record {RecordId} ({State}).", invoiceId, recorded.RecordId, recordState);
         }
 
-        return await QueueRerunAsync(invoiceId, submissionId, stored, outcome, recorded.RecordId, callerUserId).ConfigureAwait(false);
+        return await QueueRerunAsync(invoiceId, submissionId, stored, findingsJson, outcome, recorded.RecordId, callerUserId).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// 095d-2b-1, after the record: while the stored <c>rulesRerun</c> is pending, queue the submission's re-run (one job, the decision id in
-    /// its payload). A failed enqueue is <see cref="AssignFirmOutcome.Incomplete"/> at step <c>rerun</c> (503): the firm is set and recorded,
-    /// and the repeat queues it again. A completed re-run queues nothing. The answer carries the stored <c>rulesRerun</c>.
+    /// 095d-2b-1, after the record: while the re-run is pending, queue the submission's re-run (one job, the decision id in its payload).
+    /// Pending is the stored <c>rulesRerun</c> being pending, or (EB-D-204, 095d-2b-2 re-check F4) the firm gate's own reading of the stored
+    /// findings (<see cref="InvoiceFirmGate.IsRerunPending"/>): a committed re-run whose after-commit steps never moved <c>assignFirmRerun.state</c>
+    /// to done (a dead-lettered job) is queued again, and the job, finding the row already committed, runs only the after-commit steps. A failed
+    /// enqueue is <see cref="AssignFirmOutcome.Incomplete"/> at step <c>rerun</c> (503): the firm is set and recorded, and the repeat queues it
+    /// again. A re-run that is done queues nothing. The answer carries the stored <c>rulesRerun</c>.
     /// </summary>
     private async Task<AssignFirmResult> QueueRerunAsync(
-        Guid invoiceId, Guid submissionId, AssignFirmStoredDecision stored, AssignFirmOutcome outcome, Guid recordId, Guid? callerUserId)
+        Guid invoiceId, Guid submissionId, AssignFirmStoredDecision stored, string? findingsJson, AssignFirmOutcome outcome, Guid recordId, Guid? callerUserId)
     {
-        if (string.Equals(stored.RulesRerun, RulesRerunPending, StringComparison.Ordinal))
+        if (string.Equals(stored.RulesRerun, RulesRerunPending, StringComparison.Ordinal) || InvoiceFirmGate.IsRerunPending(findingsJson))
         {
             try
             {

@@ -430,10 +430,24 @@ public sealed partial class InvoiceSubmissionRerunTests
             Totals.Setup(t => t.RecalculateAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(Calculation());
         }
 
+        /// <summary>The re-run AND its after-commit Signal steps (095d-2b-2) over <paramref name="world"/>. Each entry to the Signal steps first
+        /// records <see cref="World.HoldSnapshot"/> (<see cref="RemapEntrySnapshots"/>), so a test can compare what the steps found with what they left.</summary>
         public JobHarness(World world)
             : this((s, d, f, ct) => world.Rerun().RunAsync(s, d, f, ct))
         {
+            RemapSignals = (s, ct) =>
+            {
+                RemapEntrySnapshots.Add(world.HoldSnapshot());
+                return world.Rerun().RemapSignalsAsync(s, ct);
+            };
         }
+
+        /// <summary>The world's hold state on each entry to the Signal steps (the world constructor only).</summary>
+        public List<Dictionary<string, string>> RemapEntrySnapshots { get; } = [];
+
+        /// <summary>095d-2b-2: the Signal steps the handler runs after the totals (default: done, nothing written).</summary>
+        public Func<Guid, CancellationToken, Task<InvoiceSubmissionRerunSignalsResult>> RemapSignals { get; set; } = (_, _) =>
+            Task.FromResult(new InvoiceSubmissionRerunSignalsResult(InvoiceSubmissionRerunSignalsStatus.Done, "test.done"));
 
         public Mock<IInvoiceTotalsService> Totals { get; } = new(MockBehavior.Strict);
 
@@ -444,7 +458,7 @@ public sealed partial class InvoiceSubmissionRerunTests
         public bool Enabled { get; init; } = true;
 
         public InvoiceSubmissionRerunJobHandler Handler() => new(
-            _run, Totals.Object, Locks, Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
+            _run, RemapSignals, Totals.Object, Locks, Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
             new FinanceTelemetry(), Log);
 
         public Task<JobOutcome> ProcessAsync(bool final)

@@ -350,7 +350,7 @@ public sealed class InvoiceApprovalService
         var portion = portions.Count == 1 ? portions[0] : null;
         var lines = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);
         // 082c-2: a Procedure hold refuses approve, so the state shows it as held (canApprove false).
-        var held = await IsHeldAsync(invoiceId, ct).ConfigureAwait(false)
+        var held = (await HoldAsync(invoiceId, ct).ConfigureAwait(false)).Held
             || (await InvoiceProcedureHold.ReasonsAsync(_entities, invoiceId, ct).ConfigureAwait(false)).Count > 0;
         // Task 095d-0 (EB-D-185, EB-D-190): the page's Approve and Reject follow the same gate the routes refuse on (no firm, held, or the re-run pending).
         var firmNeeded = await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) != InvoiceFirmGateResult.Open;
@@ -555,9 +555,13 @@ public sealed class InvoiceApprovalService
         IReadOnlyList<InvoiceCorrectionReevaluation.UnappliedCorrection> unapplied;
         try
         {
-            if (await IsHeldAsync(invoiceId, ct).ConfigureAwait(false))
+            if (await HoldAsync(invoiceId, ct).ConfigureAwait(false) is { Held: true } hold)
             {
-                return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.Held, "The invoice is held until its blocked submission is decided.");
+                // Task 165a: the same code; an invoice whose own submission is not linked cannot be released by deciding a submission.
+                return new ApprovalResult(ApprovalOutcome.Held, InvoiceApprovalCodes.Held,
+                    hold.ReasonCode == InvoiceBlockedHold.HeldOwnSubmissionUnlinked
+                        ? InvoiceBlockedHold.OwnSubmissionUnlinkedDetail
+                        : "The invoice is held until its blocked submission is decided.");
             }
 
             // ── Task 095c-4: no firm, or a stored "firm needed" hold (a firm set natively does not lift it). Before I-2, so zero lines are refused. ──
@@ -1330,21 +1334,16 @@ public sealed class InvoiceApprovalService
     private Task<List<Entity>> ReadLinesAsync(Guid invoiceId, CancellationToken ct) =>
         InvoiceReviewReadService.ReadPagedAsync(_entities, InvoiceReviewReadService.LineQuery(invoiceId), ct);
 
-    /// <summary>FR-20: held while any linked submission is Processing or Rejected with the Blocked reason (<see cref="FinanceBaseValues.HeldSubmissionConditions"/>).</summary>
-    private async Task<bool> IsHeldAsync(Guid invoiceId, CancellationToken ct)
+    /// <summary>FR-20: held while a blocked submission is undecided, decided only from server-written sources (task 165a,
+    /// <see cref="InvoiceBlockedHold"/>). A hold logs its reason code with the table and row id only.</summary>
+    private async Task<InvoiceBlockedHold.Verdict> HoldAsync(Guid invoiceId, CancellationToken ct)
     {
-        var query = new QueryExpression(FinanceBaseValues.SubmissionEntity)
+        var verdict = await InvoiceBlockedHold.CheckAsync(_entities, invoiceId, ct).ConfigureAwait(false);
+        if (verdict.Held)
         {
-            ColumnSet = new ColumnSet(false),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            TopCount = 1,
-        };
-        query.Criteria.AddCondition(FinanceBaseValues.SubmissionInvoiceLookup, ConditionOperator.Equal, invoiceId);
-        foreach (var (column, values) in FinanceBaseValues.HeldSubmissionConditions)
-        {
-            query.Criteria.AddCondition(column, ConditionOperator.In, values.ToArray());
+            _logger.LogInformation("Invoice hold {ReasonCode} on {Table} {RowId}", verdict.ReasonCode, verdict.Table, verdict.RowId);
         }
 
-        return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Count > 0;
+        return verdict;
     }
 }
