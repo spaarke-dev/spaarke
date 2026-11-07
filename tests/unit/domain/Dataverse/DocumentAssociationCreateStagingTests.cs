@@ -22,28 +22,25 @@ public class DocumentAssociationCreateStagingTests
 {
     private static readonly Guid RecordId = Guid.Parse("030b030b-0000-4000-8000-0000000000a2");
 
-    /// <summary>Every spelling the map accepts, the column a create writes and the table it points at.</summary>
-    public static TheoryData<string, string, string> Spellings => new()
+    /// <summary>
+    /// Every spelling the alias table accepts, read from the table itself (<see cref="DocumentAssociationMap.SupportedSpellings"/>),
+    /// so a spelling added there is covered here without editing this file.
+    /// </summary>
+    public static TheoryData<string> EverySupportedSpelling
     {
-        { "matter", "sprk_matter", "sprk_matter" },
-        { "sprk_matter", "sprk_matter", "sprk_matter" },
-        { "project", "sprk_project", "sprk_project" },
-        { "sprk_project", "sprk_project", "sprk_project" },
-        { "invoice", "sprk_invoice", "sprk_invoice" },
-        { "sprk_invoice", "sprk_invoice", "sprk_invoice" },
-        { "workassignment", "sprk_workassignment", "sprk_workassignment" },
-        { "sprk_workassignment", "sprk_workassignment", "sprk_workassignment" },
-        { "event", "sprk_relatedevent", "sprk_event" },
-        { "sprk_event", "sprk_relatedevent", "sprk_event" },
-        { "todo", "sprk_relatedtodo", "sprk_todo" },
-        { "sprk_todo", "sprk_relatedtodo", "sprk_todo" },
-        { "contact", "sprk_relatedcontact", "contact" },
-    };
+        get
+        {
+            var data = new TheoryData<string>();
+            foreach (var spelling in DocumentAssociationMap.SupportedSpellings)
+                data.Add(spelling);
+            return data;
+        }
+    }
 
-    /// <summary>AC-3: the create entity carries the lookup, to the right table, in the one write.</summary>
+    /// <summary>AC-3: the create entity carries the lookup, to the spelling's table, in the one write.</summary>
     [Theory]
-    [MemberData(nameof(Spellings))]
-    public void TryApply_ThenStage_WritesTheAssociationLookup_OnTheCreateEntity(string spelling, string column, string targetTable)
+    [MemberData(nameof(EverySupportedSpelling))]
+    public void TryApply_ThenStage_WritesTheAssociationLookup_OnTheCreateEntity(string spelling)
     {
         var request = NewRequest();
         DocumentAssociationMap.TryApply(request, spelling, RecordId).Should().BeTrue();
@@ -51,10 +48,76 @@ public class DocumentAssociationCreateStagingTests
         var document = new Entity("sprk_document");
         DataverseServiceClientImpl.StageDocumentAssociation(document, request);
 
-        var lookup = document[column].Should().BeOfType<EntityReference>().Subject;
-        lookup.LogicalName.Should().Be(targetTable);
+        var lookup = document[request.Association!.Field.LogicalName].Should().BeOfType<EntityReference>().Subject;
+        lookup.LogicalName.Should().Be(DocumentAssociationMap.ToLogicalName(spelling));
         lookup.Id.Should().Be(RecordId);
         document.Attributes.Should().ContainSingle("only the association column is staged");
+    }
+
+    /// <summary>
+    /// Lockstep (AC-4): for every spelling the alias table accepts, the create overload and the update overload BOTH apply it,
+    /// to the SAME column, pointing at the spelling's table. The update's column is the one the owner question reads
+    /// (<see cref="RecordReparent.ParentChangesOf(UpdateDocumentRequest)"/>), so the owner decided over the association is the
+    /// owner of the row it is written on. Contact is not an ownership parent (owner ruling R4-2): its update column is
+    /// <c>sprk_relatedcontact</c> (<c>DataverseServiceClientImpl.UpdateDocumentAsync</c>).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(EverySupportedSpelling))]
+    public void BothOverloads_ApplyEverySupportedSpelling_ToTheSameColumn(string spelling)
+    {
+        var create = NewRequest();
+        var update = new UpdateDocumentRequest();
+
+        var created = DocumentAssociationMap.TryApply(create, spelling, RecordId);
+        var updated = DocumentAssociationMap.TryApply(update, spelling, RecordId);
+
+        (created, updated).Should().Be((true, true),
+            $"'{spelling}' is in the alias table, so both overloads file the document; a spelling one of them drops is filed nowhere");
+        var column = create.Association!.Field.LogicalName;
+        create.Association.Field.Should().Be(
+            DocumentLinkFields.All.Single(f => f.LogicalName == column), "a create column is a verified document link field");
+        create.Association.Field.TargetEntityLogicalName.Should().Be(DocumentAssociationMap.ToLogicalName(spelling));
+        UpdateColumnsOf(update).Should().Equal(new[] { column }, "the update overload writes the column the create writes");
+
+        var ownerParents = RecordReparent.ParentChangesOf(update);
+        if (column == "sprk_relatedcontact")
+        {
+            ownerParents.Should().BeEmpty("a contact is never an ownership parent");
+            return;
+        }
+
+        var parent = ownerParents.Should().ContainSingle().Subject;
+        parent.Key.Should().Be(column);
+        parent.Value!.LogicalName.Should().Be(create.Association.Field.TargetEntityLogicalName);
+        parent.Value.Id.Should().Be(RecordId);
+    }
+
+    /// <summary>The lockstep's negative half: a spelling outside the alias table, or an empty id, fails in both overloads and sets nothing.</summary>
+    [Theory]
+    [InlineData("account", "030b030b-0000-4000-8000-0000000000a2")]
+    [InlineData("sprk_unknown", "030b030b-0000-4000-8000-0000000000a2")]
+    [InlineData("", "030b030b-0000-4000-8000-0000000000a2")]
+    [InlineData(null, "030b030b-0000-4000-8000-0000000000a2")]
+    [InlineData("matter", "00000000-0000-0000-0000-000000000000")]
+    public void BothOverloads_RefuseTogether_AndSetNothing(string? spelling, string id)
+    {
+        var create = NewRequest();
+        var update = new UpdateDocumentRequest();
+
+        DocumentAssociationMap.TryApply(create, spelling, Guid.Parse(id)).Should().BeFalse();
+        DocumentAssociationMap.TryApply(update, spelling, Guid.Parse(id)).Should().BeFalse();
+
+        create.Association.Should().BeNull();
+        UpdateColumnsOf(update).Should().BeEmpty();
+    }
+
+    /// <summary>The association columns an update request writes: the owner question's columns, and the contact link.</summary>
+    private static IReadOnlyList<string> UpdateColumnsOf(UpdateDocumentRequest update)
+    {
+        var columns = RecordReparent.ParentChangesOf(update).Keys.ToList();
+        if (update.ContactLookup is not null)
+            columns.Add("sprk_relatedcontact");
+        return columns;
     }
 
     [Fact]
@@ -80,50 +143,40 @@ public class DocumentAssociationCreateStagingTests
         document.Attributes.Should().BeEmpty();
     }
 
-    /// <summary>AC-7: no column for the type, or no id, sets nothing.</summary>
+    /// <summary>
+    /// Hardening: the stager writes only an association column the map writes, with its verified target. A document link
+    /// field the map never sets (<c>sprk_relatedorganization</c>), a column that is no link field at all, and a map column
+    /// pointed at another table are each refused before any write.
+    /// </summary>
     [Theory]
-    [InlineData("account", "030b030b-0000-4000-8000-0000000000a2")]
-    [InlineData("sprk_unknown", "030b030b-0000-4000-8000-0000000000a2")]
-    [InlineData("", "030b030b-0000-4000-8000-0000000000a2")]
-    [InlineData("matter", "00000000-0000-0000-0000-000000000000")]
-    public void TryApply_AnUnsupportedTypeOrAnEmptyId_SetsNothing(string spelling, string id)
+    [InlineData("sprk_relatedorganization", "sprk_RelatedOrganization", "sprk_organization")] // a link field, not an association column
+    [InlineData("sprk_relatedcommunication", "sprk_RelatedCommunication", "sprk_communication")] // another create member's column
+    [InlineData("ownerid", "OwnerId", "team")] // not a link field
+    [InlineData("sprk_matter", "sprk_Matter", "sprk_project")] // a map column with the wrong target
+    public void Stage_AnAssociationOutsideTheMapsColumns_IsRefusedBeforeAnyWrite(string column, string schemaName, string target)
     {
         var request = NewRequest();
+        request.Association = new DocumentAssociationBind(new DocumentLinkField(column, schemaName, target), RecordId);
+        var document = new Entity("sprk_document");
 
-        DocumentAssociationMap.TryApply(request, spelling, Guid.Parse(id)).Should().BeFalse();
+        var act = () => DataverseServiceClientImpl.StageDocumentAssociation(document, request);
 
-        request.Association.Should().BeNull();
+        act.Should().Throw<InvalidOperationException>().WithMessage($"*'{column}'*not a document association column*");
+        document.Attributes.Should().BeEmpty();
     }
 
     /// <summary>
-    /// AC-4: the column a create writes is the column the update path and the owner question use
-    /// (<see cref="RecordReparent.ParentChangesOf(UpdateDocumentRequest)"/>), so the owner decided over the association is the
-    /// owner of the row it is written on. Contact is not an ownership parent (owner ruling R4-2) and is pinned by name.
+    /// Hardening: outside Spaarke.Dataverse the association is set only through <see cref="DocumentAssociationMap"/>. The
+    /// setter is internal (this test assembly is a friend, so it can still build the refusal cases above).
     /// </summary>
-    [Theory]
-    [MemberData(nameof(Spellings))]
-    public void TheCreateColumn_IsTheColumnTheUpdateAndTheOwnerQuestionUse(string spelling, string column, string targetTable)
+    [Fact]
+    public void TheAssociationSetter_IsNotPublic()
     {
-        var create = NewRequest();
-        DocumentAssociationMap.TryApply(create, spelling, RecordId);
-        var update = new UpdateDocumentRequest();
-        DocumentAssociationMap.TryApply(update, spelling, RecordId).Should().BeTrue();
+        var setter = typeof(CreateDocumentRequest).GetProperty(nameof(CreateDocumentRequest.Association))!.SetMethod;
 
-        create.Association!.Field.Should().Be(
-            DocumentLinkFields.All.Single(f => f.LogicalName == column), "a create column is a verified document link field");
-        create.Association.Field.TargetEntityLogicalName.Should().Be(targetTable);
-
-        if (spelling == "contact")
-        {
-            RecordReparent.ParentChangesOf(update).Should().BeEmpty("a contact is never an ownership parent");
-            update.ContactLookup.Should().Be(RecordId);
-            return;
-        }
-
-        var parent = RecordReparent.ParentChangesOf(update).Should().ContainSingle().Subject;
-        parent.Key.Should().Be(column);
-        parent.Value!.LogicalName.Should().Be(targetTable);
-        parent.Value.Id.Should().Be(RecordId);
+        setter.Should().NotBeNull();
+        setter!.IsPublic.Should().BeFalse("only DocumentAssociationMap.TryApply sets the association outside its assembly");
+        setter.IsAssembly.Should().BeTrue("internal, so the map in the same assembly can set it");
     }
 
     /// <summary>

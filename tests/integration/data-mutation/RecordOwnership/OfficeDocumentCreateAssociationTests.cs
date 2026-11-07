@@ -117,6 +117,8 @@ public class OfficeDocumentCreateAssociationTests
     /// <summary>
     /// AC-8: the pre-assigned id names a row that already exists. Dataverse refuses the create (duplicate key); the save
     /// throws to its existing failure path and never writes the existing row.
+    /// The duplicate-key refusal here is the module-boundary double's own; that a real existing id is refused rests on G5
+    /// (the save only ever creates, never upserts) plus the platform's refusal of a create on an id that exists.
     /// </summary>
     [Fact]
     public async Task Save_WithAGivenIdThatAlreadyExists_IsRefused_AndTheExistingRowIsNeverUpdated()

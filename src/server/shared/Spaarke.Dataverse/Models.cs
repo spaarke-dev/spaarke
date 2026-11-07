@@ -125,9 +125,12 @@ public class CreateDocumentRequest
     /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
     /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen association would
     /// file a document to a record whose AppendTo nobody checked.</para>
+    /// <para>The setter is internal: outside this assembly the association is set only through
+    /// <see cref="DocumentAssociationMap.TryApply(CreateDocumentRequest, string?, Guid?)"/>, and the create's stager refuses a
+    /// column that is not one of the map's.</para>
     /// </remarks>
     [JsonIgnore]
-    public DocumentAssociationBind? Association { get; set; }
+    public DocumentAssociationBind? Association { get; internal set; }
 
     /// <summary>
     /// The document this one belongs to (an email attachment's email document), written as <c>sprk_parentdocument</c> IN the
@@ -345,6 +348,16 @@ public static class DocumentAssociationMap
         request.Association = new DocumentAssociationBind(field, recordId.Value);
         return true;
     }
+
+    /// <summary>
+    /// Whether <paramref name="field"/> is one of the association columns a create may write, with its verified target: an
+    /// <see cref="AssociationColumnByLogicalName"/> column, as its <see cref="DocumentLinkFields.All"/> entry names it. The
+    /// create's stager (<c>DataverseServiceClientImpl.StageDocumentAssociation</c>) refuses any other.
+    /// </summary>
+    internal static bool IsAssociationField(DocumentLinkField field) =>
+        field is not null
+        && AssociationColumnByLogicalName.Values.Contains(field.LogicalName, StringComparer.Ordinal)
+        && DocumentLinkFields.All.Contains(field);
 }
 
 /// <summary>

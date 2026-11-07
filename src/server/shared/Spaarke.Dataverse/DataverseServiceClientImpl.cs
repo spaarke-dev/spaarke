@@ -298,7 +298,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // reaches none of them at any depth below Global — and Global re-opens findings F1 and F9.
         //
         // unified-access-control-r2 task 146 (#1034): every caller now resolves the team through the BFF's
-        // IRecordOwnershipResolver (Office save + worker, POST /api/v1/documents, EmailAttachmentProcessor), so a
+        // IRecordOwnershipResolver (Office save + worker, POST /api/v1/documents), so a
         // missing owner is a programming error and REFUSES here, before any write — never the old "null keeps the
         // calling identity", which made the BFF application user own the document in the root business unit.
         if (request.OwningTeamId is not { } owningTeamId || owningTeamId == Guid.Empty)
@@ -378,7 +378,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// (field-mapping-server-write-path-r1 task 030b). No association writes nothing. Pure (no I/O), as
     /// <see cref="StageDocumentCommunicationFields"/> is.
     /// </summary>
-    /// <exception cref="InvalidOperationException">An association with an empty record id (refused before any write).</exception>
+    /// <exception cref="InvalidOperationException">An association with an empty record id, or on a column that is not one of
+    /// <see cref="DocumentAssociationMap"/>'s association columns with its verified target (refused before any write).</exception>
     internal static void StageDocumentAssociation(Entity document, CreateDocumentRequest request)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -389,6 +390,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         if (association.RecordId == Guid.Empty)
             throw new InvalidOperationException("A document's association is created with the id of the record it is filed to (task 030b).");
+
+        if (!DocumentAssociationMap.IsAssociationField(association.Field))
+        {
+            throw new InvalidOperationException(
+                $"'{association.Field.LogicalName}' -> '{association.Field.TargetEntityLogicalName}' is not a document association column; "
+                + "a create's association is set through DocumentAssociationMap.TryApply (task 030b).");
+        }
 
         document[association.Field.LogicalName] =
             new EntityReference(association.Field.TargetEntityLogicalName, association.RecordId);
