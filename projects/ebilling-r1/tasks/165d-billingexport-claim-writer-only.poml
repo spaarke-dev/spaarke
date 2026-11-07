@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="165d" project="ebilling-r1">
+  <metadata>
+    <title>The AP export claim (sprk_invoice.sprk_billingexport) is written only by AP export: refused to generic app-only writers and to field mapping (EB-D-207)</title>
+    <phase>4 Review (165 family, EB-D-200 integrity)</phase>
+    <gate>uac-r2 approved the RefuseAppOnlyWrite hook on 2026-11-07, with conditions U1-U5 below. Run after the 165a and 2b-2 merge lands on work.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the refusal every generic app-only writer asks (.cs); integrity of the AP export selection.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A small list addition copying the 166 pattern, with must-fire tests per writer; the design is fixed here.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordTableRules.cs and InheritedAccessPermission.cs (shared with uac-r2 and field-mapping).</parallel-reason>
+    <deps>165a</deps>
+    <tags>bff-api, ebilling, integrity</tags>
+  </metadata>
+
+  <prompt>Field-mapping 032 design review (2026-11-07) found that `sprk_invoice.sprk_billingexport` is in neither `RecordTableRules.MappingProtectedColumns` nor the app-only refusal. ApExportService selects invoices for a batch only while the lookup is null (ApExportService.cs ~:564) and is documented as its only writer (~:128). uac-r2's ruling: protect it with ebilling-owned rules, NOT `ParentLineage.AccessColumns` / `InheritedAccessPermission.AccessColumns` (those are for columns that confer or narrow access; this is a workflow claim), and add a must-fire test showing a generic app-only writer is refused. Wording stays neutral.</prompt>
+
+  <goal>No generic writer (field mapping at create, an Update Record node, an output mapping, Repair, the generic update handler) can set or clear an invoice's AP export claim. AP export's own claim and release keep working.</goal>
+
+  <scope>
+    <in>
+      1. `RecordTableRules`, sprk_invoice rule: add `ApExportService.BatchLookup` to `MappingProtectedColumns`, with a comment citing EB-D-207.
+      2. A new ebilling-owned per-table set on `RecordTableRule`, `WriterOnlyColumns`: columns only a typed writer sets. It starts with sprk_invoice → { BatchLookup }.
+         `InheritedAccessPermission.RefuseAppOnlyWrite` also refuses a write naming a `WriterOnlyColumns` column, with its own refusal code (e.g. `writer_only_column`) and the same shape as today's refusal.
+         This is ONE extension inside RefuseAppOnlyWrite (uac-r2's file, approved by uac-r2 before code). Every generic writer that already asks RefuseAppOnlyWrite is covered with no edit of its own.
+      3. Remarks on the new set and on ApExportService's "only writer" line, citing EB-D-207.
+    </in>
+    <out>
+      - Field security on the column (EB-D-200 covered money and firm columns; whether this column also needs it is a separate owner question, recorded as a known limit).
+      - Any change to ApExportService behaviour.
+      - Moving any existing AccessColumns entry.
+    </out>
+  </scope>
+
+  <constraints>
+    <constraint source="uac-r2 U1">Identity: the writer-only column is refused for EVERY WriteIdentity, not only AppOnly. The field-mapping push asks with WriteIdentity.Caller and still goes through the BFF. The rule is "only AP export writes it", whoever calls.</constraint>
+    <constraint source="uac-r2 U2">One vocabulary: declare WriterOnlyColumns in RecordTableRules next to the existing table-level writer-only rule (RefuseWriterOnlyTableUpdate/Delete). Log the refusal with the same `changed_only_by_its_writer` marker family and name the column (uac-r2's gate query counts that marker). The refusal code may be our own.</constraint>
+    <constraint source="uac-r2 U3">Coverage pin: a source-scan test checks that every call site of RefuseWriterOnlyTableUpdate also asks RefuseAppOnlyWrite with the payload's column keys. Known sites: ChildRecordEndpoints ~:731, FieldMappingEndpoints ~:878/:1304/:1865, DataverseUpdateRecordHandler, DataverseDeleteRecordHandler, UpdateRecordActionCore ~:227, WorkProductRecordPersister ~:191, DataverseUpdateHandler ~:116. A site that cannot is listed in the test with its reason (delete handlers carry no payload columns).</constraint>
+    <constraint source="uac-r2 U4">AP export path: pin that ApExportService writes sprk_billingexport through its own path, which never asks RefuseAppOnlyWrite. The must-fire suite includes a generic writer naming the column next to an allowed AP export claim and release.</constraint>
+    <constraint source="uac-r2 U5">Known limit, for the owner: field security on sprk_billingexport (BFF app users the only writers, default teams read; the sprk_createdbyperson pattern) closes the native write with no plugin. It is a schema step that needs the owner's go, so it goes on the dev-deploy checklist and is NOT built here. Public wording stays neutral.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`ParentLineage.AccessColumns` (refuses access columns to app-only writers); `RecordTableRule.MappingProtectedColumns` (create-time mapping only); `RecordTableRule.PreWriteRules` (create only, RecordCreationService).</existing>
+    <extension>AccessColumns is declined by its owner for non-access columns (uac-r2, 2026-11-07). MappingProtectedColumns and PreWriteRules do not reach update writers. So the extension is a sibling set that the one existing refusal also reads.</extension>
+    <cost-of-doing-nothing>A playbook Update Record node or an output mapping can set or clear the claim. That removes an approved invoice from AP payment selection, or attaches it to a batch it was never exported in.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion>Must-fire for both AppOnly and Caller identities (U1), one per writer that asks RefuseAppOnlyWrite: the Update Record node (UpdateRecordActionCore / UpdateRecordNodeExecutor), the output mapping (DocumentProfileOutputMapper if it reaches sprk_invoice; otherwise the playbook output orchestrator), Repair (FieldMappingEndpoints ~:1156) and DataverseUpdateHandler. A write naming sprk_billingexport on sprk_invoice is refused with the new code and nothing is written. Must-not-fire: the same writer naming another sprk_invoice column that is not refused proceeds.</criterion>
+    <criterion>Field mapping at create: a rule targeting sprk_billingexport is skipped with the existing warning (MappingProtectedColumns). Control: an unprotected target still maps.</criterion>
+    <criterion>ApExportService's claim and release tests pass unmodified, so the typed writer does not ask the refusal. An ArchTest or source scan pins that ApExportService is the only type that names BatchLookup in a write (copy InvoiceMoneyColumnsAppOnlyWriteGuardTests' approach; a reviewed Readers list is allowed).</criterion>
+    <criterion>One seed: remove the WriterOnlyColumns check and the Update Record must-fire test fails. Record it in the notes.</criterion>
+    <criterion>Filtered unit tests (Finance, ApExport, RecordCreation, FieldMapping, UpdateRecord, InheritedAccess) and the full ArchTests pass. The BFF builds; record the publish delta.</criterion>
+    <criterion>Notes in projects/ebilling-r1/notes/165d-billingexport-claim.md, including the known limit: a user with Write on an invoice can still set the column natively (it is not field-secured). That one goes to the owner as a question, not a fix.</criterion>
+    <criterion>Test scope: exactly the criteria above.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any generic writer that can update sprk_invoice does NOT go through RefuseAppOnlyWrite, STOP and list it. Do not add a per-writer check.</trigger>
+    <trigger>If uac-r2 declines the hook in RefuseAppOnlyWrite, STOP. The lead chooses another path.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>tests/Spaarke.ArchTests/InvoiceMoneyColumnsAppOnlyWriteGuardTests.cs</file>
+      <file>projects/ebilling-r1/notes/166-invoice-field-security.md</file>
+    </files>
+  </knowledge>
+</task>
