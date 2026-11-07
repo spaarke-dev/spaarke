@@ -699,6 +699,24 @@ public sealed class InvoiceCorrectionServiceTests
         NothingWritten(world);
     }
 
+    [Fact(DisplayName = "165a F1 must-fire: a header correction takes no provenance from a submission linked to the invoice that is not its own")]
+    public async Task AnotherSubmission_GivesNoHeaderProvenance()
+    {
+        var world = new CorrectionWorld();
+        var other = new Entity("sprk_invoicesubmission", Guid.Parse("10100000-0000-4000-8000-0000000000b2"));
+        foreach (var attribute in world.Submission!.Attributes)
+        {
+            other[attribute.Key] = attribute.Value;
+        }
+
+        world.Submission = other;
+
+        var result = await world.Service().CorrectAsync(Header("TotalDue", "2400"), CancellationToken.None);
+
+        result.Status.Should().Be(CorrectionStatus.NoProvenance);
+        NothingWritten(world);
+    }
+
     [Fact]
     public async Task HeaderAndLineRows_AreSeparateScopes()
     {

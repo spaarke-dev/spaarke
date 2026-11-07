@@ -103,7 +103,8 @@ public sealed class InvoiceCorrectionEndToEndTests
     private static Entity Submission(ApprovalWorld w, JsonObject root, InvoiceSubmissionStatus status, string reasonCode)
     {
         root["invoiceId"] = w.InvoiceId.ToString("D");
-        var submission = new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        // Task 165a: the invoice's own submission (its id derives the invoice's), as the persister links it.
+        var submission = new Entity("sprk_invoicesubmission", w.OwnSubmissionId)
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
             ["sprk_findingsjson"] = root.ToJsonString(),
@@ -615,5 +616,66 @@ public sealed class InvoiceCorrectionEndToEndTests
         result.Code.Should().Be(LineDecisionCodes.Unavailable);
         w.Writes.Should().Be(writes);
         StatusOf(w.Row("sprk_billingevent", line.Id)).Should().Be((int)InvoiceLineStatus.Clean);
+    }
+
+    // ── Task 165a (F1): the correction follow-through, approval and line decisions read and write only the invoice's OWN submission ──
+
+    /// <summary>Another submission on this invoice, NEWER than the own one (its id does not derive this invoice's).</summary>
+    private static Entity OtherSubmission(ApprovalWorld w, Entity own, Action<JsonObject>? edit = null)
+    {
+        var root = Stored(own);
+        root["invoiceId"] = Guid.NewGuid().ToString("D");
+        edit?.Invoke(root);
+        var other = new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+            ["sprk_findingsjson"] = root.ToJsonString(),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["createdon"] = Now.UtcDateTime,
+            ["versionnumber"] = 40L,
+        };
+        InvoiceSubmissionPersister.InvoiceIdFor(other.Id).Should().NotBe(w.InvoiceId, "the setup: not the invoice's own submission");
+        w.Put(other);
+        return other;
+    }
+
+    [Fact(DisplayName = "165a F1 must-fire: a correction's follow-through writes the invoice's OWN submission; another submission on the invoice is neither read nor written")]
+    public async Task TheFollowThrough_WritesOnlyTheOwnSubmission()
+    {
+        var w = new ApprovalWorld();
+        var (line, own) = CleanInvoice(w);
+        var other = OtherSubmission(w, own);
+        var otherBefore = other.GetAttributeValue<string>("sprk_findingsjson");
+
+        (await Corrections(w).CorrectAsync(new CorrectionCommand(w.InvoiceId, line.Id, "Narrative", "Prepared the brief", false, AliceUser), CancellationToken.None))
+            .IsApplied.Should().BeTrue();
+
+        w.Row("sprk_invoicesubmission", other.Id).GetAttributeValue<string>("sprk_findingsjson").Should().Be(otherBefore, "never written");
+        ((JsonArray)Stored(w.Row("sprk_invoicesubmission", own.Id))[InvoiceCorrectionReevaluation.AppliedCorrectionsMember]!)
+            .Should().NotBeEmpty("control: the own submission is written as before");
+        (await w.ApproveAs(AliceUser)).Outcome.Should().Be(ApprovalOutcome.Approved);
+    }
+
+    [Fact(DisplayName = "165a F1 must-fire: an unfinished correction still refuses approve and the line decision with another submission present on the invoice")]
+    public async Task AnUnfinishedCorrection_StillRefuses_WithAnotherSubmission()
+    {
+        var w = new ApprovalWorld();
+        var (line, own) = CleanInvoice(w);
+        w.FaultsOnce["tx:approvers"] = new TimeoutException("simulated"); // the findings patch is the first all-update transaction
+        (await Corrections(w).CorrectAsync(new CorrectionCommand(w.InvoiceId, line.Id, "Narrative", "Prepared the brief", false, AliceUser), CancellationToken.None))
+            .Status.Should().Be(CorrectionStatus.Incomplete);
+        var saved = w.Rows.Values.Where(r => r.LogicalName == "sprk_invoicecorrection").Select(r => (JsonNode)r.Id.ToString("D")).ToArray();
+        saved.Should().NotBeEmpty("the setup: the correction row was saved");
+        OtherSubmission(w, own, root => root[InvoiceCorrectionReevaluation.AppliedCorrectionsMember] = new JsonArray(saved));
+        var writes = w.Writes;
+
+        var refused = await w.ApproveAs(AliceUser);
+        var decided = await w.LineService().DecideAsync(
+            new LineDecisionCommand(w.InvoiceId, Guid.NewGuid(), LineDecisionAction.Accept, null, [new LineDecisionLine(line.Id)], BobUser, Bulk: false, CallerToken),
+            CancellationToken.None);
+
+        refused.Code.Should().Be(InvoiceApprovalCodes.CorrectionsPending);
+        decided.IsApplied.Should().BeFalse();
+        AssertApproveWroteNothing(w, writes, line);
     }
 }

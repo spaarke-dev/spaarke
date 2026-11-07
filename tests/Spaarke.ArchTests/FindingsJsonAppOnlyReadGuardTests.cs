@@ -58,6 +58,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         // task 095d-2a-2: the re-run after Set firm reads it app-only (IGenericEntityService) for the stored facts and decision, and writes the
         // re-evaluated findings (assignFirm.rulesRerun = completed) in its one app-only ExecuteTransactionAsync, row-version conditioned
         typeof(InvoiceSubmissionRerun),
+        typeof(InvoiceBlockedHold), // task 165a: reads it app-only (the IGenericEntityService its callers pass) for the recorded outcome the FR-20 hold decides from; never writes it
     ];
 
     /// <summary>

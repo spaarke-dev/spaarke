@@ -31,9 +31,9 @@ namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 /// </remarks>
 public sealed class InvoiceSubmissionRerunTests
 {
-    private static readonly Guid SubmissionId = Guid.Parse("04900000-0000-4000-8000-0000000000b1");
+    internal static readonly Guid SubmissionId = Guid.Parse("04900000-0000-4000-8000-0000000000b1");
     private static readonly Guid Firm = Guid.Parse("04900000-0000-4000-8000-0000000000f1");
-    private static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
+    internal static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
     private static readonly Guid DecisionId = InvoiceAssignFirmService.DecisionIdFor(SubmissionId);
     private static readonly Guid Reviewer = Guid.Parse("095d2a20-0000-4000-8000-0000000000c1");
 
@@ -507,6 +507,42 @@ public sealed class InvoiceSubmissionRerunTests
         InvoiceFirmHold.StateOf(invoice).Should().Be(InvoiceFirmHold.InvoiceHoldState.None);
     }
 
+    [Theory(DisplayName = "165a fix round 2: a re-run on an invoice already Returned to Firm keeps the Return stamp, so the submission still reads Returned; In Review drops it")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TheReturnStamp_IsKept_OnlyOnAnInvoiceReturnedToFirm(bool returnedToFirm)
+    {
+        var world = await World.SeedAsync();
+        world.EditFindings(f =>
+        {
+            f.Remove(SubmissionOverrideService.OverrideMember);
+            f["kind"] = nameof(SubmissionEvaluationKind.Blocked);
+            f[SubmissionOverrideService.ReturnMember] = ValidStamp();
+        });
+        if (returnedToFirm)
+        {
+            var invoice = world.Row(InvoiceId);
+            invoice["statecode"] = new OptionSetValue(InvoiceStatusCodes.StateInactive);
+            invoice["statuscode"] = new OptionSetValue(InvoiceStatusCodes.ReturnedToFirm);
+            invoice[InvoiceReviewDetail.Column] = null;
+        }
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
+        result.Kind.Should().Be(SubmissionEvaluationKind.Accepted);
+        world.Findings().ContainsKey(SubmissionOverrideService.ReturnMember).Should().Be(returnedToFirm);
+        var disposition = SubmissionOverrideService.Classify(world.Row(SubmissionId));
+        if (returnedToFirm)
+        {
+            disposition.Should().Be(SubmissionOverrideService.Disposition.Returned, "the blocked-submission view shows Returned, not 'not blocked'");
+        }
+        else
+        {
+            disposition.Should().NotBe(SubmissionOverrideService.Disposition.Returned);
+        }
+    }
+
     // ── T18, T6 ──
 
     [Fact(DisplayName = "095d-2a-2 (T18, T6 control): a firm hold on another linked submission keeps the invoice waiting for its firm (659490002); that submission and its stamp are untouched")]
@@ -671,8 +707,9 @@ public sealed class InvoiceSubmissionRerunTests
         public List<string> Released { get; } = [];
     }
 
-    /// <summary>The stored rows after Set firm, in memory: reads return copies; a transaction is applied all or nothing, every row version checked.</summary>
-    private sealed class World
+    /// <summary>The stored rows after Set firm, in memory: reads return copies; a transaction is applied all or nothing, every row version checked.
+    /// Internal so task 165a's FR-20 hold tests can read the findings a real re-run commits (<see cref="InvoiceBlockedHoldTests"/>).</summary>
+    internal sealed class World
     {
         private readonly Dictionary<Guid, Entity> _rows = [];
 

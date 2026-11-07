@@ -449,7 +449,7 @@ public sealed class InvoiceReviewReadService
         foreach (var row in lineRows.OrderBy(l => bySequence[l.Id]).ThenBy(l => l.Id))
         {
             var sequence = bySequence[row.Id];
-            // The plan and the findings are both keyed on the line INDEX (D-176 K4): a row whose sequence was edited cannot pair one index's findings with another's plan sentence.
+            // The plan and the findings are both keyed on the line INDEX (D-176 K4): a row whose sequence differs from the findings' index cannot pair one index's findings with another's plan sentence.
             var planSubject = submission is null ? row.Id : InvoiceSubmissionPersister.LineIdFor(submission.Dto.SubmissionId, sequence - 1);
             var findings = FindingsFor(parsed, "Line", sequence - 1, planSubject, overridden, withheld);
             lines.Add(ToLine(row, sequence, findings, LineFindingsFor(parsed, sequence - 1), roster: rosterTask.Result, threshold));
@@ -527,18 +527,10 @@ public sealed class InvoiceReviewReadService
         return page.Entities.FirstOrDefault() is { Id: var id } && id != Guid.Empty ? id : null;
     }
 
+    /// <summary>The invoice's own submission (task 165a: never another submission linked to the invoice); null when it is not linked.</summary>
     private async Task<SubmissionRead?> ReadSubmissionAsync(Guid invoiceId, CancellationToken ct)
     {
-        var query = new QueryExpression(SubmissionEntity)
-        {
-            ColumnSet = new ColumnSet(SubmissionColumns),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            TopCount = 1,
-        };
-        query.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
-        query.AddOrder("createdon", OrderType.Descending);
-        var page = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        var row = page.Entities.FirstOrDefault();
+        var row = await InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, SubmissionColumns, ct).ConfigureAwait(false);
         if (row is null)
         {
             return null;

@@ -429,10 +429,13 @@ public sealed class InvoiceRejectReturnService
         // ── D-101: a blocked submission holds the invoice; Override or Return of the SUBMISSION (105) is the way out, and it records the submission. ──
         try
         {
-            if (await IsHeldAsync(invoiceId, ct).ConfigureAwait(false))
+            if (await HoldAsync(invoiceId, ct).ConfigureAwait(false) is { Held: true } hold)
             {
+                // Task 165a: the same code; an invoice whose own submission is not linked cannot be released by deciding a submission.
                 return new InvoiceDecisionResult(InvoiceDecisionOutcome.Held, InvoiceRejectReturnCodes.Held,
-                    "The invoice is held until its blocked submission is decided (override or return the submission).");
+                    hold.ReasonCode == InvoiceBlockedHold.HeldOwnSubmissionUnlinked
+                        ? InvoiceBlockedHold.OwnSubmissionUnlinkedDetail
+                        : "The invoice is held until its blocked submission is decided (override or return the submission).");
             }
 
             // Task 095c-4: Return to Firm hands the invoice to its firm (the firm notice, the firm's correction); with no firm, or a stored
@@ -1042,21 +1045,16 @@ public sealed class InvoiceRejectReturnService
         return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
     }
 
-    /// <summary>FR-20 / D-101: held while any linked submission is Processing or Rejected with the Blocked reason (<see cref="FinanceBaseValues.HeldSubmissionConditions"/>).</summary>
-    private async Task<bool> IsHeldAsync(Guid invoiceId, CancellationToken ct)
+    /// <summary>FR-20 / D-101: held while a blocked submission is undecided, decided only from server-written sources (task 165a,
+    /// <see cref="InvoiceBlockedHold"/>). A hold logs its reason code with the table and row id only.</summary>
+    private async Task<InvoiceBlockedHold.Verdict> HoldAsync(Guid invoiceId, CancellationToken ct)
     {
-        var query = new QueryExpression(FinanceBaseValues.SubmissionEntity)
+        var verdict = await InvoiceBlockedHold.CheckAsync(_entities, invoiceId, ct).ConfigureAwait(false);
+        if (verdict.Held)
         {
-            ColumnSet = new ColumnSet(false),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            TopCount = 1,
-        };
-        query.Criteria.AddCondition(FinanceBaseValues.SubmissionInvoiceLookup, ConditionOperator.Equal, invoiceId);
-        foreach (var (column, values) in FinanceBaseValues.HeldSubmissionConditions)
-        {
-            query.Criteria.AddCondition(column, ConditionOperator.In, values.ToArray());
+            _logger.LogInformation("Invoice hold {ReasonCode} on {Table} {RowId}", verdict.ReasonCode, verdict.Table, verdict.RowId);
         }
 
-        return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.Count > 0;
+        return verdict;
     }
 }

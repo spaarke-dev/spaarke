@@ -40,6 +40,7 @@
     - (1) Approval refuses a line of unknown origin: the task 164 criterion "approval refuses a line of unknown origin", moved here in full.
     - (2) Status: approval, AP export and spend count an invoice as Approved, Sent to AP or Paid only when the matching server-written record exists, and otherwise refuse or hold it (409, a distinct code). The records: the approve Decision Record; the export batch or its record for Sent to AP; the paid record. Verify that each one is class (a) or (b). Spend (`FinanceBaseValues`) is ontology-r1's code: make the minimal change and list it for their review.
     - (3) Totals: approval and AP export check that the stored invoice totals equal `InvoiceTotalsCalculator` over the lines, and refuse on a mismatch (409, a distinct code).
+    - (4) Pending spend (165a notes, open items; a confirmed defect, not a known limit): both pending-spend paths (`FinanceBaseValues.cs:416`, `FinanceRollupService.cs:344`) exclude the invoices `InvoiceBlockedHold` holds, the same hold approval reads. `FinanceBaseValues` is ontology-r1's code: make the minimal change and list it for their review. Must-fire and must-not-fire tests; one seed.
   </scope>
 
   <acceptance-criteria>
