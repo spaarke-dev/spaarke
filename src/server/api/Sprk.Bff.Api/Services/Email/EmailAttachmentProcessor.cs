@@ -29,7 +29,7 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
             : Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.ToTargetLogicalName(associatedEntityType);
 
         // UAC task 194b fix round R (B3): through the one builder (ForRow), keyed by the sprk_document columns the processor's
-        // update writes (ParentDocumentLookup, then DocumentAssociationMap's lookup — RecordReparent.ParentChangesOf,
+        // create writes (ParentDocumentLookup, then DocumentAssociationMap's lookup — RecordReparent.ParentChangesOf,
         // the one column map). An associated type the map does not write is still asked, after them, as before.
         var written = new UpdateDocumentRequest
         {
@@ -330,14 +330,31 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
                 return null;
             }
 
-            // Create initial document record
+            // Create the document record. An attachment carries its parent link and its association in this create
+            // (task 034), the same columns the owner question above was asked over, so the row is filed from its first write.
             var createRequest = new CreateDocumentRequest
             {
                 Name = attachment.FileName,
                 ContainerId = request.ContainerId,
                 Description = $"Email attachment from email {request.EmailId}",
                 OwningTeamId = owner.OwningTeamId,
+                ParentDocumentLookup = request.ParentDocumentId != Guid.Empty ? request.ParentDocumentId : null,
             };
+
+            // Set entity association if provided
+            if (request.AssociatedEntityId.HasValue && !string.IsNullOrEmpty(request.AssociatedEntityType))
+            {
+                // Shared map. This copy accepted ONLY logical names, so an attachment whose parent
+                // carried the friendly "matter" was filed nowhere — see DocumentAssociationMap.
+                if (!DocumentAssociationMap.TryApply(
+                        createRequest, request.AssociatedEntityType, request.AssociatedEntityId))
+                {
+                    _logger.LogWarning(
+                        "Entity type {EntityType} has no sprk_document lookup — attachment document " +
+                        "will be created UNASSOCIATED. Known gaps: account, contact, sprk_todo.",
+                        request.AssociatedEntityType);
+                }
+            }
 
             documentIdStr = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
 
@@ -349,7 +366,7 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
                 return null;
             }
 
-            // Update with file info, parent relationship, and metadata
+            // Update with file info and metadata (never the parent link or the association: they are in the create above)
             var updateRequest = new UpdateDocumentRequest
             {
                 FileName = uniqueFileName,
@@ -360,23 +377,7 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
                 HasFile = true,
                 DocumentType = DocumentTypeEmailAttachment,
                 RelationshipType = RelationshipTypeEmailAttachment,
-                ParentDocumentLookup = request.ParentDocumentId
             };
-
-            // Set entity association if provided
-            if (request.AssociatedEntityId.HasValue && !string.IsNullOrEmpty(request.AssociatedEntityType))
-            {
-                // Shared map. This copy accepted ONLY logical names, so an attachment whose parent
-                // carried the friendly "matter" was filed nowhere — see DocumentAssociationMap.
-                if (!DocumentAssociationMap.TryApply(
-                        updateRequest, request.AssociatedEntityType, request.AssociatedEntityId))
-                {
-                    _logger.LogWarning(
-                        "Entity type {EntityType} has no sprk_document lookup — attachment document " +
-                        "will be created UNASSOCIATED. Known gaps: account, contact, sprk_todo.",
-                        request.AssociatedEntityType);
-                }
-            }
 
             await _documentService.UpdateDocumentAsync(documentIdStr, updateRequest, cancellationToken);
 

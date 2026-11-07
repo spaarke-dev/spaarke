@@ -319,6 +319,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // field-mapping-server-write-path-r1 task 030b (FR-18): the association, in this one write, never a follow-up update.
         StageDocumentAssociation(document, request);
 
+        // field-mapping-server-write-path-r1 task 034: an attachment's parent link, in this same write.
+        StageDocumentParent(document, request);
+
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
 
@@ -386,6 +389,26 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         document[association.Field.LogicalName] =
             new EntityReference(association.Field.TargetEntityLogicalName, association.RecordId);
+    }
+
+    /// <summary>
+    /// Stages <see cref="CreateDocumentRequest.ParentDocumentLookup"/> onto the document <see cref="CreateDocumentAsync"/> creates,
+    /// as <c>sprk_parentdocument = EntityReference(sprk_document, id)</c> (field-mapping-server-write-path-r1 task 034). No parent
+    /// writes nothing. Pure (no I/O), as <see cref="StageDocumentAssociation"/> is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A parent link with an empty id (refused before any write).</exception>
+    internal static void StageDocumentParent(Entity document, CreateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.ParentDocumentLookup is not { } parentId)
+            return;
+
+        if (parentId == Guid.Empty)
+            throw new InvalidOperationException("A document's parent link is created with the id of its parent document (task 034).");
+
+        document["sprk_parentdocument"] = new EntityReference("sprk_document", parentId);
     }
 
     // Task 130: sprk_document.sprk_relatedcommunication → sprk_communication (DocumentLinkFields), and the document's own

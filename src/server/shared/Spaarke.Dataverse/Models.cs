@@ -128,6 +128,19 @@ public class CreateDocumentRequest
     /// </remarks>
     [JsonIgnore]
     public DocumentAssociationBind? Association { get; set; }
+
+    /// <summary>
+    /// The document this one belongs to (an email attachment's email document), written as <c>sprk_parentdocument</c> IN the
+    /// create (field-mapping-server-write-path-r1 task 034). An attachment carries its parent link in the create; null for
+    /// every caller that has no parent document.
+    /// </summary>
+    /// <remarks>
+    /// 🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
+    /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen parent would
+    /// attach a document to one the caller cannot see.
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? ParentDocumentLookup { get; set; }
 }
 
 /// <summary>
