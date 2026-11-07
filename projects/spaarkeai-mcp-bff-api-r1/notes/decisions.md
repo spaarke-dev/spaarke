@@ -128,3 +128,11 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
 - Spike HEAD `22487c6537` contains master `d53d67f604`. CI is green.
 - **uac-r2 approved it for the next dev window.** Deploying still needs the owner's go in their session.
 - **uac-r2 condition for task 021:** no Permanent waiver carries over. Real tool-level policies replace them, and the ledger entries are rebuilt from scratch. This is now a constraint in the 021 POML.
+
+## 2026-11-07 — Ontology review of 017: OK; binding K1 for 014
+
+- Ontology reviewed `21882337f7`: OK, no F findings.
+- **Binding for 014:** the MCP tool error for a Failed commit must carry the D-17 partial-write facts as an optional `DecisionToolError.Partial`: `failedStep`, `landed`, `possiblyLanded`, `recordMayExist`, `sentButNotRecorded`, `resumable`, `replayed`. It uses codes, ids and booleans only, never record text, and a test pins it.
+- **Task 024** returns it in `structuredContent`.
+- Both are now constraints in the POMLs.
+

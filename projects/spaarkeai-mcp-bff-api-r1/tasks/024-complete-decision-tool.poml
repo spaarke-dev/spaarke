@@ -49,6 +49,7 @@
     <constraint source="ADR-015">Every log statement or telemetry property this task adds records identifiers, sizes, timings and outcome/reason codes only: no bearer token, claim value, record text or tool argument (NFR-05).</constraint>
     <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">The `spaarke_complete_decision` error result for a Failed commit carries the D-17 `Partial` payload from task 014 (`DecisionToolError.Partial`) in its structured content, so the host and the widget can tell the user which writes landed and whether a resend with the same review id resumes the decision (ontology, 2026-11-07).</constraint>
   </constraints>
 
   <knowledge>
@@ -115,6 +116,7 @@
     <criterion testable="true">grep shows no billing check, IsBillingSubject call or rights check under Api/Mcp/.</criterion>
     <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE).</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+    <criterion testable="true">An MCP-level test shows that a Failed commit returns `isError` with structuredContent containing `landed`, `possiblyLanded` and `resumable`, matching REST for the same failure.</criterion>
   </acceptance-criteria>
 
   <notes>FR-08 and ontology condition 2. The widget sends this only from the wizard's explicit Confirm (032).</notes>

@@ -50,6 +50,11 @@
     <constraint source="project">Every PR from this task that touches Services/Signals/**, Api/Signals/** or the worklist route is reviewed by spaarke-ontology-platform-r1 before merge (project CLAUDE.md §4); run /conflict-check before opening it.</constraint>
     <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">D-17 partial-write facts reach MCP (ontology review of 017, 2026-11-07, binding).
+- `DecisionResultMapper.ToToolError(DecisionCommitResult)` for `Failed` currently returns only code, message and status.
+- Extend `DecisionToolError` with an optional `Partial` payload carrying `failedStep`, `landed`, `possiblyLanded`, `recordMayExist`, `sentButNotRecorded`, `resumable` and `replayed`, exactly as the REST Failed extensions carry them.
+- Use only step and action codes, record ids, booleans and the step list. Never record text (ADR-015).
+- REST bytes are unchanged (011 baselines).</constraint>
   </constraints>
 
   <knowledge>
@@ -119,6 +124,7 @@
     <criterion testable="true">grep shows IsBillingSubject is called only from DecisionCommitService (no new billing check).</criterion>
     <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE) and ontology's approval.</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+    <criterion testable="true">A unit test pins that the tool error for a `Failed` `DecisionCommitResult` lists `landed`, `possiblyLanded` and the `resumable` flag, with the same values REST returns in its D-17 extensions. Negative case: the payload contains no record text (no Detail, no field values).</criterion>
   </acceptance-criteria>
 
   <notes>Ontology condition 2; plan high-risk item 'byte-for-byte invariants through B-1'. If the PR needs a re-merge of ontology branches, merge, never rebase (condition 3).</notes>
