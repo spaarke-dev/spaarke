@@ -821,8 +821,15 @@ public record LookupNavigationMetadata
 /// <param name="IsValidForUpdate">Whether an update may set the column.</param>
 /// <param name="IsSecured">Whether the column is field-secured (column security).</param>
 /// <param name="MaxLength">A text or memo column's maximum length in characters; <c>null</c> for any other column.</param>
+/// <param name="MinValue">A number or Money column's smallest value; <c>null</c> for any other column, or when not stated.</param>
+/// <param name="MaxValue">A number or Money column's largest value; <c>null</c> for any other column, or when not stated.</param>
+/// <param name="Targets">A lookup column's target tables (logical names); <c>null</c> for any other column, or when not stated.</param>
+/// <param name="OptionValues">A choice column's option values (choice, multi-select choice, state, status); <c>null</c> for any
+/// other column, or when not stated.</param>
 public sealed record ColumnMetadata(
-    string LogicalName, string? AttributeType, bool? IsValidForUpdate, bool? IsSecured, int? MaxLength);
+    string LogicalName, string? AttributeType, bool? IsValidForUpdate, bool? IsSecured, int? MaxLength,
+    decimal? MinValue = null, decimal? MaxValue = null, IReadOnlyList<string>? Targets = null,
+    IReadOnlyList<int>? OptionValues = null);
 
 /// <summary>
 /// Analysis entity model (sprk_analysis)

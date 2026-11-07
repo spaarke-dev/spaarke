@@ -235,7 +235,7 @@ public sealed class RecordRepairColumnMetadataTests
     public async Task TextMappedIntoAWholeNumberColumn_IsNotWritten_TheRestOfTheRowIs()
     {
         _world.ColumnOverrides[("sprk_event", "sprk_priorityname")] =
-            new ColumnMetadata("sprk_priorityname", "Integer", IsValidForUpdate: true, IsSecured: false, MaxLength: null);
+            RepairWorld.Typed("sprk_priorityname", "Integer");
         var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
 
         var outcome = await _world.RepairAsync("sprk_event", id);
@@ -259,7 +259,7 @@ public sealed class RecordRepairColumnMetadataTests
             RepairWorld.CopyLookup(ClientOrganizationColumn, ClientOrganizationColumn, 1),
             RepairWorld.Expression(CreateTimeFieldMapping.MappingTypeTemplate, "{sprk_clientname}", "sprk_clientname", 2));
         _world.ColumnOverrides[("sprk_event", ClientOrganizationColumn)] =
-            new ColumnMetadata(ClientOrganizationColumn, columnType, IsValidForUpdate: true, IsSecured: false, MaxLength: null);
+            RepairWorld.Typed(ClientOrganizationColumn, columnType);
         var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
 
         var outcome = await _world.RepairAsync("sprk_event", id);
@@ -291,7 +291,7 @@ public sealed class RecordRepairColumnMetadataTests
             ExecutionOrder = 1, IsActive = true,
         });
         _world.ColumnOverrides[("sprk_event", FeeColumn)] =
-            new ColumnMetadata(FeeColumn, "Money", IsValidForUpdate: true, IsSecured: false, MaxLength: null);
+            RepairWorld.Typed(FeeColumn, "Money");
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent");
 
         var outcome = await _world.RepairAsync("sprk_event", id);
@@ -310,7 +310,7 @@ public sealed class RecordRepairColumnMetadataTests
     {
         MapAFeeDefault();
         _world.ColumnOverrides[("sprk_event", FeeColumn)] =
-            new ColumnMetadata(FeeColumn, "Money", IsValidForUpdate: true, IsSecured: false, MaxLength: null);
+            RepairWorld.Typed(FeeColumn, "Money");
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent");
 
         await _world.RepairAsync("sprk_event", id);
@@ -324,7 +324,7 @@ public sealed class RecordRepairColumnMetadataTests
     {
         MapAFeeDefault();
         _world.ColumnOverrides[("sprk_event", FeeColumn)] =
-            new ColumnMetadata(FeeColumn, "Decimal", IsValidForUpdate: true, IsSecured: false, MaxLength: null);
+            RepairWorld.Typed(FeeColumn, "Decimal");
         var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent");
 
         await _world.RepairAsync("sprk_event", id);

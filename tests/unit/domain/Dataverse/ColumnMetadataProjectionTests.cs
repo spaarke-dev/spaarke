@@ -45,6 +45,45 @@ public sealed class ColumnMetadataProjectionTests
     }
 
     [Fact]
+    public void NumberAndMoneyColumns_CarryTheirRange()
+    {
+        var columns = DataverseServiceClientImpl.ColumnMetadataOf(Entity(
+            new IntegerAttributeMetadata { LogicalName = "sprk_count", MinValue = 0, MaxValue = 1000 },
+            new DecimalAttributeMetadata { LogicalName = "sprk_rate", MinValue = -1.5m, MaxValue = 99.25m },
+            new DoubleAttributeMetadata { LogicalName = "sprk_ratio", MinValue = -100d, MaxValue = 100.5d },
+            new MoneyAttributeMetadata { LogicalName = "sprk_fee", MinValue = 0d, MaxValue = 1_000_000d }));
+
+        (columns["sprk_count"].MinValue, columns["sprk_count"].MaxValue).Should().Be((0m, 1000m));
+        (columns["sprk_rate"].MinValue, columns["sprk_rate"].MaxValue).Should().Be((-1.5m, 99.25m));
+        (columns["sprk_ratio"].MinValue, columns["sprk_ratio"].MaxValue).Should().Be((-100m, 100.5m));
+        (columns["sprk_fee"].MinValue, columns["sprk_fee"].MaxValue).Should().Be((0m, 1_000_000m));
+    }
+
+    [Fact]
+    public void ALookup_CarriesItsTargets_AndAChoice_ItsOptionValues()
+    {
+        var choice = new PicklistAttributeMetadata { LogicalName = "sprk_status", OptionSet = new OptionSetMetadata() };
+        choice.OptionSet.Options.Add(new OptionMetadata(new Microsoft.Xrm.Sdk.Label(), 100000000));
+        choice.OptionSet.Options.Add(new OptionMetadata(new Microsoft.Xrm.Sdk.Label(), 100000001));
+        var columns = DataverseServiceClientImpl.ColumnMetadataOf(Entity(
+            new LookupAttributeMetadata { LogicalName = "sprk_client", Targets = ["account", "contact"] },
+            choice));
+
+        columns["sprk_client"].Targets.Should().Equal("account", "contact");
+        columns["sprk_status"].OptionValues.Should().Equal(100000000, 100000001);
+        columns["sprk_client"].OptionValues.Should().BeNull();
+        columns["sprk_status"].Targets.Should().BeNull();
+    }
+
+    [Fact]
+    public void ADoubleBoundNoDecimalHolds_IsNotStated()
+    {
+        DataverseServiceClientImpl.ColumnMetadataOf(Entity(
+                new DoubleAttributeMetadata { LogicalName = "sprk_ratio", MinValue = double.MinValue, MaxValue = 1d }))
+            ["sprk_ratio"].MinValue.Should().BeNull();
+    }
+
+    [Fact]
     public void FlagsTheMetadataDoesNotState_StayUnknown()
     {
         var column = DataverseServiceClientImpl.ColumnMetadataOf(Entity(new StringAttributeMetadata { LogicalName = "sprk_name" }))

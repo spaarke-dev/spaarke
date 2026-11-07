@@ -430,14 +430,17 @@ internal sealed partial class RecordCreationService
                         continue;
                     }
 
-                    if (TargetColumnRefusal(targetColumns, column, value) is { } unfit)
+                    var (unfit, columnValue) = TargetColumnValue(targetColumns, column, value);
+                    if (unfit is not null || columnValue is null)
                     {
-                        // Task 052a (task 016 K-1): a value Dataverse would refuse is left out, so it cannot fail the whole update.
-                        report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column, unfit));
+                        // Task 052a (task 016 K-1; review F1): a value Dataverse would refuse is left out, so it cannot fail the
+                        // whole update.
+                        report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column,
+                            unfit ?? RecordRepairReason.MappedValueTypeMismatch));
                         continue;
                     }
 
-                    patch[column] = AsColumnValue(targetColumns[column], value)!; // TargetColumnRefusal: the column exists, the value converts
+                    patch[column] = columnValue;
                     mappedHere.Add(column);
                     report.Add(RecordRepairField.Repaired(RecordRepairPart.Mapping, column));
                 }
@@ -572,39 +575,119 @@ internal sealed partial class RecordCreationService
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Why a mapped <paramref name="value"/> is not written to <paramref name="column"/> of the row's table, or <c>null</c>: the
-    /// table has no such column or an update may not set it (unknown counts as not); the value is not of a kind the column
-    /// takes (the create path's <see cref="Fits"/>; for a Money column, a number <see cref="AsColumnValue"/> cannot make a
-    /// <see cref="Money"/> of); or the text is longer than the column.
+    /// The mapped <paramref name="value"/> as the SDK writes it to <paramref name="column"/> of the row's table, or why it is not
+    /// written (task 052a; review F1, K4) — each a refusal the SDK would otherwise give for the WHOLE update, and with it the
+    /// row's owner repair, on every pass:
+    /// <list type="bullet">
+    /// <item>the table has no such column, or an update may not set it (unknown counts as not):
+    /// <see cref="RecordRepairReason.MappedColumnNotUpdatable"/>;</item>
+    /// <item>the value is not of a kind the column takes — the create path's <see cref="Fits"/>, and for a number column a number
+    /// that does not convert to the column's exact CLR type (<see cref="AsNumber"/>):
+    /// <see cref="RecordRepairReason.MappedValueTypeMismatch"/>;</item>
+    /// <item>text longer than the column: <see cref="RecordRepairReason.MappedValueTooLong"/>;</item>
+    /// <item>a number outside the column's stated range, or a range not stated: <see cref="RecordRepairReason.MappedValueOutOfRange"/>;</item>
+    /// <item>a lookup to a table the column does not take, or targets not stated: <see cref="RecordRepairReason.MappedLookupTableNotAccepted"/>;</item>
+    /// <item>an option (or any option of a multi-select) the column does not have, or choices not stated:
+    /// <see cref="RecordRepairReason.MappedOptionNotAccepted"/>.</item>
+    /// </list>
     /// </summary>
-    private static string? TargetColumnRefusal(IReadOnlyDictionary<string, ColumnMetadata> columns, string column, object value) =>
-        !columns.TryGetValue(column, out var metadata) || metadata.IsValidForUpdate != true
-            ? RecordRepairReason.MappedColumnNotUpdatable
-            : metadata.AttributeType is not { } type || !Fits(type, value) || AsColumnValue(metadata, value) is null
-                ? RecordRepairReason.MappedValueTypeMismatch
-                : value is string text && metadata.MaxLength is { } max && text.Length > max
-                    ? RecordRepairReason.MappedValueTooLong
-                    : null;
-
-    /// <summary>
-    /// <paramref name="value"/> as the SDK writes it to a column of <paramref name="metadata"/>'s type: a number into a Money
-    /// column becomes a <see cref="Money"/> (the engine converts Default and expression values itself, #2124; a Copy keeps the
-    /// source's decimal, which the SDK refuses there); <c>null</c> for a number no Money can hold. Anything else is unchanged.
-    /// </summary>
-    private static object? AsColumnValue(ColumnMetadata metadata, object value)
+    private static (string? Refusal, object? Value) TargetColumnValue(
+        IReadOnlyDictionary<string, ColumnMetadata> columns, string column, object value)
     {
-        if (!string.Equals(metadata.AttributeType, nameof(Microsoft.Xrm.Sdk.Metadata.AttributeTypeCode.Money), StringComparison.OrdinalIgnoreCase))
-            return value;
+        if (!columns.TryGetValue(column, out var metadata) || metadata.IsValidForUpdate != true)
+            return (RecordRepairReason.MappedColumnNotUpdatable, null);
+        if (metadata.AttributeType is not { } type)
+            return (RecordRepairReason.MappedValueTypeMismatch, null);
+
+        if (IsNumberType(type))
+        {
+            if (AsNumber(type, value) is not { } number)
+                return (RecordRepairReason.MappedValueTypeMismatch, null);
+            return InRange(metadata, number) ? (null, number) : (RecordRepairReason.MappedValueOutOfRange, null);
+        }
+
+        if (!Fits(type, value))
+            return (RecordRepairReason.MappedValueTypeMismatch, null);
 
         return value switch
         {
-            Money money => money,
-            decimal number => new Money(number),
-            int whole => new Money(whole),
-            long big => new Money(big),
-            double real when double.IsFinite(real) && real >= (double)decimal.MinValue && real <= (double)decimal.MaxValue =>
-                new Money((decimal)real),
-            _ => null,
+            string text when metadata.MaxLength is { } max && text.Length > max => (RecordRepairReason.MappedValueTooLong, null),
+            EntityReference reference when metadata.Targets is not { Count: > 0 } targets
+                                           || !targets.Contains(reference.LogicalName, StringComparer.OrdinalIgnoreCase) =>
+                (RecordRepairReason.MappedLookupTableNotAccepted, null),
+            OptionSetValue option when metadata.OptionValues is not { } choices || !choices.Contains(option.Value) =>
+                (RecordRepairReason.MappedOptionNotAccepted, null),
+            OptionSetValueCollection options when metadata.OptionValues is not { } choices
+                                                  || options.Count == 0 || options.Any(o => o is null || !choices.Contains(o.Value)) =>
+                (RecordRepairReason.MappedOptionNotAccepted, null),
+            _ => (null, value),
+        };
+    }
+
+    private static bool IsNumberType(string type) => type is "Integer" or "BigInt" or "Decimal" or "Double" or "Money";
+
+    /// <summary>
+    /// A mapped number as the exact CLR type the SDK takes for a column of <paramref name="type"/> — Integer: <see cref="int"/>
+    /// (a whole number that fits), BigInt: <see cref="long"/> (likewise), Decimal: <see cref="decimal"/>, Double:
+    /// <see cref="double"/>, Money: <see cref="Money"/> (#2124: a Copy keeps the source's value, so a decimal or a Money's
+    /// amount must be converted here) — or <c>null</c> when the value is not a number or does not convert. Review K4: a conversion
+    /// that overflows is <c>null</c> too, so one extreme number skips one column, never the whole mapping.
+    /// </summary>
+    private static object? AsNumber(string type, object value)
+    {
+        decimal? exact;
+        try
+        {
+            exact = value switch
+            {
+                int whole => whole,
+                long big => big,
+                decimal number => number,
+                Money money => money.Value,
+                double real when double.IsFinite(real) => (decimal)real,
+                _ => null,
+            };
+        }
+        catch (OverflowException)
+        {
+            return null; // a double no decimal holds
+        }
+
+        if (exact is not { } amount)
+            return null;
+
+        try
+        {
+            return type switch
+            {
+                "Integer" when decimal.Truncate(amount) == amount && amount is >= int.MinValue and <= int.MaxValue => (int)amount,
+                "BigInt" when decimal.Truncate(amount) == amount && amount is >= long.MinValue and <= long.MaxValue => (long)amount,
+                "Decimal" => amount,
+                "Double" => value is double real ? real : (double)amount,
+                "Money" => new Money(amount),
+                _ => null,
+            };
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Whether a converted number lies within its column's stated range; a range not stated is not (fail closed).</summary>
+    private static bool InRange(ColumnMetadata metadata, object number)
+    {
+        if (metadata.MinValue is not { } min || metadata.MaxValue is not { } max)
+            return false;
+
+        return number switch
+        {
+            int whole => whole >= min && whole <= max,
+            long big => big >= min && big <= max,
+            decimal amount => amount >= min && amount <= max,
+            Money money => money.Value >= min && money.Value <= max,
+            double real => real >= (double)min && real <= (double)max,
+            _ => false,
         };
     }
 
@@ -1011,6 +1094,15 @@ internal static class RecordRepairReason
 
     /// <summary>Task 052a: the mapped value is not of a kind its column takes (the create path's <c>Fits</c>).</summary>
     internal const string MappedValueTypeMismatch = "record_repair.mapped_value_type_mismatch";
+
+    /// <summary>Task 052a review F1: the mapped number is outside its column's range (or the range is not stated).</summary>
+    internal const string MappedValueOutOfRange = "record_repair.mapped_value_out_of_range";
+
+    /// <summary>Task 052a review F1: the mapped lookup points at a table its column does not take (or no targets are stated).</summary>
+    internal const string MappedLookupTableNotAccepted = "record_repair.mapped_lookup_table_not_accepted";
+
+    /// <summary>Task 052a review F1: the mapped option is not one of its column's choices (or no choices are stated).</summary>
+    internal const string MappedOptionNotAccepted = "record_repair.mapped_option_not_accepted";
 
     /// <summary>UAC-r2 condition (b) F1-1: a column that decides access (the secure flag, the access record, the access
     /// inheritance, the security unit, the container) — never filled by Repair's mapping, on any table.</summary>

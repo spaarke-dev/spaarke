@@ -1750,7 +1750,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     /// <summary>
     /// The columns of <paramref name="entity"/> as <see cref="ColumnMetadata"/>, keyed by logical name (case-insensitive): the
-    /// type's name, the update and field-security flags as stated, and a text or memo column's maximum length. Pure, and
+    /// type's name, the update and field-security flags as stated, a text or memo column's maximum length, a number or Money
+    /// column's range, a lookup's target tables and a choice column's option values. Pure, and
     /// <c>public static</c> for direct testability (the <see cref="MapToDocumentEntity"/> precedent).
     /// </summary>
     public static IReadOnlyDictionary<string, ColumnMetadata> ColumnMetadataOf(Microsoft.Xrm.Sdk.Metadata.EntityMetadata? entity)
@@ -1767,11 +1768,32 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 Microsoft.Xrm.Sdk.Metadata.MemoAttributeMetadata memo => memo.MaxLength,
                 _ => null,
             };
+            (decimal? Min, decimal? Max) range = attribute switch
+            {
+                Microsoft.Xrm.Sdk.Metadata.IntegerAttributeMetadata whole => (whole.MinValue, whole.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.BigIntAttributeMetadata big => (big.MinValue, big.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.DecimalAttributeMetadata number => (number.MinValue, number.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.DoubleAttributeMetadata real => (DecimalOf(real.MinValue), DecimalOf(real.MaxValue)),
+                Microsoft.Xrm.Sdk.Metadata.MoneyAttributeMetadata money => (DecimalOf(money.MinValue), DecimalOf(money.MaxValue)),
+                _ => (null, null),
+            };
+            var targets = (attribute as Microsoft.Xrm.Sdk.Metadata.LookupAttributeMetadata)?.Targets?
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToArray();
+            var options = (attribute as Microsoft.Xrm.Sdk.Metadata.EnumAttributeMetadata)?.OptionSet?.Options?
+                .Where(o => o?.Value is not null)
+                .Select(o => o.Value!.Value)
+                .ToArray();
             columns[attribute.LogicalName] = new ColumnMetadata(
-                attribute.LogicalName, attribute.AttributeType?.ToString(), attribute.IsValidForUpdate, attribute.IsSecured, maxLength);
+                attribute.LogicalName, attribute.AttributeType?.ToString(), attribute.IsValidForUpdate, attribute.IsSecured, maxLength,
+                range.Min, range.Max, targets, options);
         }
 
         return columns;
+
+        // A double bound as a decimal; null when no decimal holds it (the reader then treats the bound as not stated).
+        static decimal? DecimalOf(double? value) =>
+            value is { } real && double.IsFinite(real) && Math.Abs(real) < 7.9e28 ? (decimal)real : null;
     }
 
     /// <summary>

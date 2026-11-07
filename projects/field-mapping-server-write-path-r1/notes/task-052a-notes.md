@@ -26,11 +26,27 @@ The first slice of task 052: it wires an app-only column-metadata reader into Re
       `record_repair.mapped_column_not_updatable`;
     - a value its column's type does not take (the create path's `Fits`) is skipped:
       `record_repair.mapped_value_type_mismatch` (coordinator ruling, 2026-11-07);
+    - a number is converted to the exact CLR type its column takes (review F1), since the SDK refuses any other:
+      - Integer → `int` (whole and in range only);
+      - BigInt → `long`;
+      - Decimal → `decimal` (a `Money` gives its amount);
+      - Double → `double`;
+      - Money → `Money`.
+
+      A number that does not convert, including a double no decimal can hold (review K4: the overflow is caught), is a
+      type mismatch;
     - text longer than `MaxLength` is skipped: `record_repair.mapped_value_too_long`;
-    - Money columns go to `ApplyFillOnly` as `moneyAttributes`, which closes #2124 on the Repair path;
-    - a number written to a Money column is written as a `Money`. The engine converts only Default and expression
-      values, so a Copy from a decimal source would otherwise send a decimal, which the SDK refuses there. A number no
-      `Money` can hold counts as a type mismatch.
+    - a number outside its column's `MinValue`/`MaxValue`, or with no range stated: `record_repair.mapped_value_out_of_range`;
+    - a lookup to a table not in the column's `Targets`, or with no targets stated:
+      `record_repair.mapped_lookup_table_not_accepted`;
+    - an option (any value of a multi-select) not in the column's `OptionValues`, or with no choices stated:
+      `record_repair.mapped_option_not_accepted`;
+    - Money columns go to `ApplyFillOnly` as `moneyAttributes`, which closes #2124 on the Repair path.
+- **Metadata projected (review F1).** `ColumnMetadata` also carries a number or Money column's range, a lookup's targets
+  and a choice column's option values. All three come from the same `RetrieveEntityRequest` answer.
+- **Test world (review F3).** `RepairWorld`'s update refuses a value whose CLR type is not the one its column's metadata
+  type takes, as the SDK does. No existing test passed only because the world accepted anything: every Repair test
+  passed against the stricter world before the review fixes, and the 16 new value tests failed against it.
 - **#2188 guard.** Only the reason text of the existing per-member entry changed. See "Guard allow-list" below.
 
 ## CLAUDE.md §11
@@ -40,6 +56,11 @@ The first slice of task 052: it wires an app-only column-metadata reader into Re
   - The create path's `TargetAttributesAsync` and `CallerMetadataReadMemo` read AS THE CALLER through
     `IDataverseUserClient`, and Repair has no caller.
   - `SecureRootInheritance.ColumnFieldSecurityAsync` reads one column's `IsSecured` through `DataverseWebApiClient`.
+  - `SecurableEntityRegistry.FetchEntityMetadataAsync` is a `RetrieveMetadataChangesRequest` filtered to the
+    `sprk_issecure` attribute, projecting logical names only (which tables can be secure, and which exist). It does not
+    read column types or flags.
+  - `UpdateRecordActionCore.ResolveEntityMetadataAsync` resolves `MetadataService` from a scope and returns its cached
+    `EntityMetadataDto`. It has the same gaps as `MetadataService`, plus the 6 h cache.
 - **Extension.** This extends the app-only reader Repair already holds (`_entities`) with one method and one projected
   record, beside `GetLookupNavigationAsync` / `LookupNavigationMetadata`. That means:
   - no new service, registration or constructor parameter;
@@ -61,6 +82,19 @@ mechanism and correct the reason, which no longer says "TODO task 033".
 
 ## Open points
 
-- **Metadata is read twice per row.** No cache. Per the coordinator, 052b adds the per-pass cache, which fits "read per
-  pass, or cached briefly".
+- **052b must not ship without a per-pass metadata cache.** Repair reads both tables' metadata, a whole-table
+  `RetrieveEntityRequest` each, for every row. The pass's cache keeps successful reads only (a fault is never kept), for
+  one pass at most, which fits UAC-r2 condition 1's "read per pass, or cached briefly". The coordinator assigned it to
+  052b.
+- **What is still not checked.** The target filter covers what the review named:
+  - existence and update validity;
+  - type and exact CLR type;
+  - text length;
+  - number range;
+  - lookup targets;
+  - option values.
+
+  Other refusals the SDK can give for a single value still fail the row's update and are reported per row as
+  `record_repair.write_failed`. Examples: a date outside the platform's range, a lookup to a row that does not exist or
+  is inactive, and a status that does not fit the row's state. These are not claimed to be handled.
 - **#2124:** close it when this reaches master.
