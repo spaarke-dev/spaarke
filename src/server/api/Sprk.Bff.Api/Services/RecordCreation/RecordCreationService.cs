@@ -377,6 +377,21 @@ internal sealed partial class RecordCreationService
         if (request.Grantor == AssignedAccessGrantor.None)
             grantorOid = null;
 
+        // Task 049c (NFR-02, option a): steps 2 and 3 read the same table metadata as the caller — step 3's merge re-reads the
+        // table's relationships and the entity sets step 2 just read. Within these two steps each such read is asked once
+        // (CallerMetadataReadMemo: schema only; access answers, record reads and failures are never kept). Step 3½, step 5
+        // (its own memo), the pre-write rules and steps 6 to 10 keep the caller's own client, so their reads are asked as before.
+        var mappingClient = user is null ? null : new CallerMetadataReadMemo(user);
+
+        // Task 049c (NFR-02, option b): step 3's reads for a source the caller NAMED depend on nothing steps 2 and 3 decide, so
+        // they start now, beside step 2, and are taken at step 3 (MappingReadsPrefetch). Refused before step 3: cancelled and
+        // awaited when this method returns, their answers dropped.
+        var callerMapping = request.Mapping;
+        await using var earlyMappingReads = NamedMappingSource(rule, request, principal) is { } namedSource
+            ? MappingReadsPrefetch.Start(namedSource,
+                token => ReadMappingInputsAsync(table, callerMapping!, mappingClient!, namedSource, token), ct)
+            : null;
+
         // ── Step 2: the table's rules — refuse a server-owned column in the CALLER's payload ────────────────────────────
         trace.Begin(RecordCreationStep.TableRules);
         DataverseWriteItemMapper.MappedItem item;
@@ -424,7 +439,7 @@ internal sealed partial class RecordCreationService
                 var webApiBody = rule.SearchIndexed
                     ? RecordTableRules.WithoutSearchIndex(webApi.Body, RecordTableRules.SearchIndexOriginCaller, indexDrops)
                     : webApi.Body;
-                var mapped = await DataverseWriteItemMapper.MapWebApiPayloadAsync(user, table, webApiBody, ct).ConfigureAwait(false);
+                var mapped = await DataverseWriteItemMapper.MapWebApiPayloadAsync(mappingClient!, table, webApiBody, ct).ConfigureAwait(false);
                 if (mapped.ValidationError is { } invalid)
                 {
                     return Decision.Refuse(new RecordCreationRefusal(
@@ -456,7 +471,8 @@ internal sealed partial class RecordCreationService
             if (request.ReferenceLookupColumns is { Count: > 0 } references)
             {
                 var checkedReferences = await DropUnusableReferencesAsync(
-                        table, user, callerSystemUserId!.Value, item, references, request.ServerSetLookupColumns, noun, referenceWarnings, ct)
+                        table, mappingClient!, callerSystemUserId!.Value, item, references, request.ServerSetLookupColumns, noun,
+                        referenceWarnings, ct)
                     .ConfigureAwait(false);
                 if (checkedReferences.Refusal is { } referenceRefusal)
                     return Decision.Refuse(referenceRefusal);
@@ -499,7 +515,8 @@ internal sealed partial class RecordCreationService
             MappingStep mapped;
             try
             {
-                mapped = await MapFieldsAsync(table, rule, request, mapping, user, callerItem, mappingWarnings, ct)
+                mapped = await MapFieldsAsync(
+                        table, rule, request, mapping, mappingClient!, callerItem, mappingWarnings, earlyMappingReads, ct)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -2083,10 +2100,16 @@ internal sealed partial class RecordCreationService
             "record numbering.");
     }
 
-    /// <summary>The step record, with one log line per step (NFR-04).</summary>
+    /// <summary>
+    /// The step record, with one log line per step (NFR-04). Task 049c (NFR-02): each line also carries the step's time, the
+    /// milliseconds since the previous step was recorded (the first: since the pipeline began), and the total so far — the
+    /// split task 021 read from the gaps between these lines, now on the line itself.
+    /// </summary>
     private sealed class StepTrace(string table, string correlationId, ILogger logger)
     {
         private readonly List<RecordCreationStepRecord> _steps = [];
+        private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+        private TimeSpan _lastRecorded = TimeSpan.Zero;
 
         /// <summary>The request's correlation id (for the logs of a step's own helpers).</summary>
         public string CorrelationId => correlationId;
@@ -2103,9 +2126,12 @@ internal sealed partial class RecordCreationService
         {
             Current = record.Step;
             _steps.Add(record);
+            var now = _clock.Elapsed;
+            var stepMs = (long)(now - _lastRecorded).TotalMilliseconds;
+            _lastRecorded = now;
             logger.Log(record.State is RecordCreationStepState.Refused or RecordCreationStepState.Failed ? LogLevel.Warning : LogLevel.Debug,
-                "[RECORD-CREATE] {Table} step {Step}: {State} {Note} (correlationId={CorrelationId})",
-                table, record.Step, record.State, record.Note, correlationId);
+                "[RECORD-CREATE] {Table} step {Step}: {State} {Note} (correlationId={CorrelationId}, stepMs={StepMs}, totalMs={TotalMs})",
+                table, record.Step, record.State, record.Note, correlationId, stepMs, (long)now.TotalMilliseconds);
         }
 
         public RecordCreationOutcome Refused(RecordCreationRefusal refusal)
