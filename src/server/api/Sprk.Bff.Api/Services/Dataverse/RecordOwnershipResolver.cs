@@ -505,7 +505,7 @@ public sealed record RecordOwnershipContext
     /// <list type="bullet">
     /// <item><c>sprk_todo</c> (fix round F1-a): the subject first, then the document carrier, then the email carrier, then the
     /// lineage order — the Office writer's "the record regarding first, then the document or email"
-    /// (<c>OfficeService.ResolveTodoOwnerTeamAsync</c>), and <c>TodoGenerationService</c> / <c>InquiryReplyTodoCreator</c>,
+    /// (<c>OfficeService.CreateTodoAsync</c>, through the unified create since field mapping task 030a), and <c>TodoGenerationService</c> / <c>InquiryReplyTodoCreator</c>,
     /// which name the regarding as the primary.</item>
     /// <item><c>sprk_signal</c> / <c>sprk_decisionrecord</c>: the typed core lookups first, then the subject, then the lineage
     /// order (<c>SignalWriter.OwnershipContextOf</c>: core, subject, stamps).</item>
