@@ -13,7 +13,7 @@
 | 002 | A10 connector client, OAuth and connector registration | 0 | 🔲 [open] | 001 | Group B | opus / high | STANDARD |
 | 003 | Run and record Phase 0 tests T0–T14, E1–E5 | 0 | 🔲 [open] | 001, 002 | Group C | sonnet / high | STANDARD |
 | 010 | B-4a ICallerContext and Dataverse client | A | 🔲 [open] | none | Group A | opus / high | FULL |
-| 011 | Contract baseline for signal, plan and decision routes | A | 🔲 [open] | none | Group A | sonnet / high | FULL |
+| 011 | Contract baseline for signal, plan and decision routes | A | ✅ [done] | none | Group A | sonnet / high | FULL |
 | 012 | B-4b thread ICallerContext through decision slice | A | 🔲 [open] | 010, 011 | Group B | opus / high | FULL |
 | 017 | B-2 one decision result mapper | A | 🔲 [open] | 011, 012 | Group C | opus / high | FULL |
 | 013 | B-1 decision capability: list and plan | A | 🔲 [open] | 011, 017 | Group D | opus / high | FULL |

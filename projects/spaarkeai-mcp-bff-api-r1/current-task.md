@@ -9,15 +9,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Pipeline Step 5 — Wave 1 (001, 010, 011) dispatched in parallel |
+| **Task** | Pipeline Step 5 — Wave 1 finished (011 done; 001 and 010 waiting on the owner) |
 | **Step** | Pipeline Steps 0–4.2 done: 28 tasks (lint clean), committed `d79bb02009`, registered Project #2608 under Epic #421 (`3e39e66f1d`) |
 | **Status** | in-progress |
-| **Next Action** | Collect Wave 1 results; build BFF (`dotnet build src/server/api/Sprk.Bff.Api/`); mark TASK-INDEX; then Wave 2 (002, 012). |
+| **Next Action** | Owner: choose 010 design (A/B/C) and give the per-SHA go for spike `5c9e301572`. Then rework 010's POML, re-dispatch 010; Wave 2 = 002 (after spike deploy) + 012 (after 010). |
 
-### Parallel Execution (Wave 1)
-- 001 spike (sonnet) — own worktree `c:/code_files/spaarke-wt-spaarkeai-mcp-phase0-spike`, branch `spike/spaarkeai-mcp-phase0` from `origin/master`; any dev deploy waits for the owner's per-SHA go.
-- 010 B-4a ICallerContext (opus, auth, FULL, 2 adversarial passes) — this worktree.
-- 011 contract baseline (sonnet) — this worktree.
+### Wave 1 outcome (2026-11-06)
+- 011 ✅ done — 63 golden contract baselines, commit `b9d8f19b47` (notes/contract-baseline.md).
+- 001 ⛔ built and verified locally on spike branch `spike/spaarkeai-mcp-phase0` @ `5c9e301572` (worktree `C:/code_files/spaarke-wt-spaarkeai-mcp-phase0-spike`, not pushed). **Waits for the owner's per-SHA deploy go** (uac-r2 session). Notes: `notes/spikes/phase0-spike-measurements.md` (commit `00c4ced7e3`).
+- 010 🔔 escalated before any code: root-created DI scopes (singleton `SprkChatAgentFactory.cs:407`) reach `DataverseUserClient` only via ambient `IHttpContextAccessor`; a strictly request-scoped `ICallerContext` would fail chat `dataverse.*` tools closed. Also AC2 vs AC5 contradict. **Owner to choose A (ambient holder) / B (copy into scopes) / C (defer).** 012 onward waits.
+- Leftover `stash@{0}` "lint-staged automatic backup" from 011's first commit attempt — owner to drop (stash ops need confirmation).
+- TASK-INDEX keeps 001/010 as [open]: the drift checker treats [blocked]/[escalated] as terminal.
 
 ### Critical Context
 - Owner chose (2026-11-06) to merge the held ontology PRs into this branch: #2580 `9423f37004` (merge `489f6508fc`) and #2579 `ab04492ab7` (merge `026b61554a`). The BFF builds with 0 warnings and 0 errors. Facts about their code: `notes/pre-pipeline-context.md`.

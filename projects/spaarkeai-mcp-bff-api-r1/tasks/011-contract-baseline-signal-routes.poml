@@ -4,7 +4,7 @@
     <title>Contract baseline for signal, plan and decision routes</title>
     <phase>A BFF rework</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies code files (.cs tests under tests/**; root CLAUDE.md §8 runs code-review and adr-check on tests/** tasks)</rigor-reason>
     <model-tier>sonnet</model-tier>
