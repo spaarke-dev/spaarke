@@ -112,5 +112,5 @@ the Term instructions starting `SNAPSHOT-TEST:`. Claude tells you when that's do
 | R1b (Topic ID line kept?) | No, stripped |
 | R5 (offered? runs without attaching?) | Yes and yes |
 | R6 (copy or link; stale signal; delete or replace and clicks) | Copy; only "Last updated" date; no delete or replace in the chat UI |
-| R7 (skill or plain chat?) | |
+| R7 (skill or plain chat?) | Skill: routed to Review contract without `/`, imported an unsaved card, ran; 19/24; edits only on Apply |
 | G1, G2 | |

@@ -142,6 +142,25 @@ Screenshots are in OneDrive `Documents/Cowork/Test/POC-Act2/screens/`. The revie
     tells cards apart.
   - **No delete or replace for a whole playbook in the chat UI.** View all › Playbooks lists the cards (name, date,
     chevron), and the open card has only per-topic Delete topic. Stale cards accumulate.
+- **R7, no slash command (2026-11-07).** In a new chat the owner attached the library `(table).docx` with the
+  paperclip and typed "Review this NDA against attached playbook".
+  - **Word routed it to Review contract on its own.** It said "I've created a playbook based on …", showed the card
+    "Spaarke NDA – Mutual v1.1" (Save and run review / Save playbook), and the owner clicked **Run review without
+    saving**. It produced the same per-topic findings, View rules and suggested edits with Apply.
+  - Nothing is applied until the user clicks Apply.
+  - **This is the answer to gap #32.** Attaching the library file each time needs no `/`, no saved card and no
+    re-import after an update, and it always uses the current library version.
+  - **Score: 19/24 vs the v1.1 key.**
+    - Now right, though R3 missed it: **reverse engineering RED** (Not acceptable). Gap #31 is intermittent, not
+      systematic.
+    - Still wrong: independent development (Needs review; key RED), compelled disclosure (Needs review; key RED),
+      non-solicit (Not acceptable ×2; key YELLOW, the dropped fallback of gap #30).
+    - Newly wrong: **purpose and limited use** (Needs review; key GREEN) and **derived data and licence-back** (Needs
+      review; key RED). This looks like the data-use clause split across two topics (gap #27).
+    - Term is Acceptable (v1.1, "2 years"). Residuals are Not acceptable, with two clean edits: the right and its
+      heading.
+  - **Same playbook content as R3 and a different rating on 3 topics**, so this is run-to-run variation (gap #29).
+    Word's single-run score is about 19–20/24 with this playbook.
 
 ## Act 3
 
