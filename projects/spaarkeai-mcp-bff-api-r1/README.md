@@ -63,7 +63,7 @@ The project is considered **complete** when (spec Success Criteria):
 
 - MCP endpoint `/mcp/legal-operations`: stateless, A10 auth, `mcp` rate-limit policy, size limit, `Mcp:Enabled` kill switch (FR-01, FR-02)
 - Tools `spaarke_show_decisions`, `spaarke_get_decision_plan`, `spaarke_search_decision_lookup`, `spaarke_complete_decision`, plus an app-only paging call (FR-03–FR-08)
-- BFF rework B-1 (capability), B-2 (result mapper), B-3 (workforce lookup search + REST route), B-4 (`ICallerContext`), B-5 (slim projection), B-6 (placement), B-7 (tool policies), B-8 (route-guard coverage), B-10 (`because`)
+- BFF rework B-1 (capability), B-2 (result mapper), B-3 (workforce lookup search + REST route), B-4 (`ICallerContext`, deferred — option C, 2026-11-07), B-5 (slim projection), B-6 (placement), B-7 (tool policies), B-8 (route-guard coverage), B-10 (`because`)
 - Widget `ui://spaarke/decisions.html` in `src/client/widgets/spaarke-decisions/`: Decide lane and Decision wizard with every parameter kind (FR-12, FR-13); text path when no widget renders (FR-14)
 - Dev-tenant registration: A10 connector client, federated connector "Spaarke", plugin package with `spaarke-decisions`, runbooks (FR-16); Spaarke AI agent fallback only if T1 requires it (FR-17)
 - Phase 0 platform tests T0–T14, E1–E5 (FR-19); docs, terminology and skill rewrites (FR-18)

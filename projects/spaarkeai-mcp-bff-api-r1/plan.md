@@ -54,7 +54,7 @@
 | Decision | Rationale | Impact |
 |----------|-----------|--------|
 | MCP host in the BFF (ADR-013 Path C) | Tools need caller OBO, the Redis ledger and `DecisionCallerRights`, which exist only in the BFF | New `Api/Mcp/`; publish size grows ~1.6 MB + widget 1–3 MB |
-| One decision capability for REST and MCP (B-1, B-2, B-4) | A second host would fork caller resolution and result mapping | `Services/Signals/` extraction; endpoints become thin adapters |
+| One decision capability for REST and MCP (B-1, B-2; B-4 deferred — option C, 2026-11-07) | A second host would fork caller resolution and result mapping | `Services/Signals/` extraction; endpoints become thin adapters |
 | Paging (FR-05): a **fifth app-only, readOnly tool** with a cursor (working name `spaarke_list_decision_page`, final name in task 022 per the naming note) | The model-visible `spaarke_show_decisions` keeps its closed schema; an app-only tool is invisible to the model | Task 022 delivers both tools |
 | Plugin package folder: `src/solutions/CopilotPlugins/spaarke/` (app manifest 1.30, `agentConnectors`, `skills/spaarke-decisions/`); runbooks in `docs/guides/` | Spec delegates the path to plan.md; mirrors `src/solutions/CopilotAgent/` without overloading it | Task 040 creates it; task 040 may move it if the build tooling requires |
 | Phase 0 on a master-based spike branch `spike/spaarkeai-mcp-phase0` (never merged) | Ontology condition 1: no dev BFF deploy from this branch until their pair deploys | Task 001 cuts it in its own worktree |
@@ -149,9 +149,9 @@ Wrap-up (090)                              — test-diet, lessons learned
 
 **Blocking dependencies:**
 - T5 (task 003) gates everything that depends on A10 working through a connector; a T5 failure stops the project and raises an ADR-028 follow-up amendment.
-- T0 gates Phase A's MCP-dependent build (020+); 010, 011 may start in parallel with Phase 0.
+- T0 gates Phase A's MCP-dependent build (020+); 011 and 017 may start in parallel with Phase 0.
 - 011 (contract baseline) BLOCKS 017, 013, 014 (no extraction before the baseline is recorded).
-- 010 → 012 → 017 → 013 → 014 run serially (shared `Services/Signals/**`); 015 and 016 follow 013.
+- 017 → 013 → 014 run serially (shared `Services/Signals/**`); 015 and 016 follow 013. 010 (MCP caller-path verification) needs 020, 021, 023, 024 and precedes 025. 012 is cancelled (option C).
 - 020 BLOCKS 021–025; 021 BLOCKS any tool reaching a live caller.
 - 030 BLOCKS 031, 032; 023 BLOCKS 032's lookup.
 - 041 (dev deploy) is BLOCKED BY ontology's #2580/#2579 pair deploying and the owner's per-SHA go.
@@ -160,7 +160,7 @@ Wrap-up (090)                              — test-diet, lessons learned
 **High-risk items:**
 - A10 OAuth through the connector (T5) — Mitigation: first live test; stop on failure.
 - Byte-for-byte invariants through B-1 — Mitigation: 011 contract baseline; ontology review; opus/high on 014.
-- `HttpContext` reach beyond the spec's list — Mitigation: B-4 split into 010 + 012.
+- `HttpContext` reach beyond the spec's list — Mitigation: option C (2026-11-07) — no decision-slice threading; MCP tools run inside the request and call the same services as REST; 010 verifies it.
 
 ---
 
@@ -188,27 +188,26 @@ Wrap-up (090)                              — test-diet, lessons learned
 ### Phase A: BFF rework (010–017)
 
 **Objectives:**
-1. Make the decision slice `HttpContext`-free behind a scoped `ICallerContext` (B-4).
+1. Keep caller resolution unchanged: MCP tools take the request `HttpContext` from `IHttpContextAccessor` (option C, 2026-11-07; B-4 `ICallerContext` deferred — spec FR-10).
 2. Extract one transport-free decision capability and one result mapper with REST byte-for-byte unchanged (B-1, B-2).
 3. Add the slim list projection and the workforce lookup search (B-5, B-3).
 
 **Deliverables:**
-- [ ] 010 B-4a `ICallerContext` (wraps `Spaarke.Core.Auth.CallerIdentity`; Principal, BearerToken, CorrelationId) populated once per request; `DataverseUserClient` and `CallerWhoAmIMemo` read it. Auth tag: FULL rigor, two adversarial passes, uac-r2 review, task 170's per-commit WhoAmI count watched (opus)
 - [ ] 011 Contract-test baseline: record current REST responses of signal list, decision plan and decision commit routes (FR-09 guard) before any extraction
-- [ ] 012 B-4b thread `ICallerContext` through `DecisionPlanReadStamp`, `Actions/DecisionParameterSources`, `Actions/DecisionActionExecutors`, `Actions/DecisionRouteCores`, `AssignTaskNotifier`, `DecisionCommitFollowUps`, `Actions/BudgetInquiryExecutor` — no `HttpContext` in decision-slice methods, behaviour unchanged
+- [ ] ~~012~~ cancelled (option C, 2026-11-07). 010 is now the MCP caller-path verification (Phase B, after 020/021/023/024; FULL rigor, uac-r2 review)
 - [ ] 017 B-2 result mapper: `SignalReadResult` / `DecisionCommitResult` → ProblemDetails or MCP `isError` + `reasonCode`, one vocabulary; every REST reason code has an MCP mapping test incl. `ontology.decision.decided_in_invoice_review`
 - [ ] 013 B-1 capability: Decide-lane list + decision plan (HttpContext-free; plan-read stamp unchanged)
 - [ ] 014 B-1 capability: commit — invariants byte-for-byte and stated in the PR; D-207 order and replay guard unchanged; ontology review (opus)
 - [ ] 015 B-5 `WorklistItemSummary` (keeps `invoiceReview`; adds `PrivilegeFlagged` to the list projection — projection only, read rules unchanged) + paging cursor (FR-05, FR-11)
 - [ ] 016 B-3 `IDecisionLookupSearch` + REST route (FR-07): plan-driven entity and scope, D-18 matter scoping, as the caller, capped, fail closed; never the external-plane policy
 
-**Critical Tasks:** 011 MUST precede 017/013/014. 010 → 012 → 017 → 013 → 014 serial.
+**Critical Tasks:** 011 MUST precede 017/013/014. 017 → 013 → 014 serial.
 
 **Inputs**: `Services/Signals/**`, `Api/Signals/**` (post-merge #2580 code), `notes/pre-pipeline-context.md` §3/§5.
 
-**Outputs**: capability layer in `Services/Signals/`, mapper, `ICallerContext`, slim projection, lookup service + route, KEEP-path tests in `tests/integration/{auth,contract,regression,data-mutation}` and `tests/unit/domain`.
+**Outputs**: capability layer in `Services/Signals/` (methods take `HttpContext`/`ClaimsPrincipal`), mapper, slim projection, lookup service + route, KEEP-path tests in `tests/integration/{auth,contract,regression,data-mutation}` and `tests/unit/domain`.
 
-**Dependencies**: ontology review on every PR touching `Services/Signals/**`, `Api/Signals/**` or the worklist route; uac-r2 review on 010.
+**Dependencies**: ontology review on every PR touching `Services/Signals/**`, `Api/Signals/**` or the worklist route; uac-r2 review on 010 (now in Phase B).
 
 ### Phase B: MCP host and tools (020–025)
 
@@ -386,7 +385,7 @@ Wrap-up (090)                              — test-diet, lessons learned
 | R7 | Contention on `AuthorizationModule.cs` and `Services/Signals/**` | Med | Med | `/conflict-check`, small PRs; ontology and uac-r2 reviews |
 | R8 | #2580 held on ebilling's Invoice Review deployment | High | Med | Code merged into this branch 2026-11-06; only the deploy gate remains (R11) |
 | R9 | A second MCP server proposed elsewhere (`Sprk.Insights.Mcp`) | Low | Med | Any further MCP area is a new `/mcp/{area}` on this host; raise if that project starts |
-| R10 | `HttpContext` reaches further than the spec's list (`DecisionCommitService` helpers, `DecisionPlanReadStamp` L42/L86, `DecisionParameterSources` L109/L404, `DecisionActionExecutors` record field `HttpContext Http` L73, `DecisionRouteCores` ×7, `AssignTaskNotifier` ×5, `DecisionCommitFollowUps` L70, `BudgetInquiryExecutor` via `IHttpContextAccessor`) | High (confirmed) | Med | B-4 split: 010 (context + Dataverse client) then 012 (thread through executors, route cores, notifier); behaviour unchanged; two adversarial passes |
+| R10 | `HttpContext` reaches further than the spec's list (`DecisionCommitService` helpers, `DecisionPlanReadStamp` L42/L86, `DecisionParameterSources` L109/L404, `DecisionActionExecutors` record field `HttpContext Http` L73, `DecisionRouteCores` ×7, `AssignTaskNotifier` ×5, `DecisionCommitFollowUps` L70, `BudgetInquiryExecutor` via `IHttpContextAccessor`) | High (confirmed) | Med | Option C (2026-11-07): no threading; capability methods take `HttpContext`; MCP tools run inside the request (stateless, `PerSessionExecutionContext=false`); 010 verifies with tests; 012 cancelled |
 | R11 | Deploy gate: no dev BFF deploy from this branch until ontology's #2580/#2579 pair has deployed | High | Med | Phase 0 on master-based `spike/spaarkeai-mcp-phase0`; Phases A–C build and test locally; 041 waits; if earlier deploy is forced, back the merge out first |
 | R12 | Privilege column gap: worklist rows (`SignalReadService`) do not select `sprk_privilegeflagged` | High (confirmed) | High | 015 (B-5) adds the column to the list projection only; read rules unchanged; FR-04 negative test |
 | R13 | `ext-apps` 2.0.4 API drift from the 1.x samples | Med | Low | Verify in 001/030 against the package types |
