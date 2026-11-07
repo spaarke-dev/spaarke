@@ -73,7 +73,8 @@ export interface RecordFamilyActionPanelProps {
   uiScale?: number;
 }
 
-const FLAG_LABELS: Readonly<Record<string, { label: string; hint: string }>> = {
+// Partial: a flag the server adds later is not in the table, and the lookup below falls back to the flag text.
+const FLAG_LABELS: Readonly<Partial<Record<string, { label: string; hint: string }>>> = {
   secure: { label: 'Secure', hint: 'Secure record: the change is a suggestion and no access is written.' },
   restricted: { label: 'Restricted', hint: 'Restricted: no contact access is granted for this change.' },
   limited: { label: 'Limited', hint: 'Limited: no organization access is granted for this change.' },
@@ -163,7 +164,8 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
   // The preview runs when the panel opens (and again if it is reopened for other rows). It writes nothing.
   React.useEffect(() => {
     if (!open) return undefined;
-    let cancelled = false;
+    // An object, not a `let`: the cleanup below flips it while the async preview below reads it.
+    const run = { cancelled: false };
     const from: IPushSource = { table: sourceTable, id: sourceId };
     setPhase({ kind: 'previewing' });
     (async () => {
@@ -194,14 +196,14 @@ export const RecordFamilyActionPanel: React.FC<RecordFamilyActionPanelProps> = (
           review.truncated = review.truncated || response.truncated;
           review.refusedCount += response.refusedChildIds.length;
         }
-        if (!cancelled) setPhase({ kind: 'review', ...review });
+        if (!run.cancelled) setPhase({ kind: 'review', ...review });
       } catch (error) {
         console.warn('[RecordFamilyActionPanel] preview failed', error);
-        if (!cancelled) setPhase({ kind: 'failed' });
+        if (!run.cancelled) setPhase({ kind: 'failed' });
       }
     })();
     return () => {
-      cancelled = true;
+      run.cancelled = true;
     };
   }, [open, rows, sourceTable, sourceId, authenticatedFetch, includeAssignedTo]);
 
