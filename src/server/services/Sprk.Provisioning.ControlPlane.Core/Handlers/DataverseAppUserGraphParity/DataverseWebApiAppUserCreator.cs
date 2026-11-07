@@ -244,6 +244,8 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
 
                 // auth-v4 §10.4 on ADOPTION too: a row whose azureactivedirectoryobjectid is not the identity's principal id
                 // (empty, or its client id) passes every existence check yet 401s every app-only call. Never rewritten here.
+                // includes disabled: this checks the ONE row H10 found by applicationid (step 1) - skipping a disabled row
+                // would create a second App User for the same identity instead of reporting the existing one.
                 var heldObjectId = OptionalId(existing[0], "azureactivedirectoryobjectid");
                 if (!string.IsNullOrWhiteSpace(request.SystemUserAzureActiveDirectoryObjectId)
                     && heldObjectId != Guid.Parse(request.SystemUserAzureActiveDirectoryObjectId))
