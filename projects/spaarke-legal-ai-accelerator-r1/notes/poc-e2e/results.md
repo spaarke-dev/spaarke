@@ -88,6 +88,43 @@ If A imports directly and B doesn't, the preamble is the trigger.
 
 Package items X1–X6 and 5-5 are in `package-backlog.md`. The remaining Word work is the focused **test set R1–R7, A/B, G1 and G2** in the runbook's Act 2. It is owed by the owner in Word desktop, and its results go here.
 
+### Word test set (owner, Word desktop, 2026-11-06/07; script `word-test-script.md`)
+
+Screenshots are in OneDrive `Documents/Cowork/Test/POC-Act2/screens/`. The reviewed copy is
+`POC-Act2/Brightwater Mutual NDA - Word review.docx`.
+
+- **P3, before.** The saved playbooks were "NDA - Mutual (Spaarke baseline)" (Nov 1, named after our MVP file's title)
+  and "Acme Mutual NDA Review Playbook" (Nov 5). There was no saved "Spaarke … v1.0", contrary to the script.
+- **R2, team library.** Attach from Cloud opens the SharePoint file picker. **Acme Company is listed under Quick
+  access**, and the owner browsed straight to `Documents › Legal Knowledge › Playbooks › NDA`.
+- **R1 = A, imported directly.** `/Review contract` → New playbook → Attach from Cloud → the new four-column
+  `Spaarke NDA – Mutual v1.1 (table).docx`. Word reported "I've created a playbook based on …" and showed a card named
+  **"Spaarke NDA – Mutual v1.1"** (from the Title), with Save and run review / Save playbook. It was not synthesised as a
+  precedent (unlike 11-05 via `/Create playbook` with the old layout).
+  - 24 topics plus **General guidelines**, which is our scope paragraph verbatim.
+  - Fields per topic are **Name / Rules / Examples**, all editable (with Delete topic): Instructions → Rules, with
+    the "Escalate if" line kept; Example Text → Examples.
+  - **Compromise Positions dropped** (gap #30).
+  - Long text is accepted.
+- **R4, save.** "Saved" shown in the card. **No file was created in OneDrive**: the saved playbook lives in Copilot's
+  own store.
+- **R3, review** with the saved v1.1. Status per topic: Acceptable / Needs review (n) / Not acceptable (n) / Not
+  relevant. **20 of 24 match the v1.1 key.**
+  - **Term GREEN** (the v1.1 change was honoured). **Representatives YELLOW is correct**; Cowork gets this wrong (gap #16).
+  - Misses:
+    - independent development: Needs review, where the key says RED. Its RED edit sits under one-sided carve-outs;
+      Word shows "This edit overlaps with…" (cf. gap #27);
+    - compelled disclosure: Needs review, key RED (it still made the full edit);
+    - reverse engineering: Not relevant, key RED (missing clause; gap #31);
+    - non-solicit: Not acceptable, key YELLOW (dropped fallback; gap #30).
+  - **Edits:** suggestions with Apply, or **Apply all › Apply edits / Apply edits with comments**. With comments:
+    **12 insertions, 17 deletions, 13 comments**, tracked and attributed to the user (Cowork Act 5: 12 revisions,
+    13 comments).
+    - Good: Effective Date "[CONFIRM EFFECTIVE DATE]" with a comment; governing law California → Delaware;
+      compelled-disclosure notice; return and destruction with certification.
+    - Over-reach: deleted the whole non-solicit (§10) and the residuals section, including headings, without
+      renumbering.
+
 ## Act 3
 
 ### Step 1: T-P13 visual probe (2026-11-05, 30 seconds)
