@@ -126,6 +126,34 @@ public sealed class CorePairAppOnlyReadTests
         }
     }
 
+    // ---- One rule per route (UAC-r2, fix round 2): a re-read fault answers what a core-read fault answers ----------------------
+    // The decision-plan, suppression and commit routes all decide through AuthorizeAsync. A fault reading the core record (a 5xx,
+    // throttling, a thrown transport fault) is the uniform NotFound (404) there, so a fault of the app-only re-read is the same 404.
+    // Known limit K (task-044 notes): a transient fault on these two reads looks like "not found", not 503.
+
+    public enum CoreReadFault { ServiceError, RateLimited, Throws }
+
+    [Theory]
+    [InlineData(DecisionLane.Do, CoreReadFault.ServiceError)]
+    [InlineData(DecisionLane.Do, CoreReadFault.RateLimited)]
+    [InlineData(DecisionLane.Do, CoreReadFault.Throws)]
+    [InlineData(DecisionLane.Decide, CoreReadFault.ServiceError)]
+    [InlineData(DecisionLane.Decide, CoreReadFault.RateLimited)]
+    [InlineData(DecisionLane.Decide, CoreReadFault.Throws)]
+    public async Task AReReadFault_GivesTheSameDecisionAsACoreReadFault(DecisionLane lane, CoreReadFault coreFault)
+    {
+        var onCoreFault = await new Rig(lane, entities => entities, callerSeesPair: true, coreFault: coreFault)
+            .Access.AuthorizeAsync(SignalId, CancellationToken.None);
+        var onReReadThrow = await new Rig(lane, entities => entities.WithCorePairReadFault(new TimeoutException("no answer")))
+            .Access.AuthorizeAsync(SignalId, CancellationToken.None);
+        var onReReadThrottle = await new Rig(lane, entities => entities.WithCorePairReadFault(new System.ServiceModel.FaultException("throttled")))
+            .Access.AuthorizeAsync(SignalId, CancellationToken.None);
+
+        onReReadThrow.Should().Be(onCoreFault, "one rule per route: a re-read fault answers what a core-read fault answers");
+        onReReadThrottle.Should().Be(onCoreFault);
+        onCoreFault.Should().Be(SignalAccessDecision.NotFound, "the core-record read's fault is the uniform 404 today (known limit K)");
+    }
+
     [Fact]
     public async Task CancellationOfTheAppOnlyRead_Propagates()
     {
@@ -158,7 +186,8 @@ public sealed class CorePairAppOnlyReadTests
         public int AppOnlySignalReads { get; private set; }
         public SignalCoreRecordAccess Access { get; }
 
-        public Rig(DecisionLane lane, Func<Mock<IGenericEntityService>, Mock<IGenericEntityService>> appOnly, bool callerSeesPair = false, bool coreReadable = true)
+        public Rig(DecisionLane lane, Func<Mock<IGenericEntityService>, Mock<IGenericEntityService>> appOnly, bool callerSeesPair = false, bool coreReadable = true,
+            CoreReadFault? coreFault = null)
         {
             var users = new Mock<IDataverseUserClient>();
             users.Setup(u => u.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -186,6 +215,16 @@ public sealed class CorePairAppOnlyReadTests
                     if (path is "WhoAmI" or "WhoAmI()")
                     {
                         return Ok(new { UserId = Guid.NewGuid().ToString("D") });
+                    }
+
+                    if (path.StartsWith("sprk_matters(", StringComparison.Ordinal) && coreFault is { } fault)
+                    {
+                        return fault switch
+                        {
+                            CoreReadFault.ServiceError => DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "unavailable"),
+                            CoreReadFault.RateLimited => DataverseUserResponse.Fail(429, DataverseUserClientErrorCodes.RateLimited, "throttled"),
+                            _ => throw new HttpRequestException("transport fault"),
+                        };
                     }
 
                     if (path.StartsWith("sprk_matters(", StringComparison.Ordinal) && !coreReadable)
