@@ -1136,6 +1136,10 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
             ExtrasCallCount++;
             return Task.FromResult(_sequence is { Count: > 0 } ? _sequence.Dequeue() : _extras);
         }
+
+        /// <summary>H10 never calls it (only H13 T3 does, for the ontology writer).</summary>
+        public Task<GraphAppRoleExtrasResult> FindAnyRolesAsync(string servicePrincipalObjectId, string tenantId, CancellationToken ct)
+            => throw new InvalidOperationException("H10 must not call FindAnyRolesAsync.");
     }
 
     private sealed class FakeRegistry : IGraphAppRolesRegistry

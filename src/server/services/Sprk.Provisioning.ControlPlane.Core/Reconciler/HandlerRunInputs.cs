@@ -295,6 +295,10 @@ public static class HandlerRunInputs
                 // T265 (#2265): T7 checks both slots carry ExternalAccess__CustomerBusinessUnitId == H10's customer unit
                 // (absent → T7 Failed, not an H13 rejection).
                 RunInput.Output(nameof(InterStepState.CustomerBusinessUnitId), required: false),
+                // T266 (#2605): T7 checks both slots carry the writer's client id; T3 that the writer holds no Graph app role
+                // (absent → T7 / T3 Failed, not an H13 rejection).
+                RunInput.Output(nameof(InterStepState.OntologyWriterClientId), required: false),
+                RunInput.Output(nameof(InterStepState.OntologyWriterObjectId), required: false),
             ],
             [HandlerIds.H14] =
             [
