@@ -4,7 +4,7 @@
     <title>B-2 one decision result mapper</title>
     <phase>A BFF rework</phase>
     <gate>after 011 (done)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; modifies 3 endpoint .cs files and adds a new mapper</rigor-reason>
     <model-tier>opus</model-tier>
@@ -110,7 +110,16 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>The mapper needs no caller context (spec FR-10 as amended 2026-11-07, option C), so it no longer waits for the cancelled 012. DecisionToolError is a plain record in Api/Signals; 020 adds Api/Mcp/McpToolResults.cs to convert it to the SDK's CallToolResult so tool tasks 022–024 share one conversion.</notes>
+  <notes>The mapper needs no caller context (spec FR-10 as amended 2026-11-07, option C), so it no longer waits for the cancelled 012. DecisionToolError is a plain record in Api/Signals; 020 adds Api/Mcp/McpToolResults.cs to convert it to the SDK's CallToolResult so tool tasks 022–024 share one conversion.
+
+Completion (2026-11-07, commit 21882337f7):
+- DecisionResultMapper (Api/Signals) maps every failure of the worklist, plan, suppression and decision routes; the three endpoint files call it and hold no mapping statics (grep: no Results.Problem, ProblemDetailsHelper or reason-code literal outside the constants). Deviations and decisions: notes/decisions.md "2026-11-07 — Task 017".
+- Tests: DecisionResultMapperTests 53 (new; did not compile before the mapper; the blank-code case failed on the pre-fix line and passes after). Signals unit suite 4181 → 4234 passed (2 skipped both runs); Signals integration suite 128 → 128 passed (2 skipped). 011 baselines 63/63 (53 route + 10 worklist), no golden-file change; seeding ("Conflicd" title in the mapper) fails the same 4 baselines 011 recorded. ArchTests 1973/1973.
+- Build: dotnet build Sprk.Bff.Api --warnaserror --no-incremental: 0 warnings, 0 errors.
+- Publish size (dotnet publish -c Release, framework-dependent linux-x64, Compress-Archive Optimal over deploy/api-publish/*, PDBs included, fresh short-path worktrees, 191 files each side): master d53d67f604 = 39.26 MB (41,162,526 B); pre-task 81bc834686 = 39.23 MB (41,139,658 B); task 21882337f7 = 39.24 MB (41,143,201 B). Task delta +3,543 B (+0.003 MB); branch vs master −0.02 MB. Under 55/60 MB. dotnet list package --vulnerable --include-transitive: no vulnerable packages.
+- Quality gates: code-review found two F-class defects, both fixed. F1: a blank reasonCode on a commit failure made ToToolError throw, so a domain failure became an exception; fixed and tested. F2: the review_invalid fix message named actions_do_not_match_plan's fix; reworded. Known limits: K4, ThrowIfNullOrWhiteSpace on ToToolError(string, int) is a guard for a caller bug, not a domain failure. K3, no must-fire seeding of the every-constant-has-a-message test. Warning (pre-existing, unchanged by the byte-for-byte constraint): Signals routes use a reasonCode extension where ADR-019's concise text says errorCode; the Finance drift is recorded in notes. adr-check: ADR-001/008/010/013/015/019/029/038 compliant; no violations.
+- Not done here: the PR for ontology review (the session brief says push only; the main session opens the PR). Ontology review is noted in the commit body.
+rework: fix-round-1 task 017</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
