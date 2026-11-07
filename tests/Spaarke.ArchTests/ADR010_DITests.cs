@@ -420,8 +420,12 @@ public class ADR010_DITests
         // (UserContextRequired, NotAllowed, InvalidParameter, Unavailable) to prove the isError mapping without standing up the Signal
         // access check and a Dataverse world; 016's own tests drive the real search. Accepted on a NAMED IMMINENT consumer (as
         // IImpersonatedRootSetSource above). Falsifiable: if 023 completes without a double of it, register the concrete and lower to 171.
-        // Observed while measuring: IDecisionCapability -> DecisionCapability (task 013) is also a 1:1 with no double and no entry here;
-        // it fitted headroom. Reported to the project rather than adjudicated in this task.
+        // ───────── Ceiling unchanged at 172, 2026-11-07 (spaarkeai-mcp-bff-api-r1 tasks 013/014; entry added, no new interface) ─────────
+        // IDecisionCapability -> DecisionCapability (task 013, commit added by 014). It entered within existing headroom, so it had no
+        // entry until now. Seam justification: design §8 B-1 makes it the single decision capability that two hosts consume (the REST
+        // routes, and the MCP tools in tasks 022–024). The tools' tests fake its outcomes to prove the isError and Partial mapping
+        // without a Dataverse world. Accepted on NAMED IMMINENT consumers, as IDecisionLookupSearch is. Falsifiable: if 022–024
+        // complete without a double of it, register the concrete and lower by 1.
         const int knownOneToOneCeiling = 172;
 
         Assert.True(
