@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
@@ -255,7 +256,7 @@ internal sealed partial class RecordCreationService
     private async Task<MappingStep> MapFieldsAsync(
         string table, RecordTableRule rule, RecordCreationRequest request, RecordCreationMapping mapping,
         IDataverseUserClient user, DataverseWriteItemMapper.MappedItem callerItem,
-        List<RecordCreationWarning> warnings, CancellationToken ct)
+        List<RecordCreationWarning> warnings, MappingReadsPrefetch? prefetched, CancellationToken ct)
     {
         var unmapped = MappingStep.Unmapped(callerItem);
         var target = CallerEntity(table, callerItem);
@@ -272,65 +273,25 @@ internal sealed partial class RecordCreationService
             return unmapped;
         }
 
-        // The profile is keyed by the two TABLES, so whether it exists says nothing about the source record.
-        FieldMappingProfileEntity? profile;
-        try
-        {
-            profile = await _appOnly
-                .GetFieldMappingProfileWithRulesAsync(source.EntityLogicalName, table, activeRulesOnly: true, ct)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[RECORD-CREATE] the field-mapping profile {Source} -> {Table} could not be read; nothing was mapped",
-                source.EntityLogicalName, table);
-            warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingUnavailableCode, null, MappingConfigurationUnreadable));
+        // Task 049c (NFR-02): the reads below depend only on the source and the two tables, never on the caller's row, so an
+        // explicitly named source has them started at step 1 (StartMappingReads) and awaited here. Same reads, same order
+        // within them, same answers; a fault surfaces here, at step 3, as before.
+        var reads = prefetched?.FitsSource(source) == true
+            ? await prefetched.Task.ConfigureAwait(false)
+            : await ReadMappingInputsAsync(table, mapping, user, source, ct).ConfigureAwait(false);
+        warnings.AddRange(reads.Warnings);
+        if (reads.Rules is not { } rules)
             return unmapped;
-        }
-
-        if (profile is null)
-            return unmapped; // no profile for the two tables: the silent no-op
-
-        var rules = (profile.Rules ?? []).Select(NormalizedRule).ToList();
-        if (rules.Count == 0)
-        {
-            warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingRuleSkippedCode, null,
-                $"Field-mapping profile \"{profile.Name}\" has no rules; nothing was applied."));
-            return unmapped;
-        }
-
-        // Task 018b-K2: a rule aimed at a column an app-only write is refused (InheritedAccessPermission.RefuseAppOnlyWrite) is
-        // dropped with a warning that names the column and the refusal code. Mapping never refuses (FR-08).
-        rules = DropAppOnlyRefusedRules(table, rules, warnings);
-        if (rules.Count == 0)
-            return unmapped;
-
-        // FR-04: Read as the caller FIRST. Missing, denied, unmapped type, a failed probe or read: ONE outcome — nothing
-        // mapped (not even a Default rule), one warning that names nothing.
-        var sourceColumns = CreateTimeFieldMapping.CollectSourceColumns(rules);
-        var read = await MappingSourceReadProbe.ReadAsync(
-                mapping.Reader, source, sourceColumns, _entities, _logger, ct)
-            .ConfigureAwait(false);
-        if (!read.Readable)
-        {
-            warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingSourceUnavailableCode, null,
-                read.Warning ?? MappingSourceReadProbe.SourceUnavailableWarning));
-            return unmapped;
-        }
 
         // #2188 (DI-004): the app-only read ignores field-level security, so it is masked down to the columns the CALLER can
-        // read (one caller read of the same row) before any rule sees it. A caller read that cannot be made or answered makes
-        // the source unavailable — the same single warning as an unreadable source, never the app-read values (FR-04).
-        // A Default-only profile read nothing, so there is nothing to mask.
+        // read (one caller read of the same row) before any rule sees it; a caller read that cannot be made or answered makes
+        // the source unavailable — the same single warning as FR-04's, never the app-read values. A Default-only profile read
+        // nothing, so there is nothing to mask. Masked here, beside the engine call, so the #2188 guard sees both.
         Entity? masked = null;
-        if (read.Record is not null)
+        if (reads.AppRead is { } appRead)
         {
             masked = await MappingSourceCallerMask
-                .ApplyAsync(user, source.EntityLogicalName, source.RecordId, read.Record, sourceColumns, _logger, ct)
+                .ApplyAsync(user, source.EntityLogicalName, source.RecordId, appRead, reads.SourceColumns, _logger, ct)
                 .ConfigureAwait(false);
             if (masked is null)
             {
@@ -340,17 +301,9 @@ internal sealed partial class RecordCreationService
             }
         }
 
-        // The target columns as the table declares them, read as the caller: its Money columns (DI-001 / #2124), and which
-        // exist and take a value on create.
-        var targetColumns = rules
-            .Select(r => r.TargetField)
-            .Where(c => c is not null && LogicalNamePattern.IsMatch(c))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        var attributes = targetColumns.Length == 0
-            ? NoAttributes
-            : await TargetAttributesAsync(user, table, targetColumns, ct).ConfigureAwait(false);
-        if (attributes is null)
+        // The target columns, read beside the source: answered only now, after the source, as when they were read after it.
+        reads.AttributesFault?.Throw();
+        if (reads.Attributes is not { } attributes)
         {
             warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingUnavailableCode, null, MappingTargetUnreadable));
             return unmapped;
@@ -399,6 +352,228 @@ internal sealed partial class RecordCreationService
         return values.Count == 0
             ? unmapped
             : await MapMergedAsync(user, table, callerItem, values, warnings, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// What step 3 reads before it maps anything (task 049c: the first half of <see cref="MapFieldsAsync"/>, moved here
+    /// unchanged so it can start early): the warnings so far, in their order, and — when there is something to map — the
+    /// profile's rules and source columns, the app-only read of a source the caller may Read (NOT yet masked: step 3 masks it,
+    /// #2188), and the target columns' answer. <see cref="Rules"/> <see langword="null"/>: nothing is mapped (the warnings say
+    /// why, as before). The target columns' answer is taken by step 3 only after the source is masked: <see cref="Attributes"/>
+    /// <see langword="null"/> with no <see cref="AttributesFault"/> is "target unreadable", a fault is rethrown there.
+    /// </summary>
+    private sealed record MappingReads(
+        IReadOnlyList<RecordCreationWarning> Warnings,
+        List<FieldMappingRuleEntity>? Rules,
+        IReadOnlyCollection<string> SourceColumns,
+        Entity? AppRead,
+        IReadOnlyDictionary<string, TargetAttribute>? Attributes,
+        ExceptionDispatchInfo? AttributesFault)
+    {
+        public static MappingReads Nothing(IReadOnlyList<RecordCreationWarning> warnings) => new(warnings, null, [], null, null, null);
+    }
+
+    /// <summary>
+    /// Step 3's reads for <paramref name="source"/>: the profile (app-only, keyed by the two tables), the source (Read as the
+    /// caller FIRST, FR-04; then app-only — step 3 masks it to what the caller may read, #2188) and the target table's columns
+    /// (as the caller). Never refuses; a fault propagates to step 3, which maps nothing (fail closed).
+    /// </summary>
+    /// <remarks>Task 049c (NFR-02): the target columns' read needs neither the source nor the caller's view of it, so it is asked
+    /// beside them — started second, so a double that answers at once sees the order it always saw. The answers are taken in
+    /// the order they always were: an unreadable source answers first (the target read is then cancelled and awaited, its
+    /// answer and fault dropped, as when it was never asked); then step 3's mask; then the target's answer.</remarks>
+    private async Task<MappingReads> ReadMappingInputsAsync(
+        string table, RecordCreationMapping mapping, IDataverseUserClient user, MappingSource source, CancellationToken ct)
+    {
+        var warnings = new List<RecordCreationWarning>();
+
+        // The profile is keyed by the two TABLES, so whether it exists says nothing about the source record.
+        FieldMappingProfileEntity? profile;
+        try
+        {
+            profile = await _appOnly
+                .GetFieldMappingProfileWithRulesAsync(source.EntityLogicalName, table, activeRulesOnly: true, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-CREATE] the field-mapping profile {Source} -> {Table} could not be read; nothing was mapped",
+                source.EntityLogicalName, table);
+            warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingUnavailableCode, null, MappingConfigurationUnreadable));
+            return MappingReads.Nothing(warnings);
+        }
+
+        if (profile is null)
+            return MappingReads.Nothing(warnings); // no profile for the two tables: the silent no-op
+
+        var rules = (profile.Rules ?? []).Select(NormalizedRule).ToList();
+        if (rules.Count == 0)
+        {
+            warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingRuleSkippedCode, null,
+                $"Field-mapping profile \"{profile.Name}\" has no rules; nothing was applied."));
+            return MappingReads.Nothing(warnings);
+        }
+
+        // Task 018b-K2: a rule aimed at a column an app-only write is refused (InheritedAccessPermission.RefuseAppOnlyWrite) is
+        // dropped with a warning that names the column and the refusal code. Mapping never refuses (FR-08).
+        rules = DropAppOnlyRefusedRules(table, rules, warnings);
+        if (rules.Count == 0)
+            return MappingReads.Nothing(warnings);
+
+        var sourceColumns = CreateTimeFieldMapping.CollectSourceColumns(rules);
+
+        // The target columns as the table declares them, read as the caller: its Money columns (DI-001 / #2124), and which
+        // exist and take a value on create.
+        var targetColumns = rules
+            .Select(r => r.TargetField)
+            .Where(c => c is not null && LogicalNamePattern.IsMatch(c))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        // FR-04: Read as the caller FIRST, then app-only. Missing, denied, unmapped type, a failed probe or read: ONE outcome —
+        // nothing mapped (not even a Default rule), one warning that names nothing.
+        using var attributesCancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var sourceTask = MappingSourceReadProbe.ReadAsync(mapping.Reader, source, sourceColumns, _entities, _logger, ct);
+        var attributesTask = targetColumns.Length == 0
+            ? Task.FromResult<IReadOnlyDictionary<string, TargetAttribute>?>(NoAttributes)
+            : TargetAttributesAsync(user, table, targetColumns, attributesCancel.Token);
+
+        MappingSourceRead read;
+        try
+        {
+            read = await sourceTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            await NotTakenAsync(attributesCancel, attributesTask).ConfigureAwait(false);
+            throw;
+        }
+
+        if (!read.Readable)
+        {
+            await NotTakenAsync(attributesCancel, attributesTask).ConfigureAwait(false);
+            warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingSourceUnavailableCode, null,
+                read.Warning ?? MappingSourceReadProbe.SourceUnavailableWarning));
+            return MappingReads.Nothing(warnings);
+        }
+
+        // Awaited here, so nothing of it is in flight when the reads answer; its answer (a fault included) is taken by step 3
+        // after the source is masked, in the order it always was.
+        try
+        {
+            var attributes = await attributesTask.ConfigureAwait(false);
+            return new MappingReads(warnings, rules, sourceColumns, read.Record, attributes, null);
+        }
+        catch (Exception ex)
+        {
+            return new MappingReads(warnings, rules, sourceColumns, read.Record, null, ExceptionDispatchInfo.Capture(ex));
+        }
+    }
+
+    /// <summary>A read whose answer is not taken (an earlier answer in the fixed order decided): cancelled and awaited, so
+    /// nothing of it is still in flight when the step answers; its answer and its fault are dropped.</summary>
+    private static async Task NotTakenAsync(CancellationTokenSource cancel, Task read)
+    {
+        if (!read.IsCompleted)
+            await cancel.CancelAsync().ConfigureAwait(false);
+        await SettledAsync(read).ConfigureAwait(false);
+    }
+
+    /// <summary>Waits for a check whose answer is not taken, so nothing it asks is still in flight after the step answers; its
+    /// answer and its fault are dropped.</summary>
+    private static async Task SettledAsync(Task task)
+    {
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch
+        {
+            // Not taken: an earlier answer in the fixed order decided the step.
+        }
+    }
+
+    /// <summary>
+    /// Task 049c (NFR-02, option b): step 3's reads (<see cref="ReadMappingInputsAsync"/>) started at step 1, beside step 2,
+    /// for a source the caller NAMED (an explicit <c>mappingSource</c>, which the resolver takes whole, whatever the row
+    /// holds): they read the source and the two tables only, never the caller's row or another step's answer.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Nothing decided early.</b> The reads only read. Their answers (warnings included) are taken at step 3, in step
+    /// order, so a refusal at step 2 answers exactly as before, and a fault surfaces at step 3 as before (nothing mapped).</para>
+    /// <para><b>A create refused before step 3</b> made these reads for nothing: they are cancelled and awaited
+    /// (<see cref="DisposeAsync"/>), so nothing of them runs after the answer, and their answers are dropped. The source is read
+    /// app-only only after the caller's Read allowed it (FR-04), so nothing the caller could not read is read for them.</para>
+    /// </remarks>
+    private sealed class MappingReadsPrefetch : IAsyncDisposable
+    {
+        private readonly CancellationTokenSource _cancel;
+        private readonly MappingSource _source;
+
+        private MappingReadsPrefetch(CancellationTokenSource cancel, MappingSource source, Task<MappingReads> task)
+        {
+            _cancel = cancel;
+            _source = source;
+            Task = task;
+        }
+
+        /// <summary>The reads, in flight or answered.</summary>
+        public Task<MappingReads> Task { get; }
+
+        /// <summary>Started for <paramref name="source"/>: the source step 3 resolved.</summary>
+        public bool FitsSource(MappingSource source) => _source == source;
+
+        public static MappingReadsPrefetch Start(
+            MappingSource source, Func<CancellationToken, Task<MappingReads>> read, CancellationToken ct)
+        {
+            var cancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            return new MappingReadsPrefetch(cancel, source, read(cancel.Token));
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (!Task.IsCompleted)
+                _cancel.Cancel();
+            try
+            {
+                await Task.ConfigureAwait(false);
+            }
+            catch
+            {
+                // Not taken (a refusal or a fault before step 3), or already surfaced at step 3: dropped here.
+            }
+
+            _cancel.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Task 049c: the explicitly named mapping source of a caller's create, when step 3 would read one whatever the row holds
+    /// (so its reads may start at step 1), else <see langword="null"/>: no mapping, a table that is not mapped, a system
+    /// principal, a source not named whole, or a server-set lookup (whose K-2 guard may refuse before step 3 reads anything).
+    /// </summary>
+    private static MappingSource? NamedMappingSource(
+        RecordTableRule rule, RecordCreationRequest request, RecordCreationPrincipal principal)
+    {
+        if (rule.MappingExclusion is not null || request.Mapping is not { } mapping
+            || principal is not RecordCreationPrincipal.CallerPrincipal || request.ServerSetLookupColumns is { Count: > 0 }
+            || string.IsNullOrWhiteSpace(mapping.SourceTable) || mapping.SourceId is null)
+        {
+            return null;
+        }
+
+        // The resolver's own first rule (explicit wins, whole or not at all), with no row: it reads nothing for this.
+        var explicitOnly = MappingSourceResolver.ResolveAsync(
+            request.Table.Trim().ToLowerInvariant(), mapping.SourceTable, mapping.SourceId, [],
+            static (_, _) => Task.FromResult<string?>(null), CancellationToken.None);
+        return explicitOnly.IsCompletedSuccessfully
+               && explicitOnly.Result is { Origin: MappingSourceOrigin.Explicit, Source: { } named }
+            ? named
+            : null;
     }
 
     /// <summary>
@@ -478,16 +653,34 @@ internal sealed partial class RecordCreationService
         // The caller's own values first, exactly task 013's one check: a failure refuses unchanged and a fault propagates
         // (NFR-01). Fix round 1 (review K-3): asked whole first, a mapped lookup could complete a caller's untyped pair that
         // is refused without mapping — no mapped value may make the caller's own payload pass.
-        var callersOwn = await CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, callerItem, serverSetLookupColumns, ct)
-            .ConfigureAwait(false);
+        //
+        // Task 049c (NFR-02, option b): the two checks read only the input, never each other's answer, so they are asked
+        // together (started in this order) and their answers are taken in this order, as before: the caller's own first — its
+        // refusal answers and its fault propagates, whatever the merged check came to (that answer is then dropped, unread, as
+        // when it was never asked) — then the merged row's. Nothing is written before both have returned.
+        var callersOwnCheck = CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, callerItem, serverSetLookupColumns, ct);
+        var wholeCheck = CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, merged, serverSetLookupColumns, ct);
+        OwnedChildWrite.Outcome callersOwn;
+        try
+        {
+            callersOwn = await callersOwnCheck.ConfigureAwait(false);
+        }
+        catch
+        {
+            await SettledAsync(wholeCheck).ConfigureAwait(false);
+            throw;
+        }
+
         if (!callersOwn.Succeeded)
+        {
+            await SettledAsync(wholeCheck).ConfigureAwait(false);
             return MappingStep.Refused(CallerCheckRefused(callersOwn, noun));
+        }
 
         OwnedChildWrite.Outcome? whole;
         try
         {
-            whole = await CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, merged, serverSetLookupColumns, ct)
-                .ConfigureAwait(false);
+            whole = await wholeCheck.ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

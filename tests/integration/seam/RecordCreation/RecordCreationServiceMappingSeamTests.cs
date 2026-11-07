@@ -102,6 +102,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         .SecureRoot("sprk_matter", SecureMatter);
     private readonly RecordingPublisher _publisher = new();
     private Exception? _profileFault;
+
+    /// <summary>Task 049c: the app-only reads' and the owner resolver's round trips (delayed doubles); zero, as before.</summary>
+    private TimeSpan _appOnlyDelay;
+    private TimeSpan _ownerDelay;
     private Func<string, RecordTableRule?> _tableRules = RecordTableRules.Find;
     private Func<SecureRootFilingGate> _rootFiling = SecureRootFilingGateFixtures.NothingSecure;
 
@@ -143,17 +147,17 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         _appOnly
             .Setup(a => a.GetFieldMappingProfileWithRulesAsync(It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
-            .Returns((string source, string target, bool _, CancellationToken _) =>
+            .Returns((string source, string target, bool _, CancellationToken _) => AppOnlyRoundTrip(() =>
             {
                 _journal.Add("profile");
                 if (_profileFault is { } fault)
                     throw fault;
                 return Task.FromResult(_profiles.GetValueOrDefault((source, target)));
-            });
+            }));
 
         _sourceReader
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) => AppOnlyRoundTrip(() =>
             {
                 // Task 039 (FR-38): step 8 now runs on event / work assignment / invoice too and reads the owning team's business
                 // unit (and that unit's index defaults) through the same app reader. Those two reads are not mapping-source reads:
@@ -181,7 +185,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                 foreach (var column in columns.Where(row.Attributes.ContainsKey))
                     read[column] = row[column];
                 return Task.FromResult(read);
-            });
+            }));
 
         // The target tables' columns as their metadata declares them (read as the caller).
         _user.Columns["sprk_event"] = new()
@@ -734,7 +738,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         StringOf(fields, "sprk_AssignedTo@odata.bind").Should().Be($"/contacts({Assignee:D})", "a readable lookup is copied");
         outcome.MappingWarnings.Should().BeEmpty("a hidden column looks exactly like an empty one: a Copy skips it silently");
         _callerRead.Paths.Should().Equal($"sprk_matters({OrdinaryMatter:D})");
-        _journal.Should().ContainInOrder("probe", "source-read", "user:source-read", "user:columns", "owner", "create");
+        _journal.Should().ContainInOrder("probe", "source-read", "user:source-read", "owner", "create");
+        // Task 049c: the target columns' read is independent of the source and is asked beside it, so it is no longer pinned
+        // after the mask; it still precedes the owner and the write.
+        _journal.Should().ContainInOrder("user:columns", "owner", "create");
     }
 
     [Theory]
@@ -923,10 +930,15 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         Profile("sprk_matter", "sprk_event",
             Rule(null, RecordCreatorPerson.Column, Text, Default, "someone"), // a protected target: skipped
             Rule("sprk_matterdescription", "sprk_eventcode", Text), // not valid for create: dropped
-            Rule("sprk_matterdescription", "sprk_description", Memo));
+            Rule("sprk_matterdescription", "sprk_description", Memo),
+            Rule("sprk_assignedtointernal", "sprk_assignedto", Lookup));
+
+        // Task 049c: step 3's merge no longer re-reads the relationships and entity sets step 2 read (one create's metadata
+        // reads are asked once within steps 2 and 3), so the fault is put on the one read step 3 still makes after the rule was
+        // skipped and the value dropped: the entity set of the mapped lookup's table, which step 2 never read.
         _user.ThrowOn = path => _sourceReads.Count > 0
-                                && (path.Contains("ManyToOneRelationships", StringComparison.Ordinal)
-                                    || path.Contains("EntitySetName", StringComparison.Ordinal))
+                                && path.Contains("EntitySetName", StringComparison.Ordinal)
+                                && path.Contains("'contact'", StringComparison.Ordinal)
             ? new TimeoutException("metadata read timed out at 10.0.0.9")
             : null;
 
@@ -1143,7 +1155,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         var shares = SecureChildShareWorld.SynchronizerOver(() => _shareWorld, new FakeRecordShareTable());
 
         return new RecordCreationService(
-            new JournalingResolver(_world.Resolver(null), _journal), _appOnly.Object, _sourceReader.Object,
+            new JournalingResolver(_world.Resolver(null), _journal, _ownerDelay), _appOnly.Object, _sourceReader.Object,
             _rootFiling(), restamper, shares,
             _scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _publisher,
             _logger ?? NullLogger<RecordCreationService>.Instance)
@@ -1299,7 +1311,36 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         [GeneratedRegex(@"LogicalName eq '(?<c>[a-z0-9_]+)'")]
         private static partial Regex AttributeNamed();
 
-        public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
+        /// <summary>
+        /// Task 049c: a read's round trip, by its (unescaped) path — a delayed double for the timing tests. None (the default)
+        /// or zero answers at once, as before; otherwise the read waits this long, concurrently with other reads, and is then
+        /// answered one at a time (the scripted world behind it is not thread-safe).
+        /// </summary>
+        public Func<string, TimeSpan>? DelayOf { get; set; }
+
+        private readonly SemaphoreSlim _answering = new(1, 1);
+
+        public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
+            DelayOf?.Invoke(Uri.UnescapeDataString(relativePath)) is { } delay && delay > TimeSpan.Zero
+                ? DelayedGetAsync(relativePath, delay, cancellationToken)
+                : AnswerGetAsync(relativePath, cancellationToken);
+
+        private async Task<DataverseUserResponse> DelayedGetAsync(string relativePath, TimeSpan delay, CancellationToken cancellationToken)
+        {
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            await _answering.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                lock (journal)
+                    return AnswerGetAsync(relativePath, cancellationToken).GetAwaiter().GetResult();
+            }
+            finally
+            {
+                _answering.Release();
+            }
+        }
+
+        private Task<DataverseUserResponse> AnswerGetAsync(string relativePath, CancellationToken cancellationToken)
         {
             var path = Uri.UnescapeDataString(relativePath);
             journal.Add(KindOf(path));
@@ -1358,28 +1399,61 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     {
         public List<(string? Token, string EntitySet, Guid Id)> Asked { get; } = [];
 
+        /// <summary>Task 049c: the probe's round trip (a delayed double); zero answers at once, as before.</summary>
+        public TimeSpan Delay { get; set; }
+
         public override Task<AccessRights> GetCallerRightsAsync(
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
-            journal.Add("probe");
-            Asked.Add((callerBearerToken, entitySet, recordId));
-            return Task.FromResult(rightsOn(recordId));
+            return Delay > TimeSpan.Zero ? DelayedAsync() : Task.FromResult(Answer());
+
+            AccessRights Answer()
+            {
+                lock (journal)
+                {
+                    journal.Add("probe");
+                    Asked.Add((callerBearerToken, entitySet, recordId));
+                }
+
+                return rightsOn(recordId);
+            }
+
+            async Task<AccessRights> DelayedAsync()
+            {
+                await Task.Delay(Delay, ct).ConfigureAwait(false);
+                return Answer();
+            }
         }
     }
 
     /// <summary>The REAL resolver, journaled.</summary>
-    private sealed class JournalingResolver(IRecordOwnershipResolver inner, List<string> journal) : IRecordOwnershipResolver
+    private sealed class JournalingResolver(IRecordOwnershipResolver inner, List<string> journal, TimeSpan delay = default)
+        : IRecordOwnershipResolver
     {
         public Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct)
         {
-            journal.Add("owner");
+            lock (journal)
+                journal.Add("owner");
             return inner.ResolveOwningTeamAsync(context, ct);
         }
 
         public Task<RecordOwnerResolution> ResolveOwnerAsync(RecordOwnershipContext context, CancellationToken ct)
         {
-            journal.Add("owner");
-            return inner.ResolveOwnerAsync(context, ct);
+            return delay > TimeSpan.Zero ? DelayedAsync() : Answer();
+
+            Task<RecordOwnerResolution> Answer()
+            {
+                lock (journal)
+                    journal.Add("owner");
+                return inner.ResolveOwnerAsync(context, ct);
+            }
+
+            // Task 049c: the resolver's reads as one round trip (a delayed double); zero answers at once, as before.
+            async Task<RecordOwnerResolution> DelayedAsync()
+            {
+                await Task.Delay(delay, ct).ConfigureAwait(false);
+                return await Answer().ConfigureAwait(false);
+            }
         }
 
         public Task<RecordOwnerResolution> ReparentAsync(
