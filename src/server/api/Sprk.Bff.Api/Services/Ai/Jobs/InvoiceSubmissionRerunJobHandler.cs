@@ -60,7 +60,8 @@ namespace Sprk.Bff.Api.Services.Ai.Jobs;
 /// re-mapped (ontology Q2), the shared Signal closed ConditionCleared and linked to the assign-firm record when no hold reason is left (Q1, T19),
 /// and the stored state moved on from <see cref="InvoiceSubmissionRerun.StateCommitted"/> to <see cref="InvoiceSubmissionRerun.StateDone"/>
 /// last. They never write a hold, so a Signal fault leaves the hold as the commit left it: Done is Success, Retry is a retry (dead-lettered on
-/// the final delivery for a replay, the state still committed), Refused is Poisoned (Permanent=true).</para>
+/// the final delivery for a replay, the state still committed, with its own operator log: the commit is applied and the after-commit steps are
+/// incomplete), Refused is Poisoned (Permanent=true). Until the state is done the firm gate refuses decisions as re-run pending (EB-D-204).</para>
 /// </remarks>
 public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
 {
@@ -259,7 +260,7 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
         {
             _logger.LogWarning("Re-run job {JobId}: the totals of invoice {InvoiceId} failed after the commit ({ExceptionType}); a retry recomputes them",
                 job.JobId, invoiceId, ex.GetType().Name);
-            return Transient(job, InvoiceSubmissionPersister.TotalsFailedCode, stopwatch);
+            return AfterCommitTransient(job, InvoiceSubmissionPersister.TotalsFailedCode, stopwatch);
         }
 
         InvoiceSubmissionRerunSignalsResult signals;
@@ -271,7 +272,7 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
         {
             _logger.LogWarning("Re-run job {JobId}: the Signal steps of submission {SubmissionId} faulted ({ExceptionType}); the state stays committed for a retry",
                 job.JobId, submissionId, ex.GetType().Name);
-            return Transient(job, InvoiceSubmissionRerun.SignalsUnavailableCode, stopwatch);
+            return AfterCommitTransient(job, InvoiceSubmissionRerun.SignalsUnavailableCode, stopwatch);
         }
 
         switch (signals.Status)
@@ -291,11 +292,12 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
 
             case InvoiceSubmissionRerunSignalsStatus.Retry:
             default:
-                return Transient(job, signals.Code, stopwatch);
+                return AfterCommitTransient(job, signals.Code, stopwatch);
         }
     }
 
-    /// <summary>A transient outcome: Failure (the broker redelivers) until the final delivery, then Poisoned (dead-letter). Nothing was written.</summary>
+    /// <summary>A transient outcome BEFORE the commit (the re-run wrote nothing): Failure (the broker redelivers) until the final delivery, then
+    /// Poisoned (dead-letter); the marker keeps the invoice held for a replay.</summary>
     private JobOutcome Transient(JobContract job, string code, Stopwatch stopwatch)
     {
         if (!job.IsFinalDelivery)
@@ -304,6 +306,22 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
         }
 
         _logger.LogError("Re-run job {JobId}: the final delivery failed ({Code}); the invoice stays held and the message is dead-lettered for a replay",
+            job.JobId, code);
+        return JobOutcome.Poisoned(job.JobId, JobType, code, job.Attempt, stopwatch.Elapsed);
+    }
+
+    /// <summary>A transient outcome AFTER the commit (the totals or the Signal steps did not finish; the commit stands and the stored state stays
+    /// <see cref="InvoiceSubmissionRerun.StateCommitted"/>): Failure until the final delivery, then Poisoned (dead-letter). Until a replay finishes
+    /// the steps the firm gate keeps the invoice's decisions refused as re-run pending (EB-D-204); the replay reads AlreadyCompleted and runs only
+    /// the after-commit steps.</summary>
+    private JobOutcome AfterCommitTransient(JobContract job, string code, Stopwatch stopwatch)
+    {
+        if (!job.IsFinalDelivery)
+        {
+            return JobOutcome.Failure(job.JobId, JobType, code, job.Attempt, stopwatch.Elapsed);
+        }
+
+        _logger.LogError("Re-run job {JobId}: the final delivery failed after the commit ({Code}); the commit is applied, the after-commit steps (totals, Signals) are incomplete and decisions stay refused as re-run pending; the message is dead-lettered and a replay finishes them",
             job.JobId, code);
         return JobOutcome.Poisoned(job.JobId, JobType, code, job.Attempt, stopwatch.Elapsed);
     }
