@@ -71,7 +71,7 @@
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 040 | [Push on the canonical engine + preview / Assigned To / pair edges](040-push-on-canonical-engine.poml) | FR-23, FR-34, FR-35 (actions) | sonnet / xhigh | FULL | W4 | 001, 005, 019, 070, 071; UAC 195 | 🔲 |
+| 040 | [Push on the canonical engine + preview / Assigned To / pair edges](040-push-on-canonical-engine.poml) | FR-23, FR-34, FR-35 (actions) | sonnet / xhigh | FULL | W4 | 001, 005, 019, 070, 071; UAC 195 | 🔄 merged into the work branch with 075 (f77e83a91f; review + fix rounds 1-2 + scoped re-checks clean); master PR next |
 
 ## Phase 5 — W5 Records created outside the product
 
@@ -100,7 +100,7 @@
 | 072 | [GET /records/{table}/{id}/family](072-record-family-endpoint.poml) | FR-31 | sonnet / high | FULL | W7-B | 071 | ✅ [done] #2459 |
 | 073 | [RecordFamilyModal (shared UI)](073-record-family-modal.poml) | FR-32 | sonnet / high | FULL | W7-A | none | ✅ [done] #2366 |
 | 074 | [TrackingFieldTrio Family tool](074-trackingfieldtrio-family-tool.poml) | FR-33 | sonnet / high | FULL | W7-C | 073 | ✅ [done] #2383 |
-| 075 | [Push Updates ribbon opens the Family view](075-push-ribbon-opens-family-view.poml) | FR-35 | sonnet / high | FULL | W7-C | 073 (build); merges with 040 | 🔲 [open] |
+| 075 | [Push Updates ribbon opens the Family view](075-push-ribbon-opens-family-view.poml) | FR-35 | sonnet / high | FULL | W7-C | 073 (build); merges with 040 | 🔄 merged into the work branch with 040 (f77e83a91f); #2387 superseded by the combined master PR; deploy the sprk_recordfamily page before sprk_fieldmapping_push.js v1.3.0 (076) |
 | 076 | [W7 deploy + live Family check](076-w7-deploy-and-live-check.poml) | FR-29–FR-33, FR-35 | sonnet / high | FULL | none | 072, 074, 038 | 🔲 [open] |
 
 ## Wrap-up
