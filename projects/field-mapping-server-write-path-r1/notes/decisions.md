@@ -912,3 +912,16 @@ The send/reply thread read needs Basic. Record threads are owned by their record
 - The system creators of task 033 (generation, playbook, Signal, Decision) stay outside `RecordCreationService` as named exceptions under the W3 direction; ontology-r1 agreed that leaving the ledger writers out is valid. No field mapping goes into Signal or Decision Record rows.
 - 033's one piece another task needed (wiring the app-only column-metadata reader into Repair, including the Money attributes of #2124) moves into task 052.
 - Task 060's matrix names these creators as exceptions with guards.
+
+## 2026-11-07 — UAC-r2 review of the 032 design (`task/fm-032` a7b787ffbe): approved with conditions
+
+Binding on 032's implementation, together with ebilling-r1's answers (pending):
+- **Reader set (Q-U1):** a role-source assertion in `FeatureRolePrivilegeGuardTests` pins that `sprk_invoice` Read depth is never wider than the smallest core-table Read depth, so a widening fails CI.
+- **Partner columns (Q-U2):** the protected targets are the union of the invoice modules' `ReadableColumns`, plus the columns the invoice search-index document builder reads, unless ebilling-r1 shows partners have no search path to invoices. Ebilling-r1 confirms that partner notifications and exports render only module columns (Q-E5).
+- **#2188 exemption (Q-U3):** one entry, `Uses = 1`, pinned to the system-reader call site.
+- **Field security (Q-U4):**
+  - a metadata fault or an unknown `IsSecured` maps nothing;
+  - a source column missing from a successful metadata answer drops only its rule, with a Warning naming the rule;
+  - metadata is read per delivery, with no cache.
+- **Secure-source gate (Q-U5), required:** map nothing when the core record is Secure, or under no-access or hard-deny. Reuse Repair's `SourceMayBeCopiedAsync` logic, not a re-implementation. Tests: a Secure core maps nothing and writes the admin note (must fire); an ordinary core maps (must not fire).
+- **Mapped lookups (Q-U6):** written app-only with no AppendTo check, accepted. Filing and access-conferring lookups stay protected. Lookups that target `systemuser`, `team` or `contact` are protected too, unless they are on an explicit allow-list.
