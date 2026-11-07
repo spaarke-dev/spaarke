@@ -1320,10 +1320,34 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         private readonly SemaphoreSlim _answering = new(1, 1);
 
+        /// <summary>
+        /// Task 049c (fix round 1): an ordering hook, awaited before a read is answered (with the read's own token): a gate
+        /// double, so a test can hold one read until another is in flight, or see that a read was cancelled.
+        /// </summary>
+        public Func<string, CancellationToken, Task>? BeforeAnswer { get; set; }
+
         public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
-            DelayOf?.Invoke(Uri.UnescapeDataString(relativePath)) is { } delay && delay > TimeSpan.Zero
-                ? DelayedGetAsync(relativePath, delay, cancellationToken)
-                : AnswerGetAsync(relativePath, cancellationToken);
+            BeforeAnswer is { } gate
+                ? GatedGetAsync(gate, relativePath, cancellationToken)
+                : DelayOf?.Invoke(Uri.UnescapeDataString(relativePath)) is { } delay && delay > TimeSpan.Zero
+                    ? DelayedGetAsync(relativePath, delay, cancellationToken)
+                    : AnswerGetAsync(relativePath, cancellationToken);
+
+        private async Task<DataverseUserResponse> GatedGetAsync(
+            Func<string, CancellationToken, Task> gate, string relativePath, CancellationToken cancellationToken)
+        {
+            await gate(Uri.UnescapeDataString(relativePath), cancellationToken).ConfigureAwait(false);
+            await _answering.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                lock (journal)
+                    return AnswerGetAsync(relativePath, cancellationToken).GetAwaiter().GetResult();
+            }
+            finally
+            {
+                _answering.Release();
+            }
+        }
 
         private async Task<DataverseUserResponse> DelayedGetAsync(string relativePath, TimeSpan delay, CancellationToken cancellationToken)
         {

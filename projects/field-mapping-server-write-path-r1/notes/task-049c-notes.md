@@ -206,3 +206,34 @@ trigger moved to the read that step 3 still makes after the skip and the drop (3
      create live), inside the NFR-02 budget the owner kept.
 - **ADR-009:** no cache was added. The memo's scope grew from step 5 to steps 2–3 (a second instance), within one create,
   schema only (Path C as recorded in 049 Part C).
+
+## 8. Fix round 1 (review findings)
+
+1. **F3 - the CallerChecks bound.** The bound `RoundTrip * 6` passed the sequential code too (328 ms against 600 ms). Three
+   runs each way, 100 ms round trips: CallerChecks 327, 326, 329 ms with the checks asked one after the other, 218, 216, 219
+   ms asked together. The bound is now `RoundTrip * 2.7` (270 ms, the midpoint: about half a round trip either side).
+   Reverting the overlap (the merged check started after the caller's own returns) fails it: "Expected ... to be less than
+   270ms ... CallerChecks=328ms". The remark in the test file now gives the real margins (FieldMapping 5 round trips is
+   about 1.7 above the measured 326 ms and 3.7 below the sequential 869 ms). The overlap is also pinned without a clock:
+   `CreatePath_StepFiveChecks_AreInFlightTogether_...` holds the caller's own first read of the matter until the merged
+   check's read of the mapped contact is in flight (a new `BeforeAnswer` gate on the fixture's user double); on sequential
+   code the hold runs out after 3 s and the test fails. `CreatePath_TwoChecksWouldFail_...` also fails on sequential code
+   (the merged check is never asked), so it pins the overlap as well.
+2. **K - the merged check is cancelled when the caller's own check refuses or faults** (`CheckMergedPayloadAsync`). Both
+   checks take a token linked to the request's; on the refuse and fault paths the link is cancelled (`NotTakenAsync`, as
+   step 3 does) before the merged check is waited for. The answer is unchanged: the caller's own refusal or fault answers
+   first; the cancellation is dropped with the merged check's answer; only the request's own cancellation propagates.
+   Test `CreatePath_WhenTheCallersOwnCheckRefuses_TheMergedCheckIsCancelled_AndTheRefusalIsUnchanged` holds the merged
+   check's read of a mapped lookup's record, and asserts the refusal equals the unmapped run's and the held read saw
+   cancellation. Fails before the change (the held read runs its full 3 s, not cancelled).
+3. **Trivial.** A comment named `StartMappingReads`; it now says `MappingReadsPrefetch.Start`.
+
+Known limits (recorded, not fixed here):
+
+- **(K)** A create refused at step 2 still runs the early mapping reads it never needs: an app-only profile read, a Read
+  probe and, when allowed, an app-only source read that is thrown away; up to three log lines; and read-audit noise on the
+  source table when auditing is on. No data is fetched before the probe allows it; nothing is cached, returned or written.
+- **(K)** The order in which access questions are asked changed: the FR-04 Read probe is now asked before the step-2 checks.
+  The answer precedence is unchanged. UAC-r2's acknowledgement is being sought by the main session.
+- **(K4)** The timing tests use wall-clock bounds (the CallerChecks and FieldMapping ones); the two ordering tests above do
+  not.

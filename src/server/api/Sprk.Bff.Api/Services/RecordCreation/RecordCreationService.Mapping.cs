@@ -274,7 +274,7 @@ internal sealed partial class RecordCreationService
         }
 
         // Task 049c (NFR-02): the reads below depend only on the source and the two tables, never on the caller's row, so an
-        // explicitly named source has them started at step 1 (StartMappingReads) and awaited here. Same reads, same order
+        // explicitly named source has them started at step 1 (MappingReadsPrefetch.Start) and awaited here. Same reads, same order
         // within them, same answers; a fault surfaces here, at step 3, as before.
         var reads = prefetched?.FitsSource(source) == true
             ? await prefetched.Task.ConfigureAwait(false)
@@ -658,8 +658,14 @@ internal sealed partial class RecordCreationService
         // together (started in this order) and their answers are taken in this order, as before: the caller's own first — its
         // refusal answers and its fault propagates, whatever the merged check came to (that answer is then dropped, unread, as
         // when it was never asked) — then the merged row's. Nothing is written before both have returned.
-        var callersOwnCheck = CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, callerItem, serverSetLookupColumns, ct);
-        var wholeCheck = CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, merged, serverSetLookupColumns, ct);
+        //
+        // Fix round 1 (049c, K): both checks take a token linked to the request's, and the caller's own refusal or fault cancels
+        // it before the merged check is waited for, so a merged check that is not taken stops asking (as step 3's NotTakenAsync).
+        // The cancellation is this step's own: it is dropped with the merged check's answer and never surfaces; only the
+        // request's own cancellation (ct) propagates, as before.
+        using var checksCancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var callersOwnCheck = CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, callerItem, serverSetLookupColumns, checksCancel.Token);
+        var wholeCheck = CallerWriteAuthorization.CheckCallerMayCreateAsync(user, me, table, merged, serverSetLookupColumns, checksCancel.Token);
         OwnedChildWrite.Outcome callersOwn;
         try
         {
@@ -667,13 +673,13 @@ internal sealed partial class RecordCreationService
         }
         catch
         {
-            await SettledAsync(wholeCheck).ConfigureAwait(false);
+            await NotTakenAsync(checksCancel, wholeCheck).ConfigureAwait(false);
             throw;
         }
 
         if (!callersOwn.Succeeded)
         {
-            await SettledAsync(wholeCheck).ConfigureAwait(false);
+            await NotTakenAsync(checksCancel, wholeCheck).ConfigureAwait(false);
             return MappingStep.Refused(CallerCheckRefused(callersOwn, noun));
         }
 

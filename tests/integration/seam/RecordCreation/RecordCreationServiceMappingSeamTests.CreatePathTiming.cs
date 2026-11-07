@@ -15,12 +15,18 @@ namespace Sprk.Bff.Api.Tests.Seam.RecordCreation;
 /// (option a); step 5's two checks of a mapped row are asked together (option b). Each test also pins that the answer — the
 /// records written, the warnings, the refusal and which refusal — is the one the sequential pipeline gave.
 /// </summary>
-/// <remarks>The split comes from the pipeline's own step lines (<c>stepMs</c>, task 049c). Bounds are in round trips with wide
-/// margins; the sequential pipeline exceeds each by at least two round trips (task-049c-notes.md, "Local before and after").
-/// Set <c>SPRK_049C_TIMING_OUT</c> to a file path to write the measured split there.</remarks>
+/// <remarks>The split comes from the pipeline's own step lines (<c>stepMs</c>, task 049c). Bounds are in round trips (100 ms
+/// each); measured, three runs each way (task-049c-notes.md, "Local before and after" and "Fix round 1"): FieldMapping 326 ms
+/// after / 869 ms before, bound 5 round trips (about 1.7 round trips above the measured time, 3.7 below the sequential one);
+/// CallerChecks 218 ms after / 327 ms before, bound 2.7 round trips (the midpoint: about half a round trip either side).
+/// The overlap of step 5's two checks is also pinned without a clock, by the gate-double test below. Set
+/// <c>SPRK_049C_TIMING_OUT</c> to a file path to write the measured split there.</remarks>
 public sealed partial class RecordCreationServiceMappingSeamTests
 {
     private static readonly TimeSpan RoundTrip = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>The longest a gate double holds a read for another to be asked (a held read that runs out fails its test).</summary>
+    private static readonly TimeSpan HoldLimit = TimeSpan.FromSeconds(3);
 
     /// <summary>Every round trip delayed: the caller's reads, the probe, the app-only reads and the owner resolver.</summary>
     private StepTimingLogger EveryReadDelayed()
@@ -62,8 +68,89 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         // step was profile, probe, source read, mask, target columns and the merge's three metadata reads (8 round trips).
         timings.Of(RecordCreationStep.FieldMapping).Should().BeLessThan(RoundTrip * 5, timings.Split);
 
-        // Step 5's two checks of the mapped row run together: about one check's time, not two.
-        timings.Of(RecordCreationStep.CallerChecks).Should().BeLessThan(RoundTrip * 6, timings.Split);
+        // Step 5's two checks of the mapped row run together: about two round trips (218 ms measured), not three (327 ms when
+        // the merged check waits for the caller's own). The bound is the midpoint.
+        timings.Of(RecordCreationStep.CallerChecks).Should().BeLessThan(RoundTrip * 2.7, timings.Split);
+    }
+
+    [Fact]
+    public async Task CreatePath_StepFiveChecks_AreInFlightTogether_TheCallersOwnCheckIsHeldUntilTheMergedChecksFirstRead()
+    {
+        // Ordering, not time (K4): the caller's own check is held at its first read of the matter until the MERGED check -
+        // the only one that asks the mapped contact - has a read in flight. Asked one after the other, the merged check would
+        // not start until the held read was released, and the hold would run out (the hook waits at most HoldLimit).
+        MatterToEventProfile();
+        var mergedAsked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var held = 0;
+        var releasedByMergedCheck = false;
+        _user.BeforeAnswer = async (path, token) =>
+        {
+            if (!path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal))
+                return;
+            if (path.Contains(Assignee.ToString("D"), StringComparison.Ordinal))
+            {
+                mergedAsked.TrySetResult();
+                return;
+            }
+
+            if (path.Contains(OrdinaryMatter.ToString("D"), StringComparison.Ordinal) && Interlocked.Increment(ref held) == 1)
+            {
+                var first = await Task.WhenAny(mergedAsked.Task, Task.Delay(HoldLimit, token)).ConfigureAwait(false);
+                releasedByMergedCheck = first == mergedAsked.Task;
+            }
+        };
+
+        var outcome = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter, mappingSource: ("sprk_matter", OrdinaryMatter)), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        releasedByMergedCheck.Should().BeTrue("the merged check was asked while the caller's own check was still in flight");
+    }
+
+    [Fact]
+    public async Task CreatePath_WhenTheCallersOwnCheckRefuses_TheMergedCheckIsCancelled_AndTheRefusalIsUnchanged()
+    {
+        // The caller's own value fails AppendTo while the merged check (held at its read of the mapped filing lookup's record) is still in
+        // flight: the refusal answers as with no mapping, and the held read sees its token cancelled - not left to finish.
+        Profile("sprk_matter", "sprk_event",
+            Rule("sprk_matterdescription", "sprk_description", Memo),
+            Rule("sprk_primaryproject", "sprk_regardingproject", Lookup));
+        _scripted.NoAppendToIn.Add(("contacts", CallersContact));
+        var request = EventUnder(OrdinaryMatter, assignedTo: CallersContact, mappingSource: ("sprk_matter", OrdinaryMatter));
+        var expected = await Service().CreateAsync(request with { Mapping = null }, AsCaller(), CancellationToken.None);
+
+        var heldRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var mergedReadCancelled = false;
+        _user.BeforeAnswer = async (path, token) =>
+        {
+            if (!path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal)
+                || !path.Contains(OtherProject.ToString("D"), StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            heldRead.TrySetResult();
+            try
+            {
+                await Task.Delay(HoldLimit, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                mergedReadCancelled = true;
+                throw;
+            }
+        };
+
+        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
+
+        heldRead.Task.IsCompleted.Should().BeTrue("the merged check was in flight when the caller's own check refused");
+        mergedReadCancelled.Should().BeTrue("the merged check's read was cancelled when its answer was not taken");
+        outcome.Refusal.Should().NotBeNull();
+        outcome.Refusal!.Kind.Should().Be(expected.Refusal!.Kind);
+        outcome.Refusal.Code.Should().Be(expected.Refusal.Code);
+        outcome.Refusal.Detail.Should().Be(expected.Refusal.Detail);
+        Problem(outcome, "sprk_event").Status.Should().Be(StatusCodes.Status404NotFound);
+        _creates.Should().BeEmpty();
     }
 
     [Fact]
