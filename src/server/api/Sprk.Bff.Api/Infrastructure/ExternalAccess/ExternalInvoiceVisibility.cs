@@ -144,7 +144,7 @@ internal static class ExternalInvoiceVisibility
         //       unknown or unreadable   hidden.
         var sourcesOf = new Dictionary<Guid, List<Guid>>();
         var invoicePdfs = await ReadStoredFileSourcesAsync(open, readers.Query, sourcesOf, hidden, cost, ct).ConfigureAwait(false);
-        var internalWithoutDocument = await ReadSubmissionSourcesAsync(open, readers.Query, sourcesOf, hidden, cost, ct)
+        var internalWithoutDocument = await ReadSubmissionSourcesAsync(open, readers.Query, sourcesOf, hidden, cost, readers.Logger, ct)
             .ConfigureAwait(false);
         foreach (var invoiceId in internalWithoutDocument.Where(id => !invoicePdfs.Contains(id)))
             hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable);
@@ -293,6 +293,9 @@ internal static class ExternalInvoiceVisibility
     /// rerun-pending marker, and only the re-run's one commit clears it, so the withhold lifts exactly when the re-run commits, and a failed,
     /// refused or dead-lettered re-run keeps it. A stored reason of firm_missing also withholds (an extra withhold only; the column is
     /// user-writable, so it never lifts one);</item>
+    /// <item>ebilling-r1 task 165c: a submission whose invoice link is not its own invoice
+    /// (<see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission"/>) is withheld
+    /// (<see cref="InvoiceHiddenReason.InvoiceLinkNotOwn"/>) after the firm withhold above, and that invoice is not decided for it;</item>
     /// <item>a submission WITH an invoice is decided by the invoice predicate (<see cref="DecideAsync"/>), as before;</item>
     /// <item>one WITHOUT an invoice (Received, Processing, or a terminal outcome that produced none) is decided by its own
     /// source, by channel (the shared <see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel"/> enum):
@@ -332,6 +335,16 @@ internal static class ExternalInvoiceVisibility
         {
             withheld[firmless.SubmissionId] = InvoiceHiddenReason.FirmMissing;
             page.Remove(firmless);
+        }
+
+        // Task 165c: visibility counts only a submission's own invoice (the one own-submission rule,
+        // InvoiceBlockedHold.IsOwnSubmission). A submission whose invoice link is not its own invoice is withheld and decides nothing.
+        foreach (var notOwn in page.Where(s => InvoiceOf(s) is { } linked && linked != ExternalDocumentNarrowing.UnreadableLink
+                     && !Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission(linked, s.SubmissionId)).ToList())
+        {
+            withheld[notOwn.SubmissionId] = InvoiceHiddenReason.InvoiceLinkNotOwn;
+            LogInvoiceLinkNotOwn(readers.Logger, notOwn.SubmissionId, notOwn.InvoiceId!.Value);
+            page.Remove(notOwn);
         }
 
         // (1) With an invoice: THE invoice predicate, one call for the page.
@@ -490,10 +503,13 @@ internal static class ExternalInvoiceVisibility
     /// there); an unknown, unreadable or unrecognised channel hides the invoice. Returns the invoices with an Internal
     /// submission whose document link is empty (the caller hides them unless they have an InvoicePdf rule 3 can rely on). A
     /// failed read THROWS.
+    /// Task 165c: only the invoice's own submission counts
+    /// (<see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission"/>); a row whose link is not its own
+    /// invoice adds nothing to that invoice (no source, no hide) and is logged. A row whose own id cannot be read hides the invoice.
     /// </summary>
     private static async Task<HashSet<Guid>> ReadSubmissionSourcesAsync(
         IReadOnlyList<Guid> asked, CommunicationOpenThreadGate.RowQuery query, Dictionary<Guid, List<Guid>> sourcesOf,
-        Dictionary<Guid, InvoiceHiddenReason> hidden, InvoiceVisibilityCost cost, CancellationToken ct)
+        Dictionary<Guid, InvoiceHiddenReason> hidden, InvoiceVisibilityCost cost, ILogger logger, CancellationToken ct)
     {
         var internalWithoutDocument = new HashSet<Guid>();
         var rows = await ReadRowsOfInvoicesAsync(
@@ -502,6 +518,18 @@ internal static class ExternalInvoiceVisibility
             SubmissionInvoiceValue, asked, query, hidden, () => cost.SubmissionReads++, ct).ConfigureAwait(false);
         foreach (var (invoiceId, row) in rows)
         {
+            if (LinkOf(row, SubmissionIdField) is not { } submissionId || submissionId == ExternalDocumentNarrowing.UnreadableLink)
+            {
+                hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable); // cannot be shown to be the invoice's own
+                continue;
+            }
+
+            if (!Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId))
+            {
+                LogInvoiceLinkNotOwn(logger, submissionId, invoiceId);
+                continue;
+            }
+
             if (IntOf(row, SubmissionChannel) is not { } channel
                 || !Enum.IsDefined(typeof(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionChannel), channel))
             {
@@ -591,6 +619,12 @@ internal static class ExternalInvoiceVisibility
 
         return result;
     }
+
+    /// <summary>Task 165c: the event a submission whose invoice link is not its own invoice logs (the two ids and this code only).</summary>
+    internal const string InvoiceLinkNotOwnEvent = "ebilling.visibility.invoice_link_not_own";
+
+    private static void LogInvoiceLinkNotOwn(ILogger logger, Guid submissionId, Guid invoiceId) =>
+        logger.LogWarning("{EventCode}: submission {SubmissionId}, invoice {InvoiceId}", InvoiceLinkNotOwnEvent, submissionId, invoiceId);
 
     private static void AddSource(Dictionary<Guid, List<Guid>> sourcesOf, Guid invoiceId, Guid source)
     {
@@ -906,6 +940,10 @@ internal enum InvoiceHiddenReason
     /// 2026-11-06 C1, C2) also an INVOICE whose own field-secured firm hold (<c>sprk_invoice.sprk_firmhold</c>, read app-only) is set
     /// (firm_missing, or the rerun-pending marker until the re-run commits), and every submission of such an invoice.</summary>
     FirmMissing,
+
+    /// <summary>ebilling-r1 task 165c: a SUBMISSION whose invoice link is not its own invoice (visibility counts only a submission's own
+    /// invoice); it hides the submission only, never the linked invoice.</summary>
+    InvoiceLinkNotOwn,
 }
 
 /// <summary>What one decision read (counts only).</summary>
@@ -994,6 +1032,7 @@ internal sealed class InvoiceVisibilityResult
         InvoiceHiddenReason.RootUnresolved => "root_unresolved",
         InvoiceHiddenReason.SourceKindUnknown => "source_kind_unknown",
         InvoiceHiddenReason.FirmMissing => "firm_missing",
+        InvoiceHiddenReason.InvoiceLinkNotOwn => "invoice_link_not_own",
         _ => "read_failed",
     };
 }

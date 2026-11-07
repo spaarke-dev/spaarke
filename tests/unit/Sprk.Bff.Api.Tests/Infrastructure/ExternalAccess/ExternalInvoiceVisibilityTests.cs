@@ -330,7 +330,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task ConfirmRoute_AnInvoiceWhoseOnlySourceIsASubmissionsRestrictedDocument_IsHidden(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.SubmissionSource(invoice, permission: Restricted);
 
         await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceHidden);
@@ -339,7 +339,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task ConfirmRoute_ASubmissionsDocumentUnderARestrictedRoot_HidesTheInvoice(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var matter = Guid.NewGuid();
         _world.Flags[matter] = new RootRecordFlags(IsSecure: true, IsRestricted: true);
         _world.SubmissionSource(invoice, matter: matter);
@@ -350,7 +350,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task ConfirmRoute_ASubmissionsReadableDocument_LeavesTheInvoiceVisible(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var matter = Guid.NewGuid();
         _world.Flags[matter] = RootRecordFlags.None;
         _world.SubmissionSource(invoice, permission: Standard, matter: matter);
@@ -364,11 +364,12 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var matter = Guid.NewGuid();
         _world.Flags[matter] = RootRecordFlags.None;
-        _world.SubmissionSource(invoice, permission: Standard, matter: matter);
+        // Task 165c: the invoice's own submission carries the empty link; the readable row seeded after it only points at the invoice.
         _world.Submission(invoice, document: null);
+        _world.SubmissionSource(invoice, permission: Standard, matter: matter);
 
         await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
     }
@@ -376,7 +377,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task ConfirmRoute_ADocumentLinkEmptiedAfterTheInvoiceWasCreated_HidesTheInvoice(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var matter = Guid.NewGuid();
         _world.Flags[matter] = RootRecordFlags.None;
         _world.SubmissionSource(invoice, permission: Restricted, matter: matter);
@@ -394,7 +395,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task SpaUpload_NoSubmissionDocument_AndASourcelessInvoicePdf_IsVisible(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.SpaUpload(invoice);
 
         await ShouldBeVisible(caller, invoice);
@@ -403,7 +404,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task InternalUpload_NoSubmissionDocument_AndASourcelessInvoicePdf_IsVisible(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.InternalUpload(invoice);
 
         await ShouldBeVisible(caller, invoice);
@@ -412,7 +413,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task Internal_AnEmptyDocumentLink_AndNoStoredFile_IsHidden(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.Submission(invoice, document: null, channel: InvoiceWorld.InternalChannel);
 
         await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
@@ -421,7 +422,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task Internal_AnEmptyDocumentLink_AndOnlyASourcelessSupportingFile_IsHidden(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.Submission(invoice, document: null, channel: InvoiceWorld.InternalChannel);
         _world.StoredFileRaw(invoice, rawSource: null, purpose: InvoiceWorld.InvoiceSupportingFile);
 
@@ -437,7 +438,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [InlineData("flagged-systemuser", "internal")]
     public async Task AnUnknownOrUnreadableChannel_HidesTheInvoice(string caller, object? channel)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var matter = Guid.NewGuid();
         _world.Flags[matter] = RootRecordFlags.None;
         _world.Submission(invoice, _world.Document(Guid.NewGuid(), permission: Standard, matter: matter), channel);
@@ -448,7 +449,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task AnEmptySubmissionLink_PlusAStoredFileWithARestrictedSource_IsHidden_DecidedByTheFile(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.Submission(invoice, document: null, channel: InvoiceWorld.SpaChannel);
         _world.Source(invoice, permission: Restricted);
 
@@ -481,7 +482,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(Rule3InvoicePdfShapes))]
     public async Task Rule3_AnInternalEmptyLink_IsDecidedByTheInvoicePdf(string caller, string shape, string? hiddenCode)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var matter = Guid.NewGuid();
         _world.Flags[matter] = RootRecordFlags.None;
         _world.Submission(invoice, document: null, channel: InvoiceWorld.InternalChannel);
@@ -528,7 +529,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task WriterShape_FromDocument_AReadableDocument_IsVisible(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.FromDocument(invoice, _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter()));
 
         await ShouldBeVisible(caller, invoice);
@@ -549,8 +550,8 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task Correction_EachInvoiceIsJudgedByItsOwnSource_NotThroughSupersedesInvoice(string caller, bool oldSourceRestricted)
     {
         var matter = CleanMatter();
-        var oldInvoice = Guid.NewGuid();
-        var newInvoice = Guid.NewGuid();
+        var oldInvoice = _world.NewInvoice();
+        var newInvoice = _world.NewInvoice();
         var oldSubmission = _world.FromDocument(oldInvoice,
             _world.Document(Guid.NewGuid(), permission: oldSourceRestricted ? Restricted : Standard, matter: matter));
         var newSubmission = _world.FromDocument(newInvoice,
@@ -572,7 +573,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task WriterShape_FromEmail_AMarkedEml_IsVisibleToItsFirm(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var communication = FirmCommunication();
         _world.FromEmail(invoice, _world.SubmissionEml(marked: true, communication, CleanMatter()), communication, supportingParts: 2);
 
@@ -582,7 +583,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task WriterShape_FromEmail_AnUnmarkedRestrictedEml_IsHidden(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var communication = FirmCommunication();
         _world.FromEmail(invoice, _world.SubmissionEml(marked: false, communication, CleanMatter()), communication);
 
@@ -593,7 +594,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task WriterShape_FromEmail_NoInvoicePdf_OnlySupportingFiles_IsHidden(string caller)
     {
         // A supporting file never counts as the upload's own PDF, even with a source the firm may see.
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var communication = FirmCommunication();
         var eml = _world.SubmissionEml(marked: true, communication, CleanMatter());
         _world.Submission(invoice, document: null, channel: InvoiceWorld.InternalChannel);
@@ -606,7 +607,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task WriterShape_FromEmail_ASupportingFileWithARestrictedSource_HidesTheInvoice(string caller)
     {
         // A supporting file with a source is still decided by that source.
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var matter = CleanMatter();
         var communication = FirmCommunication();
         _world.FromEmail(invoice, _world.SubmissionEml(marked: true, communication, matter), communication, supportingParts: 0);
@@ -619,7 +620,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task WriterShape_AStoredFileWhosePurposeReadsNull_HidesTheInvoice(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         _world.FromDocument(invoice, _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter()));
         _world.SetStoredFile(_world.StoredFilesOf(invoice).Single(), "sprk_purpose", null);
 
@@ -630,7 +631,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task WriterShape_FromEmail_AFieldSecurityMaskedRow_HidesTheInvoice(string caller)
     {
         // The invoice is visible to its firm; one of its rows then reads as a reader without the profile reads it.
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var communication = FirmCommunication();
         _world.FromEmail(invoice, _world.SubmissionEml(marked: true, communication, CleanMatter()), communication, supportingParts: 1);
         await ShouldBeVisible(caller, invoice);
@@ -643,7 +644,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task WriterShape_FromEmail_AFailedStoredFileRead_HidesTheInvoice(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var communication = FirmCommunication();
         _world.FromEmail(invoice, _world.SubmissionEml(marked: true, communication, CleanMatter()), communication);
         _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
@@ -659,7 +660,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     {
         // The rows' invoice links are read first (taint closure): a failed read gives no answer at all; a link that is not a
         // GUID hides the row. The same invoice's rows are visible when the read succeeds.
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var communication = FirmCommunication();
         var submission = _world.FromEmail(invoice, _world.SubmissionEml(marked: true, communication, CleanMatter()), communication);
         var unreadable = _world.FamilyRow("sprk_invoicesubmission", invoice: null);
@@ -682,9 +683,9 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task Rule2_ASubmissionsOwnDocument_HonoursTheMarker(string caller)
     {
         // The legacy confirm shape (no Stored File): the submission's own document is the only source.
-        var marked = Guid.NewGuid();
+        var marked = _world.NewInvoice();
         _world.Submission(marked, _world.SubmissionEml(marked: true, FirmCommunication(), CleanMatter()));
-        var unmarked = Guid.NewGuid();
+        var unmarked = _world.NewInvoice();
         _world.Submission(unmarked, _world.SubmissionEml(marked: false, FirmCommunication(), CleanMatter()));
 
         await ShouldBeVisible(caller, marked);
@@ -729,7 +730,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task ConfirmRoute_ASubmissionReadThatFaults_HidesEveryAskedInvoice(string caller)
     {
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var clean = Guid.NewGuid();
         _world.SubmissionSource(invoice, permission: Standard);
         _world.Source(clean);
@@ -745,7 +746,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Fact]
     public async Task ConfirmRoute_MoreSubmissionsThanOneReadMayReturn_HidesTheWholeChunk()
     {
-        var busy = Guid.NewGuid();
+        var busy = _world.NewInvoice();
         var neighbour = Guid.NewGuid();
         var clean = _world.Document(Guid.NewGuid());
         for (var i = 0; i <= ExternalInvoiceVisibility.MaxSourceFilesPerChunk; i++)
@@ -975,7 +976,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         string caller, string source, bool visibleBefore, bool visibleAfter)
     {
         var submission = Guid.NewGuid();
-        var invoice = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(submission);
         var communication = FirmCommunication();
         var readable = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
         var isolated = _world.Document(Guid.NewGuid(), permission: Restricted, matter: CleanMatter());
@@ -1160,8 +1161,8 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(ExternalCallers))]
     public async Task NoFirm_WithAnInvoiceThatIsVisible_IsStillWithheld(string caller)
     {
-        var invoice = Guid.NewGuid();
         var submission = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(submission);
         _world.SpaUpload(invoice, submission);
 
         var withFirm = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.SpaChannel, invoice: invoice));
@@ -1252,7 +1253,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var spa = Guid.NewGuid();
         var internalWithDocument = Guid.NewGuid();
         var withInvoice = Guid.NewGuid();
-        var invoice = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(withInvoice);
         _world.SpaUpload(invoice, withInvoice);
         var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
         _world.Faults[faultingSet] = HttpStatusCode.ServiceUnavailable;
@@ -1302,7 +1303,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
 
         for (var i = 0; i < 10; i++)
         {
-            var invoice = Guid.NewGuid();
+            var invoice = _world.NewInvoice();
             var submission = _world.SpaUpload(invoice);
             page.Add(SubmissionView(submission, InvoiceWorld.SpaChannel, invoice: invoice, status: InvoiceSubmissionStatus.Accepted));
         }
@@ -1412,9 +1413,9 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Theory, MemberData(nameof(FamilyTables))]
     public async Task TaintClosure_ARowOfAHiddenInvoice_IsHidden_AndOneOfAVisibleInvoiceIsNot(string table)
     {
-        var hiddenInvoice = Guid.NewGuid();
+        var hiddenInvoice = _world.NewInvoice();
         _world.Source(hiddenInvoice, permission: Restricted);
-        var visibleInvoice = Guid.NewGuid();
+        var visibleInvoice = _world.NewInvoice();
         _world.Source(visibleInvoice);
         var ofHidden = _world.FamilyRow(table, invoice: hiddenInvoice);
         var ofVisible = _world.FamilyRow(table, invoice: visibleInvoice);
@@ -1498,7 +1499,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var spa = _world.PendingSubmission(null, InvoiceWorld.SpaChannel);
         var isolated = _world.PendingSubmission(
             _world.Document(Guid.NewGuid(), permission: Restricted, matter: CleanMatter()), InvoiceWorld.InternalChannel);
-        var invoice = Guid.NewGuid();
+        var invoice = _world.NewInvoice();
         var withInvoice = _world.SpaUpload(invoice);
 
         var hidden = await _world.NewService(_identity.Object)
@@ -1678,13 +1679,14 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             ids.Where(Flags.ContainsKey).ToDictionary(id => id, id => Flags[id]));
     };
 
-    public ExternalDataService NewService(ISystemUserIdentityResolver? identity) => new(
+    public ExternalDataService NewService(
+        ISystemUserIdentityResolver? identity, Microsoft.Extensions.Logging.ILogger<ExternalDataService>? logger = null) => new(
         new HttpClient(this),
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
             .Build(),
         new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
-        NullLogger<ExternalDataService>.Instance,
+        logger ?? NullLogger<ExternalDataService>.Instance,
         filing: _filingReader.Object,
         columns: null,
         identity: identity);
@@ -1753,15 +1755,37 @@ internal sealed class InvoiceWorld : HttpMessageHandler
             ["sprk_name"] = "file.pdf",
         });
 
+    private readonly Dictionary<Guid, Guid> _ownSubmissionOf = new();
+
+    /// <summary>
+    /// Task 165c: an invoice id as the persister derives it (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/> of a new submission id).
+    /// The first submission seeded on it without an explicit id is that submission (its own submission); any later one only points at it.
+    /// </summary>
+    public Guid NewInvoice()
+    {
+        var submission = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(submission);
+        lock (_ownSubmissionOf) _ownSubmissionOf[invoice] = submission;
+        return invoice;
+    }
+
+    /// <summary>The id of the next submission seeded on <paramref name="invoice"/>: its own submission once (<see cref="NewInvoice"/>), else a new id.</summary>
+    private Guid NextSubmissionId(Guid? invoice)
+    {
+        lock (_ownSubmissionOf)
+            return invoice is { } i && _ownSubmissionOf.Remove(i, out var own) ? own : Guid.NewGuid();
+    }
+
     /// <summary>A submission of <paramref name="invoice"/> naming <paramref name="document"/> on <paramref name="channel"/>
     /// (Internal by default: the confirm route's only record of its source is <c>sprk_invoicesubmission.sprk_document</c>).</summary>
     public Guid Submission(Guid invoice, Guid? document) => Submission(invoice, document, InternalChannel);
 
     /// <summary>A submission with an explicit raw <paramref name="channel"/> (null and unknown values allowed); returns its id
-    /// (<paramref name="id"/> when given: the row a submission decided before its invoice existed gets on the commit).</summary>
+    /// (<paramref name="id"/> when given: the row a submission decided before its invoice existed gets on the commit; otherwise the
+    /// invoice's own submission when <see cref="NewInvoice"/> made it and none was seeded yet, else a row that only points at it).</summary>
     public Guid Submission(Guid invoice, Guid? document, object? channel, Guid? id = null, bool noFirm = false)
     {
-        var submission = id ?? Guid.NewGuid();
+        var submission = id ?? NextSubmissionId(invoice);
         Seed("sprk_invoicesubmissions", new Dictionary<string, object?>
         {
             ["sprk_invoicesubmissionid"] = submission.ToString(),
@@ -1931,7 +1955,7 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     public Guid FamilyRow(string table, Guid? invoice, Guid? line = null)
     {
         var family = ExternalInvoiceVisibility.FamilyTables[table];
-        var id = Guid.NewGuid();
+        var id = table == "sprk_invoicesubmission" ? NextSubmissionId(invoice) : Guid.NewGuid();
         var row = new Dictionary<string, object?> { [family.IdColumn] = id.ToString() };
         if (family.InvoiceLink is { } invoiceLink) row[invoiceLink] = invoice?.ToString();
         if (family.LineLink is { } lineLink) row[lineLink] = line?.ToString();

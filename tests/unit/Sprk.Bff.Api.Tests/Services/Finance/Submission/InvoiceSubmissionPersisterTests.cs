@@ -2462,7 +2462,7 @@ public partial class InvoiceSubmissionPersisterTests
         var submission = store.Submission;
         submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id.Should().Be(InvoiceId);
         world.Submission(InvoiceId, submission.GetAttributeValue<EntityReference>("sprk_document")?.Id,
-            submission.GetAttributeValue<OptionSetValue>("sprk_channel")?.Value);
+            submission.GetAttributeValue<OptionSetValue>("sprk_channel")?.Value, id: submission.Id); // its own submission (task 165c)
         if (!withStoredFiles)
         {
             return;

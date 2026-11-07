@@ -16,8 +16,8 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [MemberData(nameof(ExternalCallers))]
     public async Task RerunPending_WithAFirm_IsWithheld_UntilTheRerunCommits(string caller)
     {
-        var invoice = Guid.NewGuid();
         var submission = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(submission);
         _world.SpaUpload(invoice, submission);
         var view = SubmissionView(submission, InvoiceWorld.SpaChannel, invoice: invoice);
 
@@ -35,8 +35,8 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [MemberData(nameof(ExternalCallers))]
     public async Task ReasonEditedAway_StaysWithheld_WhileTheInvoiceMarkerIsPending(string caller)
     {
-        var invoice = Guid.NewGuid();
         var submission = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(submission);
         _world.SpaUpload(invoice, submission);
         var edited = SubmissionView(submission, InvoiceWorld.SpaChannel, invoice: invoice) with { OutcomeReasonCode = SubmissionReasonCodes.Blocked };
         _world.FirmHold(invoice, InvoiceFirmHold.InvoiceRerunPendingValue);
@@ -58,7 +58,7 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var submission = Guid.NewGuid();
         var own = InvoiceSubmissionPersister.InvoiceIdFor(submission);
         _world.FirmHold(own, InvoiceFirmHold.InvoiceRerunPendingValue);
-        var elsewhere = Guid.NewGuid();
+        var elsewhere = _world.NewInvoice();
         _world.SpaUpload(elsewhere);
         var view = SubmissionView(submission, InvoiceWorld.SpaChannel, invoice: edit == "unlinked" ? null : elsewhere)
             with { OutcomeReasonCode = SubmissionReasonCodes.Blocked };
@@ -68,7 +68,16 @@ public sealed partial class ExternalInvoiceVisibilityTests
         var committed = await DecideSubmissions("contact", view);
 
         pending.IsVisible(submission).Should().BeFalse();
-        committed.IsVisible(submission).Should().BeTrue("must not fire: once cleared, the row is decided as before", committed.HiddenSummary());
+        if (edit == "unlinked")
+        {
+            committed.IsVisible(submission).Should().BeTrue("must not fire: once cleared, the row is decided as before", committed.HiddenSummary());
+        }
+        else
+        {
+            // Task 165c: visibility counts only a submission's own invoice, so the repointed row stays withheld after the commit.
+            committed.IsVisible(submission).Should().BeFalse();
+            committed.HiddenSummary().Should().Be($"{InvoiceVisibilityResult.CodeOf(InvoiceHiddenReason.InvoiceLinkNotOwn)}=1");
+        }
     }
 
     // ── uac-r2 2026-11-06 C2: the invoice itself while the re-run is pending ──
@@ -149,8 +158,8 @@ public sealed partial class ExternalInvoiceVisibilityTests
     [Fact]
     public async Task RerunPending_TheAssistantTools_HideTheRow_AndReadTheReason()
     {
-        var pendingInvoice = Guid.NewGuid();
-        var decidedInvoice = Guid.NewGuid();
+        var pendingInvoice = _world.NewInvoice();
+        var decidedInvoice = _world.NewInvoice();
         var pending = _world.SpaUpload(pendingInvoice);
         var decided = _world.SpaUpload(decidedInvoice);
         _world.SetSubmissions(pendingInvoice, "sprk_outcomereasoncode", SubmissionReasonCodes.FirmMissing);
