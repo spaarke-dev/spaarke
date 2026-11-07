@@ -27,14 +27,19 @@ public class FieldMappingSeederSyncModeClassTests
         var oneTime = SeederConst("SyncModeOneTime");
         var manualRefresh = SeederConst("SyncModeManualRefresh");
 
-        var wrong = SeededRules()
+        var wrong = Disagreements(SeededRules(), classify, oneTime, manualRefresh);
+
+        Assert.True(wrong.Count == 0, "Seeded sync modes disagree with the BFF's Assigned-To classifier:\n" + string.Join("\n", wrong));
+    }
+
+    /// <summary>The comparison the guard runs: every rule whose seeded value is not the one its class calls for.</summary>
+    private static List<string> Disagreements(
+        IEnumerable<SeededRule> rules, Func<string, string, bool> classify, int oneTime, int manualRefresh)
+        => rules
             .Where(r => r.SyncMode != (classify(r.Table, r.TargetField) ? oneTime : manualRefresh))
             .Select(r => $"{r.Profile}: {r.Table}.{r.TargetField} is seeded {r.SyncMode}, its class calls for "
                          + (classify(r.Table, r.TargetField) ? $"{oneTime} (Assigned-To)" : $"{manualRefresh} (plain data)"))
             .ToList();
-
-        Assert.True(wrong.Count == 0, "Seeded sync modes disagree with the BFF's Assigned-To classifier:\n" + string.Join("\n", wrong));
-    }
 
     /// <summary>Must-fire control: the seed holds both classes, so the comparison above is not vacuous.</summary>
     [Fact]
@@ -48,17 +53,35 @@ public class FieldMappingSeederSyncModeClassTests
         Assert.Contains(rules, r => !classify(r.Table, r.TargetField));
     }
 
-    /// <summary>Must-fire control: a seeded value that disagrees with its class is caught by the same comparison.</summary>
+    /// <summary>
+    /// Must-fire and must-not-fire controls on the guard's own comparison: a seed whose values disagree with their class is
+    /// caught, naming each wrong rule, and the same rules seeded with the right values pass.
+    /// </summary>
     [Fact]
-    public void AValueThatDisagreesWithItsClass_IsCaught()
+    public void AValueThatDisagreesWithItsClass_IsCaught_AndTheRightValuePasses()
     {
         var classify = PushRuleSelection.AssignedToColumnsOf(BoundRegistry());
         var oneTime = SeederConst("SyncModeOneTime");
         var manualRefresh = SeederConst("SyncModeManualRefresh");
 
         // An event Assigned-To column seeded as Manual Refresh, and a plain column seeded as One-time.
-        Assert.NotEqual(manualRefresh, classify("sprk_event", "sprk_assignedattorney1") ? oneTime : manualRefresh);
-        Assert.NotEqual(oneTime, classify("sprk_event", "sprk_clientreference") ? oneTime : manualRefresh);
+        var wrongSeed = new[]
+        {
+            new SeededRule("Control", "sprk_event", "sprk_assignedattorney1", manualRefresh),
+            new SeededRule("Control", "sprk_event", "sprk_clientreference", oneTime),
+        };
+        var rightSeed = new[]
+        {
+            new SeededRule("Control", "sprk_event", "sprk_assignedattorney1", oneTime),
+            new SeededRule("Control", "sprk_event", "sprk_clientreference", manualRefresh),
+        };
+
+        var caught = Disagreements(wrongSeed, classify, oneTime, manualRefresh);
+        Assert.Equal(2, caught.Count);
+        Assert.Contains(caught, m => m.StartsWith("Control: sprk_event.sprk_assignedattorney1 ", StringComparison.Ordinal));
+        Assert.Contains(caught, m => m.StartsWith("Control: sprk_event.sprk_clientreference ", StringComparison.Ordinal));
+
+        Assert.Empty(Disagreements(rightSeed, classify, oneTime, manualRefresh));
     }
 
     private static AccessConferringRegistry BoundRegistry()
