@@ -8,7 +8,7 @@ This project puts Spaarke's **Decide lane** and **Decision wizard** into Microso
 
 Status: see `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md`. Design: `design.md`. Plan: `plan.md`.
 
-Tasks (2026-11-06, 28 POMLs): Phase 0 spike 001–003 · Phase A BFF rework 010–017 (run order 010 → 012 → 017 → 013 → 014 → 015; 011 and 016 alongside) · Phase B MCP host and tools 020–025 · Phase C widget 030–032 · Phase D registration, deploy and live E2E 040–043 (041 deploy-gated; 043 conditional on T1) · Phase E docs 050–052 (050/051 main session only) · wrap-up 090. **Next action:** Wave 1 — 001, 010, 011 in parallel (`tasks/TASK-INDEX.md` "Parallel Execution Plan").
+Tasks (2026-11-06, 28 POMLs): Phase 0 spike 001–003 · Phase A BFF rework 011–017 (run order 011 ✅ → 017 → 013 → 014 → 015; 016 alongside; 012 cancelled 2026-11-07, option C) · Phase B MCP host and tools 020–025, plus 010 (MCP caller-path verification, after 024 and before 025) · Phase C widget 030–032 · Phase D registration, deploy and live E2E 040–043 (041 deploy-gated; 043 conditional on T1) · Phase E docs 050–052 (050/051 main session only) · wrap-up 090. **Next action:** Wave 1 — 001 and 017 in parallel; 011 is done (`tasks/TASK-INDEX.md` "Parallel Execution Plan", re-planned 2026-11-07).
 
 ## 2. Binding rules for this project
 
@@ -17,7 +17,7 @@ Tasks (2026-11-06, 28 POMLs): Phase 0 spike 001–003 · Phase A BFF rework 010�
 - MUST run every tool as the caller (OBO), `systemuser` callers only; MUST NOT accept CIAM or A9 home-directory tokens — refused server-side **before any tool runs** (FR-02).
 - MUST NOT use the connector's Entra SSO option; MUST NOT pass the caller's token downstream, log it, or log its claims (FR-02, NFR-05).
 - A failed OBO never falls back to app-only; any app-only read applies the caller's own record-access check (FR-02).
-- A capability call with no populated `ICallerContext` fails closed with `UserContextRequired`, never app-only (FR-10).
+- MCP tools take the caller from the request `HttpContext` through `IHttpContextAccessor`. A null context or an unauthenticated caller fails closed with `UserContextRequired`, never app-only. No `ICallerContext` in v1 (FR-10, owner option C 2026-11-07). Keep `/mcp/*` stateless with `PerSessionExecutionContext=false`: task 010 pins both, and decision capabilities run only inside an HTTP request (v1 limitation).
 
 **Decision domain invariants**
 - `DecisionCommitService` stays the single owner of completion; writes go only through it, need explicit Confirm, a prior plan read and an idempotency key; nothing relies on a host confirmation prompt (FR-08, NFR-06).
@@ -25,7 +25,7 @@ Tasks (2026-11-06, 28 POMLs): Phase 0 spike 001–003 · Phase A BFF rework 010�
 - Commit invariants move **byte-for-byte** through B-1 and each is stated in the B-1 PR: order (1a) caller readability → uniform 404; ledger replay; (1c) app-only Signal read; (1c-billing); `PrepareAsync`; (1c′) `CallerMayDecideAsync`; preflight; writes; locks released in `finally`. Replay decided server-side only. D-197 `CheckVersionOwnerAsync` stays put. `SignalWriter`, `DecisionRecordWriter`, `DecisionCallerRights` untouched.
 - MUST NOT add a second billing-refusal check; one MCP test proves a billing Signal returns the mapped `ontology.decision.decided_in_invoice_review` refusal and writes nothing.
 - REST responses of the signal, plan and decision routes stay byte-for-byte unchanged against recorded contract tests; one `reasonCode` vocabulary; transport errors never carry domain failures (FR-09).
-- No `HttpContext` parameter in any decision-slice service method (FR-10).
+- Decision-slice services keep their `HttpContext`/`ClaimsPrincipal` parameters. Capability methods take the request `HttpContext` (or `ClaimsPrincipal`) and pass it through unchanged (FR-10 as amended 2026-11-07, option C).
 
 **Model-visible output**
 - Privileged Work Items (`sprk_privilegeflagged` on Signal or subject) reach `content`/`structuredContent` of model-visible tools only as "N privileged items — open to review"; detail only via app-only tools (FR-04).
@@ -53,6 +53,7 @@ ADR tensions approved for this project (root CLAUDE.md §6.5):
 ## 3. Owner directives and standing decisions
 
 Full log: `notes/decisions.md`. Owner decisions O-1–O-26: `design.md` §0.
+- 2026-11-07 — **Option C:** `ICallerContext` (B-4) is deferred; spec FR-10 is amended and supersedes design §8 B-4. MCP tools use the request `HttpContext` and call the same decision services as REST. Task 010 is now the MCP caller-path verification (it depends on 020, 021, 023 and 024, and blocks 025); 012 is cancelled. — `notes/decisions.md` "Option C"
 - 2026-11-06 — **Ontology condition 1:** no dev BFF deploy from this branch until ontology's #2580/#2579 pair has deployed (it waits for ebilling task 112). Phase 0 live tests run from a separate spike branch cut from master (`spike/spaarkeai-mcp-phase0`, never merged), deployed only with the owner's per-SHA go in uac-r2's session. If this branch must deploy sooner, back the merge out first. — `notes/decisions.md` "Merge of #2580 / #2579"
 - 2026-11-06 — **Ontology condition 2:** D-207 order and replay guard unchanged; the MCP commit goes only through `DecisionCommitService`'s existing entry, never a second route that skips 1c-billing.
 - 2026-11-06 — **Ontology condition 3:** their pair merges to master first; our master PR merges after. If their branches get new commits, re-merge — merge, never rebase.
@@ -89,7 +90,7 @@ Full log: `notes/decisions.md`. Owner decisions O-1–O-26: `design.md` §0.
 
 ## 6. Gotchas — do not re-learn
 
-- 2026-11-06 — `HttpContext` reaches beyond the spec's list: `DecisionCommitService.CommitAsync` (L439) and helpers (L622, L770, L927, L1578), `DecisionPlanReadStamp` L42/L86, `Actions/DecisionParameterSources` L109/L404, `Actions/DecisionActionExecutors` (record field `HttpContext Http` L73), `Actions/DecisionRouteCores` (7 methods), `AssignTaskNotifier` (5), `DecisionCommitFollowUps` L70, `Actions/BudgetInquiryExecutor` (`IHttpContextAccessor`). `SignalReadService` takes `ClaimsPrincipal` (no change). Fix: B-4 is two tasks (010, 012).
+- 2026-11-06 — `HttpContext` reaches beyond the spec's list: `DecisionCommitService.CommitAsync` (L439) and helpers (L622, L770, L927, L1578), `DecisionPlanReadStamp` L42/L86, `Actions/DecisionParameterSources` L109/L404, `Actions/DecisionActionExecutors` (record field `HttpContext Http` L73), `Actions/DecisionRouteCores` (7 methods), `AssignTaskNotifier` (5), `DecisionCommitFollowUps` L70, `Actions/BudgetInquiryExecutor` (`IHttpContextAccessor`). `SignalReadService` takes `ClaimsPrincipal` (no change). Fix (2026-11-07, option C): leave these parameters in place; capabilities and MCP tools pass the request `HttpContext` through; 012 is cancelled.
 - 2026-11-06 — The worklist list projection does not select `sprk_privilegeflagged` (only `DecisionCommitService.cs:313` reads it). Fix: 015 adds it to the list projection only.
 - 2026-11-06 — `WorklistItemSummary` does not exist; the row type is `WorklistItemRow` (with #2580's `InvoiceReview` member). B-5 creates the summary and must keep `invoiceReview`.
 - 2026-11-06 — `WorklistLanePanel` is not exported from the Worklist barrel. Fix: deep import plus the exported `buildLaneView` (`worklistView.ts`); fallback a single-lane prop on `WorklistWidget`.

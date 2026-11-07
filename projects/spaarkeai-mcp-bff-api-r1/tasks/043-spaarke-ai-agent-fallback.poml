@@ -10,7 +10,7 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Package rebuild on documented schemas (DA v1.9, plugin v2.4, manifest 1.30) from the existing Spaarke AI agent</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>K</parallel-group>
+    <parallel-group>J</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Owner-run deployment of an existing tenant app; runs alone</parallel-reason>
     <deps>003, 041</deps>

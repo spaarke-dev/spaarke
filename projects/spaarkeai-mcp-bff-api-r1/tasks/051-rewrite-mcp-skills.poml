@@ -10,7 +10,7 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Documentation rewrite from implemented code and the naming note</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>M</parallel-group>
+    <parallel-group>L</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>touches .claude/ — main-session-only (permission boundary, root CLAUDE.md §3)</parallel-reason>
     <deps>042, 043, 050</deps>

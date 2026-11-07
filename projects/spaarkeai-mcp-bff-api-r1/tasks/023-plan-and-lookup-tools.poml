@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>F</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Adds only its own tool and test files; shares no file with 015, 024 or 030</parallel-reason>
+    <parallel-reason>Adds only its own tool and test files; shares no file with 022, 024 or 030</parallel-reason>
     <deps>016, 017, 021</deps>
     <tags>bff-api, endpoints, integration-test</tags>
     <estimated-effort>2-4 hours</estimated-effort>
@@ -41,7 +41,7 @@
 
   <constraints>
     <constraint source="project">Every MCP tool added by this task is named spaarke_{verb}_{object} (naming note §1), tagged with area legal-operations, carries an explicit readOnlyHint and a title, and has a description of at most 1,024 characters phrased 'use for / not for'; app-only tools set _meta.ui visibility to app only.</constraint>
-    <constraint source="ADR-028">Every operation this task adds or changes reads the caller only from ICallerContext (task 010); an unpopulated context returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) and never falls back to an app-only client (FR-10, ADR-002 WP-6 fail closed).</constraint>
+    <constraint source="ADR-028">Every tool this task adds reads the request HttpContext from IHttpContextAccessor and passes it (or its User) to the decision capability. A null HttpContext or an unauthenticated caller returns an isError result with UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) before any capability call, and nothing falls back to an app-only client (FR-10 as amended 2026-11-07, option C; ADR-002 WP-6 fail closed). No ICallerContext or other caller holder is introduced.</constraint>
     <constraint source="ADR-008">No endpoint or MCP tool added or changed by this task carries the ExternalCollaboration policy or the external access guard; workforce routes use .RequireAuthorization() on the default workforce scheme plus existing policies.</constraint>
     <constraint source="ADR-019">Every domain failure from a tool added by this task is returned as an isError tool result produced by DecisionResultMapper.ToToolError → Api/Mcp/McpToolResults (reasonCode plus a fix-the-call message); no domain failure is returned as a transport error or exception.</constraint>
     <constraint source="project">Every result of a tool added by this task is under 64 KiB at 200 seeded Work Items (NFR-02).</constraint>
@@ -77,8 +77,8 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="1">Implement GetDecisionPlanTool: input signalId; call GetPlanAsync and GetSuppressionAsync as the caller; return plan, suppression and the full row as structuredContent; failures through McpToolResults.</step>
-    <step order="2">Implement SearchDecisionLookupTool: input signalId, parameterCode, query; call IDecisionLookupSearch; failures through McpToolResults.</step>
+    <step order="1">Implement GetDecisionPlanTool: input signalId; read the HttpContext from IHttpContextAccessor (null or unauthenticated → isError UserContextRequired) and call GetPlanAsync and GetSuppressionAsync with it; return plan, suppression and the full row as structuredContent; failures through McpToolResults.</step>
+    <step order="2">Implement SearchDecisionLookupTool: input signalId, parameterCode, query; call IDecisionLookupSearch with the HttpContext from IHttpContextAccessor (same fail-closed rule); failures through McpToolResults.</step>
     <step order="3">Write equivalence tests against the REST routes for the same caller, the negatives, and a size test.</step>
     <step order="4">Run the suites; measure the publish-size delta.</step>
     <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>

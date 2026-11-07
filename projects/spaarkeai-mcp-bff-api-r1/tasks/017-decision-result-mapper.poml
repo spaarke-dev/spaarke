@@ -3,17 +3,17 @@
   <metadata>
     <title>B-2 one decision result mapper</title>
     <phase>A BFF rework</phase>
-    <gate>after 011 and 012</gate>
+    <gate>after 011 (done)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; modifies 3 endpoint .cs files and adds a new mapper</rigor-reason>
     <model-tier>opus</model-tier>
     <model-tier-reason>Cross-cutting refactor of 3 endpoint files on the public REST contract (byte-for-byte) plus a new shared abstraction (one reasonCode vocabulary for REST and MCP)</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>C</parallel-group>
+    <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Shares no file with 003; serial with 012/013 through deps</parallel-reason>
-    <deps>011, 012</deps>
+    <parallel-reason>Shares no file with 001 (spike worktree) or 011 (done, test files only); serial with 013 through deps</parallel-reason>
+    <deps>011</deps>
     <tags>bff-api, api, refactoring, unit-test, integration-test</tags>
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>
@@ -34,8 +34,7 @@
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs (DecisionCommitReasons L199-245)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="011" status="pending">Golden baselines and the reason-code inventory</dependency>
-      <dependency task="012" status="pending">Decision slice free of HttpContext (endpoint call sites already adjusted)</dependency>
+      <dependency task="011" status="complete">Golden baselines and the reason-code inventory</dependency>
     </dependencies>
   </context>
 
@@ -111,7 +110,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>DecisionToolError is a plain record in Api/Signals; 020 adds Api/Mcp/McpToolResults.cs to convert it to the SDK's CallToolResult so tool tasks 022–024 share one conversion.</notes>
+  <notes>The mapper needs no caller context (spec FR-10 as amended 2026-11-07, option C), so it no longer waits for the cancelled 012. DecisionToolError is a plain record in Api/Signals; 020 adds Api/Mcp/McpToolResults.cs to convert it to the SDK's CallToolResult so tool tasks 022–024 share one conversion.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

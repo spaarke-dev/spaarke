@@ -10,9 +10,9 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Reuses WorklistLanePanel, buildLaneView and WorklistService over the 030 shim with explicit FR-12 behaviour and Console reference mount</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>H</parallel-group>
+    <parallel-group>G</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Owns shared-lib Worklist component edits and the widget lane files; 025 touches none</parallel-reason>
+    <parallel-reason>Owns shared-lib Worklist component edits and the widget lane files; 010 and 040 touch none</parallel-reason>
     <deps>022, 030</deps>
     <tags>frontend, react, typescript, fluent-ui</tags>
     <estimated-effort>4-6 hours</estimated-effort>

@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>F</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Adds only its own tool and test files; shares no file with 015, 023 or 030</parallel-reason>
+    <parallel-reason>Adds only its own tool and test files; shares no file with 022, 023 or 030</parallel-reason>
     <deps>014, 017, 021</deps>
     <tags>bff-api, endpoints, integration-test</tags>
     <estimated-effort>2-4 hours</estimated-effort>
@@ -42,7 +42,7 @@
     <constraint source="project">spaarke_complete_decision is app-only (never model-visible), readOnlyHint false, destructiveHint false, idempotentHint true, named per the naming note, with a title and a 'use for / not for' description of at most 1,024 characters.</constraint>
     <constraint source="ADR-002">This task adds no billing-refusal check of its own: D-207 (ontology.decision.decided_in_invoice_review) applies only through DecisionCommitService's existing (1c-billing) step (DecisionCommitService.cs:974-996).</constraint>
     <constraint source="ADR-002">The tool calls only IDecisionCapability.CommitAsync with the DecisionReview deserialised by the same contract and JSON options as POST /api/v1/signals/{id}/decision; it adds no validation, rights check or write of its own, and relies on no host confirmation prompt (NFR-06).</constraint>
-    <constraint source="ADR-028">Every operation this task adds or changes reads the caller only from ICallerContext (task 010); an unpopulated context returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) and never falls back to an app-only client (FR-10, ADR-002 WP-6 fail closed).</constraint>
+    <constraint source="ADR-028">Every tool this task adds reads the request HttpContext from IHttpContextAccessor and passes it (or its User) to the decision capability. A null HttpContext or an unauthenticated caller returns an isError result with UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) before any capability call, and nothing falls back to an app-only client (FR-10 as amended 2026-11-07, option C; ADR-002 WP-6 fail closed). No ICallerContext or other caller holder is introduced.</constraint>
     <constraint source="ADR-019">Every domain failure from a tool added by this task is returned as an isError tool result produced by DecisionResultMapper.ToToolError → Api/Mcp/McpToolResults (reasonCode plus a fix-the-call message); no domain failure is returned as a transport error or exception.</constraint>
     <constraint source="ADR-013">Tools added by this task inject only the decision capability, IDecisionLookupSearch and Api/Mcp helpers: no AI-internal type (Services/Ai/**, IChatClient, playbook services).</constraint>
     <constraint source="project">File ownership for parallel safety: this task adds only its own files under Api/Mcp/LegalOperations/Decisions/ and its own test files; tools are discovered per area by attribute (set up in 020), so no shared registration file is edited.</constraint>
@@ -76,7 +76,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="1">Implement CompleteDecisionTool: input signalId + DecisionReview (same contract as the REST route); call IDecisionCapability.CommitAsync; return the commit result as structuredContent or failures through McpToolResults.</step>
+    <step order="1">Implement CompleteDecisionTool: input signalId + DecisionReview (same contract as the REST route); read the HttpContext from IHttpContextAccessor (null or unauthenticated → isError UserContextRequired) and call IDecisionCapability.CommitAsync with it; return the commit result as structuredContent or failures through McpToolResults.</step>
     <step order="2">Write data-mutation tests for the acceptance criteria, reusing #2580's billing fixture shapes for the one billing test.</step>
     <step order="3">Run the suites (including Task174_* and 011's commit baselines); measure the publish-size delta.</step>
     <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
@@ -110,7 +110,7 @@
     <criterion testable="true">Negative: a commit with no prior plan read returns isError with the existing refusal reasonCode and writes nothing.</criterion>
     <criterion testable="true">Negative: a caller without Write on a subject returns isError ontology.decision.not_authorized and writes nothing.</criterion>
     <criterion testable="true">Negative: a billing Signal (subject sprk_invoice or sprk_billingevent) returns isError reasonCode ontology.decision.decided_in_invoice_review, writes nothing and does not call the rights probe (the one MCP billing test).</criterion>
-    <criterion testable="true">Negative: with ICallerContext unpopulated, the tool returns UserContextRequired and writes nothing.</criterion>
+    <criterion testable="true">Negative: with no HttpContext (accessor null) or an unauthenticated caller, the tool returns an isError result with UserContextRequired and writes nothing.</criterion>
     <criterion testable="true">A because value in the DecisionReview appears on the written Decision Record (FR-15 server half).</criterion>
     <criterion testable="true">grep shows no billing check, IsBillingSubject call or rights check under Api/Mcp/.</criterion>
     <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE).</criterion>

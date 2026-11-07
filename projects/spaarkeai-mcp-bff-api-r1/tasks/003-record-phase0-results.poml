@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>C</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Writes notes only (and 043's status if T1 passes); shares no file with 017</parallel-reason>
+    <parallel-reason>Writes notes only (and 043's status if T1 passes); shares no file with 014 or 016</parallel-reason>
     <deps>001, 002</deps>
     <tags>testing, e2e-test, integration-test</tags>
     <estimated-effort>4-8 hours (elapsed time depends on the owner)</estimated-effort>

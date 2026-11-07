@@ -10,7 +10,7 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>One table row and a CHANGELOG entry following the root CLAUDE.md maintainer notes</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>M</parallel-group>
+    <parallel-group>L</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>touches .claude/ and root CLAUDE.md — main-session-only (permission boundary, root CLAUDE.md §3)</parallel-reason>
     <deps>042</deps>

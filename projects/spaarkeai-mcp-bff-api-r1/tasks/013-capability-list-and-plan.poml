@@ -10,20 +10,20 @@
     <model-tier>opus</model-tier>
     <model-tier-reason>New abstraction: the transport-free decision capability shared by REST and MCP, extracted on Services/Signals/** owned by ontology-platform</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>D</parallel-group>
+    <parallel-group>B</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Shares no file with 020; serial with 014 through deps</parallel-reason>
+    <parallel-reason>Shares no file with 002 (owner-run steps and notes only); serial with 014 and 016 through deps</parallel-reason>
     <deps>011, 017</deps>
     <tags>bff-api, api, refactoring, di, unit-test, integration-test</tags>
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>
 
-  <prompt>Create the transport-free, self-authorising decision capability (IDecisionCapability) with the Decide-lane list and the decision plan operations, read the caller from ICallerContext, and make the worklist, decision-plan and suppression REST endpoints thin adapters over it with their responses unchanged.</prompt>
+  <prompt>Create the self-authorising decision capability (IDecisionCapability) with the Decide-lane list and the decision plan operations. Its methods take the caller from the request: the HttpContext, or the ClaimsPrincipal where that is enough. Make the worklist, decision-plan and suppression REST endpoints thin adapters over it, with their responses unchanged.</prompt>
   <role>SPAARKE platform developer. Follow ADRs strictly. Expert in layered ASP.NET Core service design and behaviour-preserving extraction.</role>
   <goal>IDecisionCapability and DecisionCapability exist in Services/Signals/ with ListDecideAsync and GetPlanAsync (plan + suppression + full row, writes the plan-read stamp); the REST endpoints call them; 011's baselines pass unchanged.</goal>
 
   <context>
-    <background>Design §7 and §8 B-1; spec FR-10, FR-06. Read rules in SignalReadService (core-record check; 503 too_many_signals instead of a partial list) are unchanged. Category filtering is presentation and lives in 022, not here. The capability layer is IDecisionCapability (list, plan, commit) plus IDecisionLookupSearch (016).</background>
+    <background>Design §7 and §8 B-1; spec FR-10, FR-06. Read rules in SignalReadService (core-record check; 503 too_many_signals instead of a partial list) are unchanged. Category filtering is presentation and lives in 022, not here. The capability layer is IDecisionCapability (list, plan, commit) plus IDecisionLookupSearch (016). Caller context (FR-10 as amended 2026-11-07, owner option C; ICallerContext deferred): B-1 only moves the endpoint bodies into capability methods. ListDecideAsync takes the ClaimsPrincipal and calls SignalReadService.ReadAsync(set, user, ct). GetPlanAsync and GetSuppressionAsync take the HttpContext and run the DecisionPlanEndpoints body unchanged: SignalCoreRecordAccess, DecisionPlanService.GetAsync, DecisionPlanReadStamp.StampAsync(http) and DecisionParameterSources.OptionsAsync(http). REST passes the endpoint's HttpContext; MCP tools (022, 023) pass IHttpContextAccessor.HttpContext.</background>
     <relevant-files>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionCapability.cs</file>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.cs</file>
@@ -44,9 +44,9 @@
 
   <constraints>
     <constraint source="ADR-019">The REST responses of GET /api/v1/signals/worklist, GET /api/v1/signals/{id}/decision-plan, GET /api/v1/signals/{id}/suppression and POST /api/v1/signals/{id}/decision stay byte-for-byte unchanged: task 011's contract baseline tests pass with no golden-file edit (FR-09).</constraint>
-    <constraint source="ADR-028">Every operation this task adds or changes reads the caller only from ICallerContext (task 010); an unpopulated context returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) and never falls back to an app-only client (FR-10, ADR-002 WP-6 fail closed).</constraint>
+    <constraint source="ADR-028">Every operation this task adds or changes takes the caller from the request. Capability methods receive the HttpContext the REST endpoint already has (or its ClaimsPrincipal where that is enough) and pass it to the existing decision services unchanged. A null HttpContext or an unauthenticated caller returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED), and nothing falls back to an app-only client (FR-10 as amended 2026-11-07, option C; ADR-002 WP-6 fail closed). No ICallerContext or other caller holder is introduced.</constraint>
     <constraint source="ADR-002">In every file this task touches, SignalReadService read rules and DecisionCommitService validation, idempotency and execution order are unchanged; DecisionCommitService stays the single owner of completion; SignalWriter, DecisionRecordWriter and DecisionCallerRights are not edited.</constraint>
-    <constraint source="project">IDecisionCapability signatures contain no HttpContext, HttpRequest, IResult, ClaimsPrincipal or MCP SDK type; results are the existing domain result types (SignalReadResult etc.).</constraint>
+    <constraint source="project">IDecisionCapability signatures take the request HttpContext, or a ClaimsPrincipal where that is enough (ListDecideAsync). They contain no HttpRequest, IResult or MCP SDK type, and results are the existing domain result types (SignalReadResult etc.).</constraint>
     <constraint source="project">GetPlanAsync writes the plan-read stamp exactly as the plan route does today (same key, 4 h TTL, same conditions), and writes none when the plan is refused.</constraint>
     <constraint source="ADR-010">The capability is registered as Scoped in SignalsModule.cs; no new module.</constraint>
     <constraint source="project">File ownership for parallel safety: this task creates IDecisionCapability.cs and DecisionCapability.cs; 014 adds the commit members; 015 adds the page member; 016 does not edit them.</constraint>
@@ -80,7 +80,7 @@
 
   <steps mode="directional">
     <step order="1">Read SignalReadEndpoints.GetWorklistAsync, DecisionPlanEndpoints.GetDecisionPlanAsync/GetSuppressionAsync and the services they call.</step>
-    <step order="2">Create IDecisionCapability (ListDecideAsync(ct), GetPlanAsync(signalId, ct), GetSuppressionAsync(signalId, ct)) and DecisionCapability, moving the endpoint bodies' non-HTTP logic into it unchanged.</step>
+    <step order="2">Create IDecisionCapability (ListDecideAsync(ClaimsPrincipal user, ct), GetPlanAsync(HttpContext http, signalId, ct), GetSuppressionAsync(HttpContext http, signalId, ct)) and DecisionCapability. Move the endpoint bodies into it unchanged, including their calls that take the HttpContext; leave only HTTP result shaping in the endpoints.</step>
     <step order="3">Reduce the three endpoints to: call capability → DecisionResultMapper.ToHttp.</step>
     <step order="4">Register the capability in SignalsModule.cs.</step>
     <step order="5">Write the tests in the acceptance criteria; run 011's baselines and the Signals suites (including the one-batched-BillingEventRead count).</step>
@@ -96,7 +96,7 @@
 
   <justification>
     <existing>SignalReadService.cs, DecisionPlanReadStamp.cs and the plan/worklist endpoint bodies (DecisionPlanEndpoints.cs, SignalReadEndpoints.cs) hold this logic today.</existing>
-    <extension>Yes, it extends them: the HttpContext-free core moves out of the endpoints into one entry point; no new rules.</extension>
+    <extension>Yes, it extends them: the endpoint bodies move into one entry point whose methods take the request HttpContext or ClaimsPrincipal; no new rules.</extension>
     <cost-of-doing-nothing>MCP tools would have to call endpoint code or re-derive the caller and plan logic, giving the plan-read stamp and read rules a second owner (spec §11 table).</cost-of-doing-nothing>
   </justification>
 
@@ -113,11 +113,11 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">IDecisionCapability exposes ListDecideAsync, GetPlanAsync and GetSuppressionAsync with no HttpContext, HttpRequest, IResult, ClaimsPrincipal or MCP SDK type in any signature (012's guard passes).</criterion>
+    <criterion testable="true">IDecisionCapability exposes ListDecideAsync(ClaimsPrincipal, ct), GetPlanAsync(HttpContext, Guid, ct) and GetSuppressionAsync(HttpContext, Guid, ct), with no HttpRequest, IResult or MCP SDK type in any signature.</criterion>
     <criterion testable="true">The worklist, decision-plan and suppression endpoints call the capability; 011's baselines pass with no golden change.</criterion>
     <criterion testable="true">GetPlanAsync writes the plan-read stamp with the same key and TTL as before (test asserts presence after a plan read).</criterion>
     <criterion testable="true">Negative: for a Signal outside the caller's core-record access, GetPlanAsync returns the same reason code the REST route returns and writes no stamp.</criterion>
-    <criterion testable="true">Negative: with ICallerContext unpopulated, both operations return UserContextRequired and make no Dataverse call.</criterion>
+    <criterion testable="true">Negative: with a null HttpContext or an unauthenticated principal, the list and plan operations return UserContextRequired and make no Dataverse call.</criterion>
     <criterion testable="true">The 503 too_many_signals path and the one-batched-BillingEventRead count are unchanged (existing tests pass).</criterion>
     <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE) and the ontology review.</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>

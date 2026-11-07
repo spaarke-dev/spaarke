@@ -17,7 +17,7 @@
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>
 
-  <prompt>Before any extraction changes the code behind them, record the current REST responses of GET /api/v1/signals/worklist, GET /api/v1/signals/{id}/decision-plan, GET /api/v1/signals/{id}/suppression and POST /api/v1/signals/{id}/decision — success and every reason code each can return today — as byte-level golden contract tests (FR-09 guard for 012–017).</prompt>
+  <prompt>Before any extraction changes the code behind them, record the current REST responses of GET /api/v1/signals/worklist, GET /api/v1/signals/{id}/decision-plan, GET /api/v1/signals/{id}/suppression and POST /api/v1/signals/{id}/decision — success and every reason code each can return today — as byte-level golden contract tests (FR-09 guard for 013–017).</prompt>
   <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core integration testing and HTTP contract testing.</role>
   <goal>tests/integration/contract/Api/Signals/ holds golden contract tests and files for the four routes that pass on the unchanged code, plus an inventory of every reason code and its HTTP status in notes/contract-baseline.md.</goal>
 
@@ -84,7 +84,7 @@
   <justification>
     <existing>tests/integration/Sprk.Bff.Api.IntegrationTests/Signals/SignalReadRouteTests.cs asserts worklist behaviour but not response bytes; no decision-plan route test exists; no golden-file contract test exists for these routes (grep -rln decision-plan tests/integration/contract returns nothing).</existing>
     <extension>No: the existing tests assert behaviour, not bytes, and FR-09 needs a byte-level freeze recorded before the refactor; the new file reuses their harness.</extension>
-    <cost-of-doing-nothing>Tasks 012–017 could change a REST response without any test failing, breaking the Console's worklist and wizard silently (FR-09, success criterion 6).</cost-of-doing-nothing>
+    <cost-of-doing-nothing>Tasks 013–017 could change a REST response without any test failing, breaking the Console's worklist and wizard silently (FR-09, success criterion 6).</cost-of-doing-nothing>
   </justification>
 
   <tools>

@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>G</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Owns src/solutions/CopilotPlugins/** and its CI step; 022 touches none</parallel-reason>
+    <parallel-reason>Owns src/solutions/CopilotPlugins/** and its CI step; 010 and 031 touch none</parallel-reason>
     <deps>003, 030</deps>
     <tags>config, ci-cd, testing</tags>
     <estimated-effort>2-4 hours</estimated-effort>

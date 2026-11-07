@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>E</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Owns AuthorizationModule.cs, Api/Mcp/McpEndpoints.cs, Api/Mcp/McpToolAuthorization.cs and RouteAuthorizationGuardTests.cs in its wave; 014 and 016 touch none</parallel-reason>
+    <parallel-reason>Owns AuthorizationModule.cs, Api/Mcp/McpEndpoints.cs, Api/Mcp/McpToolAuthorization.cs and RouteAuthorizationGuardTests.cs; single-task wave (auth), so no other task runs beside it</parallel-reason>
     <deps>020</deps>
     <tags>bff-api, auth, authorization, endpoints, integration-test, testing</tags>
     <estimated-effort>4-6 hours</estimated-effort>
@@ -41,6 +41,7 @@
   <constraints>
     <constraint source="ADR-028">/mcp/* accepts only tokens from the Spaarke-tenant authority with aud = the BFF app and scope user_impersonation that resolve to a systemuser; CIAM and A9 home-directory tokens are refused with 401 server-side before any tool runs (A10).</constraint>
     <constraint source="ADR-028">No code path in this task passes the caller's token downstream to a client or logs it or its claims; a failed OBO never falls back to app-only, and any app-only read applies the caller's own record-access check (FR-02).</constraint>
+    <constraint source="ADR-028">The probe tool, and every tool helper this task adds, reads the caller from the request HttpContext through IHttpContextAccessor. A null HttpContext or an unauthenticated caller returns an isError result with UserContextRequired. No ICallerContext or other caller holder is introduced (FR-10 as amended 2026-11-07, option C; task 010 verifies this path).</constraint>
     <constraint source="ADR-008">/mcp/* falls under the authorization FallbackPolicy; no anonymous route is added (only /healthz and /ping stay anonymous); per-tool policies reuse existing named policies and never ExternalCollaboration (B-7).</constraint>
     <constraint source="project">The RouteAuthorizationGuardTests extension ships with a must-fire control (an unauthenticated MapMcp in fixture source fails) and a must-not-fire control, and a seeding proof is recorded (security guard).</constraint>
     <constraint source="project">unified-access-control-r2 reviews the diff against FR-02's four checks before merge, and two adversarial-reviewer passes are recorded (root CLAUDE.md §8.5).</constraint>

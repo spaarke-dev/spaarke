@@ -3,7 +3,7 @@
   <metadata>
     <title>MCP conformance in CI and NFR measurements</title>
     <phase>B MCP host and tools</phase>
-    <gate>after 022, 023 and 024</gate>
+    <gate>after 010, 022, 023 and 024</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies code (.cs test host) and CI workflow; tests/** modified (root CLAUDE.md §8)</rigor-reason>
@@ -12,8 +12,8 @@
     <effort>high</effort>
     <parallel-group>H</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Owns ci-tier1-blocking.yml, the conformance host and McpHostContractTests.cs; 031 touches none</parallel-reason>
-    <deps>022, 023, 024</deps>
+    <parallel-reason>Owns ci-tier1-blocking.yml, the conformance host and McpHostContractTests.cs; 032 touches none</parallel-reason>
+    <deps>010, 022, 023, 024</deps>
     <tags>ci-cd, testing, integration-test, bff-api</tags>
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>
@@ -34,6 +34,7 @@
       <file role="canonical-reference">.github/workflows/ci-tier1-blocking.yml (existing job structure, e.g. arch-tests L388)</file>
     </relevant-files>
     <dependencies>
+      <dependency task="010" status="pending">MCP caller-path verification (FR-10 option C) green before conformance and NFR runs</dependency>
       <dependency task="022" status="pending">show and paging tools</dependency>
       <dependency task="023" status="pending">plan and lookup tools</dependency>
       <dependency task="024" status="pending">complete tool</dependency>

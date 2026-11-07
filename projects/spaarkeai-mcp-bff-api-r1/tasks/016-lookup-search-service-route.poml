@@ -10,9 +10,9 @@
     <model-tier>opus</model-tier>
     <model-tier-reason>Security boundary (authorization tag): the server must stop a client widening a search (plan-driven entity, D-18 matter scoping, caller record access, fail closed)</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>E</parallel-group>
+    <parallel-group>C</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Owns IDecisionLookupSearch.cs, DecisionLookupSearch.cs, SignalsModule.cs and DecisionPlanEndpoints.cs in its wave; 014 and 021 touch none</parallel-reason>
+    <parallel-reason>Owns IDecisionLookupSearch.cs, DecisionLookupSearch.cs, SignalsModule.cs and DecisionPlanEndpoints.cs in its wave; 003 and 014 touch none</parallel-reason>
     <deps>013</deps>
     <tags>bff-api, api, endpoints, authorization, unit-test, integration-test</tags>
     <estimated-effort>4-6 hours</estimated-effort>
@@ -44,7 +44,7 @@
 
   <constraints>
     <constraint source="ADR-003">The lookup entity and scoping rule come only from the Signal's decision plan for the given parameterCode; the client supplies only signalId, parameterCode and query text, and cannot name an entity, column or filter.</constraint>
-    <constraint source="ADR-028">Every lookup read runs as the caller through IDataverseUserClient (OBO); no app-only read returns lookup results; an unpopulated ICallerContext returns UserContextRequired.</constraint>
+    <constraint source="ADR-028">Every lookup read runs as the caller through IDataverseUserClient (OBO), and no app-only read returns lookup results. SearchAsync takes the request HttpContext that the REST route already has (MCP: from IHttpContextAccessor, task 023); a null HttpContext or an unauthenticated caller returns UserContextRequired. No ICallerContext or other caller holder is introduced (FR-10 as amended 2026-11-07, option C).</constraint>
     <constraint source="ADR-008">No endpoint or MCP tool added or changed by this task carries the ExternalCollaboration policy or the external access guard; workforce routes use .RequireAuthorization() on the default workforce scheme plus existing policies.</constraint>
     <constraint source="project">The query text is escaped as an OData string literal before use; no user text is concatenated into a filter unescaped; results are capped at 25 per call.</constraint>
     <constraint source="ADR-002">Fail closed: an unreadable Signal returns the same uniform refusal the plan route returns; an unknown parameterCode returns ontology.decision.invalid_parameter; a Dataverse fault returns a failure, never a partial or unscoped list.</constraint>
@@ -88,7 +88,7 @@
 
   <steps mode="directional">
     <step order="1">Read ExternalModuleDataEndpoints.cs (L301-356, L897) for the scoped-query pattern and DecisionParameterSources for how the plan declares lookup parameters.</step>
-    <step order="2">Define IDecisionLookupSearch.SearchAsync(signalId, parameterCode, query, ct) and implement: load the plan as the caller; resolve the parameter's LookupEntity and scope (budget → filtered to the Signal's matter; contact; organisation); build the OData query server-side with the escaped query text; read as the caller; cap at 25.</step>
+    <step order="2">Define IDecisionLookupSearch.SearchAsync(HttpContext http, signalId, parameterCode, query, ct) and implement: load the plan as the caller through IDecisionCapability.GetPlanAsync(http, …); resolve the parameter's LookupEntity and scope (budget → filtered to the Signal's matter; contact; organisation); build the OData query server-side with the escaped query text; read as the caller; cap at 25.</step>
     <step order="3">Register it in SignalsModule.cs and map GET /{signalId:guid}/lookup in DecisionPlanEndpoints.cs, returning results or DecisionResultMapper.ToHttp failures.</step>
     <step order="4">Write unit tests per action type (revise-budget, reassign, add-todo, assign-work, assign-task, inquiry outside firm) and the negatives; write auth and contract tests for the route.</step>
     <step order="5">Run the Signals suites and ArchTests (RouteAuthorizationGuardTests must cover the new route); measure the publish-size delta; open the PR for ontology review.</step>

@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>D</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Shares no file with 013 (Program.cs, csproj, RateLimitingModule.cs, EndpointMappingExtensions.cs and Api/Mcp/** are not touched by 013)</parallel-reason>
+    <parallel-reason>Shares no file with 015 (Program.cs, csproj, RateLimitingModule.cs, EndpointMappingExtensions.cs and Api/Mcp/** are not touched by 015)</parallel-reason>
     <deps>003, 017</deps>
     <tags>bff-api, minimal-api, endpoints, di, config, ai, integration-test</tags>
     <estimated-effort>4-6 hours</estimated-effort>

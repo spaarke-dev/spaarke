@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>MCP caller-path verification (option C)</title>
+    <phase>B MCP host and tools</phase>
+    <gate>after 020, 021, 023 and 024; must finish before 025</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include auth and integration-test, and the task adds files under tests/** (root CLAUDE.md §8): code-review and adr-check run regardless</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth-sensitive (tag auth): these tests are the evidence that every MCP tool runs as the caller over the unchanged IHttpContextAccessor path, which option C (FR-10) relies on instead of ICallerContext</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds only test files under tests/integration/{auth,data-mutation}/Mcp/ and test-only fixtures under tests/; shares no file with 031 or 040</parallel-reason>
+    <deps>020, 021, 023, 024</deps>
+    <tags>bff-api, auth, testing, integration-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Prove on a real host that MCP tool handlers on /mcp/legal-operations run inside the ASP.NET request, so the unchanged DataverseUserClient, CallerWhoAmIMemo and decision services serve MCP callers exactly as they serve REST. Write six tests: (1) the tool sees the request HttpContext and RequestServices; (2) WhoAmI over the MCP route, failing closed with UserContextRequired when there is no bearer token or no context; (3) one WhoAmI per MCP commit; (4) a plan-read stamp written over MCP satisfies an MCP commit; (5) a pin on the stateless transport with PerSessionExecutionContext=false; (6) every existing caller suite unchanged. Change no production code.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core request scoping, IHttpContextAccessor and ExecutionContext flow, OBO token flows and WebApplicationFactory integration tests.</role>
+  <goal>Six caller-path tests pass on the real MCP host, existing caller suites pass unedited, nothing under src/ changes, and unified-access-control-r2 plus two adversarial-reviewer passes accept the evidence.</goal>
+
+  <context>
+    <background>Spec FR-10 as amended 2026-11-07 (owner option C; notes/decisions.md 2026-11-07), which supersedes design §8 B-4. ICallerContext is deferred. MCP tools read the request HttpContext from IHttpContextAccessor; a null context or unauthenticated caller returns an isError result with UserContextRequired. Otherwise the tools call the same decision services REST calls: SignalReadService.ReadAsync(set, httpContext.User, ct); the DecisionPlanEndpoints body (SignalCoreRecordAccess, DecisionPlanService.GetAsync, DecisionPlanReadStamp.StampAsync(http), DecisionParameterSources.OptionsAsync(http)); and DecisionCommitService.CommitAsync(…, http, ct). Evidence for the decision: in ModelContextProtocol.AspNetCore 2.3.1, StreamableHttpHandler passes context.RequestServices with ScopeRequests=false, and the default PerSessionExecutionContext=false keeps IHttpContextAccessor working inside tools. This task turns that evidence into tests. v1 limitation: decision capabilities run only inside an HTTP request. unified-access-control-r2 reviews this diff (project CLAUDE.md §4).</background>
+    <relevant-files>
+      <file role="new">tests/integration/auth/Mcp/McpCallerPathTests.cs (tests 1, 2 and 5)</file>
+      <file role="new">tests/integration/data-mutation/Mcp/McpCommitCallerPathTests.cs (tests 3 and 4)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Mcp/McpTestHost.cs (from 020: the in-process MCP host)</file>
+      <file role="canonical-reference">tests/integration/seam/Auth/ConfidentialClientMigrationSeamTests.cs (real DataverseUserClient behind a hand-written fake wire handler; copy the pattern, not the path)</file>
+      <file role="canonical-reference">tests/integration/data-mutation/Signals/DecisionCommitServiceTests.CallerIdentityCount.cs (T170: WhoAmIs == 1 and every rights question asked)</file>
+      <file role="canonical-reference">tests/integration/auth/Signals/CallerWhoAmIMemoIsolationTests.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/Dataverse*HandlerTests.cs (chat dataverse.* handlers; must stay green unedited)</file>
+      <file role="canonical-reference">tests/integration/contract/Api/Signals/ (task 011 golden baselines)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseUserClient.cs (read-only: IHttpContextAccessor L49/L72, context read L169, WhoAmI memo L226/L301)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/CallerWhoAmIMemo.cs (read-only)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs (from 020: transport options)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/GetDecisionPlanTool.cs and CompleteDecisionTool.cs (from 023 and 024)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeProfileDispatcher.cs:88, 117-134 (existing detached-context workaround; context for the v1 limitation only)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">MCP host, McpModule transport options and McpTestHost</dependency>
+      <dependency task="021" status="pending">A10 auth on /mcp and the test authentication handler</dependency>
+      <dependency task="023" status="pending">spaarke_get_decision_plan (writes the plan-read stamp)</dependency>
+      <dependency task="024" status="pending">spaarke_complete_decision (commit through DecisionCommitService)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">This task changes no file under src/. DataverseUserClient, CallerWhoAmIMemo, CallerRecordAccessProbe, CallerResolution, the decision services and every chat/AI path stay as they are (FR-10 option C). The PR shows git diff --stat limited to tests/ and projects/spaarkeai-mcp-bff-api-r1/.</constraint>
+    <constraint source="ADR-028">The fail-closed tests prove three things: with no bearer token or no HttpContext, the real DataverseUserClient returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED); the fake wire handler records no Dataverse call; no app-only client is invoked (FR-10, ADR-002 WP-6 fail closed).</constraint>
+    <constraint source="ADR-028">No test asserts on, prints or logs a real bearer token or claim value. Tokens in fixtures are opaque test strings, and the test authentication handler exists only under tests/.</constraint>
+    <constraint source="project">T170 keeps WhoAmIs == 1 for REST, and the new MCP variant asserts WhoAmIs == 1 per spaarke_complete_decision commit. No existing test file is edited (FAILURE-MODES AP-9).</constraint>
+    <constraint source="project">The PR is reviewed by unified-access-control-r2 and gets two adversarial-reviewer passes (root CLAUDE.md §8.5, auth tag).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;. The wire fake is a hand-written HttpMessageHandler subclass.</constraint>
+    <constraint source="project">Any defect found and not fixed in this task is filed with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue), never one without the other (project CLAUDE.md §2).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/dataverse-obo.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/decisions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Real client, fake wire" location="tests/integration/seam/Auth/ConfidentialClientMigrationSeamTests.cs">Runs the real DataverseUserClient behind a hand-written fake HTTP handler, so the OBO and WhoAmI path is exercised end to end without a tenant.</pattern>
+      <pattern name="WhoAmI count" location="tests/integration/data-mutation/Signals/DecisionCommitServiceTests.CallerIdentityCount.cs">T170: counts WhoAmI requests at the wire and asserts every rights question is still asked.</pattern>
+      <pattern name="Fail-fast verification" location=".claude/FAILURE-MODES.md">AP-7: a fail-closed claim needs a test of every consumer path, not only the targeted one.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read 020's McpModule and McpTestHost, 021's test authentication handler, 023's and 024's tools, DataverseUserClient (L49, L72, L169, L226, L301), CallerWhoAmIMemo, T170 and ConfidentialClientMigrationSeamTests. Confirm how the host configures the transport options.</step>
+    <step order="2">Test 1 (McpCallerPathTests). On the real host (the BFF Program with Mcp:Enabled=true and /mcp/legal-operations mapped), add a test middleware that captures HttpContext and a test-only tool that captures IHttpContextAccessor.HttpContext and the IServiceProvider it was resolved from. Call the tool over MCP. Assert that the accessor context is non-null and is the same instance the middleware captured (ReferenceEquals), and that the provider is that context's RequestServices.</step>
+    <step order="3">Test 2 (McpCallerPathTests). Register the real DataverseUserClient behind a hand-written fake wire handler (token exchange and Dataverse HTTP), as ConfidentialClientMigrationSeamTests does. Positive: a tool call that triggers WhoAmI over the MCP route succeeds as the caller. Negatives: (a) an authenticated test principal whose request carries no bearer token gets an isError result with UserContextRequired; (b) the client invoked with no HttpContext (accessor null, outside a request) returns UserContextRequired. In both negatives the fake wire handler records zero Dataverse calls and no app-only client is invoked.</step>
+    <step order="4">Test 3 (McpCommitCallerPathTests). Write an MCP variant of T170: one spaarke_complete_decision commit over the MCP route, WhoAmIs == 1 at the wire and every rights question T170 checks still asked.</step>
+    <step order="5">Test 4 (McpCommitCallerPathTests). Call spaarke_get_decision_plan over MCP, then spaarke_complete_decision for the same Signal and caller in a separate MCP request. Assert that the commit is not refused for a missing plan read. Negative: without the plan call, the commit returns the existing plan-read refusal reasonCode and writes nothing.</step>
+    <step order="6">Test 5 (McpCallerPathTests). Pin the transport: resolve the host's configured MCP HTTP transport options and assert Stateless == true and PerSessionExecutionContext == false. Seeding proof: override PerSessionExecutionContext to true in a test host, confirm that tests 1 and 5 fail, restore, and record the result in the task notes.</step>
+    <step order="7">Test 6. Run the existing suites with no file edits: T170, CallerWhoAmIMemoIsolationTests, the chat Dataverse*HandlerTests, the DecisionCommitService and Signal suites, and the 011 baselines. Record pass counts in the task notes.</step>
+    <step order="8">Confirm that git diff --stat touches nothing under src/. Request unified-access-control-r2 review and run two adversarial-reviewer passes.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`. The bracketed ASCII token is mandatory, because the emoji alone is not greppable (task-create Step 5, FAILURE-MODES G-16). Set the POML &lt;status&gt; to completed and run pwsh scripts/check-task-status-drift.ps1.</step>
+    <step order="10">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If test 1 shows a null accessor context, a different HttpContext instance or a provider other than RequestServices, STOP and escalate to the owner. Option C's premise (FR-10) fails. Do not add ICallerContext, a scoped caller holder or an app-only fallback.</trigger>
+    <trigger>If an MCP commit asks WhoAmI more than once, STOP and escalate. Do not adjust the test or CallerWhoAmIMemo (FAILURE-MODES AP-9).</trigger>
+    <trigger>If any existing suite in test 6 fails, or making a new test pass needs a change under src/, STOP and escalate. This is a verification task.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>T170 (DecisionCommitServiceTests.CallerIdentityCount.cs) and CallerWhoAmIMemoIsolationTests cover the REST path only; ConfidentialClientMigrationSeamTests covers the client seam but not MCP; 020's McpHostContractTests cover the transport contract, not the caller path.</existing>
+    <extension>Partly: test 3 reuses T170's fixtures and assertions, and test 2 copies the seam test's wire fake. New files are needed because no existing test drives the MCP route as a caller.</extension>
+    <cost-of-doing-nothing>Option C would rest on a reading of SDK source. An SDK upgrade or a flip to PerSessionExecutionContext=true would null the accessor inside tools, so every MCP call would fail with UserContextRequired or WhoAmI would double, and no test would go red.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/auth/Mcp/McpCallerPathTests.cs</output>
+    <output type="test">tests/integration/data-mutation/Mcp/McpCommitCallerPathTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test 1: inside an MCP tool on the real host, IHttpContextAccessor.HttpContext is non-null and is the same instance a test middleware captured for that request, and the tool's IServiceProvider is that context's RequestServices.</criterion>
+    <criterion testable="true">Test 2: with the real DataverseUserClient behind a hand-written fake wire handler, a WhoAmI-triggering tool call over /mcp/legal-operations succeeds as the caller.</criterion>
+    <criterion testable="true">Negative (test 2): with no bearer token on the request, or with no HttpContext, the result is UserContextRequired (isError over MCP), the fake wire handler records zero Dataverse calls and no app-only client is invoked.</criterion>
+    <criterion testable="true">Test 3: one spaarke_complete_decision commit over MCP asks WhoAmI exactly once (WhoAmIs == 1) and still asks every rights question T170 checks.</criterion>
+    <criterion testable="true">Test 4: a plan-read stamp written by spaarke_get_decision_plan satisfies a later spaarke_complete_decision for the same caller and Signal; negative: without the plan call the commit returns the existing plan-read refusal reasonCode and writes nothing.</criterion>
+    <criterion testable="true">Test 5: the configured MCP transport has Stateless == true and PerSessionExecutionContext == false; the seeding proof (PerSessionExecutionContext=true makes tests 1 and 5 fail) is recorded in the task notes.</criterion>
+    <criterion testable="true">Test 6: T170, CallerWhoAmIMemoIsolationTests, the chat Dataverse*HandlerTests, the DecisionCommitService and Signal suites, and 011's baselines pass with no edit to any existing test file.</criterion>
+    <criterion testable="true">Negative: the task's diff touches no file under src/ (git diff --stat in the PR).</criterion>
+    <criterion testable="true">The PR records unified-access-control-r2's review and two adversarial-reviewer passes.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Rewritten 2026-11-07 for owner option C: ICallerContext (old 010 "B-4a") is deferred and 012 is cancelled (notes/decisions.md 2026-11-07). The old acceptance criteria about populating ICallerContext and removing IHttpContextAccessor from DataverseUserClient/CallerWhoAmIMemo are removed. Seeding proof is required because a fail-open caller path would be a security outcome. Run dotnet test without --no-build after edits (G-12).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

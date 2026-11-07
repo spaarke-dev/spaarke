@@ -10,9 +10,9 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Single-component projection and cursor with an explicit contract (FR-05, FR-11) and the canonical row type WorklistItemRow to project from</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>F</parallel-group>
+    <parallel-group>D</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Owns SignalReadService.cs, WorklistItemSummary.cs, IDecisionCapability.cs, DecisionCapability.cs and DecisionResultMapper.cs in its wave; 023, 024 and 030 touch none</parallel-reason>
+    <parallel-reason>Owns SignalReadService.cs, WorklistItemSummary.cs, IDecisionCapability.cs, DecisionCapability.cs and DecisionResultMapper.cs in its wave; 020 touches none</parallel-reason>
     <deps>013, 014</deps>
     <tags>bff-api, api, unit-test, integration-test</tags>
     <estimated-effort>2-4 hours</estimated-effort>
@@ -20,7 +20,7 @@
 
   <prompt>Add the slim list projection WorklistItemSummary (WorklistItemRow without EvidenceRefs and Steps, keeping InvoiceReview, adding PrivilegeFlagged read from sprk_privilegeflagged) and a paged Decide-lane operation with an opaque cursor on the capability, leaving the Console's REST worklist response unchanged.</prompt>
   <role>SPAARKE platform developer. Follow ADRs strictly. Expert in C# record projections, JSON size budgets and cursor paging.</role>
-  <goal>WorklistItemSummary exists and serialises to at most 600 bytes at seeded maximum field lengths; IDecisionCapability.ListDecidePageAsync(cursor, ct) returns at most 50 summaries in Console order plus a next cursor; the privilege flag is read in the list pipeline without changing read rules or the REST response.</goal>
+  <goal>WorklistItemSummary exists and serialises to at most 600 bytes at seeded maximum field lengths; IDecisionCapability.ListDecidePageAsync(user, cursor, ct) returns at most 50 summaries in Console order plus a next cursor; the privilege flag is read in the list pipeline without changing read rules or the REST response.</goal>
 
   <context>
     <background>Spec FR-11, FR-05, FR-04 (supports). Gotchas (project CLAUDE.md §6): WorklistItemSummary does not exist; the row type is WorklistItemRow with #2580's InvoiceReview member; the list pipeline does not select sprk_privilegeflagged (only DecisionCommitService.cs:313 reads it). Spec assumption: a Work Item is privileged when the Signal or its subject carries sprk_privilegeflagged; verify the exact source column here.</background>
@@ -47,7 +47,7 @@
     <constraint source="project">WorklistItemRow's JSON (the Console REST response) gains no member; PrivilegeFlagged exists only on the internal row and on WorklistItemSummary.</constraint>
     <constraint source="project">Page size is at most 50 summaries; order is exactly the order SignalReadService returns for the Console; the cursor is opaque (base64url of the last item's ordering key and id) and stateless.</constraint>
     <constraint source="ADR-019">A malformed or tampered cursor returns a failure with the new reason code ontology.worklist.cursor_invalid, registered in DecisionResultMapper with an MCP mapping test; a stale but well-formed cursor is not an error.</constraint>
-    <constraint source="ADR-028">Every operation this task adds or changes reads the caller only from ICallerContext (task 010); an unpopulated context returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) and never falls back to an app-only client (FR-10, ADR-002 WP-6 fail closed).</constraint>
+    <constraint source="ADR-028">Every operation this task adds or changes takes the caller from the request. Capability methods receive the HttpContext the REST endpoint already has (or its ClaimsPrincipal where that is enough) and pass it to the existing decision services unchanged. A null HttpContext or an unauthenticated caller returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED), and nothing falls back to an app-only client (FR-10 as amended 2026-11-07, option C; ADR-002 WP-6 fail closed). No ICallerContext or other caller holder is introduced.</constraint>
     <constraint source="project">Every PR from this task that touches Services/Signals/**, Api/Signals/** or the worklist route is reviewed by spaarke-ontology-platform-r1 before merge (project CLAUDE.md §4); run /conflict-check before opening it.</constraint>
     <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
@@ -83,7 +83,7 @@
     <step order="1">Verify the privilege source: confirm sprk_signal.sprk_privilegeflagged and whether the subject entity carries its own flag; record the finding in notes/decisions.md.</step>
     <step order="2">Add the column to the list pipeline's $select and to the internal VisibleRow; leave WorklistItemRow's serialised shape unchanged.</step>
     <step order="3">Create WorklistItemSummary (all WorklistItemRow members except EvidenceRefs and Steps, keeping InvoiceReview, plus PrivilegeFlagged).</step>
-    <step order="4">Add ListDecidePageAsync(string? cursor, CancellationToken ct) to the capability: page of at most 50 summaries in Console order, next cursor or null; add ontology.worklist.cursor_invalid to the mapper.</step>
+    <step order="4">Add ListDecidePageAsync(ClaimsPrincipal user, string? cursor, CancellationToken ct) to the capability (the caller comes from the request principal, as for ListDecideAsync; FR-10 option C): page of at most 50 summaries in Console order, next cursor or null; add ontology.worklist.cursor_invalid to the mapper.</step>
     <step order="5">Write the tests in the acceptance criteria (seed 200 items across at least 3 matters with maximum-length fields).</step>
     <step order="6">Run 011's baselines and the Signals suites; measure the publish-size delta; open the PR for ontology review.</step>
     <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>

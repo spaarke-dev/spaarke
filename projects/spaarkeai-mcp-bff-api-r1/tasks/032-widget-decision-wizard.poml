@@ -10,9 +10,9 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Reuses DecisionWizardHost/DecisionItemWizard over a ResponseFetchFn shim with a complete spec; no new architecture</model-tier-reason>
     <effort>xhigh</effort>
-    <parallel-group>I</parallel-group>
+    <parallel-group>H</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Single-task wave; runs after 031 because both edit the widget App shell</parallel-reason>
+    <parallel-reason>Runs after 031 because both edit the widget App shell; shares no file with 025</parallel-reason>
     <deps>023, 024, 031</deps>
     <tags>frontend, react, typescript, fluent-ui</tags>
     <estimated-effort>6-8 hours</estimated-effort>

@@ -10,7 +10,7 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Deployment through the existing bff-deploy skill and Deploy-BffApi.ps1; the judgment points are escalation triggers</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>J</parallel-group>
+    <parallel-group>I</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Live deployment to the shared dev BFF; runs alone</parallel-reason>
     <deps>025, 032</deps>

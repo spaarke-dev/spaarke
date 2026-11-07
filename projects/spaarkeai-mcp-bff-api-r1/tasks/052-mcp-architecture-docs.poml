@@ -10,7 +10,7 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Documentation from implemented code using the docs-architecture and docs-guide skills</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>M</parallel-group>
+    <parallel-group>L</parallel-group>
     <parallel-safe>true</parallel-safe>
     <parallel-reason>Writes docs/ only; safe beside the main-session 050/051</parallel-reason>
     <deps>042</deps>

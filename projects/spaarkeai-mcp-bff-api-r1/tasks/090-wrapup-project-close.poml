@@ -10,7 +10,7 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Procedural close-out with fixed steps</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>N</parallel-group>
+    <parallel-group>M</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Final task; runs alone after every other task</parallel-reason>
     <deps>050, 051, 052</deps>

@@ -10,7 +10,7 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Executes a fixed live test plan and finalises runbooks from 002's draft; owner runs admin steps</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>L</parallel-group>
+    <parallel-group>K</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Live dev-tenant work with the owner; runs alone</parallel-reason>
     <deps>040, 041, 043</deps>

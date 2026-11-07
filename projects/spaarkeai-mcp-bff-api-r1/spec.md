@@ -3,6 +3,7 @@
 > **Status**: Ready for Implementation
 > **Created**: 2026-11-05
 > **Source**: design.md (owner-approved 2026-11-05, third review round; commit c39828a484, draft PR #2587)
+> **Amended**: 2026-11-07 — FR-10 (owner option C): design §8 B-4 (`ICallerContext`) is superseded by this clarification and deferred; see FR-10 and Owner Clarifications.
 
 ## Executive Summary
 
@@ -32,7 +33,7 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
   - B-1: capability layer;
   - B-2: result mapper;
   - B-3: workforce lookup search, with a REST route;
-  - B-4: `ICallerContext` for the decision slice;
+  - B-4: `ICallerContext` for the decision slice — **deferred** (owner, 2026-11-07, option C). MCP tools take the caller from the request `HttpContext` instead (FR-10);
   - B-5: slim list projection;
   - B-6: MCP placement;
   - B-7: tool authorization policies;
@@ -80,16 +81,16 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
 - `Api/Mcp/` (new): the MCP module, tools, resource and endpoint mapping.
 - `Infrastructure/DI/EndpointMappingExtensions.cs`: maps `/mcp/{area}`.
 - `Infrastructure/DI/` (new `AddMcpModule`) and `Infrastructure/DI/AuthorizationModule.cs`: the latter only if A10 needs a scheme change.
-- `Services/Signals/`, the decision slice:
-  - `DecisionCommitService.cs` (L432, `HttpContext` parameter);
-  - `DecisionPlanReadStamp.cs` (L42);
-  - `Actions/DecisionParameterSources.cs` (L109);
-  - `SignalReadService.cs` (L308).
+- `Services/Signals/`, the decision slice. The capability layer calls these unchanged, passing the request `HttpContext` or `ClaimsPrincipal` (option C, FR-10):
+  - `DecisionCommitService.cs` (L439, `HttpContext` parameter);
+  - `DecisionPlanReadStamp.cs` (L42, `HttpContext` parameter);
+  - `Actions/DecisionParameterSources.cs` (L109, `HttpContext` parameter);
+  - `SignalReadService.cs` (L317, `ClaimsPrincipal` parameter).
 - `Services/Signals/` (no new folder; owned by ontology-platform, which reviews every PR here): the capability layer and lookup search.
 - `Api/Signals/`:
   - `DecisionPlanEndpoints.cs`, `DecisionCommitEndpoints.cs` and `SignalReadEndpoints.cs` become thin adapters with an unchanged REST contract;
   - a new lookup-search route.
-- `Infrastructure/Dataverse/DataverseUserClient.cs`, `Infrastructure/Authentication/CallerResolution.cs` and `CallerWhoAmIMemo`: read `ICallerContext`.
+- `Infrastructure/Dataverse/DataverseUserClient.cs`, `Infrastructure/Authentication/CallerResolution.cs`, `CallerWhoAmIMemo` and `CallerRecordAccessProbe`: **unchanged** (B-4 deferred, FR-10). They keep reading the request through `IHttpContextAccessor`; task 010 verifies that this path holds for MCP tool calls.
 - `Sprk.Bff.Api.csproj`:
   - adds `ModelContextProtocol.AspNetCore` 2.3.1;
   - moves `Microsoft.Extensions.AI` 10.3.0 → 10.11.x;
@@ -199,13 +200,20 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
      - every reason code that REST can return has an MCP mapping test;
      - transport errors are never used for domain failures.
 
-10. **FR-10 — Capability layer and caller context (B-1, B-4).**
-    - The list, plan, lookup and commit operations live in a transport-free, self-authorising decision capability that REST endpoints and MCP tools both call.
-    - A scoped `ICallerContext { Caller (Spaarke.Core.Auth.CallerIdentity), Principal, BearerToken, CorrelationId }` is populated once per request. `DataverseUserClient`, `CallerWhoAmIMemo` and the decision services read it instead of `IHttpContextAccessor` or `HttpContext` parameters, for the decision slice.
+10. **FR-10 — Capability layer (B-1) shared by REST and MCP; caller from the request context (B-4 deferred).** *(Amended 2026-11-07, owner option C. This clarification supersedes design §8 B-4; design.md is not edited.)*
+    - The list, plan, lookup and commit operations live in a self-authorising decision capability that REST endpoints and MCP tools both call. B-1 only moves the endpoint bodies into capability methods that take the request `HttpContext`, or a `ClaimsPrincipal` where that is enough (the worklist read). It adds no rules. B-2 (the mapper) needs no caller context.
+    - MCP tools get the `HttpContext` from `IHttpContextAccessor`. When it is null or the caller is unauthenticated, the tool returns an `isError` result with `UserContextRequired`. Otherwise it calls exactly the decision services the REST endpoints call:
+      - `SignalReadService.ReadAsync(set, httpContext.User, ct)`;
+      - the `DecisionPlanEndpoints` body: `SignalCoreRecordAccess`, `DecisionPlanService.GetAsync`, `DecisionPlanReadStamp.StampAsync(http)` and `DecisionParameterSources.OptionsAsync(http)`;
+      - `DecisionCommitService.CommitAsync(…, http, ct)`.
+    - **B-4 `ICallerContext` is deferred** (owner, 2026-11-07, option C). `DataverseUserClient`, `CallerWhoAmIMemo`, `CallerRecordAccessProbe` and every chat/AI path are unchanged. WhoAmI stays at one per commit (T170).
+      - Rationale: the `ModelContextProtocol.AspNetCore` 2.3.1 stateless transport runs tool handlers inside the ASP.NET request. `StreamableHttpHandler` passes `context.RequestServices` with `ScopeRequests=false`, and the default `PerSessionExecutionContext=false` keeps `IHttpContextAccessor` working. A scoped caller holder would duplicate what the request already carries.
+    - **v1 limitation:** decision capabilities run only inside an HTTP request. This holds while the server stays stateless with `PerSessionExecutionContext=false`. Future off-request scenarios (durable agents, queued continuations, Teams proactive) are blocked by the user-token problem, not by this refactor. `ComposeProfileDispatcher.cs:88/117-134` shows the existing detached-context workaround.
     - Acceptance:
-      - none of the decision-slice service methods take `HttpContext`;
-      - REST behaviour is unchanged (existing integration tests pass);
-      - **negative:** a capability call with no populated caller context fails closed with `UserContextRequired`; it never runs app-only.
+      - MCP tools resolve the caller from the request context; **negative:** with no `HttpContext` or an unauthenticated caller, a tool fails closed with `UserContextRequired` and never runs app-only;
+      - REST behaviour is unchanged: task 011's baselines pass byte-for-byte;
+      - WhoAmI = 1 per MCP commit (an MCP `spaarke_complete_decision` variant of T170);
+      - a test pins the stateless transport and `PerSessionExecutionContext=false`.
 
 11. **FR-11 — Slim list projection (B-5).** `WorklistItemSummary`, a projection of the existing `WorklistItemRow` without `EvidenceRefs` or `Steps`, is used for lists. It keeps #2580's `WorklistInvoiceReview(InvoiceId, LineId)` member. The full row arrives with the plan.
     - Acceptance: a list row is ≤ 600 bytes serialized at the seeded maximum field lengths. The Console's REST list response is unchanged unless it opts in.
@@ -361,7 +369,7 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
 
 ```xml
 <hot-path-declaration>
-  <bff-api>YES — new Api/Mcp/ + AddMcpModule + MapMcpEndpoints; Services/Signals decision capability extraction (HttpContext-free overloads); new workforce lookup-search service + route; ICallerContext (DataverseUserClient, CallerWhoAmIMemo); AuthorizationModule only if A10 needs a scheme change; csproj package changes. Api/Agent untouched unless the FR-17 fallback is adopted.</bff-api>
+  <bff-api>YES — new Api/Mcp/ + AddMcpModule + MapMcpEndpoints; Services/Signals decision capability extraction (capability methods over the request HttpContext/ClaimsPrincipal — amended 2026-11-07, option C); new workforce lookup-search service + route; ICallerContext deferred (DataverseUserClient, CallerWhoAmIMemo unchanged — amended 2026-11-07, option C); AuthorizationModule only if A10 needs a scheme change; csproj package changes. Api/Agent untouched unless the FR-17 fallback is adopted.</bff-api>
   <spaarke-ai>NO — src/solutions/SpaarkeAi/** untouched; shared-lib decision and worklist components may gain props (single-lane, paging, lookup seams), consumed unchanged by the Console</spaarke-ai>
   <ci-workflows>YES — widget build step feeding the BFF embedded resource; MCP conformance run; bundle-size budget; possibly a plugin package build</ci-workflows>
   <skill-directives>YES — rewrite .claude/skills/mcp-tool-handler; update declarative-agent and widget-design skills to current schemas</skill-directives>
@@ -382,10 +390,10 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
 |---|---|---|---|
 | `/mcp/{area}` endpoint + `AddMcpModule` (`Api/Mcp/`) | April OpenAPI plugin + `/api/agent/*` (`Api/Agent/AgentEndpoints.cs:37-107`); Dataverse's built-in `/api/mcp` | No. OpenAPI actions can't carry MCP App widgets or join a federated connector, and Dataverse MCP can't apply the Signal core-record check (`SignalReadEndpoints.cs:15-19`) | Spaarke has no presence in Copilot or Cowork beside Work IQ, and no route to the legal ISV connector gallery |
 | Four `spaarke_*` tools + app-only page call | REST routes for list, plan and commit (`Api/Signals/*`) | They **are** the extension: thin adapters over the capability layer | Copilot can't list or resolve a Work Item |
-| Decision capability layer (B-1) | `SignalReadService`, `DecisionCommitService`, plan endpoints | Yes, it extends them: the `HttpContext`-free core moves out of the endpoints, with no new rules | A second host forks caller resolution and result mapping, giving the invariant a second owner |
+| Decision capability layer (B-1) | `SignalReadService`, `DecisionCommitService`, plan endpoints | Yes, it extends them: the endpoint bodies move into capability methods that take the request `HttpContext` or `ClaimsPrincipal`, with no new rules (FR-10, option C) | A second host forks caller resolution and result mapping, giving the invariant a second owner |
 | Result mapper (B-2) | Endpoint statics (`DecisionCommitEndpoints.cs:60-118`, `SignalReadEndpoints.cs:46-83`) | Yes, it extracts those statics into one mapper | MCP results drift from REST reason codes; Finance already drifted (`errorCode` vs `reasonCode`) |
 | `IDecisionLookupSearch` + REST route + tool (B-3) | Console's `Spaarke.AI.Widgets/src/widgets/workspace/worklistLookup.ts` (browser `Xrm.WebApi`); external `ExternalModuleDataEndpoints.cs` `/fetch` (external plane) | No. A browser `Xrm` helper can't run on a server, and the external route's policy must not serve workforce callers | Six action types can't be completed outside the Console, and D-18 stays enforced only in the browser |
-| `ICallerContext` (B-4) | `CallerResolution`, `CallerWhoAmIMemo`, `IHttpContextAccessor` (85 uses in 46 files) | Yes, it wraps what `CallerResolution` already resolves | MCP works only by running inside an HTTP request; a non-HTTP continuation fails silently (`UserContextRequired`) |
+| `ICallerContext` (B-4) — **DEFERRED, not built in v1** (owner, 2026-11-07, option C; FR-10) | `CallerResolution`, `CallerWhoAmIMemo`, `IHttpContextAccessor` (85 uses in 46 files) | Yes: the existing `IHttpContextAccessor` path already serves MCP tools, because the stateless transport runs them inside the ASP.NET request | Nothing fails in v1: tools run inside the request. Off-request callers are out of v1 and are blocked by the user-token problem, not by this abstraction (FR-10 v1 limitation) |
 | Slim projection `WorklistItemSummary` (B-5) | `WorklistItem` rows (1–2 KB each, with `EvidenceRefs` and `Steps`) | It is a projection of the existing row, not a new model | 30–50 rows exceed Cowork's 64 KiB inline cap |
 | `mcp` rate-limit policy | Existing BFF rate-limit policies | It adds one named policy in the existing rate-limit module | One caller's widget can exhaust the shared limit, or `/mcp` runs unthrottled |
 | `Mcp:Enabled` option + null object | ADR-032 kill-switch pattern | It follows the pattern | MCP can't be switched off in an environment without a redeploy |
@@ -431,11 +439,11 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
   1. **No dev BFF deploy from this branch until ontology's pair has deployed** (it waits for ebilling task 112). Phase 0 live tests (T0–T14, E1–E5) therefore run from a **separate spike branch cut from master**, deployed through the owner's per-SHA go in uac-r2's session. If this branch must deploy sooner, back the merge out first.
   2. The D-207 order and replay guard stay unchanged. The MCP commit goes through the same `DecisionCommitService` entry, never a second route that skips 1c-billing.
   3. Ontology's pair merges to master first. If either branch gets new commits, re-merge (they merge, never rebase).
-- **Sequencing with ontology-platform (agreed 2026-11-06):** B-1, B-2 and B-5 build on the PR #2580 code now on this branch (merged 2026-11-06; D-207, it adds the `ontology.decision.decided_in_invoice_review` 409 and `invoiceReview` on worklist items) rather than waiting for master. B-3, B-4 and the MCP foundation can start now. B-5's `WorklistItemSummary` must keep `invoiceReview`.
+- **Sequencing with ontology-platform (agreed 2026-11-06):** B-1, B-2 and B-5 build on the PR #2580 code now on this branch (merged 2026-11-06; D-207, it adds the `ontology.decision.decided_in_invoice_review` 409 and `invoiceReview` on worklist items) rather than waiting for master. B-3 and the MCP foundation can start now (B-4 is deferred, FR-10). B-5's `WorklistItemSummary` must keep `invoiceReview`.
 - **Reviews:**
   - ontology-platform reviews every PR touching `Services/Signals/**`, `Api/Signals/**` or the worklist route;
   - unified-access-control-r2 reviews every auth diff (FR-02 conditions);
-  - B-4 gets two adversarial passes (auth tag), and task 170's per-commit WhoAmI count is watched.
+  - task 010 (MCP caller-path verification, auth tag) gets two adversarial passes and unified-access-control-r2's review, and task 170's per-commit WhoAmI count is watched.
 
 ### External Dependencies
 
@@ -471,6 +479,7 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
 | Channel (spec interview) | Record that a decision came through Copilot? | No | `DecisionCommitService` unchanged; out of scope |
 | Naming (2026-11-06) | Names after the cross-project sweep? | Route `/mcp/legal-operations`; functions are tool groups and skills; skills `spaarke-{area}-{capability}` (core drops the area); widget `ui://spaarke/decisions.html` in `src/client/widgets/spaarke-decisions/`; capability in `Services/Signals/`; "Spaarke AI" kept; "Spaarke Copilot" retired | FR-01, FR-12, FR-16, FR-18; naming note §1 |
 | Coordination (2026-11-06) | Cross-project alignment? | Binding; recorded in the naming note §2 | Dependencies (sequencing, reviews) |
+| Caller context (2026-11-07) | Build `ICallerContext` (B-4) now, or let MCP tools use the request context? | **Option C: defer B-4.** MCP tools read the request `HttpContext` through `IHttpContextAccessor` (the 2.3.1 stateless transport runs them inside the request) and call the same decision services as REST, failing closed with `UserContextRequired` | FR-10 rewritten; design §8 B-4 superseded; task 010 becomes the MCP caller-path verification; task 012 cancelled; `notes/decisions.md` 2026-11-07 |
 
 ## Assumptions
 
@@ -481,6 +490,7 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
 - **Privilege flag source**: a Work Item counts as privileged when the Signal or its subject carries `sprk_privilegeflagged`, the field the Decision Record writer already copies forward. Affects FR-04. Verify the exact source column in Phase A.
 - **Connector client**: a public client with PKCE if the Developer Portal registration accepts one; otherwise one confidential client per stamp (A10). Affects FR-16; decided by T5.
 - **Telemetry sink**: the existing App Insights instance and dimensions; no new store. Affects NFR-05.
+- **Caller context is request-bound (v1 limitation, option C)**: decision capabilities run only inside an HTTP request. This holds while `/mcp/*` stays stateless with `PerSessionExecutionContext=false`, which task 010 pins with a test. Off-request callers (durable agents, queued continuations, Teams proactive) are out of v1. The user-token problem blocks them, not the deferred `ICallerContext`; `ComposeProfileDispatcher.cs:88/117-134` shows today's detached-context workaround. Affects FR-10 and any later off-request slice.
 
 ## Unresolved Questions
 

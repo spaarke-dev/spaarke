@@ -10,9 +10,9 @@
     <model-tier>opus</model-tier>
     <model-tier-reason>Security-sensitive output control: FR-04 keeps privileged legal detail out of model-visible text (ADR-015); a mistake is a confidentiality leak</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>G</parallel-group>
+    <parallel-group>F</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Adds only its own tool files, parity fixture and tests; shares no file with 040</parallel-reason>
+    <parallel-reason>Adds only its own tool files, parity fixture and tests; shares no file with 023, 024 or 030</parallel-reason>
     <deps>015, 017, 021</deps>
     <tags>bff-api, ai, endpoints, unit-test, integration-test</tags>
     <estimated-effort>4-6 hours</estimated-effort>
@@ -51,6 +51,7 @@
     <constraint source="project">spaarke_show_decisions' input schema has exactly one optional property, category, a closed enum of the Decide lane's LaneFilterKey values (all, invoiceDecisions, other and the Decide-lane work types in laneCountFilters.ts), with additionalProperties false; the paging tool's input is the cursor only.</constraint>
     <constraint source="project">Category counts are computed by DecideLaneCategories, which mirrors bucketLaneItems; a shared fixture tests/fixtures/decide-lane-category-parity/cases.json is asserted by both an xunit and a jest test.</constraint>
     <constraint source="project">structuredContent of spaarke_show_decisions carries page 1 (at most 50 summaries), the next cursor, the per-category counts and consoleBaseUrl (the Console URL the widget uses for link-outs); _meta.ui points at ui://spaarke/decisions.html.</constraint>
+    <constraint source="ADR-028">Every tool this task adds reads the request HttpContext from IHttpContextAccessor and passes it (or its User) to the decision capability. A null HttpContext or an unauthenticated caller returns an isError result with UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) before any capability call, and nothing falls back to an app-only client (FR-10 as amended 2026-11-07, option C; ADR-002 WP-6 fail closed). No ICallerContext or other caller holder is introduced.</constraint>
     <constraint source="ADR-019">Every domain failure from a tool added by this task is returned as an isError tool result produced by DecisionResultMapper.ToToolError → Api/Mcp/McpToolResults (reasonCode plus a fix-the-call message); no domain failure is returned as a transport error or exception.</constraint>
     <constraint source="project">Every result of a tool added by this task is under 64 KiB at 200 seeded Work Items (NFR-02).</constraint>
     <constraint source="ADR-013">Tools added by this task inject only the decision capability, IDecisionLookupSearch and Api/Mcp helpers: no AI-internal type (Services/Ai/**, IChatClient, playbook services).</constraint>
@@ -91,7 +92,7 @@
     <step order="1">Read laneCountFilters.ts and write the parity fixture (cases of mixed billing, matter and work-type items with expected cards and counts); make the jest parity test pass against bucketLaneItems.</step>
     <step order="2">Implement DecideLaneCategories in C# and make the xunit parity test pass on the same fixture.</step>
     <step order="3">Implement DecisionsTextSummary: counts per category, the top 5 non-privileged items each with a Console deep link built from the existing Console URL settings, and the privileged count line.</step>
-    <step order="4">Implement ShowDecisionsTool (capability ListDecidePageAsync(null) → summary text, structuredContent page 1 with privileged rows reduced, _meta.ui) and the paging tool (app-only, cursor → full summaries); fix the paging tool's final name per the naming note and record it in notes/decisions.md.</step>
+    <step order="4">Implement ShowDecisionsTool (capability ListDecidePageAsync(httpContext.User, null) with the HttpContext from IHttpContextAccessor → summary text, structuredContent page 1 with privileged rows reduced, _meta.ui) and the paging tool (app-only, cursor → full summaries); fix the paging tool's final name per the naming note and record it in notes/decisions.md.</step>
     <step order="5">Write the contract, privilege and size tests (seed 200 items across at least 3 matters, including privileged items with a unique marker string in reason and matter name).</step>
     <step order="6">Run the suites; measure the publish-size delta.</step>
     <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>

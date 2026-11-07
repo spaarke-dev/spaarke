@@ -6,30 +6,29 @@
     <gate>after 013</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Tags include bff-api; modifies DecisionCommitService.cs and the commit endpoint (.cs)</rigor-reason>
+    <rigor-reason>Tags include bff-api; adds the capability commit member and modifies the commit endpoint (.cs) on the single completion-invariant owner's entry</rigor-reason>
     <model-tier>opus</model-tier>
     <model-tier-reason>High-risk in the Risk Register (byte-for-byte invariants through B-1) on the single completion-invariant owner; migration of its entry point</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>E</parallel-group>
+    <parallel-group>C</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Owns DecisionCommitService.cs, DecisionCapability.Commit.cs, IDecisionCapability.cs and DecisionCommitEndpoints.cs; 016 and 021 touch none of them</parallel-reason>
+    <parallel-reason>Owns DecisionCapability.Commit.cs, IDecisionCapability.cs and DecisionCommitEndpoints.cs (and leaves DecisionCommitService.cs untouched); 003 and 016 touch none of them</parallel-reason>
     <deps>013</deps>
     <tags>bff-api, api, refactoring, migration, integration-test</tags>
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
 
-  <prompt>Add the commit operation to the decision capability by removing HttpContext from DecisionCommitService.CommitAsync and its helpers (reading ICallerContext instead) and delegating the capability's CommitAsync to it, so REST and MCP commit through the same entry with every invariant byte-for-byte unchanged and stated in the PR.</prompt>
+  <prompt>Add the commit operation to the decision capability as a direct delegation to the unchanged DecisionCommitService.CommitAsync(signalId, review, http, ct), passing the request HttpContext, so that REST and MCP commit through the same entry. Every invariant stays byte-for-byte unchanged and is stated in the PR.</prompt>
   <role>SPAARKE platform developer. Follow ADRs strictly. Expert in behaviour-preserving refactors of transactional C# services with idempotency and locking.</role>
-  <goal>DecisionCommitService takes no HttpContext; IDecisionCapability.CommitAsync delegates to it; the commit endpoint is a thin adapter; the ratchet baseline of 012's guard is empty; every invariant is listed in the PR with before/after file:line; all existing commit tests pass unchanged.</goal>
+  <goal>DecisionCommitService.cs is unchanged; IDecisionCapability.CommitAsync(HttpContext, signalId, review, ct) delegates to it; the commit endpoint is a thin adapter; every invariant is listed in the PR with before/after file:line; all existing commit tests pass unchanged.</goal>
 
   <context>
-    <background>Spec MUST rule (ontology's list): commit order (1a) readability as the caller → uniform 404; ledger replay; (1c) app-only Signal read; (1c-billing); PrepareAsync; (1c′) CallerMayDecideAsync; preflight; writes; locks released in finally. Replay decided server-side only. D-197 CheckVersionOwnerAsync stays put. SignalWriter, DecisionRecordWriter, DecisionCallerRights untouched. Ontology condition 2: the MCP commit goes only through this entry, never a second route that skips 1c-billing.</background>
+    <background>Spec MUST rule (ontology's list): commit order (1a) readability as the caller → uniform 404; ledger replay; (1c) app-only Signal read; (1c-billing); PrepareAsync; (1c′) CallerMayDecideAsync; preflight; writes; locks released in finally. Replay decided server-side only. D-197 CheckVersionOwnerAsync stays put. SignalWriter, DecisionRecordWriter, DecisionCallerRights untouched. Ontology condition 2: the MCP commit goes only through this entry, never a second route that skips 1c-billing. Caller context (FR-10 as amended 2026-11-07, owner option C; ICallerContext deferred, 012 cancelled): DecisionCommitService keeps its HttpContext parameter; REST passes the endpoint's HttpContext and the MCP tool (024) passes IHttpContextAccessor.HttpContext.</background>
     <relevant-files>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs (CommitAsync L439; helpers L622, L770, L927, L1578, L1966)</file>
-      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.Commit.cs (partial class: CommitAsync delegating to DecisionCommitService)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs (NOT edited: CommitAsync L439 keeps its HttpContext parameter, as do helpers L622, L770, L927, L1578, L1966; FR-10 option C)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.Commit.cs (partial class: CommitAsync(HttpContext, …) delegating to DecisionCommitService)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionCapability.cs (add CommitAsync)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionCommitEndpoints.cs (thin adapter: capability → DecisionResultMapper)</file>
-      <file role="modify">tests/Spaarke.ArchTests/DecisionSliceHttpContextGuardTests.cs (empty the ratchet baseline)</file>
       <file role="new">projects/spaarkeai-mcp-bff-api-r1/notes/b1-commit-invariants.md</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs L974-996 (1c-billing), IsBillingSubject ~L1684, sprk_privilegeflagged select L313</file>
       <file role="canonical-reference">tests/integration/data-mutation/Signals/DecisionCommitServiceTests.InvoiceReview.cs (13 Task174_* cases)</file>
@@ -41,13 +40,13 @@
   </context>
 
   <constraints>
-    <constraint source="ADR-002">Every step inside DecisionCommitService stays where it is and in the same order; the only edits are replacing the HttpContext parameter/reads with ICallerContext reads (git diff -w shows no moved statements). DecisionCommitService remains the single owner of the completion invariant.</constraint>
+    <constraint source="ADR-002">Every step inside DecisionCommitService stays where it is and in the same order: this task does not edit DecisionCommitService.cs at all (git diff of the file is empty). DecisionCommitService remains the single owner of the completion invariant.</constraint>
     <constraint source="ADR-002">This task adds no billing-refusal check of its own: D-207 (ontology.decision.decided_in_invoice_review) applies only through DecisionCommitService's existing (1c-billing) step (DecisionCommitService.cs:974-996).</constraint>
     <constraint source="project">The PR body lists each invariant from the spec MUST rule (commit order 1a…finally, server-side replay, D-197 CheckVersionOwnerAsync, untouched writers and DecisionCallerRights) with before and after file:line, copied from notes/b1-commit-invariants.md.</constraint>
-    <constraint source="ADR-028">Every operation this task adds or changes reads the caller only from ICallerContext (task 010); an unpopulated context returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) and never falls back to an app-only client (FR-10, ADR-002 WP-6 fail closed).</constraint>
+    <constraint source="ADR-028">Every operation this task adds or changes takes the caller from the request. Capability methods receive the HttpContext the REST endpoint already has (or its ClaimsPrincipal where that is enough) and pass it to the existing decision services unchanged. A null HttpContext or an unauthenticated caller returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED), and nothing falls back to an app-only client (FR-10 as amended 2026-11-07, option C; ADR-002 WP-6 fail closed). No ICallerContext or other caller holder is introduced.</constraint>
     <constraint source="ADR-019">The REST responses of GET /api/v1/signals/worklist, GET /api/v1/signals/{id}/decision-plan, GET /api/v1/signals/{id}/suppression and POST /api/v1/signals/{id}/decision stay byte-for-byte unchanged: task 011's contract baseline tests pass with no golden-file edit (FR-09).</constraint>
     <constraint source="ADR-002">In every file this task touches, SignalReadService read rules and DecisionCommitService validation, idempotency and execution order are unchanged; DecisionCommitService stays the single owner of completion; SignalWriter, DecisionRecordWriter and DecisionCallerRights are not edited.</constraint>
-    <constraint source="project">File ownership: this task owns DecisionCommitService.cs, DecisionCapability.Commit.cs, IDecisionCapability.cs and DecisionCommitEndpoints.cs in its wave; it does not edit SignalsModule.cs, DecisionPlanEndpoints.cs or SignalReadService.cs.</constraint>
+    <constraint source="project">File ownership: this task owns DecisionCapability.Commit.cs, IDecisionCapability.cs and DecisionCommitEndpoints.cs in its wave; it does not edit DecisionCommitService.cs, SignalsModule.cs, DecisionPlanEndpoints.cs or SignalReadService.cs.</constraint>
     <constraint source="project">Every PR from this task that touches Services/Signals/**, Api/Signals/** or the worklist route is reviewed by spaarke-ontology-platform-r1 before merge (project CLAUDE.md §4); run /conflict-check before opening it.</constraint>
     <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
@@ -77,15 +76,14 @@
 
   <steps mode="prescriptive">
     <step order="1">Write notes/b1-commit-invariants.md: each spec invariant with its current file:line in DecisionCommitService.cs.</step>
-    <step order="2">Inject ICallerContext into DecisionCommitService; replace the HttpContext parameter of CommitAsync (L439) and helpers (L622, L770, L927, L1578, L1966) with ICallerContext reads; change no other line.</step>
-    <step order="3">Add CommitAsync to IDecisionCapability and implement it in DecisionCapability.Commit.cs as a direct delegation to DecisionCommitService.CommitAsync(signalId, review, ct).</step>
-    <step order="4">Make DecisionCommitEndpoints call the capability and DecisionResultMapper.ToHttp.</step>
-    <step order="5">Empty the ratchet baseline of DecisionSliceHttpContextGuardTests; the guard must pass.</step>
-    <step order="6">Run 011's commit baselines, all DecisionCommitServiceTests partials (incl. Task174_* and T170), the Signals suites and the ArchTests.</step>
-    <step order="7">Add after-line numbers to notes/b1-commit-invariants.md; confirm git diff -w of DecisionCommitService.cs has only signature and caller-read lines.</step>
-    <step order="8">Measure the publish-size delta; open the PR with the invariant list for ontology review.</step>
-    <step order="9">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
-    <step order="10">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+    <step order="2">Leave DecisionCommitService.cs untouched. CommitAsync(signalId, review, http, ct) (L439) and its helpers (L622, L770, L927, L1578, L1966) keep their HttpContext parameters (FR-10 as amended 2026-11-07, option C).</step>
+    <step order="3">Add CommitAsync(HttpContext http, Guid signalId, DecisionReview review, CancellationToken ct) to IDecisionCapability. Implement it in DecisionCapability.Commit.cs as a direct delegation to DecisionCommitService.CommitAsync(signalId, review, http, ct). The only addition is a fail-closed guard: a null HttpContext or an unauthenticated principal returns UserContextRequired before the service is called.</step>
+    <step order="4">Make DecisionCommitEndpoints call the capability with its HttpContext, then DecisionResultMapper.ToHttp.</step>
+    <step order="5">Run 011's commit baselines, all DecisionCommitServiceTests partials (incl. Task174_* and T170), the Signals suites and the ArchTests.</step>
+    <step order="6">Add after-line numbers to notes/b1-commit-invariants.md (they equal the before-line numbers, because the service is not edited); confirm git diff of DecisionCommitService.cs is empty.</step>
+    <step order="7">Measure the publish-size delta; open the PR with the invariant list for ontology review.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="9">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
   </steps>
 
   <escalation>
@@ -96,8 +94,8 @@
 
   <justification>
     <existing>DecisionCommitService.CommitAsync (DecisionCommitService.cs:439) is the existing single commit entry; DecisionCommitEndpoints.cs calls it with HttpContext.</existing>
-    <extension>Yes, it extends it: DecisionCapability.Commit.cs is a one-line delegation and the only change in the service is where the caller comes from.</extension>
-    <cost-of-doing-nothing>MCP could commit only by passing an HttpContext into the service or by a second entry that might skip 1c-billing, violating ontology condition 2 and ADR-002's single owner.</cost-of-doing-nothing>
+    <extension>Yes, it extends it: DecisionCapability.Commit.cs is a one-line delegation plus the fail-closed caller guard, and the service is not changed.</extension>
+    <cost-of-doing-nothing>The MCP tool would call DecisionCommitService from tool code with its own caller check and result mapping, or through a second entry that might skip 1c-billing. Either violates ontology condition 2 and ADR-002's single owner.</cost-of-doing-nothing>
   </justification>
 
   <tools>
@@ -107,17 +105,16 @@
 
   <outputs>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.Commit.cs</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs</output>
     <output type="docs">projects/spaarkeai-mcp-bff-api-r1/notes/b1-commit-invariants.md</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">DecisionCommitService.cs declares no HttpContext parameter or field; 012's guard passes with an empty ratchet baseline.</criterion>
-    <criterion testable="true">git diff -w of DecisionCommitService.cs contains only signature and caller-read changes (no moved or reordered statements), stated in the PR.</criterion>
+    <criterion testable="true">DecisionCommitService.cs is unchanged (its git diff is empty, stated in the PR), and IDecisionCapability.CommitAsync delegates to DecisionCommitService.CommitAsync with the request HttpContext.</criterion>
+    <criterion testable="true">DecisionCommitEndpoints.cs calls only the capability and DecisionResultMapper.ToHttp; no commit logic remains in the endpoint.</criterion>
     <criterion testable="true">The PR lists every spec invariant with before and after file:line (from notes/b1-commit-invariants.md).</criterion>
-    <criterion testable="true">All 13 Task174_* cases, T170 (WhoAmIs == 1) and every DecisionCommitServiceTests partial pass with only constructor wiring edits.</criterion>
+    <criterion testable="true">All 13 Task174_* cases, T170 (WhoAmIs == 1) and every DecisionCommitServiceTests partial pass with no test edits.</criterion>
     <criterion testable="true">011's commit baselines pass with no golden change, including 409 ontology.decision.decided_in_invoice_review.</criterion>
-    <criterion testable="true">Negative: a capability commit with ICallerContext unpopulated returns UserContextRequired, writes nothing and does not touch the ledger.</criterion>
+    <criterion testable="true">Negative: a capability commit with a null HttpContext or an unauthenticated principal returns UserContextRequired, writes nothing and does not touch the ledger.</criterion>
     <criterion testable="true">Negative: a capability commit with no prior plan read returns the existing refusal reason code; a billing Signal returns 409 decided_in_invoice_review with nothing written and the rights probe not called.</criterion>
     <criterion testable="true">grep shows IsBillingSubject is called only from DecisionCommitService (no new billing check).</criterion>
     <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE) and ontology's approval.</criterion>

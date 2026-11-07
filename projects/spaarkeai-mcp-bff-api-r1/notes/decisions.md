@@ -48,7 +48,7 @@ FR-18 adds a root `CLAUDE.md` §1.1 row ("Spaarke for Microsoft 365 Copilot" / "
 
 - FR-05 paging: a fifth **app-only, readOnly** tool with a cursor (working name `spaarke_list_decision_page`; final name fixed in task 022 under the naming note). The model-visible tool keeps its closed schema.
 - Plugin package folder: `src/solutions/CopilotPlugins/spaarke/`; runbooks in `docs/guides/`. Task 040 may adjust if build tooling requires, and records the change here.
-- B-4 split into two tasks (010 caller context + Dataverse client; 012 thread through executors, route cores and notifier) after discovery found `HttpContext` beyond the spec's list.
+- B-4 split into two tasks (010 caller context + Dataverse client; 012 thread through executors, route cores and notifier) after discovery found `HttpContext` beyond the spec's list. **Superseded 2026-11-07** by option C (below): B-4 is deferred, 010 becomes a verification task and 012 is cancelled.
 - B-5 adds `sprk_privilegeflagged` to the worklist list projection (projection only; read rules unchanged) so FR-04 can be met.
 
 ## 2026-11-06 — Phase 0 spike (task 001): deviations and findings that reach production tasks
@@ -78,3 +78,32 @@ Evidence: `notes/spikes/phase0-spike-measurements.md`. Spike head `5c9e301572` o
   - keep draft PR #2615 open and unmerged, for CI;
   - tell uac-r2 when Phase 0 is done, so the next deploy is plain master.
 - The first combined deploy is uac-r2's queued batch (#2292/#2610/044) after the 046c watch. It needs its own owner go.
+
+## 2026-11-07 — Option C: defer `ICallerContext` (B-4); FR-10 amended (owner)
+
+**Decision.** The owner chose option C. B-4's `ICallerContext` is not built in v1. MCP tools get the request `HttpContext` from `IHttpContextAccessor`. When it is null or the caller is unauthenticated, a tool returns an `isError` result with `UserContextRequired`. Otherwise it calls exactly the decision services the REST endpoints call:
+- `SignalReadService.ReadAsync(set, httpContext.User, ct)`;
+- the `DecisionPlanEndpoints` body: `SignalCoreRecordAccess`, `DecisionPlanService.GetAsync`, `DecisionPlanReadStamp.StampAsync(http)`, `DecisionParameterSources.OptionsAsync(http)`;
+- `DecisionCommitService.CommitAsync(…, http, ct)`.
+
+B-1 only moves the endpoint bodies into capability methods that take `HttpContext` (or `ClaimsPrincipal` where that is enough). B-2 (the mapper) needs no caller context. Nothing changes in `DataverseUserClient`, `CallerWhoAmIMemo`, `CallerRecordAccessProbe` or any chat/AI path. WhoAmI stays at 1 per commit (T170). Spec FR-10 is rewritten and supersedes design §8 B-4 (design.md is not edited).
+
+**Evidence.** In `ModelContextProtocol.AspNetCore` 2.3.1 the stateless transport runs tool handlers inside the ASP.NET request:
+- `StreamableHttpHandler` passes `context.RequestServices` with `ScopeRequests=false`, so a tool resolves services from the request scope;
+- the default `PerSessionExecutionContext=false` keeps the request's execution context, so `IHttpContextAccessor` keeps working inside the tool.
+
+**v1 limitation.** Decision capabilities run only inside an HTTP request. This holds while the server stays stateless with `PerSessionExecutionContext=false`. Future off-request scenarios (durable agents, queued continuations, Teams proactive) are blocked by the user-token problem, not by this refactor. `ComposeProfileDispatcher.cs:88/117-134` shows the existing detached-context workaround.
+
+**Regression-test set** (task 010, rewritten as the MCP caller-path verification):
+1. On a real host, a tool sees a non-null accessor `HttpContext` that is the same instance a test middleware captured, and its `IServiceProvider` is `RequestServices`.
+2. The real `DataverseUserClient` behind a hand-written fake wire handler (the `ConfidentialClientMigrationSeamTests` pattern): WhoAmI succeeds over the MCP route; with no bearer token or no context it returns `UserContextRequired`.
+3. An MCP `spaarke_complete_decision` variant of T170 with WhoAmIs == 1.
+4. A plan-read stamp written by the MCP plan tool satisfies an MCP commit.
+5. A pin on the stateless transport and `PerSessionExecutionContext=false`.
+6. Existing suites unchanged: T170, `CallerWhoAmIMemoIsolationTests`, the chat `dataverse.*` handler tests, the `DecisionCommitService`/Signal tests and the 011 baselines.
+
+**Task consequences.**
+- 010 keeps its id, the auth tag, FULL rigor, opus and the uac-r2 review. It depends on 020, 021, 023 and 024, and finishes before 025.
+- 012 is cancelled, together with its `DecisionSliceHttpContextGuardTests` ArchTest guard and 014's "empty the ratchet baseline" step.
+- 017 depends on 011 only; 013 depends on 011 and 017. The critical path now starts 011 → 017 → 013 → 014.
+- The commit invariants and D-207 text in 014 are unchanged.

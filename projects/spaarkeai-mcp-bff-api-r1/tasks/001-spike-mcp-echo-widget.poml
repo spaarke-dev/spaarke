@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <parallel-reason>Runs in its own worktree on spike/spaarkeai-mcp-phase0, so it shares no files with 010 or 011</parallel-reason>
+    <parallel-reason>Runs in its own worktree on spike/spaarkeai-mcp-phase0, so it shares no files with 011 or 017</parallel-reason>
     <deps>none</deps>
     <tags>bff-api, minimal-api, typescript, frontend, testing</tags>
     <estimated-effort>4-6 hours</estimated-effort>
