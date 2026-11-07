@@ -32,6 +32,7 @@ using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Services.Ontology;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
+using Sprk.Bff.Api.Tests.Domain.Signals;
 using Sprk.Bff.Api.Tests.Integration.Contract.Signals;
 using Xunit;
 
@@ -305,8 +306,30 @@ public sealed partial class DecisionCommitServiceTests
         [Fact]
         public async Task Suppression_503_CountUnavailable_AfterAuthorization()
         {
-            // The Rig scripts no suppression data: the authorised caller's count read fails, which is the fault answer (503), never a guess.
-            Verify("suppression.503.unavailable", await GetAsync(new Rig(), SuppressionRoute), 503, "ontology.suppression.unavailable");
+            // The caller is authorised (the Rig's Primary Signal carries its core pair, the caller reads it), so the count read is the
+            // fault: the suppression service's own app-only read of the Signal throws. That is the fault answer (503), never a guess.
+            // Since master 847e6215d9 (ontology D-210) the Rig answers EVERY app-only sprk_signal read with an empty row
+            // (WithNoStoredCorePair, the core-pair re-read's "no pair"); left alone, the service reads that empty row as "no policy" and
+            // answers 404. The count read's fault is therefore scripted explicitly, after the Rig's default.
+            var rig = new Rig();
+            rig.Entities.WithCorePairReadFault(new TimeoutException("the count read gave no answer"));
+            Verify("suppression.503.unavailable", await GetAsync(rig, SuppressionRoute), 503, "ontology.suppression.unavailable");
+        }
+
+        [Fact]
+        public async Task Suppression_404_Uniform_WhenTheAppOnlyCorePairReReadFaults()
+        {
+            // Ontology D-210 (master 847e6215d9) stays pinned on the route: the caller's read returns no core pair, so the Signal access
+            // check re-reads the pair app-only; that read FAULTS, and the pair cannot be confirmed absent, so the answer is the uniform
+            // 404 (fail closed), never the no-core path and never a 503. The count read is not reached.
+            var rig = NoCoreRig();
+            rig.Entities.WithCorePairReadFault(new TimeoutException("no answer"));
+            Verify("suppression.404.core-pair-reread-fault", await GetAsync(rig, SuppressionRoute, DoSignal), 404, "sdap.access.deny.record_unavailable");
+
+            // The 404 alone cannot tell this denial from the count's own "no policy" 404, so pin where it came from: the app-only Signal
+            // read was asked exactly once (the re-read). The count read, a second app-only Signal read, was never reached.
+            rig.Entities.Verify(
+                e => e.RetrieveAsync(SignalCoreRecordAccess.SignalTable, DoSignal, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once);
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════════════════
