@@ -38,7 +38,7 @@ public static class FinanceBaseValues
 
     public const string InvoiceEntity = "sprk_invoice";
     public const string InvoiceTotalAmount = "sprk_totalamount";
-    /// <summary>The invoice's approved (payable) total: the billed total minus the reviewer's line and invoice adjustments. Negative
+    /// <summary>The invoice's approved (payable) total: the billed total plus reviewer-added lines as the approved total counts them (EB-D-199), minus the reviewer's line and invoice adjustments. Negative
     /// on a credit memo (D-127). Empty until the totals service has computed it. Same column as <c>InvoiceTotalsService.InvoiceApprovedTotal</c>.</summary>
     public const string InvoiceApprovedTotal = "sprk_approvedtotal";
     /// <summary>The invoice status column: <c>statuscode</c>, never <c>statecode</c> (Paid is Inactive and still counts). The
@@ -72,7 +72,7 @@ public static class FinanceBaseValues
     /// (payable) total, <c>sprk_approvedtotal</c>, when that has a value, otherwise its billed total, <c>sprk_totalamount</c>; when
     /// neither has a value it is 0. "Has a value" is not-null, so an approved total of 0 (every charge disallowed) counts as 0 and
     /// does NOT fall back to the billed total. Signed: a credit memo's negative approved total lowers spend (D-127). A reviewer's
-    /// disallowances and reductions therefore lower spend. The grouped FetchXML cannot coalesce per row, so it is split into the two
+    /// disallowances and reductions therefore lower spend, and reviewer-added lines raise it as the approved total counts them (EB-D-199, EB-D-205). The grouped FetchXML cannot coalesce per row, so it is split into the two
     /// parts of <see cref="SpendAmountPart"/> and summed by the reader; both must stay equal to this rule.
     /// </summary>
     public static decimal SpendAmount(Entity invoice)

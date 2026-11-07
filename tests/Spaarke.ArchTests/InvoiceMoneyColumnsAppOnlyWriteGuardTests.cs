@@ -54,6 +54,7 @@ public sealed class InvoiceMoneyColumnsAppOnlyWriteGuardTests
         typeof(InvoiceCorrectionService), // the header correction: TotalDue to the billed total, in the correction's transactions (app-only)
         typeof(TrackingNumberAllocator), // the submission's firm (not the invoice's): BuildRow, BuildRenumberUpdate, through IGenericEntityService
         typeof(InvoiceAdjustmentService), // a line's firm (not the invoice's): BuildRow copies the invoice's firm onto the new line
+        typeof(InvoiceLineAddService), // a line's firm (not the invoice's): Add line copies the invoice's firm onto the added line, through IGenericEntityService (app-only, task 164a)
     ];
 
     /// <summary>Types that read one of the columns (or hold its name in a list); the Readers profile gives every user read access.</summary>
@@ -62,7 +63,7 @@ public sealed class InvoiceMoneyColumnsAppOnlyWriteGuardTests
         typeof(Sprk.Bff.Api.Api.Finance.InvoiceSubmissionFromEmailHttp),
         typeof(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalInvoiceVisibility),
         typeof(ApExportService), typeof(FinanceBaseValues), typeof(FinanceSummaryService), typeof(InvoiceApprovalService),
-        typeof(InvoiceContextService), typeof(InvoiceCorrectionReevaluation), typeof(InvoiceLineDecisionService),
+        typeof(InvoiceContextService), typeof(InvoiceCorrectionReevaluation), typeof(InvoiceFindingsDiff), typeof(InvoiceLineDecisionService),
         typeof(InvoiceRejectReturnService), typeof(InvoiceReviewReadService),
         typeof(Sprk.Bff.Api.Services.Finance.Procedures.ProcedureAssignmentService),
         typeof(FromEmailSubmissionService), typeof(InvoiceFirmGate), typeof(InvoiceFirmHold), typeof(InvoiceSubmissionRerun),
