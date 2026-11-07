@@ -1,6 +1,7 @@
 using System.Data;
 using System.Text.Json.Nodes;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
@@ -8,6 +9,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Tests.Domain.Signals.Billing;
@@ -421,6 +423,48 @@ public sealed partial class InvoiceSubmissionRerunTests
 
         outcome.Status.Should().Be(JobStatus.Poisoned);
         harness.Log.Entries.Should().Contain(e => e.Message.Contains("Permanent=True"));
+    }
+
+    [Fact(DisplayName = "095d-2b-2 re-check K2 (job): a refused Signal step after the commit is logged as leaving decisions refused as re-run pending until the data is repaired")]
+    public async Task ARefusedSignalStep_LogsThatDecisionsStayRefused()
+    {
+        var harness = new JobHarness((_, _, _, _) => Task.FromResult(Result(InvoiceSubmissionRerunStatus.Completed)))
+        {
+            RemapSignals = (_, _) => Task.FromResult(new InvoiceSubmissionRerunSignalsResult(InvoiceSubmissionRerunSignalsStatus.Refused, InvoiceSubmissionRerunCodes.FindingsUnreadable)),
+        };
+
+        await harness.ProcessAsync(final: false);
+
+        harness.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Message.Contains("Permanent=True")).Which.Message
+            .Should().Contain("decisions on the invoice stay refused as re-run pending").And.Contain("until the data is repaired");
+    }
+
+    [Theory(DisplayName = "095d-2b-2 re-check K4 (job): a final delivery that finds the submission busy (lock held, or a Busy re-run) does not log that the invoice stays held - the row may be committed - and says decisions stay refused as re-run pending")]
+    [InlineData("lock")]
+    [InlineData("run")]
+    public async Task ABusyFinalDelivery_DoesNotClaimTheInvoiceStaysHeld(string source)
+    {
+        var harness = new JobHarness((_, _, _, _) => Task.FromResult(Result(InvoiceSubmissionRerunStatus.Busy, InvoiceSubmissionRerunCodes.Busy)));
+        if (source == "lock")
+        {
+            harness.Locks.BusyKeys.Add(InvoiceSubmissionProcessingJobHandler.LockKeyPrefix + SubmissionId.ToString("N"));
+        }
+
+        var outcome = await harness.ProcessAsync(final: true);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        var logged = harness.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Subject.Message;
+        logged.Should().NotContain("stays held").And.Contain("decisions on the invoice stay refused as re-run pending");
+    }
+
+    [Fact(DisplayName = "095d-2b-2 re-check K4 (must not change): a non-Busy final delivery before the commit still logs that the invoice stays held")]
+    public async Task AFailedFinalDelivery_BeforeTheCommit_StillLogsTheInvoiceStaysHeld()
+    {
+        var harness = new JobHarness((_, _, _, _) => Task.FromResult(Result(InvoiceSubmissionRerunStatus.Failed, "ebilling.rerun.failed")));
+
+        await harness.ProcessAsync(final: true);
+
+        harness.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Which.Message.Should().Contain("the invoice stays held");
     }
 
     [Fact(DisplayName = "095d-2b-2 (job): a retryable Signal step is a Failure (redelivered) before the final delivery")]

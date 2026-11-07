@@ -286,7 +286,7 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
             case InvoiceSubmissionRerunSignalsStatus.Refused:
                 _telemetry.RecordRerunRefused(signals.Code);
                 _logger.LogError(
-                    "Re-run job {JobId}: the Signal steps of submission {SubmissionId} were refused ({Code}); the commit stands (Permanent={Permanent}: operator, not retry)",
+                    "Re-run job {JobId}: the Signal steps of submission {SubmissionId} were refused ({Code}); the commit stands and the state stays committed, so decisions on the invoice stay refused as re-run pending until the data is repaired and the job is replayed (Permanent={Permanent}: operator, not retry)",
                     job.JobId, submissionId, signals.Code, true);
                 return JobOutcome.Poisoned(job.JobId, JobType, signals.Code, job.Attempt, stopwatch.Elapsed);
 
@@ -303,6 +303,15 @@ public sealed class InvoiceSubmissionRerunJobHandler : IJobHandler
         if (!job.IsFinalDelivery)
         {
             return JobOutcome.Failure(job.JobId, JobType, code, job.Attempt, stopwatch.Elapsed);
+        }
+
+        if (string.Equals(code, InvoiceSubmissionRerunCodes.Busy, StringComparison.Ordinal))
+        {
+            // K4 (095d-2b-2 re-check): the lock is taken before the stored state is read, so a Busy final delivery cannot say whether the row
+            // was already committed (a replay of a committed row runs only the after-commit steps). The wording holds for both.
+            _logger.LogError("Re-run job {JobId}: the final delivery found the submission busy ({Code}) and changed nothing; the message is dead-lettered and a replay finishes the re-run or its after-commit steps; until then decisions on the invoice stay refused as re-run pending",
+                job.JobId, code);
+            return JobOutcome.Poisoned(job.JobId, JobType, code, job.Attempt, stopwatch.Elapsed);
         }
 
         _logger.LogError("Re-run job {JobId}: the final delivery failed ({Code}); the invoice stays held and the message is dead-lettered for a replay",

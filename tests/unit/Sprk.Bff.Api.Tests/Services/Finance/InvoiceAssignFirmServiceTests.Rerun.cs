@@ -118,19 +118,67 @@ public sealed partial class InvoiceAssignFirmServiceTests
         w.Enqueued.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "095d-2b-1: a repeat after the re-run committed (rulesRerun completed) queues nothing and answers rulesRerun completed")]
-    public async Task Repeat_AfterTheRerunCompleted_QueuesNothing()
+    /// <summary>Stores the committed re-run on the world's submission: <c>rulesRerun</c> completed, and (when given) <c>assignFirmRerun.state</c>.</summary>
+    private static void StoreCompletedRerun(World w, string? rerunState)
     {
-        var w = Applied(Firm);
         var root = JsonNode.Parse(w.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson))!.AsObject();
         root[InvoiceAssignFirmService.StoredDecisionMember]!["rulesRerun"] = InvoiceAssignFirmService.RulesRerunCompleted;
+        if (rerunState is not null)
+        {
+            root[InvoiceSubmissionRerun.StateMember] = new JsonObject { ["state"] = rerunState };
+        }
+
         w.Submission[InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString();
         w.OnRenumber = _ => RenumberResult.AlreadyRenumbered("INV-7.1", 1);
+    }
+
+    [Fact(DisplayName = "095d-2b-1 / EB-D-204 (must not fire): a repeat after the re-run is done (rulesRerun completed, assignFirmRerun.state done) queues nothing and answers rulesRerun completed")]
+    public async Task Repeat_AfterTheRerunIsDone_QueuesNothing()
+    {
+        var w = Applied(Firm);
+        StoreCompletedRerun(w, InvoiceSubmissionRerun.StateDone);
 
         var result = await w.Assign();
 
         (result.Outcome, result.Status, result.RulesRerun).Should().Be((AssignFirmOutcome.AlreadyAssigned, 200, InvoiceAssignFirmService.RulesRerunCompleted));
-        w.EnqueueAttempts.Should().BeEmpty("the re-run already committed");
+        w.EnqueueAttempts.Should().BeEmpty("the re-run is done: the gate is open and there is nothing to finish");
+    }
+
+    [Fact(DisplayName = "095d-2b-2 re-check F4 / EB-D-204 (must fire): a repeat on a committed row (rulesRerun completed, state committed) queues ONE re-run job - the job runs only the after-commit steps")]
+    public async Task Repeat_OnACommittedRow_QueuesOneJob()
+    {
+        var w = Applied(Firm);
+        StoreCompletedRerun(w, InvoiceSubmissionRerun.StateCommitted);
+
+        var result = await w.Assign();
+
+        (result.Outcome, result.Status, result.RulesRerun).Should().Be((AssignFirmOutcome.AlreadyAssigned, 200, InvoiceAssignFirmService.RulesRerunCompleted));
+        w.Enqueued.Should().Equal([(SubmissionId, InvoiceAssignFirmService.DecisionIdFor(SubmissionId))],
+            "a dead-lettered after-commit step is finished by a repeat Set firm; the job is idempotent");
+    }
+
+    [Fact(DisplayName = "095d-2b-2 re-check F4 / EB-D-204 (must fire, fail closed): a repeat on a row with rulesRerun completed and NO re-run state queues one job, as the gate holds it pending")]
+    public async Task Repeat_OnACompletedRowWithNoState_QueuesOneJob()
+    {
+        var w = Applied(Firm);
+        StoreCompletedRerun(w, rerunState: null);
+
+        var result = await w.Assign();
+
+        result.Outcome.Should().Be(AssignFirmOutcome.AlreadyAssigned);
+        w.Enqueued.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "095d-2b-2 re-check F4: a failed enqueue on a committed row is 503 incomplete at failedStep rerun, as for a pending row")]
+    public async Task Repeat_OnACommittedRow_EnqueueFails_IsIncompleteAtRerun()
+    {
+        var w = Applied(Firm);
+        StoreCompletedRerun(w, InvoiceSubmissionRerun.StateCommitted);
+        w.OnEnqueue = () => new TimeoutException("queue unavailable");
+
+        var result = await w.Assign();
+
+        (result.Outcome, result.Status, result.FailedStep).Should().Be((AssignFirmOutcome.Incomplete, 503, "rerun"));
     }
 
     [Fact(DisplayName = "095d-2b-1: a repeat while the re-run is still pending queues it again (safe: the re-run commits once)")]

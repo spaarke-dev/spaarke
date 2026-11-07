@@ -119,9 +119,22 @@ public class InvoiceFirmHoldFieldSecurityAgreementTests
             .ToJson().ContainsKey(member!).Should().BeTrue("the script reads the member the BFF stores");
     }
 
+    [Fact(DisplayName = "095d-2b-2 re-check K3 (EB-D-204): check (g) names the re-run state member and the done value the gate reads")]
+    public void CheckG_NamesTheRerunStateTheGateReads()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "ebilling", "Set-EbillingInvoiceFirmHoldColumn.ps1"));
+        static string? Value(string text, string name) =>
+            Regex.Match(text, $@"^\s*\${name}\s*=\s*'([^']+)'", RegexOptions.Multiline) is { Success: true } m ? m.Groups[1].Value : null;
+
+        Value(script, "RerunStateMember").Should().Be(InvoiceSubmissionRerun.StateMember);
+        Value(script, "RerunStateDone").Should().Be(InvoiceSubmissionRerun.StateDone);
+    }
+
     // Behaviours of check (g) that no host runs in a unit test, pinned as source facts (each against the shipped script and a seeded drift).
     [Theory(DisplayName = "095d-2b-1: check (g) keeps its done test, its window FAIL in -Verify and its recorded-only scope")]
-    [InlineData(@"if \(\$row\.Stored\.RulesRerun -eq \$RulesRerunCompleted\) \{ \$rerunDone\+\+; continue \}", "-eq $RulesRerunCompleted", "-ne $RulesRerunCompleted")]
+    [InlineData(@"if \(\$row\.Stored\.RulesRerun -eq \$RulesRerunCompleted -and \$row\.Stored\.RerunState -eq \$RerunStateDone\) \{ \$rerunDone\+\+; continue \}", "-eq $RulesRerunCompleted", "-ne $RulesRerunCompleted")]
+    [InlineData(@"if \(\$row\.Stored\.RulesRerun -eq \$RulesRerunCompleted -and \$row\.Stored\.RerunState -eq \$RerunStateDone\) \{ \$rerunDone\+\+; continue \}", " -and $row.Stored.RerunState -eq $RerunStateDone", "")]
+    [InlineData(@"\$notDone = if \(\$row\.Stored\.RulesRerun -eq \$RulesRerunCompleted\) \{ 're-run committed, after-commit steps incomplete' \} else \{ 'rules re-run not done' \}", "'re-run committed, after-commit steps incomplete'", "'re-run done'")]
     [InlineData(@"if \(\$ageMinutes -gt \$RecordedNoRerunWindowMinutes\) \{", "-gt $RecordedNoRerunWindowMinutes", "-lt $RecordedNoRerunWindowMinutes")]
     [InlineData(@"if \(\$Verify\) \{ Report 'FAIL' ""\$what \(older than the \$RecordedNoRerunWindowMinutes", "if ($Verify) { Report 'FAIL' \"$what (older than the $RecordedNoRerunWindowMinutes", "if ($Verify) { Report 'INFO' \"$what (older than the $RecordedNoRerunWindowMinutes")]
     [InlineData(@"\$recorded\+\+\n\s+# \(g\)[^\n]*\n\s+\$rerunRows\.Add\(", "$rerunRows.Add(", "$rerunRowsX.Add(")]
