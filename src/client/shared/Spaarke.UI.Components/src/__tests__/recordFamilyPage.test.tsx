@@ -7,14 +7,19 @@
  *   2. the modal is rendered `embedded` (no Fluent dialog inside the platform dialog), and its Close / Escape reach
  *      the bootstrap's `closeDialog`.
  * Removing `embedded`, or bypassing `readFamilyParams`, fails these.
+ *
+ * Task 040 (ships with 075): the modal's actions open `RecordFamilyActionPanel` for exactly the ticked rows, against the
+ * record the ribbon was used on, and nothing is written until the panel's confirm button. Dropping `onAction` (both
+ * actions disabled again) or hosting the panel for another source fails the push tests.
  */
 
 import * as React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { webLightTheme } from '@fluentui/react-components';
 import { FamilyPage } from '../../../../../solutions/RecordFamily/src/FamilyPage';
 import type { IFamilyPageBootstrap } from '../../../../../solutions/RecordFamily/src/FamilyPage';
 import { throwingAuthenticatedFetch } from './helpers/authenticatedFetchDouble';
+import { PUSH_PATH } from '../components/RecordFamilyModal/recordFamilyPushService';
 
 const PROJECT = 'bbbbbbbb-0000-0000-0000-000000000002';
 
@@ -57,6 +62,153 @@ function makeBootstrap(
     ...over,
   } as IFamilyPageBootstrap & { fetchMock: jest.Mock };
 }
+
+const EVENT = 'eeeeeeee-0000-0000-0000-00000000000a';
+
+/** The anchor plus one child Event: the smallest family a person can tick a row in. */
+const familyWithChild = {
+  ...familyBody,
+  members: [
+    ...familyBody.members,
+    {
+      id: EVENT,
+      table: 'sprk_event',
+      depth: 1,
+      name: 'Hearing A',
+      recordNumber: null,
+      recordType: null,
+      status: 'Open',
+      modifiedOn: null,
+      kind: 'Filing',
+      edgeKind: 'FilingCore',
+      parentId: PROJECT,
+    },
+  ],
+};
+
+type PushBody = {
+  sourceEntity: string;
+  sourceRecordId: string;
+  targetEntity: string;
+  preview?: boolean;
+  includeAssignedTo?: boolean;
+  childIds?: string[];
+};
+
+/** A bootstrap whose server answers the family read and the push route (preview and apply), recording every push body. */
+function makePushBootstrap(params: Record<string, string | undefined>) {
+  const sent: PushBody[] = [];
+  const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
+  const fetchMock = throwingAuthenticatedFetch(async (url, init) => {
+    if (url === PUSH_PATH) {
+      const body = JSON.parse(String(init?.body)) as PushBody;
+      sent.push(body);
+      return body.preview
+        ? ok({
+            success: true,
+            preview: true,
+            updatedCount: 0,
+            failedCount: 0,
+            skippedNoWriteCount: 0,
+            truncated: false,
+            skippedRuleCount: 0,
+            changes: [
+              {
+                recordId: EVENT,
+                name: 'Hearing A',
+                column: 'sprk_clientreference',
+                from: 'OLD',
+                to: 'REF-1',
+                flags: [],
+              },
+            ],
+            errors: [],
+          })
+        : ok({ success: true, updatedCount: 1, failedCount: 0, errors: [] });
+    }
+    return ok(familyWithChild);
+  });
+  const b = {
+    theme: webLightTheme,
+    params,
+    isAuthReady: true,
+    authenticatedFetch: fetchMock,
+    closeDialog: jest.fn(),
+  } as IFamilyPageBootstrap;
+  return { b, sent, fetchMock };
+}
+
+describe('RecordFamily page (FamilyPage): the push actions (task 040)', () => {
+  const LAUNCH = { entityName: 'sprk_project', id: `{${PROJECT.toUpperCase()}}` };
+
+  async function tickHearing() {
+    await screen.findByText('Hearing A');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Hearing A' }));
+  }
+
+  it('offers the actions on ticked rows, opens no panel and sends no push request before one is chosen', async () => {
+    const { b, sent } = makePushBootstrap(LAUNCH);
+    render(<FamilyPage b={b} />);
+    await tickHearing();
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(sent).toHaveLength(0);
+  });
+
+  it('"Push field updates" previews the ticked rows against the launching record, and writes only on confirm', async () => {
+    const { b, sent } = makePushBootstrap(LAUNCH);
+    render(<FamilyPage b={b} />);
+    await tickHearing();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Push field updates' }));
+
+    const confirm = await screen.findByRole('button', { name: 'Update 1 record' });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      sourceEntity: 'sprk_project',
+      sourceRecordId: PROJECT,
+      targetEntity: 'sprk_event',
+      preview: true,
+      includeAssignedTo: false,
+      childIds: [EVENT],
+    });
+
+    fireEvent.click(confirm);
+
+    expect(await screen.findByText('1 record was updated.')).toBeInTheDocument();
+    const applies = sent.filter(x => !x.preview);
+    expect(applies).toHaveLength(1);
+    expect(applies[0]).toMatchObject({ sourceRecordId: PROJECT, targetEntity: 'sprk_event', childIds: [EVENT] });
+    // The platform dialog stays open under the panel; the person closes it.
+    expect(b.closeDialog).not.toHaveBeenCalled();
+  });
+
+  it('"Update Assigned To" opts in', async () => {
+    const { b, sent } = makePushBootstrap(LAUNCH);
+    render(<FamilyPage b={b} />);
+    await tickHearing();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update Assigned To' }));
+
+    await screen.findByRole('button', { name: 'Update 1 record' });
+    expect(sent[0]).toMatchObject({ preview: true, includeAssignedTo: true, childIds: [EVENT] });
+  });
+
+  it('cancelling the panel writes nothing and leaves the platform dialog open', async () => {
+    const { b, sent } = makePushBootstrap(LAUNCH);
+    render(<FamilyPage b={b} />);
+    await tickHearing();
+    fireEvent.click(screen.getByRole('button', { name: 'Push field updates' }));
+    await screen.findByRole('button', { name: 'Update 1 record' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Update 1 record' })).not.toBeInTheDocument());
+    expect(sent.filter(x => !x.preview)).toHaveLength(0);
+    expect(b.closeDialog).not.toHaveBeenCalled();
+    expect(screen.getByRole('region', { name: 'Family' })).toBeInTheDocument();
+  });
+});
 
 describe('RecordFamily page (FamilyPage)', () => {
   it('renders the Family embedded: a named region, no dialog, and Close / Escape close the platform dialog', async () => {

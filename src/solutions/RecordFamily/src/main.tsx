@@ -11,8 +11,8 @@
  * second Fluent Dialog inside it would be a modal in a modal (ADR-050). `onClose` closes the platform dialog the
  * way the sibling dialog pages do (`useWizardPageBootstrap().closeDialog`).
  *
- * No `onAction` is passed yet: the modal then renders both actions disabled ("Available after the
- * push update") and is a read-only Family view. Task 040 wires the actions.
+ * The modal's actions ("Push field updates", "Update Assigned To") open `RecordFamilyActionPanel` (task 040):
+ * preview, then confirm, then apply, for the rows the person ticked. See `FamilyPage.tsx`.
  *
  * Bootstrap reuses the shared `useWizardPageBootstrap` (ADR-028: `@spaarke/auth` →
  * `authenticatedFetch`; no token handling here). Reference page: `src/solutions/CreateReportCardWizard`.
