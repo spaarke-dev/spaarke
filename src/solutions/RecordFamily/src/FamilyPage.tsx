@@ -36,11 +36,33 @@ export function FamilyPage({ b }: { b: IFamilyPageBootstrap }): React.JSX.Elemen
   // Validated: a malformed table name or id never reaches a request URL (see familyParams.ts).
   const anchor = readFamilyParams(b.params);
   const [pending, setPending] = React.useState<IPendingAction | null>(null);
-  const handleAction = React.useCallback(
-    (action: RecordFamilyAction, rows: IFamilySelection[]) => setPending({ action, rows }),
-    []
-  );
   const closePanel = React.useCallback(() => setPending(null), []);
+
+  // Escape closes the platform dialog only while focus is inside the embedded modal (its handler sits on the region
+  // root). The panel's Dialog unmounts when it closes, which would drop focus to <body>; so remember what had focus when
+  // the action was chosen (the action button) and hand focus back when the panel closes, falling back to the region root.
+  const providerRef = React.useRef<HTMLDivElement>(null);
+  const opener = React.useRef<HTMLElement | null>(null);
+  const handleAction = React.useCallback((action: RecordFamilyAction, rows: IFamilySelection[]) => {
+    const active = document.activeElement;
+    opener.current = active instanceof HTMLElement && active !== document.body ? active : null;
+    setPending({ action, rows });
+  }, []);
+  const panelOpen = pending !== null;
+  const wasPanelOpen = React.useRef(false);
+  React.useEffect(() => {
+    if (panelOpen) {
+      wasPanelOpen.current = true;
+      return;
+    }
+    if (!wasPanelOpen.current) return;
+    wasPanelOpen.current = false;
+    const target = opener.current;
+    opener.current = null;
+    const root = providerRef.current?.querySelector<HTMLElement>('[role="region"]');
+    if (target && target.isConnected && !target.hasAttribute("disabled")) target.focus();
+    else root?.focus();
+  }, [panelOpen]);
 
   if (!b.isAuthReady) {
     return (
@@ -63,7 +85,7 @@ export function FamilyPage({ b }: { b: IFamilyPageBootstrap }): React.JSX.Elemen
   }
 
   return (
-    <FluentProvider theme={b.theme} style={{ height: "100%" }}>
+    <FluentProvider ref={providerRef} theme={b.theme} style={{ height: "100%" }}>
       <RecordFamilyModal
         open={true}
         onClose={b.closeDialog}

@@ -208,6 +208,62 @@ describe('RecordFamily page (FamilyPage): the push actions (task 040)', () => {
     expect(b.closeDialog).not.toHaveBeenCalled();
     expect(screen.getByRole('region', { name: 'Family' })).toBeInTheDocument();
   });
+
+  // The embedded modal's Escape handler sits on its region root, so Escape only reaches it while focus is inside the
+  // page. The panel unmounts when it closes; focus must come back or Escape would hit <body> and never close the dialog.
+  it('after Cancel, focus returns inside the page and Escape still closes the platform dialog', async () => {
+    const { b } = makePushBootstrap(LAUNCH);
+    render(<FamilyPage b={b} />);
+    await tickHearing();
+    const action = screen.getByRole('button', { name: 'Push field updates' });
+    action.focus();
+    fireEvent.click(action);
+    await screen.findByRole('button', { name: 'Update 1 record' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Update 1 record' })).not.toBeInTheDocument());
+
+    const region = screen.getByRole('region', { name: 'Family' });
+    await waitFor(() => expect(region.contains(document.activeElement)).toBe(true));
+    expect(document.activeElement).not.toBe(document.body);
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Escape', bubbles: true });
+    expect(b.closeDialog).toHaveBeenCalledTimes(1);
+  });
+
+  it('when nothing had focus as the panel opened, focus falls back to the Family region root', async () => {
+    const { b } = makePushBootstrap(LAUNCH);
+    render(<FamilyPage b={b} />);
+    await tickHearing();
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.click(screen.getByRole('button', { name: 'Push field updates' }));
+    await screen.findByRole('button', { name: 'Update 1 record' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Family' })));
+  });
+
+  it('after the apply finishes and the panel is closed, focus returns inside the page and Escape closes the platform dialog', async () => {
+    const { b } = makePushBootstrap(LAUNCH);
+    render(<FamilyPage b={b} />);
+    await tickHearing();
+    const action = screen.getByRole('button', { name: 'Push field updates' });
+    action.focus();
+    fireEvent.click(action);
+    fireEvent.click(await screen.findByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+
+    // The panel's own Close button (the dialog is the last 'Close' in the DOM; the page also has one).
+    const closes = screen.getAllByRole('button', { name: 'Close' });
+    fireEvent.click(closes[closes.length - 1]);
+    await waitFor(() => expect(screen.queryByText('1 record was updated.')).not.toBeInTheDocument());
+
+    const region = screen.getByRole('region', { name: 'Family' });
+    await waitFor(() => expect(region.contains(document.activeElement)).toBe(true));
+    expect(document.activeElement).not.toBe(document.body);
+    fireEvent.keyDown(document.activeElement as Element, { key: 'Escape', bubbles: true });
+    expect(b.closeDialog).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('RecordFamily page (FamilyPage)', () => {
