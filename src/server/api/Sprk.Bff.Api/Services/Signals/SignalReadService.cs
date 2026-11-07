@@ -943,7 +943,9 @@ public sealed class SignalReadService
     /// <see cref="SignalAccessEvents.CorePairAppOnlyReadFailed"/> with the Signal id and lane as scope fields only. When a query faults
     /// (a timeout, throttling, a 5xx: anything but a requested cancellation, which propagates), the outcome is
     /// <see cref="SignalReadOutcome.Unavailable"/> (503) with ONE warning carrying the count of rows it could not confirm, as the
-    /// worklist's other steps answer a fault: never a shorter list presented as complete (uac-r2 F4-b). Decide-lane no-core rows are
+    /// worklist's other steps answer a fault: never a shorter list presented as complete (uac-r2 F4-b). A query that succeeds but returns
+    /// NONE of the ids it asked for gets the same answer (the service read cannot see the rows); a query that returns some of them drops
+    /// only the missing ones, as a row deleted between the two reads. Decide-lane no-core rows are
     /// never candidates (D-35), so they are not re-read.
     /// </summary>
     private async Task<NoCorePairCheck> NoCoreRowsWithAStoredPairAsync(IReadOnlyList<SignalRow> rows, CancellationToken ct)
@@ -966,7 +968,21 @@ public sealed class SignalReadService
                 };
                 query.Criteria.AddCondition("sprk_signalid", ConditionOperator.In, chunk.Cast<object>().ToArray());
                 var result = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-                foreach (var stored in result.Entities.Where(e => chunk.Contains(e.Id)))
+                var returned = result.Entities.Where(e => chunk.Contains(e.Id)).ToList();
+                if (returned.Count == 0)
+                {
+                    // A whole chunk missing means the service read cannot see these rows (it is not the delete race a single missing id
+                    // among returned ones is), so a list without them would be incomplete: the same 503 a faulted query answers, with the
+                    // same reason. One summary warning, counts only. A chunk of one id whose Signal was deleted between the two reads lands
+                    // here too; that is accepted, because it is transient and the next read succeeds. Some-but-not-all returned stays a
+                    // dropped row (below), so one deletion race never blanks the Worklist.
+                    _logger.LogWarning(SignalAccessEvents.CorePairAppOnlyReadFailed,
+                        "Signal read: the app-only read of the core-record pair returned none of {ChunkCount} requested rows ({Count} no-core rows in all); unavailable.",
+                        chunk.Length, noCore.Length);
+                    return new NoCorePairCheck(leftOut, SignalReadResult.Unavailable("core_pair_read_failed"));
+                }
+
+                foreach (var stored in returned)
                 {
                     if (SignalCoreRecordAccess.HasAnyPairHalf(stored))
                     {

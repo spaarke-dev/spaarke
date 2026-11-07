@@ -173,3 +173,26 @@ Mutation checks on the round-2 code, each run and then reverted:
 - A leftover loop that runs only on a fault (the success-path loop disabled): the missing-row test fails (the omitted
   row is listed).
 - Only the first chunk queried (`Take(1)`): the 101-row case fails (row 101 is not listed).
+
+## Fix round 3 (pass-2 K1, K2, test shape)
+
+Base: `task/fm-044-fix2` (`cdb7c30232`), branch `task/fm-044-fix3`.
+
+| Item | Outcome |
+|---|---|
+| 1. Role guard reads every role definition and every script | (a) `SignalWriterRoleGuardTests.LoadRoleFiles` now reads every `*.xml` under `src/` (not `bin`, `obj`, `node_modules`) whose text has a `RolePrivilege` element or whose root is `Role`; a customizations-style document with several `Role` elements is read role by role; a file with a privilege but no role element fails. `ProcedureRolePrivilegeGuardTests.RoleFiles` is unchanged (its other users keep the `Roles`-folder rule). (b) The privilege-name scan covers `config/**/*.json`, `scripts/**/*.json`, `scripts/**/*.ps1` and `scripts/**/*.psm1`; same whole-name, case-insensitive match. (c) `RemovalOnlyScripts` names the files that only remove; a test reads each one and fails if it lacks `RemovePrivilegeRole` or contains an add/replace call. (d) The two expectation files (under `scripts/provisioning/role-privilege-expectations/`) are skipped by the name scan and instead asserted to agree with the allow-lists. |
+| 2. Step 6b | A chunk whose successful read returns none of the ids it asked for answers `Unavailable("core_pair_read_failed")`, the reason the fault path already uses, with one count-only warning. A chunk that returns some of its ids still drops only the missing rows. A one-id chunk whose Signal was deleted between the two reads lands in the "none" case; accepted, because it is transient. |
+| 3. Test fake shape | The worklist fake records any pair read that is not one `In` condition on `sprk_signalid`; the route helper asserts the record is empty after every request (a throw inside the fake would be answered as a 503 by the service, so a recorded violation is what makes a mismatch fail). |
+
+Every hit of the widened scan on the committed repo (search of `config/**`, `scripts/**`, case-insensitive, whole name):
+
+| File | Decision |
+|---|---|
+| `scripts/Remove-ConsoleSignalWriteAndDecisionRecordCreate.ps1` | Excepted by name. Read in full: its only mutating call is `RemovePrivilegeRole` (one `Invoke-DvPost`); the other `Invoke-RestMethod` use is a GET; no add/replace call or association. The four names are its closed removal list and read-only union-of-roles checks. |
+| `scripts/provisioning/role-privilege-expectations/spaarkemaster-1.2.4.0.json`, `...-1.3.0.0.json` | Not excepted: asserted. Console User and Ontology Administrator list the four as `absent`; Ontology Service lists Create Signal, Write Signal, Create DR as `present` and Write DR as `absent`. All agree with the allow-lists. |
+| `config/**` | No hits. |
+| Other `scripts/**/*.ps1` | No hits. |
+
+Role definitions found outside a `Roles` folder under `src/`: none (every role definition is in `src/dataverse/solutions/SpaarkeMaster/Roles/`).
+
+Fail-first (step 6b tests, service reverted to `cdb7c30232`): `WhenTheOnlyPairReadChunkReturnsNoneOfItsRows_...` and `WhenTheSecondPairReadChunkReturnsNoneOfItsRow_...` failed (200); the two "one missing id" controls passed before and after. Shape check mutation (service uses `Equal` instead of `In`): the pair-read tests fail on the shape message; reverted.

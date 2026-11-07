@@ -450,6 +450,82 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
             "no id in the message text");
     }
 
+    // Fix round 3 (pass-2 K1): a pair read that succeeds but returns NONE of the ids it asked for means the service read cannot see the
+    // rows, so the list would be incomplete: 503, the same outcome and reason a faulted read answers, with one count-only warning.
+    // Must fire on the leftover loop alone (it would drop every row of the chunk and answer 200 with a shorter list).
+    [Fact]
+    public async Task WhenTheOnlyPairReadChunkReturnsNoneOfItsRows_TheWorklistIs503_WithOneCountOnlyWarning()
+    {
+        var world = new World();
+        var signals = Enumerable.Range(0, 3)
+            .Select(_ => world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice]))))
+            .ToList();
+        world.PairReadOmits.UnionWith(signals);
+        _factory.Logs.Warnings.Clear();
+        _factory.Logs.WarningEvents.Clear();
+
+        var response = await GetAsync(world, Alice);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "none of the requested rows came back: the list would be incomplete");
+        (await Problem(response)).GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+        world.SignalPairReads.Should().ContainSingle();
+        _factory.Logs.WarningEvents.Count(e => e.Id == SignalAccessEvents.CorePairAppOnlyReadFailed.Id).Should().Be(1, "one summary warning, never one per row");
+        _factory.Logs.Warnings.Should().ContainSingle(w => w.Contains("returned none of 3 requested rows", StringComparison.Ordinal))
+            .Which.Should().NotContain(signals[0].ToString("D"), "counts only, no id");
+    }
+
+    [Fact]
+    public async Task WhenTheSecondPairReadChunkReturnsNoneOfItsRow_TheWorklistIs503()
+    {
+        var world = new World();
+        for (var i = 0; i < 101; i++)
+        {
+            world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice])));
+        }
+
+        world.PairReadOmitsFirst[2] = int.MaxValue; // the second read (1 id) comes back empty
+        _factory.Logs.WarningEvents.Clear();
+
+        var response = await GetAsync(world, Alice);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "a chunk the service read cannot see makes the list incomplete");
+        (await Problem(response)).GetProperty("reasonCode").GetString().Should().Be("ontology.signal.worklist_unavailable");
+        world.SignalPairReads.Select(r => r.Ids.Length).Should().Equal(100, 1);
+        _factory.Logs.WarningEvents.Count(e => e.Id == SignalAccessEvents.CorePairAppOnlyReadFailed.Id).Should().Be(1);
+    }
+
+    // Control (must not fire): some but not all of a chunk's ids come back (a Signal deleted between the two reads) is still a dropped row,
+    // never a 503 for the whole Worklist.
+    [Fact]
+    public async Task OneMissingIdAmongSeveralReturned_IsStillADroppedRow_Not503()
+    {
+        var world = new World();
+        var signals = Enumerable.Range(0, 3)
+            .Select(_ => world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice]))))
+            .ToList();
+        world.PairReadOmits.Add(signals[1]);
+
+        var body = await OkAsync(world, Alice);
+
+        Ids(body).Should().BeEquivalentTo([signals[0], signals[2]]);
+    }
+
+    [Fact]
+    public async Task OneMissingIdInTheFirstOfTwoChunks_IsStillADroppedRow_Not503()
+    {
+        var world = new World();
+        var signals = Enumerable.Range(0, 101)
+            .Select(_ => world.Signal(Do, core: null, subject: (TodoType, world.Todo(owner: Alice, readers: [Alice]))))
+            .ToList();
+        world.PairReadOmitsFirst[1] = 1; // chunk 1 returns 99 of its 100; chunk 2 returns its 1
+
+        var body = await OkAsync(world, Alice);
+
+        world.SignalPairReads.Select(r => r.Ids.Length).Should().Equal(100, 1);
+        var dropped = world.SignalPairReads[0].Ids[0];
+        Ids(body).Should().HaveCount(100).And.NotContain(dropped).And.BeEquivalentTo(signals.Where(s => s != dropped));
+    }
+
     // Fix round 2: IdChunk (100) ids per pair read. 101 rows are two reads (100 + 1) and all 101 are listed; 100 rows are one read.
     // Must fire on a query of only the first chunk (row 101 would be unconfirmed, so left out).
     [Theory]
@@ -2296,7 +2372,9 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         world.ActingAs = actingAs;
         using var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test");
-        return await client.GetAsync(Route + query);
+        var response = await client.GetAsync(Route + query);
+        world.PairReadShapeViolations.Should().BeEmpty("the app-only pair read is one In condition on sprk_signalid (fix round 3)");
+        return response;
     }
 
     private async Task<JsonElement> OkAsync(World world, Guid actingAs, string query = "")
@@ -2648,8 +2726,17 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         /// <summary>Task 044 fix round 2: runs on each app-only pair read before it answers (a test cancels the request here).</summary>
         public Action? OnPairRead { get; set; }
 
+        /// <summary>Fix round 3: for the Nth (1-based) app-only pair read, the first K requested ids are not returned. <c>int.MaxValue</c>
+        /// returns none of them (a chunk the service read cannot see); a small K is a row deleted between the two reads.</summary>
+        public Dictionary<int, int> PairReadOmitsFirst { get; } = [];
+
+        /// <summary>Fix round 3: how the worklist's pair read was shaped when it was not the one In condition on the Signal id. The route
+        /// helpers assert this is empty after every request, because the service turns a throw inside the fake into a 503.</summary>
+        public List<string> PairReadShapeViolations { get; } = [];
+
         public EntityCollection AppOnly(QueryExpression q)
         {
+            HashSet<Guid> readOmits = [];
             if (q.EntityName == "sprk_policy")
             {
                 lock (PolicyReads) PolicyReads.Add(q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToArray());
@@ -2657,7 +2744,25 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
             if (q.EntityName == "sprk_signal" && q.ColumnSet.Columns.Order().SequenceEqual(["sprk_corerecordid", "sprk_corerecordtype"]))
             {
-                lock (SignalPairReads) SignalPairReads.Add((q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToArray(), [.. q.ColumnSet.Columns]));
+                Guid[] requested;
+                int readNumber;
+                lock (SignalPairReads)
+                {
+                    requested = q.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToArray();
+                    SignalPairReads.Add((requested, [.. q.ColumnSet.Columns]));
+                    readNumber = SignalPairReads.Count;
+                }
+
+                // Fix round 3: the pair read is ONE In condition on sprk_signalid. Recorded, not thrown: the service answers a throw as a 503.
+                if (q.Criteria.Conditions.Count != 1 || q.Criteria.Conditions[0].AttributeName != "sprk_signalid"
+                    || q.Criteria.Conditions[0].Operator != ConditionOperator.In)
+                {
+                    lock (PairReadShapeViolations)
+                        PairReadShapeViolations.Add("expected one In condition on sprk_signalid, got: " + string.Join("; ",
+                            q.Criteria.Conditions.Select(c => $"{c.AttributeName} {c.Operator}")));
+                }
+
+                if (PairReadOmitsFirst.TryGetValue(readNumber, out var omitFirst)) readOmits.UnionWith(requested.Take(omitFirst));
                 OnPairRead?.Invoke();
                 if (FaultPairRead) throw new TimeoutException("app-only read of the pair timed out");
             }
@@ -2671,7 +2776,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                     var pairs = new EntityCollection();
                     foreach (var (id, _, row) in Signals.Where(s => q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_signalid" && c.Values.Contains(s.Id))))
                     {
-                        if (PairReadOmits.Contains(id)) continue;
+                        if (PairReadOmits.Contains(id) || readOmits.Contains(id)) continue;
 
                         var stored = new Entity("sprk_signal", id);
                         var (type, core) = StoredPairOnly.TryGetValue(id, out var hidden)
