@@ -1,6 +1,6 @@
 # Current Task State - spaarkeai-mcp-bff-api-r1
 
-> **Last Updated**: 2026-11-07 (017 done; 013 running; 002 with owner)
+> **Last Updated**: 2026-11-07 (013 done; 014 + 016 running; 002 with owner)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,17 +9,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Pipeline Step 5 (option C). 017 ✅ (`21882337f7`). **013 running** (background implementer, opus). **002 in progress in the main session**, owner-driven. |
-| **Step** | 002 step 3: the owner is creating Entra app "Spaarke Copilot Connector – dev" (runbook (a)). Next is runbook (b), the Teams Developer Portal OAuth registration. (c) the connector and (d) T5 wait until the spike is live on dev. |
+| **Task** | Pipeline Step 5 (option C). Done: 011, 017, 013 (ontology OK on 017 and 013). **Running now:** 014 in the main worktree and 016 in `C:/wt016` (branch `task/spaarkeai-mcp-016`). **002** is in the main session, waiting on the owner. |
+| **Step** | 014 and 016 are running in parallel as background implementers (opus). |
 | **Status** | in-progress |
-| **Next Action** | (1) When the owner pastes the client ID, verify read-only with `az ad app show --id <id>`: single tenant, `isFallbackPublicClient` true, delegated `user_impersonation` on `1e40baad…`, admin consent granted, client pre-authorized on `SDAP-BFF-SPE-API`, and no credentials. Then guide (b). If the Dev Portal demands a secret, STOP and ask the owner. (2) When 013 returns: build check, then dispatch 014 (and 016, which runs alongside it). (3) Spike `22487c6537` is approved by uac-r2; deploying it waits on the owner's go in uac-r2's session. |
+| **Next Action** | (1) When 016 returns: merge `task/spaarkeai-mcp-016` into the work branch (after 014 has pushed, or carefully alongside it), build, run the Signals unit and integration suites plus the baselines, push, then remove `C:/wt016` with `scripts/worktree/Remove-WorktreeSafe.ps1`. (2) When 014 returns: send 014 and 016 to ontology for review. Next wave: 015 and 020 (020 needs Phase 0 T0: check its gate). (3) 002: when the owner pastes the client id, verify with `az ad app show`, then guide runbook (b). (4) Check Tier 2 on PR #2587 (the 013 full-suite failures were likely caused by machine load). |
 
 ## Active Lanes
-- **013** (B-1 list + plan capability): background implementer.
-- **002**: main session with the owner. Runbook draft: `notes/drafts/connector-registration-runbook.md`. Facts go to `notes/phase0-registration-facts.md` (not yet created).
-- **ISS-002 / #2620**: CONFIRMED. Fix is in draft PR #2622 (`30b887c710`, worktree `C:/code_files/spaarke-wt-iss2620`). There is no live Compose session, so the owner decides who reviews it.
-- **ISS-003 / #2623**: possible disposed-scope bug in `PrecedentAdminEndpoints.cs:294`. Found in passing; not ours.
-- **017** needs ontology review (`21882337f7`). Ask ontology (`spaarke-wt-spaarke-ontology-platform-r1-38`).
+- **014** (commit capability) runs in the main worktree. Binding requirements: the D-17 `DecisionToolError.Partial` payload (ontology), and an empty `DecisionCommitService.cs` diff.
+- **016** (lookup search + REST route) runs in `C:/wt016`. It pushes its own branch; the main session merges it.
+- **002**: owner-driven. Runbook: `notes/drafts/connector-registration-runbook.md`.
+- **Owner decisions pending:** who reviews PR #2622 (the ISS-002 Compose fix); the go for spike `22487c6537` in uac-r2's session (uac-r2 has approved it).
+- **ISS-003 / #2623** is filed and not ours.
 
 ## State
 - Wave 1:
