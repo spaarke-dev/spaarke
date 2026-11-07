@@ -929,7 +929,7 @@ describe('InvoiceReviewPage: Add line (task 164b)', () => {
     [409, 'ebilling.line_add.firm_missing', 'This invoice has no firm. Add the firm before adding a line; nothing was changed.', 'This invoice has no firm.'],
     [409, 'ebilling.line_add.code_set_unavailable', 'server words', 'codes for this invoice could not be checked'],
     [409, 'ebilling.line_add.procedure_gap', 'server words', 'without the procedure it needs'],
-    [409, 'ebilling.line.corrections_pending', 'server words', 'correction on this invoice is still being applied'],
+    [409, 'ebilling.line.corrections_pending', 'Repeat the corrections on lines 2 and 4 first.', 'Repeat the corrections on lines 2 and 4 first.'],
     [409, 'ebilling.invoice.totals_refused', 'server words', 'totals would not allow this line'],
     [409, 'ebilling.invoice.busy', 'server words', 'Another change to this invoice is in progress'],
     [409, 'ebilling.line_add.changed', 'server words', 'The invoice changed while the line was being added'],
@@ -947,6 +947,179 @@ describe('InvoiceReviewPage: Add line (task 164b)', () => {
     expect(within(dialog).getByLabelText('Hours')).toHaveValue('2.5');
     expect(screen.queryByTestId('notice-reload')).not.toBeInTheDocument();
     expect(api.getReview).toHaveBeenCalledTimes(1);
+  });
+
+  const incompleteAddLine = () =>
+    failed(problem(503, 'ebilling.decision.incomplete', { detail: 'The line was saved; the signals were not.', failedStep: 'signals' }));
+
+  it('F1-1: a corrections_pending refusal with no detail falls back to the fixed sentence', async () => {
+    const api = mockApi(normal());
+    api.addLine.mockResolvedValue(failed(problem(409, 'ebilling.line.corrections_pending')));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    const dialog = await openAndFillFee();
+    submit(dialog);
+    expect(await within(dialog).findByTestId('add-line-error')).toHaveTextContent('correction on this invoice is still being applied');
+  });
+
+  it('F1-1: a Repeat that gets a 409 busy keeps Repeat with the same requestId and never says nothing was changed', async () => {
+    const api = mockApi(normal());
+    api.addLine
+      .mockResolvedValueOnce(incompleteAddLine())
+      .mockResolvedValueOnce(failed(problem(409, 'ebilling.invoice.busy', { detail: 'server words' })))
+      .mockResolvedValueOnce(failed(problem(409, 'ebilling.line_add.changed', { detail: 'server words' })));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    submit(await openAndFillFee());
+
+    fireEvent.click(await screen.findByTestId('notice-repeat'));
+    await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('Another change to this invoice is in progress'));
+    expect(screen.getByTestId('notice')).not.toHaveTextContent('Nothing was changed');
+    expect(screen.queryByTestId('notice-reload')).not.toBeInTheDocument();
+
+    // Repeat again (the same closure): a 409 changed is the same.
+    fireEvent.click(screen.getByTestId('notice-repeat'));
+    await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('The invoice changed while the repeat was running'));
+    expect(screen.getByTestId('notice')).not.toHaveTextContent('Nothing was changed');
+
+    // And once more it goes through: still the one request id, and the form was not reopened.
+    fireEvent.click(screen.getByTestId('notice-repeat'));
+    await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(4));
+    const calls = api.addLine.mock.calls.map(c => c[1]);
+    expect(new Set(calls.map(c => c.requestId)).size).toBe(1);
+    expect(calls[3]).toEqual(calls[0]);
+    await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('Line added'));
+    noDialog();
+  });
+
+  it('F1-1: a Repeat that gets no answer (status 0) or a 5xx keeps Repeat with the same requestId and never says nothing was changed', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const api = mockApi(normal());
+      api.addLine
+        .mockResolvedValueOnce(incompleteAddLine())
+        .mockResolvedValueOnce(failed(new TypeError('Failed to fetch')))
+        .mockResolvedValueOnce(failed(problem(500, null, { detail: 'boom' })));
+      renderPage(api);
+      await screen.findByTestId('review-title');
+      submit(await openAndFillFee());
+
+      fireEvent.click(await screen.findByTestId('notice-repeat'));
+      await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('No answer came back, so the repeat may not have finished'));
+      expect(screen.getByTestId('notice')).not.toHaveTextContent('Nothing was changed');
+      expect(screen.getByTestId('notice')).not.toHaveTextContent('Failed to fetch');
+
+      fireEvent.click(screen.getByTestId('notice-repeat'));
+      await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('The repeat did not finish'));
+      expect(screen.getByTestId('notice')).not.toHaveTextContent('Nothing was changed');
+
+      fireEvent.click(screen.getByTestId('notice-repeat'));
+      await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(4));
+      const calls = api.addLine.mock.calls.map(c => c[1]);
+      expect(new Set(calls.map(c => c.requestId)).size).toBe(1);
+      noDialog();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('F1-1: a Repeat refused for another reason shows that sentence without "Nothing was changed" and offers no Repeat', async () => {
+    const api = mockApi(normal());
+    api.addLine
+      .mockResolvedValueOnce(incompleteAddLine())
+      .mockResolvedValueOnce(failed(problem(409, 'ebilling.invoice.totals_refused', { detail: 'server words' })));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    submit(await openAndFillFee());
+    fireEvent.click(await screen.findByTestId('notice-repeat'));
+    await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('totals would not allow this line'));
+    expect(screen.getByTestId('notice')).not.toHaveTextContent('Nothing was changed');
+    expect(screen.queryByTestId('notice-repeat')).not.toBeInTheDocument();
+  });
+
+  it('F1-1 (shared path): a decision write whose Repeat gets a 409 busy keeps Repeat with the same decision id', async () => {
+    const api = mockApi(normal());
+    api.decideLine
+      .mockResolvedValueOnce(failed(problem(503, 'ebilling.decision.incomplete', { detail: 'The line was saved; the record was not.', failedStep: 'record' })))
+      .mockResolvedValueOnce(failed(problem(409, 'ebilling.invoice.busy', { detail: 'server words' })))
+      .mockResolvedValueOnce(ok({ decisionId: 'x', lines: [], totals: null }));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(row(2));
+    await screen.findByTestId(`pane-line-${lineId(2)}`);
+    fireEvent.click(screen.getByTestId('decision-confirm'));
+    fireEvent.click(await screen.findByTestId('notice-repeat'));
+    await waitFor(() => expect(api.decideLine).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId('notice')).toHaveTextContent('Another change to this invoice is in progress'));
+    expect(screen.getByTestId('notice')).not.toHaveTextContent('Nothing was changed');
+    expect(screen.queryByTestId('notice-reload')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('notice-repeat'));
+    await waitFor(() => expect(api.decideLine).toHaveBeenCalledTimes(3));
+    expect(new Set(api.decideLine.mock.calls.map(c => c[2].decisionId)).size).toBe(1);
+  });
+
+  it('F1-3: a first send with no answer says the line may already be added, keeps the form, and resends with the same requestId', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const api = mockApi(normal());
+      api.addLine.mockResolvedValueOnce(failed(new TypeError('Failed to fetch')));
+      renderPage(api);
+      await screen.findByTestId('review-title');
+      const dialog = await openAndFillFee();
+      submit(dialog);
+      const error = await within(dialog).findByTestId('add-line-error');
+      expect(error).toHaveTextContent('No answer came back, so the line may already be added');
+      expect(error).toHaveTextContent('it is never added twice');
+      expect(error).not.toHaveTextContent('could not be sent');
+      expect(error).not.toHaveTextContent('Failed to fetch');
+      expect(within(dialog).getByLabelText('Reason')).toHaveValue('The firm left this call off the invoice');
+      submit(dialog);
+      await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(2));
+      expect(api.addLine.mock.calls[1][1].requestId).toBe(api.addLine.mock.calls[0][1].requestId);
+      await waitFor(noDialog);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('K3: a 200 alreadyApplied is a success: the line is added and the form closes', async () => {
+    const added = flagged(99, { reviewerAdded: true });
+    const api = mockApi([normal(), review([...normal().lines, added])]);
+    api.addLine.mockImplementationOnce(async (_i: string, r: { requestId: string }) =>
+      ok({ requestId: r.requestId, lineId: ADDED_LINE_ID, decisionId: 'dd', status: 'Flagged', alreadyApplied: true, totals: null })
+    );
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    submit(await openAndFillFee());
+    expect(await screen.findByTestId('notice')).toHaveTextContent('Line added');
+    expect(await screen.findByTestId(`pane-line-${ADDED_LINE_ID}`)).toBeInTheDocument();
+    noDialog();
+  });
+
+  it('K3: the submit button is disabled while a send is in flight, so a second click sends nothing', async () => {
+    const api = mockApi(normal());
+    let release: (v: Awaited<ReturnType<typeof api.addLine>>) => void = () => undefined;
+    api.addLine.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          release = resolve;
+        })
+    );
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    const dialog = await openAndFillFee();
+    const button = () => within(dialog).getByRole('button', { name: 'Add line', hidden: true });
+    expect(button()).toBeEnabled();
+    submit(dialog);
+    await waitFor(() => expect(button()).toBeDisabled());
+    fireEvent.click(button());
+    expect(api.addLine).toHaveBeenCalledTimes(1);
+    release(ok({ requestId: 'r', lineId: ADDED_LINE_ID, decisionId: 'dd', status: 'Flagged', alreadyApplied: false, totals: null }));
+    await waitFor(noDialog);
   });
 
   it('C2: text that is not a number is named in the form and nothing is sent', async () => {

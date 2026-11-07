@@ -49,6 +49,8 @@ import {
   loadFailureMessage,
   newDecisionId,
   staysInAddLineForm,
+  isRetryableRepeatFailure,
+  repeatFailureMessage,
   writeFailureMessage,
   type ApiFailure,
   type ApiResult,
@@ -428,6 +430,11 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
          * its repeat is the multi-line route with the committed line ids (InvoiceLineDecisionService).
          */
         repeatCall?: (failure: ApiFailure) => () => Promise<ApiResult<T>>;
+        /**
+         * Set by the page's own Repeat. The earlier send already saved the change, so a failure here (no answer, a 5xx, a 409 busy or changed)
+         * keeps Repeat with the SAME closure (same id, same body), and no sentence claims that nothing was changed.
+         */
+        isRepeat?: boolean;
       }
     ): Promise<boolean> => {
       setBusy(true);
@@ -449,8 +456,10 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
       }
       const f = result.failure;
       if (f.status === 403) setRefused403(true);
-      const text = (opts.failureText ?? writeFailureMessage)(f);
+      const ordinaryText = (opts.failureText ?? writeFailureMessage)(f);
+      const text = opts.isRepeat ? repeatFailureMessage(f, ordinaryText) : ordinaryText;
       const incomplete = isIncomplete(f);
+      const repeatAgain = opts.isRepeat === true && isRetryableRepeatFailure(f);
       // 503 incomplete: part of the change was saved. Show the server's state (the page still shows the old one) before offering Repeat.
       if (incomplete) await reload();
       if (!alive.current) return false;
@@ -464,10 +473,13 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         setDialogError(text);
         return false;
       }
-      opts.closeDialog?.();
-      const again = opts.repeatCall ? opts.repeatCall(f) : call;
-      const action: Notice['action'] = incomplete
-        ? { label: 'Repeat', run: () => void runWrite(again, { ...opts, inDialog: false }) }
+      // A Repeat has no form of its own (it was closed); do not close one the reviewer has opened since.
+      if (!opts.isRepeat) opts.closeDialog?.();
+      // A Repeat that failed without finishing (no answer, a 5xx, a 409 busy or changed) repeats the closure that just ran: the first Repeat
+      // already chose the route, and such a failure carries no committed ids to choose it again from.
+      const again = repeatAgain ? call : opts.repeatCall ? opts.repeatCall(f) : call;
+      const action: Notice['action'] = incomplete || repeatAgain
+        ? { label: 'Repeat', run: () => void runWrite(again, { ...opts, inDialog: false, isRepeat: true }) }
         : f.status === 409 && !firmFirst
           ? { label: 'Reload', run: () => void reload() }
           : undefined;

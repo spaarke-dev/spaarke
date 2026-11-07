@@ -62,3 +62,22 @@ Results:
 - jsdom: after a send, the Fluent dialog surface carries `aria-hidden`, so role queries on it fail. The tests use DOM queries for "no dialog" and `hidden: true` for the submit button. This is the same shared `FormModal` the Correct and Bulk dialogs use; not investigated further here.
 - `ReviewLine.reviewerAdded` is a required field. A server older than 164a would omit it, and the badge would then not show (undefined is falsy); nothing else reads it.
 - The Add line button is also shown on the By rule tab (it sits in the shared toolbar).
+
+## Review fix round
+
+The adversarial review's fix-now findings and the cheap known limits. Tests are in `src/__tests__/InvoiceReviewPage.test.tsx` (describe "Add line (task 164b)") and `src/__tests__/reviewModel.test.ts`.
+
+| Finding | Change | Test |
+|---|---|---|
+| F1-1: a failed Repeat lost the requestId and said "Nothing was changed" | `runWrite` takes `isRepeat`, set by the page's own Repeat. A Repeat that fails with status 0, any 5xx or a 409 `busy` / `line_add.changed` keeps `{Repeat}` bound to the SAME closure (same id and body) and shows `repeatFailureMessage` (points back to Repeat, never "Nothing was changed"). Any other refusal on a Repeat keeps its own sentence with the "Nothing was changed" claim removed and offers no Repeat. A Repeat does not close a form the reviewer opened since. Shared by every `runWrite` caller (decisions, bulk, corrections, Add line); first-attempt behaviour is unchanged. New helpers `isRetryableRepeatFailure` / `repeatFailureMessage` in `invoiceReviewApi.ts` | Add line Repeat -> 409 busy -> 409 changed -> success (one requestId, identical body, no form reopened); Repeat -> status 0 -> 500 -> same; Repeat -> 409 totals_refused -> sentence without the claim and no Repeat; decision write Repeat -> 409 busy -> Repeat -> same decisionId |
+| F1-2: `corrections_pending` hid the server's text | `addLineFailureMessage` returns `f.detail ?? <fixed sentence>` | The C2 row now asserts the server detail is shown; a second case asserts the fixed sentence when there is no detail |
+| F1-3: a first send with no answer said "could not be sent" | `addLineFailureMessage` default branch: status 0 gives "No answer came back, so the line may already be added. Send it again from this form (it is never added twice), or reload first." The form stays open with the same requestId | Status 0 -> the message, the typed values kept, resend uses the same requestId and closes the form |
+| K1: `Number("0x10")` / `"1e3"` accepted | `buildAddLineRequest` tests `/^-?\d+(\.\d+)?$/` (after trim) before converting; the "must be a number" message is unchanged | `reviewModel.test.ts`: refused 0x10, 1e3, 1E3, Infinity, 1,5, .5, 5., +2, --2, "1 2"; accepted 1.5, -2, " 2.5 ", 300, 0; blank is null |
+| K4: `staysInAddLineForm` comment versus use | `runWrite` consults it only for a 409 (other statuses already stay in the form there). The helper is narrowed to the 409 codes and its comment says so. No behaviour change | The existing C2 rows (all statuses) still pass |
+| K3: test gaps | Tests only | 200 `alreadyApplied` is shown as success (line added, selected, form closed); the submit button is disabled while a send is in flight and a second click sends nothing |
+
+### Browser check before UAT (known limits left as notes)
+
+- The "Added by reviewer" badge's `aria-label`.
+- `FormModal` carries `aria-hidden` on its surface in jsdom after a send (the tests use DOM queries and `hidden: true`).
+- Focus after the form closes.

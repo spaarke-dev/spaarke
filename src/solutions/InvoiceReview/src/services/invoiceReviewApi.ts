@@ -433,25 +433,50 @@ export function writeFailureMessage(f: ApiFailure): string {
 }
 
 /**
- * Add line (task 164): refusals that leave the form open with what the reviewer typed. Nothing was written for any of them, so the same
- * request id is safe to send again. The 409 `id_reused` and `not_in_review`, every 403 and every 503 incomplete belong to the page, not the form.
+ * Add line (task 164): the 409 refusals that leave the form open with what the reviewer typed. `runWrite` consults this ONLY for a 409
+ * (any other non-403, non-incomplete refusal - a 400, status 0, another 5xx - already stays in the form there). Nothing was written for any
+ * of these, so the same request id is safe to send again. The 409 `id_reused` and `not_in_review` belong to the page (Reload), and so do
+ * every 403 and every 503 incomplete.
  */
 export function staysInAddLineForm(f: ApiFailure): boolean {
-  if (f.signInFailed || f.status === 403 || isIncomplete(f)) return false;
-  if (f.status === 400) return true;
-  if (f.status === 409) {
-    return (
-      f.errorCode === CODE_ADD_LINE_FIRM_MISSING ||
-      f.errorCode === CODE_ADD_LINE_CODE_SET_UNAVAILABLE ||
-      f.errorCode === CODE_ADD_LINE_PROCEDURE_GAP ||
-      f.errorCode === CODE_ADD_LINE_CHANGED ||
-      f.errorCode === CODE_CORRECTIONS_PENDING ||
-      f.errorCode === CODE_TOTALS_REFUSED ||
-      f.errorCode === CODE_BUSY
-    );
+  if (f.status !== 409) return false;
+  return (
+    f.errorCode === CODE_ADD_LINE_FIRM_MISSING ||
+    f.errorCode === CODE_ADD_LINE_CODE_SET_UNAVAILABLE ||
+    f.errorCode === CODE_ADD_LINE_PROCEDURE_GAP ||
+    f.errorCode === CODE_ADD_LINE_CHANGED ||
+    f.errorCode === CODE_CORRECTIONS_PENDING ||
+    f.errorCode === CODE_TOTALS_REFUSED ||
+    f.errorCode === CODE_BUSY
+  );
+}
+
+/**
+ * True when a failed REPEAT (the page's Repeat after a 503 incomplete) says nothing final about the change: no answer at all (status 0, a
+ * sign-in failure included), any other 5xx, or a 409 `busy` / `line_add.changed`. The earlier send already saved the change, so the reviewer
+ * must still be able to Repeat the SAME request: the form is closed, and a reopened form would mint a new id and add a duplicate.
+ */
+export function isRetryableRepeatFailure(f: ApiFailure): boolean {
+  if (f.status === 403 || isIncomplete(f)) return false;
+  if (f.status === 0 || f.status >= 500) return true;
+  return f.status === 409 && (f.errorCode === CODE_BUSY || f.errorCode === CODE_ADD_LINE_CHANGED);
+}
+
+/**
+ * The sentence shown when a REPEAT fails. The earlier send was saved, so it never says "Nothing was changed". A retryable failure
+ * (`isRetryableRepeatFailure`) gets its own sentence that points back to Repeat; any other refusal keeps its own sentence with that claim removed.
+ */
+export function repeatFailureMessage(f: ApiFailure, ordinary: string): string {
+  if (isRetryableRepeatFailure(f)) {
+    if (f.signInFailed) return 'Sign-in could not be verified for this session. Repeat it again, or reload the page.';
+    if (f.status === 0) return 'No answer came back, so the repeat may not have finished. Repeat it again to finish; nothing is recorded twice.';
+    if (f.status === 409 && f.errorCode === CODE_BUSY) {
+      return 'Another change to this invoice is in progress. The earlier change was saved; Repeat in a moment to finish it.';
+    }
+    if (f.status === 409) return 'The invoice changed while the repeat was running. The earlier change was saved; Repeat to finish it.';
+    return 'The repeat did not finish. The earlier change was saved; Repeat it again to finish (nothing is recorded twice).';
   }
-  // No answer at all (status 0) or another 5xx: the reviewer may send it again as typed, with the same request id.
-  return f.status === 0 || f.status >= 500;
+  return ordinary.replace(/\s*Nothing was changed(?:; add it again)?\.?/g, '').trim();
 }
 
 /**
@@ -478,7 +503,8 @@ export function addLineFailureMessage(f: ApiFailure): string {
     case CODE_ADD_LINE_PROCEDURE_GAP:
       return 'Adding this line would leave a billing rule without the procedure it needs, so it was not added. Nothing was changed.';
     case CODE_CORRECTIONS_PENDING:
-      return 'A correction on this invoice is still being applied. Try again in a moment. Nothing was changed.';
+      // The server's detail names the corrections to repeat; the fixed sentence is only for a response with no detail.
+      return f.detail ?? 'A correction on this invoice is still being applied. Try again in a moment. Nothing was changed.';
     case CODE_TOTALS_REFUSED:
       return 'The invoice totals would not allow this line, so it was not added. Nothing was changed.';
     case CODE_BUSY:
@@ -490,6 +516,10 @@ export function addLineFailureMessage(f: ApiFailure): string {
     case CODE_OWNER_UNRESOLVED:
       return 'The line could not be given an owner, so it was not added. Contact an administrator.';
     default:
+      // A first send that got no answer: the line may or may not have been added, so do not say it was not sent.
+      if (f.status === 0) {
+        return 'No answer came back, so the line may already be added. Send it again from this form (it is never added twice), or reload first.';
+      }
       return writeFailureMessage(f);
   }
 }
