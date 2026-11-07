@@ -1617,7 +1617,8 @@ public sealed class SecureRecordSetupProcedureTests
             {
                 if (role)
                 {
-                    dv.UserRoles[dv.WriterAppUser] = [admin];
+                    // Keeps the ontology role too: the re-read must refuse the EXTRA role, not a missing one.
+                    dv.UserRoles[dv.WriterAppUser] = [dv.OntologyRoleId, admin];
                 }
                 else
                 {
