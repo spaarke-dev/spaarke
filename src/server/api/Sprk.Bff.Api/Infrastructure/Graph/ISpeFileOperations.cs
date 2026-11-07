@@ -173,7 +173,7 @@ public interface ISpeFileOperations
     /// uploads of the same file name collapse onto ONE drive-item (SharePoint retains the prior content
     /// as a version, so the bytes are recoverable, but the two uploads stop being two documents).
     /// Callers that need distinct documents either make the file name unique first — see
-    /// <c>EmailAttachmentProcessor.GenerateUniqueFileName</c> and the collision-survival tests in
+    /// IncomingCommunicationProcessor's attachment upload (the record id folded into the name) and the collision-survival tests in
     /// <c>tests/integration/data-mutation/SpeUploadPaths/SpeFlatUploadPathTests.cs</c> — or use the
     /// <see cref="UploadSmallAsync(string,string,Stream,Sprk.Bff.Api.Models.ConflictBehavior,CancellationToken)"/>
     /// overload with <c>Fail</c> / <c>Rename</c>.

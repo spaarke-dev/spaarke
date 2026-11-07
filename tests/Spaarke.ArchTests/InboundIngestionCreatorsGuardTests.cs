@@ -15,21 +15,22 @@ namespace Spaarke.ArchTests;
 /// <c>UnfiledCommunicationKeepsCreator</c>); C2 <c>IncomingCommunicationProcessor</c> communication and C5
 /// <c>EmailUploadCaptureService</c> communication (association evaluated first, owner from <c>ResolveOwnerAsync</c>, the
 /// filing and the FR-26 stamps from <c>IncomingAssociationResolver</c>); C3 / C4 the processor's attachment rows and archived
-/// .eml (the communication's resolved owner carried through <c>ApplyOwner</c>, never re-resolved); C6
-/// <c>EmailAttachmentProcessor</c> (owner resolved before <c>CreateDocumentAsync</c>; its parent link and association are
-/// columns of that create) and C7
+/// .eml (the communication's resolved owner carried through <c>ApplyOwner</c>, never re-resolved); C6 no document-seam
+/// creator: no file under Services/Communication or Services/Email calls <c>CreateDocumentAsync</c>
+/// (<c>EmailAttachmentProcessor</c> is the attachment filter the processor asks, and creates nothing); and C7
 /// <c>MessageAttachmentMaterializer</c> (owner resolved before the upload, applied to both rows).</para>
 /// <para><b>What is pinned.</b> (1) The files that create the three tables are exactly the inventory, with the ingestors' own
 /// create counts. (2) Each creator's owner calls, in order, and the only places <c>ownerid</c> is written. (3) The unfiled
 /// exception is the ingestor path's alone: C1 can name no owner and no filing, and the unified service still refuses an
 /// unfiled create on an <c>OwnershipException</c> table. (4) Attachment rows take their owner from the resolver and from
-/// nothing else. (5) No inbound principal: <c>RequestedBy</c> is never fed by a message field. (6) An attachment carries its
-/// parent link and its association in the create, never in the follow-up update (C6, and the client stager that writes them).</para>
+/// nothing else. (5) No inbound principal: <c>RequestedBy</c> is never fed by a message field. (6) The client's one document
+/// create stages the parent link and the association on the entity it creates, so a caller that sets them on the create
+/// request has them in the create.</para>
 /// <para><b>What is not pinned here.</b> How many creates the outbound <c>CommunicationService</c> makes (the census owns
 /// counts there), the satellites the ingestors call after the create (threads, participants, review logs: the census), and the
 /// dedupe on the message id (<see cref="InboundIngestionDedupeGuardTests"/>). Known limit: the rules read source text with line
 /// comments stripped, so a create built from a computed table name, or by a helper in another file, is not seen; the census and
-/// the behaviour tests (<c>SecureChildOwnershipWriterTests</c>) still cover those.</para>
+/// the writers' behaviour tests (<c>SecureChildOwnershipWriterTests</c>, for the writers it drives) still cover those.</para>
 /// <para><b>Controls.</b> Every rule has must-fire controls that apply one mutation to the REAL source (so the control cannot
 /// drift from the shape it guards and cannot be vacuous: the mutated text must exist) and must-not-fire controls that change
 /// the source without breaking the rule (a comment that names a forbidden token, a whitespace-only change). Enforced by: this guard
@@ -44,7 +45,8 @@ public class InboundIngestionCreatorsGuardTests
     internal const string IncomingProcessorFile = Communication + "IncomingCommunicationProcessor.cs";
     internal const string UploadCaptureFile = Communication + "EmailUploadCaptureService.cs";
     internal const string ChatAttachmentFile = Communication + "MessageAttachmentMaterializer.cs";
-    internal const string EmailAttachmentFile = Email + "EmailAttachmentProcessor.cs";
+    /// <summary>The attachment filter: in ingestion code, and a creator of nothing (C6).</summary>
+    internal const string EmailAttachmentFilterFile = Email + "EmailAttachmentProcessor.cs";
     internal const string OutboundFile = Communication + "CommunicationService.cs";
     internal const string CreationServiceFile = "src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs";
     internal const string DataverseClientFile = "src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs";
@@ -85,10 +87,8 @@ public class InboundIngestionCreatorsGuardTests
         IncomingProcessorFile, UploadCaptureFile,
     };
 
-    private static readonly IReadOnlySet<string> DocumentSeamCallersInIngestionCode = new HashSet<string>(StringComparer.Ordinal)
-    {
-        EmailAttachmentFile,
-    };
+    /// <summary>C6: the files under Services/Communication and Services/Email that may create a document through the document seam. None.</summary>
+    internal static readonly IReadOnlySet<string> DocumentSeamCallersInIngestionCode = new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>The ingestors' own create shapes and how many of each the file holds: table literals and create calls.</summary>
     internal static readonly (string File, string What, Regex Shape, int Count)[] IngestorCreateCounts =
@@ -106,7 +106,6 @@ public class InboundIngestionCreatorsGuardTests
         (ChatAttachmentFile, "sprk_document rows", DocumentLiteral, 1),
         (ChatAttachmentFile, "sprk_communicationattachment rows", AttachmentRowLiteral, 1),
         (ChatAttachmentFile, "generic creates", GenericCreateCall, 2),
-        (EmailAttachmentFile, "document seam creates", DocumentSeamCall, 1),
     ];
 
     /// <summary>An owner on a row is written in exactly one shape: the resolver's team, and only when the resolver owned it.</summary>
@@ -262,21 +261,6 @@ public class InboundIngestionCreatorsGuardTests
         return violations;
     }
 
-    /// <summary>C6: resolve first, refuse without a row, create with the resolver's team; the file never writes an owner itself.</summary>
-    internal static IReadOnlyList<string> EmailAttachmentOwnerViolations(string code)
-    {
-        var violations = new List<string>();
-        if (!Regex.IsMatch(code, @"ResolveOwnerAsync\(\s*OwnershipOfAttachmentDocument\("))
-            violations.Add("EmailAttachmentProcessor does not ask the resolver about the attachment document (ResolveOwnerAsync(OwnershipOfAttachmentDocument(...))).");
-        violations.AddRange(InOrder("EmailAttachmentProcessor", code,
-            "ResolveOwnerAsync(", "if (!owner.IsOwned)", "return null;", "CreateDocumentAsync("));
-        if (!Regex.IsMatch(code, @"OwningTeamId\s*=\s*owner\.OwningTeamId\s*,"))
-            violations.Add("EmailAttachmentProcessor creates the document with an owning team that is not the resolver's answer.");
-        if (OwnerIdLiteral.IsMatch(code))
-            violations.Add("EmailAttachmentProcessor writes ownerid itself; the document seam takes the resolver's OwningTeamId.");
-        return violations;
-    }
-
     /// <summary>C7: resolve before any bytes move, refuse on a refusal, apply the answer to both rows before they are created.</summary>
     internal static IReadOnlyList<string> ChatAttachmentOwnerViolations(string code)
     {
@@ -329,46 +313,6 @@ public class InboundIngestionCreatorsGuardTests
             : ["RecordCreationService no longer refuses a create filed under nothing on a table with an OwnershipException "
                + "(record_creation.ownership_exception). The unfiled-communication creator exception is the ingestors' alone; if the service "
                + "may now create such a row, that is an owner-rule change for UAC-r2 and this guard and the registry rule move together."];
-    }
-
-    /// <summary>
-    /// C6: an attachment carries its parent link and its association in the create, never in the follow-up update. A document has no
-    /// stamp column of its own; its root (I-1) and the record its owner was decided over (I-6) are read from these lookups.
-    /// </summary>
-    internal static IReadOnlyList<string> EmailAttachmentLinksInCreateViolations(string code)
-    {
-        var violations = new List<string>();
-        var createStart = code.IndexOf("var createRequest = new CreateDocumentRequest", StringComparison.Ordinal);
-        var updateStart = code.IndexOf("var updateRequest = new UpdateDocumentRequest", StringComparison.Ordinal);
-        if (createStart < 0 || updateStart < 0)
-        {
-            violations.Add("EmailAttachmentProcessor no longer builds `var createRequest = new CreateDocumentRequest` and `var updateRequest = new UpdateDocumentRequest`; "
-                + "the rule that an attachment carries its links in the create lost its signal.");
-            return violations;
-        }
-
-        var create = InboundIngestionDedupeGuardTests.Block(code, createStart);
-        var update = InboundIngestionDedupeGuardTests.Block(code, updateStart);
-        if (create is null || update is null)
-        {
-            violations.Add("EmailAttachmentProcessor's create or update request has no readable initializer.");
-            return violations;
-        }
-
-        if (!Regex.IsMatch(create, @"\bParentDocumentLookup\s*="))
-            violations.Add("EmailAttachmentProcessor does not carry the attachment's parent link in the create (ParentDocumentLookup in the CreateDocumentRequest).");
-
-        violations.AddRange(InOrder("EmailAttachmentProcessor", code,
-            "var createRequest = new CreateDocumentRequest", "DocumentAssociationMap.TryApply(", "createRequest,", "_documentService.CreateDocumentAsync(createRequest"));
-        if (!Regex.IsMatch(code, @"DocumentAssociationMap\.TryApply\(\s*createRequest\s*,"))
-            violations.Add("EmailAttachmentProcessor does not carry the attachment's association in the create (DocumentAssociationMap.TryApply(createRequest, ...)).");
-
-        if (Regex.IsMatch(update, @"\bParentDocumentLookup\b") || Regex.IsMatch(update, @"\b(?:Matter|Project|Invoice|WorkAssignment|Event|Todo|Contact)Lookup\b"))
-            violations.Add("EmailAttachmentProcessor's follow-up update names a parent or association lookup. An attachment carries its parent link and "
-                + "association in the create; the update writes the file pointer and metadata only.");
-        if (Regex.IsMatch(code, @"DocumentAssociationMap\.TryApply\(\s*updateRequest\b"))
-            violations.Add("EmailAttachmentProcessor files the attachment with DocumentAssociationMap.TryApply(updateRequest, ...). Apply it to the create request.");
-        return violations;
     }
 
     /// <summary>The client's one document create stages the parent link and the association on the entity it creates.</summary>
@@ -434,17 +378,12 @@ public class InboundIngestionCreatorsGuardTests
         ],
         UploadCaptureFile => [.. CreateCountViolations(file, code), .. UploadCaptureViolations(code), .. PrincipalViolations(file, code)],
         ChatAttachmentFile => [.. CreateCountViolations(file, code), .. ChatAttachmentOwnerViolations(code), .. PrincipalViolations(file, code)],
-        EmailAttachmentFile =>
-        [
-            .. CreateCountViolations(file, code), .. EmailAttachmentOwnerViolations(code), .. EmailAttachmentLinksInCreateViolations(code),
-            .. PrincipalViolations(file, code),
-        ],
         DataverseClientFile => DocumentCreateStagesLinksViolations(code),
         _ => throw new ArgumentOutOfRangeException(nameof(file), file, "not an ingestor in the inventory"),
     };
 
     private static readonly string[] Ingestors =
-        [MessagingIngestorFile, IncomingProcessorFile, UploadCaptureFile, ChatAttachmentFile, EmailAttachmentFile];
+        [MessagingIngestorFile, IncomingProcessorFile, UploadCaptureFile, ChatAttachmentFile];
 
     // ── The guard, against the real source ─────────────────────────────────────────────────────────────────────────────
 
@@ -533,10 +472,43 @@ public class InboundIngestionCreatorsGuardTests
     }
 
     [Fact]
-    public void AttachmentLinks_FireWhenTheShapeIsGone()
+    public void DocumentCreateStaging_FiresWhenTheShapeIsGone()
     {
-        Assert.Contains(EmailAttachmentLinksInCreateViolations("var x = 1;"), v => v.Contains("lost its signal", StringComparison.Ordinal));
         Assert.Contains(DocumentCreateStagesLinksViolations("var x = 1;"), v => v.Contains("StageDocumentParent", StringComparison.Ordinal));
+    }
+
+    /// <summary>C6 must fire: a document-seam create added to the attachment filter (or any ingestion file) is an unnamed creator.</summary>
+    [Fact]
+    public void NoDocumentSeamCreator_FiresWhenTheAttachmentFilterCreatesADocument()
+    {
+        const string from = "public bool ShouldFilterAttachment(";
+        var source = Read(EmailAttachmentFilterFile);
+        Assert.True(source.Contains(from, StringComparison.Ordinal), $"control is vacuous: `{from}` is not in {EmailAttachmentFilterFile}");
+        var mutated = source.Replace(from,
+            "private Task<string> Create(IDocumentDataverseService d) => d.CreateDocumentAsync(new CreateDocumentRequest(), default);\n    " + from,
+            StringComparison.Ordinal);
+
+        var violations = CreatorSetViolations(
+            [(EmailAttachmentFilterFile, CodeOf(mutated))], DocumentSeamCall, DocumentSeamCallersInIngestionCode, "documents through the document seam");
+
+        Assert.Contains(violations, v => v.Contains(EmailAttachmentFilterFile, StringComparison.Ordinal) && v.Contains("not in the inbound-ingestion inventory", StringComparison.Ordinal));
+    }
+
+    /// <summary>C6 must not fire: the real filter, and the filter with a comment that names the create, create nothing.</summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("// _documentService.CreateDocumentAsync(createRequest, cancellationToken);\n")]
+    public void NoDocumentSeamCreator_IgnoresTheFilterAndACommentNamingTheCreate(string prefix)
+    {
+        const string from = "public class EmailAttachmentProcessor";
+        var source = Read(EmailAttachmentFilterFile);
+        Assert.True(source.Contains(from, StringComparison.Ordinal), $"control is vacuous: `{from}` is not in {EmailAttachmentFilterFile}");
+
+        var violations = CreatorSetViolations(
+            [(EmailAttachmentFilterFile, CodeOf(source.Replace(from, prefix + from, StringComparison.Ordinal)))],
+            DocumentSeamCall, DocumentSeamCallersInIngestionCode, "documents through the document seam");
+
+        Assert.Empty(violations);
     }
 
     [Theory]
@@ -577,17 +549,9 @@ public class InboundIngestionCreatorsGuardTests
         { UploadCaptureFile, "communication[\"ownerid\"] = new EntityReference(\"team\", owner.OwningTeamId!.Value);", "communication[\"ownerid\"] = new EntityReference(\"systemuser\", Guid.Empty);", "writes ownerid" },
         { UploadCaptureFile, "RecordRequester.OfObjectId(userId)", "RecordRequester.OfObjectId(email.From)", "sets RequestedBy once" },
         { UploadCaptureFile, "var owner = await _ownership.ResolveOwnerAsync(", "var owner = await _ownership.Other(", "ResolveOwnerAsync" },
-        // C6: owner before the create, from the resolver.
-        { EmailAttachmentFile, "ParentDocumentLookup = request.ParentDocumentId != Guid.Empty ? request.ParentDocumentId : null,", "", "parent link in the create" },
-        { EmailAttachmentFile, "createRequest, request.AssociatedEntityType, request.AssociatedEntityId))", "updateRequest, request.AssociatedEntityType, request.AssociatedEntityId))", "association in the create" },
-        { EmailAttachmentFile, "RelationshipType = RelationshipTypeEmailAttachment,", "RelationshipType = RelationshipTypeEmailAttachment, ParentDocumentLookup = request.ParentDocumentId,", "follow-up update names a parent or association lookup" },
-        { EmailAttachmentFile, "RelationshipType = RelationshipTypeEmailAttachment,", "RelationshipType = RelationshipTypeEmailAttachment, MatterLookup = request.AssociatedEntityId,", "follow-up update names a parent or association lookup" },
-        { EmailAttachmentFile, "await _documentService.UpdateDocumentAsync(documentIdStr, updateRequest, cancellationToken);", "DocumentAssociationMap.TryApply(updateRequest, request.AssociatedEntityType, request.AssociatedEntityId); await _documentService.UpdateDocumentAsync(documentIdStr, updateRequest, cancellationToken);", "TryApply(updateRequest" },
+        // (6): the client's document create stages the parent link and the association.
         { DataverseClientFile, "StageDocumentParent(document, request);", "// dropped", "StageDocumentParent" },
         { DataverseClientFile, "document[\"sprk_parentdocument\"] = new EntityReference(\"sprk_document\", parentId);", "document[\"sprk_parentdocument\"] = new EntityReference(\"sprk_matter\", parentId);", "no longer writes sprk_parentdocument" },
-        { EmailAttachmentFile, "if (!owner.IsOwned)", "if (false)", "if (!owner.IsOwned)" },
-        { EmailAttachmentFile, "OwningTeamId = owner.OwningTeamId,", "OwningTeamId = Guid.NewGuid(),", "not the resolver's answer" },
-        { EmailAttachmentFile, "var owner = await _ownership.ResolveOwnerAsync(", "var early = await _documentService.CreateDocumentAsync(null!, cancellationToken); var owner = await _ownership.ResolveOwnerAsync(", "holds 2 document seam creates" },
         // C7: owner before the bytes, applied to both rows.
         { ChatAttachmentFile, "owner.ApplyTo(document); // task 146", "// dropped", "owner.ApplyTo(document)" },
         { ChatAttachmentFile, "owner.ApplyTo(attachment); // task 146", "// dropped", "owner.ApplyTo(attachment)" },
@@ -614,14 +578,11 @@ public class InboundIngestionCreatorsGuardTests
         { IncomingProcessorFile, "public sealed class IncomingCommunicationProcessor", "// ResolveOwnerAsync(x) \"ownerid\" RequestedBy\npublic sealed class IncomingCommunicationProcessor" },
         { UploadCaptureFile, "public sealed class EmailUploadCaptureService", "// \"ownerid\" = ResolveOwnerAsync( owner RequestedBy\npublic sealed class EmailUploadCaptureService" },
         { ChatAttachmentFile, "public sealed class MessageAttachmentMaterializer", "// \"ownerid\" RequestedBy\npublic sealed class MessageAttachmentMaterializer" },
-        { EmailAttachmentFile, "public class EmailAttachmentProcessor", "// \"ownerid\" RequestedBy\npublic class EmailAttachmentProcessor" },
         // A whitespace-only change (blank lines before the class) changes nothing the rules read, and does not tie a control to log wording.
         { MessagingIngestorFile, "public sealed class MessagingIngestor", "\n\n   \n\npublic sealed class MessagingIngestor" },
         { IncomingProcessorFile, "public sealed class IncomingCommunicationProcessor", "\n\n   \n\npublic sealed class IncomingCommunicationProcessor" },
         { UploadCaptureFile, "public sealed class EmailUploadCaptureService", "\n\n   \n\npublic sealed class EmailUploadCaptureService" },
         { ChatAttachmentFile, "public sealed class MessageAttachmentMaterializer", "\n\n   \n\npublic sealed class MessageAttachmentMaterializer" },
-        { EmailAttachmentFile, "public class EmailAttachmentProcessor", "\n\n   \n\npublic class EmailAttachmentProcessor" },
-        { EmailAttachmentFile, "public class EmailAttachmentProcessor", "// ParentDocumentLookup = x; DocumentAssociationMap.TryApply(updateRequest, a, b); MatterLookup = id;\npublic class EmailAttachmentProcessor" },
         { DataverseClientFile, "internal static void StageDocumentParent(", "// StageDocumentParent(document, request); document[\"sprk_parentdocument\"] = x;\n    internal static void StageDocumentParent(" },
     };
 

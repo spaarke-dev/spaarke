@@ -1246,7 +1246,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // only thing keeping two emails' identically-named attachments apart — image001.png being the
         // canonical case — because UploadSmallAsync is Graph's path-keyed simple PUT, which accepts no
         // @microsoft.graph.conflictBehavior and therefore replaces silently and unconditionally. So the id
-        // moves into the name rather than being dropped (cf. EmailAttachmentProcessor.GenerateUniqueFileName).
+        // moves into the name rather than being dropped (as in IncomingCommunicationProcessor's attachment upload).
         //
         // SANITIZED 2026-08-29: attachment.FileName originates in an email the mailbox RECEIVED, so it is
         // attacker-influenced. A '/' in it makes Graph create that folder; folding the parent id in front

@@ -19,6 +19,8 @@ evidence, the attachment change, census, owner questions, section 10, history.
   unfiled create on an `OwnershipException` table, and the ingestor files are the only creators.
 - **C6 (`EmailAttachmentProcessor`) now carries its parent link and its association in the create**, as task 030b does
   for the Office save (coordinator instruction, 2026-11-07). A guard pins it; the behaviour tests failed first.
+  Superseded by the cleanup round (below): that creator had no caller and is deleted; C6 now pins that no ingestion file
+  creates a document through the document seam.
 - Mapping into inbound rows is an owner question (below).
 
 ## Creators and tables (closed set, found by grepping `src/server` for the inbound ingestion code)
@@ -30,7 +32,7 @@ evidence, the attachment change, census, owner questions, section 10, history.
 | C3 | same file, `ProcessIncomingAttachmentsAsync` | `sprk_document`, `sprk_communicationattachment` | generic creates, `ApplyOwner(row, owner)` |
 | C4 | same file, `ArchiveEmlAsync` / `ArchivedEmlDocument` | `sprk_document` | generic create, `ApplyOwner(document, owner)` |
 | C5 | `Communication/EmailUploadCaptureService.cs` | `sprk_communication` | `CreateCommunicationRaceProofAsync`, stamped before create |
-| C6 | `Email/EmailAttachmentProcessor.cs` | `sprk_document` | document seam create carrying the parent link and association; the update writes the file pointer only. No caller today |
+| C6 | `Email/EmailAttachmentProcessor.cs` | `sprk_document` | document seam create carrying the parent link and association; the update writes the file pointer only. No caller today; deleted in the cleanup round (below) |
 | C7 | `Communication/MessageAttachmentMaterializer.cs` | `sprk_document`, `sprk_communicationattachment` | two generic creates, `owner.ApplyTo(row)` |
 
 Not creators of these tables, and left out on purpose: `ThreadResolver`, `DirectThreadAccessService` (threads),
@@ -158,7 +160,43 @@ registry rule `UnfiledCommunicationKeepsCreator` and the new guard. No count or 
    (`AlternateKeyDuplicateClassifierTests`), the chat handler (`IncomingMessagingJobHandlerTests`) and the upload
    reconcile (`EmailUploadCaptureSeamTests`). Say if a mailbox behaviour test is wanted.
 3. **`EmailAttachmentProcessor` has no caller.** Delete it, or keep it (now filing in its create). Either is safe; the
-   guard fails if its creates change shape.
+   guard fails if its creates change shape. *Resolved: deleted in the cleanup round below.*
+
+## Cleanup round (coordinator, 2026-11-07)
+
+The adversarial review of 030b and 034 found no fix-now defects. This round removes the uncalled attachment creator.
+
+- **Deleted.**
+  - From `Services/Email/EmailAttachmentProcessor.cs`: `ProcessAttachmentsAsync`, `ProcessSingleAttachmentAsync`,
+    `GetFilterReason`, `GenerateUniqueFileName`, `OwnershipOfAttachmentDocument`, the two option-value constants, and the
+    `SpeFileStore`, `IDocumentDataverseService` and `IRecordOwnershipResolver` dependencies. The constructor now takes
+    options and a logger.
+  - From `IEmailAttachmentProcessor.cs`: `ProcessAttachmentsAsync`, and the types only it used: `ProcessAttachmentsRequest`,
+    `EmailAttachmentDto`, `AttachmentProcessingResult`, `AttachmentDocumentRecord` and `FilteredAttachmentInfo`.
+  - The behaviour tests that drove only that path: `EmailAttachmentCreateCarriesLinksTests.cs`, the two
+    `EmailAttachment_*` tests in `SecureChildOwnershipWriterTests` with their helpers, and the attachment theory in
+    `WriterBuilderOwnershipParityTests`.
+- **Kept.** `ShouldFilterAttachment` and its tests (`EmailAttachmentProcessorTests`, with the shorter constructor), the DI
+  registration, and `IncomingCommunicationProcessor`'s use of the filter.
+- **Guard rule C6, adjusted.** C6 no longer expects a creator. It pins that no file under `Services/Communication` or
+  `Services/Email` creates a document through the document seam (`CreateDocumentAsync`); the closed set for that is now
+  empty. Must fire: the real filter file with a document-seam create added. Must not fire: the real file, and the file with
+  a comment that names the create. Every other rule and control is unchanged; rule (6) keeps pinning that the client's
+  document create stages the parent link and the association.
+- **Other references.** The census's `UnscannedWriters` and `PersonLessWriters` entries for the file are removed; the SPE
+  sink guard's `Dead` entry for its upload is removed (that list is now empty); comments that cited
+  `GenerateUniqueFileName` as the flat-upload precedent now cite `IncomingCommunicationProcessor`'s attachment upload.
+  Nothing else in `src` or `tests` referenced what was deleted.
+
+### Component justification (§11)
+
+One sentence each. 030b's surface (`DocumentFilePointer`, `DocumentAssociationBind`, `Association`, `FilePointer`, the create
+`TryApply` overload, `StageDocumentAssociation`, `StageDocumentFilePointer`) is answered in `task-030-notes.md`.
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `CreateDocumentRequest.ParentDocumentLookup` | `UpdateDocumentRequest.ParentDocumentLookup`: the same column, written by the update. | It is the extension: the same member name, `[JsonIgnore]`, on the existing create request; no new type. | An attachment child gets its parent link only in a second write, so a failed update leaves the child without it. |
+| `DataverseServiceClientImpl.StageDocumentParent` | The parent line of `UpdateDocumentAsync`, and `StageDocumentAssociation`. | The update block builds its own entity inline and cannot write the create entity; the stager follows the `StageDocumentCommunicationFields` pattern (pure, internal, tested directly). | `CreateDocumentAsync` never writes `ParentDocumentLookup`, so a caller's parent link is dropped without an error. |
 
 ## Section 10 (BFF hygiene)
 

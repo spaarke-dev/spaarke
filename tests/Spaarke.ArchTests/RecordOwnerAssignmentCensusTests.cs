@@ -360,8 +360,6 @@ public class RecordOwnerAssignmentCensusTests
             "App-only profile analyses owned from the document; a refusal skips (best-effort shape)."),
         new UnscannedWriter("DataverseObservationMirror.cs", "owner of ObservationMirrorMapper's row",
             "ForChild over the mirrored row; a refusal skips the mirror."),
-        new UnscannedWriter("EmailAttachmentProcessor.cs", "seam caller (CreateDocumentAsync)",
-            "Inbound attachment documents owned from the parent document and its association."),
         new UnscannedWriter("UploadFinalizationWorker.cs", "seam caller (CreateDocumentAsync, artifact creates)",
             "Office upload documents and their artifacts carry the resolved / carried team."),
         new UnscannedWriter("DataverseDocumentsEndpoints.cs", "seam caller (POST) + PUT re-file",
@@ -2714,7 +2712,6 @@ public class RecordOwnerAssignmentCensusTests
     private static readonly IReadOnlyDictionary<string, string> PersonLessWriters = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["IncomingCommunicationProcessor.cs"] = "inbound mail: nobody in the organisation asked for it (the sender is outside it)",
-        ["EmailAttachmentProcessor.cs"] = "inbound mail attachments: as above",
         ["MessagingIngestor.cs"] = "inbound channel message (E1, keeps the application as creator): no BFF caller",
         ["CommunicationParticipantIndexer.cs"] = "derived index rows of a communication: system work",
         ["CommunicationEnrichmentService.cs"] = "background enrichment and its review logs: system work",
