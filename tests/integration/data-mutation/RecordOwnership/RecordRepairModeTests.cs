@@ -1326,6 +1326,22 @@ internal sealed class RepairWorld
     /// <summary>Every update call the service made (applied or not).</summary>
     public int UpdateCalls => Writes.Count;
 
+    /// <summary>
+    /// Task 052a: the column metadata the service reads app-only, per (table, column), over the default — every column any
+    /// profile's rules name, on every table: text, valid for update, not field-secured, no length limit. A <c>null</c> value
+    /// takes the column out of its table.
+    /// </summary>
+    public Dictionary<(string Table, string Column), ColumnMetadata?> ColumnOverrides { get; } = [];
+
+    /// <summary>Task 052a: per table, the fault reading its column metadata throws.</summary>
+    public Dictionary<string, Exception> ColumnMetadataFaults { get; } = [];
+
+    /// <summary>Task 052a: every table whose column metadata the service read, in order.</summary>
+    public List<string> ColumnMetadataReads { get; } = [];
+
+    /// <summary>Task 052a: the column lists the service asked of mapping sources (the system principal's app-only read).</summary>
+    public List<(string Table, string[] Columns)> SourceReads { get; } = [];
+
     public static readonly Guid MatterType = Guid.Parse("a0160000-0000-4000-8000-0000000000c1");
     public static readonly Guid SecureCommunication = Guid.Parse("a0160000-0000-4000-8000-000000000008");
     public static readonly Guid SourceDocument = Guid.Parse("a0160000-0000-4000-8000-000000000009");
@@ -1709,16 +1725,123 @@ internal sealed class RepairWorld
                 BeforeWrite = null;
                 var current = Directory.Version(table, id).ToString(System.Globalization.CultureInfo.InvariantCulture);
                 var applied = current == version;
-                Writes.Add((table, id, version, new Dictionary<string, object>(fields), applied && WriteFault is null));
+                // Task 052a review F3: Dataverse refuses the whole update when one value is not the CLR type its column takes.
+                var mistyped = MistypedColumns(table, fields);
+                Writes.Add((table, id, version, new Dictionary<string, object>(fields), applied && WriteFault is null && mistyped.Count == 0));
                 if (WriteFault is { } fault)
                     throw fault;
+                if (mistyped.Count > 0)
+                    throw new InvalidOperationException($"Test: {table} {id}: the SDK refuses {string.Join("; ", mistyped)}.");
                 if (!applied)
                     throw new DBConcurrencyException($"Test: {table} {id} is at version {current}, not {version}.");
                 Directory.Write(table, id, fields.ToDictionary(f => f.Key, f => (object?)f.Value));
                 return Task.CompletedTask;
             });
+        entities
+            .Setup(e => e.GetColumnMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, CancellationToken _) => ColumnMetadataOf(table));
         return entities.Object;
     }
+
+    /// <summary>Task 052a: <paramref name="table"/>'s column metadata — the default, with <see cref="ColumnOverrides"/> applied.</summary>
+    private Task<IReadOnlyDictionary<string, ColumnMetadata>> ColumnMetadataOf(string table)
+    {
+        ColumnMetadataReads.Add(table);
+        if (ColumnMetadataFaults.TryGetValue(table, out var fault))
+            return Task.FromException<IReadOnlyDictionary<string, ColumnMetadata>>(fault);
+
+        return Task.FromResult<IReadOnlyDictionary<string, ColumnMetadata>>(ColumnsOf(table));
+    }
+
+    /// <summary>Task 052a review F3: each patch column the world has metadata for whose value is not the CLR type its type takes.</summary>
+    private List<string> MistypedColumns(string table, Dictionary<string, object> fields)
+    {
+        var columns = ColumnsOf(table);
+        return fields
+            .Where(f => columns.TryGetValue(f.Key, out var metadata) && !ClrTypeFits(metadata.AttributeType, f.Value))
+            .Select(f => $"{f.Key} ({columns[f.Key].AttributeType}) = {f.Value?.GetType().Name ?? "null"}")
+            .ToList();
+    }
+
+    /// <summary>The SDK's CLR type for a column of <paramref name="type"/> (a null clears any column; an unknown type is not judged).</summary>
+    public static bool ClrTypeFits(string? type, object? value) => value is null || type switch
+    {
+        "String" or "Memo" => value is string,
+        "Integer" => value is int,
+        "BigInt" => value is long,
+        "Decimal" => value is decimal,
+        "Double" => value is double,
+        "Money" => value is Money,
+        "Boolean" => value is bool,
+        "Picklist" or "State" or "Status" => value is OptionSetValue,
+        "Virtual" => value is OptionSetValueCollection,
+        "DateTime" => value is DateTime,
+        "Lookup" or "Customer" or "Owner" => value is EntityReference,
+        _ => true,
+    };
+
+    /// <summary>The tables this world's lookups point at (a lookup column's default targets).</summary>
+    public static readonly string[] KnownTables =
+    [
+        "sprk_matter", "sprk_project", "sprk_organization", "sprk_document", "sprk_communication", "sprk_invoice", "sprk_event",
+        "sprk_todo", "sprk_aisearchindex", "account", "contact", "systemuser", "team", "businessunit",
+    ];
+
+    /// <summary>
+    /// Task 052a: a column of <paramref name="type"/> as real metadata states one — valid for update, not secured, a number or
+    /// Money column with its platform range, a lookup with <see cref="KnownTables"/> as targets (a choice column states no
+    /// option values: a test that maps one gives them).
+    /// </summary>
+    public static ColumnMetadata Typed(string column, string type, int? maxLength = null)
+    {
+        (decimal? Min, decimal? Max) range = type switch
+        {
+            "Integer" => (int.MinValue, int.MaxValue),
+            "BigInt" => (long.MinValue, long.MaxValue),
+            "Decimal" or "Double" => (-100_000_000_000m, 100_000_000_000m),
+            "Money" => (-922_337_203_685_477m, 922_337_203_685_477m),
+            _ => (null, null),
+        };
+        return new ColumnMetadata(column.ToLowerInvariant(), type, IsValidForUpdate: true, IsSecured: false, maxLength,
+            range.Min, range.Max, type is "Lookup" or "Customer" ? KnownTables : null);
+    }
+
+    /// <summary>Task 052a: <paramref name="table"/>'s column metadata — the default, with <see cref="ColumnOverrides"/> applied.</summary>
+    private Dictionary<string, ColumnMetadata> ColumnsOf(string table)
+    {
+        var rules = _profiles.Values.SelectMany(p => p.Rules ?? []).ToArray();
+        var columns = new Dictionary<string, ColumnMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in CreateTimeFieldMapping.CollectSourceColumns(rules).Where(c => c.Length > 0))
+            columns[column] = Typed(column, "String");
+
+        // A rule's target column is typed as the rule says it is (Copy keeps the source's value, so the types agree).
+        foreach (var rule in rules.Where(r => !string.IsNullOrWhiteSpace(r.TargetField)))
+            columns[rule.TargetField.Trim()] = Typed(rule.TargetField.Trim(), AttributeTypeOf(rule.TargetFieldType));
+
+        foreach (var ((overridden, column), metadata) in ColumnOverrides)
+        {
+            if (!string.Equals(overridden, table, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (metadata is null)
+                columns.Remove(column);
+            else
+                columns[column] = metadata;
+        }
+
+        return columns;
+    }
+
+    /// <summary>Task 052a: the column type a rule's <c>TargetFieldType</c> names (Number: a decimal column).</summary>
+    public static string AttributeTypeOf(int targetFieldType) => targetFieldType switch
+    {
+        CreateTimeFieldMapping.FieldTypeLookup => "Lookup",
+        CreateTimeFieldMapping.FieldTypeOptionSet => "Picklist",
+        CreateTimeFieldMapping.FieldTypeNumber => "Decimal",
+        CreateTimeFieldMapping.FieldTypeDateTime => "DateTime",
+        CreateTimeFieldMapping.FieldTypeBoolean => "Boolean",
+        CreateTimeFieldMapping.FieldTypeMemo => "Memo",
+        _ => "String",
+    };
 
     private Entity Read(string table, Guid id, string[] columns)
     {
@@ -1762,6 +1885,7 @@ internal sealed class RepairWorld
                 // A mapping source's columns (the system principal's app-only read).
                 if (SourceReadFault is { } readFault)
                     throw readFault;
+                SourceReads.Add((table, columns));
                 var row = Directory.Row(table, id);
                 var copy = new Entity(table, id);
                 foreach (var column in columns)
