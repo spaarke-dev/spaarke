@@ -34,20 +34,21 @@
 | 042b | [Derive the stamp before the owner (#2483, DI-009)](042b-stamp-before-owner-fix.poml) | FR-41 | opus / high | FULL | none | 042a, 019 | ✅ (#2562, 0d4aa87ee0) |
 | 042c | [Signal / DR core record: caller AppendTo + core first in the owner question (#2561, DI-019)](042c-core-record-owner-and-appendto.poml) | FR-41 | opus / high | FULL | none | 042b | ✅ [done] PR #2569 merged 2026-11-05 (D-204 refusal) |
 | 043 | [A Document is a field-mapping source (owner 2026-11-04)](043-document-as-mapping-source.poml) | FR-03, FR-04, FR-19 | opus / high | FULL | none | 031 | ✅ [done] merged into the work branch 2026-11-05 (18361d7dcc) |
-| 044 | [Core pair written whole, only by the server and the ledger writers: field security (owner 2026-11-04)](044-core-pair-server-only-field-security.poml) | FR-41 | opus / high | FULL | none | 042c; dev import gated on the owner's go in UAC-r2's session | 🔲 [open] |
+| 044 | [Core pair written whole, only by the server and the ledger writers: field security (owner 2026-11-04)](044-core-pair-server-only-field-security.poml) | FR-41 | opus / high | FULL | none | 042c; dev import gated on the owner's go in UAC-r2's session | 🔄 re-scoped (owner 2026-11-06): no field security; fail-closed re-read + auditing + guard + 052 report |
 | 045 | [Regarding pair always complete and propagated: inventory + design first (owner 2026-11-04)](045-regarding-pair-complete-and-propagated.poml) | FR-23, FR-41 | opus / high | FULL | none | 042c, 044; part B after owner approval | 🔲 [open] |
 | 046 | [Feature permission matrix, proposed role changes (UAC-r2), role guard (owner 2026-11-04)](046-feature-permission-matrix-and-role-guard.poml) | FR-08, FR-26 | opus / high | FULL | none | 031, 042c | ✅ [done] merged into the work branch 2026-11-05 (0b0edfbe35); role changes in 046b |
 | 046b | [Owner's role rulings on 046's gaps: role files + apply script; writer-only rule at role level; standalone add-ons checked alone (owner 2026-11-05)](046b-role-changes-apply-script-and-standalone-add-ons.poml) | FR-08, FR-26 | opus / high | FULL | none | 046; live apply by UAC-r2 under the owner's go | ✅ [done] master via #2592 (c5aa7ab6cd, 2026-11-06); additions and R1 applied on dev |
-| 046c | [Basic User is read-only on Spaarke tables: role file, -Remove, guard (owner 2026-11-06)](046c-basic-user-read-only-on-spaarke-tables.poml) | FR-08, FR-26 | opus / high | FULL | none | 046b; live removal by UAC-r2 under the owner's go | 🔲 [open] |
+| 046c | [Basic User is read-only on Spaarke tables: role file, -Remove, guard (owner 2026-11-06)](046c-basic-user-read-only-on-spaarke-tables.poml) | FR-08, FR-26 | opus / high | FULL | none | 046b; live removal by UAC-r2 under the owner's go | 🔄 repo side merged into the work branch (1b304bda82; review 2 + re-check clean); master PR after verify-suites; dev apply (G17, then -Remove -Gap R3) waits for the owner's go |
 | 048 | [Signal, Decision Record and Budget Revision changed only by their writers: generic update tools refuse them (owner 2026-11-04, D-204 extended)](048-writer-only-tables-refused-by-generic-updates.poml) | FR-41 | opus / high | FULL | none | 042c | ✅ [done] PR #2570 merged 2026-11-05 (0f53e053bf) |
-| 049 | [Create path within NFR-02: concurrent caller checks, assigned-access grant after the response (owner 2026-11-05)](049-create-path-latency-nfr02.poml) | NFR-02 | opus / high | FULL | none | 021, 042c | 🔄 Parts A/B/C done, UAC-r2 approved e8da405eb0; PR to master next |
+| 049 | [Create path within NFR-02: concurrent caller checks, assigned-access grant after the response (owner 2026-11-05)](049-create-path-latency-nfr02.poml) | NFR-02 | opus / high | FULL | none | 021, 042c | ✅ [done] master via #2599 (20669df6a9, 2026-11-06); dev deploy via UAC-r2 |
+| 049b | Create path: when the maker is the root's Assigned To, grant only the maker inline and queue the other subjects (UAC-r2 ruling 2026-11-06) | NFR-02 | opus / high | FULL | none | 049 | 🔲 queued for the next agent slot |
 
 ## Phase 3 — W3 Product creators onto the service
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 020 | [Child-records route: Matter, Project, `mappingSource`](020-child-records-route-matter-project.poml) | FR-15 | opus / high | FULL | none | 019 | ✅ (#2551, aef86b89f7) |
-| 021 | [Matter wizard (reference) + latency before/after](021-matter-wizard-migration.poml) | FR-16, NFR-02 | sonnet / high | FULL | W3-wizards | 020, 041 | 🔄 code + review fix round 1 on task/fm-021 (d6dc73e9f6); live NFR-02 +2634 ms (task-021-live.md) → 049; wizard deploy waits for 049 |
+| 021 | [Matter wizard (reference) + latency before/after](021-matter-wizard-migration.poml) | FR-16, NFR-02 | sonnet / high | FULL | W3-wizards | 020, 041 | 🔄 code + review fix round 1 on task/fm-021 (d6dc73e9f6). Re-measure 2026-11-06 after 049, with the Project→Matter profile: still over NFR-02 (maker is Assigned To: p95 +10.4 s, inline grant of every subject → 049b; queued: about +2 s). Owner decision pending (task-021-live.md); wizard deploy waits |
 | 022 | [Project wizard (incl. secure Project)](022-project-wizard-migration.poml) | FR-16, FR-15 | opus / high | FULL | W3-wizards | 021, 041 | 🔲 |
 | 023 | [Event wizard](023-event-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 022, 041 | 🔲 |
 | 024 | [To Do wizard](024-todo-wizard-migration.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 023, 041 | 🔲 |
@@ -56,11 +57,11 @@
 | 027 | [Report Card wizard (fill-only regression)](027-report-card-wizard-migration.poml) | FR-16, FR-02 | sonnet / high | FULL | W3-wizards | 026, 041 | 🔲 |
 | 028 | [Analysis wizard + email mapping at send](028-analysis-wizard-and-email-send-mapping.poml) | FR-16, FR-17 | sonnet / xhigh | FULL | W3-wizards | 027, 041 | 🔲 |
 | 029 | [Document Upload + Summarize Files wizards](029-document-upload-and-summarize-wizards.poml) | FR-16 | sonnet / high | FULL | W3-wizards | 028, 041 | 🔲 |
-| 030 | [Office To Do + document save](030-office-todo-and-document-save.poml) | FR-18 | opus / high | FULL | W3-server | 019 | 🔲 |
+| 030 | [Office To Do + document save](030-office-todo-and-document-save.poml) | FR-18 | opus / high | FULL | W3-server | 019 | 🔄 030a merged into the work branch (04522d2124; fix round 1 re-checked clean; word-add-in content read pending); 030b: association in the existing create + guards (W3 direction, 2026-11-06) |
 | 031 | [Typed routes: events, analysis create](031-typed-routes-events-analysis.poml) | FR-19 | sonnet / high | FULL | W3-server | 019 | ✅ [done] PR #2564 merged 2026-11-04; live on dev 909754869f |
-| 032 | [Invoice extraction](032-invoice-extraction.poml) | FR-20 | sonnet / high | FULL | W3-server | 019 | 🔲 |
-| 033 | [System creators: generation, playbook, Signal, Decision](033-system-creators-generation-playbook-signal-decision.poml) | FR-21 | opus / high | FULL | W3-server | 019 | 🔲 |
-| 034 | [System creators: inbound ingestion](034-system-creators-inbound-ingestion.poml) | FR-21 | opus / high | FULL | W3-server | 019 | 🔲 |
+| 032 | [Invoice extraction](032-invoice-extraction.poml) | FR-20 | sonnet / high | FULL | W3-server | 019 | 🔲 re-scope: fill-only mapping step inside the persister (owner 2026-11-06) |
+| 033 | [System creators: generation, playbook, Signal, Decision](033-system-creators-generation-playbook-signal-decision.poml) | FR-21 | opus / high | FULL | W3-server | 019 | 🔲 re-scope under the W3 direction (2026-11-06) before it runs; likely dropped |
+| 034 | [System creators: inbound ingestion](034-system-creators-inbound-ingestion.poml) | FR-21 | opus / high | FULL | W3-server | 019 | 🔲 re-scope: named exceptions + guards (W3 direction, 2026-11-06) |
 | 035 | [Delete client mapping engine + guard](035-delete-client-mapping-engine.poml) | FR-22 | sonnet / high | FULL | none | 029 | 🔲 |
 | 036 | [W3 server paths deploy + live check](036-w3-server-paths-deploy-and-live-check.poml) | FR-18–FR-21 | sonnet / high | FULL | none | 030–034 | 🔲 |
 | 037 | [Work Assignment Assigned To default (#2354)](037-work-assignment-assignedto-default.poml) | FR-36 | opus / high | FULL | W7-A | none (UAC-r2 diff review) | ✅ [done] #2370 |

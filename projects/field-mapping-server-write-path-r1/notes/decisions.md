@@ -646,7 +646,7 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 
 ### 2026-11-02 — Ontology-r1 research: the Signal/Decision writers keep their dedicated identity (recommendation; owner to decide)
 
-- **Source:** ontology-r1, `projects/spaarke-ontology-platform-r1/notes/writer-identity-fr21-answer.md` (branch `docs/ontology-platform-design`, 4279c429d2). The owner asked for deep research first.
+- **Source:** ontology-r1's FR-21 answer (keep the dedicated writer identity; named FR-21 exception), reviewed privately with UAC-r2. The owner asked for deep research first.
 - **Why the identity exists:** ontology D-1, "ADR-028 path A", 2026-10-03/04.
   - The shared BFF identities are System Administrator. Dataverse privileges are additive with no deny, so those identities can Write and Delete `sprk_decisionrecord`.
   - `mi-ontology-writer-dev` holds only the Spaarke Ontology Service role:
@@ -861,3 +861,38 @@ The ruling above rested on a wrong premise. Core User is not raised. Direct thre
 ## 2026-11-06 — G13 is not a gap (closes "G13 grant withdrawn")
 
 The send/reply thread read needs Basic. Record threads are owned by their record's team at creation (`ThreadResolver`), and a member reads them at Basic. Threads anchored to a party, and Direct threads, are read through ownership and shares, by the privacy rule. Core User and Basic User both hold Basic, so no role changes. Task 046b, `5d079d1508`.
+
+## 2026-11-06 — Task 032 becomes a design task (owner, in fm's session)
+
+- **Finding (task 032 agent, `task/fm-032` 96769b68bf):** since ebilling-r1 task 050a (D-134), invoice review creates no invoice. The only invoice creator is ebilling's `InvoiceSubmissionPersister`, which writes the invoice, lines, approval, Stored File rows and submission link in one transaction with fixed ids, inside a background job with no caller token. `RecordCreationService` creates one row per call with a new id and refuses mapping for a system principal.
+- **Options put to the owner:** drop 032 and name the persister as an exception; a new design task; or a mapping-only step inside the persister.
+- **Ruling:** a new Opus-tier design task. The create service gains a fixed-id, multi-row transactional create and a way to map under a system principal (for example the submitter as the recorded caller). UAC-r2 and ebilling-r1 review it. Task 032's POML is re-scoped before it runs; the single-creator rule holds (no second creator).
+
+## 2026-11-06 — W3 direction: named exceptions plus guards, no core redesign in R1 (owner, in fm's session; supersedes "Task 032 becomes a design task")
+
+- **Rule as written:** one server owner per invariant (`DATAVERSE-WRITE-PATH-ARCHITECTURE.md` :17, :58, :81). The invariant owners are the classes (I-1 stamp, record-first owner, mapping engine, secure gates); `RecordCreationService` is the L1 orchestrator that calls them, not the invariant itself.
+- **Named exception:** a creator outside the service is valid when it calls the same owner classes for every invariant its table carries (or L3/L4 fill-only reconciliation covers it, fail-closed), and a guard pins it: this creator writes this table and calls these owners, and no other creator does.
+- **No core redesign in R1:** no given-id input, no multi-row transactional create, no pinned-owner input and no app-only lookup translator in `RecordCreationService`. Any of these later is an owner-rule change reviewed by UAC-r2. A given id is never accepted on a table whose ids carry meaning to another rule.
+- **032:** `InvoiceSubmissionPersister` stays the single creator of the invoice family, named in task 060's matrix with a guard. FR-20's Matter mapping for extracted invoices is deferred (the alternative, a fill-only step in the persister calling the same mapping engine, stays open if the owner wants it in R1).
+- **030:** 030a routes the Office To Do through the service (adapter, no core change). 030b keeps the document save outside the service: the association moves into the existing create call, and guards pin that only the server writes the narrowing and pointer columns, that the save calls the stamp and owner classes, and that a client-supplied id that already exists is refused, never updated.
+- **034:** the ingestors stay outside the service as named exceptions. Guards pin the dedupe on the message id, the unfiled-communication creator exception on the ingestor path only, and attachment ownership through the same resolver.
+- **033:** re-scoped under this rule before it runs; likely dropped.
+- **046c:** before Basic User loses them, Core User gains AppendTo on `sprk_agreementtype`, `sprk_organizationtype_ref` and `sprk_documenttype_ref` (Global). The add-on gaps are "requires Core User" (as 046b ruled). Before the live apply, dev users holding Basic plus an add-on without Core User are counted and either given Core User or listed for the owner.
+- **Reviewed by:** UAC-r2 (independent read, 2026-11-06).
+
+## 2026-11-06 — Owner rulings: 044 scope, 032 mapping, Office To Do assignee order, live checks (owner, in fm's session)
+
+- **044: no field security on the core pair** (revises 042c's "task 044 covers the paths outside the server: field security plus a repair-pass backstop"). The pair is written whole by the server writers only. Outside the server, an edit is detected and traced, not blocked: column auditing on both pair columns (confirmed on dev), a guard that no non-admin role gains Write on `sprk_signal` or `sprk_decisionrecord`, and task 052's report flags a half pair and a pair that changed after create. The Signals access check keeps a fail-closed re-read when the caller's read of the pair returns neither half. Ontology-r1 and UAC-r2 agreed.
+- **032: extracted invoices get Matter field mapping in R1.** `InvoiceSubmissionPersister` stays the single creator; a fill-only mapping step inside it, before its transaction, calls the same mapping engine (W3 direction, option 2). No change to `RecordCreationService`. Ebilling-r1 and UAC-r2 review.
+- **Office To Do assignee order:** the user's explicit choice; else the field-mapped value; else the user's own contact (the order 030a implements).
+- **Live checks on dev approved:** the Project→Matter profile check and the 021 re-measure, test rows prefixed FMSWP-.
+
+## 2026-11-06 — 049b: only the maker is granted inside the request (UAC-r2)
+
+**Finding (021 re-measure, task-021-live.md):** when the created root's Assigned To is its maker, 049 runs the assigned-access pass inline for every assigned subject (5 subjects, 11 writes, about 6.6 s), so the create p95 was 11.8 s.
+
+**Ruling (UAC-r2):** the inline pass exists so the maker can open the record at once. Inline grants the maker's own subject only; every other subject, external grants included, goes through the queued path the non-maker case uses. Conditions:
+1. The queued remainder uses the same ordered scan and revoke-on-change (G-8) path: no new queue, no second owner.
+2. If enqueueing the remainder fails, it is logged and the reconciler completes it; the create never reports "all granted".
+3. If the maker's inline grant fails, today's behaviour is unchanged.
+4. Tests: maker case is exactly 1 subject inline and N-1 queued; the non-maker case is unchanged; an external subject is never inline.
