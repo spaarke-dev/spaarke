@@ -896,3 +896,13 @@ The send/reply thread read needs Basic. Record threads are owned by their record
 2. If enqueueing the remainder fails, it is logged and the reconciler completes it; the create never reports "all granted".
 3. If the maker's inline grant fails, today's behaviour is unchanged.
 4. Tests: maker case is exactly 1 subject inline and N-1 queued; the non-maker case is unchanged; an external subject is never inline.
+
+**Amended (UAC-r2, 2026-11-07), condition 2:** when the remainder cannot be enqueued in the maker case, the full pass runs inline once, with the grantor, as master's inline path does (an external assignee still gets the invite), and a neutral event counts it. The reconciler-only fallback was rejected: an external assignee would silently never be invited. Accepted known limits: a narrow race on the unleased maker pass (master's inline full pass has it too), and a one-subject pass acts only on a share.
+
+## 2026-11-07 — Owner decisions on the open questions (owner, in fm's session)
+
+1. **NFR-02:** keep the window as written and speed the create path up further (it is about +2 s over with the grant queued). A new task (049c) profiles the remaining steps and removes the largest costs, with no change to what the create guarantees.
+2. **The "Project to Matter (Attorney Matrix)" profile stays on dev.**
+3. **046c dev apply: approved.** Core User gains its three AppendTo rights first and is verified; then Basic User's write rights on Spaarke tables are removed and verified. Rollback: `-Restore -Gap R3`. Users holding Basic plus an add-on without Core User are counted before the removal (2026-11-06 condition).
+4. **Stash `da43b8a2` (lint-staged automatic backup): drop it** once its content is confirmed committed.
+5. **mcp-bff re-merge:** the owner relays it; it does not hold this project.
