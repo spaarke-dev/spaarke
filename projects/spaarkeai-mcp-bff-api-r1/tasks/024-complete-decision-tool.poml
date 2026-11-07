@@ -109,7 +109,7 @@
     <criterion testable="true">tools/list shows spaarke_complete_decision with app-only visibility and readOnlyHint false; it is absent from the model-visible tool set.</criterion>
     <criterion testable="true">One completion writes one Decision Record and closes the Signal.</criterion>
     <criterion testable="true">The same reviewId sent twice returns the first outcome and writes nothing new.</criterion>
-    <criterion testable="true">Negative: a commit with no prior plan read returns isError with the existing refusal reasonCode and writes nothing.</criterion>
+    <criterion testable="true">Negative: a commit with no prior plan read on a system-closed Signal returns isError with `signal_not_open` and writes nothing. A missing stamp means "review starts now" (ISS-004 ruling, 2026-11-07). If the tool also requires the plan tool to have run first, that requirement is a usability guard, not the security check.</criterion>
     <criterion testable="true">Negative: a caller without Write on a subject returns isError ontology.decision.not_authorized and writes nothing.</criterion>
     <criterion testable="true">Negative: a billing Signal (subject sprk_invoice or sprk_billingevent) returns isError reasonCode ontology.decision.decided_in_invoice_review, writes nothing and does not call the rights probe (the one MCP billing test).</criterion>
     <criterion testable="true">Negative: with no HttpContext (accessor null) or an unauthenticated caller, the tool returns an isError result with UserContextRequired and writes nothing.</criterion>

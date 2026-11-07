@@ -52,6 +52,7 @@
     <constraint source="project">Shared-lib changes are optional seams; existing DecisionWizard tests and the Console wizard behave unchanged.</constraint>
     <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hex, rgb or inline colour), supports host light and dark themes, and is operable by keyboard (NFR-07).</constraint>
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">The lookup type-ahead calls `spaarke_search_decision_lookup` only after a debounce of at least 300 ms and with at least 2 typed characters, because each call runs the Signal access check, plan resolution and several Dataverse reads as the caller (ontology review of 016, K1, 2026-11-07).</constraint>
   </constraints>
 
   <knowledge>

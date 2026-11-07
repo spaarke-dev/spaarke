@@ -184,3 +184,12 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
 - **Review (adversarial, opus, one pass) and fixes.** No blocking defect. Fixed: F4 LIKE wildcards (above); F3 the unreadable-record test asserted a property of its own fake, now it asserts what the search owns (lookup rows only through the caller client; the strict app-only mock reads configuration only); F4 no end-to-end Do-lane reassign test, now `DoLanePrivacyTests` pins that the assignee lookup searches contacts for the assignee and answers a same-BU colleague exactly as an unreadable Signal (no contact read past the gate).
 - **Known limits (K-class, not defects):** K4 the MCP fix text for `invalid_parameter` is commit-oriented (task 023 owns the tool wording); K2 a caller 403 on the lookup table maps to 503 "try again" rather than a permission message (fail closed; same as the plan route's after-gate reads); K3 one keystroke costs 4–6 caller round trips (WhoAmI, Signal, core pair, policy version, search) on the `dataverse-query` limiter (the Console debounces; caching the gate is out of scope); K1 a Signal whose core is a project gets an empty budget list (matches `ReviseBudgetExecutor`).
 - **Observed, not adjudicated:** `IDecisionCapability` (task 013) is also a 1:1 interface counted in the ADR-010 ratchet without a documented entry; reported to the main session.
+
+## 2026-11-07 — Ontology reviews of 014 and 016: OK; ISS-004 ruled intended
+
+- **014 and 016:** OK, no F findings.
+- **ISS-004 (#2628), closed.** "No plan-read stamp = review starts now" is intended. It is the fail-safe direction: earlier system closures count as before the review, so a system-closed Signal gets `signal_not_open`. The stamp is best-effort: cache, 4-hour TTL, never fails a read. A commit is always validated against the current plan. The spec wording is amended. For MCP, requiring the plan tool first is a usability guard only.
+- **016 K2:** the class remarks now say a new plan adjustment that touches Person or Lookup parameters must also be applied in the lookup search.
+- **016 K1:** type-ahead must debounce at 300 ms or more and keep the 2-character minimum. Added to task 032.
+- **014 note (not blocking):** `DecisionCapability` builds `DecisionCommitService` on read routes too. If that becomes costly, use `Lazy<>`.
+

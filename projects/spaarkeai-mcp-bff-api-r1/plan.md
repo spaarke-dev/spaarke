@@ -323,7 +323,7 @@ Wrap-up (090)                              — test-diet, lessons learned
 - Contract: signal list / plan / decision REST responses byte-for-byte before and after (011 baseline).
 - Auth: anonymous 401 with `WWW-Authenticate`; CIAM 401; A9 home-directory 401 before any tool runs; no-`systemuser` → `UserContextRequired`; no app-only fallback on failed OBO; must-fire route guard on an unauthenticated `/mcp/{area}`.
 - Protocol: in-process host — tool list and annotations, `resources/read` MIME type, 406 without the dual `Accept`, 404 for unmapped area, 503 with `Mcp:Enabled=false`, 429 over the limit.
-- Data mutation: one completion → one Decision Record + Signal closed; replay returns the first outcome; no plan read → refused; billing Signal → mapped D-207 refusal, nothing written. Existing #2580 tests (Task174_*) stay green, including the one-batched-`BillingEventRead` count.
+- Data mutation: one completion → one Decision Record + Signal closed; replay returns the first outcome; no plan read → review starts now (a system-closed Signal → `signal_not_open`; ISS-004 ruling); billing Signal → mapped D-207 refusal, nothing written. Existing #2580 tests (Task174_*) stay green, including the one-batched-`BillingEventRead` count.
 - Arch: `MapMcp` covered by `RouteAuthorizationGuardTests`; every tool has explicit `ReadOnly`; no AI-internal types injected.
 - AI suites for the `Microsoft.Extensions.AI` bump (NFR-08).
 

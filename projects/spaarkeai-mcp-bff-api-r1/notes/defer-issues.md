@@ -51,7 +51,7 @@ Decide with the Copilot surface's owner. `spaarkeai-mcp-bff-api-r1` replaces thi
 
 | Field | Value |
 |---|---|
-| **Status** | Open (owner decision) |
+| **Status** | Closed 2026-11-07: intended behaviour (ontology ruling). A missing stamp means "review starts now", the fail-safe direction. Spec FR-08, NFR-06 and the MUST rule are amended; the pinning test is kept. |
 | **Urgency** | soon (before task 024 ships the MCP complete tool) |
 | **Filed** | 2026-11-07 |
 | **Source** | Task 014 (B-1 commit capability), acceptance criterion "a commit with no prior plan read returns the existing refusal reason code" |

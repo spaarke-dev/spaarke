@@ -42,6 +42,9 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// cannot run on the server, and the external route's dual-scheme policy and access guard must not serve workforce callers. Cost of doing
 /// nothing: revise-budget, reassign, add-todo, assign-work, assign-task and the inquiry's outside firm cannot be completed outside the
 /// Console, and D-18 stays enforced only in the browser.</para>
+/// <para><b>Plan adjustments (ontology review of 016, K2).</b> The search resolves the plan WITHOUT the D-180 and D-111 adjustments
+/// that the plan route applies, because neither adds or removes a Person or Lookup parameter. Any new plan adjustment that touches
+/// Person or Lookup parameters must be applied here too, or the lookup and the plan will disagree about which parameters are searchable.</para>
 /// </remarks>
 public sealed class DecisionLookupSearch : IDecisionLookupSearch
 {

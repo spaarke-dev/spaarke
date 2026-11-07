@@ -167,7 +167,7 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
 6. **FR-06 — `spaarke_get_decision_plan` (app-only, readOnly).**
    - Input: `signalId`.
    - It returns the decision plan, the suppression state and the full Work Item row, resolved as the caller.
-   - It **writes the plan-read stamp** (`DecisionPlanReadStamp`, 4 h TTL) that a commit requires.
+   - It **writes the plan-read stamp** (`DecisionPlanReadStamp`, 4 h TTL), which sets the review start for a later commit.
    - Acceptance:
      - for a Signal the caller can read, the plan equals `GET /api/v1/signals/{id}/decision-plan` for the same caller;
      - **negative:** for a Signal outside the caller's core-record access, it returns an `isError` result with the same reason code REST returns, and no stamp is written.
@@ -190,7 +190,7 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
    - Acceptance:
      - one completion writes one Decision Record and closes the Signal;
      - the same `reviewId` sent twice returns the first outcome and writes nothing new;
-     - **negative:** a commit with no prior plan read is refused with the existing reason code;
+     - a commit is validated against the Signal's current plan; the server's plan-read stamp only sets the review start (missing = now; ontology ruling on ISS-004 / #2628, 2026-11-07, D-207). A commit with no plan read is never looser: a system-closed Signal gets `signal_not_open`, and a mismatched action gets `actions_do_not_match_plan`. The MCP commit tool may still require the plan tool to have run first, as a usability guard;
      - a commit by a caller without Write on a subject is refused;
      - nothing in the server relies on a host confirmation prompt.
 
@@ -288,7 +288,7 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
 - **NFR-03 — Widget budget.** Single-file HTML: aim < 1 MB (`widget-design` skill), hard ceiling 3 MB (O-16). Init time is measured in Chat and Cowork (Phase 0 "Size"). A bundle-size test fails the build above budget. If the budget is missed, the fallback is the `decisionDraft.ts` re-render.
 - **NFR-04 — Publish size and CVEs (CLAUDE.md §10).** On every BFF task, measure the delta against a fresh master build. A delta of ≥ +5 MB in one task needs justification; ≥ 55 MB total triggers architecture review, and 60 MB is a hard stop. No new HIGH CVE.
 - **NFR-05 — Logging (ADR-015, A10).** No bearer token or claim values are logged on `/mcp/*` beyond the standard audit enrichment. No record text or tool arguments appear in logs. Telemetry per call records the tool name, latency, row count, outcome or reason code, and correlation id.
-- **NFR-06 — Writes are server-enforced.** Writes go only through `DecisionCommitService`. They need an explicit Confirm, a prior plan read and an idempotency key. No behaviour depends on a host consent prompt.
+- **NFR-06 — Writes are server-enforced.** Writes go only through `DecisionCommitService`. They need an explicit Confirm, validation against the current plan (the plan-read stamp sets only the review start; missing = now, ISS-004) and an idempotency key. No behaviour depends on a host consent prompt.
 - **NFR-07 — Accessibility and theming.** The widget follows Fluent v9 semantic tokens, with no hex or inline colours. It supports host light and dark themes and keyboard operation of the lane and wizard.
 - **NFR-08 — AI pipeline regression.** The `Microsoft.Extensions.AI` bump to 10.11.x passes the AI unit and integration suites before merge.
 - **NFR-09 — Protocol conformance.** The `modelcontextprotocol/conformance` suite (`--spec-version 2026-07-28`) passes against `/mcp/legal-operations` in CI with a test-token injector.
@@ -316,7 +316,7 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
 - ✅ MUST authenticate `/mcp/*` with OAuth at the Spaarke-tenant authority, scope `api://{bffAppId}/user_impersonation`, `aud` = the BFF app (A10).
 - ✅ MUST run every tool as the caller (OBO), for `systemuser` callers only (A10).
 - ✅ MUST keep `DecisionCommitService` as the single owner of the completion invariant (ADR-002).
-- ✅ MUST fail closed on missing caller context, a missing plan read, or missing rights (ADR-002 WP-6).
+- ✅ MUST fail closed on missing caller context, a plan mismatch, or missing rights (ADR-002 WP-6). A missing plan-read stamp means "review starts now", the stricter direction (ISS-004).
 - ✅ MUST send the model only the minimum text, and never privileged Work Item detail (ADR-015; FR-04).
 
 **Placement and tooling**
