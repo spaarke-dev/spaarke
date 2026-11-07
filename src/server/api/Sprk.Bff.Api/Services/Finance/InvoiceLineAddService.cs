@@ -139,9 +139,10 @@ public sealed record AddLineResult(
 /// <para><b>Rights.</b> The route asks the caller's Write on the invoice as the caller (<c>ebilling.invoice.decide</c>, D-77) before this runs; the line is
 /// written by the app identity (person roles hold no Create on <c>sprk_billingevent</c>), and the caller is stamped as <c>sprk_createdbyperson</c>.</para>
 /// <para><b>Order.</b> Step 0, the shape (400), reads nothing. Step 1 takes the per-invoice lock (<see cref="InvoiceLineDecisionService.LockKeyFor"/>, so
-/// an add, a line decision, an adjustment, approve and the Set-firm re-run never interleave) and reads app-only: the invoice, In Review, the single core
-/// record, the firm gate (<see cref="InvoiceFirmGate"/>: no firm, held for one, or the re-run pending is 409 before anything else is read), an unapplied
-/// correction (409), then the derived row (a repeat of the same content answers <c>alreadyApplied</c>; other content is <c>id_reused</c>). Steps 2 to 5
+/// an add, a line decision, an adjustment, approve and the Set-firm re-run never interleave) and reads app-only: the invoice, then the derived row (a
+/// repeat of the same content by the same caller answers <c>alreadyApplied</c>; other content or another caller is <c>id_reused</c>), then, for a first
+/// add only, In Review, the single core record, the firm gate (<see cref="InvoiceFirmGate"/>: no firm, held for one, or the re-run pending is 409) and an
+/// unapplied correction (409). A repeat is looked up before those refusals so that a committed add can still finish its record (164a fix round). Steps 2 to 5
 /// write nothing. Step 6 is one transaction: the line create, the submission's findings (conditioned on its row version), the status of each stored line
 /// the add touched (conditioned on its version) and a version-only update of the invoice (conditioned on its version). From the commit on the request's
 /// cancellation no longer applies.</para>
@@ -161,14 +162,17 @@ public sealed record AddLineResult(
 /// <see cref="InvoiceRuleSignalReconciler"/>, the correction's own reconcile (a new group: episode 1; the same fingerprint: a refresh; another:
 /// Superseded, record-free, then n+1; a group that is gone: ConditionCleared, record-free), then ONE row-version-conditional write removes them and
 /// moves <see cref="AddLineMember"/> to <see cref="StateDone"/>. The member stays where the correction's Signals step reads it, so whichever runs first
-/// reconciles an entry and removes it; the other finds it gone (every close and write is idempotent, so a race converges). No hold link is written
+/// reconciles an entry and removes it; the other finds it gone. A correction takes no processing lock, so the two can overlap: a Signal write is unique on
+/// <c>sprk_dedupekey</c>, a close and the member's removal are conditional on the row version, and the run that loses a condition fails its step (503
+/// Incomplete) and converges on its repeat. No hold link is written
 /// (EB-D-198 Q7): Add line never clears a hold reason, and a stored Blocked entry is kept by the diff. A failure at step 7, 8 or 9 is
 /// <see cref="AddLineStatus.Incomplete"/> naming the step.</para>
 /// <para><b>The resume.</b> A repeat finds its row (the derived id) with the same content and answers <c>alreadyApplied</c>. Unless
 /// <see cref="AddLineMember"/> names this decision at <see cref="StateDone"/>, steps 7 to 9 run again (each is idempotent), so a repeat after an
 /// Incomplete add finishes it with one record. <see cref="AddLineMember"/> is a single member: a later add overwrites it, and then a repeat of the
-/// earlier add cannot tell whether it finished, so it runs the steps again. Step 8 runs on EVERY repeat: the recorder's hash refuses the same decision
-/// id with another reason or decider, which is answered <c>id_reused</c> (the row compare cannot see the reason, which the row does not store).</para>
+/// earlier add cannot tell whether it finished, so it runs the steps again. Step 8 runs on EVERY repeat, and on a repeat whose invoice is no longer In
+/// Review it is the only step that runs (steps 7 and 9 need the invoice In Review). Step 7 failing does not skip step 8. The recorder refuses the same
+/// decision id with other content (another reason, which the row does not store); only that refusal is answered <c>id_reused</c>.</para>
 /// <para><b>Logging</b> carries ids, counts and codes only (ADR-015): never a description, a name, an amount or the reason.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceAdjustmentService"/> (creates Adjustment lines),
 /// <see cref="InvoiceLineDecisionService"/> (decides lines), <see cref="InvoiceCorrectionReevaluation"/> (re-runs the rules after a correction), the

@@ -81,7 +81,7 @@ The 200 body is `{requestId, lineId, decisionId, status, alreadyApplied, totals}
 ## The id contract (EB-D-198)
 
 - `decisionId = IdOf("ebilling-add-line-{invoiceId}-{requestId}")`: the client's `requestId` is scoped by the invoice.
-- `lineId = ExtractionProvenance.AddedLineIdFor(decisionId)`.
+- `lineId = ExtractionProvenance.AddedLineIdFor(invoiceId, decisionId)` = `IdOf("ebilling-added-line-{invoiceId:D}-{decisionId:D}")` (164a fix round K2: the id names the invoice, and `IsReviewerAdded` checks it against the row's `sprk_invoice`).
 - `sprk_extractionconfidence` starts from `ExtractionProvenance.ForReviewerAddedLine(decisionId)`, so `IsReviewerAdded(row)` holds. The marker member is unchanged; the extra members are added beside it.
 
 ## 164a-3 open points
@@ -139,10 +139,10 @@ The 200 body is `{requestId, lineId, decisionId, status, alreadyApplied, totals}
   - not In Review.
 
   There are also two Add line cases: 400 before any read or decider lookup, and 403 for an unproven identity.
-- **Seeds:** see the final report for the fail counts. They are re-run on demand by reverting the named line:
-  - **S1:** remove the Add route's `AddFinanceAuthorizationFilter`.
-  - **S2:** remove the `InvoiceFirmGate` check.
-  - **S4:** remove `RequireInternalFinanceCaller` from the group.
+- **Seeds** (re-run in the 164a fix round, 2026-11-06; each reverted, and the targeted tests pass again after the revert: 30/30 and 3/3):
+  - **S1:** remove the Add route's `AddFinanceAuthorizationFilter`. `Denied_WithoutTheRight_ReadsAndWritesNothing` and `RightOnAnotherInvoice_IsNotRightOnThisOne_AndAQueryIdCannotSubstitute`: 2 of 10 fail, the Add route's case of each (the other routes keep their filter).
+  - **S2:** disable the `InvoiceFirmGate` check. N3 `TheFirmGate_Refuses_AndWritesNothing`: 2 of 3 fail (HeldForFirm, RerunPending). NoFirm still answers 409 `firm_missing` with nothing written, because the rule-fact load refuses an invoice with no firm (`CorrectionFirmMissingException`); the gate is the first of two refusals for that state.
+  - **S4:** remove `RequireInternalFinanceCaller` from the group. `StepZero_RefusesBeforeAnyRightsCallOrRead`: 20 of 20 fail (every route of the group, the Add route included).
 - **Not covered here:**
   - N7, N8 (beyond the version conflict), N10, T1 to T8 and C1 to C4 depend on steps 7 to 9 and belong to 4b;
   - P1 and P2 belong to 4b;
