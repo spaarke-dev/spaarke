@@ -1912,59 +1912,92 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>
-    /// The I-12 L1 "Assigned *" pass of a created root. Inline when the root's "for" person is its maker's own linked contact
-    /// (task 049 fix round 1, UAC-r2 ruling: the maker's own Assigned-To share stays immediate); otherwise queued
-    /// (<see cref="QueueAssignedAccessGrantAsync"/>), and inline again when nothing could be queued (as before task 049).
-    /// Never throws; a fault is the reconciliation job's.
+    /// The I-12 L1 "Assigned *" pass of a created root. When the root's "for" person is its maker's own linked contact, the
+    /// maker's own subject is granted inline (task 049 fix round 1, UAC-r2 ruling: the maker's own Assigned-To share stays
+    /// immediate), and then the full pass is queued (task 049b, UAC-r2 ruling: every other subject, external grants included,
+    /// takes the queued path; the full pass finds the maker's access already in place and writes nothing for it). Otherwise
+    /// the full pass is queued (<see cref="QueueAssignedAccessGrantAsync"/>). Either way, when nothing could be queued the
+    /// FULL pass runs inline, once, with the create's grantor (<see cref="RunFullPassNotQueuedAsync"/>). Never throws; a
+    /// fault is the reconciliation job's.
     /// </summary>
+    /// <remarks>Task 049b fix round 2 (UAC-r2 ruling b): in the maker case a failed enqueue no longer leaves the other
+    /// subjects to the reconciliation job; it runs the same inline full pass as the other case, so an external subject is
+    /// granted and invited in the request. A send that is merely slow and then succeeds is not a failure and runs nothing
+    /// inline.</remarks>
     private async Task GrantAssignedAccessAsync(string table, Guid id, RecordTableRule rule, Decision decision, string correlationId)
     {
-        if (await ForPersonIsTheMakerAsync(table, id, rule, decision).ConfigureAwait(false)
-            || !await QueueAssignedAccessGrantAsync(table, id, decision.GrantorOid, correlationId).ConfigureAwait(false))
+        if (await MakersForPersonContactAsync(table, id, rule, decision).ConfigureAwait(false) is { } makersContact)
         {
             await AssignedAccessMaterializer.RunAfterWriteAsync(
-                _scopes, table, id, writtenColumns: null, decision.GrantorOid, _logger, CancellationToken.None).ConfigureAwait(false);
+                _scopes, table, id, writtenColumns: null, decision.GrantorOid, _logger, CancellationToken.None,
+                onlySubject: new AssignedSubject(AssignedSubjectKind.Contact, makersContact)).ConfigureAwait(false);
+        }
+
+        var queued = await QueueAssignedAccessGrantAsync(table, id, decision.GrantorOid, correlationId).ConfigureAwait(false);
+        if (!queued.Queued)
+            await RunFullPassNotQueuedAsync(table, id, decision.GrantorOid, correlationId, queued.SendFailure).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Nothing was queued, so the full "Assigned *" pass runs inline, once, as the create's grantor (the grantor the queued
+    /// job would carry, so an external subject's invite has its actor). When the send itself failed
+    /// (<paramref name="sendFailure"/>), one <c>[ASSIGNED-ACCESS] QueueDownInlinePass</c> line records the root and how many
+    /// assigned subjects the pass evaluated, so creates made while the queue is down can be counted; it names no contact,
+    /// name or email. (The BFF logs with message tags, not event ids.)
+    /// </summary>
+    private async Task RunFullPassNotQueuedAsync(
+        string table, Guid id, string? grantorOid, string correlationId, string? sendFailure)
+    {
+        var outcome = await AssignedAccessMaterializer.RunAfterWriteAsync(
+            _scopes, table, id, writtenColumns: null, grantorOid, _logger, CancellationToken.None).ConfigureAwait(false);
+
+        if (sendFailure is not null)
+        {
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] QueueDownInlinePass {Table} {Id}: the create-time grant could not be queued ({ExceptionType}); " +
+                "the full pass ran inline for {Subjects} assigned subject(s) (correlationId={CorrelationId}).",
+                table, id, sendFailure, outcome?.Entries.Count ?? 0, correlationId);
         }
     }
 
     /// <summary>
-    /// Task 049 fix round 1 (UAC-r2 ruling): whether the created root's "for" person (<see cref="RecordTableRule.ForPerson"/>,
-    /// Assigned To) is its maker's linked contact, as <see cref="IIdentityNormalizationService.ResolveAsync"/> answers it: the
-    /// resolver the chat and Office adapters fill that column from (cached). Only a root that sets the column asks. Fails
-    /// closed: no maker, no resolver in this host, or a lookup that faults, outlasts
-    /// <see cref="AssignedAccessCreateGrantJobHandler.EnqueueTimeout"/> or answers no contact is <c>false</c>, so the pass is
+    /// Task 049 fix round 1 (UAC-r2 ruling): the created root's "for" person (<see cref="RecordTableRule.ForPerson"/>,
+    /// Assigned To) when it is its maker's linked contact, as <see cref="IIdentityNormalizationService.ResolveAsync"/>
+    /// answers it: the resolver the chat and Office adapters fill that column from (cached); otherwise <c>null</c>. Only a
+    /// root that sets the column asks. Fails closed: no maker, no resolver in this host, or a lookup that faults, outlasts
+    /// <see cref="AssignedAccessCreateGrantJobHandler.EnqueueTimeout"/> or answers no contact is <c>null</c>, so the pass is
     /// queued and never granted inline on a guess.
     /// </summary>
-    private async Task<bool> ForPersonIsTheMakerAsync(string table, Guid id, RecordTableRule rule, Decision decision)
+    private async Task<Guid?> MakersForPersonContactAsync(string table, Guid id, RecordTableRule rule, Decision decision)
     {
         if (rule.ForPerson is not { } forPerson
             || !string.Equals(forPerson.RelatedTable, "contact", StringComparison.OrdinalIgnoreCase)
             || decision.MakerSystemUserId is not { } maker || maker == Guid.Empty)
         {
-            return false;
+            return null;
         }
 
         var assignee = decision.Item?.Lookups
             .FirstOrDefault(l => string.Equals(l.Column, forPerson.Column, StringComparison.OrdinalIgnoreCase))?.RecordId;
         if (assignee is not { } forPersonId || forPersonId == Guid.Empty)
-            return false;
+            return null;
 
         try
         {
             using var scope = _scopes.CreateScope();
             if (scope.ServiceProvider.GetService<IIdentityNormalizationService>() is not { } identity)
-                return false;
+                return null;
 
             using var timeout = new CancellationTokenSource(AssignedAccessCreateGrantJobHandler.EnqueueTimeout);
             var person = await identity.ResolveAsync(maker, timeout.Token).ConfigureAwait(false);
-            return person.ContactId is { } contact && contact == forPersonId;
+            return person.ContactId is { } contact && contact == forPersonId ? forPersonId : null;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 "[ASSIGNED-ACCESS] The maker of {Table} {Id} could not be matched to its Assigned To ({ExceptionType}); the " +
                 "create-time pass is queued.", table, id, ex.GetType().Name);
-            return false;
+            return null;
         }
     }
 
@@ -1972,19 +2005,22 @@ internal sealed partial class RecordCreationService
     /// Task 049 Part B (NFR-02; UAC-r2's conditions, notes/task-049-notes.md): queues the I-12 L1 "Assigned *" pass of a
     /// created project, matter or work assignment (<see cref="AssignedAccessCreateGrantJobHandler"/>), so the create returns
     /// without it. Create only: every update path keeps its inline pass. The message names the root, the grantor and the
-    /// cache tenants, never the assignees. Returns <c>false</c> when nothing was queued (another table, no queue in this
-    /// host, a failed or slow send), and the caller then runs the pass inline, as before.
+    /// cache tenants, never the assignees. <c>Queued</c> is <c>false</c> when nothing was queued (another table, no queue in
+    /// this host, a failed send, or a send that outlasts the enqueue timeout); the caller then runs the full pass inline
+    /// (<see cref="RunFullPassNotQueuedAsync"/>), in the maker case too (task 049b fix round 2). <c>SendFailure</c> is the
+    /// exception type when the send itself failed or timed out; the caller logs it.
     /// </summary>
-    private async Task<bool> QueueAssignedAccessGrantAsync(string table, Guid id, string? grantorOid, string correlationId)
+    private async Task<(bool Queued, string? SendFailure)> QueueAssignedAccessGrantAsync(
+        string table, Guid id, string? grantorOid, string correlationId)
     {
         if (!AssignedAccessMaterializer.TryParseRootLogicalName(table, out var rootType))
-            return false;
+            return (false, null);
 
         try
         {
             using var scope = _scopes.CreateScope();
             if (scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>() is not { } jobs)
-                return false;
+                return (false, null);
 
             var tenant = scope.ServiceProvider.GetService<IConfiguration>() is { } configuration
                 ? ImpersonatedRootSetSource.DeploymentCacheTenant(configuration)
@@ -1997,14 +2033,11 @@ internal sealed partial class RecordCreationService
             _logger.LogInformation(
                 "[ASSIGNED-ACCESS] Queued the create-time grant of {Table} {Id} (job {JobId}, correlationId={CorrelationId}).",
                 table, id, job.JobId, correlationId);
-            return true;
+            return (true, null);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(
-                "[ASSIGNED-ACCESS] The create-time grant of {Table} {Id} could not be queued ({ExceptionType}); it runs inline " +
-                "(correlationId={CorrelationId}).", table, id, ex.GetType().Name, correlationId);
-            return false;
+            return (false, ex.GetType().Name);
         }
     }
 
