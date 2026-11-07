@@ -176,6 +176,11 @@ function form(entity: string, h?: IHarness, opts: IFormOptions = {}) {
   };
 }
 
+/** The script's code with block and line comments removed (the script has no comment markers inside strings). */
+function codeOnly(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+}
+
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 
 const cacheKey = (entity: string, id = BRACED_ID) => `sprk_fieldmapping_hasSource_${entity}_${id}`;
@@ -257,12 +262,45 @@ describe('sprk_fieldmapping_push.js — Push Updates opens the Family view (task
   it('pushUpdates no longer references the push endpoint (source scan)', () => {
     const start = SCRIPT.indexOf('ns.pushUpdates = function');
     expect(start).toBeGreaterThan(-1);
-    const end = SCRIPT.indexOf('// LEGACY direct-push helpers', start);
-    expect(end).toBeGreaterThan(start);
-    const body = SCRIPT.slice(start, end);
+    // The assignment closes at the first `    };` (four-space indent) after it opens: a structural anchor, so it does
+    // not depend on any banner text between the sections of the file.
+    const close = /\r?\n {4}\};/.exec(SCRIPT.slice(start));
+    expect(close).not.toBeNull();
+    const body = SCRIPT.slice(start, start + (close as RegExpExecArray).index);
+    expect(body).toContain('navigateTo'); // the slice really is the function body
     expect(body).not.toMatch(
       /field-mappings\/push|PUSH_ENDPOINT_PATH|fetch\(|openConfirmDialog|executePushForAllTargets/
     );
+  });
+
+  it('the legacy direct-push code is gone from the whole script (task 040 deleted it)', () => {
+    const code = codeOnly(SCRIPT);
+    expect(code).toContain('ns.pushUpdates = function'); // the scan reads real code, not an empty string
+    expect(code).not.toMatch(
+      /field-mappings\/push|PUSH_ENDPOINT_PATH|OVER_LIMIT_TITLE|fetch\(|openConfirmDialog|showProgressIndicator/
+    );
+    expect(code).not.toMatch(
+      /executePushForAllTargets|pushSequentially|pushOne|presentAggregateOutcome|normalizePushResponse/
+    );
+    expect(code).not.toMatch(/msal|acquireToken|ssoSilent|getAuthTokenForBff|resolveBffBaseUrl|BFF_/i);
+    // The targets list that only the legacy push read is not written any more.
+    expect(code).not.toMatch(/TARGETS_CACHE_KEY_PREFIX|sprk_fieldmapping_targets_/);
+  });
+
+  it('the legacy scan fires on legacy code and ignores comments (controls)', () => {
+    expect(codeOnly('var a = 1; // fetch(x)\n/* openConfirmDialog */ var b = 2;')).not.toMatch(
+      /fetch|openConfirmDialog/
+    );
+    expect(codeOnly('fetch(url + "/api/v1/field-mappings/push");')).toMatch(/field-mappings\/push/);
+  });
+
+  it('a cache miss writes only the enable-rule cache entry, never a targets list', async () => {
+    const h = harness({
+      recordTypeRefs: [{ sprk_recordtype_refid: SOURCE_RT_ID }],
+      profiles: [{ sprk_fieldmappingprofileid: 'p1' }],
+    });
+    await h.push.hasSourceProfile(form('sprk_matter').primaryControl);
+    expect([...h.session.keys()]).toEqual([cacheKey('sprk_matter')]);
   });
 });
 
