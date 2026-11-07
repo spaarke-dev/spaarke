@@ -506,7 +506,8 @@ describe('RecordFamilyModal (FR-32)', () => {
     });
 
     it('Escape from an inner control reaches onClose, but not when that control already handled it', async () => {
-      const props = makeProps(() => ok(response()), { embedded: true });
+      // The checkbox exists only where an action can use the selection (#2513), so the host passes `onAction`.
+      const props = makeProps(() => ok(response()), { embedded: true, onAction: jest.fn() });
       renderModal(props);
       await screen.findByText('Diligence Project');
 
