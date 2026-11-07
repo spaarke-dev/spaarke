@@ -34,7 +34,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Resolved 2026-11-07 by task 165a (`1864e1ed69`, merged into work in `79e2bf2178`): approve, the approval state view, reject and return decide the FR-20 hold from server-written sources (`InvoiceBlockedHold`). The pending-spend paths follow the same hold in task 165 item 4 (165b). |
 | **Urgency** | next-round (before any release beyond dev) |
 | **Filed** | 2026-11-05 |
 | **Source** | 114 adversarial review pass 1 (pre-existing; not introduced by 114) |
