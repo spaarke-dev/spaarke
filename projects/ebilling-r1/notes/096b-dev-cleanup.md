@@ -35,3 +35,13 @@ The checks covered:
 - **Delete** the invoice. The 8 with no dependents can be deleted outright. For the other 3, the dependents (1 line, 2 documents with their stored files, 1 communication) would need deleting or detaching first.
 
 **Recommendation:** delete the 8 with no dependents, and Cancel the 3 with dependents ("Invoice Wizard", "New invoice 3 7/9/2026", "INV-005").
+
+## Done 2026-11-07 (owner go in the ebilling session; uac-r2 agreed to delete instead of Cancel: no BFF route cancels an invoice)
+
+Run as ralph.schroeder@spaarke.com on SPAARKE DEV 1. uac-r2 was told before and after.
+
+1. 20:00:51Z and 20:00:59Z: the two documents `d36e37a2-3ccb-f111-a05d-0022482913fc` and `58328b00-477b-f111-ab0e-7ced8ddc4cc6` were deleted through the dev BFF `DELETE /api/documents/{id}`. Both answered 200, and the file and row went together.
+2. About 20:01–20:02Z: line `5ea5ad2a-9e9c-f111-b8de-7ced8ddc4cc6` and communication `a62a5f02-477b-f111-ab0e-7ced8ddc4a05` were deleted in Dataverse.
+3. 20:03Z: the 11 invoices listed above were deleted in Dataverse (11/11).
+
+Afterwards, dev has 6 invoices, all derived from their submission, and 0 non-derived. This is the 165c baseline. The membership junction rows of the two documents go stale until the nightly reconciliation; uac-r2 checks them.
