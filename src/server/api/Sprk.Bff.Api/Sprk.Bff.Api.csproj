@@ -81,6 +81,7 @@
     <PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.0.1" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.3.0" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.3.1" />
     <!-- OpenAI pinned to 2.8.0: required by Microsoft.Extensions.AI.OpenAI 10.3.0 IChatClient bridge -->
     <PackageReference Include="OpenAI" Version="2.8.0" />
 
@@ -268,6 +269,11 @@
     <EmbeddedResource Include="..\..\..\..\config\secure-record-owner-role.json"
                       LogicalName="Sprk.Bff.Api.SecureRecordOwnerRole.json"
                       Link="Infrastructure\Dataverse\secure-record-owner-role.json" />
+  </ItemGroup>
+
+  <!-- SPIKE (spaarkeai-mcp-bff-api-r1 task 001, spike branch only): the built single-file test widget. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Api\Mcp\Spike\Widgets\spike.html" LogicalName="Sprk.Bff.Api.SpikeWidget.html" />
   </ItemGroup>
 
   <!-- Exclude template config from publish - all config comes from Azure App Settings -->
