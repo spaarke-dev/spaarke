@@ -41,8 +41,8 @@
 | 046c | [Basic User is read-only on Spaarke tables: role file, -Remove, guard (owner 2026-11-06)](046c-basic-user-read-only-on-spaarke-tables.poml) | FR-08, FR-26 | opus / high | FULL | none | 046b; live removal by UAC-r2 under the owner's go | ✅ repo side on master via #2610 (fb5738b60d); applied on dev 2026-11-07 (owner go in fm session; G17 03:33:12Z, R3 80 removals 03:36:46Z, both -Verify PASS; UAC-r2 2 h watch to 05:40Z); was: dev apply (G17, then -Remove -Gap R3) waits for the owner's go |
 | 048 | [Signal, Decision Record and Budget Revision changed only by their writers: generic update tools refuse them (owner 2026-11-04, D-204 extended)](048-writer-only-tables-refused-by-generic-updates.poml) | FR-41 | opus / high | FULL | none | 042c | ✅ [done] PR #2570 merged 2026-11-05 (0f53e053bf) |
 | 049 | [Create path within NFR-02: concurrent caller checks, assigned-access grant after the response (owner 2026-11-05)](049-create-path-latency-nfr02.poml) | NFR-02 | opus / high | FULL | none | 021, 042c | ✅ [done] master via #2599 (20669df6a9, 2026-11-06); dev deploy via UAC-r2 |
-| 049b | Create path: when the maker is the root's Assigned To, grant only the maker inline and queue the other subjects (UAC-r2 ruling 2026-11-06) | NFR-02 | opus / high | FULL | none | 049 | 🔄 merged into the work branch 2026-11-07 (049b + fix1 + fix2, UAC-r2 approved, ruling b); master PR next |
-| 049c | [Create path within NFR-02, round 2: cut the pre-create steps (owner 2026-11-07)](049c-create-path-speed-up.poml) | NFR-02 | opus / high | FULL | none | 049, 049b | 🔲 after 049b merges |
+| 049b | Create path: when the maker is the root's Assigned To, grant only the maker inline and queue the other subjects (UAC-r2 ruling 2026-11-06) | NFR-02 | opus / high | FULL | none | 049 | ✅ [done] master via #2619 (d53d67f604, 2026-11-07); dev deploy in the next window |
+| 049c | [Create path within NFR-02, round 2: cut the pre-create steps (owner 2026-11-07)](049c-create-path-speed-up.poml) | NFR-02 | opus / high | FULL | none | 049, 049b | 🔄 task/fm-049c + fix1 (c97dfce34c) + fix2 running; Opus review no F; UAC-r2 acked (A)/(B) |
 
 ## Phase 3 — W3 Product creators onto the service
 
@@ -61,7 +61,7 @@
 | 030 | [Office To Do + document save](030-office-todo-and-document-save.poml) | FR-18 | opus / high | FULL | W3-server | 019 | 🔄 030a on master via #2610 (fb5738b60d, 2026-11-07; fix rounds 1-2 re-checked clean); 030b: association in the existing create + guards (W3 direction, 2026-11-06) |
 | 031 | [Typed routes: events, analysis create](031-typed-routes-events-analysis.poml) | FR-19 | sonnet / high | FULL | W3-server | 019 | ✅ [done] PR #2564 merged 2026-11-04; live on dev 909754869f |
 | 032 | [Invoice extraction](032-invoice-extraction.poml) | FR-20 | sonnet / high | FULL | W3-server | 019 | 🔲 re-scope: fill-only mapping step inside the persister (owner 2026-11-06) |
-| 033 | [System creators: generation, playbook, Signal, Decision](033-system-creators-generation-playbook-signal-decision.poml) | FR-21 | opus / high | FULL | W3-server | 019 | 🔲 re-scope under the W3 direction (2026-11-06) before it runs; likely dropped |
+| 033 | [System creators: generation, playbook, Signal, Decision](033-system-creators-generation-playbook-signal-decision.poml) | FR-21 | opus / high | FULL | W3-server | 019 | ⛔ dropped (owner 2026-11-07): named exceptions under the W3 direction; the Repair metadata-reader wiring moves to 052 |
 | 034 | [System creators: inbound ingestion](034-system-creators-inbound-ingestion.poml) | FR-21 | opus / high | FULL | W3-server | 019 | 🔲 re-scope: named exceptions + guards (W3 direction, 2026-11-06) |
 | 035 | [Delete client mapping engine + guard](035-delete-client-mapping-engine.poml) | FR-22 | sonnet / high | FULL | none | 029 | 🔲 |
 | 036 | [W3 server paths deploy + live check](036-w3-server-paths-deploy-and-live-check.poml) | FR-18–FR-21 | sonnet / high | FULL | none | 030–034 | 🔲 |
@@ -80,7 +80,7 @@
 |---|---|---|---|---|---|---|---|
 | 050 | [Resolve W5 open questions (marker, quick-create flags)](050-resolve-w5-open-questions.poml) | spec UQ 1–2 | sonnet / high | STANDARD | W5-A | 019 | ✅ |
 | 051 | [Native UI: ribbon New, quick create off, Assign hidden](051-native-ui-redirect-quickcreate-assign.poml) | FR-24 | sonnet / high | FULL | W5-B | 050, 029 | 🔲 |
-| 052 | [Repair pass `IScheduledJob` + on-demand trigger](052-repair-pass-scheduled-job.poml) | FR-25 | opus / xhigh | FULL | W5-B | 016, 033, 050 | 🔲 |
+| 052 | [Repair pass `IScheduledJob` + on-demand trigger](052-repair-pass-scheduled-job.poml) | FR-25 | opus / xhigh | FULL | W5-B | 016, 050 (033 dropped; its Repair metadata-reader wiring is in scope here) | 🔲 |
 | 053 | [W5 deploy + live 5-row import check](053-w5-deploy-and-live-import-check.poml) | FR-24, FR-25 | sonnet / high | FULL | none | 051, 052 | 🔲 |
 
 ## Phase 6 — W6 Standard, guards, docs, retirement

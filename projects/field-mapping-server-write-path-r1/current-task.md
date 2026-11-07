@@ -1,21 +1,22 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-11-07 ~02:00Z (main session checkpoint). Recovery: read Quick Recovery first.
-> **Done on master**: 001–006, 010–018, 030a, 037–039, 042c, 043, 046, 046b (#2592), 046c repo side, 048, 049 (#2599), 070–074. #2610 merged at fb5738b60d (030a, 046c source, 046b guard fix).
-> **Live on dev:** BFF + Console at master 20669df6a9. "Project to Matter (Attorney Matrix)" profile (keep/remove = owner question). 54 FMSWP-021 test matters (cleanup list in notes/task-021-live.md). 046c NOT applied on dev.
-> **W3 direction:** named exceptions plus guards; no core redesign in R1 (decisions.md).
+> **Last updated**: 2026-11-07 ~08:30Z (main session checkpoint). Recovery: read Quick Recovery first.
+> **Done on master**: 001–006, 010–018, 030a, 037–040, 042c, 043, 044, 046, 046b, 046c repo side, 048, 049, 070–075. #2610 (fb5738b60d), #2617 (cc11294300: 040+075+044).
+> **Live on dev:** BFF + Console at master 20669df6a9 (UAC-r2 is putting the batch #2292+#2610+#2617 to the owner). 046c APPLIED on dev 2026-11-07 (G17 03:33:12Z, R3 80 removals 03:36:46Z, -Verify PASS; UAC-r2 2 h watch PASS: 0 privilege faults, 0×403). Project to Matter profile kept (owner). 54 FMSWP-021 matters (cleanup list in notes/task-021-live.md).
+> **W3 direction:** named exceptions plus guards; no core redesign in R1 (decisions.md). Owner decisions 2026-11-07 in decisions.md.
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Work branch** | = master fb5738b60d + the TASK-INDEX commit 304b6af504 (pushed). |
-| **044** | Branch origin/task/fm-044-fix3 37946fc15c (rounds 1–3 on task/fm-044-fix → fix2 cdb7c30232 → fix3). Opus pass 1 and pass 2: no F. Ontology APPROVED round 3. Waiting: UAC-r2 OK (sent pass-2 result + fix3 tip). NEXT: squash-merge fix3 into the work branch, master PR, send the master SHA to ontology + UAC-r2. Follow-up filed: #2612 (live holder check, not R1). Known limits: per-Signal re-read before the lane check (cosmetic); ParseFetches doesn't require the core columns (Decide lane, pre-existing). |
-| **049b** | origin/task/fm-049b aa552ce32c + origin/task/fm-049b-fix1 41ee8952a9 (a one-subject pass acts only on a share; Evaluated doc). Opus review: no F; UAC-r2's 4 conditions met. WAITING on UAC-r2: (a) accept that the maker case's enqueue-failure path relies on the reconciler (no invite for an external assignee), or (b) keep the full inline fallback there (one line in GrantAssignedAccessAsync). Then merge, PR, re-measure 021. |
-| **040 + 075** | Combined on origin/task/fm-040-075 9daf41cdff (040 fix2 123f19783f + 075 ed1cf9b5d1 + legacy push helpers deleted, FamilyPage wires onAction to RecordFamilyActionPanel, deploy-script entry, lint fixes). Scoped Sonnet re-check rc-040-075 RUNNING. Then: edit the 040 POML (drop "a non-Filing kind is refused" at line 117 and the kinds constraint at line 53), merge into the work branch, send UAC-r2 the re-check result + merge SHA, master PR (close #2387 as superseded). Deploy order: sprk_recordfamily code page BEFORE sprk_fieldmapping_push.js v1.3.0 (task 076); the SpaarkeMaster web resource entry comes from the first dev export after deploy; K2 live check (failed save → Push Updates) at deploy. |
-| **Owner questions open** | (1) NFR-02: still ~+2 s over even queued: more speed-up (profile cache, FieldMapping concurrent) or amend the window to "record opened"? (2) Keep the Project to Matter profile on dev? (3) 046c dev apply go: G17 -Apply/-Verify -ChangesOnly, then -Remove -Gap R3 -Apply/-Verify (rollback -Restore -Gap R3). (4) Drop stash da43b8a2 "lint-staged automatic backup" (content committed). (5) mcp-bff session can't be reached by message (permission mode): the owner relays "re-merge master fb5738b60d". |
-| **Re-scope pending** | 032 (mapping step in persister; inputs notes/task-032-design-inputs.md; design to UAC-r2 + ebilling first), 030b (association in existing create + guards; send to word-add-in for content read), 034 (named exceptions + guards), 033 (likely dropped). |
-| **Gotchas this session** | Pester 6.2 is the machine default: use `Import-Module Pester -MaximumVersion 5.99`. App Insights drops whole requests (#2158): count from client logs + Dataverse read-back. Commits can exceed 100 s (dotnet format hook): `timeout 400 git commit`. Don't push to the work branch while its master PR is open (auto-merge would take the commits). |
+| **Work branch** | 8a50a12def (= master cc11294300 + 049b merge + task index). **PR #2619 OPEN with auto-merge (049b)**: do NOT push to the work branch until it merges (monitor bqgt6y9y9). This file is uncommitted until then: commit it after the merge. verify-suites PASS (Arch 1998, BFF 7086/0 fail); publish delta +2,432 B (39.26 MB); no CVE. |
+| **After #2619 merges** | Send UAC-r2 the master SHA (049b follows the current deploy batch, next window). Commit this checkpoint. |
+| **049c** | origin/task/fm-049c 47504e3dae (overlaps step 3's reads with step 2, a shared request-scoped metadata memo, step 5's two checks run together; local pre-create ~1620 → ~980 ms; live estimate still ~0.6–0.8 s over p95). Opus review: no production F; F3 weak timing assertion; K cancel the merged check on the caller's refusal. **fm-049c-fix1 RUNNING** (Sonnet; branch task/fm-049c-fix1). **Asked UAC-r2 to ack (A) the FR-04 probe now asked before step 2 and (B) the merged check asked concurrently** (POML escalation "an order, a check"). Then merge into the work branch → PR → deploy → re-measure (Debug-level step timing needed). If still over: propose 049d to the owner (cross-request metadata cache with short TTL; owner/post-create only with UAC-r2). |
+| **Deploy batch (UAC-r2)** | #2292 + #2610 + #2617 + the MCP spike commit; awaiting the owner's go in UAC-r2's session. #2617 client order: BFF → `sprk_recordfamily` (Deploy-WebResourceInline create + add to spaarke_core, read back) → `sprk_fieldmapping_push` v1.3.0 (Type 3). Live UI checks (a)–(d) (opens; push one FMSWP- child; K2 failed save opens nothing; no-Filing-edge 409) need either the owner clicking through or the owner's go to run them here. `Set-FieldMappingRuleSyncMode -Apply` stays out (owner review). |
+| **Owner questions open** | (1) After the deploy: who runs the Push Updates live UI checks (owner, or fm with the owner's go for FMSWP- writes)? (2) After the 049c re-measure: 049d if still over NFR-02. (3) Sync-mode -Apply on dev (28 Assigned-To rules → One-time, no behaviour change): review. |
+| **Re-scope pending** | 032 (mapping step in the persister; inputs notes/task-032-design-inputs.md; design to UAC-r2 + ebilling first), 030b (association in the existing create + guards; send to word-add-in for a content read), 034 (named exceptions + guards), 033 (likely dropped). |
+| **Filed this session** | #2612 (live check of who holds the Signal/DR writer roles), #2613 (stale vite build list in Build-AllClientComponents.ps1). Ontology filed #2611 (Rules.test.tsx load flake). |
+| **Gotchas this session** | Pester 6.2 is the machine default: `Import-Module Pester -MaximumVersion 5.99`. App Insights drops whole requests (#2158). `timeout 400 git commit`. Don't push to the work branch while its master PR is open. The mcp-bff session can't be messaged (permission mode); the owner relays. `git log --all --find-object` also searches refs/stash: use `--branches --remotes`. |
 
 ## How wave-2 agents are run (lessons)
 
@@ -37,4 +38,4 @@
 
 ## Next tasks
 
-044 → 049b → 040 (+075) → 021 deploy (after the owner's NFR-02 call) → 032/030b/034 re-scopes → 019, 033 (before 052), 050.
+049b PR → 049c (+ UAC-r2 ack) → deploy batch + live UI checks → 049c re-measure → 021 deploy (after the owner's NFR-02 call) → 032/030b/034 re-scopes → 019, 033 (before 052), 050.
