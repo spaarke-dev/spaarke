@@ -150,7 +150,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 130 | 🔲 [open] | Firm-visible findings projection (clause quotes, visibility filtering) | FULL | sonnet / high | none | 019, 049, 100, 083 |
+| 130 | 🔲 [open; amended by EB-D-202: In Review shows reviewer-added and decided lines with reasons] | Firm-visible findings projection (clause quotes, visibility filtering) | FULL | sonnet / high | none | 019, 049, 100, 083 |
 | 131 | 🔲 [open] | Firm notice Action `INVOICE-FIRM-NOTICE@v1` with template fallback | STANDARD | sonnet / high | P5-B | 041, 130 |
 | 132 | 🔲 [open] | Notifications: email, SPA feed, approver in-app | STANDARD | sonnet / high | none | 131, 133, 024, 103, 104 |
 | 133 | 🔲 [open] | Adjustment report PDF | STANDARD | sonnet / high | P5-B | 130, 028 |
@@ -183,6 +183,10 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 161 | 🟡 [harness, offline baseline and report (notes/calibration-report.md) done 2026-11-03; DEF-051 filed; live runs S1/S2 pending owner OK] | Calibration report from corrections and the evaluation set | STANDARD | sonnet / high | P7-A | 002, 049, 101 |
 | 162 | 🔲 [open] | Accuracy and performance evaluation; tuning | STANDARD | opus / high | none | 005, 160, 161 |
 | 163 | 🔲 [open] | UAT with the owner and dev rollout | STANDARD | sonnet / high | none | 162 |
+| 164 | 🔄 [164a server Add line: built, 2 reviews, fix round done (`task/ebilling-164a`), re-check running; then uac-r2 + ontology review, merge. 164b client, 164c ribbon not started] | Add line (reviewer-added invoice line, EB-D-192/198/199) | FULL | opus / high | none | 100, 103 |
+| 165 | 🔄 [165a: 2 adversarial passes, fix round 2 running (`task/ebilling-165a`); 165b after 165a and 164a; 165c after 165a] | Invoice integrity (EB-D-200): hold, approval, AP export and spend decide only from server-written sources | FULL | opus / high | none | 164a |
+| 165c | 🔲 [open; after the 165a merge] | External invoice visibility counts a submission's invoice link only when it is its own invoice | FULL | opus / high | none | 165a |
+| 166 | ✅ [merged into work `ab95fe67d6`; live dev apply pending owner go] | `sprk_invoice` money and firm columns field-secured (EB-D-200) | FULL | opus / high | none | — |
 | 189 | 🔲 [open] | Docs: retire "Procedure Library"; data-model docs for the Procedure and Stored File tables; file-store architecture note | STANDARD | sonnet / high | none | 079 |
 | 190 | 🔲 [open] | Project wrap-up | FULL | sonnet / high | none | all |
 | 191 | ✅ [done; on work e657bfda4c] | Invoice reader preflight at intake (422 `ebilling.submission.reader_not_configured` before anything is written) and the `ai.invoice.*` outcome codes in contract §9 (owner OK 2026-10-31, after the first dev UAT) | FULL | sonnet / high | none | 095 |

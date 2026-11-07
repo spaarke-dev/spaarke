@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="165c" project="ebilling-r1">
+  <metadata>
+    <title>External invoice visibility counts a submission's invoice link only when it is the submission's own invoice</title>
+    <phase>4 Review</phase>
+    <gate>After 165a merges into work (165a rewrites ExternalInvoiceVisibility.cs).</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Partner-readable visibility decision (auth, external-access); two adversarial passes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Access decision on the external read path; fail-closed.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Infrastructure/ExternalAccess/ExternalInvoiceVisibility.cs (shared with uac-r2; 165a touches it).</parallel-reason>
+    <deps>165a</deps>
+    <tags>bff-api, auth, external-access, ebilling, integrity</tags>
+  </metadata>
+
+  <prompt>uac-r2 ruling 2026-11-06 (by message): fix the two submission readers in `ExternalInvoiceVisibility` as class (c). A submission's `sprk_invoice` link counts only when it equals `InvoiceSubmissionPersister.InvoiceIdFor(submissionId)`. Same rule as 165a's own-submission helper; reuse it (`InvoiceBlockedHold.OwnSubmissionOf` or its successor), never a second copy.
+    Wording in commits, notes and the PR stays neutral ("visibility counts only a submission's own invoice"). Do not describe what a mismatched link could do.</prompt>
+
+  <goal>A submission whose invoice link is not its own invoice neither lends its verdict to that invoice nor adds its document as that invoice's source.</goal>
+
+  <scope>
+    1. `DecideSubmissionsAsync` (reader 1): a submission whose link differs from `InvoiceIdFor(id)` is withheld with a new hidden reason and does not decide the linked invoice's visibility.
+    2. `ReadSubmissionSourcesAsync` (reader 2): such a submission's document is not added as a source of the linked invoice.
+    3. Log a distinct neutral event with ids only.
+    Dev pre-check done 2026-11-06 (read-only): 6 linked submissions on dev, all agree, 0 would go hidden. Re-run the count before the dev deploy. If it is not 0, send the list to uac-r2 first.
+    Out of scope: the In Review withhold. EB-D-202 dropped it. Reasons and added lines for partners are task 130.
+  </scope>
+
+  <acceptance-criteria>
+    <criterion>Must-fire for each reader with a mismatched link: the submission is withheld (reader 1) and its document is not a source (reader 2). Must-not-fire: an agreeing link; an unlinked Spa submission; an unlinked Internal submission (all unchanged). One seed per reader: drop the check.</criterion>
+    <criterion>The event logs only ids and a reason code.</criterion>
+    <criterion>uac-r2 reviews the diff before merge; two adversarial passes (partner-readable).</criterion>
+    <criterion>Filtered unit tests (ExternalAccess, ExternalInvoiceVisibility, Finance Submission) and ArchTests pass; the BFF builds; publish delta measured against a fresh master build.</criterion>
+    <criterion>Cover the stated contract plus the cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a legitimate path writes a submission link that is not its own invoice (for example a resubmission or correction flow), STOP and report before withholding it.</trigger>
+  </escalation>
+</task>

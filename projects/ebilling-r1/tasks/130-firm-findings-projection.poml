@@ -45,7 +45,14 @@
   <constraints>
     <constraint source="D-70">Firm scoping applies to every external invoice read surface eBilling touches (invoices module grid and record, submission status, findings, report, guidelines); the firm is resolved server-side from the caller identity, never from a client parameter.</constraint>
     <constraint source="D-66, D-63">Clause quote and section reference appear only when 076's helper allows them for that rule's rule set. No item, field or link anywhere in the projection points at a Procedure Library document or container.</constraint>
-    <constraint source="spec FR-38">An invoice still In Review (or a submission still Received / Processing) projects status and billed total only: no findings, no line decisions, no approved total. Findings never adopted by a decision (Pending, Flagged, overridden, AI observations) never appear.</constraint>
+    <constraint source="spec FR-38, EB-D-202">A submission still Received / Processing projects status and billed total only. An invoice In Review projects status, billed total, its reviewer-added lines, and its decided lines (Reduced, Disallowed, Added) with the reviewer's reason (EB-D-202, superseding EB-D-192's firm-view clause). It projects no approved total and no undecided finding. Findings never adopted by a decision (Pending, Flagged, overridden, AI observations) never appear.</constraint>
+    <constraint source="EB-D-202 (uac-r2 access conditions)">
+      - Reviewer reasons come from `sprk_decisionrecord` read app-only, as a typed projection: reason text, decision code (`add-line`, `reduce`, `disallow`, invoice adjustments), and the line it applies to.
+      - A reason is read only for an invoice the caller already sees through `ExternalInvoiceVisibility`, and only from a record that carries that invoice's or that line's link. A record without the link is never projected.
+      - Partners get no Read on `sprk_decisionrecord`. No role change.
+      - Reviewer identity and internal notes never appear (NFR-10).
+      - uac-r2 reviews the diff (an access review). The SPA rendering is coordinated with External Access R4 (session spaarke-wt-spa-external-access-platform-ad).
+    </constraint>
     <constraint source="NFR-10, ADR-015">Firm-visible text only: firm-visible reason text, reviewer reason, values read; never internal Signal messages, confidence scores, reviewer identity, internal notes or other firms' data.</constraint>
     <constraint source="ADR-008, ADR-028">External routes: CIAM caller only; the invoice's firm (sprk_vendororg) must be one of the caller's active firm memberships AND its core record must be in the caller's accessible set; otherwise 403 with a stable code. One check shared with 044; no second copy of the rule.</constraint>
     <constraint source="ADR-019, 040">ProblemDetails with stable codes; RequireEbillingEnabled() on every route (503 ebilling.disabled when off).</constraint>
@@ -106,7 +113,14 @@
     <criterion testable="true">Per D-70, the external invoices module (the invoices ExternalModuleDescriptor in Infrastructure/DI/ExternalAccessModule.cs) also scopes by firm: a CIAM caller sees only sprk_invoice rows whose sprk_vendororg is the caller's firm, in addition to the existing matter / project and secure-root scoping. A test with two firms on one shared matter shows each firm sees only its own invoices, submissions and findings (seeding proof). uac-r2 reviews the descriptor change (it owns decision D2 for that module); record the review in notes.</criterion>
     <criterion testable="true">Seeding proof: with firms A and B seeded on one shared matter, a firm-A CIAM caller requesting firm B's invoice or submission outcome gets 403 ProblemDetails with a stable code and no outcome data; the same test fails if the firm check is removed.</criterion>
     <criterion testable="true">A caller of the right firm without access to the core record gets 403; 401 unauthenticated; 503 ebilling.disabled when the flag is off; 200 for the own firm with access.</criterion>
-    <criterion testable="true">An invoice In Review projects no findings, no line decisions and no approved total; Pending, Flagged, overridden and AI-observation findings never appear.</criterion>
+    <criterion testable="true">EB-D-202 (supersedes this criterion's earlier "In Review projects no line decisions" wording): an invoice In Review projects its decided and reviewer-added lines with the reviewer's reason, and no approved total. Pending, Flagged, overridden and AI-observation findings never appear.</criterion>
+    <criterion testable="true">EB-D-202 reasons:
+      - must-fire: a Decision Record with no invoice or line link of the visible invoice is not projected;
+      - must-fire: a record of another invoice (including one the caller cannot see) is not projected;
+      - must-not-fire: a linked `add-line`, `reduce` and `disallow` record each projects its reason, code and line.
+      One seed: drop the link check.</criterion>
+    <criterion testable="true">EB-D-202 added lines: the external invoices module returns an invoice's lines by the invoice's visibility, not by line ownership. A reviewer-added line (BFF-written) appears in the SPA's line list for the partner, with a test. If the module filters by ownership, fix it in the module descriptor with uac-r2's review, or STOP and report.</criterion>
+    <criterion testable="true">EB-D-202 pin: a test asserts both facts. (1) Basic User's `prvReadsprk_DecisionRecord` depth is Basic in the role source. (2) The writer never sets a partner-resolvable owner on add-line, reduce or disallow records (the owner is the writer or its team). Either change fails the test.</criterion>
     <criterion testable="true">For a rule set with "visible to firms" off, no item carries clause text or section reference (per D-79 the item carries the reason and the rule set name only); with it on, items carry rule set name, version, section reference and clause quote.</criterion>
     <criterion testable="true">No projection field contains a document link, container id or drive item id for a Procedure Library document (asserted over every field of a fully populated projection).</criterion>
     <criterion testable="true">A rejected submission's projection lists each rejection finding with line, values read, rule and citation.</criterion>

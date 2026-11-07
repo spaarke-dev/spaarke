@@ -10,6 +10,26 @@
 
 ## Open (in priority order)
 
+### DEF-056 — A line-decision repeat cannot finish its Decision Record once the invoice leaves In Review
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-06 |
+| **Source** | ebilling-r1 task 164a fix round (adversarial correctness review; pre-existing) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2614 |
+
+**Description**: a line decision that committed but did not finish its Decision Record (503 `incomplete`, record step) cannot be finished by a repeat once the invoice leaves In Review or while a correction is pending: the status and correction checks refuse the repeat before it recognises its own committed decision. Add line was fixed in 164a by looking up its derived row first; the line row stores no decision id, so the line-decision service cannot tell a repeat from a new decision on a decided line.
+
+**Fix direction** (design choice): a decision marker on the line row in an existing server-written column, or a lookup in the Decision Record store by the decision key, read before the status checks; then always finish the record (the recorder is idempotent).
+
+**Entry-points**: `Services/Finance/InvoiceLineDecisionService.cs` (~:554).
+
+**Fails without it**: the line decision keeps no Decision Record (FR-30, D-75).
+
+---
+
 ### DEF-053 — FR-20 held-submission test is not anchored in a field-secured column
 
 | Field | Value |
