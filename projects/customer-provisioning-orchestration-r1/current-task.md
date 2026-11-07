@@ -2,7 +2,7 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2/§3/§6. Decisions → `notes/model1-dedicated-remediation-plan.md`. Narrative → commit messages. Full detail of every open item below as of 2026-11-06 (verbatim): `notes/handoff-history/current-task-archive-2026-11-06.md`.
 
-> **Last Updated**: 2026-11-06 (session b8). HEAD `48cae0dc35`+, pushed.
+> **Last Updated**: 2026-11-07 (session b8). HEAD `77d468dcf7`, pushed.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
@@ -10,8 +10,8 @@
 |-------|-------|
 | **Task** | **266** — per-stamp ontology writer identity (#2605). POML `tasks/266-stamp-ontology-writer-identity.poml` |
 | **Status** | in-progress (started 2026-11-06). Rigor FULL, opus @ high, directional. |
-| **Step** | Steps 1–3 DONE + pushed (`b514a9edca` bicep/H2a/H4b; `fefcfb09b8` H10 writer App User, no role; 3262 tests). Now Step 4 — H7b S24. |
-| **Next Action** | H7b S24 in `SecureRecordSetupProcedure.cs` (copy S23: `OntologyServiceRoleName`, FindRolesAsync/FindRoleCopiesAsync/ListUserRolesAsync/AssociateUserRoleAsync). Request gets `OntologyWriterApplicationUserId` (H7b handler passes `InterStepState.OntologyWriterSystemUserId`; declare in HandlerRunInputs H7b; Guid.Empty → Resumable). S24: writer in customer BU else Quarantine; role copy in customer BU (S23's lookup) → associate if absent; both writer profiles (`Spaarke Ontology Writer Field Writers`, `Spaarke Ontology Writer Firm Reason Writers`, names from `SpaarkeMaster/Other/FieldSecurityProfiles.xml`) — absent profile → Resumable naming SpaarkeMaster ≥ 1.2.4.0; add membership (copy S11/S12 profile-member code); sweep: profile members other than the writer → QuarantineRequired; writer holding any role other than Ontology Service → verify fails. ProcedureVersion → 7 + "v6-completed run does not short-circuit" test (copy the v5→v6 test). New rejection codes in `SecureRecordSetupRejectionCodes.cs`. Then Step 5 H13 T7 (setting read-back, copy T265 CheckCustomerBusinessUnit) + T3 includes writer UAMI; Step 6 guide rows + adversarial review ×2 (auth). |
+| **Step** | Steps 1–5 DONE + pushed (`b514a9edca` bicep/H2a/H4b; `fefcfb09b8` H10 writer App User; `99fb858153` H7b S24 + v7; `77d468dcf7` H13 T7 writer setting + T3 writer no Graph role; 3307 tests). Now Step 6 — guide rows, ArchTests, reviews. |
+| **Next Action** | Step 6: guide rows in `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` (H2a writer UAMI, H4b setting, H10 writer App User, H7b S24 + 7 new `secure_setup.ontology_writer_*` codes, H13 T7/T3); `dotnet test tests/Spaarke.ArchTests` WITH build (reads customer.json); `/code-review` + `/adr-check`; adversarial-reviewer ×2 (auth). Step 7: TASK-INDEX ✅, POML notes, drift check, portfolio sync. Then ACME run-log + ontology reply. |
 | **Files modified (this task)** | committed: customer.bicep/json, modules/app-service(-slot).bicep, manifest.yaml + generator + generated, ArmDeploymentRunner, BicepDeployOutputs, H2a, InterStepState (OntologyWriterClientId/ObjectId/SystemUserId), PerEnvSourceCatalog, HandlerRunInputs, IDataverseAppUserCreator (SecurityRoleName nullable), DataverseWebApiAppUserCreator, H10 handler + H10Rejections (+3 codes), tests (H2a, H4b, H10, creator). |
 | **ACME (ontology applied 2026-11-06, owner go in their session)** | writer UAMI + both slots + app setting + app user in ACME Corporation + role + "Field Writers" profile; "Firm Reason Writers" waits for 1.3.0.0. Ids in their message — record in `notes/t186-acme-run-log.md` (no ids in commits beyond what the log already carries). Check read-only that the app user's azureactivedirectoryobjectid = writer principalId. |
 | **Delegation** | Not delegated: the pieces are coupled through InterStepState / DAG / manifest; main session. |
