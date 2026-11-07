@@ -437,7 +437,7 @@ internal sealed partial class RecordCreationService
                         continue;
                     }
 
-                    patch[column] = value;
+                    patch[column] = AsColumnValue(targetColumns[column], value)!; // TargetColumnRefusal: the column exists, the value converts
                     mappedHere.Add(column);
                     report.Add(RecordRepairField.Repaired(RecordRepairPart.Mapping, column));
                 }
@@ -573,14 +573,40 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// Why a mapped <paramref name="value"/> is not written to <paramref name="column"/> of the row's table, or <c>null</c>: the
-    /// table has no such column or an update may not set it (unknown counts as not), or the text is longer than the column.
+    /// table has no such column or an update may not set it (unknown counts as not); the value is not of a kind the column
+    /// takes (the create path's <see cref="Fits"/>; for a Money column, a number <see cref="AsColumnValue"/> cannot make a
+    /// <see cref="Money"/> of); or the text is longer than the column.
     /// </summary>
     private static string? TargetColumnRefusal(IReadOnlyDictionary<string, ColumnMetadata> columns, string column, object value) =>
         !columns.TryGetValue(column, out var metadata) || metadata.IsValidForUpdate != true
             ? RecordRepairReason.MappedColumnNotUpdatable
-            : value is string text && metadata.MaxLength is { } max && text.Length > max
-                ? RecordRepairReason.MappedValueTooLong
-                : null;
+            : metadata.AttributeType is not { } type || !Fits(type, value) || AsColumnValue(metadata, value) is null
+                ? RecordRepairReason.MappedValueTypeMismatch
+                : value is string text && metadata.MaxLength is { } max && text.Length > max
+                    ? RecordRepairReason.MappedValueTooLong
+                    : null;
+
+    /// <summary>
+    /// <paramref name="value"/> as the SDK writes it to a column of <paramref name="metadata"/>'s type: a number into a Money
+    /// column becomes a <see cref="Money"/> (the engine converts Default and expression values itself, #2124; a Copy keeps the
+    /// source's decimal, which the SDK refuses there); <c>null</c> for a number no Money can hold. Anything else is unchanged.
+    /// </summary>
+    private static object? AsColumnValue(ColumnMetadata metadata, object value)
+    {
+        if (!string.Equals(metadata.AttributeType, nameof(Microsoft.Xrm.Sdk.Metadata.AttributeTypeCode.Money), StringComparison.OrdinalIgnoreCase))
+            return value;
+
+        return value switch
+        {
+            Money money => money,
+            decimal number => new Money(number),
+            int whole => new Money(whole),
+            long big => new Money(big),
+            double real when double.IsFinite(real) && real >= (double)decimal.MinValue && real <= (double)decimal.MaxValue =>
+                new Money((decimal)real),
+            _ => null,
+        };
+    }
 
     /// <summary>A secure root's security business unit (provisioning's; it decides where the record's access lives).</summary>
     private const string SecurityBusinessUnitColumn = "sprk_securitybu";
@@ -982,6 +1008,9 @@ internal static class RecordRepairReason
 
     /// <summary>Task 052a: the mapped text is longer than its column takes.</summary>
     internal const string MappedValueTooLong = "record_repair.mapped_value_too_long";
+
+    /// <summary>Task 052a: the mapped value is not of a kind its column takes (the create path's <c>Fits</c>).</summary>
+    internal const string MappedValueTypeMismatch = "record_repair.mapped_value_type_mismatch";
 
     /// <summary>UAC-r2 condition (b) F1-1: a column that decides access (the secure flag, the access record, the access
     /// inheritance, the security unit, the container) — never filled by Repair's mapping, on any table.</summary>

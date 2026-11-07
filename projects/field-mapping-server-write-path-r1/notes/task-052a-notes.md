@@ -24,8 +24,13 @@ The first slice of task 052: it wires an app-only column-metadata reader into Re
     - a fault or an empty answer maps nothing: `record_repair.mapping_target_metadata_unavailable`;
     - a mapped column that is missing, or not valid for update (unknown counts as not), is skipped:
       `record_repair.mapped_column_not_updatable`;
+    - a value its column's type does not take (the create path's `Fits`) is skipped:
+      `record_repair.mapped_value_type_mismatch` (coordinator ruling, 2026-11-07);
     - text longer than `MaxLength` is skipped: `record_repair.mapped_value_too_long`;
-    - Money columns go to `ApplyFillOnly` as `moneyAttributes`, which closes #2124 on the Repair path.
+    - Money columns go to `ApplyFillOnly` as `moneyAttributes`, which closes #2124 on the Repair path;
+    - a number written to a Money column is written as a `Money`. The engine converts only Default and expression
+      values, so a Copy from a decimal source would otherwise send a decimal, which the SDK refuses there. A number no
+      `Money` can hold counts as a type mismatch.
 - **#2188 guard.** Only the reason text of the existing per-member entry changed. See "Guard allow-list" below.
 
 ## CLAUDE.md §11
@@ -56,10 +61,6 @@ mechanism and correct the reason, which no longer says "TODO task 033".
 
 ## Open points
 
-- **Type mismatch is not checked.** The create path's `Fits(type, value)` is not applied, because the brief named
-  ValidForUpdate and MaxLength only. A rule whose value is the wrong kind (for example text into a whole-number
-  column) still fails the row's update. Adding `Fits` is a one-line follow-up, but the fixture would then need per-column
-  types.
-- **Metadata is read twice per row.** No cache. The scheduled pass (052b) may add a per-pass memo of successful reads,
-  which fits "read per pass, or cached briefly".
+- **Metadata is read twice per row.** No cache. Per the coordinator, 052b adds the per-pass cache, which fits "read per
+  pass, or cached briefly".
 - **#2124:** close it when this reaches master.

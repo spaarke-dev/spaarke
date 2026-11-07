@@ -1748,12 +1748,12 @@ internal sealed class RepairWorld
 
         var rules = _profiles.Values.SelectMany(p => p.Rules ?? []).ToArray();
         var columns = new Dictionary<string, ColumnMetadata>(StringComparer.OrdinalIgnoreCase);
-        foreach (var column in CreateTimeFieldMapping.CollectSourceColumns(rules)
-                     .Concat(rules.Select(r => r.TargetField?.Trim() ?? string.Empty))
-                     .Where(c => c.Length > 0))
-        {
-            columns[column] = new ColumnMetadata(column.ToLowerInvariant(), "String", IsValidForUpdate: true, IsSecured: false, MaxLength: null);
-        }
+        foreach (var column in CreateTimeFieldMapping.CollectSourceColumns(rules).Where(c => c.Length > 0))
+            columns[column] = Column(column, "String");
+
+        // A rule's target column is typed as the rule says it is (Copy keeps the source's value, so the types agree).
+        foreach (var rule in rules.Where(r => !string.IsNullOrWhiteSpace(r.TargetField)))
+            columns[rule.TargetField.Trim()] = Column(rule.TargetField.Trim(), AttributeTypeOf(rule.TargetFieldType));
 
         foreach (var ((overridden, column), metadata) in ColumnOverrides)
         {
@@ -1766,7 +1766,22 @@ internal sealed class RepairWorld
         }
 
         return Task.FromResult<IReadOnlyDictionary<string, ColumnMetadata>>(columns);
+
+        static ColumnMetadata Column(string name, string type) =>
+            new(name.ToLowerInvariant(), type, IsValidForUpdate: true, IsSecured: false, MaxLength: null);
     }
+
+    /// <summary>Task 052a: the column type a rule's <c>TargetFieldType</c> names (Number: a decimal column).</summary>
+    public static string AttributeTypeOf(int targetFieldType) => targetFieldType switch
+    {
+        CreateTimeFieldMapping.FieldTypeLookup => "Lookup",
+        CreateTimeFieldMapping.FieldTypeOptionSet => "Picklist",
+        CreateTimeFieldMapping.FieldTypeNumber => "Decimal",
+        CreateTimeFieldMapping.FieldTypeDateTime => "DateTime",
+        CreateTimeFieldMapping.FieldTypeBoolean => "Boolean",
+        CreateTimeFieldMapping.FieldTypeMemo => "Memo",
+        _ => "String",
+    };
 
     private Entity Read(string table, Guid id, string[] columns)
     {

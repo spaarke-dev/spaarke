@@ -26,6 +26,8 @@ public sealed class RecordRepairColumnMetadataTests
 {
     private const string FeeColumn = "sprk_estimatedfee";
     private const string FlagTarget = "sprk_isurgent";
+    private const string ClientOrganizationColumn = "sprk_clientorganization";
+    private static readonly Guid ClientOrganization = Guid.Parse("a0520000-0000-4000-8000-0000000000a1");
 
     private readonly RepairWorld _world = new();
 
@@ -222,6 +224,81 @@ public sealed class RecordRepairColumnMetadataTests
             write.Fields.Should().NotContainKey("sprk_practicearea");
             Field(outcome, "sprk_practicearea").ReasonCode.Should().Be(RecordRepairReason.MappedValueTooLong);
         }
+    }
+
+    // =====================================================================================
+    // The target: the value's type (the coordinator's 052a ruling: one rule whose value does not fit its column must not fail
+    // the row's update on every pass)
+    // =====================================================================================
+
+    [Fact]
+    public async Task TextMappedIntoAWholeNumberColumn_IsNotWritten_TheRestOfTheRowIs()
+    {
+        _world.ColumnOverrides[("sprk_event", "sprk_priorityname")] =
+            new ColumnMetadata("sprk_priorityname", "Integer", IsValidForUpdate: true, IsSecured: false, MaxLength: null);
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Applied.Should().BeTrue();
+        write.Fields.Should().NotContainKey("sprk_priorityname");
+        write.Fields["sprk_clientname"].Should().Be(RepairWorld.MatterClient);
+        write.Fields["sprk_practicearea"].Should().Be(RepairWorld.MatterPracticeArea);
+        Field(outcome, "sprk_priorityname").ReasonCode.Should().Be(RecordRepairReason.MappedValueTypeMismatch);
+    }
+
+    [Theory]
+    [InlineData("String", false)] // a lookup into a text column: not written
+    [InlineData("Lookup", true)]  // a lookup into a lookup column: written (must-not-fire)
+    public async Task AMappedLookupIsWrittenOnlyIntoALookupColumn(string columnType, bool written)
+    {
+        _world.Directory.Row("sprk_matter", RepairWorld.Matter)[ClientOrganizationColumn] =
+            new EntityReference("sprk_organization", ClientOrganization);
+        _world.Map("sprk_matter", "sprk_event",
+            RepairWorld.CopyLookup(ClientOrganizationColumn, ClientOrganizationColumn, 1),
+            RepairWorld.Expression(CreateTimeFieldMapping.MappingTypeTemplate, "{sprk_clientname}", "sprk_clientname", 2));
+        _world.ColumnOverrides[("sprk_event", ClientOrganizationColumn)] =
+            new ColumnMetadata(ClientOrganizationColumn, columnType, IsValidForUpdate: true, IsSecured: false, MaxLength: null);
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: "Tax", priority: "Urgent");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        var write = _world.Writes.Should().ContainSingle().Subject;
+        write.Fields["sprk_clientname"].Should().Be(RepairWorld.MatterClient);
+        if (written)
+        {
+            write.Fields[ClientOrganizationColumn].Should().Be(new EntityReference("sprk_organization", ClientOrganization));
+            Field(outcome, ClientOrganizationColumn).State.Should().Be(RecordRepairFieldState.Repaired);
+        }
+        else
+        {
+            write.Fields.Should().NotContainKey(ClientOrganizationColumn);
+            Field(outcome, ClientOrganizationColumn).ReasonCode.Should().Be(RecordRepairReason.MappedValueTypeMismatch);
+        }
+    }
+
+    [Fact]
+    public async Task ADecimalCopiedIntoAMoneyColumn_IsWrittenAsMoney_MustNotFire()
+    {
+        // The engine applies the Money columns to Default and expression rules only; a Copy keeps the source's value, and the
+        // SDK refuses a decimal in a Money column. The type check lets it through, and Repair writes it as a Money.
+        _world.Directory.Row("sprk_matter", RepairWorld.Matter)["sprk_budget"] = 2500.50m;
+        _world.Map("sprk_matter", "sprk_event", new FieldMappingRuleEntity
+        {
+            Id = Guid.NewGuid(), Name = "budget", SourceField = "sprk_budget", TargetField = FeeColumn,
+            TargetFieldType = CreateTimeFieldMapping.FieldTypeNumber, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+            ExecutionOrder = 1, IsActive = true,
+        });
+        _world.ColumnOverrides[("sprk_event", FeeColumn)] =
+            new ColumnMetadata(FeeColumn, "Money", IsValidForUpdate: true, IsSecured: false, MaxLength: null);
+        var id = _world.EventUnderTheMatter(clientName: "Acme", practiceArea: "Tax", priority: "Urgent");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        _world.Writes.Should().ContainSingle().Which.Fields[FeeColumn]
+            .Should().BeOfType<Money>().Which.Value.Should().Be(2500.50m);
+        Field(outcome, FeeColumn).State.Should().Be(RecordRepairFieldState.Repaired);
     }
 
     // =====================================================================================
