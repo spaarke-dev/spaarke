@@ -1,6 +1,6 @@
 # Current Task State - spaarkeai-mcp-bff-api-r1
 
-> **Last Updated**: 2026-11-07 (013 done; 014 + 016 running; 002 with owner)
+> **Last Updated**: 2026-11-07 (014 + 016 done and merged; 015 running; 002 with owner)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,17 +9,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Pipeline Step 5 (option C). Done: 011, 017, 013 (ontology OK on 017 and 013). **Running now:** 014 in the main worktree and 016 in `C:/wt016` (branch `task/spaarkeai-mcp-016`). **002** is in the main session, waiting on the owner. |
-| **Step** | 014 and 016 are running in parallel as background implementers (opus). |
+| **Task** | Pipeline Step 5 (option C). Done: 011, 017, 013, 014, 016 (016 merged at `40d924098c`; merged-tree suites green). **015 running** (sonnet, main worktree). **002** in the main session, waiting on the owner. |
+| **Step** | 015 is running. 020+ are gated on 003 (T0/T13), which waits on 002 (connector). |
 | **Status** | in-progress |
-| **Next Action** | (1) When 016 returns: merge `task/spaarkeai-mcp-016` into the work branch (after 014 has pushed, or carefully alongside it), build, run the Signals unit and integration suites plus the baselines, push, then remove `C:/wt016` with `scripts/worktree/Remove-WorktreeSafe.ps1`. (2) When 014 returns: send 014 and 016 to ontology for review. Next wave: 015 and 020 (020 needs Phase 0 T0: check its gate). (3) 002: when the owner pastes the client id, verify with `az ad app show`, then guide runbook (b). (4) Check Tier 2 on PR #2587 (the 013 full-suite failures were likely caused by machine load). |
+| **Next Action** | (1) When 015 returns: build, run the Signals unit + integration suites and the baselines, then send it to ontology for review. (2) 002: when the owner pastes the client id, verify with `az ad app show`, then guide runbook (b). The spike is LIVE on dev, so (c) the connector can follow (b) immediately. (3) Waiting on ontology: review of 014 and 016, and their answer on ISS-004 (#2628), commit without a prior plan read. (4) Owner: who reviews PR #2622. (5) Size-test widgets (1/3/6 MB) for 003 are not built yet; they go to uac-r2 as a new spike SHA when needed. |
 
 ## Active Lanes
-- **014** (commit capability) runs in the main worktree. Binding requirements: the D-17 `DecisionToolError.Partial` payload (ontology), and an empty `DecisionCommitService.cs` diff.
-- **016** (lookup search + REST route) runs in `C:/wt016`. It pushes its own branch; the main session merges it.
+- **015** (FR-04 `PrivilegeFlagged`, FR-05/11 paging): background implementer.
 - **002**: owner-driven. Runbook: `notes/drafts/connector-registration-runbook.md`.
-- **Owner decisions pending:** who reviews PR #2622 (the ISS-002 Compose fix); the go for spike `22487c6537` in uac-r2's session (uac-r2 has approved it).
-- **ISS-003 / #2623** is filed and not ours.
+- **Spike on dev:** `22487c6537` is live (uac-r2 gates PASS, 20:06Z). The next window carries `6fbb3a7642` (= master `23567b2f93` + spike, CI green); deploying it waits on the owner's go in uac-r2's session. Phase 0 isn't done yet, so every deploy carries the spike.
+- **ISS-002 / #2620**: fix is in draft PR #2622, waiting for the owner to name a reviewer. **ISS-003 / #2623**: filed, not ours. **ISS-004 / #2628**: question sent to ontology.
 
 ## State
 - Wave 1:
