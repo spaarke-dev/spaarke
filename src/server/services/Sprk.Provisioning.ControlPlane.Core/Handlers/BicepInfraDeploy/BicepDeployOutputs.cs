@@ -96,6 +96,13 @@ public sealed class BicepDeployOutputs
     /// </summary>
     public required string OntologyWriterClientId { get; init; }
 
+    /// <summary>
+    /// Principal (object) id of the ontology writer UAMI (ARM output <c>ontologyWriterIdentityObjectId</c>, task 266) —
+    /// written to <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.OntologyWriterObjectId"/>. H10 writes it
+    /// as the writer application user's <c>azureactivedirectoryobjectid</c> (auth-v4 §10.4: never the client id).
+    /// </summary>
+    public required string OntologyWriterObjectId { get; init; }
+
     /// <summary>Whether SignalR was deployed this run (mirrors <see cref="BicepDeployRequest.SignalREnabled"/>; downstream handlers may read to skip SignalR-touching steps when off).</summary>
     public required bool SignalRDeployed { get; init; }
 }

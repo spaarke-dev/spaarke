@@ -144,6 +144,33 @@ public sealed class DataverseWebApiAppUserCreatorTests
         associate.Body.Should().Contain($"https://spaarke-acme.crm.dynamics.com/api/data/v9.2/roles({RoleCopy})");
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData(CustomerBu)]
+    public async Task AppUser_NoRoleRequested_CreatesOrAdoptsTheUserOnly_AndTouchesNoRole(string? existingUnit)
+    {
+        // T266 (#2605): the ontology writer's App User — H10 associates no role; H7b S24 owns its one role.
+        var http = AppUserFake(existingUnit: existingUnit, roleRows: 1, roleHeld: false);
+
+        var outcome = await Creator(http).EnsureAppUserAsync(Request(UamiObjectId) with { SecurityRoleName = null }, CancellationToken.None);
+
+        outcome.Should().Be(new DataverseAppUserCreationOutcome.Success(SystemUser));
+        http.Requests.Should().NotContain(r => r.Uri.Contains("/roles?"), "no role is looked up");
+        http.Requests.Should().NotContain(r => r.Uri.Contains("systemuserroles_association"), "no role is read or associated");
+        http.Requests.Count(r => r.Method == HttpMethod.Post).Should().Be(existingUnit is null ? 1 : 0);
+    }
+
+    [Fact]
+    public async Task AppUser_ABlankRoleName_IsACallerBug_NotNoRole()
+    {
+        var http = AppUserFake(existingUnit: CustomerBu, roleRows: 1, roleHeld: false);
+
+        var act = () => Creator(http).EnsureAppUserAsync(Request() with { SecurityRoleName = " " }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        http.Requests.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task AppUser_ExistingInTheCustomerUnit_WithTheRole_WritesNothing()
     {

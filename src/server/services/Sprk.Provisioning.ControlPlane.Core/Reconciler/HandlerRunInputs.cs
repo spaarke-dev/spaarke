@@ -238,6 +238,8 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.MiObjectId)),
+                RunInput.Output(nameof(InterStepState.OntologyWriterClientId)),   // T266: the writer's App User
+                RunInput.Output(nameof(InterStepState.OntologyWriterObjectId)),   // T266: its azureactivedirectoryobjectid
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
             ],
             [HandlerIds.H11] =

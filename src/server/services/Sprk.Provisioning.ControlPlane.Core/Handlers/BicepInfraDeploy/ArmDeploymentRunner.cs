@@ -457,7 +457,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
         "userAssignedIdentityResourceId", "userAssignedIdentityObjectId", "userAssignedIdentityClientId",
         "appServiceName", "appServiceStagingSlotName", "openAiEndpoint", "aiSearchEndpoint", "cosmosAccountEndpoint",
         "keyVaultName", "keyVaultUri", "serviceBusEndpoint", "redisEndpoint", "contentSafetyEndpoint", "storagePrimaryEndpoint",
-        "ontologyWriterIdentityClientId",
+        "ontologyWriterIdentityClientId", "ontologyWriterIdentityObjectId",
     ];
 
     /// <summary>
@@ -525,6 +525,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             ContentSafetyEndpoint = hasRoot ? ReadString(root, "contentSafetyEndpoint") : string.Empty,
             StorageBlobEndpoint = hasRoot ? ReadString(root, "storagePrimaryEndpoint") : string.Empty,
             OntologyWriterClientId = hasRoot ? ReadString(root, "ontologyWriterIdentityClientId") : string.Empty,
+            OntologyWriterObjectId = hasRoot ? ReadString(root, "ontologyWriterIdentityObjectId") : string.Empty,
             SignalRDeployed = hasRoot && ReadBool(root, "signalrEnabled"),
         };
     }

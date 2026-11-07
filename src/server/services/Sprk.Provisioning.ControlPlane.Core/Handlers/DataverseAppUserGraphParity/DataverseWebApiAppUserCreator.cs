@@ -166,7 +166,11 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         ArgumentException.ThrowIfNullOrWhiteSpace(request.EnvironmentUrl);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ApplicationId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.SecurityRoleName);
+        if (request.SecurityRoleName is not null)
+        {
+            // null = no role (task 266); a blank name is a caller bug, never "no role".
+            ArgumentException.ThrowIfNullOrWhiteSpace(request.SecurityRoleName);
+        }
 
         if (!Uri.TryCreate(request.EnvironmentUrl, UriKind.Absolute, out var envUri))
         {
@@ -255,6 +259,12 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
                 systemUserId = await CreateAsync(envUri, token, "systemusers", payload, cancellationToken).ConfigureAwait(false);
             }
 
+            // Task 266: no role requested (the ontology writer) — the application user alone; its role is H7b S24's.
+            if (request.SecurityRoleName is null)
+            {
+                return new DataverseAppUserCreationOutcome.Success(systemUserId.ToString("D"));
+            }
+
             // (3) The role's copy IN the user's unit — exactly one.
             var roles = await FindRoleCopiesAsync(envUri, token, request, cancellationToken).ConfigureAwait(false);
             if (roles.Count != 1)
@@ -310,7 +320,7 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
     {
         var attempts = Math.Max(1, _options.PropagationRetryAttempts);
         var relative =
-            $"roles?$filter=name eq '{Literal(request.SecurityRoleName)}' and _businessunitid_value eq {request.BusinessUnitId:D}" +
+            $"roles?$filter=name eq '{Literal(request.SecurityRoleName!)}' and _businessunitid_value eq {request.BusinessUnitId:D}" +
             "&$select=roleid&$top=2";
         for (var attempt = 1; ; attempt++)
         {

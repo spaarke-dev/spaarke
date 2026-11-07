@@ -73,7 +73,8 @@ public abstract record CustomerBusinessUnitOutcome
 /// <param name="ApplicationId">The Entra application (client) ID to register as the App User's <c>applicationid</c>.</param>
 /// <param name="SecurityRoleName">
 /// Security role name to ensure is associated (e.g. "System Administrator") — the copy of that role IN
-/// <paramref name="BusinessUnitId"/> (Dataverse assigns a user only roles of the user's own unit).
+/// <paramref name="BusinessUnitId"/> (Dataverse assigns a user only roles of the user's own unit). <c>null</c> = ensure the
+/// application user only and associate NO role (task 266: the ontology writer, whose one role H7b S24 assigns).
 /// </param>
 /// <param name="BusinessUnitId">
 /// T259: the customer's business unit (<see cref="IDataverseAppUserCreator.EnsureCustomerBusinessUnitAsync"/>). A new App
@@ -100,7 +101,7 @@ public sealed record DataverseAppUserCreationRequest(
     string EnvironmentUrl,
     string TenantId,
     string ApplicationId,
-    string SecurityRoleName,
+    string? SecurityRoleName,
     Guid BusinessUnitId,
     string? SystemUserAzureActiveDirectoryObjectId = null);
 
