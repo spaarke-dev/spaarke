@@ -206,7 +206,7 @@ public class IncomingCommunicationJobHandler : IJobHandler
                     title: "Inbound email held: record owner unresolved",
                     body: body,
                     category: "error",
-                    priority: 200000002, // Critical
+                    priority: Sprk.Bff.Api.Services.AppNotificationOptions.Priority.High, // the highest appnotification priority (there is no Critical)
                     cancellationToken: ct);
             }
             catch (Exception ex)

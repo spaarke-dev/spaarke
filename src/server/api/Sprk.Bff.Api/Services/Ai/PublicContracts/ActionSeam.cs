@@ -62,6 +62,10 @@ public sealed class ActionSeam : IActionSeam
             return new CreateNotificationResult(false, null, false, "title is required");
         if (string.IsNullOrWhiteSpace(request.Body))
             return new CreateNotificationResult(false, null, false, "body is required");
+        // An LLM- or binding-supplied priority / toastType reaches here unchecked (OutputRouter); Dataverse would reject it.
+        var invalid = Sprk.Bff.Api.Services.AppNotificationOptions.Validate(request.Priority, request.ToastType);
+        if (invalid is not null)
+            return new CreateNotificationResult(false, null, false, invalid);
 
         var core = new NotificationActionCore(_entityService, _logger);
         var result = await core.CreateAsync(
