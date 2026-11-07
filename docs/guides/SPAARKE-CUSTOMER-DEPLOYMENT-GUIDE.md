@@ -746,6 +746,10 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
   ISS-005 / #1673). The customer's own business unit: a child of the root with exactly one default Owner team, never the Secure
   Record business unit. When it is absent the BFF creates no customer contact and registration and first sign-in answer 500
   `sdap.access.registration_owner_unconfigured`.
+- `Ontology__Writer__ManagedIdentityClientId` — **REQUIRED on every stamp** (task 266, #2605). The client id of the
+  stamp's ontology writer managed identity (§7.2 H2a), never the stamp identity's. The BFF writes Signals and Decision
+  Records only as this identity; when it is absent the writer credential fails closed and every such write is refused.
+  H4b writes it on both slots; H13 trap T7 reads it back.
 
 #### 6.5.1 Customer identity (`Customer__Id`) — required per stamp
 
@@ -1243,6 +1247,13 @@ Failure diagnostic surfaces to operator; run does not start until resolved.
 **H2a** deploys the per-customer Bicep stack — **the same stack in both models** (D-12):
 - `customer.bicep` — 15 resources per §7.2 of design.md, into the customer's own subscription + resource group
 - `model1-shared.bicep` was deleted by task 225a (§3.2); since T228 Model 1 deploys `customer.bicep` too, into the subscription the operator created for the customer
+- **the ontology writer identity (task 266, #2605):** a second user-assigned managed identity,
+  `mi-spaarke-{customerId}-{env}-ontology-writer`, attached to BOTH BFF slots beside the stamp identity
+  (`keyVaultReferenceIdentity` stays the stamp identity). The BFF writes Signals and Decision Records only as this
+  identity (ontology-platform FR-21): it holds `Spaarke Ontology Service` and the two ontology-writer field-security
+  profiles in Dataverse (H10, H7b S24) and nothing else — no Azure role, no Graph app role, never System Administrator.
+  H2a records its client id and principal id (`ontologyWriterClientId`, `ontologyWriterObjectId`) for H4b, H10 and H13.
+  A redeploy of `customer.bicep` keeps both identities on both slots; the template lists them together
 
 Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + report on drift (per FR-34).
 
@@ -1341,6 +1352,12 @@ intake `tenantId` (= `AzureAd__TenantId`), `Graph__Scopes__0` = `https://graph.m
 which no stamp sets — so a stamp carries no `Onboarding__*` setting and no HMAC signing key.
 
 **H4b external-registration owner (R3 073 / ADR-028 A9).** H4b also writes `ExternalAccess__CustomerBusinessUnitId` on both slots: the customer's own business unit, from H10's `InterStepState.CustomerBusinessUnitId` (so H4b follows H10 in the DAG). The BFF refuses to start on a non-GUID value, and without it the external registration route answers 500 `registration_owner_unconfigured`. **H13 trap T7 reads it back** (task 265): both slots must carry a GUID equal to H10's unit.
+
+**H4b ontology writer (task 266, #2605).** H4b also writes `Ontology__Writer__ManagedIdentityClientId` on both slots: the
+ontology writer identity's client id, from H2a's `InterStepState.OntologyWriterClientId` (never the stamp identity's — the
+stamp identity holds System Administrator). Without it the BFF's writer credential fails closed and every Signal and
+Decision Record write is refused. A run without H2a's value fails H4b Resumable before any write. **H13 trap T7 reads it
+back**: both slots must carry a GUID equal to H2a's writer, and never the stamp identity's client id.
 
 **H4b session-file store (T186 follow-up).** H4b also writes `SessionFileStore__BlobEndpoint` on both slots: the stamp storage account's blob endpoint, from H2a's `storagePrimaryEndpoint` output (`InterStepState.StorageBlobEndpoint`). The container is not written — the BFF defaults to `ai-chunks`, which every stamp creates. Without it chat session-file uploads are refused (`StoreDisabled`).
 
@@ -1590,6 +1607,16 @@ records its id as `customerBusinessUnitId`. It then registers 2 Dataverse Applic
 **created in that unit** (the role is the unit's own copy):
 - BFF app-reg
 - UAMI (post-Phase-C)
+
+It then creates or adopts a **third** App User for the **ontology writer identity** (task 266, #2605), in the same unit:
+`applicationid` = the writer's client id, `azureactivedirectoryobjectid` = its **principal id** (never its client id), and
+**no role** — H7b S24 grants exactly the writer's role and profiles. H10 records it as `ontologyWriterSystemUserId`.
+It refuses before any Dataverse call when the run lacks H2a's writer ids (`h10-missing-ontology-writer-identity`,
+Resumable) or the writer's client id is the stamp identity's (`h10-ontology-writer-is-stamp-identity`,
+QuarantineRequired); a writer App User in another unit is QuarantineRequired like the other two, and a failed create is
+`h10-ontology-writer-app-user-creation-failed` (Resumable). H10's idempotency key includes the App User set, so a run
+whose H10 completed before task 266 runs H10 again when it is dispatched; where a resume does not dispatch it, H7b S24
+refuses `secure_setup.ontology_writer_unresolved` — start a new run.
 
 Why the customer's own unit, not the root: `Spaarke Basic User` holds Read at **Deep** on project, matter
 and work assignment. Deep at the root reaches every child unit, the `Secure Record` unit included, so a user in the root
@@ -1889,14 +1916,29 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
   application id, which is the identity `Graph__ManagedIdentity__ClientId` makes the BFF use for Dataverse. While that
   user also holds System Administrator (H10, standing instruction) the role grants nothing extra; it is what the BFF
   would need to read the ontology tables without System Administrator. It is **not** the Signal / Decision Record
-  writer identity (`Ontology:Writer:ManagedIdentityClientId`, a separate least-privileged managed identity), which no
-  stamp provisions yet. H7b assigns the copy in the user's own business unit, which must be the customer's, reads it
+  writer identity (`Ontology:Writer:ManagedIdentityClientId`, a separate least-privileged managed identity — S24 below).
+  H7b assigns the copy in the user's own business unit, which must be the customer's, reads it
   back, and fails the step if it is missing. It refuses
   `secure_setup.ontology_service_role_unresolved` (Resumable: import SpaarkeMaster, or H10's output is missing),
   `secure_setup.ontology_service_role_user_outside_customer_bu` or
   `secure_setup.ontology_service_role_human_or_team_holder` (QuarantineRequired), before writing anything; the
   verification failure is `secure_setup.ontology_service_role_not_held` (Resumable). Other application users that hold the
   role are left alone;
+- (S24, task 266 / #2605; procedure version 7) the **ontology writer's** application user (H10's
+  `ontologyWriterSystemUserId`) holds exactly the customer-unit copy of `Spaarke Ontology Service` and is the ONLY member
+  of `Spaarke Ontology Writer Field Writers` and `Spaarke Ontology Writer Firm Reason Writers` (both ship in
+  SpaarkeMaster; Firm Reason Writers first in 1.3.0.0). H7b adds the role and the missing memberships, then reads both
+  back. It never removes anything. Before writing anything it refuses:
+  - `secure_setup.ontology_writer_unresolved` (Resumable, start a new run) when the run has no writer;
+  - QuarantineRequired when the writer is one of the BFF's own application users
+    (`secure_setup.ontology_writer_is_bff_identity`), is outside the customer's unit
+    (`secure_setup.ontology_writer_outside_customer_bu`), holds any other role
+    (`secure_setup.ontology_writer_holds_other_role`), or a writer profile has another member or any team
+    (`secure_setup.ontology_writer_profile_has_other_member`);
+  - `secure_setup.ontology_writer_profile_unresolved` (Resumable) when a writer profile is missing or ambiguous: upgrade
+    SpaarkeMaster (H6), then resume.
+
+  The verification failure is `secure_setup.ontology_writer_not_configured` (Resumable);
 - a check that `sprk_noaccessentry` is readable, and that the `Spaarke Access Administrator` role holds Read on it at
   Global while `Spaarke Core User` holds none (unified-access-control-r2 task 154; verified, never repaired — H7b
   refuses `secure_setup.no_access_entry_roles_incomplete` and names `scripts/Set-NoAccessEntryRolePrivileges.ps1`);
@@ -2126,11 +2168,11 @@ Seven known-issue guardrails baked into handler post-conditions. Each has been d
 |---|---|---|---|
 | **T1** | App Service `keyVaultReferenceIdentity` not set to UAMI → KV references fail post-swap | H2a (set by `customer.bicep`; H4 re-asserts) | ARM read `keyVaultReferenceIdentity == UAMI-resource-id` |
 | **T2** | Dataverse App User for UAMI not registered → BFF loses Dataverse access post-swap | H10 | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 |
-| **T3** | UAMI SP missing a Graph app role → Graph calls fail with 403; or holding one outside the stamp set → tenant-wide reach into Spaarke's tenant | H10 | UAMI SP Graph `appRoleAssignments` are exactly the Entra-granted roles of `GraphAppRoles.cs` (task 261) |
+| **T3** | UAMI SP missing a Graph app role → Graph calls fail with 403; or holding one outside the stamp set → tenant-wide reach into Spaarke's tenant | H10 | UAMI SP Graph `appRoleAssignments` are exactly the Entra-granted roles of `GraphAppRoles.cs` (task 261); **and (T266)** the ontology writer identity (principal id `ontologyWriterObjectId`) holds **no** Graph app role — any role, a run without the writer, fails; an unreadable answer is an InfraFault, never a pass |
 | **T4** | Stamp identity missing its group-scoped Exchange mailbox roles (Mail.* calls 403), or holding one outside the group (reaches other customers' mailboxes) | H14(a) | H13 reads the identity's assignments via the sidecar: every `Application Mail.*` role in scope, none outside |
 | **T5** | Slot MI vs slot MI KV RBAC parity broken → cold-start KV-ref failure after slot swap | H4 (interim); H10 + Phase C UAMI (structural) | Both slot MIs have KV RBAC (interim); **structurally impossible post-Phase-C** |
 | **T6** | SPE container work uses a delegated token → 403 "public client not allowed" | H8 | H13 lists `GET /storage/fileStorage/containers?$filter=containerTypeId eq {id}` app-only as the owning app (through the Worker UAMI's federated credential) and passes only if the run's container (H8 output) is in the list. Container absent or a delegated-token refusal → Failed; other refusals / 404 / errors → InfraFault |
-| **T7** | `Customer__Id` missing, blank or another customer's id on either BFF slot → the BFF runs on the derived-from-resource-group path, or names the wrong customer (§6.5.1); **and (T255)** the workforce tenant list missing, stale or different on either slot → every customer employee's contact-only sign-in is denied, or the wrong organisation is admitted (§6.5.2) | H4b (writes both slots, removes stale indices) | ARM read of both slots' app settings: `Customer__Id` == run customerId (T238); `WorkforceIdentity__CustomerTenantIds__*` == the run's `customerWorkforceTenantIds` as a set, none equal to `AzureAd__TenantId` on Model 1 (T255); **and (T264)** the BFF app registration lacks `authenticationBehaviors.removeUnverifiedEmailClaim = true` → an unverified-domain email can bind to a contact (§7.3) — Graph v1.0 read of `applications(appId='{BffAppRegId}')` in the run's tenant: the flag must be `true` (missing app, null or false fails; a Graph read error is an InfraFault, never a pass); **and (T265)** `ExternalAccess__CustomerBusinessUnitId` missing, blank, not a GUID or different from H10's customer business unit on either slot → the external registration answers 500 `registration_owner_unconfigured` and first-sign-in contact creates are refused — the same two slot reads: the setting must equal the run's `InterStepState.CustomerBusinessUnitId` as a GUID (a run with no H10 unit fails; H4b writes it) |
+| **T7** | `Customer__Id` missing, blank or another customer's id on either BFF slot → the BFF runs on the derived-from-resource-group path, or names the wrong customer (§6.5.1); **and (T255)** the workforce tenant list missing, stale or different on either slot → every customer employee's contact-only sign-in is denied, or the wrong organisation is admitted (§6.5.2) | H4b (writes both slots, removes stale indices) | ARM read of both slots' app settings: `Customer__Id` == run customerId (T238); `WorkforceIdentity__CustomerTenantIds__*` == the run's `customerWorkforceTenantIds` as a set, none equal to `AzureAd__TenantId` on Model 1 (T255); **and (T264)** the BFF app registration lacks `authenticationBehaviors.removeUnverifiedEmailClaim = true` → an unverified-domain email can bind to a contact (§7.3) — Graph v1.0 read of `applications(appId='{BffAppRegId}')` in the run's tenant: the flag must be `true` (missing app, null or false fails; a Graph read error is an InfraFault, never a pass); **and (T265)** `ExternalAccess__CustomerBusinessUnitId` missing, blank, not a GUID or different from H10's customer business unit on either slot → the external registration answers 500 `registration_owner_unconfigured` and first-sign-in contact creates are refused — the same two slot reads: the setting must equal the run's `InterStepState.CustomerBusinessUnitId` as a GUID (a run with no H10 unit fails; H4b writes it); **and (T266)** `Ontology__Writer__ManagedIdentityClientId` missing, blank, not a GUID, different from H2a's writer, or equal to the stamp identity's client id on either slot → every Signal and Decision Record write is refused, or would run as System Administrator — the same two slot reads (a run with no H2a writer fails; H4b writes it) |
 
 H13 acceptance gate verifies all 7 traps cleared with 0-failure status.
 
@@ -2451,6 +2493,8 @@ pac admin application list --environment <dv-org-url>
 
 # T3 — Graph app-role parity: exactly FileStorageContainer.Selected on Microsoft Graph, and nothing else (no Mail.* — those are Exchange-scoped)
 az rest --uri "https://graph.microsoft.com/v1.0/servicePrincipals/<uami-principal-id>/appRoleAssignments"
+# T3 (T266) — the ontology writer identity holds NO Graph app role (expect an empty value array)
+az rest --uri "https://graph.microsoft.com/v1.0/servicePrincipals/<ontology-writer-principal-id>/appRoleAssignments"
 
 # T4 — the stamp identity's Exchange mailbox roles, all limited to the customer's group (Organization Management admin)
 # A group-scoped assignment reads RecipientWriteScope = Group, with the group's Name in CustomResourceScope
@@ -2475,6 +2519,11 @@ az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource
     --query "[?name=='ExternalAccess__CustomerBusinessUnitId'].value" -o tsv
 az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
     --slot staging --query "[?name=='ExternalAccess__CustomerBusinessUnitId'].value" -o tsv
+# T7 (T266) — Ontology__Writer__ManagedIdentityClientId on BOTH slots == H2a's writer client id (never the stamp identity's)
+az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
+    --query "[?name=='Ontology__Writer__ManagedIdentityClientId'].value" -o tsv
+az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
+    --slot staging --query "[?name=='Ontology__Writer__ManagedIdentityClientId'].value" -o tsv
 # T7 (T264) — the BFF app registration strips unverified emails (signed in to the run's tenant — Spaarke's for Model 1; expect true)
 # ($filter form: az.cmd's batch wrapper breaks on the bare ")" of applications(appId='…'); authenticationBehaviors is
 #  returned only when named in $select, so `az ad app show` does not show it)
@@ -2833,6 +2882,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-22 | §6.5.2: `scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Verify` must exit 0 before deploying a BFF that stamps a new table — the BFF trusts `sprk_createdbyperson` only on stamped tables, and only a field-secured column makes that safe; source guard `CreatorPersonColumnSecuredGuardTests` | #2273 fix round 1 (PR #2277) |
 | 2026-10-22 | §5 H3 row + §7.3 + §9 T7 + §12.3: `authenticationBehaviors.removeUnverifiedEmailClaim = true` set by H3 on every BFF registration (`appreg-unverified-email-claim-failed`) and verified by H13 trap T7 | `customer-provisioning-orchestration-r1` task 264 (#2001 from SPA-r3 ISS-013) |
 | 2026-10-22 | §9 T7 + §12.3 + H4b external-registration owner note: H13 trap T7 reads back `ExternalAccess__CustomerBusinessUnitId` on both slots (equal to H10's customer business unit) | `customer-provisioning-orchestration-r1` task 265 (#2265) |
+| 2026-11-07 | §6.5 settings + §7.2 H2a + H4b note + §7.7 H10 + H7b S24 + §9 T3/T7 + §12.3: the per-stamp ontology writer identity — H2a creates `mi-spaarke-{customerId}-{env}-ontology-writer` on both slots, H4b writes `Ontology__Writer__ManagedIdentityClientId`, H10 creates its App User with no role, H7b S24 (procedure v7) grants exactly `Spaarke Ontology Service` and the two writer profiles, H13 T7 reads the setting back and T3 checks the writer holds no Graph app role | `customer-provisioning-orchestration-r1` task 266 (#2605) |
 | 2026-10-23 | §6.5.2: contact access-level and identity bookkeeping columns are field-secured — `scripts/Set-ExternalAccessContactSecuritySchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) secures `sprk_accesspermissiongrant`, `sprk_identityplane` and the `sprk_identitycollision*` columns and adds three BFF-only columns; the H6 path for a new stamp applies once SpaarkeMaster 1.2.4.0 is published; §7.11: H7b S18 covers the plane and collision columns, S19 verifies the access-level lock and the whole standing-grant lock (Standing Grant Administrators 4/4/4; no other writer but System Administrator — `secure_setup.standing_grant_lock_other_writer`), S22 verifies the three BFF-only columns' locks once a release carries them; an H7b carrying these checks requires SpaarkeMaster >= 1.2.4.0 published before the control plane is deployed | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice A) |
 | 2026-10-23 | §6.5.2 rollout note: rollout order — the contact security schema is applied and `-Verify` passes (stamp columns and proof reads) on every environment BEFORE a BFF build that requires the invite stamp is deployed; without the stamp columns every email bind (CIAM and Workforce) is refused; an email bind needs a current invite stamp (invited address and, for work accounts, the invited tenant unless `xms_edov` is boolean true); invites take an optional `invitedTenantId` (GUID); Workforce contacts never invited through the BFF, or invited before this release, need a re-invite naming their tenant | `spaarke-SPA-external-access-platform-r3` (contact identity hardening, slice B) |
 | 2026-10-28 | §7.11 + §12.2: the customer owner teams step is **Phase 7a**, after Phase 7 (H10 creates the unit) and before Phase 8 — no longer "Phase 5d" before Phase 6; the Phase 6 BFF refuses ordinary hard-deny writes until its `-Verify` exits 0. The configuration-team seeders are future work (field-mapping task 004, H12b FR-39); until then an operator re-owns the rows | `unified-access-control-r2` task 194b R4b-4 |
