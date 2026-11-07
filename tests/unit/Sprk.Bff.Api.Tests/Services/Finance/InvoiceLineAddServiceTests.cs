@@ -379,6 +379,48 @@ public sealed partial class InvoiceLineAddServiceTests
         add.World.Lines.Should().NotContain(l => l.Id == ExpectedLineId());
     }
 
+    /// <summary>The own submission's findings carry a Set-firm decision with <c>rulesRerun</c> completed and the re-run's
+    /// <c>assignFirmRerun.state</c> = <paramref name="rerunState"/> (the invoice's own hold column stays blank).</summary>
+    private static void WithCompletedRerun(AddLineWorld add, string rerunState)
+    {
+        var root = add.Findings();
+        InvoiceFirmGateTests.WithAssignFirm(root, InvoiceAssignFirmService.RulesRerunCompleted, W.Firm, rerunState);
+        add.World.Submission!["sprk_findingsjson"] = root.ToJsonString();
+    }
+
+    [Fact(DisplayName = "EB-D-204 must-fire: Add line is refused as re-run pending while the re-run's state is committed (rules completed), and writes nothing")]
+    public async Task WhileTheRerunSignalStepsAreNotDone_AddLineIsRefused_AndWritesNothing()
+    {
+        var add = new AddLineWorld();
+        WithCompletedRerun(add, InvoiceSubmissionRerun.StateCommitted);
+        var linesBefore = add.World.Lines.Count;
+        var findingsBefore = add.World.Submission!.GetAttributeValue<string>("sprk_findingsjson");
+
+        var result = await add.Service().AddAsync(Expense(), CancellationToken.None);
+
+        result.Status.Should().Be(AddLineStatus.FirmMissing);
+        result.Code.Should().Be("ebilling.line_add.firm_missing");
+        result.Detail.Should().Be(AddLineCodes.FirmDetailFor(InvoiceFirmGateResult.RerunPending));
+        add.Transactions.Should().BeEmpty();
+        add.World.Lines.Should().HaveCount(linesBefore);
+        add.World.Submission!.GetAttributeValue<string>("sprk_findingsjson").Should().Be(findingsBefore);
+        add.TotalsWrites.Should().BeEmpty();
+        add.DecisionRecords().Should().BeEmpty();
+        add.RecorderIdentity.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "EB-D-204 must-not-fire: Add line proceeds once the re-run's state is done (rules completed)")]
+    public async Task OnceTheRerunIsDone_AddLineProceeds()
+    {
+        var add = new AddLineWorld();
+        WithCompletedRerun(add, InvoiceSubmissionRerun.StateDone);
+
+        var result = await add.Service().AddAsync(Expense(), CancellationToken.None);
+
+        result.Status.Should().Be(AddLineStatus.Applied, result.Detail);
+        add.World.Lines.Should().ContainSingle(l => l.Id == ExpectedLineId());
+    }
+
     [Theory(DisplayName = "N4: each closed status is 409 not_in_review and writes nothing")]
     [InlineData(InvoiceStatusCodes.Approved)]
     [InlineData(InvoiceStatusCodes.Rejected)]
