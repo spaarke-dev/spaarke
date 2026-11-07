@@ -47,6 +47,30 @@ Decide with the Copilot surface's owner. `spaarkeai-mcp-bff-api-r1` replaces thi
 **Blockers**: none. If `spaarkeai-mcp-bff-api-r1` adopts the declarative-agent fallback (design §5.2), do this together with retiring the April OpenAPI action.
 **Related**: #1523, #1579, #1574 (the "remove before production" token logger, also found by this design and already filed there); ADR-010; CLAUDE.md §10
 
+### ISS-004 — The decision commit does not require a prior plan read, although the spec says it must
+
+| Field | Value |
+|---|---|
+| **Status** | Open (owner decision) |
+| **Urgency** | soon (before task 024 ships the MCP complete tool) |
+| **Filed** | 2026-11-07 |
+| **Source** | Task 014 (B-1 commit capability), acceptance criterion "a commit with no prior plan read returns the existing refusal reason code" |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2628 |
+
+**Description**
+
+NFR-06, FR-08's negative case, the MUST "fail closed on … a missing plan read" and design §11 say a commit needs a prior plan read. `DecisionCommitService` does not refuse a commit that has no plan-read stamp: it takes the review start as now (`DecisionCommitService.cs:672-674`). The only refusal that a missing plan read causes is `ontology.decision.signal_not_open` (409), for a Signal the system closed before the commit.
+
+Concrete failure: a client, or an MCP host after task 024, that sends a confirmed review with the plan's action codes and never reads the plan gets the decision recorded while the Signal is open. The commit is still as the caller, rights-checked, confirmed and idempotent; only the "plan read first" condition is not enforced.
+
+**Suggested fix**
+
+Owner and ontology choose: (1) amend the spec text (the stamp sets the review start and is not a gate), or (2) ontology adds a refusal for "no stamp" in `DecisionCommitService`, which is a REST contract change with a new 011 baseline case. Do not gate only the MCP tool (a second rule outside the single owner; ADR-002 WP-1, ontology condition 2). Task 014 could not do either: the spec forbids changing `DecisionCommitService` validation and B-1 adds no rule.
+
+**Estimated effort**: option 1, one spec edit; option 2, half a day in ontology plus a baseline case
+**Blockers**: owner decision; option 2 needs ontology-platform
+**Related**: task 014 (`DecisionCommitServiceTests.Capability.cs` pins today's behaviour), task 024, FR-06, FR-08, NFR-06
+
 ---
 
 ## In Progress

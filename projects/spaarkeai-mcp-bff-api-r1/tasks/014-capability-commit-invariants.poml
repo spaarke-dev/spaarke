@@ -4,7 +4,7 @@
     <title>B-1 decision capability: commit</title>
     <phase>A BFF rework</phase>
     <gate>after 013</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; adds the capability commit member and modifies the commit endpoint (.cs) on the single completion-invariant owner's entry</rigor-reason>
     <model-tier>opus</model-tier>
@@ -127,7 +127,20 @@
     <criterion testable="true">A unit test pins that the tool error for a `Failed` `DecisionCommitResult` lists `landed`, `possiblyLanded` and the `resumable` flag, with the same values REST returns in its D-17 extensions. Negative case: the payload contains no record text (no Detail, no field values).</criterion>
   </acceptance-criteria>
 
-  <notes>Ontology condition 2; plan high-risk item 'byte-for-byte invariants through B-1'. If the PR needs a re-merge of ontology branches, merge, never rebase (condition 3).</notes>
+  <notes>Ontology condition 2; plan high-risk item 'byte-for-byte invariants through B-1'. If the PR needs a re-merge of ontology branches, merge, never rebase (condition 3).
+
+Completion (2026-11-07, commits d5bee692a6, 5ef152c1cd, d133bfcfcb):
+- DecisionCapability.CommitAsync(HttpContext?, Guid, DecisionReview, ct) (new DecisionCapability.Commit.cs; member on IDecisionCapability) delegates unchanged to DecisionCommitService.CommitAsync(signalId, review, http, ct); the only addition is the no-caller guard (null context or no authenticated identity returns DecisionCapability.UserContextRequiredCommitResult, 401 DATAVERSE_USER_CONTEXT_REQUIRED on both hosts, matched by reference; a service-built CallerUnresolved stays the single 403). POST /api/v1/signals/{signalId}/decision now calls the capability. DecisionCommitService.cs, SignalWriter.cs, DecisionRecordWriter.cs, DecisionCallerRights.cs, SignalsModule.cs: empty diff. Invariant table with before/after file:line: notes/b1-commit-invariants.md. Deviations and decisions: notes/decisions.md "2026-11-07 — Task 014".
+- Binding addition (ontology, D-17): DecisionToolError gains optional Partial (DecisionToolPartial: failedStep, landed, possiblyLanded, steps without Detail, recordMayExist, sentButNotRecorded, resumable, replayed), set only for Failed; codes, ids and flags only, never record text. REST bytes unchanged.
+- Escalation triggers: none fired. 011 golden baselines unchanged and passing (ContractBaseline 54/54); no golden file edited. T170 WhoAmI = 1 per commit, and = 1 through the capability.
+- Tests: new DecisionToolErrorPartialTests (unit/domain; parity with REST extensions, no record text, no Partial on non-Failed, 401 vs 403) and DecisionCommitServiceTests.Capability.cs (integration/data-mutation; no-caller theory touches no Dataverse, lease or ledger; invoice / invoice-line 409 before rights or writes; no-plan-read signal_not_open + positive control; WhoAmI = 1). Fail-before (mutation): guard narrowed, 401 arm removed, Partial unset fails 7 of 17 new tests. Sprk.Bff.Api.Tests Signals/ContractBaseline/mapper filter 4291 -> 4308 pass (2 skip); DecisionCommitServiceTests 303/303; IntegrationTests Signal 142/142 (2 skip); ArchTests 1998/1998. Test-helper edits: DecisionCommitServiceTests ThroughTheRoute (one line) and DecisionCapabilityFixtures (optional commits).
+- ArchTest: RouteAuthorizationGuard keeps MaxHandlerDecisionHops = 2; only the commit route (ThreeHopHandlerDecisionRoutes) may declare 3 (must-fire control: 4 hops on it fails; with the pin removed the real route fails at 3).
+- Build: Sprk.Bff.Api 0 warnings, 0 errors.
+- Publish size (dotnet publish -c Release, Compress-Archive Optimal over deploy/api-publish/*, PDBs included, fresh worktrees C:\wt014m / C:\wt014b, 191 files each side): master 23567b2f93 = 41,168,034 B (39.26 MB); branch 5ef152c1cd (BFF identical at d133bfcfcb) = 41,183,506 B; delta +15,472 B. Under 55/60 MB. dotnet list package --vulnerable --include-transitive: no vulnerable packages.
+- Quality gates: adversarial review (opus), one pass: no F-class finding. K2 fixed (global hop cap narrowed to the pinned route). Known limits: K3, read routes now construct the commit service graph (scoped DecisionCapability takes DecisionCommitService; changing it needs SignalsModule, out of scope); K1, the documented test-helper deviation; K4, Partial omits reviewId/actionCode per spec, and serializes "partial": null on non-Failed errors (note for 024). adr-check: ADR-001/002/008/010/015/019/028/029/038/041/052 compliant.
+- Defect filed: ISS-004 (#2628), the spec says a commit needs a prior plan read, the service treats no stamp as review start now; owner decision (service edit is forbidden here).
+- Master sync: origin/master 23567b2f93 already merged; no overlap. Ontology reviews Services/Signals/** and Api/Signals/** (noted in commit bodies).
+rework: fix-round-1 task 014</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
