@@ -34,14 +34,14 @@
 | 042b | [Derive the stamp before the owner (#2483, DI-009)](042b-stamp-before-owner-fix.poml) | FR-41 | opus / high | FULL | none | 042a, 019 | ✅ (#2562, 0d4aa87ee0) |
 | 042c | [Signal / DR core record: caller AppendTo + core first in the owner question (#2561, DI-019)](042c-core-record-owner-and-appendto.poml) | FR-41 | opus / high | FULL | none | 042b | ✅ [done] PR #2569 merged 2026-11-05 (D-204 refusal) |
 | 043 | [A Document is a field-mapping source (owner 2026-11-04)](043-document-as-mapping-source.poml) | FR-03, FR-04, FR-19 | opus / high | FULL | none | 031 | ✅ [done] merged into the work branch 2026-11-05 (18361d7dcc) |
-| 044 | [Core pair written whole, only by the server and the ledger writers: field security (owner 2026-11-04)](044-core-pair-server-only-field-security.poml) | FR-41 | opus / high | FULL | none | 042c; dev import gated on the owner's go in UAC-r2's session | 🔄 re-scoped (owner 2026-11-06): no field security; fail-closed re-read + auditing + guard + 052 report. Squash-merged into the work branch (847e6215d9; 2 Opus passes, no F; ontology + UAC-r2 approved round 3); master PR next. Follow-up #2612 |
+| 044 | [Core pair written whole, only by the server and the ledger writers: field security (owner 2026-11-04)](044-core-pair-server-only-field-security.poml) | FR-41 | opus / high | FULL | none | 042c; dev import gated on the owner's go in UAC-r2's session | ✅ [done] master via #2617 (cc11294300, 2026-11-07); dev deploy in UAC-r2's batch  |
 | 045 | [Regarding pair always complete and propagated: inventory + design first (owner 2026-11-04)](045-regarding-pair-complete-and-propagated.poml) | FR-23, FR-41 | opus / high | FULL | none | 042c, 044; part B after owner approval | 🔲 [open] |
 | 046 | [Feature permission matrix, proposed role changes (UAC-r2), role guard (owner 2026-11-04)](046-feature-permission-matrix-and-role-guard.poml) | FR-08, FR-26 | opus / high | FULL | none | 031, 042c | ✅ [done] merged into the work branch 2026-11-05 (0b0edfbe35); role changes in 046b |
 | 046b | [Owner's role rulings on 046's gaps: role files + apply script; writer-only rule at role level; standalone add-ons checked alone (owner 2026-11-05)](046b-role-changes-apply-script-and-standalone-add-ons.poml) | FR-08, FR-26 | opus / high | FULL | none | 046; live apply by UAC-r2 under the owner's go | ✅ [done] master via #2592 (c5aa7ab6cd, 2026-11-06); additions and R1 applied on dev |
 | 046c | [Basic User is read-only on Spaarke tables: role file, -Remove, guard (owner 2026-11-06)](046c-basic-user-read-only-on-spaarke-tables.poml) | FR-08, FR-26 | opus / high | FULL | none | 046b; live removal by UAC-r2 under the owner's go | ✅ repo side on master via #2610 (fb5738b60d); applied on dev 2026-11-07 (owner go in fm session; G17 03:33:12Z, R3 80 removals 03:36:46Z, both -Verify PASS; UAC-r2 2 h watch to 05:40Z); was: dev apply (G17, then -Remove -Gap R3) waits for the owner's go |
 | 048 | [Signal, Decision Record and Budget Revision changed only by their writers: generic update tools refuse them (owner 2026-11-04, D-204 extended)](048-writer-only-tables-refused-by-generic-updates.poml) | FR-41 | opus / high | FULL | none | 042c | ✅ [done] PR #2570 merged 2026-11-05 (0f53e053bf) |
 | 049 | [Create path within NFR-02: concurrent caller checks, assigned-access grant after the response (owner 2026-11-05)](049-create-path-latency-nfr02.poml) | NFR-02 | opus / high | FULL | none | 021, 042c | ✅ [done] master via #2599 (20669df6a9, 2026-11-06); dev deploy via UAC-r2 |
-| 049b | Create path: when the maker is the root's Assigned To, grant only the maker inline and queue the other subjects (UAC-r2 ruling 2026-11-06) | NFR-02 | opus / high | FULL | none | 049 | 🔲 queued for the next agent slot |
+| 049b | Create path: when the maker is the root's Assigned To, grant only the maker inline and queue the other subjects (UAC-r2 ruling 2026-11-06) | NFR-02 | opus / high | FULL | none | 049 | 🔄 merged into the work branch 2026-11-07 (049b + fix1 + fix2, UAC-r2 approved, ruling b); master PR next |
 | 049c | [Create path within NFR-02, round 2: cut the pre-create steps (owner 2026-11-07)](049c-create-path-speed-up.poml) | NFR-02 | opus / high | FULL | none | 049, 049b | 🔲 after 049b merges |
 
 ## Phase 3 — W3 Product creators onto the service
@@ -72,7 +72,7 @@
 
 | ID | Task | FRs | Tier / effort | Rigor | Group | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 040 | [Push on the canonical engine + preview / Assigned To / pair edges](040-push-on-canonical-engine.poml) | FR-23, FR-34, FR-35 (actions) | sonnet / xhigh | FULL | W4 | 001, 005, 019, 070, 071; UAC 195 | 🔄 merged into the work branch with 075 (f77e83a91f; review + fix rounds 1-2 + scoped re-checks clean); master PR next |
+| 040 | [Push on the canonical engine + preview / Assigned To / pair edges](040-push-on-canonical-engine.poml) | FR-23, FR-34, FR-35 (actions) | sonnet / xhigh | FULL | W4 | 001, 005, 019, 070, 071; UAC 195 | ✅ [done] master via #2617 (cc11294300, 2026-11-07); dev deploy in UAC-r2's batch (+ live UI checks a-d after the client pieces) |
 
 ## Phase 5 — W5 Records created outside the product
 
@@ -101,7 +101,7 @@
 | 072 | [GET /records/{table}/{id}/family](072-record-family-endpoint.poml) | FR-31 | sonnet / high | FULL | W7-B | 071 | ✅ [done] #2459 |
 | 073 | [RecordFamilyModal (shared UI)](073-record-family-modal.poml) | FR-32 | sonnet / high | FULL | W7-A | none | ✅ [done] #2366 |
 | 074 | [TrackingFieldTrio Family tool](074-trackingfieldtrio-family-tool.poml) | FR-33 | sonnet / high | FULL | W7-C | 073 | ✅ [done] #2383 |
-| 075 | [Push Updates ribbon opens the Family view](075-push-ribbon-opens-family-view.poml) | FR-35 | sonnet / high | FULL | W7-C | 073 (build); merges with 040 | 🔄 merged into the work branch with 040 (f77e83a91f); #2387 superseded by the combined master PR; deploy the sprk_recordfamily page before sprk_fieldmapping_push.js v1.3.0 (076) |
+| 075 | [Push Updates ribbon opens the Family view](075-push-ribbon-opens-family-view.poml) | FR-35 | sonnet / high | FULL | W7-C | 073 (build); merges with 040 | ✅ [done] master via #2617 (cc11294300, 2026-11-07); dev deploy in UAC-r2's batch (+ live UI checks a-d after the client pieces) |
 | 076 | [W7 deploy + live Family check](076-w7-deploy-and-live-check.poml) | FR-29–FR-33, FR-35 | sonnet / high | FULL | none | 072, 074, 038 | 🔲 [open] |
 
 ## Wrap-up
