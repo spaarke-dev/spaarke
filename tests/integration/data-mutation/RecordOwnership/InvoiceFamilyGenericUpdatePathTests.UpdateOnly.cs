@@ -143,13 +143,15 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                 It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Response status code does not indicate success: 500"));
 
-        // The playbook paths propagate it (their callers turn it into a failed node or update); the push fails this child with it.
+        // The playbook paths propagate it (their callers turn it into a failed node or update); the push fails this child with a
+        // FIXED string (task 040, #1437 / ADR-019): the fault's text is logged, never returned.
         var core = () => RunAsync(GenericPath.PlaybookUpdate, PlainTable, Event, NoLookups, RenameOnly, app: NoReads());
         await core.Should().ThrowAsync<HttpRequestException>();
         var orchestrator = () => RunAsync(GenericPath.OutputOrchestrator, PlainTable, Event, NoLookups, RenameOnly, app: NoReads());
         await orchestrator.Should().ThrowAsync<HttpRequestException>();
         var push = await RunAsync(GenericPath.FieldMappingPush, PlainTable, Event, NoLookups, RenameOnly, app: NoReads());
-        push.Message.Should().Be("Response status code does not indicate success: 500");
+        push.Message.Should().Be(Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints.ChildUpdateFailedMessage)
+            .And.NotContain("500");
     }
 
     [Fact]

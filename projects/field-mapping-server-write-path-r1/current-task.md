@@ -1,23 +1,21 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-11-06 ~23:05Z (main session checkpoint). Recovery: read Quick Recovery first.
-> **Done on master**: 001–006, 010–018, 037–039, 042c, 043, 046, 046b (#2592), 048, 049 (#2599), 070–074.
-> **Live on dev:** BFF + Console at master 20669df6a9. "Project to Matter (Attorney Matrix)" profile created 20:42Z (owner-approved live check; keep/remove = owner question). 54 FMSWP-021 test matters (cleanup list in notes/task-021-live.md).
+> **Last updated**: 2026-11-07 ~02:00Z (main session checkpoint). Recovery: read Quick Recovery first.
+> **Done on master**: 001–006, 010–018, 030a, 037–039, 042c, 043, 046, 046b (#2592), 046c repo side, 048, 049 (#2599), 070–074. #2610 merged at fb5738b60d (030a, 046c source, 046b guard fix).
+> **Live on dev:** BFF + Console at master 20669df6a9. "Project to Matter (Attorney Matrix)" profile (keep/remove = owner question). 54 FMSWP-021 test matters (cleanup list in notes/task-021-live.md). 046c NOT applied on dev.
 > **W3 direction:** named exceptions plus guards; no core redesign in R1 (decisions.md).
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Work branch** | dde7ae35d7 (pushed). Merged in: 030a (+fix, +fix2 transient OFFICE_010 text), 046c (+fix, +fix2), 6e9a6510a4 (046b guard: Create/Write on Signal/DR with no exception). verify-suites PASS before fix2 (Arch 1978, BFF 6984/0 fail). |
-| **In flight (main)** | publish-delta running (master f9ba615b09 vs dde7ae35d7). master is 222 ahead, merge-tree clean. NEXT: merge origin/master into the work branch (Step 2.5), rebuild, ArchTests + verify-suites, then master PR (030a, 046c, 046b guard fix). After merge: tell ontology-r1 (mcp-bff re-merge) and UAC-r2 (master SHA). |
-| **Agents running** | fm-049b (opus; maker-only inline grant, UAC-r2's 4 conditions; branch task/fm-049b from master). fm-040-fix (opus; 12 findings, single classifier per UAC-r2, wrapper type if small). rev-044 (opus adversarial pass 1 of 2 on task/fm-044-fix 9159cfb376; ontology + UAC-r2 already approved, no F). |
-| **044 after review** | pass 2 (security) then merge task/fm-044-fix; tell UAC-r2 the master SHA. File neutral follow-up: read-only Test-SignalWriterRoles.ps1 -Verify (not R1). Ontology accepted the admin dry-run label limit (K). 052 POML wording agreed verbatim (in 9159cfb376). |
-| **040 after fix** | scoped re-check; UAC-r2 signed #2188 (wrapper not a precondition). Master push today is impersonated update-only (no live exposure, UAC-r2 agreed). 075 ships with 040. |
-| **049b after build** | review (opus), send to UAC-r2, PR. Then re-measure 021 (the queued path is ~+2 s over NFR-02 regardless). |
-| **Owner questions open** | (1) NFR-02: still ~+2 s over even queued: more speed-up (profile cache, FieldMapping concurrent) or amend window to "record opened"? (2) keep the Project to Matter profile on dev? (3) 046c dev apply go: G17 -Apply/-Verify -ChangesOnly, then -Remove -Gap R3 -Apply/-Verify (rollback -Restore -Gap R3). (4) drop stash da43b8a2 "lint-staged automatic backup" (22:38Z, left by an interrupted commit hook; content committed). |
+| **Work branch** | = master fb5738b60d + the TASK-INDEX commit 304b6af504 (pushed). |
+| **044** | Branch origin/task/fm-044-fix3 37946fc15c (rounds 1–3 on task/fm-044-fix → fix2 cdb7c30232 → fix3). Opus pass 1 and pass 2: no F. Ontology APPROVED round 3. Waiting: UAC-r2 OK (sent pass-2 result + fix3 tip). NEXT: squash-merge fix3 into the work branch, master PR, send the master SHA to ontology + UAC-r2. Follow-up filed: #2612 (live holder check, not R1). Known limits: per-Signal re-read before the lane check (cosmetic); ParseFetches doesn't require the core columns (Decide lane, pre-existing). |
+| **049b** | origin/task/fm-049b aa552ce32c + origin/task/fm-049b-fix1 41ee8952a9 (a one-subject pass acts only on a share; Evaluated doc). Opus review: no F; UAC-r2's 4 conditions met. WAITING on UAC-r2: (a) accept that the maker case's enqueue-failure path relies on the reconciler (no invite for an external assignee), or (b) keep the full inline fallback there (one line in GrantAssignedAccessAsync). Then merge, PR, re-measure 021. |
+| **040 + 075** | Combined on origin/task/fm-040-075 9daf41cdff (040 fix2 123f19783f + 075 ed1cf9b5d1 + legacy push helpers deleted, FamilyPage wires onAction to RecordFamilyActionPanel, deploy-script entry, lint fixes). Scoped Sonnet re-check rc-040-075 RUNNING. Then: edit the 040 POML (drop "a non-Filing kind is refused" at line 117 and the kinds constraint at line 53), merge into the work branch, send UAC-r2 the re-check result + merge SHA, master PR (close #2387 as superseded). Deploy order: sprk_recordfamily code page BEFORE sprk_fieldmapping_push.js v1.3.0 (task 076); the SpaarkeMaster web resource entry comes from the first dev export after deploy; K2 live check (failed save → Push Updates) at deploy. |
+| **Owner questions open** | (1) NFR-02: still ~+2 s over even queued: more speed-up (profile cache, FieldMapping concurrent) or amend the window to "record opened"? (2) Keep the Project to Matter profile on dev? (3) 046c dev apply go: G17 -Apply/-Verify -ChangesOnly, then -Remove -Gap R3 -Apply/-Verify (rollback -Restore -Gap R3). (4) Drop stash da43b8a2 "lint-staged automatic backup" (content committed). (5) mcp-bff session can't be reached by message (permission mode): the owner relays "re-merge master fb5738b60d". |
 | **Re-scope pending** | 032 (mapping step in persister; inputs notes/task-032-design-inputs.md; design to UAC-r2 + ebilling first), 030b (association in existing create + guards; send to word-add-in for content read), 034 (named exceptions + guards), 033 (likely dropped). |
-| **Gotchas this session** | Pester 6.2 is the machine default: use `Import-Module Pester -MaximumVersion 5.99`. App Insights drops whole requests (#2158): count from client logs + Dataverse read-back. Commits during verify-suites can exceed 100 s (dotnet format hook): use a longer timeout. |
+| **Gotchas this session** | Pester 6.2 is the machine default: use `Import-Module Pester -MaximumVersion 5.99`. App Insights drops whole requests (#2158): count from client logs + Dataverse read-back. Commits can exceed 100 s (dotnet format hook): `timeout 400 git commit`. Don't push to the work branch while its master PR is open (auto-merge would take the commits). |
 
 ## How wave-2 agents are run (lessons)
 
@@ -39,4 +37,4 @@
 
 ## Next tasks
 
-Master PR (030a, 046c) → 044 (after 2 security passes) → 049b → 040 (+075) → 021 deploy (after the owner's NFR-02 call) → 032/030b/034 re-scopes → 019, 033 (before 052), 050.
+044 → 049b → 040 (+075) → 021 deploy (after the owner's NFR-02 call) → 032/030b/034 re-scopes → 019, 033 (before 052), 050.

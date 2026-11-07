@@ -98,6 +98,15 @@ internal sealed record RecordFamilyRead(
     bool Truncated,
     string? Continuation);
 
+/// <summary>The children of one record in one table, one level down (task 040: <see cref="RecordFamilyReader.ReadChildrenAsync"/>).</summary>
+/// <param name="Outcome">How the read ended; any outcome but <see cref="RecordFamilyReadOutcome.Read"/> carries no children.</param>
+/// <param name="Children">The children, each listed under the source as its primary parent. At most the asked-for number.</param>
+/// <param name="Truncated">True when more children exist than were asked for.</param>
+internal sealed record RecordFamilyChildren(
+    RecordFamilyReadOutcome Outcome,
+    IReadOnlyList<RecordFamilyMember> Children,
+    bool Truncated);
+
 /// <summary>
 /// field-mapping-server-write-path-r1 task 071 (FR-30; design §12.3 B, §12.12) — the read-only walk of a record's family AS THE
 /// CALLER: every member query and every display-column read impersonates the caller through
@@ -336,6 +345,77 @@ internal sealed class RecordFamilyReader
             next);
     }
 
+    /// <summary>
+    /// True when a <paramref name="kind"/> family has an edge from <paramref name="sourceTable"/> down to
+    /// <paramref name="targetTable"/> that a read lists (a detail table is never listed). The push's "is this a family the source
+    /// has?" question (task 040), answered from the edge catalogue alone: no read, no caller.
+    /// </summary>
+    internal static bool HasListedEdge(FamilyKind kind, string? sourceTable, string? targetTable)
+    {
+        var source = sourceTable?.Trim().ToLowerInvariant();
+        var target = targetTable?.Trim().ToLowerInvariant();
+        return !string.IsNullOrEmpty(source) && !string.IsNullOrEmpty(target)
+            && !RecordFamilyEdges.DetailTables.Contains(target)
+            && RecordFamilyEdges.Of(kind).Any(e =>
+                string.Equals(e.ParentTable, source, StringComparison.Ordinal)
+                && string.Equals(e.ChildTable, target, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The children of <paramref name="sourceTable"/> <paramref name="sourceId"/> in <paramref name="targetTable"/>, ONE level
+    /// down, as <paramref name="caller"/> (task 040: the push's way to its children, replacing a hand-built parent-lookup
+    /// query). A child is found through a Filing edge — a typed lookup or the regarding pair — and listed only when the source is
+    /// its PRIMARY parent (the rule <see cref="ReadAsync"/> applies), so a child filed first under another record is not the
+    /// source's. Nothing else of the family is walked, and a detail table yields no children.
+    /// </summary>
+    /// <param name="caller">The person pushing; every Dataverse read impersonates them.</param>
+    /// <param name="kind">The family kind; anything but <see cref="FamilyKind.Filing"/> is refused before a read.</param>
+    /// <param name="sourceTable">The source record's table.</param>
+    /// <param name="sourceId">The source record's id.</param>
+    /// <param name="targetTable">The child table to list.</param>
+    /// <param name="max">The most children to return; one more is looked for, to say <see cref="RecordFamilyChildren.Truncated"/>.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The children (id order, as the walk finds them) and whether more exist. A Dataverse fault propagates (never an
+    /// app-only retry).</returns>
+    public async Task<RecordFamilyChildren> ReadChildrenAsync(
+        RecordFamilyCaller caller, FamilyKind kind, string sourceTable, Guid sourceId, string targetTable, int max, CancellationToken ct)
+    {
+        if (kind != FamilyKind.Filing)
+            return RefusedChildren(RecordFamilyReadOutcome.KindNotSupported);
+
+        ArgumentNullException.ThrowIfNull(caller);
+        if (caller.ObjectId == Guid.Empty || caller.SystemUserId == Guid.Empty)
+            throw new ArgumentException("A family read needs the caller's object id and systemuserid; nothing is read without them.", nameof(caller));
+        ArgumentOutOfRangeException.ThrowIfLessThan(max, 1);
+
+        var walk = new Walk(this, caller, kind, ct);
+        var anchorTable = sourceTable?.Trim().ToLowerInvariant();
+        var childTable = targetTable?.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(anchorTable) || string.IsNullOrEmpty(childTable) || sourceId == Guid.Empty
+            || !walk.IsFamilyTable(anchorTable) || !HasListedEdge(kind, anchorTable, childTable))
+        {
+            return RefusedChildren(RecordFamilyReadOutcome.AnchorNotFound);
+        }
+
+        walk.Wanted = max + 1;
+        var anchor = await walk.ReadNodeAsync(anchorTable, sourceId).ConfigureAwait(false);
+        if (anchor is null)
+            return RefusedChildren(RecordFamilyReadOutcome.AnchorNotFound);
+
+        await walk.ChildrenOfAsync(anchor, childTable).ConfigureAwait(false);
+
+        var children = walk.Sequence.Take(max).Select(n => walk.ToMember(n)).ToList();
+        _logger.LogInformation(
+            "[RECORD-FAMILY] {Table} children in {ChildTable} read as the caller: {Children} child(ren), truncated={Truncated}, "
+            + "{Queries} caller-scoped quer(y/ies).",
+            anchorTable, childTable, children.Count, walk.Sequence.Count > max, walk.Queries);
+
+        return new RecordFamilyChildren(RecordFamilyReadOutcome.Read, children, walk.Sequence.Count > max);
+    }
+
+    private static RecordFamilyChildren RefusedChildren(RecordFamilyReadOutcome outcome) =>
+        new(outcome, Array.Empty<RecordFamilyMember>(), false);
+
     private static RecordFamilyRead Refused(RecordFamilyReadOutcome outcome) =>
         new(outcome, null, null, Array.Empty<RecordFamilyMember>(), new Dictionary<string, int>(), false, null);
 
@@ -569,17 +649,33 @@ internal sealed class RecordFamilyReader
         }
 
         /// <summary>
+        /// The children of <paramref name="start"/> in <paramref name="childTable"/> ONE level down, each listed under its
+        /// PRIMARY parent only (the same rule <see cref="DownAsync"/> applies): the push's question (task 040), asked without
+        /// walking the other tables or levels. Stops once <see cref="Wanted"/> children are listed.
+        /// </summary>
+        public async Task ChildrenOfAsync(Node start, string childTable)
+        {
+            start.Depth = 0;
+            var enqueued = new HashSet<(string, Guid)> { start.Key };
+            await ExpandAsync(new List<Node> { start }, 0, passThrough: null, skip: null, enqueued, probe: false, onlyChildTable: childTable)
+                .ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// One level: the children of <paramref name="frontier"/> whose primary parent is in it. Returns the next frontier, or
         /// null when the walk must stop (the page is full, or — probing — a child exists).
         /// </summary>
         private async Task<List<Node>?> ExpandAsync(
             List<Node> frontier, int depth, IReadOnlyDictionary<(string, Guid), Node>? passThrough, (string, Guid)? skip,
-            HashSet<(string, Guid)> enqueued, bool probe)
+            HashSet<(string, Guid)> enqueued, bool probe, string? onlyChildTable = null)
         {
             var next = new List<Node>();
             var byKey = frontier.ToDictionary(n => n.Key);
             foreach (var edge in _listedEdges)
             {
+                if (onlyChildTable is not null && !string.Equals(edge.ChildTable, onlyChildTable, StringComparison.Ordinal))
+                    continue;
+
                 var parentIds = frontier.Where(n => n.Table == edge.ParentTable).Select(n => n.Id).OrderBy(i => i).ToArray();
                 if (parentIds.Length == 0 || EntitySetOf(edge.ChildTable) is not { } set)
                     continue;

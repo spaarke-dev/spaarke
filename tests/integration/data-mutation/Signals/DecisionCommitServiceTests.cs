@@ -29,6 +29,7 @@ using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Domain.Signals;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
@@ -135,7 +136,7 @@ public sealed partial class DecisionCommitServiceTests
 
         public int WhoAmICalls;
         public Mock<IOrganizationServiceAsync2> Org { get; } = new();
-        public Mock<IGenericEntityService> Entities { get; } = new();
+        public Mock<IGenericEntityService> Entities { get; } = new Mock<IGenericEntityService>().WithNoStoredCorePair();
         public Mock<IDataverseUserClient> User { get; } = new();
         public Mock<CallerRecordAccessProbe> Probe { get; }
 

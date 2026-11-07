@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049c" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Create path within NFR-02 (round 2): cut the pre-create steps without changing what a create guarantees (owner 2026-11-07)</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
+    <gate>049b (with UAC-r2 ruling b) merged into the work branch first: both edit RecordCreationService. The live re-measure waits on a dev deploy (owner's go, UAC-r2 runs it).</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes step order, concurrency and caching on every create through RecordCreationService (.cs, bff-api); caller checks and owner resolution are authorization-adjacent.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Concurrency and caching across authorization-adjacent steps; fail-closed reasoning and deterministic refusal precedence.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordCreationService, which 049b also edits.</parallel-reason>
+    <deps>049, 049b, 021 (measurement)</deps>
+    <tags>bff-api, performance, security, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>The owner ruled on 2026-11-07 (notes/decisions.md) that NFR-02 stays as written (the Create Matter create p95 may rise at most +500 ms over the old direct create) and the create path is sped up further. After 049 and 049b, the queued path is still about +2.0 s at p50 (notes/task-021-live.md, "Re-measure after 049"; sampled step medians: FieldMapping ~900 ms with a Project to Matter profile against 176 with none, CallerChecks ~555, Principal ~350, TableRules ~330, Owner ~300, Create ~200, PostCreate ~350 queued). Step 1: measure. Add or use per-step timing in RecordCreationService and reproduce the split locally with delayed doubles; list every Dataverse read each step makes, with repeats across steps. Step 2: remove the cost, in this order of preference: (a) reads repeated within one request: reuse the first answer (request-scoped); (b) independent steps run concurrently. FieldMapping is the candidate to overlap with TableRules, Owner and Principal, but only where no step reads another's output; the order a refusal is chosen in stays deterministic. (c) Cacheable metadata (the mapping profile and its rules for a source/target pair, target table metadata, record-type references) in the ADR-009 cache with a stated invalidation; never an authorization answer and never a per-caller result across callers. (d) Fewer round trips: one batched or expanded read where several single reads go to the same table. Step 3: measure again locally and record the before and after per step. Step 4: after a dev deploy, re-run the 021 timing method (FMSWP- rows, the owner-kept Project to Matter profile) and record the result.</prompt>
+  <role>SPAARKE platform developer, BFF write path performance. Security fails closed. Follow ADRs strictly.</role>
+  <goal>Every create through RecordCreationService gives the same records, answers and refusals as today, faster; the live p95 delta is within +500 ms, or the residue is measured per step and escalated.</goal>
+
+  <context>
+    <background>Owner decisions 2026-11-05 ("NFR-02 exceeded ... speed up the server") and 2026-11-07 ("yes speed it up"). 049 made the caller checks concurrent and queued the assigned-access grant; 049b grants only the maker inline. The remaining cost is before the create. The spec's "Profile caching: none initially. Add only if NFR-02 escalates" (spec.md:901) is now triggered.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (step order; per-step timing)</file>
+      <file role="modify">The field-mapping engine and profile reader used by the create path (find them from RecordCreationService's FieldMapping step)</file>
+      <file role="modify">The TableRules, Owner and Principal steps' readers, where a read repeats or can batch</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/task-021-live.md (baseline, method, step split); notes/task-049-notes.md and task-049b-notes.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-009 (caching); docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="branching">Brief line 1: `git switch -c task/fm-049c &lt;tip of work/field-mapping-server-write-path-r1 after 049b merged&gt;`, then confirm this POML exists on the branch.</constraint>
+    <constraint source="NFR-07">No refusal's status, code or wording changes; when several steps would refuse, the same one answers as today (deterministic precedence, not first-to-finish). No step that today runs after a refusal may write anything before it.</constraint>
+    <constraint source="ADR-009">Caches are Redis or request-scoped per ADR-009, with a stated invalidation and TTL; a profile or rule edit is visible to the next create within the stated bound (name it in the notes and docs). No cache of an authorization answer, a caller's privileges or any per-caller result across callers.</constraint>
+    <constraint source="security">Fail closed: a cache miss, a cache fault or a concurrent step's fault gives today's answer or a refusal, never a create that skipped a check.</constraint>
+    <constraint source="W3 direction">No new creator, no given-id input, no change to what the service guarantees (decisions.md 2026-11-06).</constraint>
+    <constraint source="ADR-038">KEEP paths only; no new file under tests/unit/Sprk.Bff.Api.Tests/**.</constraint>
+    <constraint source="CLAUDE.md §10/§11">Any new cache, service or registration answers §11's three questions; publish delta; CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; /conflict-check (RecordCreationService and the mapping engine).</step>
+    <step order="1">Measure: per-step timing and the read inventory (table, filter, step, repeats). Record it in notes/task-049c-notes.md.</step>
+    <step order="2">Remove repeats (request-scoped), then overlap independent steps, then cache metadata (ADR-009), then batch reads. For each change: tests that the records written, the answers and the refusal precedence are unchanged, and a timing test with delayed doubles.</step>
+    <step order="3">Build; verify-suites.sh and ArchTests; publish delta; CVE; one Opus adversarial pass. Send the diff to UAC-r2.</step>
+    <step order="4">After merge and a dev deploy: re-run the 021 timing method and record the result in notes/task-021-live.md.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1: the step split and the read inventory, before and after, are in notes/task-049c-notes.md.</criterion>
+    <criterion testable="true">AC2: for every create path the existing suites cover, the records written, the answers and the refusal (status, code, wording, precedence) are unchanged; a seeded case where two steps would refuse returns the same refusal as before.</criterion>
+    <criterion testable="true">AC3: a cache fault or miss gives today's result; a profile or rule edit is seen within the stated bound (tested); no authorization answer is cached across callers (tested or guarded).</criterion>
+    <criterion testable="true">AC4: the live p95 delta is within +500 ms, or the residue is measured per step and escalated to the owner.</criterion>
+    <criterion testable="true">AC5 (negative): no create proceeds when a concurrent step faults; no cached value outlives its stated invalidation.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the live p95 delta is still above +500 ms after the changes, STOP and report the per-step medians to the owner.</trigger>
+    <trigger>If a speed-up needs a change to what a create guarantees (an order, a check or a write), STOP and ask UAC-r2 and the owner.</trigger>
+  </escalation>
+
+  <notes>Added 2026-11-07 from the owner's decision in fm's session.</notes>
+</task>
