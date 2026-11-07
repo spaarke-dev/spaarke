@@ -11,6 +11,10 @@
  * statuses. A refused write shows the server's message and changes nothing on the page. A 403 on a write turns the page read-only.
  * While any line is Processing (stored Pending, F-1) the page re-reads the review on a timer and stops when none is.
  *
+ * Add line (task 164, EB-D-188): a toolbar button, shown when the caller can decide and the invoice is In Review, opens AddLineModal. One
+ * requestId is made when the form opens and is kept for every send from it, including Repeat after a 503 incomplete, so the server adds the
+ * line once. The page checks none of what the server owns; a refusal shows in the form.
+ *
  * Slots for task 111: `paneTabs` (Context, Related work, History), `headerExtras` (Awaiting approvers), `banners` (the blocked-submission
  * state) and `invoiceActions` (Decide invoice…).
  */
@@ -39,10 +43,12 @@ import {
   type PdfBytes,
 } from '@spaarke/ui-components';
 import {
+  addLineFailureMessage,
   isFirmFirst,
   isIncomplete,
   loadFailureMessage,
   newDecisionId,
+  staysInAddLineForm,
   writeFailureMessage,
   type ApiFailure,
   type ApiResult,
@@ -55,7 +61,9 @@ import {
   CORE_ENTITY,
   CORE_KIND_LABEL,
   FIRM_FIRST_WORDS,
+  buildAddLineRequest,
   buildLineCountCards,
+  canAddLine,
   fieldLabel,
   filterLines,
   highlightFor,
@@ -67,6 +75,7 @@ import {
   reviewAccess,
   shortDate,
   signedMoney,
+  type AddLineForm,
   type LineFilterKey,
   type RuleGroup,
   type SuggestionPlan,
@@ -74,7 +83,7 @@ import {
 import { LinesGrid } from './LinesGrid';
 import { LineReviewPane, type PaneDecision } from './LineReviewPane';
 import { RuleGroups } from './RuleGroups';
-import { BulkDecisionModal, CorrectValueModal, HEADER_FIELDS, type BulkRequest, type CorrectTarget } from './Dialogs';
+import { AddLineModal, BulkDecisionModal, CorrectValueModal, HEADER_FIELDS, type BulkRequest, type CorrectTarget } from './Dialogs';
 
 const useStyles = makeStyles({
   page: {
@@ -290,6 +299,8 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
   const [selectedField, setSelectedField] = React.useState<string | null>(null);
   const [correct, setCorrect] = React.useState<CorrectTarget | null>(null);
   const [bulk, setBulk] = React.useState<BulkRequest | null>(null);
+  /** The Add line form, open when set. Its requestId is made once, when the form opens, and kept for every send from it (task 164, C1). */
+  const [addLine, setAddLine] = React.useState<{ requestId: string } | null>(null);
   const [dialogError, setDialogError] = React.useState<string | null>(null);
 
   const panes = useTwoPanelLayout({ defaultDetailWidth: 560, minPrimaryWidth: 520, minDetailWidth: 420, storageKey: 'sprk-invoice-review-pane' });
@@ -407,6 +418,10 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         inDialog?: boolean;
         /** Closes that dialog: on a 403 or a 503 incomplete the outcome belongs to the page, not the form. */
         closeDialog?: () => void;
+        /** The sentence for a refusal (default: the shared write-failure sentence). */
+        failureText?: (f: ApiFailure) => string;
+        /** A refusal that also stays in the dialog (default: only the firm-first 409), for forms whose 409s are fixed by editing the form. */
+        staysInDialog?: (f: ApiFailure) => boolean;
         after?: (value: T, fresh: InvoiceReview | null) => void;
         /**
          * What Repeat sends after a 503 incomplete. Default: the same call. Accept all Clean cannot repeat itself (its lines left Clean), so
@@ -434,7 +449,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
       }
       const f = result.failure;
       if (f.status === 403) setRefused403(true);
-      const text = writeFailureMessage(f);
+      const text = (opts.failureText ?? writeFailureMessage)(f);
       const incomplete = isIncomplete(f);
       // 503 incomplete: part of the change was saved. Show the server's state (the page still shows the old one) before offering Repeat.
       if (incomplete) await reload();
@@ -444,7 +459,7 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
       // notice offers Reload instead. EB-D-185: a 409 firm_missing is an ordinary refusal - nothing changed, so there is nothing to reload: the
       // dialog stays open with what the reviewer typed and shows the server's sentence, and the page notice (a decision made in the pane)
       // shows it with no Reload.
-      const firmFirst = isFirmFirst(f);
+      const firmFirst = isFirmFirst(f) || (opts.staysInDialog?.(f) ?? false);
       if (opts.inDialog && !incomplete && f.status !== 403 && (f.status !== 409 || firmFirst)) {
         setDialogError(text);
         return false;
@@ -530,6 +545,38 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
         after: () => setCorrect(null),
       }
     );
+  };
+
+  /** One requestId per opened form (C1). It stays with the form for every send, and with the Repeat closure after a 503 incomplete. */
+  const openAddLine = () => {
+    setDialogError(null);
+    setAddLine({ requestId: newDecisionId() });
+  };
+
+  const submitAddLine = (requestId: string, form: AddLineForm) => {
+    const built = buildAddLineRequest(form, requestId);
+    if (!built.ok) {
+      // A value that is not a number cannot be sent as one; every rule the server owns is the server's to refuse.
+      setDialogError(built.message);
+      return;
+    }
+    const request = built.request;
+    void runWrite(() => api.addLine(invoiceId, request), {
+      success: 'Saved · Line added for your decision; the rules ran again',
+      inDialog: true,
+      closeDialog: () => setAddLine(null),
+      failureText: addLineFailureMessage,
+      staysInDialog: staysInAddLineForm,
+      after: (added, fresh) => {
+        setAddLine(null);
+        // Show the new line (from the server's fresh state) so it can be decided next.
+        if (fresh?.lines.some(l => l.id === added.lineId)) {
+          setSelectedLineId(added.lineId);
+          setSelectedField(null);
+          setTab('review');
+        }
+      },
+    });
   };
 
   const confirmValue = (line: ReviewLine, field: string) => {
@@ -726,6 +773,11 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
                   By rule
                 </Tab>
               </TabList>
+              {canAddLine(review, refused403) && (
+                <Button size="small" onClick={openAddLine} disabled={busy || firmNeeded} data-testid="add-line">
+                  Add line…
+                </Button>
+              )}
             </div>
             {view === 'lines' ? (
               <LinesGrid
@@ -816,6 +868,14 @@ export function InvoiceReviewPage(props: InvoiceReviewPageProps) {
           error={dialogError}
           onClose={() => setCorrect(null)}
           onSubmit={(field, value) => submitCorrection(correct, field, value)}
+        />
+      )}
+      {addLine && (
+        <AddLineModal
+          busy={busy}
+          error={dialogError}
+          onClose={() => setAddLine(null)}
+          onSubmit={form => submitAddLine(addLine.requestId, form)}
         />
       )}
       {bulk && (

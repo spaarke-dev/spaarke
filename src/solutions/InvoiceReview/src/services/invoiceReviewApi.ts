@@ -10,6 +10,7 @@
  *             GET  /api/finance/invoices/{invoiceId}/corrections                    the invoice's correction rows, newest first
  *   Task 092  GET  /api/finance/files/{fileId}/content                              the invoice PDF bytes (the read model's invoicePdfFileId)
  *   Task 102  adjustment lines and the stored totals arrive in the read model; adding one is 111's approve wizard.
+ *   Task 164  POST /api/finance/invoices/{invoiceId}/lines                                  Add line: a reviewer adds a Fee or Expense line the firm did not bill
  *
  * The page decides nothing the server owns (ADR-002, I-1): it never computes a total, a status or who may decide. Every outcome is the
  * server's answer. `authenticatedFetch` THROWS on any non-2xx (`ApiError` with the parsed ProblemDetails) and on an exhausted 401
@@ -181,6 +182,8 @@ export interface ReviewLine {
   findings: ReviewFinding[];
   fields: Record<string, ReviewField>;
   lineFindings: ReviewLineFinding[];
+  /** EB-D-193: a reviewer added this line through Add line; the firm did not bill it. False for every intake line. */
+  reviewerAdded: boolean;
 }
 
 export interface ReviewDecisionRecord {
@@ -269,6 +272,41 @@ export interface CorrectionRequest {
   confirm: boolean;
 }
 
+/** Body of Add line (task 164, AddLineRequest). No total, status, owner or person: the server takes the decider from the caller's token. */
+export interface AddLineRequest {
+  /** The client's id for this add; one per opened form, kept across a retry or Repeat (the server derives the line id from it). */
+  requestId: string;
+  costType: 'fee' | 'expense';
+  /** yyyy-mm-dd. */
+  date: string | null;
+  /** Fee only. */
+  timekeeper: string | null;
+  /** Fee only. */
+  hours: number | null;
+  /** Fee only. */
+  rate: number | null;
+  /** A Fee gives hours and rate, or an amount; an Expense gives an amount. */
+  amount: number | null;
+  /** Fee only. */
+  taskCode: string | null;
+  /** Fee only. */
+  activityCode: string | null;
+  /** Expense only. */
+  expenseCode: string | null;
+  description: string | null;
+  reason: string | null;
+}
+
+/** 200 body of Add line. `alreadyApplied`: the same request had already added the line. */
+export interface AddLineResponse {
+  requestId: string;
+  lineId: string;
+  decisionId: string;
+  status: string | null;
+  alreadyApplied: boolean;
+  totals: ReviewTotals | null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Failures
 // ─────────────────────────────────────────────────────────────────────────────
@@ -298,6 +336,23 @@ export const CODE_DECISION_INCOMPLETE = 'ebilling.decision.incomplete';
 export const CODE_CORRECTION_INCOMPLETE = 'ebilling.correction.incomplete';
 /** 409: the invoice needs its firm first (EB-D-185), so the line decision was refused and nothing was written. */
 export const CODE_LINE_DECISION_FIRM_MISSING = 'ebilling.line_decision.firm_missing';
+
+/** Add line refusals (task 164; InvoiceLineAddService AddLineCodes, which reuses some line-decision codes). */
+export const CODE_ADD_LINE_INVALID = 'ebilling.line_add.invalid';
+export const CODE_ADD_LINE_AMOUNT_MISMATCH = 'ebilling.line_add.amount_mismatch';
+export const CODE_ADD_LINE_CODE_NOT_ALLOWED = 'ebilling.line_add.code_not_allowed';
+export const CODE_ADD_LINE_CODE_SET_UNAVAILABLE = 'ebilling.line_add.code_set_unavailable';
+export const CODE_ADD_LINE_PROCEDURE_GAP = 'ebilling.line_add.procedure_gap';
+export const CODE_ADD_LINE_ID_REUSED = 'ebilling.line_add.id_reused';
+export const CODE_ADD_LINE_CHANGED = 'ebilling.line_add.changed';
+export const CODE_ADD_LINE_FIRM_MISSING = 'ebilling.line_add.firm_missing';
+export const CODE_REASON_REQUIRED = 'ebilling.line.reason_required';
+export const CODE_REASON_TOO_LONG = 'ebilling.line.reason_too_long';
+export const CODE_NOT_IN_REVIEW = 'ebilling.invoice.not_in_review';
+export const CODE_CORRECTIONS_PENDING = 'ebilling.line.corrections_pending';
+export const CODE_TOTALS_REFUSED = 'ebilling.invoice.totals_refused';
+export const CODE_BUSY = 'ebilling.invoice.busy';
+export const CODE_OWNER_UNRESOLVED = 'ebilling.decision.owner_unresolved';
 
 function str(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -377,6 +432,68 @@ export function writeFailureMessage(f: ApiFailure): string {
   return 'The change could not be made. Try again in a moment.';
 }
 
+/**
+ * Add line (task 164): refusals that leave the form open with what the reviewer typed. Nothing was written for any of them, so the same
+ * request id is safe to send again. The 409 `id_reused` and `not_in_review`, every 403 and every 503 incomplete belong to the page, not the form.
+ */
+export function staysInAddLineForm(f: ApiFailure): boolean {
+  if (f.signInFailed || f.status === 403 || isIncomplete(f)) return false;
+  if (f.status === 400) return true;
+  if (f.status === 409) {
+    return (
+      f.errorCode === CODE_ADD_LINE_FIRM_MISSING ||
+      f.errorCode === CODE_ADD_LINE_CODE_SET_UNAVAILABLE ||
+      f.errorCode === CODE_ADD_LINE_PROCEDURE_GAP ||
+      f.errorCode === CODE_ADD_LINE_CHANGED ||
+      f.errorCode === CODE_CORRECTIONS_PENDING ||
+      f.errorCode === CODE_TOTALS_REFUSED ||
+      f.errorCode === CODE_BUSY
+    );
+  }
+  // No answer at all (status 0) or another 5xx: the reviewer may send it again as typed, with the same request id.
+  return f.status === 0 || f.status >= 500;
+}
+
+/**
+ * The sentence shown for a refused Add line. The server's code picks the words; a 400 that names the input (`invalid`, `amount_mismatch`,
+ * `code_not_allowed`) shows the server's own detail, which says which one. Anything else falls back to the shared write-failure sentence.
+ */
+export function addLineFailureMessage(f: ApiFailure): string {
+  if (f.signInFailed || isIncomplete(f)) return writeFailureMessage(f);
+  switch (f.errorCode) {
+    case CODE_ADD_LINE_INVALID:
+    case CODE_ADD_LINE_AMOUNT_MISMATCH:
+    case CODE_ADD_LINE_CODE_NOT_ALLOWED:
+      return f.detail ?? 'A value on the form was not accepted. Check it and try again.';
+    case CODE_REASON_REQUIRED:
+      return 'A reason is required to add a line.';
+    case CODE_REASON_TOO_LONG:
+      return f.detail ?? 'The reason is too long. Shorten it and try again.';
+    case CODE_ADD_LINE_FIRM_MISSING:
+      return f.detail ?? 'This invoice needs its firm first. Add the firm, then add the line. Nothing was changed.';
+    case CODE_NOT_IN_REVIEW:
+      return 'This invoice is no longer in review, so a line cannot be added. Nothing was changed.';
+    case CODE_ADD_LINE_CODE_SET_UNAVAILABLE:
+      return 'The codes for this invoice could not be checked, so the line was not added. Nothing was changed.';
+    case CODE_ADD_LINE_PROCEDURE_GAP:
+      return 'Adding this line would leave a billing rule without the procedure it needs, so it was not added. Nothing was changed.';
+    case CODE_CORRECTIONS_PENDING:
+      return 'A correction on this invoice is still being applied. Try again in a moment. Nothing was changed.';
+    case CODE_TOTALS_REFUSED:
+      return 'The invoice totals would not allow this line, so it was not added. Nothing was changed.';
+    case CODE_BUSY:
+      return 'Another change to this invoice is in progress. Try again in a moment. Nothing was changed.';
+    case CODE_ADD_LINE_CHANGED:
+      return 'The invoice changed while the line was being added. Nothing was changed; add it again.';
+    case CODE_ADD_LINE_ID_REUSED:
+      return 'This form was already used to add a different line. Reload to see the invoice as it is now, then open Add line again.';
+    case CODE_OWNER_UNRESOLVED:
+      return 'The line could not be given an owner, so it was not added. Contact an administrator.';
+    default:
+      return writeFailureMessage(f);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Client
 // ─────────────────────────────────────────────────────────────────────────────
@@ -389,6 +506,8 @@ export interface InvoiceReviewApi {
   correctLine(invoiceId: string, lineId: string, request: CorrectionRequest): Promise<ApiResult<CorrectionResponse>>;
   correctHeader(invoiceId: string, request: CorrectionRequest): Promise<ApiResult<CorrectionResponse>>;
   listCorrections(invoiceId: string): Promise<ApiResult<Correction[]>>;
+  /** Task 164: add a Fee or Expense line the firm did not bill. Send the same `requestId` again on a retry. */
+  addLine(invoiceId: string, request: AddLineRequest): Promise<ApiResult<AddLineResponse>>;
   /** The invoice PDF bytes. */
   fetchFile(fileId: string): Promise<ApiResult<ArrayBuffer>>;
 }
@@ -411,6 +530,7 @@ export const routes = {
   correctLine: (base: string, invoiceId: string, lineId: string) =>
     `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/lines/${id(lineId)}/corrections`,
   correctHeader: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/header/corrections`,
+  addLine: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/lines`,
   corrections: (base: string, invoiceId: string) => `${trimBase(base)}/api/finance/invoices/${id(invoiceId)}/corrections`,
   fileContent: (base: string, fileId: string) => `${trimBase(base)}/api/finance/files/${id(fileId)}/content`,
 };
@@ -483,6 +603,23 @@ export function createInvoiceReviewApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl
 
     correctHeader(invoiceId, r) {
       return post(routes.correctHeader(bffBaseUrl, invoiceId), { field: r.field, value: r.value, confirm: r.confirm });
+    },
+
+    addLine(invoiceId, r) {
+      return post(routes.addLine(bffBaseUrl, invoiceId), {
+        requestId: r.requestId,
+        costType: r.costType,
+        date: r.date,
+        timekeeper: r.timekeeper,
+        hours: r.hours,
+        rate: r.rate,
+        amount: r.amount,
+        taskCode: r.taskCode,
+        activityCode: r.activityCode,
+        expenseCode: r.expenseCode,
+        description: r.description,
+        reason: r.reason,
+      });
     },
 
     async listCorrections(invoiceId) {

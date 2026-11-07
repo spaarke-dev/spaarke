@@ -5,7 +5,23 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { InvoiceReviewPage } from '../components/InvoiceReviewPage';
 import { LINE_FINDING_FALLBACK } from '../services/reviewModel';
-import { INVOICE_ID, failed, field, finding, flagged, line, lineId, listSourceFiles, mockApi, ok, problem, review, type MockApi } from './testKit';
+import {
+  ADDED_LINE_ID,
+  INVOICE_ID,
+  failed,
+  field,
+  finding,
+  flagged,
+  forbidden,
+  line,
+  lineId,
+  listSourceFiles,
+  mockApi,
+  ok,
+  problem,
+  review,
+  type MockApi,
+} from './testKit';
 
 function renderPage(api: MockApi, opts: { theme?: typeof webLightTheme; pollIntervalMs?: number; openRecord?: jest.Mock; firmNeeded?: boolean } = {}) {
   return render(
@@ -787,6 +803,230 @@ function findColourLiterals(source: string): string[] {
   }
   return found;
 }
+
+describe('InvoiceReviewPage: Add line (task 164b)', () => {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  /** Open the form and fill a Fee: date, timekeeper, hours and rate, a task code, a description and a reason. */
+  async function openAndFillFee() {
+    fireEvent.click(await screen.findByTestId('add-line'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Date'), { target: { value: '2025-03-14' } });
+    fireEvent.change(within(dialog).getByLabelText('Timekeeper'), { target: { value: 'B. Associate' } });
+    fireEvent.change(within(dialog).getByLabelText('Hours'), { target: { value: '2.5' } });
+    fireEvent.change(within(dialog).getByLabelText('Rate'), { target: { value: '300' } });
+    fireEvent.change(within(dialog).getByLabelText('Task code'), { target: { value: 'L110' } });
+    fireEvent.change(within(dialog).getByLabelText('Description'), { target: { value: 'Call with the client' } });
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'The firm left this call off the invoice' } });
+    return dialog;
+  }
+
+  // hidden: true - the dialog surface can carry aria-hidden once it has been used in jsdom; the element is still the one on screen.
+  const submit = (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole('button', { name: 'Add line', hidden: true }));
+  // Queried by DOM, not by role: a role query skips an aria-hidden surface and would pass for the wrong reason.
+  const noDialog = () => expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+  it('C1: sends ONE requestId per opened form, and the same one on Repeat after a 503 incomplete', async () => {
+    const api = mockApi(normal());
+    api.addLine.mockResolvedValueOnce(
+      failed(problem(503, 'ebilling.decision.incomplete', { detail: 'The line was saved; the signals were not.', failedStep: 'signals' }))
+    );
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    const dialog = await openAndFillFee();
+    submit(dialog);
+
+    // The change was saved: the form closes and the page offers Repeat.
+    fireEvent.click(await screen.findByTestId('notice-repeat'));
+    await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(2));
+    const [first, second] = api.addLine.mock.calls.map(c => c[1]);
+    expect(first.requestId).toMatch(UUID);
+    expect(second.requestId).toBe(first.requestId);
+    expect(second).toEqual(first);
+    // Only what the reviewer typed, the cost type and the request id: no total, status, owner, person or line id.
+    expect(first).toEqual({
+      requestId: first.requestId,
+      costType: 'fee',
+      date: '2025-03-14',
+      timekeeper: 'B. Associate',
+      hours: 2.5,
+      rate: 300,
+      amount: null,
+      taskCode: 'L110',
+      activityCode: null,
+      expenseCode: null,
+      description: 'Call with the client',
+      reason: 'The firm left this call off the invoice',
+    });
+    expect(api.addLine.mock.calls[0][0]).toBe(INVOICE_ID);
+  });
+
+  it('C1: a refusal that leaves the form open is resent with the same requestId; the next opened form gets a new one', async () => {
+    const api = mockApi(normal());
+    api.addLine.mockResolvedValueOnce(failed(problem(400, 'ebilling.line_add.invalid', { detail: 'A fee line needs its timekeeper.' })));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    const dialog = await openAndFillFee();
+    submit(dialog);
+    expect(await within(dialog).findByTestId('add-line-error')).toHaveTextContent('A fee line needs its timekeeper.');
+    submit(dialog);
+    await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(2));
+    expect(api.addLine.mock.calls[1][1].requestId).toBe(api.addLine.mock.calls[0][1].requestId);
+
+    // The second send went through (default mock): the form closed. Opening it again is a new add with a new id.
+    await waitFor(noDialog);
+    fireEvent.click(screen.getByTestId('add-line'));
+    const again = await screen.findByRole('dialog');
+    fireEvent.change(within(again).getByLabelText('Reason'), { target: { value: 'Another' } });
+    submit(again);
+    await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(3));
+    expect(api.addLine.mock.calls[2][1].requestId).toMatch(UUID);
+    expect(api.addLine.mock.calls[2][1].requestId).not.toBe(api.addLine.mock.calls[0][1].requestId);
+  });
+
+  it('C1: an Expense sends only the Expense fields', async () => {
+    const api = mockApi(normal());
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    fireEvent.click(await screen.findByTestId('add-line'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Timekeeper'), { target: { value: 'left over from the Fee tab' } });
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Expense' }));
+    fireEvent.change(within(dialog).getByLabelText('Date'), { target: { value: '2025-03-20' } });
+    fireEvent.change(within(dialog).getByLabelText('Amount'), { target: { value: '42.10' } });
+    fireEvent.change(within(dialog).getByLabelText('Expense code'), { target: { value: 'E101' } });
+    submit(dialog);
+    await waitFor(() => expect(api.addLine).toHaveBeenCalledTimes(1));
+    expect(api.addLine.mock.calls[0][1]).toMatchObject({
+      costType: 'expense',
+      timekeeper: null,
+      hours: null,
+      rate: null,
+      taskCode: null,
+      activityCode: null,
+      amount: 42.1,
+      expenseCode: 'E101',
+    });
+  });
+
+  it('C1: on success the form closes, the page re-reads and the new line is selected', async () => {
+    const added = flagged(99, { reviewerAdded: true });
+    const api = mockApi([normal(), review([...normal().lines, added])]);
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    submit(await openAndFillFee());
+    expect(await screen.findByTestId('notice')).toHaveTextContent('Line added');
+    await waitFor(() => expect(api.getReview).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId(`pane-line-${ADDED_LINE_ID}`)).toBeInTheDocument();
+    noDialog();
+  });
+
+  it.each([
+    [400, 'ebilling.line_add.invalid', 'A fee line needs its timekeeper.', 'A fee line needs its timekeeper.'],
+    [400, 'ebilling.line_add.amount_mismatch', 'The amount is not the hours times the rate.', 'The amount is not the hours times the rate.'],
+    [400, 'ebilling.line_add.code_not_allowed', 'The task code is not in this invoice code set.', 'The task code is not in this invoice code set.'],
+    [400, 'ebilling.line.reason_required', 'server words', 'A reason is required to add a line.'],
+    [409, 'ebilling.line_add.firm_missing', 'This invoice has no firm. Add the firm before adding a line; nothing was changed.', 'This invoice has no firm.'],
+    [409, 'ebilling.line_add.code_set_unavailable', 'server words', 'codes for this invoice could not be checked'],
+    [409, 'ebilling.line_add.procedure_gap', 'server words', 'without the procedure it needs'],
+    [409, 'ebilling.line.corrections_pending', 'server words', 'correction on this invoice is still being applied'],
+    [409, 'ebilling.invoice.totals_refused', 'server words', 'totals would not allow this line'],
+    [409, 'ebilling.invoice.busy', 'server words', 'Another change to this invoice is in progress'],
+    [409, 'ebilling.line_add.changed', 'server words', 'The invoice changed while the line was being added'],
+    [500, 'ebilling.decision.owner_unresolved', 'server words', 'could not be given an owner'],
+  ])('C2: %s %s shows in the form, which keeps what was typed and offers no Reload', async (status, code, detail, shown) => {
+    const api = mockApi(normal());
+    api.addLine.mockResolvedValue(failed(problem(status, code, { detail })));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    const dialog = await openAndFillFee();
+    submit(dialog);
+    expect(await within(dialog).findByTestId('add-line-error')).toHaveTextContent(shown);
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Reason')).toHaveValue('The firm left this call off the invoice');
+    expect(within(dialog).getByLabelText('Hours')).toHaveValue('2.5');
+    expect(screen.queryByTestId('notice-reload')).not.toBeInTheDocument();
+    expect(api.getReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('C2: text that is not a number is named in the form and nothing is sent', async () => {
+    const api = mockApi(normal());
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    const dialog = await openAndFillFee();
+    fireEvent.change(within(dialog).getByLabelText('Hours'), { target: { value: 'two' } });
+    submit(dialog);
+    expect(await within(dialog).findByTestId('add-line-error')).toHaveTextContent('Hours must be a number');
+    expect(api.addLine).not.toHaveBeenCalled();
+  });
+
+  it('C2: id_reused and not_in_review close the form and offer Reload', async () => {
+    for (const code of ['ebilling.line_add.id_reused', 'ebilling.invoice.not_in_review']) {
+      const api = mockApi(normal());
+      api.addLine.mockResolvedValue(failed(problem(409, code, { detail: 'server words' })));
+      const view = renderPage(api);
+      await screen.findByTestId('review-title');
+      submit(await openAndFillFee());
+      fireEvent.click(await screen.findByTestId('notice-reload'));
+      await waitFor(() => expect(api.getReview).toHaveBeenCalledTimes(2));
+      noDialog();
+      view.unmount();
+    }
+  });
+
+  it('C2: a 403 closes the form and turns the page read-only', async () => {
+    const api = mockApi(normal());
+    api.addLine.mockResolvedValue(failed(forbidden('finance.access.denied')));
+    renderPage(api);
+    await screen.findByTestId('review-title');
+    submit(await openAndFillFee());
+    expect(await screen.findByTestId('readonly-notice')).toBeInTheDocument();
+    expect(screen.queryByTestId('add-line')).not.toBeInTheDocument();
+    noDialog();
+  });
+
+  it('C3: the button shows only when the caller can decide AND the invoice is In Review', async () => {
+    const shows = async (overrides: Parameters<typeof review>[1]) => {
+      const view = renderPage(mockApi(review([flagged(1)], overrides)));
+      await screen.findByTestId('review-title');
+      const present = screen.queryByTestId('add-line') !== null;
+      view.unmount();
+      return present;
+    };
+    const inReview = review([]).header;
+    expect(await shows({})).toBe(true);
+    expect(await shows({ flags: { canRead: true, canDecide: false } })).toBe(false);
+    for (const [status, statusCode] of [
+      ['Approved', 3],
+      ['Rejected', 4],
+      ['ReturnedToFirm', 5],
+      ['SentToAp', 6],
+      ['Paid', 7],
+      ['Cancelled', 8],
+    ] as const) {
+      // canDecide stays true: the status alone hides it.
+      expect(await shows({ header: { ...inReview, status, statusCode } })).toBe(false);
+    }
+  });
+
+  it('C3: the button is disabled while the invoice needs its firm first', async () => {
+    renderPage(mockApi(normal()), { firmNeeded: true });
+    await screen.findByTestId('review-title');
+    expect(screen.getByTestId('add-line')).toBeDisabled();
+  });
+
+  it('C4: a reviewer-added line carries the badge; intake lines do not', async () => {
+    renderPage(mockApi(review([line(1), flagged(2, { reviewerAdded: true }), flagged(3)])));
+    await screen.findByTestId('review-title');
+    const badge = screen.getByTestId(`reviewer-added-${lineId(2)}`);
+    expect(badge).toHaveTextContent('Added');
+    expect(badge).toHaveAccessibleName('Added by reviewer');
+    expect(within(row(2)).getByTestId(`reviewer-added-${lineId(2)}`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`reviewer-added-${lineId(1)}`)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(`reviewer-added-${lineId(3)}`)).not.toBeInTheDocument();
+    expect(screen.getAllByTestId(/^reviewer-added-/)).toHaveLength(1);
+  });
+});
 
 describe('source guards', () => {
   it('uses no colour literal anywhere in the page source (dark mode: Fluent tokens only, ADR-021)', () => {
