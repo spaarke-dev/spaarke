@@ -57,3 +57,15 @@ Evidence: `notes/spikes/phase0-spike-measurements.md`. Spike head `5c9e301572` o
 - Adding `ModelContextProtocol.AspNetCore` 2.3.1 lifts `Microsoft.Extensions.AI.Abstractions` to 10.11.0 and needs `Microsoft.Extensions.Logging.Abstractions >= 10.0.13`. `Spaarke.sln` restore then fails with NU1605 in `Sprk.Provisioning.ControlPlane.NightlyTests` (pins 10.0.11; references the BFF). Task 020 must bump that pin (and any other BFF-referencing project that pins lower) and fold the `Microsoft.Extensions.AI` alignment into the NFR-08 AI suites.
 - Widget variants: the 1, 3 and 6 MB widgets are three extra resources plus `spike.html` (alias of 1 MB); the 3 and 6 MB ones are not bound to a tool because T13 fixes each route's tool set. 003 binds a variant by editing the spike or the tool meta.
 - `spike_whoami` returns `tid` and `oid` GUIDs plus booleans for `aud` (matches the BFF app) and `scp` (has `user_impersonation`); no claim text.
+
+## 2026-11-06 — Phase 0 spike dev deploy: option (a), short window (owner, in uac-r2's session)
+
+- **Decision:** the spike is deployed to the shared dev BFF in a time-boxed window. A separate slot or App Service (option b) is rejected. That copy would run the whole BFF, including its scheduled reconcilers and Service Bus consumers, so two builds would compete for the same subscriptions and Dataverse rows. Feature-flagged code on master (option c) is the long-term route, through tasks 020/021.
+- **Conditions (uac-r2):**
+  1. The spike is rebuilt on the exact master SHA of uac-r2's queued batch deploy (#2292/#2610/044). `git diff <batch SHA>..<spike SHA>` must contain only `5c9e301572`'s files.
+  2. Never-merge draft PR **#2615** with Router and Client lint green. Re-confirm the §10 numbers (+0.703 MB, no vulnerable packages) on the rebuilt SHA.
+  3. The window opens after the batch gate passes and lasts at most 24 h unless the owner extends it. Master deploys pause during it. An urgent peer fix may end it early, with the owner's go.
+  4. The spike gate is the master server gate plus: anonymous `/mcp/legal-operations` and `/mcp/spike-area-b` return 401, and signed-in requests return 2xx.
+  5. At the end, uac-r2 redeploys the then-current master.
+  6. Auth uses the default workforce scheme only. T5 includes one negative check: a CIAM or A9 token returns 401.
+- **Order:** the 046c watch (until 05:40Z), then the batch deploy (its own owner go), its gate, and then our window. uac-r2 sends the batch master SHA. We merge it into `spike/spaarkeai-mcp-phase0`, push, wait for green CI, and the owner gives the per-SHA go in uac-r2's session.
