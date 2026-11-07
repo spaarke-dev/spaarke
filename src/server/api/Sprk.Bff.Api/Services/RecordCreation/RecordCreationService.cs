@@ -1916,11 +1916,14 @@ internal sealed partial class RecordCreationService
     /// maker's own subject is granted inline (task 049 fix round 1, UAC-r2 ruling: the maker's own Assigned-To share stays
     /// immediate), and then the full pass is queued (task 049b, UAC-r2 ruling: every other subject, external grants included,
     /// takes the queued path; the full pass finds the maker's access already in place and writes nothing for it). Otherwise
-    /// the full pass is queued (<see cref="QueueAssignedAccessGrantAsync"/>), and runs inline when nothing could be queued
-    /// (as before task 049). Never throws; a fault is the reconciliation job's.
+    /// the full pass is queued (<see cref="QueueAssignedAccessGrantAsync"/>). Either way, when nothing could be queued the
+    /// FULL pass runs inline, once, with the create's grantor (<see cref="RunFullPassNotQueuedAsync"/>). Never throws; a
+    /// fault is the reconciliation job's.
     /// </summary>
-    /// <remarks>Task 049b, enqueue failure in the maker case: the rest is NOT run inline (that pass is the latency 049b
-    /// removes). It is logged, and <see cref="AssignedAccessReconciliationJob"/> grants it within one cycle.</remarks>
+    /// <remarks>Task 049b fix round 2 (UAC-r2 ruling b): in the maker case a failed enqueue no longer leaves the other
+    /// subjects to the reconciliation job; it runs the same inline full pass as the other case, so an external subject is
+    /// granted and invited in the request. A send that is merely slow and then succeeds is not a failure and runs nothing
+    /// inline.</remarks>
     private async Task GrantAssignedAccessAsync(string table, Guid id, RecordTableRule rule, Decision decision, string correlationId)
     {
         if (await MakersForPersonContactAsync(table, id, rule, decision).ConfigureAwait(false) is { } makersContact)
@@ -1928,24 +1931,32 @@ internal sealed partial class RecordCreationService
             await AssignedAccessMaterializer.RunAfterWriteAsync(
                 _scopes, table, id, writtenColumns: null, decision.GrantorOid, _logger, CancellationToken.None,
                 onlySubject: new AssignedSubject(AssignedSubjectKind.Contact, makersContact)).ConfigureAwait(false);
-
-            if (!await QueueAssignedAccessGrantAsync(table, id, decision.GrantorOid, correlationId, runsInlineOnFailure: false)
-                    .ConfigureAwait(false))
-            {
-                _logger.LogWarning(
-                    "[ASSIGNED-ACCESS] {Table} {Id}: only the maker's own assigned subject was evaluated in the request; the " +
-                    "create-time pass for the other assigned subjects was not queued, so the assigned-access reconciliation " +
-                    "job completes it (correlationId={CorrelationId}).", table, id, correlationId);
-            }
-
-            return;
         }
 
-        if (!await QueueAssignedAccessGrantAsync(table, id, decision.GrantorOid, correlationId, runsInlineOnFailure: true)
-                .ConfigureAwait(false))
+        var queued = await QueueAssignedAccessGrantAsync(table, id, decision.GrantorOid, correlationId).ConfigureAwait(false);
+        if (!queued.Queued)
+            await RunFullPassNotQueuedAsync(table, id, decision.GrantorOid, correlationId, queued.SendFailure).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Nothing was queued, so the full "Assigned *" pass runs inline, once, as the create's grantor (the grantor the queued
+    /// job would carry, so an external subject's invite has its actor). When the send itself failed
+    /// (<paramref name="sendFailure"/>), one <c>[ASSIGNED-ACCESS] QueueDownInlinePass</c> line records the root and how many
+    /// assigned subjects the pass evaluated, so creates made while the queue is down can be counted; it names no contact,
+    /// name or email. (The BFF logs with message tags, not event ids.)
+    /// </summary>
+    private async Task RunFullPassNotQueuedAsync(
+        string table, Guid id, string? grantorOid, string correlationId, string? sendFailure)
+    {
+        var outcome = await AssignedAccessMaterializer.RunAfterWriteAsync(
+            _scopes, table, id, writtenColumns: null, grantorOid, _logger, CancellationToken.None).ConfigureAwait(false);
+
+        if (sendFailure is not null)
         {
-            await AssignedAccessMaterializer.RunAfterWriteAsync(
-                _scopes, table, id, writtenColumns: null, decision.GrantorOid, _logger, CancellationToken.None).ConfigureAwait(false);
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] QueueDownInlinePass {Table} {Id}: the create-time grant could not be queued ({ExceptionType}); " +
+                "the full pass ran inline for {Subjects} assigned subject(s) (correlationId={CorrelationId}).",
+                table, id, sendFailure, outcome?.Entries.Count ?? 0, correlationId);
         }
     }
 
@@ -1994,21 +2005,22 @@ internal sealed partial class RecordCreationService
     /// Task 049 Part B (NFR-02; UAC-r2's conditions, notes/task-049-notes.md): queues the I-12 L1 "Assigned *" pass of a
     /// created project, matter or work assignment (<see cref="AssignedAccessCreateGrantJobHandler"/>), so the create returns
     /// without it. Create only: every update path keeps its inline pass. The message names the root, the grantor and the
-    /// cache tenants, never the assignees. Returns <c>false</c> when nothing was queued (another table, no queue in this
-    /// host, a failed or slow send); the caller then runs the pass inline, as before, unless it is the maker case (task 049b,
-    /// <paramref name="runsInlineOnFailure"/> <c>false</c>), which leaves it to the reconciliation job.
+    /// cache tenants, never the assignees. <c>Queued</c> is <c>false</c> when nothing was queued (another table, no queue in
+    /// this host, a failed send, or a send that outlasts the enqueue timeout); the caller then runs the full pass inline
+    /// (<see cref="RunFullPassNotQueuedAsync"/>), in the maker case too (task 049b fix round 2). <c>SendFailure</c> is the
+    /// exception type when the send itself failed or timed out; the caller logs it.
     /// </summary>
-    private async Task<bool> QueueAssignedAccessGrantAsync(
-        string table, Guid id, string? grantorOid, string correlationId, bool runsInlineOnFailure)
+    private async Task<(bool Queued, string? SendFailure)> QueueAssignedAccessGrantAsync(
+        string table, Guid id, string? grantorOid, string correlationId)
     {
         if (!AssignedAccessMaterializer.TryParseRootLogicalName(table, out var rootType))
-            return false;
+            return (false, null);
 
         try
         {
             using var scope = _scopes.CreateScope();
             if (scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>() is not { } jobs)
-                return false;
+                return (false, null);
 
             var tenant = scope.ServiceProvider.GetService<IConfiguration>() is { } configuration
                 ? ImpersonatedRootSetSource.DeploymentCacheTenant(configuration)
@@ -2021,15 +2033,11 @@ internal sealed partial class RecordCreationService
             _logger.LogInformation(
                 "[ASSIGNED-ACCESS] Queued the create-time grant of {Table} {Id} (job {JobId}, correlationId={CorrelationId}).",
                 table, id, job.JobId, correlationId);
-            return true;
+            return (true, null);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(
-                "[ASSIGNED-ACCESS] The create-time grant of {Table} {Id} could not be queued ({ExceptionType}); {Fallback} " +
-                "(correlationId={CorrelationId}).", table, id, ex.GetType().Name,
-                runsInlineOnFailure ? "it runs inline" : "the assigned-access reconciliation job completes it", correlationId);
-            return false;
+            return (false, ex.GetType().Name);
         }
     }
 

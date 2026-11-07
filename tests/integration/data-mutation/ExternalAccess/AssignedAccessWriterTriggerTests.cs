@@ -146,6 +146,9 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
     /// <summary>Task 049 Part B: the jobs the Office host's creates queued.</summary>
     private readonly List<Sprk.Bff.Api.Services.Jobs.JobContract> _queued = new();
 
+    /// <summary>Task 049b fix round 2: how many sends a failing queue was asked for.</summary>
+    private int _submitAttempts;
+
     private Sprk.Bff.Api.Services.Jobs.JobSubmissionService QueueThatRecords(bool fails = false)
     {
         var jobs = new Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
@@ -156,6 +159,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         if (fails)
         {
             jobs.Setup(j => j.SubmitJobAsync(It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), It.IsAny<CancellationToken>()))
+                .Callback<Sprk.Bff.Api.Services.Jobs.JobContract, CancellationToken>((_, _) => Interlocked.Increment(ref _submitAttempts))
                 .ThrowsAsync(new Azure.Messaging.ServiceBus.ServiceBusException(
                     "Simulated send failure.", Azure.Messaging.ServiceBus.ServiceBusFailureReason.ServiceCommunicationProblem));
             return jobs.Object;
@@ -293,13 +297,58 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
     }
 
     /// <summary>
-    /// Task 049b, condition 2: the remainder cannot be queued. Only the maker's subject was granted; the rest is not run
-    /// inline, the failure is logged naming the reconciliation job, and no log line reads as the root's whole pass.
+    /// Task 049b fix round 2 (UAC-r2 ruling b), condition (i): the remainder cannot be queued (the send throws). The FULL
+    /// pass runs inline with the create's grantor, so the external subject gets its grant AND its invite, the maker is still
+    /// granted, and one neutral line records the queue-down create (no contact id, name or email).
     /// </summary>
     [Fact]
-    public async Task OfficeQuickCreate_ForItsMaker_WhenTheQueueFails_LogsIt_AndNeverReportsEverySubjectGranted()
+    public async Task OfficeQuickCreate_ForItsMaker_WhenTheQueueFails_RunsTheFullPassInline_GrantingAndInvitingTheExternalSubject()
     {
         var (makersContact, makerUser) = _h.LinkedContact();
+        var others = OthersOnTheMatter();
+        const string externalEmail = "partner@outside.test";
+        _h.Identities.Contacts[others.External].Email = externalEmail;
+        var grantorOid = Guid.NewGuid();
+        _h.Grants.SystemUserIdsByOid[grantorOid] = Guid.NewGuid(); // an internal user: the invite rule applies
+        var logs = new Sprk.Bff.Api.Tests.Auth.SpeAdmin.RecordingLoggerProvider();
+        var created = new List<(string Table, Guid Id)>();
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        using var host = OfficeHost(factory, makersContact, created, queueFails: true, alsoAssign: others.Assign, logs: logs);
+        var client = host.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-Oid", grantorOid.ToString("D"));
+
+        var response = await client.PostAsJsonAsync("/api/office/quickcreate/matter", new QuickCreateRequest { Name = "Quick" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var createdId = created.Should().ContainSingle().Subject.Id;
+        _queued.Should().BeEmpty("the queue failed");
+        _inlinePasses.Should().Be(2, "the maker's own grant, then the full pass");
+        _h.Shares.MaskOf("sprk_matter", createdId, DataversePrincipalRef.User(makerUser)).Should().NotBeNull("the maker is still granted");
+        _h.Shares.MaskOf("sprk_matter", createdId, DataversePrincipalRef.User(others.AttorneyUser)).Should().NotBeNull();
+        _h.Grants.ActiveRowsOf(createdId, others.External).Should().ContainSingle("the external subject is granted in the request");
+        _h.Grants.ActiveRowsOf(createdId, organizationId: others.Firm).Should().ContainSingle();
+        _h.Emails.InviteUrls.Should().ContainSingle("the external subject is invited, as the grantor's pass does");
+        _h.Store.RowsOf(createdId, makersContact).Should().ContainSingle().Which.State.Should().Be(AssignedAccessState.Shared);
+
+        var lines = logs.Lines.Where(l => l.Message.Contains(createdId.ToString(), StringComparison.OrdinalIgnoreCase)).ToList();
+        var queueDown = lines.Where(l => l.Message.Contains("QueueDownInlinePass")).ToList();
+        queueDown.Should().ContainSingle("one neutral line counts a queue-down create").Which.Message
+            .Should().Contain("for 4 assigned subject(s)");
+        queueDown[0].Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Warning);
+        logs.Lines.Should().NotContain(l => l.Message.Contains("reconciliation job completes it"));
+        logs.Lines.Should().NotContain(l => l.Message.Contains("it runs inline"));
+        queueDown[0].Message.Should().NotContainAny(externalEmail, others.External.ToString(), makersContact.ToString())
+            .And.NotContainEquivalentOf(grantorOid.ToString("D"), "the line names no contact, email or person");
+    }
+
+    /// <summary>
+    /// Task 049b fix round 2, condition (iii): the fallback runs once. One send is attempted, the full pass is not run twice
+    /// (one full-pass line, one maker-only line) and nothing is queued again.
+    /// </summary>
+    [Fact]
+    public async Task OfficeQuickCreate_ForItsMaker_WhenTheQueueFails_TheFullPassRunsOnce_AndIsNotQueuedAgain()
+    {
+        var (makersContact, _) = _h.LinkedContact();
         var others = OthersOnTheMatter();
         var logs = new Sprk.Bff.Api.Tests.Auth.SpeAdmin.RecordingLoggerProvider();
         var created = new List<(string Table, Guid Id)>();
@@ -310,20 +359,15 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
 
         response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
         var createdId = created.Should().ContainSingle().Subject.Id;
-        _queued.Should().BeEmpty("the queue failed");
-        _inlinePasses.Should().Be(1, "only the maker's grant ran in the request; the rest is not run inline");
-        _h.Shares.MaskOf("sprk_matter", createdId, DataversePrincipalRef.User(makerUser)).Should().NotBeNull();
-        _h.Shares.MaskOf("sprk_matter", createdId, DataversePrincipalRef.User(others.AttorneyUser)).Should().BeNull();
-        _h.Grants.WriteCount.Should().Be(0);
+        _submitAttempts.Should().Be(1, "one send, not retried");
+        _queued.Should().BeEmpty();
+        _inlinePasses.Should().Be(2, "the maker's pass and exactly one full pass");
 
         var lines = logs.Lines.Where(l => l.Message.Contains(createdId.ToString(), StringComparison.OrdinalIgnoreCase)).ToList();
-        lines.Should().Contain(l => l.Level == Microsoft.Extensions.Logging.LogLevel.Warning
-                                    && l.Message.Contains("reconciliation job completes it"),
-            "the failed enqueue is logged, and the reconciliation job is the backstop");
-        lines.Should().Contain(l => l.Message.Contains("1 of 4 assigned subject(s) evaluated"));
-        lines.Should().NotContain(l => System.Text.RegularExpressions.Regex.IsMatch(
-            l.Message, @": \d+ assigned subject\(s\), \d+ write\(s\)"), "no line reads as every subject's pass");
-        lines.Should().NotContain(l => l.Message.Contains("it runs inline"));
+        lines.Count(l => System.Text.RegularExpressions.Regex.IsMatch(l.Message, @": \d+ assigned subject\(s\), \d+ write\(s\)"))
+            .Should().Be(1, "the full pass ran once");
+        lines.Count(l => l.Message.Contains("1 of 4 assigned subject(s) evaluated")).Should().Be(1);
+        lines.Count(l => l.Message.Contains("QueueDownInlinePass")).Should().Be(1);
     }
 
     /// <summary>

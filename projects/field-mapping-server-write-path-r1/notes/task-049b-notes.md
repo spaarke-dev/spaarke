@@ -27,7 +27,8 @@
    `ContinueOursAsync` (Shared branch): it reads the share mask, finds it, and `EnsureRowsAsync` skips a ledger write that
    already says the same. Zero writes for the maker (asserted in the materializer test and in both Office tests).
    **Ordering:** the maker's inline pass finishes before the enqueue, so the job never runs concurrently with it.
-2. **Enqueue failure (maker case): the rest is NOT run inline.** Choice: log a warning naming the reconciliation job
+2. **Enqueue failure (maker case): the rest is NOT run inline.** *(Superseded by "Fix round 2 (UAC-r2 ruling b)" below:
+   the full pass now runs inline.)* Choice: log a warning naming the reconciliation job
    (`[ASSIGNED-ACCESS] … only the maker's own assigned subject was evaluated in the request; the create-time pass for the
    other assigned subjects was not queued, so the assigned-access reconciliation job completes it`), and the
    enqueue's own catch says "the assigned-access reconciliation job completes it" instead of "it runs inline". The
@@ -45,7 +46,7 @@
 |---|---|---|---|
 | `OfficeQuickCreate_ForItsMaker_GrantsOnlyTheMakerInline_AndQueuesTheRest` | AssignedAccessWriterTriggerTests | FAIL | pass |
 | `OfficeQuickCreate_ForItsMaker_NeverGrantsAnExternalSubjectInline` | AssignedAccessWriterTriggerTests | FAIL | pass |
-| `OfficeQuickCreate_ForItsMaker_WhenTheQueueFails_LogsIt_AndNeverReportsEverySubjectGranted` | AssignedAccessWriterTriggerTests | FAIL | pass |
+| `OfficeQuickCreate_ForItsMaker_WhenTheQueueFails_LogsIt_AndNeverReportsEverySubjectGranted` (replaced in fix round 2; see below) | AssignedAccessWriterTriggerTests | FAIL | pass |
 | `OfficeQuickCreate_ForItsMaker_AFaultInTheMakersGrant_NeverFailsTheCreate` (condition 3) | AssignedAccessWriterTriggerTests | FAIL (nothing queued) | pass |
 | `OfficeQuickCreate_ForItsMaker_SharesTheRecordWithThem_BeforeItReturns` ×2 (updated: one job is now queued) | AssignedAccessWriterTriggerTests | FAIL | pass |
 | `CreateAsync_AnIsolatedCreate_ForItsMaker_RunsItsPassInline_OnceSecuringCompleted` (updated: one job is now queued) | RecordCreationServiceSecureRootSeamTests | FAIL | pass |
@@ -87,3 +88,41 @@ filter reported 1 failure that did not reproduce in the next two runs (its name 
   test failed (`Expected ... "none" ... but "granted"`); after it passes.
 - **K4 - doc.** `AssignedAccessStatus.Evaluated` and `AssignedAccessOutcome.Complete` now say that for a one-subject pass
   they cover that subject only. Doc only.
+
+## Fix round 2 (UAC-r2 ruling b)
+
+UAC-r2 ruled that the maker case must not leave the other subjects to the reconciliation job when the enqueue fails.
+
+- **Behaviour.** In `GrantAssignedAccessAsync` the maker's one-subject pass still runs first. The full pass is then queued.
+  If nothing was queued (the send threw, including the enqueue timeout, or the host has no queue), the FULL pass runs
+  inline, once, through `AssignedAccessMaterializer.RunAfterWriteAsync` with no `OnlySubject` and `decision.GrantorOid`,
+  the same grantor master's inline path used. An external subject is therefore granted and invited in the request. This is
+  now one code path for the maker and non-maker cases (`RunFullPassNotQueuedAsync`). A send that is slow but succeeds
+  is not a failure and runs nothing inline; the success case (1 inline subject, the rest queued) is unchanged, and the K2
+  rule (a one-subject pass acts only on a share) is untouched.
+- **Failure signal.** `QueueAssignedAccessGrantAsync` now returns `(Queued, SendFailure)`: `SendFailure` is the exception
+  type when the send threw, `null` for "no queue in this host" or another table. The fallback runs once, in the caller.
+- **Logging.** The BFF logs with message tags, not event ids (no `EventId` is used anywhere in `Sprk.Bff.Api`, and the
+  non-maker fallback had none), so the tag is `[ASSIGNED-ACCESS] QueueDownInlinePass`, Warning level, one line per
+  queue-down create: table, root id, exception type, assigned-subject count (`Entries.Count` of the inline pass), correlation
+  id. No contact id, name, email or grantor. It replaces both 049b's "the reconciliation job completes it" warning and the
+  enqueue catch's "it runs inline" warning, so the log is one line, not two. Count them with `QueueDownInlinePass`.
+- **Docs amended.** `GrantAssignedAccessAsync` and `QueueAssignedAccessGrantAsync` summaries (`RecordCreationService.cs`);
+  `AssignedAccessCreateGrantJobHandler.EnqueueTimeout` summary.
+- **Tests** (`AssignedAccessWriterTriggerTests`, 22 in the class):
+  - (i) `OfficeQuickCreate_ForItsMaker_WhenTheQueueFails_RunsTheFullPassInline_GrantingAndInvitingTheExternalSubject`
+    (replaces the reconciler-only test): the send throws; two inline passes; the maker, the internal attorney, the external
+    contact (grant + one invite URL) and the firm are all granted; one `QueueDownInlinePass` line with "for 4 assigned
+    subject(s)" and none of the external's email, contact id, the maker's contact id or the grantor oid; the old
+    "reconciliation job completes it" and "it runs inline" lines are absent.
+  - (iii) `..._TheFullPassRunsOnce_AndIsNotQueuedAgain`: one send attempt, nothing queued, two inline passes in all, exactly
+    one full-pass materializer line and one maker-only line.
+  - (ii) the existing `..._GrantsOnlyTheMakerInline_AndQueuesTheRest` and `..._NeverGrantsAnExternalSubjectInline` pass
+    unchanged.
+  - **Fail-first:** with master-of-fix1's `RecordCreationService.cs` copied back, 20 run, **2 failed** (both new tests, each on
+    `_inlinePasses` expected 2, found 1: the full pass was not run inline), 18 passed. Service restored afterwards.
+  - After: the filtered BFF run (`AssignedAccess | RecordCreation | OfficeQuickCreate | SecureRootCreateRoute |
+    SecureFromCreation | CallerChecksConcurrency`): 1207 tests, 1204 passed, 3 skipped, 0 failed.
+- **Note on a timed-out send.** The 5 s enqueue timeout cancels the send and counts as a failure. A cancelled send might
+  still have reached the queue; the full pass is idempotent (it reads the root's current state), so a queued job arriving
+  later writes nothing more. This is the same exposure the non-maker fallback already had.
