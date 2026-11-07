@@ -14,7 +14,44 @@ namespace Sprk.Bff.Api.Api.Signals;
 /// <param name="Message">How to fix the call. It names the reason and the fix only: never record text, party names or matter names
 /// (ADR-015), so it never repeats a result's <c>Detail</c>.</param>
 /// <param name="Status">The HTTP status the REST route answers for the same result. Information for the host, never a transport status.</param>
-public sealed record DecisionToolError(string ReasonCode, string Message, int Status);
+/// <param name="Partial">For a <see cref="DecisionCommitStatus.Failed"/> commit only (task 014; D-17): which writes landed, the same facts
+/// the REST route's Failed extensions carry. Null for every other result.</param>
+public sealed record DecisionToolError(string ReasonCode, string Message, int Status, DecisionToolPartial? Partial = null);
+
+/// <summary>
+/// What a failed commit left behind (D-17; spaarkeai-mcp-bff-api-r1 task 014, from ontology's review of task 017): the REST route's
+/// Failed extensions (<c>failedStep</c>, <c>landed</c>, <c>possiblyLanded</c>, <c>steps</c>, <c>recordMayExist</c>,
+/// <c>sentButNotRecorded</c>, <c>resumable</c>, <c>replayed</c>) with the same values, so an MCP host can tell the user what was done
+/// and whether a retry resumes. Codes, record ids and flags only (ADR-015): a step's <see cref="DecisionCommitStep.Detail"/> is left
+/// out, as is the result's <see cref="DecisionCommitResult.Detail"/>.
+/// </summary>
+/// <param name="FailedStep">The D-17 step that failed (2, 3, 4 or 5).</param>
+/// <param name="Landed">Every write confirmed to have landed, in order.</param>
+/// <param name="PossiblyLanded">Writes sent without a clear answer; they may have landed.</param>
+/// <param name="Steps">The executed steps, without their text.</param>
+/// <param name="RecordMayExist">A step-5 failure without a clear answer: the Decision Record may exist.</param>
+/// <param name="SentButNotRecorded">A message went out and the record was not written.</param>
+/// <param name="Resumable">A retry with the same review id resumes after the steps that landed.</param>
+/// <param name="Replayed">This is the stored first outcome of a repeated review id.</param>
+public sealed record DecisionToolPartial(
+    int? FailedStep,
+    IReadOnlyList<DecisionCommitRef> Landed,
+    IReadOnlyList<DecisionCommitRef> PossiblyLanded,
+    IReadOnlyList<DecisionToolStep> Steps,
+    bool RecordMayExist,
+    bool SentButNotRecorded,
+    bool Resumable,
+    bool Replayed);
+
+/// <summary>One executed step of a failed commit for a tool: <see cref="DecisionCommitStep"/> without its <c>Detail</c> text.</summary>
+public sealed record DecisionToolStep(
+    string Key,
+    string Code,
+    int Phase,
+    string Status,
+    IReadOnlyList<DecisionCommitRef> Written,
+    IReadOnlyList<DecisionCommitRef> PossiblyWritten,
+    string? ReasonCode);
 
 /// <summary>
 /// The ONE place the decision slice maps its results (spaarkeai-mcp-bff-api-r1 task 017, design §8 B-2, spec FR-09): to
@@ -29,7 +66,7 @@ public sealed record DecisionToolError(string ReasonCode, string Message, int St
 /// <see cref="DecisionActionReasons"/>, the route constants on <see cref="DecisionPlanEndpoints"/> and
 /// <see cref="SignalReadEndpoints"/>, <see cref="ProblemDetailsHelper.RecordUnavailableReasonCode"/>); this class adds none. REST
 /// and MCP take the status of a commit result from the same switch, so the two hosts cannot disagree.</para>
-/// <para><b>No caller (task 013).</b> A capability call with no request context or no authenticated caller answers
+/// <para><b>No caller (tasks 013, 014).</b> A capability call (a read or the commit) with no request context or no authenticated caller answers
 /// <c>UserContextRequired</c> (<see cref="DataverseUserClientErrorCodes.UserContextRequired"/>, 401) on both hosts. A REST request never
 /// reaches it (the routes' <c>RequireAuthorization</c> answers 401 first, so no baseline moves); an MCP tool can.</para>
 /// <para><b>Placement justification (CLAUDE.md section 10; .claude/constraints/bff-extensions.md).</b> It replaces mapping statics
@@ -150,6 +187,10 @@ public static class DecisionResultMapper
     /// landed (D-17).</summary>
     public static IResult ToHttp(DecisionCommitResult result, HttpContext httpContext)
     {
+        // Task 014: the capability's no-caller answer. A REST request never reaches it (RequireAuthorization answers 401 first).
+        if (IsUserContextRequired(result))
+            return Problem(UserContextRequiredProblem, httpContext);
+
         switch (result.Status)
         {
             case DecisionCommitStatus.Recorded:
@@ -217,16 +258,16 @@ public static class DecisionResultMapper
             _ => ToToolError(SuppressionUnavailableProblem),
         };
 
-    /// <summary>A commit result for a tool: null when the decision was recorded, otherwise the REST route's reason code and status.</summary>
+    /// <summary>A commit result for a tool: null when the decision was recorded, otherwise the REST route's reason code and status. A
+    /// <see cref="DecisionCommitStatus.Failed"/> result also carries <see cref="DecisionToolError.Partial"/>, the D-17 facts (task 014).</summary>
     public static DecisionToolError? ToToolError(DecisionCommitResult result) =>
         result.Status switch
         {
             DecisionCommitStatus.Recorded => null,
+            _ when IsUserContextRequired(result) => ToToolError(UserContextRequiredProblem),
             DecisionCommitStatus.NotFound => ToToolError(ProblemDetailsHelper.RecordUnavailableReasonCode, StatusCodes.Status404NotFound),
             DecisionCommitStatus.CallerUnresolved => ToToolError(CallerUnresolvedProblem),
-            _ => ToToolError(
-                string.IsNullOrWhiteSpace(result.ReasonCode) ? FallbackReasonCode(result.Status) : result.ReasonCode,
-                CommitStatusCode(result.Status)),
+            _ => CommitToolError(result),
         };
 
     /// <summary>
@@ -275,6 +316,32 @@ public static class DecisionResultMapper
         };
 
     private static DecisionToolError ToToolError(FixedProblem problem) => ToToolError(problem.ReasonCode, problem.Status);
+
+    /// <summary>A refused or failed commit for a tool; a <see cref="DecisionCommitStatus.Failed"/> one adds the D-17 facts (task 014).</summary>
+    private static DecisionToolError CommitToolError(DecisionCommitResult result)
+    {
+        var error = ToToolError(
+            string.IsNullOrWhiteSpace(result.ReasonCode) ? FallbackReasonCode(result.Status) : result.ReasonCode,
+            CommitStatusCode(result.Status));
+        return result.Status == DecisionCommitStatus.Failed ? error with { Partial = PartialOf(result) } : error;
+    }
+
+    /// <summary>The REST Failed extensions' values (<see cref="CommitProblem"/>), with no record text: the steps lose their Detail.</summary>
+    private static DecisionToolPartial PartialOf(DecisionCommitResult result) =>
+        new(
+            result.FailedStep,
+            result.Landed,
+            result.PossiblyLanded,
+            result.Steps.Select(s => new DecisionToolStep(s.Key, s.Code, s.Phase, s.Status, s.Written, s.PossiblyWritten, s.ReasonCode)).ToList(),
+            result.RecordMayExist,
+            result.SentButNotRecorded,
+            result.Resumable,
+            result.Replayed);
+
+    /// <summary>The capability's no-caller commit answer (<see cref="DecisionCapability.UserContextRequiredCommitResult"/>), by reference
+    /// as for the worklist, so a <see cref="DecisionCommitStatus.CallerUnresolved"/> the service builds stays the single 403.</summary>
+    private static bool IsUserContextRequired(DecisionCommitResult result) =>
+        ReferenceEquals(result, DecisionCapability.UserContextRequiredCommitResult);
 
     /// <summary>The capability's no-caller worklist answer: that one instance (<see cref="DecisionCapability.UserContextRequiredReadResult"/>),
     /// by reference, so a <see cref="SignalReadOutcome.CallerUnresolved"/> that <see cref="SignalReadService"/> builds stays the single 403

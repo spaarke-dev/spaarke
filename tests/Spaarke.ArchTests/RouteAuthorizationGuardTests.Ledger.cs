@@ -2220,21 +2220,25 @@ public partial class RouteAuthorizationGuardTests
             + "Anything but Allowed returns before the plan is read (DecisionCapability.cs:101-104; mapped by DecisionResultMapper to the uniform 404, "
             + "the caller_unresolved 403 or the subject-read or \"mine\" fault 503)."),
         new HandlerDecision("POST /api/v1/signals/{signalId:guid}/decision", "CommitDecisionAsync", "IDataverseUserClient",
-            new[] { "DecisionCommitService.CommitAsync", "SignalCoreRecordAccess.AuthorizeAsync" },
-            "Ontology task 043: the handler calls DecisionCommitService.CommitAsync (DecisionCommitEndpoints.cs:56), whose first I/O is "
-            + "SignalCoreRecordAccess.AuthorizeAsync for every Signal in the review (DecisionCommitService.cs:461, readability only: enforceDoLaneMine false) -- the Signal and "
+            new[] { "DecisionCapability.CommitAsync", "DecisionCommitService.CommitAsync", "SignalCoreRecordAccess.AuthorizeAsync" },
+            "Ontology task 043; spaarkeai-mcp-bff-api-r1 task 014 (B-1): the handler calls DecisionCapability.CommitAsync "
+            + "(DecisionCommitEndpoints.cs:59), which after a no-caller guard (no context or no authenticated identity: UserContextRequired, "
+            + "nothing read, DecisionCapability.Commit.cs:39) delegates unchanged to DecisionCommitService.CommitAsync (:44), the route's "
+            + "former direct call, which MCP's complete tool shares. Its first I/O is "
+            + "SignalCoreRecordAccess.AuthorizeAsync for every Signal in the review (DecisionCommitService.cs:467, readability only: enforceDoLaneMine false) -- the Signal and "
             + "its core record (or, no-core, its subject row) read AS THE CALLER through IDataverseUserClient; anything but Allowed returns before the review-id "
-            + "ledger, any app-only read or any write (uniform 404 at :466-467, caller_unresolved 403 at :462-463, 503 at :464-465). The Do-lane \"mine\" "
-            + "half (D-141, ConfirmDoLaneMineAsync :568, the same three answers) runs right after the ledger peek (:481-482), before any "
+            + "ledger, any app-only read or any write (uniform 404 at :472-473, caller_unresolved 403 at :468-469, 503 at :470-471). The Do-lane \"mine\" "
+            + "half (D-141, ConfirmDoLaneMineAsync :587, the same three answers) runs right after the ledger peek (:487-488), before any "
             + "lock, ledger answer or write; it is skipped only when the same caller resends the same content (the ledger key carries the "
-            + "caller and the stored hash the content), runs under the lock when that entry is gone (:621-622), and runs again before a "
-            + "resume (:645) or a repair replay (:759) unless that review's own reassign step landed (:638). Before any "
+            + "caller and the stored hash the content), runs under the lock when that entry is gone (:640-642), and runs again before a "
+            + "resume (:664) or a repair replay (:778) unless that review's own reassign step landed (:657). Before any "
             + "write or close it also asks, as the caller through CallerRecordAccessProbe, Write on each Signal's subject and "
-            + "AppendTo on the core record (FR-51; :964, AppendTo :1472, Write :1495), also before a stored-record repeat closes anything and again "
-            + "before a replay repairs a close (:803), and every executor's own preflight. The Decision Record's owning team is the "
+            + "AppendTo on the core record (FR-51; :1005, through DecisionCallerRights.CheckAsync :1580-1583), also before a stored-record repeat closes anything and again "
+            + "before a replay repairs a close (:822), and every executor's own preflight (:1050-1079). The Decision Record's owning team is the "
             + "ownership resolver's answer for EVERY parent the record sits under (the core, if any, and the subject of each Signal it "
-            + "resolves, secure-if-any; D-129, uac-r2 F1), taken as returned and asked only AFTER that check (:1069), so the answer never shows "
-            + "whether a row exists (a refusal is 422, a resolver fault 503: :1071-1085)."),
+            + "resolves, secure-if-any; D-129, uac-r2 F1), taken as returned and asked only AFTER that check (:1110), so the answer never shows "
+            + "whether a row exists (a refusal is 422, a resolver fault 503: :1112-1126). Three hops: B-1 puts the capability between the "
+            + "route and the service by design (spec FR-10)."),
         new HandlerDecision("GET /api/v1/signals/{signalId:guid}/suppression", "GetSuppressionAsync", "IDataverseUserClient",
             new[] { "DecisionCapability.GetSuppressionAsync", "SignalCoreRecordAccess.AuthorizeAsync" },
             "Ontology task 034; spaarkeai-mcp-bff-api-r1 task 013 (B-1) moved the body, unchanged, into DecisionCapability.GetSuppressionAsync, "

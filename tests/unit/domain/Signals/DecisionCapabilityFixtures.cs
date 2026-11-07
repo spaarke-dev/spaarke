@@ -51,7 +51,8 @@ internal static class DecisionCapabilityFixtures
         SignalReadService? signalRead = null,
         DecisionPlanReadStamp? planReadStamp = null,
         DecisionParameterSources? parameterSources = null,
-        ILogger<SignalSuppressionService>? suppressionLogger = null) =>
+        ILogger<SignalSuppressionService>? suppressionLogger = null,
+        DecisionCommitService? commits = null) =>
         new(
             signalRead ?? Unused<SignalReadService>(),
             access ?? Unused<SignalCoreRecordAccess>(),
@@ -60,6 +61,7 @@ internal static class DecisionCapabilityFixtures
             suppression ?? Unused<SignalSuppressionService>(),
             caller ?? new Mock<IDataverseUserClient>(MockBehavior.Strict).Object,
             suppressionLogger ?? NullLogger<SignalSuppressionService>.Instance,
+            commits ?? Unused<DecisionCommitService>(),
             planReadStamp,
             parameterSources);
 

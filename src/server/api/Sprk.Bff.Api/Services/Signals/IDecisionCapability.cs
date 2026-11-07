@@ -38,6 +38,14 @@ public interface IDecisionCapability
 
     /// <summary>A Signal's dismissal count and suppression date, read as <c>GET /api/v1/signals/{signalId}/suppression</c> reads them.</summary>
     Task<SuppressionReadResult> GetSuppressionAsync(HttpContext? http, Guid signalId, CancellationToken ct);
+
+    /// <summary>
+    /// Records one decision on a Signal (task 014): <see cref="DecisionCommitService.CommitAsync"/> as the caller, unchanged, with the
+    /// request's <see cref="HttpContext"/>. Every commit invariant (order, ledger replay, the invoice-review refusal, the caller-rights
+    /// check, locks) is that service's; this member adds only the no-caller guard, which answers
+    /// <see cref="DecisionCapability.UserContextRequiredCommitResult"/> before the service is called.
+    /// </summary>
+    Task<DecisionCommitResult> CommitAsync(HttpContext? http, Guid signalId, DecisionReview review, CancellationToken ct);
 }
 
 /// <summary>What a <see cref="IDecisionCapability.GetPlanAsync"/> call decided.</summary>

@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <summary>
 /// The decision capability (spaarkeai-mcp-bff-api-r1 task 013, design §8 B-1, spec FR-10 as amended 2026-11-07, option C): the
 /// worklist, decision-plan and suppression route bodies, moved here unchanged so the REST routes and the MCP tools run one copy.
-/// Task 014 adds the commit member in <c>DecisionCapability.Commit.cs</c>.
+/// Task 014 adds the commit member in <c>DecisionCapability.Commit.cs</c>, a direct delegation to <see cref="DecisionCommitService"/>.
 /// </summary>
 /// <remarks>
 /// <para><b>Unchanged rules.</b> The worklist is <see cref="SignalReadService.ReadAsync"/> as it was; the plan and suppression reads
@@ -45,10 +45,12 @@ public sealed partial class DecisionCapability : IDecisionCapability
     private readonly SignalSuppressionService _suppression;
     private readonly IDataverseUserClient _caller;
     private readonly ILogger<SignalSuppressionService> _suppressionLogger;
+    private readonly DecisionCommitService _commits;
     private readonly DecisionPlanReadStamp? _planReadStamp;
     private readonly DecisionParameterSources? _parameterSources;
 
     /// <param name="suppressionLogger">The suppression route's logger, kept so its log category is unchanged by the move.</param>
+    /// <param name="commits">The single owner of completion (task 014); <see cref="CommitAsync"/> delegates to it unchanged.</param>
     /// <param name="planReadStamp">Optional exactly as it was on the plan route: without it no stamp is written.</param>
     /// <param name="parameterSources">Optional exactly as it was on the plan route: without it no option list is resolved.</param>
     public DecisionCapability(
@@ -59,6 +61,7 @@ public sealed partial class DecisionCapability : IDecisionCapability
         SignalSuppressionService suppression,
         IDataverseUserClient caller,
         ILogger<SignalSuppressionService> suppressionLogger,
+        DecisionCommitService commits,
         DecisionPlanReadStamp? planReadStamp = null,
         DecisionParameterSources? parameterSources = null)
     {
@@ -69,6 +72,7 @@ public sealed partial class DecisionCapability : IDecisionCapability
         _suppression = suppression ?? throw new ArgumentNullException(nameof(suppression));
         _caller = caller ?? throw new ArgumentNullException(nameof(caller));
         _suppressionLogger = suppressionLogger ?? throw new ArgumentNullException(nameof(suppressionLogger));
+        _commits = commits ?? throw new ArgumentNullException(nameof(commits));
         _planReadStamp = planReadStamp;
         _parameterSources = parameterSources;
     }

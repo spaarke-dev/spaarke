@@ -1457,7 +1457,7 @@ public sealed partial class DecisionCommitServiceTests
     private static async Task<DecisionCommitResult> ThroughTheRoute(Rig rig, DecisionReview review)
     {
         var http = Http();
-        var reply = await DecisionCommitEndpoints.CommitDecisionAsync(Primary, review, http, rig.Service(), CancellationToken.None);
+        var reply = await DecisionCommitEndpoints.CommitDecisionAsync(Primary, review, http, DecisionCapabilityFixtures.Capability(commits: rig.Service()), CancellationToken.None);
         reply.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.Ok<DecisionCommitResult>>();
         return ((Microsoft.AspNetCore.Http.HttpResults.Ok<DecisionCommitResult>)reply).Value!;
     }

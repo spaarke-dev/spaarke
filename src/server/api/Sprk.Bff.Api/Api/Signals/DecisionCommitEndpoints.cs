@@ -9,7 +9,8 @@ namespace Sprk.Bff.Api.Api.Signals;
 /// Signal and lists the writes that landed. A repeated review id returns the first outcome and writes nothing.
 /// </summary>
 /// <remarks>
-/// <para><b>Authorization (NFR-10, D-29).</b> <c>RequireAuthorization</c> on the group. The record-level checks run in
+/// <para><b>Authorization (NFR-10, D-29).</b> <c>RequireAuthorization</c> on the group. The handler calls
+/// <see cref="IDecisionCapability.CommitAsync"/> (task 014), a direct delegation. The record-level checks run in
 /// <see cref="DecisionCommitService"/>: every Signal in the review through <see cref="SignalCoreRecordAccess.AuthorizeAsync"/> as
 /// the caller (unreadable: the uniform 404; unresolved caller: the single 403), then every action's preflight as the caller (a
 /// missing right: 403 naming the action, before any write).</para>
@@ -46,14 +47,16 @@ public static class DecisionCommitEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
+    /// <summary>A thin adapter (spaarkeai-mcp-bff-api-r1 task 014, B-1): the decision capability's commit with this request's context,
+    /// then the one mapper. The capability delegates to <see cref="DecisionCommitService.CommitAsync"/> unchanged.</summary>
     internal static async Task<IResult> CommitDecisionAsync(
         Guid signalId,
         DecisionReview review,
         HttpContext httpContext,
-        DecisionCommitService commits,
+        IDecisionCapability decisions,
         CancellationToken ct)
     {
-        var result = await commits.CommitAsync(signalId, review, httpContext, ct);
+        var result = await decisions.CommitAsync(httpContext, signalId, review, ct);
         return DecisionResultMapper.ToHttp(result, httpContext);
     }
 }
