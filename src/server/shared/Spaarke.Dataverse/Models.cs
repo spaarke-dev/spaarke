@@ -812,6 +812,19 @@ public record LookupNavigationMetadata
 }
 
 /// <summary>
+/// One column of a table as its metadata declares it (<see cref="IGenericEntityService.GetColumnMetadataAsync"/>). A
+/// <c>null</c> flag is one the metadata did not state; a reader treats it as unknown and fails closed.
+/// </summary>
+/// <param name="LogicalName">The column's logical name.</param>
+/// <param name="AttributeType">The SDK <c>AttributeTypeCode</c> name (<c>String</c>, <c>Money</c>, <c>Lookup</c>, ...), the same
+/// names as the Web API's <c>AttributeType</c>; <c>null</c> when the metadata gives none.</param>
+/// <param name="IsValidForUpdate">Whether an update may set the column.</param>
+/// <param name="IsSecured">Whether the column is field-secured (column security).</param>
+/// <param name="MaxLength">A text or memo column's maximum length in characters; <c>null</c> for any other column.</param>
+public sealed record ColumnMetadata(
+    string LogicalName, string? AttributeType, bool? IsValidForUpdate, bool? IsSecured, int? MaxLength);
+
+/// <summary>
 /// Analysis entity model (sprk_analysis)
 /// </summary>
 public class AnalysisEntity

@@ -1730,6 +1730,50 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>One <c>RetrieveEntityRequest</c> (attributes, published metadata), projected by <see cref="ColumnMetadataOf"/>.
+    /// A fault propagates: the caller fails closed.</remarks>
+    public async Task<IReadOnlyDictionary<string, ColumnMetadata>> GetColumnMetadataAsync(
+        string entityLogicalName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName.Trim().ToLowerInvariant(),
+            EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Attributes,
+        };
+
+        var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+            _serviceClient.Execute(request), ct).ConfigureAwait(false);
+        return ColumnMetadataOf(response.EntityMetadata);
+    }
+
+    /// <summary>
+    /// The columns of <paramref name="entity"/> as <see cref="ColumnMetadata"/>, keyed by logical name (case-insensitive): the
+    /// type's name, the update and field-security flags as stated, and a text or memo column's maximum length. Pure, and
+    /// <c>public static</c> for direct testability (the <see cref="MapToDocumentEntity"/> precedent).
+    /// </summary>
+    public static IReadOnlyDictionary<string, ColumnMetadata> ColumnMetadataOf(Microsoft.Xrm.Sdk.Metadata.EntityMetadata? entity)
+    {
+        var columns = new Dictionary<string, ColumnMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var attribute in entity?.Attributes ?? [])
+        {
+            if (attribute is null || string.IsNullOrWhiteSpace(attribute.LogicalName))
+                continue;
+
+            var maxLength = attribute switch
+            {
+                Microsoft.Xrm.Sdk.Metadata.StringAttributeMetadata text => text.MaxLength,
+                Microsoft.Xrm.Sdk.Metadata.MemoAttributeMetadata memo => memo.MaxLength,
+                _ => null,
+            };
+            columns[attribute.LogicalName] = new ColumnMetadata(
+                attribute.LogicalName, attribute.AttributeType?.ToString(), attribute.IsValidForUpdate, attribute.IsSecured, maxLength);
+        }
+
+        return columns;
+    }
+
     /// <summary>
     /// Maps a raw Dataverse <c>sprk_document</c> <see cref="Entity"/> to the read-model
     /// <see cref="DocumentEntity"/>. Pure (no ServiceClient / no I/O) and uses no instance state,
