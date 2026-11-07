@@ -248,7 +248,10 @@ internal sealed partial class RecordCreationService
     /// filed-under parent; the record-type catalog read app-only), the profile, the source read app-only
     /// (<see cref="MappingSourceReader.System"/>, no probe), then <see cref="CreateTimeFieldMapping.ApplyFillOnly"/> — the
     /// create's own fill decision — over a copy of the row. A mapped value that would file the row under a record (a filing
-    /// or ownership-parent lookup, or an I-1 stamp column) is not written: Repair never re-files a row.
+    /// or ownership-parent lookup, or an I-1 stamp column) is not written: Repair never re-files a row. Task 052a: both
+    /// tables' column metadata is read app-only first — the source's field-secured columns are never read for mapping nor
+    /// copied, a mapped value its column cannot take is not written, Money columns get a Money (#2124), and metadata that
+    /// cannot be read maps nothing.
     /// </summary>
     private async Task RepairMappingAsync(
         string table, RecordTableRule rule, Entity row, IReadOnlyList<RecordOwnershipParent> ownerParents,
@@ -324,8 +327,23 @@ internal sealed partial class RecordCreationService
                 return;
             }
 
+            // Task 052a: both tables' column metadata, read app-only before anything is read from the source (owner decision
+            // 2026-10-21, option 1; UAC-r2 condition 1: metadata that cannot be read, or does not say, maps nothing).
+            if (await SourceColumnsRepairMayCopyAsync(table, row.Id, source.EntityLogicalName,
+                    CreateTimeFieldMapping.CollectSourceColumns(rules), ct).ConfigureAwait(false) is not { } copyable)
+            {
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceMetadataUnavailable));
+                return;
+            }
+
+            if (await ColumnMetadataForRepairAsync(table, row.Id, ct).ConfigureAwait(false) is not { } targetColumns)
+            {
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingTargetMetadataUnavailable));
+                return;
+            }
+
             // The source's own secure status (review F1-e (ii)) is read in the same one read as its mapped columns.
-            var sourceColumns = SourceColumnsRepairMayCopy(source.EntityLogicalName, CreateTimeFieldMapping.CollectSourceColumns(rules))
+            var sourceColumns = copyable
                 .Concat(SourceGateColumns(source.EntityLogicalName))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -362,10 +380,14 @@ internal sealed partial class RecordCreationService
             if (rule.SearchIndexed)
                 protectedColumns.UnionWith([SearchIndexColumns.LookupColumn, SearchIndexColumns.LegacyTextColumn]);
 
+            // Task 052a: only the columns Repair may copy reach the engine — a gate column (the owner, the secure flag) is read to
+            // decide the gate, never copied unless a rule names it and it is not field-secured. #2124: the row's Money columns,
+            // so a Default or an expression into one is written as a Money.
+            var copySource = CopyableSource(source.EntityLogicalName, read.Record, copyable);
             var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             CreateTimeFieldMapping.ApplyFillOnly(
-                rules, target, read.Record, protectedColumns, warnings, _logger,
-                moneyAttributes: null, mappedColumns: written);
+                rules, target, copySource, protectedColumns, warnings, _logger,
+                moneyAttributes: MoneyColumns(targetColumns), mappedColumns: written);
 
             var columns = rules
                 .Select(r => r.TargetField?.Trim())
@@ -405,6 +427,13 @@ internal sealed partial class RecordCreationService
                         // Review F1-c (NFR-03): a blank mapped string is no value — written, it would read as unset again and be
                         // written on every pass.
                         report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column, RecordRepairReason.MappingNoValue));
+                        continue;
+                    }
+
+                    if (TargetColumnRefusal(targetColumns, column, value) is { } unfit)
+                    {
+                        // Task 052a (task 016 K-1): a value Dataverse would refuse is left out, so it cannot fail the whole update.
+                        report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column, unfit));
                         continue;
                     }
 
@@ -452,17 +481,106 @@ internal sealed partial class RecordCreationService
             : null;
 
     /// <summary>
-    /// The mapped source columns Repair may copy (owner decision 2026-10-21, field security option 1). Today: all of them,
-    /// unchanged.
+    /// The mapped source columns Repair may read and copy (owner decision 2026-10-21, field security option 1; task 052a): Repair
+    /// runs as the system principal, with no caller to mask the source against (#2188), so it leaves out every column of
+    /// <paramref name="sourceTable"/> its metadata states is field-secured. A column the table does not have is left out too
+    /// (nothing to read or copy). <c>null</c> — map nothing for the row (UAC-r2 condition 1, fail closed) — when the metadata
+    /// cannot be read, comes back empty, or does not say whether a mapped column is secured.
     /// </summary>
-    // TODO(task 033): drop every column of sourceTable whose IsSecured is true, read through task 033's app-only metadata
-    // reader. Fail closed: when that metadata is unavailable (a fault, or IsSecured unknown) map nothing for the row, with
-    // reason record_repair.mapping_source_metadata_unavailable. Task 052 stays blocked until this lands.
-    private static IEnumerable<string> SourceColumnsRepairMayCopy(string sourceTable, IEnumerable<string> mappedSourceColumns)
+    private async Task<IReadOnlyList<string>?> SourceColumnsRepairMayCopyAsync(
+        string table, Guid rowId, string sourceTable, IEnumerable<string> mappedSourceColumns, CancellationToken ct)
     {
-        _ = sourceTable;
-        return mappedSourceColumns;
+        if (await ColumnMetadataForRepairAsync(sourceTable, rowId, ct).ConfigureAwait(false) is not { } columns)
+            return null;
+
+        var copyable = new List<string>();
+        var secured = new List<string>();
+        foreach (var column in mappedSourceColumns)
+        {
+            if (!columns.TryGetValue(column, out var metadata))
+                continue;
+
+            if (metadata.IsSecured is not { } isSecured)
+            {
+                _logger.LogWarning("[RECORD-REPAIR] {Table} {Id}: the metadata of the mapping source column {Source}.{Column} does not " +
+                                   "say whether it is field-secured; nothing was mapped", table, rowId, sourceTable, column);
+                return null;
+            }
+
+            (isSecured ? secured : copyable).Add(column);
+        }
+
+        if (secured.Count > 0)
+        {
+            _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the field-secured source column(s) {Columns} of {Source} are not " +
+                                   "copied", table, rowId, string.Join(", ", secured), sourceTable);
+        }
+
+        return copyable;
     }
+
+    /// <summary>
+    /// <paramref name="table"/>'s column metadata, read app-only (<see cref="IGenericEntityService.GetColumnMetadataAsync"/>,
+    /// task 052a), or <c>null</c> when it faulted or came back empty (an empty answer cannot be told from a failed read).
+    /// Cancellation is rethrown.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, ColumnMetadata>?> ColumnMetadataForRepairAsync(
+        string table, Guid rowId, CancellationToken ct)
+    {
+        try
+        {
+            var columns = await _entities.GetColumnMetadataAsync(table, ct).ConfigureAwait(false);
+            if (columns is { Count: > 0 })
+                return columns;
+
+            _logger.LogWarning("[RECORD-REPAIR] the column metadata of {Table} came back empty while repairing {Id}; nothing was " +
+                               "mapped", table, rowId);
+            return null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-REPAIR] the column metadata of {Table} could not be read while repairing {Id}; nothing " +
+                                   "was mapped", table, rowId);
+            return null;
+        }
+    }
+
+    /// <summary>The engine's source: the read row's <paramref name="copyable"/> columns only, with their labels.</summary>
+    private static Entity CopyableSource(string sourceTable, Entity read, IReadOnlyCollection<string> copyable)
+    {
+        var source = new Entity(sourceTable, read.Id);
+        foreach (var column in copyable)
+        {
+            if (read.Attributes.TryGetValue(column, out var value))
+                source[column] = value;
+            if (read.FormattedValues.TryGetValue(column, out var label))
+                source.FormattedValues[column] = label;
+        }
+
+        return source;
+    }
+
+    /// <summary>The Money columns of a table (#2124: a Default or an expression into one is written as a <see cref="Money"/>).</summary>
+    private static IReadOnlySet<string> MoneyColumns(IReadOnlyDictionary<string, ColumnMetadata> columns) =>
+        columns.Values
+            .Where(c => string.Equals(c.AttributeType, nameof(Microsoft.Xrm.Sdk.Metadata.AttributeTypeCode.Money), StringComparison.OrdinalIgnoreCase))
+            .Select(c => c.LogicalName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Why a mapped <paramref name="value"/> is not written to <paramref name="column"/> of the row's table, or <c>null</c>: the
+    /// table has no such column or an update may not set it (unknown counts as not), or the text is longer than the column.
+    /// </summary>
+    private static string? TargetColumnRefusal(IReadOnlyDictionary<string, ColumnMetadata> columns, string column, object value) =>
+        !columns.TryGetValue(column, out var metadata) || metadata.IsValidForUpdate != true
+            ? RecordRepairReason.MappedColumnNotUpdatable
+            : value is string text && metadata.MaxLength is { } max && text.Length > max
+                ? RecordRepairReason.MappedValueTooLong
+                : null;
 
     /// <summary>A secure root's security business unit (provisioning's; it decides where the record's access lives).</summary>
     private const string SecurityBusinessUnitColumn = "sprk_securitybu";
@@ -850,6 +968,20 @@ internal static class RecordRepairReason
     internal const string MappingSourceUnreadable = "record_repair.mapping_source_unreadable";
     internal const string MappingNoValue = "record_repair.mapping_no_value";
     internal const string MappedValueWouldRefile = "record_repair.mapped_value_would_refile";
+
+    /// <summary>Task 052a (owner decision 2026-10-21, UAC-r2 condition 1): the mapping source's column metadata could not be
+    /// read, or does not say whether a mapped source column is field-secured — nothing is mapped (fail closed).</summary>
+    internal const string MappingSourceMetadataUnavailable = "record_repair.mapping_source_metadata_unavailable";
+
+    /// <summary>Task 052a: the row's own column metadata could not be read, so no mapped value can be checked against its
+    /// column (update validity, length, Money) — nothing is mapped (fail closed).</summary>
+    internal const string MappingTargetMetadataUnavailable = "record_repair.mapping_target_metadata_unavailable";
+
+    /// <summary>Task 052a: the mapped column does not exist on the row's table, or an update may not set it.</summary>
+    internal const string MappedColumnNotUpdatable = "record_repair.mapped_column_not_updatable";
+
+    /// <summary>Task 052a: the mapped text is longer than its column takes.</summary>
+    internal const string MappedValueTooLong = "record_repair.mapped_value_too_long";
 
     /// <summary>UAC-r2 condition (b) F1-1: a column that decides access (the secure flag, the access record, the access
     /// inheritance, the security unit, the container) — never filled by Repair's mapping, on any table.</summary>

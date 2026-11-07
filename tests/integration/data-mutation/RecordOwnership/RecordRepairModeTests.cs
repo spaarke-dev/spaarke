@@ -1326,6 +1326,22 @@ internal sealed class RepairWorld
     /// <summary>Every update call the service made (applied or not).</summary>
     public int UpdateCalls => Writes.Count;
 
+    /// <summary>
+    /// Task 052a: the column metadata the service reads app-only, per (table, column), over the default — every column any
+    /// profile's rules name, on every table: text, valid for update, not field-secured, no length limit. A <c>null</c> value
+    /// takes the column out of its table.
+    /// </summary>
+    public Dictionary<(string Table, string Column), ColumnMetadata?> ColumnOverrides { get; } = [];
+
+    /// <summary>Task 052a: per table, the fault reading its column metadata throws.</summary>
+    public Dictionary<string, Exception> ColumnMetadataFaults { get; } = [];
+
+    /// <summary>Task 052a: every table whose column metadata the service read, in order.</summary>
+    public List<string> ColumnMetadataReads { get; } = [];
+
+    /// <summary>Task 052a: the column lists the service asked of mapping sources (the system principal's app-only read).</summary>
+    public List<(string Table, string[] Columns)> SourceReads { get; } = [];
+
     public static readonly Guid MatterType = Guid.Parse("a0160000-0000-4000-8000-0000000000c1");
     public static readonly Guid SecureCommunication = Guid.Parse("a0160000-0000-4000-8000-000000000008");
     public static readonly Guid SourceDocument = Guid.Parse("a0160000-0000-4000-8000-000000000009");
@@ -1717,7 +1733,39 @@ internal sealed class RepairWorld
                 Directory.Write(table, id, fields.ToDictionary(f => f.Key, f => (object?)f.Value));
                 return Task.CompletedTask;
             });
+        entities
+            .Setup(e => e.GetColumnMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, CancellationToken _) => ColumnMetadataOf(table));
         return entities.Object;
+    }
+
+    /// <summary>Task 052a: <paramref name="table"/>'s column metadata — the default, with <see cref="ColumnOverrides"/> applied.</summary>
+    private Task<IReadOnlyDictionary<string, ColumnMetadata>> ColumnMetadataOf(string table)
+    {
+        ColumnMetadataReads.Add(table);
+        if (ColumnMetadataFaults.TryGetValue(table, out var fault))
+            return Task.FromException<IReadOnlyDictionary<string, ColumnMetadata>>(fault);
+
+        var rules = _profiles.Values.SelectMany(p => p.Rules ?? []).ToArray();
+        var columns = new Dictionary<string, ColumnMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in CreateTimeFieldMapping.CollectSourceColumns(rules)
+                     .Concat(rules.Select(r => r.TargetField?.Trim() ?? string.Empty))
+                     .Where(c => c.Length > 0))
+        {
+            columns[column] = new ColumnMetadata(column.ToLowerInvariant(), "String", IsValidForUpdate: true, IsSecured: false, MaxLength: null);
+        }
+
+        foreach (var ((overridden, column), metadata) in ColumnOverrides)
+        {
+            if (!string.Equals(overridden, table, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (metadata is null)
+                columns.Remove(column);
+            else
+                columns[column] = metadata;
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<string, ColumnMetadata>>(columns);
     }
 
     private Entity Read(string table, Guid id, string[] columns)
@@ -1762,6 +1810,7 @@ internal sealed class RepairWorld
                 // A mapping source's columns (the system principal's app-only read).
                 if (SourceReadFault is { } readFault)
                     throw readFault;
+                SourceReads.Add((table, columns));
                 var row = Directory.Row(table, id);
                 var copy = new Entity(table, id);
                 foreach (var column in columns)
