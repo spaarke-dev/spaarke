@@ -22,6 +22,8 @@
 - 046c: all five add-on holders get Core User (done 17:30Z).
 - The root team's Console User was removed (done 18:11Z). Get Started is left as is; no root-cause change (owner).
 - ebilling EB-D-200 = option D (via ebilling).
+- MCP spike on dev (owner 2026-11-07, here): a short window of at most 24 h AFTER the batch deploy's gate passes. The spike is rebuilt on the exact batch master SHA (diff = `5c9e301572` only), with a draft PR and green CI. Master deploys pause during it; I may end it early for an urgent peer fix. Spike gate: master gate plus anonymous MCP routes -> 401 and signed-in -> 2xx. At the end, redeploy current master.
+- 046c applied on dev by fm (owner go in fm's session): G17 at 03:33:12Z, R3 (80 Basic User removals) at 03:36:46Z, -Verify PASS. My watch runs to 05:40Z (scratchpad watch046c_uac.sh).
 - Partners (the SPA) SEE reviewer-added lines and reviewer reasons while an invoice is In Review (owner, typed here; supersedes EB-D-192's In Review clause). ebilling records it; 165c keeps only the submission-link check; reasons are shown through a typed invoice-module projection, never a partner Read on the Decision Record table.
 
 ## The next dev deploy (owner: wait for 049)
