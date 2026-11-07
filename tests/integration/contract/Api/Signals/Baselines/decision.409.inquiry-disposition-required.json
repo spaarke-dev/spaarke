@@ -1,0 +1,16 @@
+{
+  "case": "decision.409.inquiry-disposition-required",
+  "status": 409,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.10\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"This To Do is completed by recording how the inquiry turned out, not by marking it complete; nothing was done.\",\"reasonCode\":\"inquiry.disposition_required\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000013\",\"actionCode\":\"mark-complete\"}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+    "title": "Conflict",
+    "status": 409,
+    "detail": "This To Do is completed by recording how the inquiry turned out, not by marking it complete; nothing was done.",
+    "reasonCode": "inquiry.disposition_required",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000013",
+    "actionCode": "mark-complete"
+  }
+}

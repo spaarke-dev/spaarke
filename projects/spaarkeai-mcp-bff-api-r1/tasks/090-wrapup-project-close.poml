@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>Wrap-up</phase>
+    <gate>after every other task is done or cancelled</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Runs project-close quality gates and /test-diet (task-create Step 3.7)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Procedural close-out with fixed steps</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>N</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task; runs alone after every other task</parallel-reason>
+    <deps>050, 051, 052</deps>
+    <tags>testing, documentation</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project: final code-review and adr-check on all project code with every F-class finding fixed, /test-diet reconciliation, repository cleanup, README and plan marked complete, lessons learned, deferrals reconciled, spike worktree removed safely, and the project archived.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Spaarke project close-out procedure.</role>
+  <goal>All quality gates pass; tests are reconciled; README and plan show Complete; lessons are recorded; the spike worktree is removed with the safe script; the project is archived.</goal>
+
+  <context>
+    <background>task-create Step 3.7 (mandatory wrap-up) and root CLAUDE.md §7 (task-execute runs /test-diet for 090-wrapup tasks).</background>
+    <relevant-files>
+      <file role="modify">projects/spaarkeai-mcp-bff-api-r1/README.md</file>
+      <file role="modify">projects/spaarkeai-mcp-bff-api-r1/plan.md</file>
+      <file role="modify">projects/spaarkeai-mcp-bff-api-r1/notes/lessons-learned.md</file>
+      <file role="modify">projects/spaarkeai-mcp-bff-api-r1/notes/defer-issues.md</file>
+      <file role="modify">projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md (prune to what stays true)</file>
+      <file role="modify">projects/spaarkeai-mcp-bff-api-r1/tasks/TASK-INDEX.md</file>
+      <file role="canonical-reference">scripts/worktree/Remove-WorktreeSafe.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Root CLAUDE.md row</dependency>
+      <dependency task="051" status="pending">Skills rewritten</dependency>
+      <dependency task="052" status="pending">Docs written</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">/test-diet classifies every test added or modified by this project as scaffolding (delete) or maintain (keep at its KEEP path) per ADR-038's build-vs-maintain criteria; KEEP-path tests are deleted only with same-PR replacement.</constraint>
+    <constraint source="project">Every F-class finding from /code-review and /adr-check is fixed before close (task-execute Step 9.5); known-limit findings are filed with /project-defer-issue-tracking.</constraint>
+    <constraint source="project">The spike worktree is removed only with scripts/worktree/Remove-WorktreeSafe.ps1 (FAILURE-MODES G-20); deleting the spike branch needs the owner's go.</constraint>
+    <constraint source="project">The project folder is not renamed or moved (no x- prefix); archiving uses /devops-project-archive.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/devops-project-archive/SKILL.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /code-review and /adr-check on all project code; classify findings per task-execute Step 9.5; fix every F-class finding.</step>
+    <step order="2">Run /test-diet for the project and apply its classification.</step>
+    <step order="3">Run /repo-cleanup projects/spaarkeai-mcp-bff-api-r1; approve removals (notes/debug/, notes/spikes/, notes/drafts/); archive notes/handoffs/ to .archive/.</step>
+    <step order="4">Remove the spike worktree with scripts/worktree/Remove-WorktreeSafe.ps1; ask the owner whether to delete spike/spaarkeai-mcp-phase0.</step>
+    <step order="5">Update README.md (Status Complete, dates, 100%, graduation criteria, changelog) and plan.md (Complete, milestones ✅).</step>
+    <step order="6">Append lessons to notes/lessons-learned.md (one per entry, with why it mattered); reconcile notes/defer-issues.md with GitHub issues; prune the project CLAUDE.md.</step>
+    <step order="7">Verify every task in TASK-INDEX.md is [done] or [cancelled]; run scripts/check-task-status-drift.ps1.</step>
+    <step order="8">Run /devops-project-archive.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="10">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an F-class finding cannot be fixed without reopening a closed task's scope, STOP and escalate with options.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+    <tool name="npm">Install (npm install --legacy-peer-deps --no-audit --no-fund), build and test TypeScript projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/README.md</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/.archived</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">/code-review and /adr-check report no open F-class finding; known-limit findings are filed in notes/defer-issues.md with GitHub issue URLs.</criterion>
+    <criterion testable="true">/test-diet has classified every project test and its actions are applied; dotnet test and the widget tests pass afterwards.</criterion>
+    <criterion testable="true">The spike worktree is gone (removed with Remove-WorktreeSafe.ps1) and the spike branch's fate is recorded with the owner's decision.</criterion>
+    <criterion testable="true">README.md shows Status Complete with 100% and all graduation criteria checked; plan.md shows Complete.</criterion>
+    <criterion testable="true">notes/lessons-learned.md has this project's lessons; notes/defer-issues.md matches GitHub issues.</criterion>
+    <criterion testable="true">Every TASK-INDEX.md row is [done] or [cancelled] and check-task-status-drift.ps1 exits 0.</criterion>
+    <criterion testable="true">/devops-project-archive has run and projects/spaarkeai-mcp-bff-api-r1/.archived exists; the folder was not renamed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Root CLAUDE.md §7: task-execute runs the project-close /test-diet gate for 090 wrap-up tasks.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

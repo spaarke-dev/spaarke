@@ -262,6 +262,90 @@ describe('count filters are lenses on the existing list (no second queue)', () =
   });
 });
 
+describe('Invoice decisions (task 175, D-207)', () => {
+  const billing = (extra: Partial<WorklistItem> = {}) =>
+    item('Decide', 'askOutsideCounsel', { invoiceReview: { invoiceId: 'inv-1', lineId: 'line-1' }, ...extra });
+  const mixed = (): WorklistItem[] => [
+    billing(),
+    billing({ workType: null, invoiceReview: { invoiceId: 'inv-2', lineId: null } }),
+    item('Decide', 'askOutsideCounsel'),
+    item('Decide', 'approveOrRebudget'),
+    item('Decide', 'chaseReply'),
+  ];
+
+  it('Decide: two billing items and three matter items give All 5, Invoice decisions 2, work types 3, right after All', () => {
+    const buckets = bucketLaneItems(mixed(), 'Decide');
+    expect(buckets.map(b => [b.label, b.items.length])).toEqual([
+      ['All', 5],
+      ['Invoice decisions', 2],
+      ['Ask outside counsel', 1],
+      ['Approve or rebudget', 1],
+      ['Chase a reply', 1],
+    ]);
+    const workTypes = buckets.filter(b => !['all', 'invoiceDecisions'].includes(b.key));
+    expect(workTypes.reduce((n, b) => n + b.items.length, 0)).toBe(3);
+  });
+
+  it('the non-All buckets sum to All, billing items with a missing work type included, and none lands in Other', () => {
+    const items = [...mixed(), item('Decide', null)];
+    const buckets = bucketLaneItems(items, 'Decide');
+    const sum = buckets.filter(b => b.key !== 'all').reduce((n, b) => n + b.items.length, 0);
+    expect(sum).toBe(buckets[0].items.length);
+    expect(buckets.find(b => b.key === 'other')!.items).toHaveLength(1); // only the plain one with no work type
+    expect(buckets.find(b => b.key === 'invoiceDecisions')!.items.every(i => i.invoiceReview)).toBe(true);
+  });
+
+  it('negative: no billing items means no Invoice decisions bucket', () => {
+    expect(bucketLaneItems(decideItems(), 'Decide').map(b => b.key)).not.toContain('invoiceDecisions');
+  });
+
+  it('negative: an invoiceReview without an invoice id is not a billing item', () => {
+    const items = [item('Decide', 'chaseReply', { invoiceReview: { invoiceId: '' } })];
+    expect(bucketLaneItems(items, 'Decide').map(b => b.key)).toEqual([
+      'all',
+      'askOutsideCounsel',
+      'approveOrRebudget',
+      'chaseReply',
+    ]);
+  });
+
+  it('Do lane: unchanged (it has no Invoice decisions bucket, even for an item that carries invoiceReview)', () => {
+    const items = [...doItems(), item('Do', 'comingDue', { invoiceReview: { invoiceId: 'inv-9' } })];
+    const buckets = bucketLaneItems(items, 'Do');
+    expect(buckets.map(b => b.label)).toEqual(['All', 'Finish or reschedule', 'Coming due', 'Chase a response']);
+    expect(sumTypeCounts(items, 'Do')).toEqual({ all: 5, sum: 5 });
+  });
+
+  it('selecting it filters to exactly the billing items; an emptied selection resolves to All', () => {
+    const items = mixed();
+    const shown = filterLaneItems(items, 'Decide', 'invoiceDecisions');
+    expect(shown.map(i => i.signalId)).toEqual([items[0].signalId, items[1].signalId]);
+    const withoutBilling = items.filter(i => !i.invoiceReview);
+    expect(resolveLaneFilterKey(withoutBilling, 'Decide', 'invoiceDecisions')).toBe('all');
+    expect(filterLaneItems(withoutBilling, 'Decide', 'invoiceDecisions')).toHaveLength(3);
+  });
+
+  it('choosing the card selects it, choosing it again returns to All', () => {
+    const items = mixed();
+    const first = buildLaneCountCards({
+      lane: 'Decide',
+      items,
+      selectedKey: 'all',
+      onSelectKey: jest.fn(),
+      today: TODAY,
+    });
+    expect(first.map(c => c.label).slice(0, 2)).toEqual(['All', 'Invoice decisions']);
+    const onSelect = jest.fn();
+    buildLaneCountCards({ lane: 'Decide', items, selectedKey: 'all', onSelectKey: onSelect, today: TODAY })[1]
+      .onClick!();
+    expect(onSelect).toHaveBeenLastCalledWith('invoiceDecisions');
+    const again = jest.fn();
+    buildLaneCountCards({ lane: 'Decide', items, selectedKey: 'invoiceDecisions', onSelectKey: again, today: TODAY })[1]
+      .onClick!();
+    expect(again).toHaveBeenLastCalledWith('all');
+  });
+});
+
 describe('static guards', () => {
   const dir = path.join(__dirname, '..');
   const src = fs.readFileSync(path.join(dir, 'laneCountFilters.ts'), 'utf8');

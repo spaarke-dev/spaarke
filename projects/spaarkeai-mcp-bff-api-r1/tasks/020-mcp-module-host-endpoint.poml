@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>MCP module, packages and /mcp/{area} host</title>
+    <phase>B MCP host and tools</phase>
+    <gate>after 003 (T0 passed; T13 route mechanism recorded)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; new module, endpoints and package changes (.cs, .csproj)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows existing module patterns with exact canonical references (SignalsModule, NotificationsModule:20-55, RateLimitingModule per-user partition L301-322); placement and shape are settled in design §8 B-6 and §11</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Shares no file with 013 (Program.cs, csproj, RateLimitingModule.cs, EndpointMappingExtensions.cs and Api/Mcp/** are not touched by 013)</parallel-reason>
+    <deps>003, 017</deps>
+    <tags>bff-api, minimal-api, endpoints, di, config, ai, integration-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the MCP host to the BFF: package ModelContextProtocol.AspNetCore 2.3.1 and move Microsoft.Extensions.AI to 10.11.x with the AI regression suites green; register AddMcpModule with Mcp:Enabled (default false, null object → 503); map /mcp/{area} through MapMcpEndpoints with only legal-operations in v1, explicit RequireAuthorization, an mcp rate-limit policy per caller, a request-size limit and buffering off; and add the shared tool-result conversion.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core Minimal APIs, the ModelContextProtocol C# SDK, rate limiting and NuGet dependency management.</role>
+  <goal>A stateless MCP endpoint answers at /mcp/legal-operations behind auth, rate and size limits and the kill switch; tool types are discovered per area by attribute; Api/Mcp/McpToolResults converts DecisionToolError to an isError CallToolResult; AI suites pass on Microsoft.Extensions.AI 10.11.x; the publish-size delta is recorded.</goal>
+
+  <context>
+    <background>Spec FR-01, NFR-04, NFR-08; design §8 B-6 and §11 (stateless, 406 trap, buffering). Phase 0 T0 and T13 results (notes/phase0-results.md) decide the route mechanism; fallback is one route that filters tools by path. Routes are /mcp/{area}; 'core' is avoided because it means core record.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (add ModelContextProtocol.AspNetCore 2.3.1; Microsoft.Extensions.AI and .OpenAI 10.3.0 → 10.11.x with the pinned chain at L34-L133)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs (AddMcpModule; McpOptions binding; null object when disabled)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/McpOptions.cs (SectionName "Mcp", Enabled default false)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/McpEndpoints.cs (MapMcpEndpoints: /mcp/legal-operations)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolResults.cs (DecisionToolError → CallToolResult isError)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/RateLimitingModule.cs (add the "mcp" policy partitioned per caller, like L301-322)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Program.cs (builder.Services.AddMcpModule(builder.Configuration) beside AddSignalsModule, L110)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (app.MapMcpEndpoints())</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json (Mcp: { Enabled: false })</file>
+      <file role="new">tests/integration/contract/Api/Mcp/McpHostContractTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Mcp/McpTestHost.cs (in-process host + test token helper, tests only)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/NotificationsModule.cs:20-55 (options + null object)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SignalsModule.cs (module shape)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceMatterEndpoints.cs:196-200 (buffering off)</file>
+      <file role="canonical-reference">.claude/patterns/provisioning/null-object-kill-switch-anti-pattern.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">T0 pass and the T13 route-mechanism decision in notes/phase0-results.md</dependency>
+      <dependency task="017" status="pending">DecisionToolError type consumed by McpToolResults (017 completes in an earlier wave)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">MCP registers only through AddMcpModule (Infrastructure/DI/McpModule.cs) and maps only through MapMcpEndpoints called from EndpointMappingExtensions.cs; v1 maps exactly /mcp/legal-operations.</constraint>
+    <constraint source="ADR-032">When Mcp:Enabled is false (the default), /mcp/legal-operations is still mapped and answers 503 ProblemDetails from a null object; no tool handler runs; registration is symmetric (no conditional DI that breaks startup).</constraint>
+    <constraint source="ADR-016">The mcp rate-limit policy is a new named policy in RateLimitingModule.cs partitioned per caller (oid), shaped like the existing per-user partition at L301-322; the chosen limits are recorded in notes/decisions.md.</constraint>
+    <constraint source="ADR-001">The endpoint is stateless (no session store, no affinity), sets a request-body limit of 256 KiB on /mcp/*, disables response buffering for streamed responses, and adds no Functions or Durable packages.</constraint>
+    <constraint source="ADR-028">/mcp/legal-operations calls .RequireAuthorization() on the default workforce scheme; A10 refusals, protected-resource metadata and per-tool policies are task 021's.</constraint>
+    <constraint source="project">Tool types are discovered per area by attribute (one class per tool under Api/Mcp/{Area}/{Group}/), so tool tasks 022–024 add files without editing a shared registration file; no tools/list exact-set assertion is added here (025 owns it).</constraint>
+    <constraint source="project">Microsoft.Extensions.AI moves 10.3.0 → 10.11.x only with the AI unit and integration suites passing before merge (NFR-08); every pinned dependency comment in the csproj (L34-L133) is updated to match.</constraint>
+    <constraint source="ADR-052">This task adds no BackgroundService, timer or queued work; every operation it adds completes inside the request (every MCP tool under 30 s).</constraint>
+    <constraint source="ADR-015">Every log statement or telemetry property this task adds records identifiers, sizes, timings and outcome/reason codes only: no bearer token, claim value, record text or tool argument (NFR-05).</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Any defect found and not fixed in this task is filed with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue), never one without the other (project CLAUDE.md §2).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/provisioning/null-object-kill-switch-anti-pattern.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>.claude/agent-memory/researcher/mcp-server-dotnet-bff-copilot-widget-2026-11-05.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/phase0-results.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/spikes/phase0-spike-measurements.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Kill switch null object" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/NotificationsModule.cs">Lines 20-55: options + null object when disabled (ADR-032).</pattern>
+      <pattern name="Per-user rate-limit partition" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/RateLimitingModule.cs">Lines ~301-322: partition by caller.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read notes/phase0-results.md (T0, T13) and the spike measurements note; adopt the route mechanism they record.</step>
+    <step order="2">Update the csproj: add ModelContextProtocol.AspNetCore 2.3.1; move Microsoft.Extensions.AI and .OpenAI to 10.11.x and adjust the pinned chain; dotnet build with 0 warnings.</step>
+    <step order="3">Run the AI unit and integration suites (tests/unit/domain/Ai, tests/integration/regression/Ai, tests/integration/contract/Api/Ai) and record the counts.</step>
+    <step order="4">Create McpOptions, McpModule (AddMcpModule: options binding, SDK registration stateless, per-area attribute discovery, null object when disabled) and McpEndpoints (MapMcpEndpoints for legal-operations with RequireAuthorization, RequireRateLimiting("mcp"), 256 KiB body limit, buffering off).</step>
+    <step order="5">Add the mcp policy to RateLimitingModule.cs, wire Program.cs and EndpointMappingExtensions.cs, add Mcp to appsettings.template.json.</step>
+    <step order="6">Create McpToolResults (DecisionToolError → CallToolResult with isError, reasonCode in structured content, message text).</step>
+    <step order="7">Write McpHostContractTests with a test-only probe tool registered inside the test host; run them; measure the publish-size delta and CVEs.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="9">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Microsoft.Extensions.AI bump breaks any AI test or forces a package downgrade elsewhere, STOP and escalate (NFR-08, risk R5) rather than pinning around it.</trigger>
+    <trigger>If SDK 2.3.1 needs a session or state store for the features used, STOP: v1 is stateless.</trigger>
+    <trigger>If the publish-size delta is +5 MB or more, or the total exceeds 55 MB, STOP and escalate with the measurement.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>April OpenAPI plugin and /api/agent/* (Api/Agent/AgentEndpoints.cs:37-107); Dataverse's built-in /api/mcp; existing rate-limit policies in RateLimitingModule.cs; the ADR-032 null-object pattern (NotificationsModule.cs:20-55); grep ModelContextProtocol in the csproj returns nothing.</existing>
+    <extension>No for the endpoint and package: OpenAPI actions cannot carry MCP App widgets or join a federated connector, Dataverse MCP cannot apply the Signal core-record check, and hand-rolling the 2026-07-28 transport duplicates the SDK. The rate-limit policy and kill switch extend existing modules and patterns.</extension>
+    <cost-of-doing-nothing>Spaarke has no presence in Copilot or Cowork beside Work IQ; without the mcp policy one caller's widget can exhaust shared limits; without Mcp:Enabled the endpoint cannot be switched off in an environment without a redeploy.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/McpModule.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/McpEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/McpOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolResults.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/McpHostContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With Mcp:Enabled=true and a valid test token, initialize and tools/list on /mcp/legal-operations succeed and tools/list returns only tools tagged legal-operations (the test probe tool).</criterion>
+    <criterion testable="true">Negative: /mcp/unknown-area returns 404.</criterion>
+    <criterion testable="true">Negative: with Mcp:Enabled=false, /mcp/legal-operations returns 503 ProblemDetails and the probe tool's invocation counter stays 0.</criterion>
+    <criterion testable="true">Negative: a request without Accept: application/json, text/event-stream returns 406.</criterion>
+    <criterion testable="true">Negative: a caller over the mcp limit gets 429 while a second caller in the same window is not limited.</criterion>
+    <criterion testable="true">Negative: a request body over 256 KiB returns 413; an anonymous request returns 401.</criterion>
+    <criterion testable="true">Response buffering is disabled on the MCP route (test asserts streaming is not buffered).</criterion>
+    <criterion testable="true">McpToolResults converts a DecisionToolError into a CallToolResult with isError true, the reasonCode and the message (unit test).</criterion>
+    <criterion testable="true">AI unit and integration suites pass on Microsoft.Extensions.AI 10.11.x (counts recorded in task notes).</criterion>
+    <criterion testable="true">No BackgroundService is added; the PR records the publish-size delta (expected about +1.6 MB; total at or under 60 MB) and no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>The 256 KiB body limit is this task's concrete value for 'a request-size limit' (DecisionReview payloads are a few KB); record it in notes/decisions.md. Do not use the Workforce ExternalCollaboration policy anywhere. If T13 failed, implement the area filter on a single route and keep the /mcp/{area} URL shape.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

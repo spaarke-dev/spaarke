@@ -1,0 +1,14 @@
+{
+  "case": "worklist.400.unknown-set",
+  "status": 400,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.1\",\"title\":\"One or more validation errors occurred.\",\"status\":400,\"errors\":{\"set\":[\"set must be one of: lanes, closedToday, suppressed, closedEarlier, decided.\"]}}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+    "title": "One or more validation errors occurred.",
+    "status": 400,
+    "errors": {
+      "set": ["set must be one of: lanes, closedToday, suppressed, closedEarlier, decided."]
+    }
+  }
+}

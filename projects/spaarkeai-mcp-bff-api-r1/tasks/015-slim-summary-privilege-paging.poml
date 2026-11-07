@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>B-5 slim summary, privilege flag and paging cursor</title>
+    <phase>A BFF rework</phase>
+    <gate>after 013 and 014</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; modifies SignalReadService.cs and the capability (.cs)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component projection and cursor with an explicit contract (FR-05, FR-11) and the canonical row type WorklistItemRow to project from</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns SignalReadService.cs, WorklistItemSummary.cs, IDecisionCapability.cs, DecisionCapability.cs and DecisionResultMapper.cs in its wave; 023, 024 and 030 touch none</parallel-reason>
+    <deps>013, 014</deps>
+    <tags>bff-api, api, unit-test, integration-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the slim list projection WorklistItemSummary (WorklistItemRow without EvidenceRefs and Steps, keeping InvoiceReview, adding PrivilegeFlagged read from sprk_privilegeflagged) and a paged Decide-lane operation with an opaque cursor on the capability, leaving the Console's REST worklist response unchanged.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in C# record projections, JSON size budgets and cursor paging.</role>
+  <goal>WorklistItemSummary exists and serialises to at most 600 bytes at seeded maximum field lengths; IDecisionCapability.ListDecidePageAsync(cursor, ct) returns at most 50 summaries in Console order plus a next cursor; the privilege flag is read in the list pipeline without changing read rules or the REST response.</goal>
+
+  <context>
+    <background>Spec FR-11, FR-05, FR-04 (supports). Gotchas (project CLAUDE.md §6): WorklistItemSummary does not exist; the row type is WorklistItemRow with #2580's InvoiceReview member; the list pipeline does not select sprk_privilegeflagged (only DecisionCommitService.cs:313 reads it). Spec assumption: a Work Item is privileged when the Signal or its subject carries sprk_privilegeflagged; verify the exact source column here.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs (add sprk_privilegeflagged to the list $select; carry it on the internal VisibleRow only)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/WorklistItemSummary.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionCapability.cs (add ListDecidePageAsync)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.cs (implement paging)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionResultMapper.cs (map the new cursor reason code)</file>
+      <file role="new">tests/unit/domain/Signals/WorklistItemSummaryTests.cs</file>
+      <file role="new">tests/integration/regression/Signals/DecideLanePagingTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReadService.cs (WorklistItemRow ~L119-141, WorklistInvoiceReview L145, steps 9a and 12)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs:313 (how sprk_privilegeflagged is selected today)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">IDecisionCapability list operation</dependency>
+      <dependency task="014" status="pending">Commit members added to IDecisionCapability.cs first (file ownership)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">The REST responses of GET /api/v1/signals/worklist, GET /api/v1/signals/{id}/decision-plan, GET /api/v1/signals/{id}/suppression and POST /api/v1/signals/{id}/decision stay byte-for-byte unchanged: task 011's contract baseline tests pass with no golden-file edit (FR-09).</constraint>
+    <constraint source="ADR-002">SignalReadService read rules are unchanged: the only list-pipeline change is selecting sprk_privilegeflagged and carrying it to the summary; the core-record check, Do-lane scope and 503 too_many_signals behaviour stay as they are; #2580's single batched BillingEventRead per response stays one.</constraint>
+    <constraint source="project">WorklistItemRow's JSON (the Console REST response) gains no member; PrivilegeFlagged exists only on the internal row and on WorklistItemSummary.</constraint>
+    <constraint source="project">Page size is at most 50 summaries; order is exactly the order SignalReadService returns for the Console; the cursor is opaque (base64url of the last item's ordering key and id) and stateless.</constraint>
+    <constraint source="ADR-019">A malformed or tampered cursor returns a failure with the new reason code ontology.worklist.cursor_invalid, registered in DecisionResultMapper with an MCP mapping test; a stale but well-formed cursor is not an error.</constraint>
+    <constraint source="ADR-028">Every operation this task adds or changes reads the caller only from ICallerContext (task 010); an unpopulated context returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) and never falls back to an app-only client (FR-10, ADR-002 WP-6 fail closed).</constraint>
+    <constraint source="project">Every PR from this task that touches Services/Signals/**, Api/Signals/** or the worklist route is reviewed by spaarke-ontology-platform-r1 before merge (project CLAUDE.md §4); run /conflict-check before opening it.</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/pre-pipeline-context.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse $select is all-or-nothing" location=".claude/FAILURE-MODES.md">G-13: adding sprk_privilegeflagged to a $select fails the whole read if the column name is wrong; verify the column on sprk_signal (and the subject) first.</pattern>
+      <pattern name="Optional field drift" location=".claude/FAILURE-MODES.md">AP-2: an optional field two clients read differently; keep invoiceReview's shape identical to WorklistItemRow's.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Verify the privilege source: confirm sprk_signal.sprk_privilegeflagged and whether the subject entity carries its own flag; record the finding in notes/decisions.md.</step>
+    <step order="2">Add the column to the list pipeline's $select and to the internal VisibleRow; leave WorklistItemRow's serialised shape unchanged.</step>
+    <step order="3">Create WorklistItemSummary (all WorklistItemRow members except EvidenceRefs and Steps, keeping InvoiceReview, plus PrivilegeFlagged).</step>
+    <step order="4">Add ListDecidePageAsync(string? cursor, CancellationToken ct) to the capability: page of at most 50 summaries in Console order, next cursor or null; add ontology.worklist.cursor_invalid to the mapper.</step>
+    <step order="5">Write the tests in the acceptance criteria (seed 200 items across at least 3 matters with maximum-length fields).</step>
+    <step order="6">Run 011's baselines and the Signals suites; measure the publish-size delta; open the PR for ontology review.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="8">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the privilege flag on the subject lives in a different column or entity than sprk_privilegeflagged on sprk_signal, STOP and escalate with the evidence before choosing (spec Assumptions: 'verify the exact source column').</trigger>
+    <trigger>If a summary row cannot fit 600 bytes at maximum field lengths without dropping a field the widget needs, STOP and escalate with the measured sizes.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>WorklistItemRow (SignalReadService.cs ~L119-141), 1–2 KB per row with EvidenceRefs and Steps; no type named WorklistItemSummary exists (grep -rn WorklistItemSummary src returns nothing).</existing>
+    <extension>It is a projection of the existing row, not a new model; extending WorklistItemRow itself would change the Console's REST response (FR-09).</extension>
+    <cost-of-doing-nothing>30–50 full rows exceed Cowork's 64 KiB inline cap, so spaarke_show_decisions cannot return page 1, and FR-04 cannot be met because the list never reads the privilege flag.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/WorklistItemSummary.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCapability.cs</output>
+    <output type="test">tests/unit/domain/Signals/WorklistItemSummaryTests.cs</output>
+    <output type="test">tests/integration/regression/Signals/DecideLanePagingTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A WorklistItemSummary at the seeded maximum field lengths (including InvoiceReview with both ids) serialises to at most 600 bytes.</criterion>
+    <criterion testable="true">With 200 seeded Decide-lane items, every page holds at most 50 summaries and serialises under 64 KiB.</criterion>
+    <criterion testable="true">Paging from a null cursor to the end returns every item exactly once, in the same order as SignalReadService's Console list for the same caller.</criterion>
+    <criterion testable="true">Negative: when items are resolved between page requests, the stale cursor returns the remaining items with no duplicate and no error.</criterion>
+    <criterion testable="true">Negative: a malformed or tampered cursor returns ontology.worklist.cursor_invalid; DecisionResultMapper maps it to an isError tool error (unit test).</criterion>
+    <criterion testable="true">PrivilegeFlagged is true on summaries of seeded privileged Signals and false otherwise.</criterion>
+    <criterion testable="true">011's worklist baseline passes with no golden change; the one-batched-BillingEventRead test passes.</criterion>
+    <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE) and the ontology review.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec assumption 'page 1 carries at most 50 slim rows'. The new reason code name is chosen here (ontology.worklist.cursor_invalid) to follow the ontology.{area}.{reason} convention of DecisionCommitReasons; ontology review confirms it.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

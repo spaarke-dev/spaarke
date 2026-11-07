@@ -1,0 +1,16 @@
+{
+  "case": "decision.422.plan-refused",
+  "status": 422,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc4918#section-11.2\",\"title\":\"Unprocessable Entity\",\"status\":422,\"detail\":\"This item's decision plan does not resolve against the action catalog.\",\"reasonCode\":\"ontology.decisionplan.refused\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000027\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc4918#section-11.2",
+    "title": "Unprocessable Entity",
+    "status": 422,
+    "detail": "This item's decision plan does not resolve against the action catalog.",
+    "reasonCode": "ontology.decisionplan.refused",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000027",
+    "actionCode": null
+  }
+}

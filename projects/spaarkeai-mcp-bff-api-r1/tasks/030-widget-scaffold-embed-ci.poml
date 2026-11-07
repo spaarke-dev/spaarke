@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>Widget scaffold, BFF embedding and CI size gate</title>
+    <phase>C Widget</phase>
+    <gate>after 003 (Size budget) and 021</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include frontend and bff-api; new .ts/.tsx files, a BFF resource handler (.cs) and CI changes</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New single-file build following the CreateMatterWizard Vite config and the DataFactory.MCP embedded-resource pattern, with an explicit size budget</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns the widget folder, Sprk.Bff.Api.csproj, the widget resource class, publish-bff-artifact.yml and client-tests.yml in its wave; 015, 023 and 024 touch none</parallel-reason>
+    <deps>003, 021</deps>
+    <tags>frontend, react, typescript, fluent-ui, bff-api, ci-cd</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Scaffold src/client/widgets/spaarke-decisions/ as a Vite + vite-plugin-singlefile React app on @modelcontextprotocol/ext-apps 2.0.4 with MCP fetch shims that return a real Response and a host-driven Fluent theme; embed the built HTML in the BFF and serve it through resources/read as ui://spaarke/decisions.html; build it in CI before the BFF publish; and fail the build when the bundle exceeds 3 MB.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Vite single-file builds, React 18, Fluent UI v9, MCP Apps (ext-apps) and .NET embedded resources.</role>
+  <goal>npm run build emits one self-contained HTML file under budget; the BFF serves it at ui://spaarke/decisions.html with mimeType text/html;profile=mcp-app and an empty _meta.ui.csp; the shim and theme plumbing are unit-tested; CI builds the widget before publishing the BFF and runs its tests.</goal>
+
+  <context>
+    <background>Spec FR-12 (resource, csp, no tokens, host theme), NFR-03 (aim under 1 MB, ceiling 3 MB; Phase 0 Size result in notes/phase0-results.md), NFR-07; design §9.1. Gotchas: createWorklistService({ fetch }) expects a ResponseFetchFn, so shims must return a Response and pass reasonCode through; no bundle-size check exists in CI yet; the widget build must run before publish-bff-artifact.yml embeds it.</background>
+    <relevant-files>
+      <file role="new">src/client/widgets/spaarke-decisions/package.json, vite.config.ts, tsconfig.json, index.html</file>
+      <file role="new">src/client/widgets/spaarke-decisions/src/main.tsx (FluentProvider from host context; App shell)</file>
+      <file role="new">src/client/widgets/spaarke-decisions/src/mcp/mcpHost.ts (ext-apps App connection, callServerTool, host context)</file>
+      <file role="new">src/client/widgets/spaarke-decisions/src/mcp/mcpFetch.ts (ResponseFetchFn shims: tool result → Response; isError → error Response with reasonCode)</file>
+      <file role="new">src/client/widgets/spaarke-decisions/src/theme/hostTheme.ts</file>
+      <file role="new">src/client/widgets/spaarke-decisions/src/__tests__/mcpFetch.test.ts</file>
+      <file role="new">src/client/widgets/spaarke-decisions/scripts/check-bundle-size.mjs (fails above 3 MB, warns above 1 MB)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (EmbeddedResource of the built HTML, Condition=Exists)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/DecisionsWidgetResource.cs (resources/read ui://spaarke/decisions.html)</file>
+      <file role="new">tests/integration/contract/Api/Mcp/DecisionsWidgetResourceTests.cs</file>
+      <file role="modify">.github/workflows/publish-bff-artifact.yml (build the widget before dotnet publish)</file>
+      <file role="modify">.github/workflows/client-tests.yml (add the widget to the jest matrix)</file>
+      <file role="canonical-reference">src/solutions/CreateMatterWizard/vite.config.ts (singlefile + source aliases + resolveSharedLibDeps)</file>
+      <file role="canonical-reference">knowledge/mcp-apps/trey-research/src/mcpserver/widgets/src/hooks/useMcpApp.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/Worklist/worklistService.ts (createWorklistService({ fetch }) L350)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj L249-268 (EmbeddedResource pattern)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Size/init budget recommendation</dependency>
+      <dependency task="021" status="pending">/mcp/* auth so resources/read is served to authenticated callers only</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The widget declares no network origins (_meta.ui.csp empty), holds no token, and talks to the server only through callServerTool; it calls no fetch or XMLHttpRequest except inside the shim, which never touches the network.</constraint>
+    <constraint source="ADR-021">The theme comes from ext-apps host context at init and on change, through FluentProvider; detectDarkModeFromNavbar is not called and no theme is written to storage.</constraint>
+    <constraint source="project">Bundle budget: scripts/check-bundle-size.mjs fails the build when dist/index.html exceeds 3 MB and warns above 1 MB (NFR-03, O-16); the measured size is recorded in task notes.</constraint>
+    <constraint source="project">A local dotnet build without the widget built succeeds (EmbeddedResource with Condition=Exists); resources/read then returns an error result, never stale HTML; publish-bff-artifact.yml builds the widget first so published artifacts always embed it.</constraint>
+    <constraint source="ADR-012">This task reuses @spaarke/ui-components by deep import of source modules (not the barrel); it creates no per-project copy of a shared component; any shared-lib change is an optional prop or seam that leaves the Console's LegalWorkspace worklist mount (worklist.registration.ts) unchanged.</constraint>
+    <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hex, rgb or inline colour), supports host light and dark themes, and is operable by keyboard (NFR-07).</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/widget-design/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/embedded-widget-sizing.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-host-visual-fit.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>knowledge/mcp-apps/NOTES.md</file>
+      <file>knowledge/mcp-apps/trey-research/src/mcpserver/widgets/src/hooks/useMcpApp.tsx</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/phase0-results.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/spikes/phase0-spike-measurements.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Single-file Vite build" location="src/solutions/CreateMatterWizard/vite.config.ts">vite-plugin-singlefile with shared-lib source aliases; mirror it.</pattern>
+      <pattern name="MCP App hook" location="knowledge/mcp-apps/trey-research/src/mcpserver/widgets/src/hooks/useMcpApp.tsx">Host connection and callServerTool usage; check ext-apps 2.0.4 API drift from this 1.x sample.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the Phase 0 Size result and the spike note's ext-apps 2.0.4 API notes.</step>
+    <step order="2">Scaffold the widget folder mirroring CreateMatterWizard's vite.config.ts (singlefile, aliases to @spaarke/ui-components source, React version boundary); npm install --legacy-peer-deps --no-audit --no-fund.</step>
+    <step order="3">Implement mcpHost.ts (connect, host context, callServerTool) and mcpFetch.ts (ResponseFetchFn: map a request path + method to a tool call; wrap structuredContent in a Response; map isError to a non-2xx Response whose JSON body carries reasonCode and message).</step>
+    <step order="4">Implement hostTheme.ts and main.tsx (FluentProvider with webLightTheme/webDarkTheme from host context; placeholder App until 031).</step>
+    <step order="5">Add check-bundle-size.mjs to the build; add unit tests for the shim and the theme.</step>
+    <step order="6">Embed dist/index.html in the BFF (Condition=Exists) and add DecisionsWidgetResource for resources/read; add the contract test.</step>
+    <step order="7">Wire CI: widget build before dotnet publish in publish-bff-artifact.yml; widget in the client-tests.yml jest matrix.</step>
+    <step order="8">Run the ui-tests below against a local MCP Apps host; measure the publish-size delta.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="10">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ext-apps 2.0.4's API differs from the 1.x samples so that callServerTool or host context is not available as assumed, STOP and record the drift with a proposed adapter before building on it (risk R13).</trigger>
+    <trigger>If the empty scaffold plus Fluent already exceeds 1 MB, STOP and report the composition before 031 adds the lane.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Code-page Vite builds (src/solutions/CreateMatterWizard/vite.config.ts, ten code pages); no MCP App widget exists in src/ (ls src/client/widgets returns nothing).</existing>
+    <extension>Same toolchain and shared components, new entry point: a code page runs inside Dataverse with Xrm, while the widget runs in a sandboxed Copilot frame that only speaks MCP, so it cannot be a code page.</extension>
+    <cost-of-doing-nothing>There is no UI to view or resolve a Work Item in Copilot or Cowork (FR-12, FR-13), and NFR-03 has no enforcement.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Widget shell renders in a local MCP Apps host">
+      <url>http://localhost:{basic-host-port}/?server={local-bff}/mcp/legal-operations</url>
+      <steps>
+        <step>Start the BFF locally with Mcp:Enabled=true and a dev test token</step>
+        <step>Open the ext-apps basic host pointed at /mcp/legal-operations and load ui://spaarke/decisions.html</step>
+        <step>Verify the shell renders and a shimmed call round-trips through callServerTool</step>
+        <step>Check the browser console for JavaScript errors</step>
+      </steps>
+      <expected>The shell renders with no console errors; no network request leaves the frame (devtools Network tab shows none)</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host (Cowork or the local MCP Apps host) to dark theme</step>
+        <step>Verify backgrounds adapt (no white surface in dark mode) and text adapts (no black text in dark mode)</step>
+        <step>Verify icons use currentColor</step>
+        <step>Switch back to light theme and verify the widget follows without reload</step>
+      </steps>
+      <expected>All colours come from Fluent v9 semantic tokens driven by host context (ADR-021); nothing is stored</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Install (npm install --legacy-peer-deps --no-audit --no-fund), build and test TypeScript projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/widgets/spaarke-decisions/</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/DecisionsWidgetResource.cs</output>
+    <output type="test">src/client/widgets/spaarke-decisions/src/__tests__/mcpFetch.test.ts</output>
+    <output type="test">tests/integration/contract/Api/Mcp/DecisionsWidgetResourceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build in the widget folder emits a single dist/index.html with all JS and CSS inline; its size is recorded and is under 3 MB.</criterion>
+    <criterion testable="true">Negative: a build whose output exceeds 3 MB fails check-bundle-size.mjs (test with a padded fixture).</criterion>
+    <criterion testable="true">resources/read for ui://spaarke/decisions.html returns mimeType text/html;profile=mcp-app, an empty _meta.ui.csp and the built HTML.</criterion>
+    <criterion testable="true">Negative: with the widget not built, dotnet build succeeds and resources/read returns an error result (not stale HTML).</criterion>
+    <criterion testable="true">mcpFetch returns a Response with status 200 and the tool's structuredContent for success, and a non-2xx Response whose JSON carries reasonCode and message for an isError result (unit tests).</criterion>
+    <criterion testable="true">Negative: no code outside mcpFetch.ts calls fetch or XMLHttpRequest, and no token is read or stored (grep + test).</criterion>
+    <criterion testable="true">The theme follows host context light and dark and nothing is written to localStorage or sessionStorage for theme.</criterion>
+    <criterion testable="true">publish-bff-artifact.yml builds the widget before dotnet publish; client-tests.yml runs the widget's tests.</criterion>
+    <criterion testable="true">ext-apps 2.0.4 API drift notes are recorded in the task notes; the PR records the BFF publish-size delta (at or under 60 MB).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Node installs in src/solutions/* and similar use npm install --legacy-peer-deps --no-audit --no-fund (root CLAUDE.md §12). Deep-import @spaarke/ui-components source so pdfjs-dist, mammoth and App Insights stay out of the bundle (design §9.1).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

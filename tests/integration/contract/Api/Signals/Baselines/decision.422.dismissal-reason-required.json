@@ -1,0 +1,16 @@
+{
+  "case": "decision.422.dismissal-reason-required",
+  "status": 422,
+  "contentType": "application/problem+json",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc4918#section-11.2\",\"title\":\"Unprocessable Entity\",\"status\":422,\"detail\":\"Taking nothing is a dismissal, and a dismissal needs a reason.\",\"reasonCode\":\"ontology.decision.dismissal_reason_required\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000021\",\"actionCode\":null}",
+  "bodyPretty": {
+    "type": "https://tools.ietf.org/html/rfc4918#section-11.2",
+    "title": "Unprocessable Entity",
+    "status": 422,
+    "detail": "Taking nothing is a dismissal, and a dismissal needs a reason.",
+    "reasonCode": "ontology.decision.dismissal_reason_required",
+    "correlationId": "<volatile>",
+    "reviewId": "c0430011-0000-4000-8000-000000000021",
+    "actionCode": null
+  }
+}

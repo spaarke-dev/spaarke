@@ -1,0 +1,92 @@
+{
+  "case": "decision.200.recorded",
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": "{\"status\":0,\"reviewId\":\"c0430011-0000-4000-8000-000000000001\",\"reasonCode\":null,\"detail\":null,\"actionCode\":null,\"decisionRecordId\":\"c0430000-0000-4000-8000-000000000060\",\"recordClass\":\"Judgement\",\"gateTier\":\"Tier4\",\"steps\":[{\"key\":\"action:revise-budget\",\"code\":\"revise-budget\",\"phase\":2,\"status\":\"Done\",\"written\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"},{\"entity\":\"sprk_budget\",\"id\":\"c0430000-0000-4000-8000-000000000040\"}],\"possiblyWritten\":[],\"reasonCode\":null,\"detail\":null},{\"key\":\"next-step:add-todo#0\",\"code\":\"add-todo\",\"phase\":3,\"status\":\"Done\",\"written\":[{\"entity\":\"sprk_todo\",\"id\":\"c0430000-0000-4000-8000-000000000051\"}],\"possiblyWritten\":[],\"reasonCode\":null,\"detail\":null},{\"key\":\"action:send-budget-inquiry\",\"code\":\"send-budget-inquiry\",\"phase\":4,\"status\":\"Done\",\"written\":[{\"entity\":\"sprk_servicerequest\",\"id\":\"c0430000-0000-4000-8000-000000000053\"},{\"entity\":\"sprk_communication\",\"id\":\"c0430000-0000-4000-8000-000000000054\"}],\"possiblyWritten\":[],\"reasonCode\":null,\"detail\":null}],\"followOns\":[{\"entity\":\"sprk_todo\",\"id\":\"c0430000-0000-4000-8000-000000000051\"}],\"signals\":[{\"signalId\":\"c0430000-0000-4000-8000-000000000031\",\"state\":\"Acted\",\"warning\":null}],\"failedStep\":null,\"landed\":[],\"possiblyLanded\":[],\"recordMayExist\":false,\"sentButNotRecorded\":false,\"resumable\":false,\"warnings\":[],\"replayed\":false}",
+  "bodyPretty": {
+    "status": 0,
+    "reviewId": "c0430011-0000-4000-8000-000000000001",
+    "reasonCode": null,
+    "detail": null,
+    "actionCode": null,
+    "decisionRecordId": "c0430000-0000-4000-8000-000000000060",
+    "recordClass": "Judgement",
+    "gateTier": "Tier4",
+    "steps": [
+      {
+        "key": "action:revise-budget",
+        "code": "revise-budget",
+        "phase": 2,
+        "status": "Done",
+        "written": [
+          {
+            "entity": "sprk_budgetrevision",
+            "id": "c0430000-0000-4000-8000-000000000052"
+          },
+          {
+            "entity": "sprk_budget",
+            "id": "c0430000-0000-4000-8000-000000000040"
+          }
+        ],
+        "possiblyWritten": [],
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "key": "next-step:add-todo#0",
+        "code": "add-todo",
+        "phase": 3,
+        "status": "Done",
+        "written": [
+          {
+            "entity": "sprk_todo",
+            "id": "c0430000-0000-4000-8000-000000000051"
+          }
+        ],
+        "possiblyWritten": [],
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "key": "action:send-budget-inquiry",
+        "code": "send-budget-inquiry",
+        "phase": 4,
+        "status": "Done",
+        "written": [
+          {
+            "entity": "sprk_servicerequest",
+            "id": "c0430000-0000-4000-8000-000000000053"
+          },
+          {
+            "entity": "sprk_communication",
+            "id": "c0430000-0000-4000-8000-000000000054"
+          }
+        ],
+        "possiblyWritten": [],
+        "reasonCode": null,
+        "detail": null
+      }
+    ],
+    "followOns": [
+      {
+        "entity": "sprk_todo",
+        "id": "c0430000-0000-4000-8000-000000000051"
+      }
+    ],
+    "signals": [
+      {
+        "signalId": "c0430000-0000-4000-8000-000000000031",
+        "state": "Acted",
+        "warning": null
+      }
+    ],
+    "failedStep": null,
+    "landed": [],
+    "possiblyLanded": [],
+    "recordMayExist": false,
+    "sentButNotRecorded": false,
+    "resumable": false,
+    "warnings": [],
+    "replayed": false
+  }
+}

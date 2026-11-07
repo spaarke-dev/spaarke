@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>spaarke_get_decision_plan and lookup search tools</title>
+    <phase>B MCP host and tools</phase>
+    <gate>after 016, 017 and 021</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; new tool classes (.cs)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Thin adapters over IDecisionCapability.GetPlanAsync (013) and IDecisionLookupSearch (016) with explicit FR-06/FR-07 contracts</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds only its own tool and test files; shares no file with 015, 024 or 030</parallel-reason>
+    <deps>016, 017, 021</deps>
+    <tags>bff-api, endpoints, integration-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the app-only readOnly tools spaarke_get_decision_plan (plan, suppression and full Work Item row as the caller; writes the plan-read stamp) and spaarke_search_decision_lookup (signalId, parameterCode, query over IDecisionLookupSearch), each returning domain failures as isError results.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP tool implementation over existing ASP.NET Core services.</role>
+  <goal>Both tools are listed app-only and readOnly; the plan equals the REST plan for the same caller and writes the stamp; the lookup equals the REST lookup route's results; the FR-06 and FR-07 negatives hold.</goal>
+
+  <context>
+    <background>Spec FR-06, FR-07; design §7.1 (the lookup must be readOnly so typing does not prompt for consent).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/GetDecisionPlanTool.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/SearchDecisionLookupTool.cs</file>
+      <file role="new">tests/integration/contract/Api/Mcp/PlanAndLookupToolTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionCapability.cs (GetPlanAsync, GetSuppressionAsync)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/IDecisionLookupSearch.cs (from 016)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolResults.cs (from 020)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="016" status="pending">IDecisionLookupSearch and the REST route</dependency>
+      <dependency task="017" status="pending">DecisionResultMapper</dependency>
+      <dependency task="021" status="pending">A10 auth and per-tool policies</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every MCP tool added by this task is named spaarke_{verb}_{object} (naming note §1), tagged with area legal-operations, carries an explicit readOnlyHint and a title, and has a description of at most 1,024 characters phrased 'use for / not for'; app-only tools set _meta.ui visibility to app only.</constraint>
+    <constraint source="ADR-028">Every operation this task adds or changes reads the caller only from ICallerContext (task 010); an unpopulated context returns DataverseUserClientErrorCodes.UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) and never falls back to an app-only client (FR-10, ADR-002 WP-6 fail closed).</constraint>
+    <constraint source="ADR-008">No endpoint or MCP tool added or changed by this task carries the ExternalCollaboration policy or the external access guard; workforce routes use .RequireAuthorization() on the default workforce scheme plus existing policies.</constraint>
+    <constraint source="ADR-019">Every domain failure from a tool added by this task is returned as an isError tool result produced by DecisionResultMapper.ToToolError → Api/Mcp/McpToolResults (reasonCode plus a fix-the-call message); no domain failure is returned as a transport error or exception.</constraint>
+    <constraint source="project">Every result of a tool added by this task is under 64 KiB at 200 seeded Work Items (NFR-02).</constraint>
+    <constraint source="ADR-013">Tools added by this task inject only the decision capability, IDecisionLookupSearch and Api/Mcp helpers: no AI-internal type (Services/Ai/**, IChatClient, playbook services).</constraint>
+    <constraint source="project">File ownership for parallel safety: this task adds only its own files under Api/Mcp/LegalOperations/Decisions/ and its own test files; tools are discovered per area by attribute (set up in 020), so no shared registration file is edited.</constraint>
+    <constraint source="ADR-015">Every log statement or telemetry property this task adds records identifiers, sizes, timings and outcome/reason codes only: no bearer token, claim value, record text or tool argument (NFR-05).</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/design.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Implement GetDecisionPlanTool: input signalId; call GetPlanAsync and GetSuppressionAsync as the caller; return plan, suppression and the full row as structuredContent; failures through McpToolResults.</step>
+    <step order="2">Implement SearchDecisionLookupTool: input signalId, parameterCode, query; call IDecisionLookupSearch; failures through McpToolResults.</step>
+    <step order="3">Write equivalence tests against the REST routes for the same caller, the negatives, and a size test.</step>
+    <step order="4">Run the suites; measure the publish-size delta.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the plan tool's output cannot equal the REST plan without changing the REST response, STOP and escalate (FR-09 wins).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>REST GET /api/v1/signals/{id}/decision-plan and GET /api/v1/signals/{id}/lookup (DecisionPlanEndpoints.cs).</existing>
+    <extension>They are the extension: thin adapters over the same capability and lookup service the REST routes call.</extension>
+    <cost-of-doing-nothing>The widget's wizard cannot open an item (no plan, no stamp, so every commit is refused) and cannot resolve any lookup parameter, so six action types cannot be completed in Copilot.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/GetDecisionPlanTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/SearchDecisionLookupTool.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/PlanAndLookupToolTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">tools/list shows both tools with app-only visibility, readOnlyHint true, a title and a description of at most 1,024 characters.</criterion>
+    <criterion testable="true">For a Signal the caller can read, the plan tool's plan equals GET /api/v1/signals/{id}/decision-plan for the same caller (JSON-equivalence test) and the plan-read stamp exists afterwards.</criterion>
+    <criterion testable="true">Negative: for a Signal outside the caller's core-record access, the plan tool returns isError with the same reasonCode the REST route returns, and no stamp is written.</criterion>
+    <criterion testable="true">The lookup tool returns the same results as the REST lookup route for the same caller and inputs.</criterion>
+    <criterion testable="true">Negative: an unknown parameterCode returns isError ontology.decision.invalid_parameter; a budget of another matter and a record the caller cannot read never appear.</criterion>
+    <criterion testable="true">Every result is under 64 KiB at 200 seeded items; no ExternalCollaboration policy is attached (021's arch test passes).</criterion>
+    <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>The wizard (032) calls these through its ResponseFetchFn shim; keep the structured shapes identical to the REST JSON so the shim can wrap them in a Response unchanged.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

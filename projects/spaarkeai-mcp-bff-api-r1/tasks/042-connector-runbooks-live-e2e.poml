@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>Connector, runbooks and live E2E in Cowork and Chat</title>
+    <phase>D Registration, deploy and live E2E</phase>
+    <gate>after 040, 041 and 043 (043 done or cancelled)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Live end-to-end testing and runbook finalisation in the deployment phase; no code files</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Executes a fixed live test plan and finalises runbooks from 002's draft; owner runs admin steps</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live dev-tenant work with the owner; runs alone</parallel-reason>
+    <deps>040, 041, 043</deps>
+    <tags>e2e-test, deploy, integration-test</tags>
+    <estimated-effort>4-8 hours (elapsed time depends on the owner)</estimated-effort>
+  </metadata>
+
+  <prompt>Re-point the 'Spaarke' connector at the dev BFF's /mcp/legal-operations, deploy the plugin package, finalise the runbooks into docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md, and prove the full flow live in Cowork and Copilot Chat with a licensed non-admin user, plus the 20-prompt routing eval and NFR-01 latency.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Microsoft 365 Copilot and Cowork administration and live acceptance testing.</role>
+  <goal>A non-admin user resolves Work Items end to end in Cowork and in Chat (connector widget or the 043 agent) with Decision Record ids captured; routing-eval rate and NFR-01 p95s are recorded; the runbook reproduces the setup from scratch.</goal>
+
+  <context>
+    <background>Spec FR-16, FR-12/FR-13/FR-15 live acceptance, NFR-01, success criteria 2, 3, 4, 7, 10 and 11. Seed data: a test user with at least 200 Decide-lane Work Items across at least 3 matters, including privileged items and every lookup-bearing action type. MC1493223 gates / skills in Chat.</background>
+    <relevant-files>
+      <file role="new">docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md (client registration, connector creation, plugin package upload and approval, user Connect)</file>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r1/notes/live-e2e-results.md</file>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r1/notes/routing-eval.md</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/notes/drafts/connector-registration-runbook.md (from 002)</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/notes/phase0-registration-facts.md</file>
+      <file role="canonical-reference">docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md (format reference)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">Plugin package</dependency>
+      <dependency task="041" status="pending">Dev BFF with MCP on</dependency>
+      <dependency task="043" status="pending">Agent fallback, or cancelled when T1 passed</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The owner (Global Admin) runs every admin-center step (connector re-point, plugin package approval); consent and approval behaviour is tested with a licensed non-admin user (O-20).</constraint>
+    <constraint source="ADR-015">Live evidence saved to notes or docs contains no token, claim value or privileged record text; for the FR-04 spot-check, record only whether the marker appeared.</constraint>
+    <constraint source="project">The runbook names only real artifacts (app registrations by display name, files by repo path) and holds no secret; each step states who runs it and whether it is scriptable.</constraint>
+    <constraint source="project">No write is attempted from the text path or by the model; completions happen only through the widget's Confirm (NFR-06).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/phase0-results.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/nfr-measurements.md</file>
+      <file>docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/drafts/connector-registration-runbook.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">With the owner, re-point the 'Spaarke' connector to {devBffUrl}/mcp/legal-operations and deploy the plugin package (owner approval).</step>
+    <step order="2">Verify seed data (at least 200 Decide-lane items, 3 matters, privileged items, every lookup-bearing action type).</step>
+    <step order="3">Cowork: the non-admin user connects once in Settings › Sources; /spaarke-decisions renders the lane with Console-equal counts; resolve one Work Item of each lookup-bearing action type with a because rationale; capture Decision Record ids; confirm the Console shows them resolved.</step>
+    <step order="4">Chat: a direct prompt 'what decisions are waiting on me in Spaarke?' calls spaarke_show_decisions; resolve one Work Item through the connector widget or, if 043 was built, @Spaarke AI; capture the id.</step>
+    <step order="5">FR-04 spot-check: ask the model about the privileged item's matter; record that the marker did not appear in model text.</step>
+    <step order="6">Run the 20-prompt routing eval (prompts without the skill) and record the rate in notes/routing-eval.md.</step>
+    <step order="7">Measure NFR-01 on dev: 50 calls each; record p95 per tool in notes/live-e2e-results.md.</step>
+    <step order="8">Finalise docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md from 002's draft; have a second admin (or a clean re-run) follow it from scratch and record the result.</step>
+    <step order="9">Run context-handoff.</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="11">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the widget does not render in Cowork through the plugin package, STOP and escalate with evidence (FR-16).</trigger>
+    <trigger>If NFR-01 p95 misses a target, record it and escalate to the owner (targets are working assumptions, spec Assumptions) rather than changing tool behaviour here.</trigger>
+    <trigger>If any live step would need a client secret or Key Vault change, STOP for human confirmation (root CLAUDE.md §9).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md covers the April declarative agent, not a federated connector, A10 client or plugin package; no connector runbook exists (ls docs/guides | grep -i connector shows only Connection Engine docs).</existing>
+    <extension>No: the April guide documents a different package type and auth plane; extending it would mix the retired 'Spaarke Copilot' agent steps with the A10 connector.</extension>
+    <cost-of-doing-nothing>Success criterion 11 (a second admin reproduces the setup from scratch) and FR-16's runbook acceptance fail, and customer provisioning has no documented steps.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Cowork end to end">
+      <url>https://m365.cloud.microsoft/cowork</url>
+      <steps>
+        <step>Sign in as the licensed non-admin test user</step>
+        <step>Run /spaarke-decisions</step>
+        <step>Verify lane counts equal the Console's Decide lane</step>
+        <step>Open a Work Item, complete the wizard with a because rationale, Confirm</step>
+        <step>Check the browser console for errors from the widget frame</step>
+      </steps>
+      <expected>The Work Item leaves the lane, a Decision Record is written (id captured) and the Console shows it resolved</expected>
+    </test>
+    <test name="Chat end to end">
+      <url>https://m365.cloud.microsoft/chat</url>
+      <steps>
+        <step>Ask 'what decisions are waiting on me in Spaarke?'</step>
+        <step>Verify spaarke_show_decisions is called</step>
+        <step>Resolve one Work Item through the widget (or @Spaarke AI if 043 was built)</step>
+      </steps>
+      <expected>A Decision Record is written (id captured)</expected>
+    </test>
+    <test name="Billing row in the live lane">
+      <steps>
+        <step>Find a billing Work Item in the lane</step>
+        <step>Verify it reads 'Finding' and links to Invoice Review with no decide action</step>
+      </steps>
+      <expected>The Invoice Review page opens for the invoice; no decision is possible in Copilot</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host (Cowork or the local MCP Apps host) to dark theme</step>
+        <step>Verify backgrounds adapt (no white surface in dark mode) and text adapts (no black text in dark mode)</step>
+        <step>Verify icons use currentColor</step>
+        <step>Switch back to light theme and verify the widget follows without reload</step>
+      </steps>
+      <expected>All colours come from Fluent v9 semantic tokens driven by host context (ADR-021); nothing is stored</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="terminal">Run shell commands (grep, wc, git diff)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/notes/live-e2e-results.md</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/notes/routing-eval.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A licensed non-admin user connects once in Settings › Sources and resolves one Work Item of each lookup-bearing action type in Cowork; Decision Record ids are recorded and the Console shows the items resolved (success criterion 2).</criterion>
+    <criterion testable="true">The same user resolves a Work Item in Copilot Chat through the connector widget or the 043 agent; the record id is recorded (success criterion 3).</criterion>
+    <criterion testable="true">A direct prompt without the skill invokes spaarke_show_decisions, and the 20-prompt routing-eval rate is recorded (success criterion 4).</criterion>
+    <criterion testable="true">A because rationale entered in the wizard appears on the written Decision Record (FR-15).</criterion>
+    <criterion testable="true">Negative: a billing Work Item offers only the Invoice Review link-out; the FR-04 spot-check shows no privileged marker in model text.</criterion>
+    <criterion testable="true">NFR-01 p95 over 50 calls each is recorded for show/page/plan (target 3 s), lookup (1.5 s) and complete (15 s), every call under 30 s.</criterion>
+    <criterion testable="true">docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md exists, holds no secret, and a second admin or clean re-run reproduced the setup from it (result recorded).</criterion>
+    <criterion testable="true">The Console worklist and wizard smoke on dev passes after the live runs (success criterion 7).</criterion>
+  </acceptance-criteria>
+
+  <notes>052 links the runbook from the architecture doc and doc-drift-audits it; this task authors it. Re-check Chat widget support after Ignite (17–20 Nov 2026) if Chat relied on the agent fallback.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

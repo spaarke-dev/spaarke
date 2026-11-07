@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>A10 auth on /mcp, tool policies and route guard</title>
+    <phase>B MCP host and tools</phase>
+    <gate>after 020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include auth and bff-api; modifies auth configuration, endpoints and ArchTests (.cs)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth-sensitive (tags auth, authorization): A10 token acceptance and refusal before any tool runs, and the route-guard ratchet</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns AuthorizationModule.cs, Api/Mcp/McpEndpoints.cs, Api/Mcp/McpToolAuthorization.cs and RouteAuthorizationGuardTests.cs in its wave; 014 and 016 touch none</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, auth, authorization, endpoints, integration-test, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make /mcp/* accept only ADR-028 A10 tokens (Spaarke-tenant authority, aud = BFF, scope user_impersonation, systemuser callers), refuse CIAM and A9 home-directory tokens server-side before any tool runs, add per-tool authorization policies (B-7), and extend RouteAuthorizationGuardTests to MapMcp with tool-annotation checks (B-8), meeting unified-access-control-r2's four checks.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core JWT bearer authentication, authorization policies and architecture tests.</role>
+  <goal>/mcp/* enforces A10 with refusals before any tool runs; tools carry per-tool policies that reuse existing policies; the ArchTest guard covers MapMcp with must-fire and must-not-fire controls and checks every tool's ReadOnly annotation and title; uac-r2's four checks pass.</goal>
+
+  <context>
+    <background>Spec FR-02 and its review conditions; ADR-028 A10; design §6 and §8 B-7, B-8. AuthorizationModule.cs: ApplyFallbackPolicy L914, AuthSchemes.Ciam and WorkforceHome. RouteAuthorizationGuardTests recognises Map{Verb}, MapMethods and MapHealthChecks today (verb list ~L2642).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs (ONLY if A10 needs a scheme change: ApplyFallbackPolicy L914; AuthSchemes.Ciam / WorkforceHome)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Mcp/McpEndpoints.cs (auth metadata, challenge)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolAuthorization.cs (AddAuthorizationFilters + per-tool [Authorize(Policy = …)] wiring)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs (MapMcp in the scanned verbs ~L2642; tool ReadOnly/title check; no AI-internal types in tools)</file>
+      <file role="new">tests/integration/auth/Mcp/McpAuthTests.cs</file>
+      <file role="canonical-reference">.claude/adr/ADR-028-spaarke-auth-architecture.md (A10)</file>
+      <file role="canonical-reference">PnP mcp-cs-customers-secure-server (auth pattern, SDK 1.2.0 → 2.3.1; external sample, MIT)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">The /mcp/{area} host and test host</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">/mcp/* accepts only tokens from the Spaarke-tenant authority with aud = the BFF app and scope user_impersonation that resolve to a systemuser; CIAM and A9 home-directory tokens are refused with 401 server-side before any tool runs (A10).</constraint>
+    <constraint source="ADR-028">No code path in this task passes the caller's token downstream to a client or logs it or its claims; a failed OBO never falls back to app-only, and any app-only read applies the caller's own record-access check (FR-02).</constraint>
+    <constraint source="ADR-008">/mcp/* falls under the authorization FallbackPolicy; no anonymous route is added (only /healthz and /ping stay anonymous); per-tool policies reuse existing named policies and never ExternalCollaboration (B-7).</constraint>
+    <constraint source="project">The RouteAuthorizationGuardTests extension ships with a must-fire control (an unauthenticated MapMcp in fixture source fails) and a must-not-fire control, and a seeding proof is recorded (security guard).</constraint>
+    <constraint source="project">unified-access-control-r2 reviews the diff against FR-02's four checks before merge, and two adversarial-reviewer passes are recorded (root CLAUDE.md §8.5).</constraint>
+    <constraint source="ADR-015">Every log statement or telemetry property this task adds records identifiers, sizes, timings and outcome/reason codes only: no bearer token, claim value, record text or tool argument (NFR-05).</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">Any defect found and not fixed in this task is filed with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue), never one without the other (project CLAUDE.md §2).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+      <file>.claude/patterns/auth/token-caching.md</file>
+      <file>.claude/agent-memory/researcher/mcp-server-dotnet-bff-copilot-widget-2026-11-05.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/phase0-registration-facts.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read ADR-028 A10, AuthorizationModule.cs (schemes, ApplyFallbackPolicy L914) and the T5 claim evidence in notes/phase0-registration-facts.md.</step>
+    <step order="2">Configure /mcp/* to the default workforce scheme with explicit refusal of CIAM and A9 home-directory tokens before endpoint execution; change AuthorizationModule.cs only if the existing schemes cannot express A10.</step>
+    <step order="3">Emit a 401 with a WWW-Authenticate challenge per the MCP authorization spec (escalation below if it needs an anonymous metadata route).</step>
+    <step order="4">Add McpToolAuthorization: AddAuthorizationFilters and per-tool policies reusing existing policies.</step>
+    <step order="5">Extend RouteAuthorizationGuardTests: MapMcp scanned; every [McpServerTool] has explicit ReadOnly and Title; no tool constructor injects a Services/Ai/** type; must-fire, must-not-fire and the seeding proof.</step>
+    <step order="6">Write McpAuthTests covering the acceptance criteria; run auth, contract and ArchTests suites.</step>
+    <step order="7">Request unified-access-control-r2 review and two adversarial-reviewer passes; measure the publish-size delta.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="9">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the WWW-Authenticate challenge needs an anonymous protected-resource-metadata route (RFC 9728 /.well-known/oauth-protected-resource), STOP and escalate with options: FR-02 allows no anonymous route other than /healthz and /ping (root CLAUDE.md §9).</trigger>
+    <trigger>If A10 cannot be expressed without changing an existing scheme used by other planes, STOP and escalate to the owner and unified-access-control-r2 before editing AuthorizationModule.cs.</trigger>
+    <trigger>If any existing auth test changes expected behaviour, STOP (AP-9).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>AuthorizationModule.cs schemes and FallbackPolicy (L914); existing named policies; RouteAuthorizationGuardTests.cs (no MapMcp coverage today).</existing>
+    <extension>Yes for policies and the guard: per-tool policies reuse existing ones and the guard is extended, not replaced; McpToolAuthorization.cs is new only because endpoint filters (ADR-008) do not reach MCP tools.</extension>
+    <cost-of-doing-nothing>Without it, CIAM or A9 tokens could reach tools, checks held in endpoint filters would not apply to tools, and a new unauthenticated MCP route would be invisible to the ratchet.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolAuthorization.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/McpEndpoints.cs</output>
+    <output type="test">tests/integration/auth/Mcp/McpAuthTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Negative: an anonymous call to /mcp/legal-operations returns 401 with a WWW-Authenticate challenge.</criterion>
+    <criterion testable="true">Negative: a CIAM token returns 401 and an A9 home-directory token returns 401, each with the probe tool's invocation counter at 0 (refused before any tool runs).</criterion>
+    <criterion testable="true">Negative: a valid token that resolves to no systemuser gets the existing UserContextRequired refusal as an isError result.</criterion>
+    <criterion testable="true">Negative: when OBO fails, the tool returns an isError result and the app-only client is never invoked (spy assertion).</criterion>
+    <criterion testable="true">A valid A10 token for a licensed user runs the probe tool as that caller.</criterion>
+    <criterion testable="true">/mcp/* falls under the FallbackPolicy: a test endpoint mapped under /mcp without explicit auth still returns 401.</criterion>
+    <criterion testable="true">RouteAuthorizationGuardTests: an unauthenticated MapMcp fixture fails (must-fire), an authenticated one passes (must-not-fire), and the seeding proof is recorded.</criterion>
+    <criterion testable="true">The guard fails a fixture tool without an explicit ReadOnly annotation or title, and a fixture tool injecting a Services/Ai type.</criterion>
+    <criterion testable="true">No MCP endpoint or tool carries the ExternalCollaboration policy (arch test); grep shows no token or claim value logged.</criterion>
+    <criterion testable="true">The PR records unified-access-control-r2's review of the four checks, two adversarial passes, and the publish-size delta (at or under 60 MB, no new HIGH CVE).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>uac-r2's four checks (naming note §2): FallbackPolicy covers /mcp/*; must-fire guard test on an unauthenticated /mcp/{area}; CIAM and A9 refused server-side before any tool runs, tested; no app-only fallback on failed OBO.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
