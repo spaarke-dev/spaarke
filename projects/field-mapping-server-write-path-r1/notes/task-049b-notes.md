@@ -74,3 +74,16 @@ filter reported 1 failure that did not reproduce in the next two runs (its name 
   Implemented: the reconciler, per the ruling's text. Flip is one line in `GrantAssignedAccessAsync` if UAC-r2 prefers it.
 - The queued job covers the maker too (idempotent, zero writes for it). A maker-only inline grant that failed is retried
   by that job first, then by the reconciler.
+
+## Fix round 1 (review K2, K4)
+
+- **K2 - a one-subject pass acts only on a share.** In `DecideSubjectAsync`, right after `ResolveTargetAsync`, a request
+  with `OnlySubject` set and a target that is not `TargetKind.Share` records the subject with `AssignedAccessAction.None`
+  (state `Skipped`) and returns: no ledger write, no contact/organization grant, no invite. The queued full pass handles
+  that subject. This makes "an external subject is never granted inline" a property of the materializer, not only of
+  the caller. Test `AOneSubjectPass_ActsOnlyOnAShare_ANonShareSubjectIsLeftToTheFullPass` (unlinked contact with an email,
+  internal grantor present so an invite would be sent): one-subject pass asserts no grant row, no write, no invite, no
+  ledger row; the control full pass for the same setup grants and writes the Granted ledger row. Before the change the
+  test failed (`Expected ... "none" ... but "granted"`); after it passes.
+- **K4 - doc.** `AssignedAccessStatus.Evaluated` and `AssignedAccessOutcome.Complete` now say that for a one-subject pass
+  they cover that subject only. Doc only.

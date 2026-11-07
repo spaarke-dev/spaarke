@@ -50,7 +50,8 @@ public sealed record AssignedAccessRequest(
 /// <summary>Stable outcome statuses.</summary>
 public static class AssignedAccessStatus
 {
-    /// <summary>Every subject was evaluated; see the entries (and failures).</summary>
+    /// <summary>Every subject was evaluated; see the entries (and failures). For a one-subject pass
+    /// (<see cref="AssignedAccessRequest.OnlySubject"/> set) this covers that subject only, not every assigned subject.</summary>
     public const string Evaluated = "evaluated";
 
     /// <summary>No root has the id.</summary>
@@ -108,7 +109,8 @@ public sealed record AssignedAccessOutcome(
     IReadOnlyList<AssignedAccessFailure> Failures,
     int Writes)
 {
-    /// <summary>Evaluated with no failure. Anything else is not "clean".</summary>
+    /// <summary>Evaluated with no failure. Anything else is not "clean". For a one-subject pass
+    /// (<see cref="AssignedAccessRequest.OnlySubject"/> set) this covers that subject only, not every assigned subject.</summary>
     public bool Complete => Status == AssignedAccessStatus.Evaluated && Failures.Count == 0;
 }
 
@@ -773,6 +775,14 @@ public sealed class AssignedAccessMaterializer
         }
 
         var target = await ResolveTargetAsync(subject, flags, ct).ConfigureAwait(false);
+
+        // A one-subject pass (task 049b) acts only on a share. Any other target (a contact or organization grant, or a skip)
+        // is left untouched here, with no ledger write, no grant and no invite: the queued full pass handles that subject.
+        if (run.Request.OnlySubject is not null && target.Kind != TargetKind.Share)
+        {
+            run.Entry(subject, fields, target.SystemUserId, AssignedAccessState.Skipped, null, AssignedAccessAction.None);
+            return;
+        }
 
         // (3) Access this owner created: verify it, convert it (141 link), renew it.
         if (live.FirstOrDefault(r => r.State is AssignedAccessState.Granted or AssignedAccessState.Shared) is { } ours)

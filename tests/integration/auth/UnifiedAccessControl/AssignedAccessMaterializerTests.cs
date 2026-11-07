@@ -837,6 +837,41 @@ public class AssignedAccessMaterializerTests
     }
 
     [Fact]
+    public async Task AOneSubjectPass_ActsOnlyOnAShare_ANonShareSubjectIsLeftToTheFullPass()
+    {
+        var contact = _h.Contact();
+        _h.Identities.Contacts[contact].Email = "assignee@outside.test";
+        var grantorOid = Guid.NewGuid();
+        _h.Grants.SystemUserIdsByOid[grantorOid] = Guid.NewGuid();
+        _h.Grants.RootNames[_matter] = "Smith v. Smith";
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        var outcome = await _h.Materializer.MaterializeAsync(
+            new AssignedAccessRequest(Matter, _matter, AssignedAccessTrigger.Inline, grantorOid.ToString("D"),
+                RevokeOnChange: false, new[] { TestTenant },
+                OnlySubject: new AssignedSubject(AssignedSubjectKind.Contact, contact)),
+            CancellationToken.None);
+
+        outcome.Complete.Should().BeTrue();
+        outcome.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.None);
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty("an external subject is never granted inline");
+        _h.Grants.WriteCount.Should().Be(0);
+        _h.Emails.InviteUrls.Should().BeEmpty("no grant, so no invite");
+        _h.Store.RowsOf(_matter, contact).Should().BeEmpty("no ledger write: the queued full pass handles it");
+        _h.Store.Writes.Should().BeEmpty();
+
+        // Control: the same setup under the full pass (no OnlySubject) makes the contact grant and the ledger row.
+        var full = await _h.Materializer.MaterializeAsync(
+            new AssignedAccessRequest(Matter, _matter, AssignedAccessTrigger.Inline, grantorOid.ToString("D"),
+                RevokeOnChange: true, new[] { TestTenant }),
+            CancellationToken.None);
+
+        full.Complete.Should().BeTrue();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+        _h.Store.RowsOf(_matter, contact).Should().ContainSingle().Which.State.Should().Be(AssignedAccessState.Granted);
+    }
+
+    [Fact]
     public async Task AOneSubjectPass_NeverSettlesAnEndedAssignment_TheFullPassStillRevokesIt()
     {
         var earlier = _h.Contact();
