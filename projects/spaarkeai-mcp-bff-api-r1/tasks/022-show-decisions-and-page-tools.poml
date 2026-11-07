@@ -59,6 +59,7 @@
     <constraint source="ADR-015">Every log statement or telemetry property this task adds records identifiers, sizes, timings and outcome/reason codes only: no bearer token, claim value, record text or tool argument (NFR-05).</constraint>
     <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="FR-10">One caller per call (013 known limit, 2026-11-07). `DecisionCapability` checks the caller and keys the plan stamp on the `HttpContext` passed in, while the Dataverse reads take the token from `IHttpContextAccessor`. Every MCP tool must pass exactly `IHttpContextAccessor.HttpContext` (the ambient request context), never a constructed or cached `HttpContext`, so the guard and the reads see the same principal.</constraint>
   </constraints>
 
   <knowledge>
@@ -139,6 +140,7 @@
     <criterion testable="true">A log-capture test shows per-call telemetry has tool name, latency, row count, outcome and correlation id, and no argument or record text.</criterion>
     <criterion testable="true">The final paging tool name is recorded in notes/decisions.md; the PR records the publish-size delta (at or under 60 MB, no new HIGH CVE).</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+    <criterion testable="true">Negative: a grep or ArchTest shows no MCP tool constructs a `DefaultHttpContext` or stores an `HttpContext` in a field. The tool passes `accessor.HttpContext` straight through.</criterion>
   </acceptance-criteria>
 
   <notes>Request one seeding proof for the privileged-marker test (confidentiality guard): stop reducing one privileged row, confirm the test fails, restore. The jest parity test lives beside the existing laneCountFilters tests and must not change laneCountFilters.ts.</notes>

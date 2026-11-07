@@ -60,6 +60,7 @@
     <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
     <constraint source="project">Any defect found and not fixed in this task is filed with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue), never one without the other (project CLAUDE.md §2).</constraint>
+    <constraint source="FR-10">One caller per call (013 known limit, 2026-11-07). `DecisionCapability` checks the caller and keys the plan stamp on the `HttpContext` passed in, while the Dataverse reads take the token from `IHttpContextAccessor`. Every MCP tool must pass exactly `IHttpContextAccessor.HttpContext` (the ambient request context), never a constructed or cached `HttpContext`, so the guard and the reads see the same principal.</constraint>
   </constraints>
 
   <knowledge>
@@ -149,6 +150,7 @@
     <criterion testable="true">AI unit and integration suites pass on Microsoft.Extensions.AI 10.11.x (counts recorded in task notes).</criterion>
     <criterion testable="true">No BackgroundService is added; the PR records the publish-size delta (expected about +1.6 MB; total at or under 60 MB) and no new HIGH CVE.</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+    <criterion testable="true">On a real stateless MCP host, a test shows that the `HttpContext` a tool hands to `IDecisionCapability` is the same instance (ReferenceEquals) as `IHttpContextAccessor.HttpContext` during the call, and as the context the request middleware saw.</criterion>
   </acceptance-criteria>
 
   <notes>The 256 KiB body limit is this task's concrete value for 'a request-size limit' (DecisionReview payloads are a few KB); record it in notes/decisions.md. Do not use the Workforce ExternalCollaboration policy anywhere. If T13 failed, implement the area filter on a single route and keep the /mcp/{area} URL shape.</notes>

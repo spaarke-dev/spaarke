@@ -149,3 +149,11 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
 - **Test scope beyond the criteria** (one line each): the suppression no-caller case (FR-06 pairs plan + suppression in one tool, same guard); the REST-route stamp test (the plan-read stamp behaviour must not change on REST); mapper parity rows for every plan/suppression outcome (FR-09: every REST code has an MCP mapping test).
 - **Review round 1 (adversarial, `ffe5b3a84f`).** F3: no test pinned that the plan read's 503 from the inquiry check writes no stamp; `DoLanePrivacyTests` now asserts it on both 503 paths, with the ordinary To Do as the positive control. F3: stale ledger line citation fixed. K2: by-reference match (above).
 - **Known limit for 020/022 (review K1).** The guard and the stamp key read the `HttpContext` passed in, while the Dataverse reads take the bearer token from `IHttpContextAccessor.HttpContext`. On REST they are the same object. The MCP tools must pass the ambient context (the POML says so) and the host must stay stateless (FR-01), or a session-held context could pass the guard as one principal and read as another. 020 should test this.
+
+## 2026-11-07 — 013 done; one-caller rule for MCP tools
+
+- 013 is done (`51f124bb6d`, `ffe5b3a84f`, `2323a9bb3a`). The 011 baselines pass, and `IDecisionCapability` is now the REST/MCP seam.
+- **Known limit, now a binding constraint in 020 and 022:** the capability's guard and stamp read the `HttpContext` argument, but the Dataverse reads use `IHttpContextAccessor`. MCP tools must pass the ambient accessor context only, never a constructed or cached one.
+- 020 pins this by reference equality on a real stateless host. Task 010 test 1 covers the same ground.
+- The full unit suite in 013's run stopped at about 80 minutes, with 40 failures outside Signals. These look like load timeouts on a shared machine: 4 of the classes re-ran and passed. Before the next push, we confirm them through the CI Tier 2 run on PR #2587.
+
