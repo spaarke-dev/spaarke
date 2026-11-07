@@ -9,17 +9,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Pipeline Step 5 — Wave 1 finished (011 done; 001 and 010 waiting on the owner) |
-| **Step** | Pipeline Steps 0–4.2 done: 28 tasks (lint clean), committed `d79bb02009`, registered Project #2608 under Epic #421 (`3e39e66f1d`) |
+| **Task** | Pipeline Step 5 — Wave 1 done except 010 (owner decision) ; spike dev deploy in progress via uac-r2 |
+| **Step** | Spike branch merged with uac-r2 batch master SHA `cc11294300` → new spike HEAD `72e300c40b` (diff == `5c9e301572` only, verified). NOT yet built/pushed/measured. |
 | **Status** | in-progress |
-| **Next Action** | (1) 010: a read-only investigation is running; then the owner chooses A/B/C. (2) Spike: wait for uac-r2's first combined deploy (SHA + readback), then run T5/T0/T1 (task 003; 002 needs the owner in the admin centre). (3) Separate BFF-split reassessment agent running → notes/drafts/bff-split-reassessment-2026-11-06.md (does not block the project). Then rework 010's POML, re-dispatch 010; Wave 2 = 002 (after spike deploy) + 012 (after 010). |
+| **Next Action** | (1) In `C:/code_files/spaarke-wt-spaarkeai-mcp-phase0-spike`: `dotnet build`, `git push`, PR #2615 CI (Router + Client lint) green; re-measure publish delta (master `cc11294300` vs spike, procedure `.claude/constraints/azure-deployment.md` "BFF Publish-Size Per-Task Verification Rule") + `dotnet list package --vulnerable --include-transitive`; SendMessage uac-r2 (`spaarke-wt-unified-access-control-r2-20`) the SHA + numbers. (2) Owner to answer: task 010 → option C? (see below). |
 
-### Wave 1 outcome (2026-11-06)
-- 011 ✅ done — 63 golden contract baselines, commit `b9d8f19b47` (notes/contract-baseline.md).
-- 001 ⛔ built and verified locally on spike branch `spike/spaarkeai-mcp-phase0` @ `5c9e301572` (worktree `C:/code_files/spaarke-wt-spaarkeai-mcp-phase0-spike`, not pushed). Pushed `ac21863f57` (master merged in); never-merge draft PR #2615. **Owner approved: every uac-r2 dev deploy ships master + `5c9e301572` until we declare Phase 0 done** (no time limit). Keep that commit cherry-pickable; tell uac-r2 when Phase 0 is done. First combined deploy = their batch #2292/#2610/044 after the 046c watch. Notes: `notes/spikes/phase0-spike-measurements.md` (commit `00c4ced7e3`).
-- 010 🔔 escalated before any code: root-created DI scopes (singleton `SprkChatAgentFactory.cs:407`) reach `DataverseUserClient` only via ambient `IHttpContextAccessor`; a strictly request-scoped `ICallerContext` would fail chat `dataverse.*` tools closed. Also AC2 vs AC5 contradict. **Owner to choose A (ambient holder) / B (copy into scopes) / C (defer).** 012 onward waits.
-- Leftover `stash@{0}` "lint-staged automatic backup" from 011's first commit attempt — owner to drop (stash ops need confirmation).
-- TASK-INDEX keeps 001/010 as [open]: the drift checker treats [blocked]/[escalated] as terminal.
+### Open owner decision — task 010 (asked 2026-11-06)
+Investigation recommends **C (defer ICallerContext)**: stateless MCP tools run inside the request (SDK 2.3.1 uses `context.RequestServices`, `PerSessionExecutionContext=false`), so tools call existing decision services exactly as REST does; no change to DataverseUserClient / WhoAmI memo / chat paths; WhoAmI stays 1/commit. If owner says yes: amend spec FR-10 (defer B-4), replace tasks 010+012 with one verification task (tests: tool sees request context + RequestServices; real DataverseUserClient behind fake wire handler; MCP T170 WhoAmIs==1; MCP plan stamp satisfies MCP commit; pin stateless + PerSessionExecutionContext=false; existing suites + 011 baselines unchanged), file ISS for probable defect `ComposeProfileDispatcher.cs:130-134` (sets accessor.HttpContext inside Task.Run → may null the originating request's context), then continue 017 → 013.
+
+### Done this session (2026-11-06/07)
+- Wave 1: 011 ✅ (`b9d8f19b47`); 001 built (spike `5c9e301572`, notes `00c4ced7e3`); 010 escalated (no code).
+- Spike deploy terms (owner, in uac-r2's session): every uac-r2 dev deploy ships master + `5c9e301572` until we declare Phase 0 done; draft PR #2615 never merged (notes/decisions.md).
+- BFF split reassessment: no split now (`notes/drafts/bff-split-reassessment-2026-11-06.md`, `58ac89ed65`); full re-assessment due 2026-11-20 (other owners).
+- Leftover `stash@{0}` "lint-staged automatic backup" — owner to drop.
 
 ### Critical Context
 - Owner chose (2026-11-06) to merge the held ontology PRs into this branch: #2580 `9423f37004` (merge `489f6508fc`) and #2579 `ab04492ab7` (merge `026b61554a`). The BFF builds with 0 warnings and 0 errors. Facts about their code: `notes/pre-pipeline-context.md`.
