@@ -4,7 +4,7 @@
     <title>B-3 decision lookup search and REST route</title>
     <phase>A BFF rework</phase>
     <gate>after 013</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api and authorization; new service and endpoint (.cs)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -132,7 +132,10 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>The 25-result cap and the route path /api/v1/signals/{signalId}/lookup are this task's concrete choices for 'capped' and 'a REST route' in FR-07; record them in notes/decisions.md. A seeding proof is requested for the other-matter-budget negative (a widened search is a data-exposure outcome).</notes>
+  <notes>The 25-result cap and the route path /api/v1/signals/{signalId}/lookup are this task's concrete choices for 'capped' and 'a REST route' in FR-07; record them in notes/decisions.md. A seeding proof is requested for the other-matter-budget negative (a widened search is a data-exposure outcome).
+Completed 2026-11-07 (branch task/spaarkeai-mcp-016): IDecisionLookupSearch/DecisionLookupSearch in Services/Signals, DecisionResultMapper.Lookup.cs partial, GET /api/v1/signals/{signalId:guid}/lookup in DecisionPlanEndpoints (group RequireAuthorization), SignalsModule registration, route-guard ledger entry, ADR-010 ceiling 171 to 172 (documented). Cap 25, route path and deviations recorded in notes/decisions.md. Seeding proofs: matter clause, URL escaping, LIKE escaping, cap, caller guard (all killed).
+Review: one adversarial pass (opus); fixed F4 LIKE wildcards, F3 tautological unreadable-record test, F4 Do-lane reassign end-to-end test. Known limits K1 project-core budgets empty, K2 table 403 maps to 503, K3 4-6 caller round trips per keystroke, K4 MCP invalid_parameter fix text (023). Observed: IDecisionCapability 1:1 undocumented in the ADR-010 ratchet (reported, not filed).
+rework: fix-round-1 task 016</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
