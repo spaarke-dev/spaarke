@@ -1,72 +1,104 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="032" project="field-mapping-server-write-path-r1">
   <metadata>
-    <title>Extracted invoices carry Matter field mapping: a fill-only mapping step inside InvoiceSubmissionPersister, before its transaction (FR-20; owner ruling 2026-11-06)</title>
+    <title>Extracted invoices carry Matter field mapping: an allow-listed, gated, fill-only mapping step inside InvoiceSubmissionPersister, before its transaction (FR-20; owner ruling 2026-11-06; reviews 2026-11-07)</title>
     <phase>3 W3 Product creators onto the service</phase>
-    <gate>notes/task-032-design.md reviewed by ebilling-r1 AND unified-access-control-r2, every question in its section 12 answered and recorded in notes/decisions.md. No code before both reviews.</gate>
+    <gate>Round-3 confirmations, recorded in notes/decisions.md, for each item of notes/task-032-design.md section 14:
+      (1) the owner approves moving Repair's gate and fit logic into MappingWriteGates;
+      (2) ebilling-r1 AND UAC-r2 sign off the allow-list;
+      (3) the owner chooses option A, B or C for FR-20's value;
+      (4) ebilling-r1 confirms the one-parameter constructor;
+      (5) UAC-r2 confirms ReadCoverageAsync for the No Access read;
+      (6) UAC-r2 confirms "no admin note" for a Secure core.
+    No code before then.</gate>
     <status>blocked</status>
-    <blocked-reason>Design review by ebilling-r1 and UAC-r2 (owner ruling 2026-11-06).</blocked-reason>
+    <blocked-reason>Round-3 confirmations (design section 14). Base branch: section 15.</blocked-reason>
     <rigor>FULL</rigor>
-    <rigor-reason>Modifies .cs in Sprk.Bff.Api; tags include bff-api, finance, security; the step writes into a one-transaction create with fixed ids (data-mutation) as the system principal; changes a UAC-r2 guarded ArchTest (#2188 mask guard) and adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
+    <rigor-reason>Modifies .cs in Sprk.Bff.Api, including a RecordCreationService partial (a move, with the owner's approval). Tags include bff-api, finance and security. The step writes into a one-transaction create with fixed ids as the system principal. It changes guarded ArchTests (#2188 mask guard, FeatureRolePrivilegeGuardTests) and adds tests at KEEP paths.</rigor-reason>
     <model-tier>sonnet</model-tier>
-    <model-tier-reason>The design (notes/task-032-design.md) fixes the placement, the principal, every protected column, the fault rules and the guard; the work is a bounded new static class plus a small persister edit, executed literally. Escalate to opus if a review answer changes the design.</model-tier-reason>
+    <model-tier-reason>The design fixes the placement, the principal, the allow-list, the deny-list, the gate, the fault rules, the re-commit and the guards, so each part is executed literally. Escalate to opus if a round-3 answer changes the design.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>W3-server</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Edits ebilling-r1's InvoiceSubmissionPersister.cs; must rebase on work/ebilling-r1 and run /conflict-check (ebilling 095d-2b-2, 164a, 165a are nearby).</parallel-reason>
-    <deps>019; design review (gate); the app-only column-metadata reader (task 052 scope, see constraint "metadata reader")</deps>
+    <parallel-reason>Edits ebilling-r1's InvoiceSubmissionPersister.cs, AdminAttentionText.cs and FinanceModule.cs, and fm's RecordCreationService.Repair.cs. Sequence after eb 165d and 095d-2b-3 and run /conflict-check.</parallel-reason>
+    <deps>019; 052a (merged: IGenericEntityService.GetColumnMetadataAsync); round-3 gate; the base branch of design section 15</deps>
     <tags>bff-api, finance, security, field-mapping, testing</tags>
-    <estimated-effort>10-14 hours</estimated-effort>
+    <estimated-effort>22-29 hours, executed as three PRs: 032a (5-7 h), 032b (9-12 h), 032c (8-10 h)</estimated-effort>
   </metadata>
 
-  <prompt>Implement notes/task-032-design.md exactly. Add a fill-only mapping step that `InvoiceSubmissionPersister.PersistCoreAsync` calls on the in-memory invoice entity after every persister-written column is set and immediately before `_lifecycle.BuildInvoiceCreateRequest(invoice, initial)`, so the one `ExecuteTransactionAsync` commits the invoice with the mapped values. The step reuses the field-mapping engine directly (`CreateTimeFieldMapping`, `MappingSourceReadProbe` with `MappingSourceReader.System`, the profile read on `IFieldMappingDataverseService`, `RecordCreationService.ProtectedFromMapping` / `NormalizedRule` / `IsFilingLookup` as they are) and never calls `RecordCreationService` itself. Fill-only: an extracted or persister value always wins. A mapping fault, a missing profile or an unreadable source never fails, refuses or retries the submission: it maps nothing and, for a fault, records an admin-attention note in the same transaction.</prompt>
+  <prompt>Implement notes/task-032-design.md (round 2) exactly, in three parts.
+
+- **032a** moves Repair's secure-source and target-fit logic, unchanged, into `Services/RecordCreation/MappingWriteGates.cs`. Repair delegates to it. 032a also adds the role-source assertion G5.
+- **032b** adds the scoped class `InvoiceExtractionFieldMapping`. Its outcomes: owner gate, profile, then the allow-list (primary) and deny-list (second check), No Access, metadata per delivery, source read as `MappingSourceReader.System`, the secure-source gate, `ApplyFillOnly` all-or-nothing, fit, and copy.
+- **032c** wires the class into `PersistCoreAsync`:
+  - one optional constructor parameter;
+  - the call between the review-detail write and `BuildInvoiceCreateRequest`;
+  - `OwnedInvoiceColumns`;
+  - the local-function commit with one mapping-free re-commit;
+  - the `AdminAttentionText` mapping segment;
+  - the FinanceModule registration.
+
+Fill-only: an extracted or persister value always wins. Never call `RecordCreationService` itself. A fault never fails, refuses or retries the submission.</prompt>
   <role>SPAARKE platform developer, .NET 10 BFF, e-billing submission persistence and field mapping. Follow ADRs strictly. The design is the contract: where it and this POML disagree, stop and ask.</role>
-  <goal>A submission whose core record (matter, project or work assignment) has an active field-mapping profile to sprk_invoice produces an invoice whose unsupplied, unprotected columns are filled from that core record, in the same single transaction, with the same deterministic ids; every other submission persists exactly as today.</goal>
+  <goal>A submission whose core record (matter, project or work assignment) has an active field-mapping profile to sprk_invoice, with rules into allow-listed columns, produces an invoice whose unsupplied allow-listed columns are filled from that core record. This happens in the same single transaction and with the same deterministic ids, unless the gate, a fault or a fit check says otherwise, in which case nothing is mapped. Every other submission persists exactly as today.</goal>
 
   <context>
-    <background>Owner ruling 2026-11-06 (notes/decisions.md "Owner rulings", 032 bullet; "W3 direction" 032 bullet): `InvoiceSubmissionPersister` stays the single creator of the invoice family; mapping is a fill-only step inside it, before its transaction, calling the same mapping engine (W3 option 2); `RecordCreationService` does not change. Design inputs from ebilling-r1: notes/task-032-design-inputs.md (conditions 1-6). Prior escalation (superseded by the ruling): notes/task-032-notes.md. The previous POML target (`InvoiceReviewService.CreateInvoiceRecordAsync`) no longer exists (ebilling-r1 050a / D-134).</background>
+    <background>
+      <item>Owner ruling 2026-11-06: notes/decisions.md :886, and the W3 direction :871-881.</item>
+      <item>Reviews 2026-11-07: UAC-r2 :916-927; ebilling-r1 :929-949; the UAC-r2 follow-up :950-953; ebilling EB-D-207 (work/ebilling-r1 projects/ebilling-r1/notes/decisions-log.md :215).</item>
+      <item>Dev profile read on 2026-11-07 (read-only GET): one profile, "Matter to Invoice (Attorney Matrix)", with four access-conferring Contact lookup targets, all refused (design section 6.3).</item>
+    </background>
     <relevant-files>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionPersister.cs (ebilling-r1 owns it; work/ebilling-r1 b07e220fa6: PersistCoreAsync :300, invoice entity :461, owner :476, FillInvoice call :546, BuildInvoiceCreateRequest :614, adminAttention + submission update :708-716, ExecuteTransactionAsync :730, generic transaction catch :757, ResumeAsync :1082; re-grep)</file>
-      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceExtractionFieldMapping.cs (the step; static, no DI registration)</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/AdminAttentionText.cs (only if ebilling-r1 answers design Q-E2 with option a: one new segment kind)</file>
-      <file role="modify">tests/Spaarke.ArchTests/MappingSourceCallerMaskGuardTests.cs (one UnmaskedCallExemptions entry, Uses = 1; KnownCallSites 3 -> 4; only with UAC-r2's answer to design Q-U3)</file>
-      <file role="new">tests/Spaarke.ArchTests/InvoiceExtractionMappingGuardTests.cs (the named-exception guard, section 9 of the design)</file>
-      <file role="new">tests/unit/domain/Finance/Submission/InvoiceExtractionFieldMappingTests.cs (the step's unit tests)</file>
-      <file role="new">tests/unit/domain/Finance/Submission/InvoiceSubmissionPersisterMappingTests.cs (the persister with the step: placement, fill-only, one transaction, faults)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs (RepairMappingAsync :253-441: the system-principal use of the same engine)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Mapping.cs (MapFieldsAsync :255-402; ProtectedFromMapping :184; IsFilingLookup :94; NormalizedRule :1145)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/MappingSourceReadProbe.cs (ReadAsync :265; MappingSourceReader.System :47)</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs (CollectSourceColumns :77; ApplyFillOnly :126)</file>
-      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/InvoiceSubmissionPersisterTests.cs (on work/ebilling-r1: the persister's fakes; reuse, do not copy)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionPersister.cs (ebilling-r1's; work/ebilling-r1 2ae26bae9d): constructor :199-221; owner :476-485; FillInvoice :546; review detail :606-612; BuildInvoiceCreateRequest :614; guard and submission indexes :697-716; commit and catches :728-796; ResumeAsync :1082. Re-grep before use. (032c)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/AdminAttentionText.cs (eb): Merge :175-230, WithoutStopped :239-254. One mapping segment kind. (032c)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (eb :249): AddScoped&lt;InvoiceExtractionFieldMapping&gt;(). (032c)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs (fm): TargetColumnValue and helpers :594-692, SourceGateColumns :744, SourceMayBeCopiedAsync :754-812. These become wrappers over the moved code, with no behaviour change. (032a, owner approval)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/RecordCreation/MappingWriteGates.cs (MappingSourceCopyGate, MappedTargetFit; static) (032a)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceExtractionFieldMapping.cs (scoped concrete class, no interface) (032b)</file>
+      <file role="modify">tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs (G5 role-source assertion with controls) (032a)</file>
+      <file role="modify">tests/Spaarke.ArchTests/MappingSourceCallerMaskGuardTests.cs (one UnmaskedCallExemptions entry, Uses = 1; KnownCallSites 3 -> 4) (032b)</file>
+      <file role="new">tests/Spaarke.ArchTests/InvoiceExtractionMappingGuardTests.cs (G1) (032c)</file>
+      <file role="new">tests/unit/domain/RecordCreation/MappingWriteGatesTests.cs (T-M1) (032a)</file>
+      <file role="new">tests/unit/domain/Finance/Submission/InvoiceExtractionFieldMappingTests.cs (the step and G3) (032b)</file>
+      <file role="new">tests/unit/domain/Finance/Submission/InvoiceSubmissionPersisterMappingTests.cs (wiring, re-commit, re-delivery, admin note, DI) (032c)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RecordNoAccessEndpoint.cs :204-237 (the per-record No Access read: ReadCoverageAsync, ReadEntryAsync, TryClassify)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs (RepairMappingAsync: the system-principal use of the same engine; ColumnsRepairNeverMaps :712-741)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs (ApplyFillOnly :126; ApplyAll ordering :198)</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Submission/InvoiceSubmissionPersisterTests.cs (eb: the persister's fakes; reuse, do not copy)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="019" status="required">W2 service deployed and reviewed.</dependency>
-      <dependency task="design-review" status="required">ebilling-r1 and UAC-r2 answers to design section 12, recorded in notes/decisions.md.</dependency>
-      <dependency task="052" status="shared">The app-only column-metadata reader. One reader, never two: use 052's if it has landed; otherwise add it here as 052's scope describes and 052 consumes it.</dependency>
+      <dependency task="019" status="required">The W2 service is deployed and reviewed.</dependency>
+      <dependency task="052a" status="met">IGenericEntityService.GetColumnMetadataAsync and ColumnMetadata (range, Targets, OptionValues); uncached.</dependency>
+      <dependency task="round-3" status="required">Design section 14, items 1-6, answered in notes/decisions.md.</dependency>
+      <dependency task="ebilling-r1 165d, 095d-2b-3" status="sequence">Land before 032c, which touches the same files and refusal.</dependency>
     </dependencies>
   </context>
 
   <constraints>
-    <constraint source="owner ruling 2026-11-06">Scope: creator. `InvoiceSubmissionPersister` remains the only code that creates the invoice family on the extraction path. No new creator, no second transaction outside the persister, no call to `RecordCreationService.CreateAsync` or any other `RecordCreationService` instance member.</constraint>
-    <constraint source="owner ruling 2026-11-06">Scope: RecordCreationService. No change to any `RecordCreationService*.cs` file (no given-id input, no multi-row create, no system-principal mapping mode, no visibility change). Its existing `internal static` members are called as they are.</constraint>
-    <constraint source="FR-02">Scope: precedence. Fill-only through `CreateTimeFieldMapping.ApplyFillOnly` on the invoice as the persister built it; every column the persister set is supplied and never overwritten.</constraint>
-    <constraint source="design section 5">Scope: protected targets. A rule whose target is in the design's protected set (section 5: ProtectedFromMapping, RefuseAppOnlyWrite per target, the persister-owned columns written or conditionally written, the status pair, the invoice id, the firm and firm hold, the submitter columns, the supersedes link, sprk_document, the search-index columns, the access-conferring columns, every column a registered external module for sprk_invoice may read, and every filing lookup) is skipped, never written, whether or not the persister set it this time.</constraint>
-    <constraint source="ADR-028; design section 4">Scope: identity. The source, the profile and the metadata are read app-only as the system principal (`MappingSourceReader.System`); no OBO, no impersonation, no caller probe. The source is only ever the submission's core record (`outcome.CoreRecord`), passed explicitly; never inferred from the invoice's columns.</constraint>
-    <constraint source="#2188; design section 4.3">Scope: field security. Every source column whose metadata says IsSecured, or whose IsSecured cannot be read, removes the whole step's output (fail closed for unknown) or the column (known secured), as the design states. Never a fallback to "not secured".</constraint>
-    <constraint source="design section 7">Scope: faults. Nothing in the step returns Retry, Refused, ReEvaluate or throws to the persister (cancellation of the job's own token aside). A fault maps nothing at all (no partial set) and adds the admin-attention note; a missing profile and a profile with no applicable rules map nothing silently.</constraint>
-    <constraint source="ebilling-r1 (CLAUDE.md §4)">Scope: transaction. Ids stay `InvoiceIdFor` / `LineIdFor` / `ApprovalIdFor`; the request order and count of the transaction are unchanged except as the design's section 8 allows (the one mapping-free re-commit, only if ebilling-r1 answers Q-E1 with option a). Lines, approval, Stored File rows and the submission row are never mapping targets. `ResumeAsync` never maps.</constraint>
-    <constraint source="metadata reader">Scope: metadata. Target type, IsValidForCreate, MaxLength, DateTimeBehavior, lookup Targets and source IsSecured come from the one app-only column-metadata reader (task 052 scope), read per delivery or from a cache no longer than the design states; a value that does not fit its target exactly as the SDK needs it is dropped, never coerced silently.</constraint>
-    <constraint source="ADR-010">Scope: DI. No new registration and no new interface (ADR010_DITests ceiling unchanged). New persister constructor parameters are optional trailing parameters of already-registered services; a null one makes the step map nothing.</constraint>
-    <constraint source="ADR-015">Scope: logs and notes. Log lines and the admin-attention note carry codes, column names and ids only; never a mapped or extracted value.</constraint>
-    <constraint source="CLAUDE.md §10">Scope: BFF publish. Placement Justification in the PR; fresh-master publish-size delta; `dotnet list package --vulnerable --include-transitive`; no package.</constraint>
-    <constraint source="ADR-038; testing.md:132">Scope: tests. New tests under tests/unit/domain/** and tests/Spaarke.ArchTests only; existing persister tests change only to follow a moved dependency, never by weakening an assertion; every guard ships with must-fire and must-not-fire controls.</constraint>
+    <constraint source="owner ruling 2026-11-06">Creator: InvoiceSubmissionPersister stays the only code that creates the invoice family on the extraction path. No new creator, no second transaction, and no call to any RecordCreationService instance member.</constraint>
+    <constraint source="owner ruling 2026-11-06; design 5.3">RecordCreationService: nothing is added to it. The ONLY permitted diff is 032a's move of SourceMayBeCopiedAsync, SourceGateColumns and TargetColumnValue (with IsNumberType, AsNumber and InRange) into MappingWriteGates, with the Repair methods as wrappers that keep their log lines and behaviour. It needs the owner's approval first (gate item 1). The Repair suites pass with no assertion changed.</constraint>
+    <constraint source="FR-02">Precedence: fill-only through CreateTimeFieldMapping.ApplyFillOnly, unchanged (no new parameter), on a copy of the invoice as the persister built it.</constraint>
+    <constraint source="C1; Q-U6; design 6.1">Allow-list (primary): a rule is applied only when its target is in InvoiceExtractionFieldMapping.AllowedTargets, the set signed off in round 3 (proposed: sprk_description, sprk_highpriority). Every entry is of a type ColumnMetadata fully checks: no Decimal, Double, Money or DateTime column.</constraint>
+    <constraint source="C1; Q-U2; Q-E3; Q-E5; C5; design 6.2">Deny-list (second check): every group of design 6.2 refuses its targets even when allow-listed. The groups are read by reference: ProtectedFromMapping, RefuseAppOnlyWrite, the status pair and the id, InvoiceSubmissionPersister.OwnedInvoiceColumns (including the five Q-E3 columns), InvoiceIndexDocument.InvoiceColumns and the search-index columns, the runtime ExternalModuleRegistry ReadableColumns for sprk_invoice, the access-conferring columns (canonical and bound), contact, systemuser and team lookups, filing lookups (both IsFilingLookup overloads), sprk_billingexport and sprk_invoiceduedate.</constraint>
+    <constraint source="C2; Q-U5; UAC-r2 follow-up; EB-D-207; design 5">Gate: map nothing when owner.IsSecureOwner, when owner.InPlaceOfDefaultTeamId is set (hard-deny), when an active, well-formed No Access entry covers the core record (ReadCoverageAsync, then ReadEntryAsync, then TryClassify; truncated counts as covered), or when MappingSourceCopyGate says Secure. Gated outcomes log a code and write NO admin note. A failed read (coverage, entry, secure team) maps nothing and writes the note.</constraint>
+    <constraint source="ADR-028; design 4">Identity: the profile, metadata, No Access and source are read app-only as the system principal (MappingSourceReader.System). No OBO, no impersonation and no caller probe. The source is only outcome.CoreRecord, passed explicitly. MappingSourceResolver is never called.</constraint>
+    <constraint source="Q-U4; design 7">Field security and metadata: GetColumnMetadataAsync is called for the core table and sprk_invoice on every delivery that reaches it, with no cache. A fault, an empty answer, or an unknown IsSecured on a needed source column maps nothing (note). A source column missing from a successful answer drops only its rule, with a Warning naming the rule id. A secured source column is never read. A target that is not IsSecured == false is dropped.</constraint>
+    <constraint source="C3; design 8.2">All or nothing: any warning ApplyFillOnly adds, or any written column that fails MappedTargetFit, maps nothing and writes the note (rule_fault or value_unfit). No partial set ever reaches the invoice.</constraint>
+    <constraint source="C4; design 3.3">Determinism: the protected resolver keys are the static CreateTimeFieldMapping.RegardingPairAndResolverColumns. Rules are sorted by (ExecutionOrder, Id) before the engine runs. Lookups are checked with the MappedLookup overload of IsFilingLookup.</constraint>
+    <constraint source="Q-E1; design 9">Transaction: ids, request order and count are unchanged. The commit and its full catch chain are one local function, called at most twice. A second call happens only when FailedRequestIndex == 0, the step applied at least one column, and the outcome is known. Before it, create.Requests and the submission update are rebuilt at the same indexes with the mapped columns removed and the note create_refused_with_mapping. If the count or an index would differ, return the ordinary Retry. ResumeAsync never maps.</constraint>
+    <constraint source="Q-E2; design 8.3">Admin note: one AdminAttentionText segment kind ("Field mapping not applied: " plus one code), for faults only, in the fixed order signals, policy, mapping, stopped, undone. Merge and WithoutStopped recognise it. The Signal segment shrinks so the whole text stays within AdminAttentionMaxLength (500) and the mapping segment is never cut.</constraint>
+    <constraint source="Q-E6; ADR-010; CLAUDE.md §11">DI: one new registration, AddScoped&lt;InvoiceExtractionFieldMapping&gt;() in FinanceModule (concrete, no interface, so the ADR010_DITests ceiling is unchanged). The persister gains one optional trailing parameter. When it is null, the step does not run and one Warning not_wired is logged per persist. If ebilling-r1 picks the five-parameter fallback in round 3, follow design 3.1 instead.</constraint>
+    <constraint source="C5">Money guard: InvoiceExtractionFieldMapping names no money or firm column, and reaches them only through OwnedInvoiceColumns and ProtectedFromMapping. InvoiceMoneyColumnsAppOnlyWriteGuardTests passes unchanged unless ebilling-r1 lists the step under Readers.</constraint>
+    <constraint source="ADR-015">Logs and the note carry codes, column names, rule ids and record ids only, never a mapped or extracted value.</constraint>
+    <constraint source="CLAUDE.md §10">BFF publish: Placement Justification in each PR, the fresh-master publish-size delta, `dotnet list package --vulnerable --include-transitive`, and no package.</constraint>
+    <constraint source="ADR-038; testing.md:132">Tests: new tests go under tests/unit/domain/** and tests/Spaarke.ArchTests only. Existing tests change only to follow a moved dependency, never by weakening an assertion. Every guard ships with must-fire and must-not-fire controls, and every behaviour test is shown red first.</constraint>
   </constraints>
 
   <knowledge>
-    <topic>Invoice submission persistence; create-time field mapping</topic>
+    <topic>Invoice submission persistence; create-time field mapping; No Access; record ownership</topic>
     <files>
       <file>projects/field-mapping-server-write-path-r1/notes/task-032-design.md</file>
-      <file>projects/field-mapping-server-write-path-r1/notes/task-032-design-inputs.md</file>
+      <file>projects/field-mapping-server-write-path-r1/notes/decisions.md (2026-11-06 and 2026-11-07 entries)</file>
       <file>.claude/adr/ADR-002-thin-plugins.md</file>
       <file>.claude/adr/ADR-010-di-minimalism.md</file>
       <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
@@ -79,27 +111,25 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0" name="Context + rigor declaration">Declare FULL rigor. Confirm the gate (review answers in decisions.md). `git switch -c task/fm-032-impl` from the work branch, merge or rebase onto work/ebilling-r1, run /conflict-check. Re-grep every line the design cites.</step>
-    <step order="1">Metadata reader: confirm whether 052's app-only column-metadata reader exists; if not, add it as 052's scope describes (extend MetadataService) with its own tests.</step>
-    <step order="2">Write the failing tests of design section 10 first (unit and guard).</step>
-    <step order="3">Add InvoiceExtractionFieldMapping (design sections 3-7) and call it from PersistCoreAsync at the design's position; thread its admin-attention note into the existing submission update.</step>
-    <step order="4">Only if Q-E1 = option a: the one mapping-free re-commit (design section 8).</step>
-    <step order="5">Guards: the #2188 exemption entry (with UAC-r2's answer) and InvoiceExtractionMappingGuardTests with controls.</step>
-    <step order="6">Build; run the persister suites, the handler suites, MappingSourceCallerMaskGuardTests, RecordOwnerAssignmentCensusTests, ADR010_DITests and the field-mapping unit suites; publish-size delta; CVE check.</step>
-    <step order="7">Adversarial review: two passes (security). Record deviations in projects/field-mapping-server-write-path-r1/notes/task-032-notes.md.</step>
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor. Confirm the round-3 answers in decisions.md. Cut the part's branch from the base in design section 15 and run /conflict-check. Re-grep every line the design cites.</step>
+    <step order="1" name="032a">Write T-M1 and G5 red. Move the Repair logic into MappingWriteGates unchanged and make Repair delegate. Run the Repair suites unchanged, FeatureRolePrivilegeGuardTests and T-M1. One adversarial pass.</step>
+    <step order="2" name="032b">Write the step's tests red (T-P2-4, T-G1, T-S1-2, T-C3-4, T-V1, T-F1-2, G3). Add InvoiceExtractionFieldMapping following design sections 3 and 5-8, and the #2188 entry. Two adversarial passes (security).</step>
+    <step order="3" name="032c">Write the persister tests red (T-P1, T-T1-2, T-I1, T-R1, T-E4, T-A1, T-DI, G1). Add OwnedInvoiceColumns, the parameter, the call, the local-function commit and re-commit, the AdminAttentionText segment and the registration. Run the regression list of design section 11. One adversarial pass.</step>
+    <step order="4">For each part: build, publish-size delta, CVE check, notes in notes/task-032-notes.md.</step>
   </steps>
 
   <escalation>
-    <trigger>A review answer changes the placement, the principal, the protected set or the fault rule: STOP; the design is re-issued before code.</trigger>
-    <trigger>Implementing needs any change to a RecordCreationService*.cs file: STOP and escalate (owner ruling forbids it).</trigger>
-    <trigger>The persister on work/ebilling-r1 has moved so that no single point after the last persister-written invoice column and before BuildInvoiceCreateRequest exists: STOP and ask ebilling-r1.</trigger>
-    <trigger>The metadata reader cannot tell IsSecured for a source column on a live table: STOP; never ship with a "not secured" default.</trigger>
+    <trigger>A round-3 answer changes the placement, the principal, the allow-list, the gate or the fault rule: STOP. The design is re-issued before code.</trigger>
+    <trigger>Any RecordCreationService*.cs change beyond 032a's approved move and wrappers: STOP.</trigger>
+    <trigger>A Repair test must change to pass after the move: STOP. The move was not behaviour-preserving.</trigger>
+    <trigger>The persister on the base branch has no single point after the last persister-written invoice column and before BuildInvoiceCreateRequest, or create.Requests is not rebuildable at the same indexes: STOP and ask ebilling-r1.</trigger>
+    <trigger>An allow-listed column turns out to be partner-readable, indexed, access-conferring or persister-written: STOP. The allow-list is reviewed again.</trigger>
   </escalation>
 
   <justification>
-    <existing>RecordCreationService.MapFieldsAsync (caller principal, Web API item) and RepairMappingAsync (system principal, existing row) are the two engine callers; both are private members of the service, which the ruling forbids changing or calling for this create.</existing>
-    <extension>The engine itself is reused unchanged (static CreateTimeFieldMapping, MappingSourceReadProbe, the service's internal static helpers). The one new class is needed because the persister cannot reach either private caller and the ruling keeps the service closed; it holds only the invoice-specific protection and fault rules.</extension>
-    <cost-of-doing-nothing>FR-20 is not met for extracted invoices: every invoice from the submission job lacks the Matter fields the profile names (owner ruling 2026-11-06 requires them in R1).</cost-of-doing-nothing>
+    <existing>RecordCreationService.MapFieldsAsync (caller principal) and RepairMappingAsync (system principal) are the engine's two callers. Both are private, and the ruling keeps the service closed. Repair's SourceMayBeCopiedAsync and TargetColumnValue are private too.</existing>
+    <extension>The engine (CreateTimeFieldMapping, MappingSourceReadProbe, the service's internal static helpers) is reused unchanged. Repair's gate and fit logic is moved, not copied, so the step and Repair share one implementation (UAC-r2 "reuse, not a re-implementation"). The step class holds only the invoice-specific allow-list, deny-list, gate order and fault rules.</extension>
+    <cost-of-doing-nothing>FR-20 is not met for extracted invoices: no invoice from the submission job gets core-record fields, which the owner ruling of 2026-11-06 requires in R1. The scoped registration (rather than parameters) is the cost of the gate UAC-r2 required: six dependencies that the persister would otherwise take one by one.</cost-of-doing-nothing>
   </justification>
 
   <tools>
@@ -107,30 +137,45 @@
   </tools>
 
   <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/MappingWriteGates.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs (wrappers)</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceExtractionFieldMapping.cs</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionPersister.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/AdminAttentionText.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</output>
+    <output type="test">tests/unit/domain/RecordCreation/MappingWriteGatesTests.cs</output>
     <output type="test">tests/unit/domain/Finance/Submission/InvoiceExtractionFieldMappingTests.cs</output>
     <output type="test">tests/unit/domain/Finance/Submission/InvoiceSubmissionPersisterMappingTests.cs</output>
     <output type="test">tests/Spaarke.ArchTests/InvoiceExtractionMappingGuardTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/FeatureRolePrivilegeGuardTests.cs (G5)</output>
+    <output type="test">tests/Spaarke.ArchTests/MappingSourceCallerMaskGuardTests.cs (entry)</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">AC1 Placement: PersistCoreAsync calls the step exactly once per non-resume persist, after FillInvoice, the creator stamp, sprk_submittedby, the supersedes link and the review detail are set, and before BuildInvoiceCreateRequest; the transaction's invoice create carries the mapped columns (unit test asserting the CreateRequest target).</criterion>
-    <criterion testable="true">AC2 Fill-only: with a profile that targets a column the persister set (for example sprk_name, sprk_totalamount, sprk_invoicenumber), the committed value is the persister's (unit test per column).</criterion>
-    <criterion testable="true">AC3 Mapping happens: with an active profile from the core table to sprk_invoice and a Copy rule into an unprotected, unset column, the committed invoice carries the source value; the same holds for a project and a work assignment core record (unit tests).</criterion>
-    <criterion testable="true">AC4 Protected targets (negative, one test per column, design section 5): a rule targeting each listed column writes nothing to it, including statecode, statuscode, sprk_invoiceid, ownerid, sprk_createdbyperson, sprk_submittedby, sprk_vendororg (also when the submission has no firm), sprk_firmhold, sprk_document, the supersedes link, sprk_reviewdetail, every money total, sprk_currency, sprk_invoicedate and the billing period (also when extraction found none), every core lookup, the search-index columns, and every column of a registered sprk_invoice external module's ReadableColumns.</criterion>
-    <criterion testable="true">AC5 Field security (negative): a Copy from a source column the metadata marks IsSecured writes nothing for that column and the other rules still apply; a metadata read fault or an unknown IsSecured maps nothing at all and adds the note.</criterion>
-    <criterion testable="true">AC6 Faults never fail the submission (negative): a profile read fault, a source read fault, a metadata fault and an exception thrown inside the step each give the same persist status, reason code, ids and request count as the same submission with no profile, with no mapped column on the invoice and the note in the submission update.</criterion>
-    <criterion testable="true">AC7 Silent no-ops: no profile, a profile with no rules, and a profile whose every rule is skipped map nothing and add no note.</criterion>
-    <criterion testable="true">AC8 Value fit (negative): a mapped value of the wrong SDK type, over MaxLength, into a column not valid for create, into a date column of unknown behaviour, or a lookup whose target table the column does not accept is dropped, and the transaction is built without it.</criterion>
-    <criterion testable="true">AC9 Transaction shape: ids, request order and request count are identical with and without mapping; lines, approval, Stored File rows and the submission update carry no mapped column; ResumeAsync makes no mapping read (unit test with a throwing profile reader on a resumed submission).</criterion>
-    <criterion testable="true">AC10 Source: the step reads only outcome.CoreRecord's table and id; the mapping read uses MappingSourceReader.System; no caller probe and no OBO client is used (unit test with recording fakes).</criterion>
-    <criterion testable="true">AC11 Guard: InvoiceExtractionMappingGuardTests pins the step's call position in PersistCoreAsync, no mapping call in ResumeAsync, the invoice local as the only target, and no RecordCreationService instance member in the persister or the step; each with must-fire and must-not-fire controls. The #2188 guard passes with exactly one new exemption (Uses = 1) and KnownCallSites = 4.</criterion>
-    <criterion testable="true">AC12 Unchanged: no RecordCreationService*.cs file and no InvoiceSubmissionRerunJobHandler.cs file is in the diff; existing persister, handler, MappingSourceCallerMaskGuardTests (other than the entry), RecordOwnerAssignmentCensusTests and ADR010_DITests pass with unchanged assertions.</criterion>
-    <criterion testable="true">AC13 BFF build 0 errors; publish-size delta and CVE result recorded in notes/task-032-notes.md.</criterion>
+    <criterion testable="true">AC1 Placement (032c): PersistCoreAsync calls ApplyAsync exactly once per non-resume persist, after FillInvoice, the creator stamp, sprk_submittedby, the supersedes link and the review detail, and before BuildInvoiceCreateRequest. The invoice create carries the mapped columns.</criterion>
+    <criterion testable="true">AC2 Allow-list (032b): a Copy into sprk_description or sprk_highpriority fills it, for a matter, a project and a work-assignment core record. A rule into any other column, including the dev profile's four attorney and paralegal targets, writes nothing. G3 pins the exact set, its disjointness from every design 6.2 group, its types and its ValidForCreateApi, with must-fire seeds.</criterion>
+    <criterion testable="true">AC3 Deny-list (032b, negative): one test per design 6.2 group and per Q-E3 column. An allow-listed copy of the column is still refused, including when the persister left the column empty.</criterion>
+    <criterion testable="true">AC4 Fill-only (032b/032c): a persister-set value is never overwritten.</criterion>
+    <criterion testable="true">AC5 Gate (032b, T-G1): a Secure owner, a hard-deny owner, a covering active and well-formed No Access entry (record, organization wall, Secure parent), truncated coverage, and a Secure or flagged source each map nothing with NO note and a log code. The owner cases make no read. Unreadable coverage, an entry read fault and an unresolved Secure team map nothing WITH the note. An inactive or malformed entry, and an ordinary core record, map.</criterion>
+    <criterion testable="true">AC6 Field security and metadata (032b): a secured source column is never read or mapped. A metadata fault, an empty answer or an unknown IsSecured maps nothing with the note. A missing source column drops only its rule, with a Warning naming the rule id. Metadata is read twice per delivery and again on the next delivery (no cache).</criterion>
+    <criterion testable="true">AC7 All or nothing (032b): any engine warning maps nothing (note rule_fault). Any written column failing MappedTargetFit (type, length, range, lookup table, option) maps nothing (note value_unfit).</criterion>
+    <criterion testable="true">AC8 Determinism (032b): shuffled rules with equal ExecutionOrder give the same result. A filing lookup is refused through the MappedLookup overload.</criterion>
+    <criterion testable="true">AC9 Faults never fail the submission (032b/032c): every fault gives the same status, reason code, ids, request order and count as no profile. No profile, an empty profile, or every rule skipped writes no note.</criterion>
+    <criterion testable="true">AC10 Re-commit (032c, T-R1): refused once at index 0 with mapping, the second execution commits without the mapped columns, with the note. Refused twice: Retry, two executions. Nothing mapped: Retry, one execution. Another index: the existing chain, one execution. Outcome unknown: no re-commit.</criterion>
+    <criterion testable="true">AC11 Re-delivery (032c, T-E4, T-T2): two deliveries, the first rolled back, store exactly the second's values and note. A resumed submission makes no profile, metadata, No Access or source read.</criterion>
+    <criterion testable="true">AC12 Admin note (032c, T-A1): the cap test holds (at most 500 characters, mapping segment whole, Signal segment truncated with "(+N more)"), the order is fixed, and WithoutStopped keeps the mapping segment.</criterion>
+    <criterion testable="true">AC13 DI (032c, T-DI): from the real container, the persister resolves with a non-null InvoiceExtractionFieldMapping whose dependencies are all non-null. With it null, one Warning not_wired is logged and nothing is mapped.</criterion>
+    <criterion testable="true">AC14 Identity (032b): the source read names outcome.CoreRecord with MappingSourceReader.System. No OBO client or probe is used.</criterion>
+    <criterion testable="true">AC15 Guards: G1 (call position, single caller, no ResumeAsync call, invoice local only, allowed RecordCreationService statics only, System reader literal, gate before engine) with controls. G2: the #2188 guard passes with one entry, Uses = 1, and KnownCallSites = 4. G4: InvoiceMoneyColumnsAppOnlyWriteGuardTests passes. G5 (032a): role-source assertion with a must-fire seeded role and must-not-fire real files. G6: the census passes.</criterion>
+    <criterion testable="true">AC16 Move (032a): the Repair suites (RecordRepairColumnMetadataTests, RecordRepairColumnValueTests and the Repair mapping tests) pass with no assertion changed. T-M1 covers MappingWriteGates directly.</criterion>
+    <criterion testable="true">AC17 Unchanged: no change to CreateTimeFieldMapping, RecordTableRules, ColumnMetadata, InvoiceSubmissionRerunJobHandler or the handler. The only RecordCreationService*.cs diff is 032a's move. ADR010_DITests is unchanged.</criterion>
+    <criterion testable="true">AC18 Each part: the BFF builds with 0 errors; the publish-size delta and CVE result are recorded in notes/task-032-notes.md.</criterion>
   </acceptance-criteria>
 
-  <notes>Re-scoped 2026-11-07 to the owner ruling of 2026-11-06. Design: notes/task-032-design.md. Live check: task 036 (a submission under a profiled matter on dev).</notes>
+  <notes>
+    <note>Round 2 (2026-11-07) met the UAC-r2 and ebilling-r1 conditions. Open items for round 3 are in design section 14. The base branch is in section 15, and the size and split in section 16.</note>
+    <note>Live check: task 036, with a dev profile rule into an allow-listed column. Today's dev profile maps nothing under this design.</note>
+  </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
