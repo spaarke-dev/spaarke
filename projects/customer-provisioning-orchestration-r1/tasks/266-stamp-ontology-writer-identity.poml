@@ -4,7 +4,7 @@
     <title>Per-stamp ontology writer identity: UAMI, app setting, Dataverse grants, read-back (#2605)</title>
     <phase>Model 1 dedicated-stamp remediation — cross-project hand-off (2026-11-06, ontology-platform-r1)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs (H2a, H4b, H10, H7b, H13) and Bicep; adds an identity and its Dataverse grants (auth / least privilege).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -95,7 +95,7 @@
 
   <justification>
     <existing>Stamp UAMI `modules/uami.bicep` (customer.bicep:254), H10's UAMI app-user path, S23 in SecureRecordSetupProcedure.cs, T7's slot read-back.</existing>
-    <extension>Yes — every piece extends an existing module or step; no new handler, interface or DI registration. The UAMI is a second instance of the existing module because FR-21 forbids reusing the runtime identity.</extension>
+    <extension>Yes — every piece extends an existing module or step; no new handler, interface or DI registration. The UAMI is a second instance of the existing module because FR-21 forbids reusing the runtime identity. New members on existing seams (code-review W1, 2026-11-07): IGraphAppRoleParityVerifier.FindAnyRolesAsync — FindUnexpectedRolesAsync deliberately answers Unknown for an empty allowed set, so "allowed = none" needs its own call; ISecureRecordSetupDataverse.ListUserTeamsAsync / ListUserProfilesAsync — the only way to see roles inherited through a team and direct profile memberships, without which S24 cannot prove "exactly this role and these profiles"; TrapVerificationRequest's two writer fields — T7/T3 have no other input.</extension>
     <cost-of-doing-nothing>Every stamp BFF's SignalWriter and DecisionRecordWriter fail closed, so no Signal or Decision Record is ever written on a customer stamp (#2605).</cost-of-doing-nothing>
   </justification>
 
@@ -118,6 +118,9 @@
   </acceptance-criteria>
 
   <notes>
+    <note date="2026-11-07">Done (code + tests + guide; no live change). Commits b514a9edca (bicep/H2a/H4b), fefcfb09b8 (H10 writer App User), 99fb858153 (H7b S24, procedure v7), 77d468dcf7 (H13 T7 + T3), bafbba6a43 (guide), 9073fa3e14 + 3eb0f08a70 + 9f24305bf2 (review fixes). 3315 control-plane tests, ArchTests 1950/1950. The second writer profile ships first in SpaarkeMaster 1.3.0.0 (not 1.2.4.0 as first noted).</note>
+    <note date="2026-11-07">Rework (adversarial review x2 — auth): S24 now also refuses a writer that would inherit a role through a team (any team but its unit's default team, or a role on that default team) or holds another profile directly; verify: extras QuarantineRequired, missing Resumable; H10 adoption refuses a row whose azureactivedirectoryobjectid is not the principal id (also the stamp UAMI); H10/H4b say "start a new run" for runs predating an H2a output; privilege specifics dropped from comments. Seeding proofs: team guard 3 tests, profile guard 1, verify class 2, adoption guard 2. Known limits: K4 FindAnyRoles/FindUnexpectedRoles share ~15 lines; S24 inline in RunAsync; H10 checks the writer's unit only at adoption (ordering, no wrong outcome).</note>
+    <note date="2026-11-07">Scoped re-check of the fix diff (Sonnet, one pass — the approach did not change): F2 the guide's external-access row asks for a contact role on the customer unit's default team, which S24 refuses (the writer inherits it) — cross-project security decision filed as #2618, S24 left fail-closed, both guide places cross-reference it; K1 late-role test fixed; K2 real Dataverse returning the default team in teammembership_association unconfirmed live (if it does not, no inheritance through it exists either).</note>
     <note date="2026-11-06">Created from #2605 (ontology confirmed stamps must write Signals / Decision Records; owner direction relayed by ontology to add it here). ACME facts sent to ontology the same day; ACME lacks the second writer profile until SpaarkeMaster ≥ 1.2.4.0.</note>
   </notes>
 
