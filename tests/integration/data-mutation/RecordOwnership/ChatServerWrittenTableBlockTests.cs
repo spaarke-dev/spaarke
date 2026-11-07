@@ -140,6 +140,51 @@ public sealed class ChatServerWrittenTableBlockTests : TypedToolHandlerTestFixtu
         _appCreates.Should().BeEmpty();
     }
 
+    // ── ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line's generic create alone is refused ─────────────────────────
+    // The same hard block, in both legs, with the line's own words; its update and delete are not refused.
+
+    [Fact(DisplayName = "164a-1 (must fire): chat execute refuses an invoice line, before any Dataverse call")]
+    public async Task CreateRecord_AnInvoiceLine_IsRefused_WithNoCreateCall()
+    {
+        _user.Held.UnionWith(["prvCreatesprk_billingevent", "prvAppendsprk_billingevent"]);
+
+        var result = await CreateRecord("sprk_billingevent", Lookup("sprk_matter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed, "the sprk_document hard block's refusal shape");
+        result.ErrorMessage.Should().Be(DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage("sprk_billingevent"));
+        result.ErrorMessage.Should().Contain("sprk_billingevent").And.Contain("REJECTED").And.Contain("Do NOT retry")
+            .And.Contain("Invoice lines").And.NotContain("signal");
+        _appCreates.Should().BeEmpty("the row is never created by the application");
+        _user.Posts.Should().BeEmpty("nor as the caller");
+        _reads.Should().BeEmpty("refused before any Dataverse call, metadata included");
+        _user.PrivilegeQuestions.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "164a-1 (must fire): chat validate refuses an invoice line, before the confirmation")]
+    [InlineData("sprk_billingevent")]
+    [InlineData("SPRK_BillingEvent")]
+    public void ValidateChat_AnInvoiceLine_IsRefusedBeforeTheConfirmation(string table)
+    {
+        var result = Handler().ValidateChat(CreateContext(table, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter)),
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)));
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle()
+            .Which.Should().Be(DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage("sprk_billingevent"));
+        _reads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "164a-1 (must not fire): the invoice line is create-only — its update and delete are not refused")]
+    public void AnInvoiceLine_IsRefusedForCreateOnly()
+    {
+        DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter("sprk_billingevent").Should().BeTrue();
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate("sprk_billingevent").Should().BeNull();
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableDelete("sprk_billingevent").Should().BeNull();
+        // And the writer-only tables keep their own words.
+        DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage("sprk_signal").Should().Contain("signal");
+    }
+
     [Fact]
     public async Task CreateRecord_AnOrdinaryRegistryTable_IsStillCreated_MustNotFire()
     {

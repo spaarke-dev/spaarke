@@ -15,8 +15,11 @@
  *       sprk_todo -> To Do wizard, sprk_event -> Event wizard, sprk_invoice -> Invoice wizard,
  *       sprk_reportcard -> Report Card wizard, sprk_document -> Document Upload wizard,
  *       sprk_communication -> the Communication page in compose mode (sent through the BFF),
- *       sprk_budget, sprk_kpiassessment, sprk_billingevent -> POST /api/v1/child-records/{table} (no wizard of their own),
+ *       sprk_budget, sprk_kpiassessment -> POST /api/v1/child-records/{table} (no wizard of their own),
  *       then the new row opens.
+ *     sprk_billingevent is served (its native "+ New" is hidden like any other) but has NO create here: ebilling-r1 task
+ *     164a-1 (uac-r2 Q6) - an invoice line's new rows have one server-side owner (extraction, a line decision, Add line in
+ *     the invoice's review), and the BFF refuses its generic create.
  *
  * FAIL CLOSED (ADR-003): the native "+ New" is allowed ONLY when the host is a project / matter / work assignment whose
  * sprk_issecure was read (through Xrm.WebApi) and is false, or a party (contact, organization, account - never an
@@ -77,14 +80,13 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
 
     /**
      * Tables created through POST /api/v1/child-records/{table}, then opened (no wizard of their own). r1c: the live
-     * inventory of every main form adds the KPI assessment (matter, project and report card forms) and the billing event
-     * (invoice form) - the new row is a named draft filed under the host; its form asks for the rest. ebilling-r1 ISS-010:
-     * a billing event created on an invoice also binds the invoice's one core record (FR-05; see invoiceCoreBind).
+     * inventory of every main form adds the KPI assessment (matter, project and report card forms) - the new row is a named
+     * draft filed under the host; its form asks for the rest. ebilling-r1 task 164a-1 (uac-r2 Q6): the billing event's
+     * "New Billing Event" is removed (the BFF no longer creates an invoice line on this route).
      */
     ns.CREATE_THEN_OPEN = {
         sprk_budget: { label: "budget" },
-        sprk_kpiassessment: { label: "KPI assessment" },
-        sprk_billingevent: { label: "billing event" }
+        sprk_kpiassessment: { label: "KPI assessment" }
     };
 
     /** Every child table this script serves (the template's per-entity instances must stay within it). */
@@ -246,30 +248,6 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
         });
     }
 
-    /** The core records an invoice can be filed under: its lookup column -> the core table (ebilling-r1 FR-05). */
-    var INVOICE_CORE_LOOKUPS = [
-        { column: "sprk_matter", table: "sprk_matter" },
-        { column: "sprk_project", table: "sprk_project" },
-        { column: "sprk_regardingworkassignment", table: "sprk_workassignment" }
-    ];
-
-    /**
-     * ebilling-r1 ISS-010 (FR-05): a billing event names exactly ONE core record through its OWN lookup (the server never
-     * takes it from the invoice, D-75), so "New Billing Event" on an invoice binds the invoice's own core record as well.
-     * Resolves { key, value } (the bind), or null when the invoice is not filed under exactly one (nothing is created).
-     */
-    function invoiceCoreBind(childTable, host) {
-        var select = "?$select=" + INVOICE_CORE_LOOKUPS.map(function (l) { return "_" + l.column + "_value"; }).join(",");
-        return Xrm.WebApi.retrieveRecord(host.entity, host.id, select).then(function (row) {
-            var named = INVOICE_CORE_LOOKUPS.filter(function (l) { return row && row["_" + l.column + "_value"]; });
-            if (named.length !== 1) return null;
-            var core = named[0];
-            return Promise.all([bindKeyFor(childTable, core.table, null), entitySetOf(core.table)]).then(function (parts) {
-                return { key: parts[0], value: "/" + parts[1].EntitySetName + "(" + cleanId(row["_" + core.column + "_value"]) + ")" };
-            });
-        });
-    }
-
     /** sprk_budget: create through the BFF (owned by the team the rule names), then open the new record. */
     function createThenOpen(childTable, host, primaryControl, selectedControl) {
         var label = ns.CREATE_THEN_OPEN[childTable].label;
@@ -279,19 +257,11 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
                     alert("New " + label, "Sign-in needed - reload the page and retry. Nothing was created.");
                     return null;
                 }
-                var underInvoice = childTable === "sprk_billingevent" && host.entity === "sprk_invoice";
-                return Promise.all([bindKeyFor(childTable, host.entity, selectedControl), entitySetOf(host.entity), entitySetOf(childTable),
-                    underInvoice ? invoiceCoreBind(childTable, host) : Promise.resolve(undefined)])
+                return Promise.all([bindKeyFor(childTable, host.entity, selectedControl), entitySetOf(host.entity), entitySetOf(childTable)])
                     .then(function (parts) {
-                        if (parts[3] === null) {
-                            alert("New " + label, "This invoice is not filed under exactly one matter, project or work assignment, " +
-                                "so a " + label + " cannot be added to it. Nothing was created.");
-                            return null;
-                        }
                         var payload = {};
                         payload[parts[2].PrimaryNameAttribute] = "New " + label;
                         payload[parts[0]] = "/" + parts[1].EntitySetName + "(" + host.id + ")";
-                        if (parts[3]) payload[parts[3].key] = parts[3].value;
                         return fetch(baseUrl + "/api/v1/child-records/" + childTable, {
                             method: "POST",
                             headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + token },
@@ -299,7 +269,6 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
                         });
                     })
                     .then(function (response) {
-                        if (!response) return null; // refused before the create (nothing was sent)
                         if (!response.ok) {
                             return problemText(response).then(function (text) {
                                 alert("New " + label, text + " Nothing was created.");

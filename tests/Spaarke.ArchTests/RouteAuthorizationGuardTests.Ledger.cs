@@ -393,9 +393,10 @@ public partial class RouteAuthorizationGuardTests
             + "from their own token) and a correction never touches a line's status, approved amount or decision."),
         new GovernedFile("Api/Finance/InvoiceLineReviewEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/review and POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision, .../lines/decisions, "
-            + ".../lines/accept-clean (ebilling-r1 task 100, FR-31) -- the Invoice Review read model and the line decisions. Every route carries "
+            + ".../lines/accept-clean (ebilling-r1 task 100, FR-31) -- the Invoice Review read model and the line decisions -- and POST "
+            + "/api/finance/invoices/{invoiceId}/lines (Add line, task 164, EB-D-188). Every route carries "
             + "AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail closed: the read with \"finance.read\" (Read), the three "
-            + "decisions with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches the caller through the core record (013, ADR-034). The "
+            + "decisions and Add line with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches the caller through the core record (013, ADR-034). The "
             + "eBilling kill switch runs after it. Every line id is checked against the invoice's own lines (uniform 404) before a write; the decider "
             + "is the caller's systemuserid from their own token, never the body."),
         new GovernedFile("Api/Finance/InvoiceRelatedWorkEndpoints.cs", Scope.RouteLevelGate,

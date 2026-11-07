@@ -103,7 +103,7 @@ public sealed partial class DecisionRecordWriterTests
         Guid? policyVersion = null) => new(
         decisionId ?? BillingDecision,
         code,
-        subject ?? (code is "accept-line" or "reduce-line" or "disallow-line"
+        subject ?? (code is "accept-line" or "reduce-line" or "disallow-line" or "add-line"
             ? new DecisionRecordRef("sprk_billingevent", LineId)
             : new DecisionRecordRef("sprk_invoice", InvoiceId)),
         system ? null : confirmer ?? Reviewer,
@@ -174,6 +174,7 @@ public sealed partial class DecisionRecordWriterTests
     [InlineData("accept-line", "sprk_todo")]
     [InlineData("override-submission", "sprk_invoicesubmission")]
     [InlineData("assign-firm", "sprk_invoicesubmission")] // 095d-1b: Set firm files under the invoice, never the submission
+    [InlineData("add-line", "sprk_invoice")] // 164a-2 (EB-D-198): an added line is filed under the line, never the invoice
     public async Task Billing_C2_ASubjectThatIsNotTheCodesTable_IsRefused_WithZeroReaderCallsAndZeroCreates(string code, string table)
     {
         var h = BillingHarness();
@@ -194,6 +195,7 @@ public sealed partial class DecisionRecordWriterTests
             ("accept-line", "sprk_billingevent"), ("reduce-line", "sprk_billingevent"), ("disallow-line", "sprk_billingevent"),
             ("approve-invoice", "sprk_invoice"), ("reject-invoice", "sprk_invoice"), ("return-to-firm", "sprk_invoice"),
             ("override-submission", "sprk_invoice"), ("assign-firm", "sprk_invoice"),
+            ("add-line", "sprk_billingevent"), // 164a-2 (EB-D-198): the subject is the line (D-75)
         }, "D-75, D-101: no submission subject; the override and the automatic rejection file under the invoice");
         DecisionRecordWriter.BillingSubjectEntityOf("mark-complete").Should().BeNull("a Signals code has no billing subject");
         DecisionActionCatalog.BillingActions.Should().OnlyContain(d => !d.Code.Contains('_') && !d.Code.Contains('%') && !d.Code.Contains('['),
@@ -216,6 +218,43 @@ public sealed partial class DecisionRecordWriterTests
         second.ConfirmedByUserId.Should().Be(Reviewer, "the stored confirmer");
         h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
         h.OwnerAsks.Should().ContainSingle("a repeat stops at the lookup");
+    }
+
+    [Fact]
+    public async Task Billing_C3_AddLine_IsFiledUnderTheLine_WithTheReason_AndARepeatOfTheDecisionIdGivesOneRecord()
+    {
+        // 164a-2 (EB-D-198): idempotent on the decision id - a retry after a timeout gives one line's record, not two.
+        var h = BillingHarness();
+        var facts = new Dictionary<string, object?> { ["lineId"] = LineId.ToString("D"), ["costType"] = "Fee", ["utbmsTask"] = "L100" };
+
+        var first = await h.Writer.WriteBillingDecisionAsync(Billing("add-line", reason: "Fee omitted from the invoice", facts: facts));
+        var second = await h.Writer.WriteBillingDecisionAsync(Billing("add-line", reason: "Fee omitted from the invoice", facts: facts));
+
+        first.AlreadyRecorded.Should().BeFalse();
+        second.AlreadyRecorded.Should().BeTrue();
+        second.RecordId.Should().Be(first.RecordId);
+        h.Org.Verify(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+        var record = h.Created.Should().ContainSingle().Which;
+        record.GetAttributeValue<string>("sprk_actioncode").Should().Be("add-line");
+        record.GetAttributeValue<string>("sprk_reason").Should().Be("Fee omitted from the invoice");
+        record.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Reviewer);
+        first.ResolvedSignalIds.Should().BeEmpty("an added line resolves no Signal");
+    }
+
+    [Fact]
+    public async Task Billing_C3_AddLine_WithoutAReason_IsRefusedBeforeAnyIo_AndTheSameIdWithOtherContentIsRefused()
+    {
+        var h = BillingHarness();
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("add-line", reason: " "))).Should()
+            .ThrowAsync<DecisionRecordRefusedException>()).Which;
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        NoIo(h);
+
+        await h.Writer.WriteBillingDecisionAsync(Billing("add-line", reason: "Fee omitted"));
+        var other = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing("add-line", reason: "A different reason"))).Should()
+            .ThrowAsync<DecisionRecordRefusedException>()).Which;
+        other.Message.Should().Contain("other content", "the same id with another reason is not a repeat");
+        h.Created.Should().ContainSingle();
     }
 
     [Fact]
@@ -572,8 +611,24 @@ public sealed partial class DecisionRecordWriterTests
             ["createdby"] = new EntityReference("systemuser", WriterUser),
         });
 
-        (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>())
-            .Which.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        // ebilling-r1 164a fix round K2: same reason, but the message says the content cannot be read, so a caller does not read it as proven
+        // other content (Add line answers id_reused only for DecisionRecordWriter.BillingOtherContentRefusal).
+        ex.Message.Should().Be(DecisionRecordWriter.BillingContentUnreadableRefusal);
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Billing_K2_ReadableOtherContent_IsTheOtherContentRefusal()
+    {
+        var h = BillingHarness();
+        h.Seeded.Add(StoredBillingRow("1111111111111111111111111111111111111111111111111111111111111111"));
+
+        var ex = (await h.Writer.Invoking(w => w.WriteBillingDecisionAsync(Billing())).Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        ex.Message.Should().Be(DecisionRecordWriter.BillingOtherContentRefusal);
         h.Created.Should().BeEmpty();
     }
 

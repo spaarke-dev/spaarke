@@ -1027,7 +1027,8 @@ public sealed class ApExportService
                 ColumnSet = new ColumnSet(
                     "sprk_eventdate", "sprk_costtype", "sprk_timekeeper", "sprk_quantity", "sprk_rate", "sprk_amount", "sprk_approvedamount", "sprk_linestatus",
                     "sprk_linesequence", "sprk_taskcode", "sprk_activitycode", "sprk_expensecode", "sprk_taskcodeasbilled", "sprk_activitycodeasbilled",
-                    "sprk_expensecodeasbilled", InvoiceTotalsService.LineState),
+                    "sprk_expensecodeasbilled", InvoiceTotalsService.LineState, InvoiceSubmissionPersister.LineExtractionConfidence,
+                    InvoiceTotalsService.LineInvoiceLookup), // the reviewer-added rule reads the line's invoice (164a fix round K2)
                 Criteria = new FilterExpression(LogicalOperator.And),
                 PageInfo = new PagingInfo { PageNumber = 1, Count = ReadLimit },
             };
@@ -1060,12 +1061,15 @@ public sealed class ApExportService
                 }
                 else
                 {
-                    billed = amount;
+                    // 164a-2 F2 (EB-D-192): the firm did not bill a reviewer-added line, so it is outside the invoice's BilledTotal and its
+                    // billed is 0, as for an Adjustment line; its approved is its contribution (the amount, the approved amount when Reduced,
+                    // 0 when Disallowed), which is part of the ApprovedTotal. Same read as the totals (the marker AND the derived id).
+                    billed = ExtractionProvenance.IsReviewerAdded(line) ? 0m : amount;
                     approved = line.GetAttributeValue<OptionSetValue>("sprk_linestatus")?.Value switch
                     {
                         (int)InvoiceLineStatus.Disallowed => 0m,
-                        (int)InvoiceLineStatus.Reduced => Dec(line, "sprk_approvedamount") ?? billed,
-                        _ => billed,
+                        (int)InvoiceLineStatus.Reduced => Dec(line, "sprk_approvedamount") ?? amount,
+                        _ => amount,
                     };
                 }
 

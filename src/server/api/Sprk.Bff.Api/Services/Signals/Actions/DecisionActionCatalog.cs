@@ -446,6 +446,17 @@ public static class DecisionActionCatalog
             Excludes: [],
             DecisionRecordClass.Judgement)
         { Gate = new DecisionGateFactors(GateRiskTier.Tier3, Reversible: false, ExternallyVisible: true, RecordOfTruthImpact: true) },
+
+        // ---- Add line (task 164a, EB-D-188, EB-D-198; subject: the line the reviewer added, D-75) --------------------------
+        // A line decision (the record is filed under the line it created). Recorded only by the Add line service, never through the
+        // Signals commit route (BillingActions only). Reversible: a later disallow-line has its own record. Resolves no Signal and
+        // excludes no other code; the writer is idempotent on the decision id, so a retry gives one line and one record.
+        new("add-line", "Add line", DecisionLane.Decide, IsNextStep: false, WorkType: null,
+            [new("reason", "Reason for adding the line", DecisionParameterKind.TextArea, Required: true, Hint: ReasonHint)],
+            ["Adds a line the firm did not bill, marked as added by the reviewer", "Recomputes the invoice totals"],
+            Excludes: [],
+            DecisionRecordClass.Judgement)
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier2b, Reversible: true, RecordOfTruthImpact: true) },
     ];
 
     /// <summary>The billing set with every exclusion made mutual. Its codes never overlap <see cref="Definitions"/> (checked at static

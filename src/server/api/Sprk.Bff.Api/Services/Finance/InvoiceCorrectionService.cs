@@ -1373,22 +1373,26 @@ public sealed class InvoiceCorrectionService
         var rows = await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false);
         return rows
             .Where(r => r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value is (int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense)
-            .Select(r => new InvoiceLineToCode
-            {
-                LineKey = ((r.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0) - 1).ToString(CultureInfo.InvariantCulture),
-                Date = r.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate) is { } date ? DateOnly.FromDateTime(date) : null,
-                LineType = r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value == (int)InvoiceLineCostType.Fee
-                    ? InvoiceLineType.Fee
-                    : InvoiceLineType.Expense,
-                Narrative = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineDescription),
-                Hours = r.GetAttributeValue<decimal?>(InvoiceSubmissionPersister.LineQuantity),
-                Amount = r.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value,
-                BilledTaskCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTaskCodeAsBilled),
-                BilledActivityCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineActivityCodeAsBilled),
-                BilledExpenseCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExpenseCodeAsBilled),
-            })
+            .Select(CodingLineOf)
             .ToList();
     }
+
+    /// <summary>One stored fee or expense line as the coding step reads it (task 164a-4a: shared with Add line, which resolves the invoice's code set
+    /// over the same input).</summary>
+    internal static InvoiceLineToCode CodingLineOf(Entity r) => new()
+    {
+        LineKey = ((r.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0) - 1).ToString(CultureInfo.InvariantCulture),
+        Date = r.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate) is { } date ? DateOnly.FromDateTime(date) : null,
+        LineType = r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value == (int)InvoiceLineCostType.Fee
+            ? InvoiceLineType.Fee
+            : InvoiceLineType.Expense,
+        Narrative = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineDescription),
+        Hours = r.GetAttributeValue<decimal?>(InvoiceSubmissionPersister.LineQuantity),
+        Amount = r.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value,
+        BilledTaskCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTaskCodeAsBilled),
+        BilledActivityCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineActivityCodeAsBilled),
+        BilledExpenseCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExpenseCodeAsBilled),
+    };
 
     private static string? CodeOf(JsonNode? extraction, string member) =>
         extraction?["coding"]?[member]?["code"] is JsonValue v && v.TryGetValue<string>(out var code) && !string.IsNullOrWhiteSpace(code) ? code.Trim() : null;

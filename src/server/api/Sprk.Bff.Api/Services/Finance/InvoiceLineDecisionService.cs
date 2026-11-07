@@ -665,9 +665,10 @@ public sealed class InvoiceLineDecisionService
         var inputs = lineRows.Select(row =>
         {
             var t = all[row.Id];
+            var reviewerAdded = InvoiceTotalsService.ReviewerAddedOf(row);
             return proposed.TryGetValue(row.Id, out var p)
-                ? new InvoiceLineInput(row.Id, t.Type, t.Billed, p.Approved, p.Status, AdjustmentMethodOf(row), row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue))
-                : new InvoiceLineInput(row.Id, t.Type, t.Billed, t.PreviousApproved, t.Status, AdjustmentMethodOf(row), row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue));
+                ? new InvoiceLineInput(row.Id, t.Type, t.Billed, p.Approved, p.Status, AdjustmentMethodOf(row), row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue), reviewerAdded)
+                : new InvoiceLineInput(row.Id, t.Type, t.Billed, t.PreviousApproved, t.Status, AdjustmentMethodOf(row), row.GetAttributeValue<decimal?>(InvoiceTotalsService.LineAdjustmentValue), reviewerAdded);
         }).ToList();
         var dryRun = InvoiceTotalsCalculator.Calculate(billedTotal, inputs);
         if (dryRun.IsRefused)

@@ -326,9 +326,9 @@ public sealed partial class InvoiceLineDecisionServiceTests
 
         public Entity AddLine(
             decimal amount, InvoiceLineStatus status, InvoiceLineCostType type = InvoiceLineCostType.Fee, string? extraction = null, decimal? approved = null,
-            InvoiceAdjustmentMethod? method = null, decimal? adjustmentValue = null)
+            InvoiceAdjustmentMethod? method = null, decimal? adjustmentValue = null, Guid? rowId = null)
         {
-            var id = Guid.NewGuid();
+            var id = rowId ?? Guid.NewGuid();
             var line = new Entity("sprk_billingevent", id)
             {
                 ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),

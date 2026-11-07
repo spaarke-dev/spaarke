@@ -38,12 +38,7 @@ interface IHarness {
   posts: Array<{ url: string; body: Record<string, unknown> }>;
 }
 
-function harness(options: {
-  flag?: boolean | null | 'throw';
-  bffStatus?: number;
-  bffBody?: unknown;
-  invoiceRow?: Record<string, unknown>;
-}): IHarness {
+function harness(options: { flag?: boolean | null | 'throw'; bffStatus?: number; bffBody?: unknown }): IHarness {
   const h: IHarness = {
     ribbon: undefined as unknown as IRibbon,
     reads: [],
@@ -64,7 +59,6 @@ function harness(options: {
       WebApi: {
         retrieveRecord: (entity: string, id: string, query: string) => {
           h.reads.push(`${entity}(${id})${query}`);
-          if (query.includes('_sprk_matter_value')) return Promise.resolve(options.invoiceRow ?? {});
           if (flag === 'throw') return Promise.reject(new Error('no read'));
           return Promise.resolve({ sprk_issecure: flag });
         },
@@ -229,7 +223,7 @@ describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
     expect(h.posts).toEqual([]);
   });
 
-  it.each(['sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent'])(
+  it.each(['sprk_budget', 'sprk_kpiassessment'])(
     'creates a %s through POST /api/v1/child-records/{table}, filed under the host, then opens it',
     async table => {
       const h = harness({ flag: true });
@@ -244,42 +238,27 @@ describe('sprk_secure_child_ribbon.js — the BFF-backed "New <thing>"', () => {
     }
   );
 
-  // ebilling-r1 ISS-010 (FR-05): the server refuses a billing event that names no core record of its own (D-75), so the
-  // invoice form's "New Billing Event" binds the invoice's one core record too.
-  const MATTER_ID = 'c1470000-0000-4000-8000-000000000003';
-  const PROJECT_ID = 'c1470000-0000-4000-8000-000000000004';
+  // ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line's new rows have one server-side owner (extraction, a line decision,
+  // Add line), and the BFF no longer creates one on the child-record route, so the ribbon has no "New Billing Event" create.
+  it.each(['sprk_invoice', 'sprk_matter'])(
+    'a billing event on a %s is not created: nothing is sent, nothing opens, the user is told',
+    async host => {
+      const h = harness({ flag: true });
+      h.ribbon.newChild(formOf(host), { getRelationship: () => ({ attributeName: host }) }, 'sprk_billingevent');
+      for (let i = 0; i < 10 && h.alerts.length === 0; i++) await flush();
 
-  it('a billing event on an invoice also binds the one core record the invoice is filed under', async () => {
-    const h = harness({ flag: true, invoiceRow: { _sprk_matter_value: MATTER_ID, _sprk_project_value: null } });
-    h.ribbon.newChild(
-      formOf('sprk_invoice'),
-      { getRelationship: () => ({ attributeName: 'sprk_invoice' }) },
-      'sprk_billingevent'
-    );
-    for (let i = 0; i < 10 && h.forms.length === 0; i++) await flush();
+      expect(h.posts).toEqual([]);
+      expect(h.reads).toEqual([]); // not even the host row: there is no create to prepare
+      expect(h.forms).toEqual([]);
+      expect(h.pages).toEqual([]);
+      expect(h.alerts).toHaveLength(1);
+      expect(h.alerts[0].text).toContain('Nothing was created.');
+    }
+  );
 
-    expect(h.posts).toHaveLength(1);
-    expect(h.posts[0].body['sprk_Invoice@odata.bind']).toBe(`/sprk_invoices(${HOST_ID})`);
-    expect(h.posts[0].body['sprk_Matter@odata.bind']).toBe(`/sprk_matters(${MATTER_ID})`);
-    expect(h.forms).toEqual([{ entityName: 'sprk_billingevent', entityId: NEW_ID }]);
-  });
-
-  it.each([
-    ['no core record', {}],
-    ['two core records', { _sprk_matter_value: MATTER_ID, _sprk_project_value: PROJECT_ID }],
-  ])('a billing event on an invoice with %s is refused before anything is sent', async (_label, row) => {
-    const h = harness({ flag: true, invoiceRow: row });
-    h.ribbon.newChild(
-      formOf('sprk_invoice'),
-      { getRelationship: () => ({ attributeName: 'sprk_invoice' }) },
-      'sprk_billingevent'
-    );
-    for (let i = 0; i < 10 && h.alerts.length === 0; i++) await flush();
-
-    expect(h.posts).toEqual([]);
-    expect(h.alerts).toHaveLength(1);
-    expect(h.alerts[0].text).toContain('Nothing was created.');
-    expect(h.forms).toEqual([]);
+  it('the billing event subgrid on an invoice still hides the platform "+ New" (the hide is kept; only the create is gone)', async () => {
+    const h = harness({ flag: false });
+    await expect(Promise.resolve(h.ribbon.nativeNewAllowed(formOf('sprk_invoice')))).resolves.toBe(false);
   });
 
   it('a BFF refusal shows the server message and opens nothing', async () => {

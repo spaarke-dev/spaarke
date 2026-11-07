@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Resolution;
@@ -35,6 +36,67 @@ internal static class ExtractionProvenance
     internal const string ActionCodeMember = "actionCode";
     internal const string ActionVersionMember = "actionVersion";
     internal const string HeaderMember = "header";
+
+    // ── Task 164a-2 (EB-D-193): the reviewer-added marker ──
+
+    /// <summary>The member of a line's <c>provenance</c> that says where the line came from. Absent on a line intake wrote.</summary>
+    internal const string SourceMember = "source";
+
+    /// <summary>The <see cref="SourceMember"/> value of a line a reviewer added through Add line. Its totals rule is EB-D-199.</summary>
+    internal const string ReviewerSource = "reviewer";
+
+    /// <summary>The member that names the Add line decision that created the line (the deterministic decision id, a Guid in text).</summary>
+    internal const string DecisionIdMember = "decisionId";
+
+    /// <summary>
+    /// The id Add line gives the row it creates on the invoice <paramref name="invoiceId"/> for the decision <paramref name="decisionId"/> (164a-2 F1;
+    /// 164a fix round K2): derived from the invoice and the decision id, so a retry of the same decision addresses the same row (one line), and a row
+    /// can be proven to be the added line of that decision ON that invoice. The marker stores only the decision id (EB-D-189 / EB-D-193); the invoice
+    /// is the row's own <c>sprk_invoice</c>. Placed here, beside the marker it authenticates, and not on <see cref="InvoiceSubmissionPersister"/> beside
+    /// <c>LineIdFor</c>: the persister is not edited by this task (it overlaps 082d and 095d-2a), and the prefix keeps the id space apart from every
+    /// intake line id.
+    /// </summary>
+    internal static Guid AddedLineIdFor(Guid invoiceId, Guid decisionId) =>
+        InvoiceSubmissionPersister.IdOf($"ebilling-added-line-{invoiceId:D}-{decisionId:D}");
+
+    /// <summary>
+    /// A reviewer-added line's whole <c>sprk_extractionconfidence</c> (EB-D-193): <c>{ "provenance": { "source": "reviewer", "decisionId": "..." } }</c>.
+    /// Numbers, flags and ids only: no name, text or value (EB-D-189 conditions), and no new column. A line written this way carries no
+    /// analyzer pair, so <see cref="LineProvenance.HasExtraction"/> is false and an extracted-field correction of it is refused (brief K1).
+    /// </summary>
+    internal static string ForReviewerAddedLine(Guid decisionId) =>
+        new JsonObject
+        {
+            [Member] = new JsonObject
+            {
+                [SourceMember] = ReviewerSource,
+                [DecisionIdMember] = decisionId.ToString("D", CultureInfo.InvariantCulture),
+            },
+        }.ToJsonString();
+
+    /// <summary>
+    /// True ONLY for a row Add line created on the invoice it is on now (164a-2 F1, the one read every money or exemption decision uses): the column
+    /// says <c>provenance.source = "reviewer"</c>, its <c>decisionId</c> parses, the row names its invoice (<c>sprk_invoice</c>), AND the row's id is
+    /// <see cref="AddedLineIdFor"/>(that invoice, that decision). The column is not field-secured, so the marker alone is not proof of who wrote the line; the
+    /// derived row id decides. The id is derived, not read from a field, and a line moved to another invoice no longer matches (164a fix round K2), so it is an ordinary line there. False for an empty
+    /// or unreadable column, no <c>provenance</c>, another source (ordinal), a missing or unparsable decision id, no invoice on the row, and an id that
+    /// does not match. Every reader of this rule reads <c>sprk_invoice</c> with the line.
+    /// </summary>
+    internal static bool IsReviewerAdded(Entity line)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        return ReadMember(line.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence)) is { } member
+            && string.Equals(Text(member, SourceMember), ReviewerSource, StringComparison.Ordinal)
+            && Text(member, DecisionIdMember) is { } text
+            && Guid.TryParseExact(text, "D", out var decisionId)
+            && decisionId != Guid.Empty
+            && line.GetAttributeValue<EntityReference>(LineInvoiceColumn)?.Id is { } invoiceId
+            && invoiceId != Guid.Empty
+            && line.Id == AddedLineIdFor(invoiceId, decisionId);
+    }
+
+    /// <summary>The line's invoice lookup (<c>sprk_billingevent.sprk_invoice</c>) that <see cref="IsReviewerAdded"/> reads.</summary>
+    private const string LineInvoiceColumn = "sprk_invoice";
 
     /// <summary>The header fields a reviewer may correct, under the <see cref="BillingFieldNames"/> / resolution spellings.</summary>
     internal static readonly string[] HeaderFieldNames =

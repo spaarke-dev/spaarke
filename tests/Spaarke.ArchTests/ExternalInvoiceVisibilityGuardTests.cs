@@ -90,6 +90,8 @@ public class ExternalInvoiceVisibilityGuardTests
             "The chat create's blocked server-written invoice tables (ebilling-r1 review of f758480f3c); refuses a create, reads no row.",
         ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler::ServerWrittenInvoiceFamilyCreateBlockedMessage"] =
             "The refusal text for those tables (sprk_externalidentifier's own sentence, ebilling-r1 2026-10-30); reads no row.",
+        ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler::CreatedOnlyByItsWriterCreateBlockedMessage"] =
+            "The refusal text for a generic create the registry refuses (sprk_billingevent's own sentence, ebilling-r1 task 164a-1); reads no row.",
         // ── parts of the predicate's application (inputs and the decision's consequence) ──
         [$"{typeof(ExternalMessageEndpoints).FullName}::RegardingInvoicesOf"] =
             "Extracts a message page's regarding invoice ids FOR the predicate (SecureRootsFilter → RegardingInvoicesVisibleAsync).",

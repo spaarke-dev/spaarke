@@ -205,7 +205,8 @@ public static class OperationAccessPolicy
         // .../lines/accept-clean (ebilling-r1 task 100, FR-31, D-77: any user with Write on the invoice decides its lines, not only the
         // eligible approvers). Deciding a line changes the invoice's lines and totals, which is a Write on the invoice (the
         // "finance.confirm" reasoning); a Read-only viewer cannot decide. Tasks 101-104 (corrections, adjustments, approval, reject /
-        // return) reuse this one key for their invoice-level writes. A separate key from "finance.confirm" (which names a DOCUMENT) so a
+        // return) reuse this one key for their invoice-level writes, and so does Add line (task 164,
+        // POST /api/finance/invoices/{invoiceId}/lines, EB-D-188). A separate key from "finance.confirm" (which names a DOCUMENT) so a
         // deny log names the act.
         ["ebilling.invoice.decide"] = AccessRights.Write,
         // "ebilling.submission.decide" — Read AND Write on the SUBMISSION (sprk_invoicesubmissions) named by the route of

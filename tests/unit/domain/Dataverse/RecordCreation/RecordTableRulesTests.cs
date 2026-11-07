@@ -310,6 +310,23 @@ public class RecordTableRulesTests
             .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision");
     }
 
+    [Fact]
+    public void GenericCreateRefused_IsTheWriterOnlyTables_PlusTheInvoiceLine_WhoseCreateAloneIsRefused()
+    {
+        // ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line's generic create is refused; its update and delete are not.
+        RecordTableRules.All.Where(r => r.GenericCreateOnlyRefused).Select(r => r.Table).Should().Equal("sprk_billingevent");
+        RecordTableRules.All.Where(r => r.GenericCreateRefused).Select(r => r.Table)
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_billingevent");
+
+        var line = RecordTableRules.Get("sprk_billingevent");
+        line.CreatedOnlyByItsWriter.Should().BeFalse("the update and delete refusals read this flag alone");
+        RecordTableRules.RefuseWriterOnlyTableUpdate("sprk_billingevent").Should().BeNull("D-96 updates a line generically");
+        RecordTableRules.RefuseWriterOnlyTableDelete("sprk_billingevent").Should().BeNull("delete is unchanged");
+        // The rest of the line's entry is as before.
+        line.PreWriteRules.Should().NotBeEmpty();
+        line.MappingApplies.Should().BeTrue();
+    }
+
     [Theory]
     [InlineData("task")]
     [InlineData("contact")]
