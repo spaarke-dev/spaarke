@@ -1308,7 +1308,8 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     // invoice by the invoice predicate, one without by its own source. The seam is the real ExternalDataService over InvoiceWorld.
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private static readonly Guid HiddenInvoice = Guid.Parse("09800000-0000-4000-8000-00000000c0de");
+    private static readonly Guid HiddenSubmission = Guid.Parse("09800000-0000-4000-8000-00000000c0df");
+    private static readonly Guid HiddenInvoice = InvoiceSubmissionPersister.InvoiceIdFor(HiddenSubmission); // its own invoice (task 165c)
     private static readonly Guid FlaggedSystemUser = Guid.Parse("09800000-0000-4000-8000-0000000000f2");
     private const int RestrictedPermission = 100000002;
     private const int StandardPermission = 100000000;
@@ -1343,9 +1344,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     /// <summary>A submission row of the caller's firm on the matter, as <c>ToView</c> reads it.</summary>
     private static Entity SubmissionRow(
         string number, int? channel, Guid? document = null, Guid? invoice = null,
-        InvoiceSubmissionStatus status = InvoiceSubmissionStatus.Received)
+        InvoiceSubmissionStatus status = InvoiceSubmissionStatus.Received, Guid? id = null)
     {
-        var row = new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        var row = new Entity("sprk_invoicesubmission", id ?? Guid.NewGuid())
         {
             ["sprk_trackingnumber"] = number,
             ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
@@ -1411,7 +1412,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public async Task Task098_get_of_a_submission_whose_invoice_is_hidden_is_the_same_404_as_a_missing_one()
     {
         _world.Source(HiddenInvoice, permission: RestrictedPermission);
-        var id = Guid.NewGuid();
+        var id = HiddenSubmission;
 
         await ReadIsTheSameAsMissingAsync(StoredSubmissionWithInvoice(id, HiddenInvoice), "its invoice is hidden");
 
@@ -1452,7 +1453,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     {
         _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
         var id = Guid.NewGuid();
-        StoredSubmissionWithInvoice(id, Guid.NewGuid());
+        StoredSubmissionWithInvoice(id, InvoiceSubmissionPersister.InvoiceIdFor(id));
 
         var response = await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}");
 
@@ -1462,9 +1463,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     [Fact]
     public async Task Task098_get_of_a_submission_whose_invoice_is_visible_or_absent_is_200_as_before()
     {
-        var invoice = Guid.NewGuid();
-        _world.SpaUpload(invoice);
         var withInvoice = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(withInvoice);
+        _world.SpaUpload(invoice, withInvoice);
         StoredSubmissionWithInvoice(withInvoice, invoice);
         (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{withInvoice}")).StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -1477,7 +1478,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public async Task Task098_get_never_returns_the_invoice_id()
     {
         var id = Guid.NewGuid();
-        var invoice = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(id);
         StoredSubmissionWithInvoice(id, invoice);
 
         var body = await (await SendAsync(HttpMethod.Get, $"/api/v1/external/invoice-submissions/{id}")).Content.ReadAsStringAsync();
@@ -1491,7 +1492,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         _world.Source(HiddenInvoice, permission: RestrictedPermission);
 
         var body = await ListBodyAsync(
-            SubmissionRow("INV-HIDDEN", Spa, invoice: HiddenInvoice, status: InvoiceSubmissionStatus.Accepted),
+            SubmissionRow("INV-HIDDEN", Spa, invoice: HiddenInvoice, status: InvoiceSubmissionStatus.Accepted, id: HiddenSubmission),
             SubmissionRow("INV-PENDING", Spa));
 
         body.Should().Contain("INV-PENDING").And.NotContain("INV-HIDDEN");
@@ -1501,10 +1502,11 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     [Fact]
     public async Task Task098_list_keeps_a_submission_whose_invoice_is_visible()
     {
-        var invoice = Guid.NewGuid();
-        _world.SpaUpload(invoice);
+        var id = Guid.NewGuid();
+        var invoice = InvoiceSubmissionPersister.InvoiceIdFor(id);
+        _world.SpaUpload(invoice, id);
 
-        (await ListBodyAsync(SubmissionRow("INV-VISIBLE", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted)))
+        (await ListBodyAsync(SubmissionRow("INV-VISIBLE", Spa, invoice: invoice, status: InvoiceSubmissionStatus.Accepted, id: id)))
             .Should().Contain("INV-VISIBLE");
     }
 
@@ -1588,8 +1590,10 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public async Task EB_D_169_list_is_503_when_the_invoice_read_fails()
     {
         _world.Faults["sprk_storedfiles"] = HttpStatusCode.ServiceUnavailable;
+        var with = Guid.NewGuid();
         ListReturns(
-            SubmissionRow("INV-WITH", Spa, invoice: Guid.NewGuid(), status: InvoiceSubmissionStatus.Accepted), SubmissionRow("INV-PENDING", Spa));
+            SubmissionRow("INV-WITH", Spa, invoice: InvoiceSubmissionPersister.InvoiceIdFor(with), status: InvoiceSubmissionStatus.Accepted, id: with),
+            SubmissionRow("INV-PENDING", Spa));
 
         await ShouldBeRetryable503Async(
             await SendAsync(HttpMethod.Get, "/api/v1/external/invoice-submissions"), "INV-WITH", "INV-PENDING");
@@ -2710,12 +2714,13 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     private const string InternalRoute = "/api/finance/invoice-submissions";
     private const string ExternalRoute = "/api/v1/external/invoice-submissions";
     private static readonly Guid OldSubmissionId = Guid.Parse("097f0000-0000-4000-8000-000000000001");
-    private static readonly Guid OldInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000002");
+    private static readonly Guid OldInvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(OldSubmissionId); // its own invoice (task 165c)
     private static readonly Guid NewSubmissionId = Guid.Parse("097f0000-0000-4000-8000-000000000003");
-    private static readonly Guid NewInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000004");
+    private static readonly Guid NewInvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(NewSubmissionId);
     private static readonly Guid SecondSubmissionId = Guid.Parse("097f0000-0000-4000-8000-000000000005");
-    private static readonly Guid SecondInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000006");
-    private static readonly Guid OtherInvoiceId = Guid.Parse("097f0000-0000-4000-8000-000000000009");
+    private static readonly Guid SecondInvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SecondSubmissionId);
+    private static readonly Guid OtherSubmissionId = Guid.Parse("097f0000-0000-4000-8000-000000000008");
+    private static readonly Guid OtherInvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(OtherSubmissionId);
 
     private static Entity InvoiceRow(Guid id, int status) =>
         new("sprk_invoice", id) { ["statuscode"] = new OptionSetValue(status) };
@@ -2734,7 +2739,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
             [InvoiceSubmissionService.ResubmissionOfColumn] = new EntityReference("sprk_invoicesubmission", OldSubmissionId),
         });
         _h.Invoices[invoiceId] = InvoiceRow(invoiceId, invoiceStatus);
-        _world.SpaUpload(invoiceId); // visible to a firm by the (a') predicate
+        _world.SpaUpload(invoiceId, submissionId); // visible to a firm by the (a') predicate
         _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, submissionId, AccessRights.Read);
     }
 
@@ -2745,7 +2750,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         old["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted);
         old["sprk_trackingnumber"] = "INV-1.1";
         _h.Invoices[OldInvoiceId] = InvoiceRow(OldInvoiceId, InvoiceStatusCodes.Superseded);
-        _world.SpaUpload(OldInvoiceId);
+        _world.SpaUpload(OldInvoiceId, OldSubmissionId);
         _access.Grant(FinanceAuthorizationFilter.InvoiceSubmissionEntitySet, OldSubmissionId, AccessRights.Read);
         AddReplacement(NewSubmissionId, NewInvoiceId, InvoiceStatusCodes.InReview, "INV-1.2");
         return old;
@@ -2904,9 +2909,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public async Task ExternalList_NotesOnlyTheSuperseded_WithOneStatusRead()
     {
         var old = SeedSuperseded();
-        var other = SubmissionRow("INV-9.1", Spa, invoice: OtherInvoiceId, status: InvoiceSubmissionStatus.Accepted);
+        var other = SubmissionRow("INV-9.1", Spa, invoice: OtherInvoiceId, status: InvoiceSubmissionStatus.Accepted, id: OtherSubmissionId);
         _h.Invoices[OtherInvoiceId] = InvoiceRow(OtherInvoiceId, InvoiceStatusCodes.InReview);
-        _world.SpaUpload(OtherInvoiceId);
+        _world.SpaUpload(OtherInvoiceId, OtherSubmissionId);
         var received = SubmissionRow("INV-9.2", Spa);
         _h.Entities.Setup(e => e.RetrieveMultipleAsync(
                 It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"

@@ -401,7 +401,7 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
             // Task 097b: New names no invoice and no target; a Correction names both, and the target is the invoice's own submission.
             || !(input.Mode == FromEmailModes.New && input.InvoiceId is null && input.ResubmissionOf is null
                 || input.Mode == FromEmailModes.Correction && input.InvoiceId is { } invoiceId && invoiceId != Guid.Empty
-                    && input.ResubmissionOf is { } target && InvoiceSubmissionPersister.InvoiceIdFor(target) == invoiceId)
+                    && input.ResubmissionOf is { } target && InvoiceBlockedHold.IsOwnSubmission(invoiceId, target))
             // Review round 5 (pass-2 F4-2): the route's body shape and 095's own checks refuse these first, with the contract's answers.
             || input.FirmId == Guid.Empty || input.CoreRecord is null || input.CoreRecord.RecordId == Guid.Empty
             || input.FirmInvoiceNumber.Trim().Length > TrackingNumberAllocator.MaxFirmInvoiceNumberLength

@@ -137,16 +137,23 @@ public static class InvoiceBlockedHold
 
     /// <summary>
     /// The invoice's own submission among <paramref name="linked"/>: the one whose immutable id derives the invoice's
-    /// (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>). Null when none of them is (pure). Every reader that takes "the invoice's
-    /// submission" selects it here, never by the link alone or by creation order (task 165a).
+    /// (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>, <see cref="IsOwnSubmission"/>). Null when none of them is (pure). Every reader
+    /// that takes "the invoice's submission" selects it here, never by the link alone or by creation order (task 165a).
     /// </summary>
     public static Entity? OwnSubmissionOf(Guid invoiceId, IEnumerable<Entity> linked)
     {
         ArgumentNullException.ThrowIfNull(linked);
-        return invoiceId == Guid.Empty
-            ? null
-            : linked.FirstOrDefault(s => s.Id != Guid.Empty && InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoiceId);
+        return invoiceId == Guid.Empty ? null : linked.FirstOrDefault(s => IsOwnSubmission(invoiceId, s.Id));
     }
+
+    /// <summary>
+    /// THE own-submission rule (pure): <paramref name="submissionId"/> is <paramref name="invoiceId"/>'s own submission when its immutable id
+    /// derives the invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>). Every reader that selects or counts a submission of an
+    /// invoice by its <c>sprk_invoice</c> link applies it here (<see cref="OwnSubmissionOf"/>, task 165a; external visibility, task 165c).
+    /// Enforced by: the ArchTest <c>OwnSubmissionRuleSingleSourceTests</c>: no other source uses an <c>InvoiceIdFor(...)</c> call, or a local assigned from one, as an operand of <c>==</c>, <c>!=</c> or <c>Equals</c>. It does not follow a derived id into a parameter or a field, so a comparison there is a review item.
+    /// </summary>
+    public static bool IsOwnSubmission(Guid invoiceId, Guid submissionId) =>
+        invoiceId != Guid.Empty && submissionId != Guid.Empty && InvoiceSubmissionPersister.InvoiceIdFor(submissionId) == invoiceId;
 
     /// <summary>
     /// Reads the invoice's own submission (<see cref="OwnSubmissionOf"/>) with <paramref name="columns"/>, app-only through

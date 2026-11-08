@@ -250,7 +250,7 @@ public sealed record SubmissionSnapshot
         }
 
         var invoice = row?.GetAttributeValue<EntityReference>(InvoiceSubmissionService.InvoiceColumn)?.Id;
-        return invoice is { } id && id == InvoiceSubmissionPersister.InvoiceIdFor(earlier)
+        return invoice is { } id && InvoiceBlockedHold.IsOwnSubmission(id, earlier)
             ? CorrectedInvoiceRead.Resolved(earlier, id)
             : CorrectedInvoiceRead.Unresolved(earlier);
     }

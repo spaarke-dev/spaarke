@@ -1212,8 +1212,10 @@ public sealed class InvoiceAssignFirmService
             var subs = new QueryExpression(TrackingNumberAllocator.SubmissionEntity) { ColumnSet = new ColumnSet(SubmissionColumnsFor(scopeColumnExists)) };
             subs.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
             var linked = (await _entities.RetrieveMultipleAsync(subs, ct).ConfigureAwait(false)).Entities;
-            submissions = linked.Where(s => InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoiceId).ToList();
-            others = linked.Where(s => InvoiceSubmissionPersister.InvoiceIdFor(s.Id) != invoiceId).ToList();
+            // Task 165c: the one own-submission rule (InvoiceBlockedHold.IsOwnSubmission). Every own row is kept so that more than one
+            // still refuses below; the others are the rows that only point at the invoice.
+            submissions = linked.Where(s => InvoiceBlockedHold.IsOwnSubmission(invoiceId, s.Id)).ToList();
+            others = linked.Where(s => !InvoiceBlockedHold.IsOwnSubmission(invoiceId, s.Id)).ToList();
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
