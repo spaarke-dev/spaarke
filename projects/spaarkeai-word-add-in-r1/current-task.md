@@ -1,47 +1,43 @@
 # Current Task State — `spaarkeai-word-add-in-r1`
 
-> **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas". History: git log + `notes/handoff-history/` (do not load on recovery; the state before 2026-11-01 is archived verbatim in `notes/handoff-history/2026-11.md`).
+> **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas". History: git log + `notes/handoff-history/` (do not load on recovery).
 
-> **Last Updated**: 2026-11-06 (fm 030a content read sent; dev BFF 20669df6a9 live; #2552 held).
+> **Last Updated**: 2026-11-08 (by context-handoff). This project's session moved from VS Code to the **Claude Desktop session `word-add-in-r1`**. The VS Code session (`spaarke-wt-spaarkeai-word-add-in-r1-7b`) is retiring.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev; unified package **1.1.4** uploaded by the owner 2026-11-03 (Invoice pane tab; Submit Invoice / Create To Do ribbon buttons removed). |
-| **Open PR** | **#2552 draft, HOLD** (C:\wt185f, `feat/invoice-optional-firm`, head 6af195647d): optional firm (ebilling EB-D-185) + "Submit it again." sentences for the 095c-4 transient Failed codes. Merge only after ebilling sends the master SHA of the dev BFF deploy carrying 095c-2..4. Then: merge master into the branch, `gh pr ready 2552`, wait for every check, `gh pr merge 2552 --auto --merge`, confirm the SWA deploy, owner retest (no-firm submit + correction of it), remove C:\wt185f with Remove-WorktreeSafe. |
-| **Live dev BFF** | **22487c6537 since 2026-11-07T20:06:34Z** (uac-r2; gate PASS). It is the tip of `spike/spaarkeai-mcp-phase0` (draft PR #2615), **not on master**: owner-approved in uac-r2's session to ride along with every dev deploy until mcp-bff-api closes Phase 0 (owner go per SHA; this one "Deploy now"). Read-back names 22487c6537 and stands for the next master build on access and correctness; **after that build is live, re-run one To Do save** (049c changes the create path's mapping-source read), and carry no timings across. Carries 049b (maker's Assigned-To grant inline, full pass queued; never throws) + MCP spike routes; no Office, invoice or add-in change, no add-in concern. Lacks master's 049c (23567b2f93). Previous: cc11294300 (fm 030a, #2292), checked OK. |
-| **Owner checks open** | On whatever build is live: (1) an Office save filed to a matter, (2) an Office save with no related record, (3) one Submit Invoice from an email. Then read `sprk_document` rows created after the live time (`sprk_searchindexcompletedon`, `sprk_searchindexname`) and the invoice submission, invoice and line rows; send the result to uac-r2. None made yet (checked after 16:44:51Z). |
-| **Last merge to master** | **PR #2607 MERGED** 2026-11-06 as f9ba615b09: the To Do form can be saved again after a failed create. Every PR check passed, including the add-in test gate on the merge commit; the add-in deploy to the dev Static Web App succeeded. Main checkout fast-forwarded. (Before it: #2604 bcdc0e0069, project records.) |
-| **Next Action** | Wait for: the owner's three checks; ebilling's 095c SHA (#2552); fm's answer on OFFICE_010 and the 030b PR for a content read before its dev deploy (030a read done); ebilling's 095a/095b/151e PR + SHA (banner, invoice Files section). |
+| **Status** | Waiting on others; no work in progress. Work branch is clean and pushed; nothing uncommitted. |
+| **Open PR** | **#2552 draft, HOLD** (worktree C:\wt185f, `feat/invoice-optional-firm`, head 6af195647d): optional firm (ebilling EB-D-185) + "Submit it again." sentences for the 095c-4 transient Failed codes. Merge only after ebilling sends the master SHA of the dev BFF deploy carrying 095c-2..4. Then: merge master into the branch, `gh pr ready 2552`, wait for every check, `gh pr merge 2552 --auto --merge`, confirm the SWA deploy, owner retest (no-firm submit + correction of it), remove C:\wt185f with Remove-WorktreeSafe. |
+| **Live dev BFF** | **22487c6537 since 2026-11-07T20:06:34Z** (uac-r2; gate PASS). Tip of `spike/spaarkeai-mcp-phase0` (draft PR #2615), not on master; owner-approved ride-along (see CLAUDE.md "Deploy"). Carries 049b + MCP spike routes; checked: no add-in concern. Lacks master's 049c (23567b2f93). |
+| **Owner checks open** | On the live build: (1) an Office save filed to a matter, (2) an Office save with no related record, (3) one Submit Invoice from an email. Then read back `sprk_document` rows created after 2026-11-07T20:06:34Z (`sprk_searchindexcompletedon`, `sprk_searchindexname`, owner, BU) and the invoice submission, invoice and line rows; send the result to `uac-r2` naming 22487c6537. It stands for the next master build on access and correctness. **After the next master build is live, ask the owner for one Outlook To Do save and read it back** (049c changes the create path); carry no timings across. None made yet. |
+| **Last merge to master** | **#2607** (f9ba615b09, 2026-11-06): the To Do form can be saved again after a failed create; checks, gate and SWA deploy all passed. The work branch is 5 commits ahead of master (checkpoints only); they go in with the next merge. |
+| **Next Action** | Wait for, and act on: the owner's three checks (read back, report to `uac-r2`); fm's 030b PR (content read before its dev deploy, as for 030a); ebilling's 095c SHA (#2552 steps above); ebilling's 095a/095b/151e PR + SHA (banner, invoice Files section); each `uac-r2` deploy notice (range check, reply). |
 
-## Decisions and alignment (2026-11-04 to 11-06)
-- **W3 create paths** (owner 2026-11-06, fm decisions.md, UAC-r2 reviewed): see project `CLAUDE.md` "Create paths follow fm's W3 direction" and the spec ADR Tensions row. fm confirmed the 030b "existing id refused" guard covers creates only; the version save (`existingDocumentId` + `isNewVersion`) and the re-file (`documentId`) get must-not-fire tests.
-- **fm 030a** (Office To Do through the service): built, in fm review (content read of fe8e8913e6 sent 2026-11-06: OK). Its To Do refusal is **403** OFFICE_009 `source_record_inaccessible`, now ending "or choose a different person to assign it to"; an assignee contact needs AppendTo (Core User has it). The pane pins nothing and shows the server detail under the catalog title, so no pane change. A To Do created with no assignee needs no pane notice (the confirmation never shows an assignee). OFFICE_010 stays 403; fm's fix round gives its transient kinds the detail "…could not be created right now, and nothing was saved. Try again in a moment…". No `retryable` extension (declined: the pane has no reader for it). Pane fix found while answering: after a failed create the To Do form left Save disabled until Cancel cleared the input; now Save stays available after an error (CreateTodoView `canCreate`, test pins the retry). Waiting on the 030b PR.
-- **Roles** (owner): Office Add In User needs Core User and is for licensed core users only; Basic User becomes Read-only on `sprk_*` (fm 046c, live apply by uac-r2). The four service and demo accounts do not get the add-in role (2026-11-05). The five add-in holders who lacked Core User were given it (2026-11-06, read back on dev); every add-in role holder now has Core User or System Administrator.
-- **ebilling contract** (#2552): `"firm": null` prefill accepted; "Firm: none" kept (ebilling confirmed); §12 reviewer refusals not on any pane route; 082c-3 `warning` is SPA-only, no pane impact.
+## Decisions in force (detail in CLAUDE.md "Standing directives")
+- **W3 create paths** (owner 2026-11-06): CLAUDE.md "Create paths follow fm's W3 direction". 030a is live; 030b (Office document save, named exception) is not built yet. Its creates-only guard leaves the version save (`existingDocumentId` + `isNewVersion`) and the re-file (`documentId`) working, with must-not-fire tests (fm confirmed).
+- **Roles**: add-in user = Core User + Office Add In User; service and demo accounts never get the add-in role; every add-in role holder has Core User or System Administrator (read back 2026-11-06).
+- **ebilling contract** (#2552): `"firm": null` prefill accepted; "Firm: none" kept; §12 reviewer refusals are on no pane route; 082c-3 `warning` is SPA-only.
 
-## Deploy OKs given (newest first; history in git log)
-- 2026-11-06 20669df6a9: checked after uac-r2's before-notice; POST /api/v1/documents caller check does not touch the pane (it uses GET/PUT there).
-- 2026-11-05 0f6618094b: content OK; the owner held it and it shipped inside 20669df6a9.
-- 2026-11-05 0f53e053bf, 2026-11-04 909754869f, 2026-11-03 d763dc120e: content OK; each carried the owner-checks condition above.
-- Dev BFF deploys run through uac-r2 (Claude Desktop session `uac-r2` since 2026-11-08; the VS Code session `-r2-20` is retiring; a held message means the owner approves it there): requests, peer OKs and after-notices go there; the owner gives the go per build in its session (`docs/procedures/dev-bff-deploy-coordination.md`).
+## Recent deploy checks (newest first; older ones in git log)
+- 2026-11-07 22487c6537 (spike tip): no add-in concern; flagged "not on master"; uac-r2 confirmed the owner's go.
+- 2026-11-07 cc11294300: 030a To Do through RecordCreationService; #2292 shared alternate-key classifier (exact 0x80060891). No add-in concern.
+- 2026-11-06 20669df6a9: POST /api/v1/documents caller check does not touch the pane (it uses GET/PUT there).
 
 ## Submit Invoice (task 133): state
-- Already-submitted banner (#2533) shows nothing until ebilling 095a is on dev (404 → today's form). Backfill for older submissions (incl. 0d67bcc9 and INV-792345.3/.4) is ebilling's, with the owner's OK.
+- Already-submitted banner (#2533) shows nothing until ebilling 095a is on dev (404 → today's form). Backfill for older submissions is ebilling's, with the owner's OK.
 - Invoice form Files section and "Source email" link: ebilling 151e. No approve UI until ebilling 110/111/112 (no interim path).
 - Owner retest still open: INV-012.2 / correction UAT.
 - **Slice C (needs the owner's explicit go):** remove Invoice from Save and "+ New" in both hosts; tell the owner Word loses Invoice save; then tell ebilling for 096.
 
-## Peers (SendMessage by session name)
-- uac-r2 `uac-r2` (Desktop; dev BFF deploys, roles); ebilling `spaarke-wt-ebilling-r1-7b` / `-c7`; field-mapping `spaarke-wt-field-mapping-server-write-pa-69`; ontology `spaarke-wt-spaarke-ontology-platform-r1-38`.
-
-## Gotchas (this session)
-- Use `git commit -F <file>`; git under the Bash tool hangs, so use PowerShell.
-- Remote refs are shared by every worktree: another session's fetch can move `origin/master` mid-task. Re-check `git rev-list --count HEAD..origin/master` right before a merge or PR.
-- `Gated jest suites (office-addins)` is NOT required: wait for it before relying on a merge.
-- `App.invoiceRoute.test.tsx` replaces the whole `InvoiceView` module: export pure helpers from a service module.
-- A fresh worktree needs `npm run build` in `src/client/shared/Spaarke.Auth` before office-addins tsc (gitignored `dist`).
+## Peers (SendMessage by session name; check `ListAgents` — several moved to Claude Desktop on 2026-11-08)
+- `uac-r2` (Desktop): dev BFF deploys, roles. A held message means the owner approves it in that session.
+- `spaarke-wt-field-mapping-server-write-pa-69`: field mapping (030b pending).
+- `spaarke-wt-ebilling-r1-c7`: ebilling.
+- `spaarke-wt-spaarke-ontology-platform-r1-38`: ontology.
+- `provisioning-r1` (Desktop): customer provisioning.
 
 ## Owner items (open)
 - Prod Entra: register the add-in's `brk-…://addins.spaarke.com` redirect on prod `1958aec2` (dev has it; offered via az with a go).
@@ -49,5 +45,3 @@
 - Request Too Long follow-ups on the owner's machine.
 - Excel/PowerPoint add-in (no go yet); UAT 042, 080, 121, 127, 078; PCF re-sync; A9 guest sign-in; a named user's retest for R3; 090 wrap-up (`/test-diet`).
 - Post-deploy check (UAC #2468): a child-BU user's unfiled Outlook save; read back the `sprk_document` owner and BU.
-- Main checkout `C:\code_files\spaarke`: leave its uncommitted files alone. C:\wtqa1906 is the owner's.
-- Cleanup later (Remove-WorktreeSafe): C:\wt2412, C:\wt2412m, C:\wt2416, C:\wt2416c.
