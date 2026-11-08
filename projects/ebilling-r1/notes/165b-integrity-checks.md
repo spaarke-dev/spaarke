@@ -478,3 +478,250 @@ Known limits recorded from the re-check:
 - **K3: closed currency list.** The refused set is the seven 3-decimal ISO codes. CLF and UYW (4-decimal unit-of-account codes, not invoice currencies) are not listed. A future 3-decimal currency is a manual addition.
 - **K4: guard upkeep.** The baseline reasons quote line numbers that will go stale. Every entry carries the same citation. `LinkToAttributeName` and positional `LinkEntity` arguments are not detected. Mark Paid's answers for statuses other than Sent to AP repeat the lifecycle's answers and could drift.
 - **The re-check's F4 does not apply.** `MarkPaidAuthorizationTests` asserts `StatusReads == 0`. That counter sits at the lifecycle's own Dataverse boundary (`ApExportRoutesHost.LifecycleRecords`), and the lifecycle reads status before any write. So the assertion does prove the lifecycle was not reached.
+
+## 7. 165b-4 design (for ontology-r1)
+
+Task `tasks/165b4-spend-server-written-sources.poml`, step 1: the design note, before any code. Base `work/ebilling-r1` at `c66b6933cf` (165b-3
+merged). Wording stays neutral: every spend reader decides only from server-written sources. Line numbers are on that base.
+
+### 7.1 The readers today
+
+| Reader | Counted spend | Pending spend | Identity |
+|---|---|---|---|
+| `FinanceBaseValues.ReadAsync` (`FinanceBaseValues.cs:262-285`), called by `SignalEvaluator.cs:233-234` | 3 grouped FetchXML reads per chunk of 200 parents (`ReadSpendPartsAsync` `:328-359`: billed part, approved part, billed re-read; 6 on a retry) | `ReadPendingSpendAsync` `:296-312`, same 3 reads with the held anti-join (`:416-428`). **No production caller** (only tests). | shared `IGenericEntityService` = the `IDataverseService` singleton (`GraphModule.cs:90,145`) |
+| `FinanceRollupService` | 1 row read, `BuildInvoiceQuery` (`:361-374`), not paged (`:297-307`), summed in memory (`ComputeSpendFigures` `:256-292`) | 1 row read with the anti-join (`BuildPendingInvoiceQuery` `:327-352`); a fault leaves the stored value (`WriteRollupAsync` `:143-157`) | the same `IDataverseService`, unwrapped to `ServiceClient` (`:180`) |
+| `Services/Finance/Tools/FinancialCalculationToolHandler` | 1 row read through the rollup's builder (`:131-132`, `:145-154`, `:190-199`) | none | the same; a fault becomes `CreateError` (`:120-124`) |
+
+`Services/Ai/Handlers/FinancialCalculationToolHandler` (formula tool) reads no invoice and is out of scope. On dev the `IDataverseService` identity
+is the BFF application identity (read 2026-11-08, §7.9).
+
+### 7.2 The problem
+
+uac-r2's F1 on 165b-3 (merged, §6.3 item 1) makes a counted status need the writer-created approve record **under the approval's key**:
+`InvoiceLineOrigin.ReviewIdOf(row)` (`InvoiceLineOrigin.cs:140-155`, reads `sprk_steps` JSON) equals
+`BillingDecisionKey.IdOf(sprk_invoice, X, InvoiceApprovalService.DecisionIdFor(portion of X))` (`DecisionRecordWriter.cs:233-242`,
+`InvoiceApprovalService.cs:382`). FetchXML cannot match a value inside `sprk_steps`, and the key is a SHA-256 of a string built from the portion
+id. So no `exists` link can carry the key; spend needs the portion read and the record read that `InvoicesWithApproveRecordAsync`
+(`InvoiceApprovalService.cs:1403-1474`) makes, or a parent-scoped form of them.
+
+**Note on §6.2.** §6.2 as merged records no dev probe of an `exists` link. §7.9 records the probe this note ran (read-only, 2026-11-08).
+
+### 7.3 Options
+
+Both options use the same keyed reads, scoped by parent (one read per chunk of parents, not per 200 invoices): portions of the chunk's counted
+invoices, and writer-created approve records regarding them, each through an inner link to `sprk_invoice` (§7.5). With the 165b-3 read as it is
+(scoped by invoice ids), each option costs one more invoice read plus `2 x ceil(n/200)` for n counted invoices.
+
+| | **(a)** unkeyed `exists` link + keyed deny-list | **(b)** row read + keyed allow-list (recommended) |
+|---|---|---|
+| Counted spend | Keyed reads give F = invoices with a writer-created approve record but none under their key. Then the 3 grouped reads, each with the unkeyed `exists` link and `sprk_invoiceid not-in F` (omitted when F is empty; F larger than 200 throws, value unknown). | One paged row read of the chunk's counted invoices (id, parent, the two amount columns). Keyed reads give M = invoices with the record under their key. Sum `SpendAmount` over rows in M, per parent. |
+| Queries per chunk (evaluator) | 2 keyed + 3 grouped (6 on a retry) + 1 budget = **6** (9) | 1 row + 2 keyed + 1 budget = **4**, no retry |
+| Readers unable to disagree | Weaker. The sum is a grouped read; the key is applied as a deny-list from an earlier read. An invoice whose record appears between the keyed reads and the grouped reads is counted on the unkeyed link alone. The rollup and the tool still need rows (dates, count), so they would use (b)'s path anyway: two code paths. | One function, `FinanceBaseValues.ReadCountedInvoicesAsync`, returns the counted rows; `ReadAsync`, the rollup and the tool all sum or bucket those rows. An invoice counts only when it is in M (allow-list). A race leaves out an invoice whose record is not yet visible, which is what the rule says. S5 holds by construction (one row per invoice). |
+| O1 (static, pure reader) | `ReadAsync(..., Guid writerUserId, ...)`; the keyed reads are a static call with `entities` and `writerUserId` as parameters. | Same. |
+| `ReadSpendPartsAsync` re-read | Kept; the link and `not-in` are in all three reads, so an invoice whose record appears between them changes the billed part and the re-read catches it (§7.7). | Not needed: one row read is one snapshot of each invoice's amounts and `SpendAmount` coalesces per row. The grouped spend path is retired (§7.11 H5). |
+| FinanceBaseValues hunk | Smaller (H1, H4 and a link in `BuildGroupedFetchXml`). | Larger (H1-H5). |
+| Aggregate limit | Grouped reads keep the 50,000-row aggregate limit. | Row reads page at 5000; no aggregate limit. |
+
+**Recommendation: (b).** It meets O7's budget exactly (4 per chunk, today's 3 + 1), the key is an allow-list applied per invoice, and the three
+readers share one function, so parity is structural (the O6 test still runs). The cost is retiring the grouped spend path in ontology's file.
+If ontology-r1 prefers the smaller hunk, (a) works at 6 queries per chunk, with the deny-list window stated as a known limit.
+
+### 7.4 One keyed rule (no copy)
+
+The keyed logic does **not** need to move into `Services/Signals/`. `FinanceBaseValues` already uses `Services/Finance` types, the writer rule stays
+in `Services/Signals/WriterCreatedRecord.cs`, and the key stays in `BillingDecisionKey`. The extraction is ebilling's, in `Services/Finance`:
+
+- **New** `Services/Finance/InvoiceApproveRecord.cs`: a pure static class with no DI registration. It holds:
+  - `ActionCode` (moved from `InvoiceApprovalService.ApproveActionCode`, `:262`) and `InvoiceLookup` (moved from `:275`).
+  - `RecordQuery(Guid writerUserId)`: action code plus `WriterCreatedRecord.AddConditions`, columns lookup and `sprk_steps`, paged, `NoLock`.
+  - `PortionQuery()`.
+  - The pure matcher `Matched(portions, records)`, the body of `:1426-1470`: the `keys` map with `BillingDecisionKey.IdOf(..., DecisionIdFor(portion))` and the `ReviewIdOf` compare.
+  - `MatchedInvoicesAsync(entities, scope, writerUserId, ct)`, where `scope` is either invoice ids (chunks of 200: 165b-3's behaviour) or
+    parents (parent lookup `In`, status `In`, through an inner link to `sprk_invoice`).
+- **`InvoiceApprovalService` hunks.** `InvoicesWithApproveRecordAsync` (`:1403-1474`) keeps its signature and delegates to the invoice-id scope.
+  `WriterApproveRecordsAsync` (`:1354-1373`) uses `RecordQuery` (one copy of the record conditions instead of three). `:262` and `:275` refer
+  to the moved members. No behaviour change: the 165b-3 tests (`InvoiceApprovalCompletionTests`, `ApExportApprovalRecordTests`, Mark Paid) are
+  the parity check for the move.
+- **§11.** *Existing*: `InvoicesWithApproveRecordAsync` and `WriterApproveRecordsAsync`. *Extension*: an invoice-id-scoped internal of a
+  DI service. Calling it from ontology's static reader would tie that reader to the approval service, and it has no parent scope. The fallback
+  is a parent-scope overload on the same internal static, with no new type. *Cost of doing nothing*: spend copies the key match, so approval,
+  AP export and spend can disagree.
+- The writer id comes from `OntologyWriterDataverseClient.GetWriterUserIdAsync` (`:224`) in every reader. The evaluator gets it there (Q2).
+  The rollup and the tool take `BillingDecisionRecorder` (singleton, `FinanceModule.cs:201`; `WriterUserIdAsync` `:174`), as `ApExportService`
+  does. No new registration.
+
+### 7.5 Counted spend reads as built
+
+**(b), per chunk of up to 200 parents.** The three reads below, shown in FetchXML form (built as `QueryExpression`):
+
+```xml
+<!-- 1. rows -->
+<fetch><entity name="sprk_invoice"><attribute name="sprk_invoiceid"/><attribute name="sprk_matter"/>
+  <attribute name="sprk_approvedtotal"/><attribute name="sprk_totalamount"/>
+  <filter type="and"><condition attribute="sprk_matter" operator="in"><value>{parent}</value>...</condition>
+    <condition attribute="statuscode" operator="in"><value>659490000</value><value>659490001</value><value>659490002</value></condition></filter>
+</entity></fetch>
+<!-- 2. portions -->
+<fetch><entity name="sprk_invoiceapproval"><attribute name="sprk_invoiceapprovalid"/><attribute name="sprk_invoice"/>
+  <link-entity name="sprk_invoice" from="sprk_invoiceid" to="sprk_invoice" link-type="inner">{same parent + status filter}</link-entity>
+</entity></fetch>
+<!-- 3. writer-created approve records -->
+<fetch><entity name="sprk_decisionrecord"><attribute name="sprk_regardinginvoice"/><attribute name="sprk_steps"/>
+  <filter type="and"><condition attribute="sprk_actioncode" operator="eq" value="approve-invoice"/>
+    {WriterCreatedRecord: createdby eq {writer}, createdonbehalfby null}</filter>
+  <link-entity name="sprk_invoice" from="sprk_invoiceid" to="sprk_regardinginvoice" link-type="inner">{same parent + status filter}</link-entity>
+</entity></fetch>
+```
+
+The rollup and the tool add `sprk_invoicedate` and `statuscode` to read 1 (their `InvoiceColumns`, `FinanceRollupService.cs:356-357`).
+
+**(a), as it would be built** (`BuildGroupedSpendFetchXml`, one per part):
+
+```xml
+<fetch aggregate="true"><entity name="sprk_invoice">
+  <attribute name="{sprk_approvedtotal|sprk_totalamount}" alias="total" aggregate="sum"/>
+  <attribute name="sprk_matter" alias="parent" groupby="true"/>
+  <filter type="and">{parent in; approvedtotal not-null|null; statuscode in counted}
+    [<condition attribute="sprk_invoiceid" operator="not-in">{F}</condition>]</filter>
+  <link-entity name="sprk_decisionrecord" from="sprk_regardinginvoice" to="sprk_invoiceid" link-type="exists">
+    <filter type="and"><condition attribute="sprk_actioncode" operator="eq" value="approve-invoice"/>
+      {WriterCreatedRecord.FetchXmlFilter(writer)}</filter></link-entity>
+</entity></fetch>
+```
+
+### 7.6 Pending spend and the hold batch
+
+- **Rule.** Pending leaves out every In Review invoice that `InvoiceBlockedHold.Of` (`InvoiceBlockedHold.cs:102-136`) holds, applied in memory.
+  No copy: the batch read lives in `InvoiceBlockedHold`, a type `FindingsJsonAppOnlyReadGuardTests` has already reviewed (`:65`).
+- **Reads, per chunk of up to 200 parents.**
+  1. A paged row read of the In Review invoices (as §7.5 read 1, status In Review).
+  2. One paged read of `sprk_invoicesubmission`, columns `InvoiceBlockedHold.SubmissionColumns` (`:72-76`), through an inner link to
+     `sprk_invoice` with the same parent and status filter.
+- **Count.** 2 per chunk, constant in the invoice count (paging adds one read per 5000 rows). Today the rollup makes 1 read and
+  `ReadPendingSpendAsync` makes 3.
+- **The anti-join is dropped.** `Of`'s check (1) is the same column rule (`MatchesHeldConditions`, `:245-263`), so there is one rule.
+- **One pending reader.** The rollup calls `FinanceBaseValues.ReadPendingSpendAsync` with `[parentId]`.
+- **Behaviour change (EB-D-201).** An In Review invoice with no linked own submission is held by `Of` (`HeldOwnSubmissionUnlinked`), so it leaves
+  pending. On dev, both In Review invoices have a linked submission (§7.9).
+- **Canary (O5), in the read, no extra query.** The persister writes the own submission's findings, with `invoiceId`, in the transaction that
+  creates the invoice (D-130(a)). The undo clears the findings only together with the link, after deleting the invoice
+  (`SubmissionCommitGate.cs:428-432`). So a linked own submission whose findings read back empty means the column cannot be read: the pending
+  read throws (unknown), never "held" or "not held". Without the canary, an unreadable column would make `Of` hold every invoice and pending
+  would read as 0. Q6 asks whether ontology-r1 also wants an explicit per-run check.
+
+### 7.7 Query count per evaluation and the re-read check
+
+| Path | Today | (a) | (b) |
+|---|---|---|---|
+| Evaluator, per chunk of up to 200 parents | 3 invoice (6 on a retry) + 1 budget | 2 keyed + 3 grouped (6 on a retry) + 1 budget | 1 row + 2 keyed + 1 budget |
+| Rollup, one parent | counted 1 + budget 1 + pending 1 | — | counted 3 + budget 1 + pending 2 |
+| Tool, one parent | counted 1 + budget 1 | — | counted 3 + budget 1 |
+| Writer id | — | WhoAmI once per process (cached, `OntologyWriterDataverseClient.cs:224-241`) | same |
+
+With 1 invoice or 50 invoices on a core record, every path makes the same number of reads (no `In` over invoice ids; paging only beyond 5000
+rows). **Re-read under (a):** the link and `not-in` sit inside all three reads, so `SameSums` (`:365-366`) still compares like with like. An
+invoice whose approve record appears between the reads leaves or enters the billed part; that changes the billed re-read and triggers the retry.
+**Under (b)** the re-read check is not needed (§7.3).
+
+### 7.8 Guards (O3, O4, O5) and parity (O6)
+
+- **O3 `DerivedBaseColumns`** (`:123-136`) gains `sprk_decisionrecord`: `sprk_regardinginvoice`, `sprk_actioncode`, `sprk_steps`, `createdby` and
+  `createdonbehalfby` (the last two listed for completeness). It also gains `sprk_invoiceapproval.sprk_invoice`. `sprk_steps` and the portion
+  lookup go beyond O3's list, but the key needs them (Q4). All are unsecured in the solution source: only `sprk_createdbyperson` is secured
+  (`sprk_DecisionRecord/Entity.xml:795-806`, `sprk_invoiceapproval/Entity.xml:685-696`). The two guards (`DerivedBaseColumnsFieldSecurityTests`,
+  `SignalPredicateTests:194-208`) and the pin (`TheDerivedBaseColumns_CoverTheAmountRuleAndTheHeldAntiJoin`) take them.
+- **O3 role ArchTest.** It pins `prvReadsprk_DecisionRecord` at Global in `Roles/Spaarke Ontology Service.xml:51`. Must-fire: a scratch copy at
+  Deep. Must-not-fire: the real file. The open point: on dev the reading identity's Decision Record read does not come from a
+  SpaarkeMaster role (Q3; identity details sent to ontology-r1 and uac-r2 privately). So the XML pin alone does not cover the evaluator. Proposed: a live check that the
+  reading identity holds Read on `sprk_decisionrecord` at Global (`RetrieveUserPrivileges` for WhoAmI on the `IDataverseService` connection).
+- **O4 hold sources.** `sprk_invoicesubmission.sprk_findingsjson` is secured. It is readable through "Spaarke BFF-Managed Field Writers"
+  (`FieldSecurityProfiles.xml:855`, grant `:1457-1464`, CanRead 4); its members on dev include the BFF application identities. `sprk_invoice.sprk_firmhold`
+  (`:1625-1631`; Readers profile `:773-779`) is not read by `InvoiceBlockedHold` (Q5).
+  - The hold sources do not join `DerivedBaseColumns`. A new list, `FinanceBaseValues.HoldSourceColumns`, carries the pair "secured, readable by
+    the BFF application user through Spaarke BFF-Managed Field Writers".
+  - The guard, offline: the profile XML grants CanRead 4 on each listed column, and each listed column is secured.
+  - The guard, live (dev, `SignalPredicateTests` style): the reading identity is a member of the profile (`systemuserprofiles`).
+- **O5:** the in-read canary in §7.6.
+- **O6.** One fixture store answers the three reads and the hold read. The same fixture goes through `FinanceBaseValues.ReadAsync`,
+  `FinanceRollupService` (its reads move to the `IDataverseService` as `IGenericEntityService`, with no `ServiceClient` unwrap for invoices)
+  and the tool. Counted spend must be equal across the three; pending must be equal between `ReadPendingSpendAsync` and the rollup.
+
+### 7.9 Dev probe (read-only, GET and SQL only, 2026-11-08; ids to the lead only)
+
+- **The `exists` link in the grouped aggregate** (the option (a) shape, with the helper's two conditions) is accepted.
+  - Counted spend per parent is identical with and without the link: 2 parents, approved part only, billed part empty.
+  - With an unknown `createdby` the link returns no rows.
+  - Dev has one approve record per counted invoice, so dev data cannot show S5; `exists` is a semi-join, and S5 is tested offline.
+- **(b)'s three reads, parent-scoped.** 2 parents, 2 counted invoice rows, 2 portions, 2 writer-created approve records. Both match under the key,
+  derived in the probe the same way the C# code derives it. Counted spend on dev is unchanged.
+- **Pending.** 2 In Review invoices, each with a linked submission. The held result is part of the implementation's before/after comparison.
+- **Identities.** The role and field-security profile memberships of the reading and writing identities were read; the details went to
+  ontology-r1 and uac-r2 privately, not into this repository.
+
+### 7.10 Test shape
+
+Each case runs on every reader in scope (evaluator `ReadAsync`, rollup, tool; pending: `ReadPendingSpendAsync` and the rollup):
+
+| Case | Must fire | Control |
+|---|---|---|
+| S1 | Approved, no writer-created approve record: not counted | same invoice with the record: counted |
+| S2 | record by another identity; record on the writer's behalf: not counted | the writer's own record: counted |
+| Key | writer-created approve record under another key (another invoice's, unrelated, no or unreadable `sprk_steps`): not counted; no portion: not counted | the approval's own key: counted |
+| D-211 | — | Approved invoice with a reviewer-added line (approved > billed) and its key: counted at the approved total; the add-line record is not taken for an approve record |
+| S3 | held In Review invoice (recorded outcome Blocked, which the column state cannot show; column state; own submission unlinked): not in pending | released by an Override stamp: in pending |
+| O5 | linked own submission whose findings read back empty: pending read throws | readable findings: a value |
+| S4 | fault on the row, portion, record or submission read, or on the writer id; `Guid.Empty`: evaluator throws (policy unknown), rollup counted write not made and pending unchanged, tool returns an error | — |
+| S5 | two approve records under the key: counted once | — |
+| O6 | parity: the same fixture gives equal spend through all three readers | — |
+| Count | 1 invoice and 50 invoices: equal read counts (4 per chunk; pending 2) | — |
+
+**Seeds.** (1) Matcher returns every invoice with a writer record (key dropped): the Key must-fire cases fail. (2) Writer conditions dropped: S2
+fails. (3) Hold exclusion removed from pending: S3 fails. (4) Canary removed: O5 fails. Each file restored byte-identical (`cmp`).
+
+**Existing tests that change.** In `SpendHeldAndPendingTests`, the store gains inner-link support, and the pins "counted has no link"
+(`:291-295`) and the anti-join shape (`:403-488`) are rewritten. `FinanceBaseValuesTests` (grouped builders) and `InvoiceRejectReturnServiceTests:121-125`
+change under (b). The `FinanceBaseValuesSeamTests` grouped cases become row-read cases.
+
+### 7.11 Hunks for ontology-r1's review (option (b))
+
+- **`FinanceBaseValues.cs`**
+  - H1: `ReadAsync` gains a `Guid writerUserId` parameter, and its spend half sums `ReadCountedInvoicesAsync` per parent (`:262-285`).
+  - H2: new `ReadCountedInvoicesAsync` (row read plus `InvoiceApproveRecord.MatchedInvoicesAsync`, parent scope).
+  - H3: `ReadPendingSpendAsync` becomes a row read plus `InvoiceBlockedHold`'s batch, with the canary (`:287-312`).
+  - H4: `DerivedBaseColumns` additions and the new `HoldSourceColumns` (`:112-136`).
+  - H5: retired: `SpendAmountPart` and `SpendAmountPartsInReadOrder` (`:89-110`); `ReadSpendPartsAsync`, `ReadPartAsync` and `SameSums`
+    (`:317-366`); the two spend builders (`:368-382`); the part and held branches of `BuildGroupedFetchXml` (`:384-432`, which keeps the budget
+    form); `HeldAlias` (`:189`). The remarks at `:25-29` and `:174` are updated.
+- **`Services/Signals`**
+  - `SignalEvaluator.cs`: the writer id is obtained and passed to `ReadAsync` (`:131-138`, `:233-234`; Q2).
+  - `PolicyVersionValidator.cs:150-151`: the remark names the new reader.
+  - No change to `WriterCreatedRecord`.
+- **ebilling**
+  - New `InvoiceApproveRecord.cs`.
+  - `InvoiceApprovalService.cs:262,275,1354-1373,1403-1474`.
+  - `InvoiceBlockedHold.cs`: the batch reader.
+  - `FinanceRollupService.cs:168-244,297-374`, and its constructor.
+  - `Tools/FinancialCalculationToolHandler.cs:131-205`, and its constructor.
+- **Tests:** §7.10, plus the O3 role ArchTest and the O4 profile guard.
+
+### Questions for ontology-r1
+
+1. Option (b) (recommended), or option (a) with its smaller `FinanceBaseValues` hunk? Is retiring the grouped spend path (H5) acceptable?
+2. Writer id into `SignalEvaluator`: inject `OntologyWriterDataverseClient` (already registered, `SignalsModule.cs:51-53`), or should
+   `SignalWriter` expose it?
+3. O3: the evaluator reads as the BFF application user, whose Decision Record read on dev does not come from a SpaarkeMaster role. Is the role-XML pin
+   plus the live `RetrieveUserPrivileges` check enough, or should provisioning (H10) also give the BFF app user Spaarke Ontology Service?
+4. Do you agree to add `sprk_steps` and `sprk_invoiceapproval.sprk_invoice` to `DerivedBaseColumns` (the key needs them)?
+5. O4 names `sprk_firmhold`, but `InvoiceBlockedHold` does not read it. Should pending also leave out `InvoiceFirmHold`'s hold, or only
+   `InvoiceBlockedHold`'s (the POML goal)?
+6. O5: is the in-read canary enough, or do you also want one explicit membership check per run (1 query)?
+7. Should the rollup call `ReadPendingSpendAsync` (it has no production caller today), so there is one pending reader? Do you accept that an
+   In Review invoice with no linked own submission leaves pending (EB-D-201)?
+
+### Questions for uac-r2
+
+1. Does option (b) satisfy your F1 for spend? An invoice counts only when it is in the matched set, and the matcher is the one approval, AP export
+   and Mark Paid use. Does option (a) also satisfy it, given the window in which an invoice is counted on the unkeyed link alone?
+2. 165b-3's K2 (any-portion match at invoice level) carries into spend unchanged. Do you accept the same limit there?
+3. The spend reads find the records through an inner link from `sprk_regardinginvoice` to the parent's invoices. Matching is still by invoice id,
+   and the key and the writer conditions are unchanged. Do you have any concern with this parent scope?
