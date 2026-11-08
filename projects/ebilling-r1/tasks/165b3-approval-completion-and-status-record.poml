@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="165b-3" project="ebilling-r1">
+  <metadata>
+    <title>Invoice integrity, part 165b-3: approval completion decides only from server-written sources; counted statuses need the approve record (EB-D-200)</title>
+    <phase>4 Review (165 family)</phase>
+    <gate>165b item 1 merged into work. Part B waits for uac-r2's reply on the proposed status rule (EB-D-208, sent 2026-11-07); part A does not wait.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The approval write path and the counted-status readers (.cs); integrity of the approve Decision Record.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Changes when approval completes, in a locked multi-step path; three readers of counted status.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceApprovalService (shared with 165b-2) and the AP export and spend readers.</parallel-reason>
+    <deps>165b</deps>
+    <tags>bff-api, ebilling, integrity</tags>
+  </metadata>
+
+  <prompt>This is item 2 of task 165 (`tasks/165-invoice-integrity.poml`, scope "165b"). It also carries a fix that 165b found in the approval completion path. The detail of that fix was given to the lead and uac-r2 privately. The lead's brief for this run names the methods; this file states only the outcome.
+    Wording in commits, notes, comments and the PR stays neutral: "approval completion decides only from server-written sources". Never describe a sequence of steps.</prompt>
+
+  <goal>(A) The approve Decision Record is written only when the approval's own checks pass at completion. (B) Approval, AP export and spend treat an invoice as Approved, Sent to AP or Paid only when a writer-created approve Decision Record exists for it.</goal>
+
+  <scope>
+    <in>
+      A. Approval completion (`InvoiceApprovalService` completion path):
+         - Before it writes the approve Decision Record, completion re-runs the approval checks: eligibility, hold, I-2 open lines, the 165b line origin, and the 165b-2 totals check once that has merged.
+         - The approved amount must equal the line-derived total.
+         - Whether the approval is complete is decided from the writer-created approve Decision Record, not from columns a user can write.
+         - On a refusal, nothing is written: 409 with a distinct code; the log carries the table and row id only.
+      B. Counted status needs its record (EB-D-208, once uac-r2 agrees):
+         - Approval, AP export selection and both spend paths count an invoice as Approved, Sent to AP or Paid only when a writer-created approve Decision Record exists for it.
+         - Otherwise approval and AP export refuse or leave it out with a distinct code, and spend does not count it.
+         - Reuse 165b's writer-identity record lookup (InvoiceLineOrigin's createdby rule); no copy.
+         - Paid carries no record of its own in R1 (known limit, recorded in the notes).
+    </in>
+    <out>
+      - A new Decision Record action, or any change to `DecisionActionCatalog` (ontology-r1).
+      - Field security on status or portion columns (an owner schema question; list it as a known limit).
+      - Any client change.
+    </out>
+  </scope>
+
+  <acceptance-criteria>
+    <criterion>Part A, must-fire, each with its must-not-fire control:
+      - C1: completion is refused, and no approve record is written, when the checks fail at completion time. Control: a normal approval completes and writes one record.
+      - C2: completion is refused when the approved amount differs from the line-derived total. Control: equal amounts complete.
+      - C3: an approval with no writer-created approve record is not treated as complete. Control: the writer's record is.
+      - C4: completion replayed after it has finished writes no second record (idempotent).
+    </criterion>
+    <criterion>Part B, must-fire, each with its must-not-fire control:
+      - R1: an Approved invoice with no writer-created approve record is left out of AP export.
+      - R2: the same invoice is not counted in spend, on both paths.
+      - R3: the record's createdby must be the writer identity.
+      Control for each: the same invoice with the writer's record exports and counts.
+    </criterion>
+    <criterion>One seed per guard: the completion re-check (C1) and the record requirement (R1). Record both in the notes.</criterion>
+    <criterion>Dev data (read-only): every live Approved, Sent to AP or Paid invoice has a writer-created approve record (165b found 2 of 2). If any does not, STOP before merging.</criterion>
+    <criterion>Filtered unit tests (Finance, ApExport, InvoiceApproval) and the full ArchTests pass. The BFF builds. Measure the publish delta.</criterion>
+    <criterion>Notes go in `notes/165b-integrity-checks.md`, in a new 165b-3 section, in neutral wording.</criterion>
+    <criterion>Test scope: exactly C1–C4, R1–R3 and the seeds.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If uac-r2 objects to EB-D-208, do part A only and STOP.</trigger>
+    <trigger>If a legitimate approval flow (multi-portion, Override) cannot meet C2, STOP and report.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+</task>
