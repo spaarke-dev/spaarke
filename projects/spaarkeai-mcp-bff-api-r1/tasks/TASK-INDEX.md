@@ -19,7 +19,7 @@
 | 013 | B-1 decision capability: list and plan | A | ✅ [done] | 011, 017 | Group B | opus / high | FULL |
 | 014 | B-1 decision capability: commit | A | ✅ [done] | 013 | Group C | opus / high | FULL |
 | 016 | B-3 decision lookup search and REST route | A | ✅ [done] | 013 | Group C | opus / high | FULL |
-| 015 | B-5 slim summary, privilege flag and paging cursor | A | 🔲 [open] | 013, 014 | Group D | sonnet / high | FULL |
+| 015 | B-5 slim summary, privilege flag and paging cursor | A | ✅ [done] | 013, 014 | Group D | sonnet / high | FULL |
 | 020 | MCP module, packages and /mcp/{area} host | B | 🔲 [open] | 003, 017 | Group D | sonnet / high | FULL |
 | 021 | A10 auth on /mcp, tool policies and route guard | B | 🔲 [open] | 020 | Group E (alone) | opus / high | FULL |
 | 022 | spaarke_show_decisions and app-only paging tool | B | 🔲 [open] | 015, 017, 021 | Group F | opus / high | FULL |
