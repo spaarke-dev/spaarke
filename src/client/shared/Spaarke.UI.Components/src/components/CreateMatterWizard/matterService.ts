@@ -301,9 +301,11 @@ export class MatterService {
       };
     }
 
-    // The matter's "Assigned *" people get their access inside the create above: on a root create the server runs
-    // AssignedAccessMaterializer.RunAfterWriteAsync (the I-12 L1 grant) in the same request, so there is no client
-    // access sync here (task 021 fix round 1; the work-assignment wizard dropped its call the same way, task 046).
+    // The matter's "Assigned *" people get their access from the create above, not from a client call: on a root create
+    // the server grants the maker's own Assigned-To share inside the request and queues the full I-12 L1 pass for every
+    // other subject (tasks 049/049b; the queue's own failure runs the full pass inline, the reconciliation job is the
+    // backstop). So there is no client access sync here (task 021 fix round 1; the work-assignment wizard dropped its call
+    // the same way, task 046) and an assigned attorney or paralegal may see the matter a moment after the wizard closes.
 
     // -- Step 2: Upload files to SPE via BFF + create document records --
     //

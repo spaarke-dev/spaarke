@@ -118,9 +118,9 @@ describe('the client writers call the sync route after their create (criterion 1
   const matterFetch = (): jest.Mock =>
     jest.fn(async (url: string) => (url === MATTER_ROUTE ? ok({ id: CREATED }) : ok()));
 
-  // Fix round 1 (task 021): on a root create the server runs AssignedAccessMaterializer.RunAfterWriteAsync in the create
-  // request, so the Create Matter wizard no longer calls the sync route (a second grant pass would only repeat it).
-  it('Create Matter: does NOT call the sync route -- the server grants the Assigned * access inside the create', async () => {
+  // Fix round 1 (task 021): on a root create the server owns the Assigned * grant (the maker's share inline, the full pass
+  // queued, tasks 049/049b), so the Create Matter wizard no longer calls the sync route (a second pass would only repeat it).
+  it('Create Matter: does NOT call the sync route -- the server grants the Assigned * access from the create', async () => {
     const fetchMock = matterFetch();
 
     const result = await new MatterService(dataService(), fetchMock, BFF).createMatter(matterForm, [], {});

@@ -116,3 +116,40 @@
 `- \`tsc --noEmit\` in \`Spaarke.UI.Components\`: clean.
 `- \`node scripts/quality/client-lint/client-lint.mjs check --package ui-components\`: ok.
 `- \`npm run build\` in \`src/solutions/CreateMatterWizard\`: built (\`dist/\` gitignored, not deployed).
+
+## Resume 2026-11-08 (fix-round-1 close-out, merge, contract check)
+
+Branch `task/fm-021`, merged with `origin/work/field-mapping-server-write-path-r1` (57748ebf6d). One conflict, `webApiCreateError.ts`: fix round 1's `rootCreate` not-found branch (this branch) against the secure-create reason-code branches (049: `SECURE_CREATE_CHECK_FAILED`, `SECURE_CREATE_DENIED_CODES`; work branch). Resolved by keeping both: `reasonCodeOf(err)` is read once into `reason`; the `rootCreate` + `child_record.not_found` branch comes first, then the two secure-create branches. The test file merged without conflict. Nothing deployed.
+
+### Fix-round-1 items, checked in code
+
+| # | Item | In code | Test |
+|---|---|---|---|
+| 1, 2 | Notes corrections | notes only | n/a |
+| F1 | Root-create not-found text | `matterService.ts` passes `{ rootCreate: true }`; `webApiCreateError.ts` maps `child_record.not_found` | `webApiCreateError.test.ts` (4 cases) |
+| 4 | No index name to `indexUploadedFiles` | call has 4 arguments | `matterService.cascade.test.ts` |
+| 5 | Stale comments | rewritten | comments only |
+| 6 | No client `syncAssignedAccess` | removed | `assignedAccessSync.test.ts` |
+| 7 | Success text with warnings | `CreateMatterWizard.tsx` "...with warnings. See details below." | not asserted |
+
+All seven are closed. None was open.
+
+### Contract check against the server (work branch tip)
+
+- Route and query: `POST /api/v1/child-records/sprk_matter?mappingSourceEntity=&mappingSourceId=`. `secure` is a new optional query (049 fix round 2), but `SecureIntentTables` is project and work assignment only, so the matter wizard sends none. No drift.
+- Response: `{ id }` or `{ id, warnings }` where `warnings` is `IReadOnlyList<string>` (`RecordCreationOutcome.Warnings`), which is what `createRecordViaBffWithWarnings` reads. No drift.
+- Refusals: `child_record.denied` and `child_record.not_found` are unchanged and handled; the 049 secure-create codes arrive through the merge into the same function.
+- 049b (the maker's subject inline, the rest queued, an inline full pass when the queue is down): removing the client sync stays correct, and 049's notes say a client sync right after a create can meet the queued grant. **Drift fixed (comment only).** The comment in `matterService.ts` said the full I-12 pass runs in the same request; it now says the maker's share is inline and the rest queued, so an assigned attorney or paralegal may see the matter a moment after the wizard closes. The test comment in `assignedAccessSync.test.ts` was updated the same way.
+- 049c: server-side speed-up only; no client surface.
+- 045a `RecordCreationWarning.RegardingTypeClearedCode`: **not merged** (no such constant on the work branch). A matter has no regarding pair, so it would not reach this wizard in any case.
+- 076c: a push-preview panel fix (`task-040-notes.md`); not a create-wizard surface.
+
+### NFR-02
+
+Dev re-measure r3 (2026-11-08, `task-021-live.md`): p95 delta +1288 ms against the +500 ms budget. **Owner ruling 2026-11-08: the NFR-02 verdict is taken in UAT ("we'll test this in UAT").** NFR-02 does not block finishing the code, and no performance work is done here. The verdict stays open until UAT.
+
+### Left before the wizard can deploy
+
+UAC-r2 deploys with the owner's go: the BFF route for `sprk_matter` first (the wizard calls the route unconditionally), then `sprk_creatematterwizard` via `code-page-deploy`, then the live checks in "Left for the live part" above, then the NFR-02 verdict in UAT. The Console's in-app wizard moves only with a SpaarkeAi rebuild and deploy.
+
+File hygiene: the sections above this one were written with a stray backtick at the start of each line, so they render as code. Left as is.
