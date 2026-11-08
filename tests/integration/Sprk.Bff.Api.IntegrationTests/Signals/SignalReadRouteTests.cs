@@ -2580,7 +2580,8 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             string? sentence = null,
             Guid? decisionRecord = null,
             int? status = null,
-            Guid? policy = null)
+            Guid? policy = null,
+            bool privilegeFlagged = false)
         {
             var id = Guid.NewGuid();
             policy ??= Policy(shortName, workType, severity);
@@ -2605,6 +2606,7 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
                 ["sprk_resolvedon"] = resolvedOn?.ToString("o"),
                 ["sprk_suppresseduntil"] = suppressedUntil?.ToString("o"),
                 ["_sprk_decisionrecord_value"] = decisionRecord,
+                ["sprk_privilegeflagged"] = privilegeFlagged,
             };
             if (subjectPair.Type is { } st) row["_sprk_regardingrecordtype_value"] = st;
             if (core is { } pair)
@@ -3019,6 +3021,11 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             if (!text.Contains("<attribute name=\"sprk_sentence\" />", StringComparison.Ordinal))
             {
                 slice = slice.Select(r => r.Where(kv => kv.Key != "sprk_sentence").ToDictionary(kv => kv.Key, kv => kv.Value)).ToList();
+            }
+            // Task 015 (FR-04): the privilege flag is returned only when the query selects it (the Lanes query adds it; the other sets do not).
+            if (!text.Contains("<attribute name=\"sprk_privilegeflagged\" />", StringComparison.Ordinal))
+            {
+                slice = slice.Select(r => r.Where(kv => kv.Key != "sprk_privilegeflagged").ToDictionary(kv => kv.Key, kv => kv.Value)).ToList();
             }
             // Task 045: the Decision Record lookup is returned only when the query selects it (the route adds it to the closed sets).
             if (!text.Contains("<attribute name=\"sprk_decisionrecord\" />", StringComparison.Ordinal))

@@ -90,6 +90,10 @@ public static partial class DecisionResultMapper
         StatusCodes.Status503ServiceUnavailable, "Service Unavailable", "The worklist could not be read. Try again.",
         SignalReadEndpoints.WorklistUnavailableReasonCode);
 
+    private static readonly FixedProblem CursorInvalidProblem = new(
+        StatusCodes.Status400BadRequest, "Bad Request", "The paging cursor is not valid. Use the cursor of the previous page, or none for the first page.",
+        SignalReadEndpoints.CursorInvalidReasonCode);
+
     private static readonly FixedProblem PlanRefusedProblem = new(
         StatusCodes.Status422UnprocessableEntity, "Unprocessable Entity",
         "This Signal's decision plan does not resolve against the action catalog, so no actions can be offered.",
@@ -224,6 +228,17 @@ public static partial class DecisionResultMapper
             _ when IsUserContextRequired(result) => ToToolError(UserContextRequiredProblem),
             SignalReadOutcome.CallerUnresolved => ToToolError(CallerUnresolvedProblem),
             _ => ToToolError(WorklistUnavailableProblem),
+        };
+
+    /// <summary>The Decide-lane page for a tool (task 015): null when the page was returned, otherwise the error of the same failure on the
+    /// worklist route; a cursor that does not decode is <c>ontology.worklist.cursor_invalid</c> (400).</summary>
+    public static DecisionToolError? ToToolError(DecidePageResult result) =>
+        result.Outcome switch
+        {
+            DecidePageOutcome.Ok => null,
+            DecidePageOutcome.UserContextRequired => ToToolError(UserContextRequiredProblem),
+            DecidePageOutcome.CursorInvalid => ToToolError(CursorInvalidProblem),
+            _ => (result.ReadFailure is { } failure ? ToToolError(failure) : null) ?? ToToolError(WorklistUnavailableProblem),
         };
 
     /// <summary>The access check for a tool, called when the route cannot go on (see <see cref="ToHttp(SignalAccessOutcome, HttpContext)"/>).</summary>
@@ -411,6 +426,8 @@ public static partial class DecisionResultMapper
             "This item could not be checked right now; nothing was done. Try again shortly.",
         [SignalReadEndpoints.WorklistUnavailableReasonCode] =
             "The decision list could not be read right now. Try again shortly.",
+        [SignalReadEndpoints.CursorInvalidReasonCode] =
+            "The paging cursor is not valid. Use the cursor returned with the previous page unchanged, or none to start from the first page.",
         [DecisionPlanEndpoints.PlanRefusedReasonCode] =
             "No actions can be offered for this item here. Open the item in Spaarke to decide it.",
         [DecisionPlanEndpoints.SuppressionUnavailableReasonCode] =

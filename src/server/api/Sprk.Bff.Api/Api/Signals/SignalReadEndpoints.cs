@@ -22,6 +22,9 @@ public static class SignalReadEndpoints
 {
     internal const string WorklistUnavailableReasonCode = "ontology.signal.worklist_unavailable";
 
+    /// <summary>The Decide-lane page's cursor is not one the server wrote the shape of (task 015). MCP only: no REST route pages.</summary>
+    internal const string CursorInvalidReasonCode = "ontology.worklist.cursor_invalid";
+
     public static void MapSignalReadEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/v1/signals")

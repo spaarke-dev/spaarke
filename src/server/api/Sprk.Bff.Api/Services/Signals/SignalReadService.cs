@@ -144,6 +144,14 @@ public sealed record WorklistItemRow(
 /// invoice line (its <paramref name="InvoiceId"/> is the line's parent invoice), and null when the subject is the invoice itself.</summary>
 public sealed record WorklistInvoiceReview(Guid InvoiceId, Guid? LineId);
 
+/// <summary>D-42's item rank keys: severity rank (Critical 0, unknown 3), the subject's high-priority flag, and when the Signal was first
+/// detected. They order items within a group and, through the group's best item, the groups.</summary>
+public readonly record struct RankKey(int SeverityRank, bool HighPriority, DateTimeOffset? FirstDetected);
+
+/// <summary>What <see cref="SignalReadService"/> knows about a returned Signal that <see cref="WorklistItemRow"/> deliberately does not carry
+/// (the Console's REST response gains no member, task 015): the privilege flag (FR-04) and the rank keys the Decide-lane page's cursor orders by.</summary>
+public sealed record WorklistItemExtras(bool PrivilegeFlagged, RankKey Rank);
+
 /// <summary>
 /// The Signal read route's service (task 038). Every row-visibility question is asked AS THE CALLER through
 /// <see cref="IDataverseUserClient"/>; only configuration and metadata (the worklist row, the record-type catalog, entity-set
@@ -206,6 +214,10 @@ public sealed class SignalReadService
     internal const int WitnessIdChunk = 200;
 
     internal const string SignalEntitySet = "sprk_signals";
+
+    /// <summary><c>sprk_signal.sprk_privilegeflagged</c> (ADR-015: flagged, never decided). The Lanes query selects it (task 015, FR-04)
+    /// so the slim list can carry it; it changes no filter and no row, and <see cref="WorklistItemRow"/> does not carry it.</summary>
+    internal const string PrivilegeFlaggedColumn = "sprk_privilegeflagged";
     internal const string HighPriorityColumn = "sprk_highpriority";
 
     /// <summary><c>sprk_todo.sprk_notes</c>: it carries the inquiry hint of an inquiry-outcome To Do (task 071, task 154).</summary>
@@ -316,8 +328,15 @@ public sealed class SignalReadService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    /// <summary>The caller's visible Signals in <paramref name="set"/>, grouped and ordered.</summary>
-    public async Task<SignalReadResult> ReadAsync(WorklistSet set, ClaimsPrincipal? user, CancellationToken ct)
+    /// <summary>
+    /// The caller's visible Signals in <paramref name="set"/>, grouped and ordered. When <paramref name="extras"/> is given it is also
+    /// filled with, for each returned Signal, what the row type does not carry (<see cref="WorklistItemExtras"/>: the privilege flag and
+    /// the D-42 rank keys), for the slim Decide-lane page (spaarkeai-mcp-bff-api-r1 task 015). The pipeline, the read rules and the
+    /// returned <see cref="WorklistResponse"/> are the same whether or not it is given. One method, not an overload pair: the task 167
+    /// authorization guard credits a route only when every overload reaches the caller's Dataverse client in its own body.
+    /// </summary>
+    public async Task<SignalReadResult> ReadAsync(
+        WorklistSet set, ClaimsPrincipal? user, CancellationToken ct, IDictionary<Guid, WorklistItemExtras>? extras = null)
     {
         // (1) + (2) Who the caller is and their linked contact: the inputs of the Do-lane "mine" rule.
         var caller = await ResolveMineCallerAsync(_user, _identity, _logger, ct).ConfigureAwait(false);
@@ -497,6 +516,14 @@ public sealed class SignalReadService
             _logger.LogInformation(
                 "Signal read: set {Set}, {Read} Signals read as the caller, {Visible} returned.", set, rows.Count, visible.Count);
 
+            if (extras is not null)
+            {
+                foreach (var v in visible)
+                {
+                    extras[v.Row.SignalId] = new WorklistItemExtras(v.Row.PrivilegeFlagged, RankOf(v));
+                }
+            }
+
             return Ok(set, Shape(set, visible, cores.Readable, catalog, decisions));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -599,6 +626,7 @@ public sealed class SignalReadService
                 {
                     WorklistSet.ClosedToday or WorklistSet.ClosedEarlier => WithDecisionRecordColumn(fetch),
                     WorklistSet.Decided => DecidedFetch(fetch),
+                    WorklistSet.Lanes => WithColumn(fetch, PrivilegeFlaggedColumn),
                     _ => fetch,
                 });
             }
@@ -613,15 +641,22 @@ public sealed class SignalReadService
 
     /// <summary>The query with <c>sprk_decisionrecord</c> selected (a no-op when the configuration already selects it), so a closed
     /// item can be joined to its record whatever version of the configuration row is live (task 045).</summary>
-    private static string WithDecisionRecordColumn(string fetchXml)
+    private static string WithDecisionRecordColumn(string fetchXml) => WithColumn(fetchXml, "sprk_decisionrecord");
+
+    /// <summary>
+    /// The query with <paramref name="column"/> selected (a no-op when the configuration already selects it), whatever version of the
+    /// configuration row is live. Only a selected column is added: no filter, order or link changes, so membership and order are the
+    /// configuration's.
+    /// </summary>
+    private static string WithColumn(string fetchXml, string column)
     {
         var doc = XDocument.Parse(fetchXml);
         var entity = doc.Root!.Element("entity")!;
-        if (!entity.Elements("attribute").Any(a => a.Attribute("name")?.Value == "sprk_decisionrecord"))
+        if (!entity.Elements("attribute").Any(a => a.Attribute("name")?.Value == column))
         {
             var last = entity.Elements("attribute").LastOrDefault();
-            var column = new XElement("attribute", new XAttribute("name", "sprk_decisionrecord"));
-            if (last is null) entity.AddFirst(column); else last.AddAfterSelf(column);
+            var attribute = new XElement("attribute", new XAttribute("name", column));
+            if (last is null) entity.AddFirst(attribute); else last.AddAfterSelf(attribute);
         }
 
         return doc.ToString(SaveOptions.DisableFormatting);
@@ -2023,15 +2058,20 @@ public sealed class SignalReadService
         return byRank != 0 ? byRank : a.Row.SignalId.CompareTo(b.Row.SignalId);
     }
 
+    private static RankKey RankOf(VisibleRow v) => new(SeverityRank(v.Row.Severity), v.HighPriority, v.Row.FirstDetected);
+
+    private static int CompareRankKeys(VisibleRow a, VisibleRow b) => CompareRankKeys(RankOf(a), RankOf(b));
+
     /// <summary>D-42's item keys: severity (Critical first, unknown last), flagged first, oldest first (undated last).</summary>
-    private static int CompareRankKeys(VisibleRow a, VisibleRow b)
+    internal static int CompareRankKeys(RankKey a, RankKey b)
     {
-        var bySeverity = SeverityRank(a.Row.Severity).CompareTo(SeverityRank(b.Row.Severity));
+        var bySeverity = a.SeverityRank.CompareTo(b.SeverityRank);
         if (bySeverity != 0) return bySeverity;
         var byFlag = (a.HighPriority ? 0 : 1).CompareTo(b.HighPriority ? 0 : 1);
         if (byFlag != 0) return byFlag;
-        return (a.Row.FirstDetected ?? DateTimeOffset.MaxValue).CompareTo(b.Row.FirstDetected ?? DateTimeOffset.MaxValue);
+        return (a.FirstDetected ?? DateTimeOffset.MaxValue).CompareTo(b.FirstDetected ?? DateTimeOffset.MaxValue);
     }
+
 
     internal static int SeverityRank(int? severity) => severity switch
     {
@@ -2176,7 +2216,8 @@ public sealed class SignalReadService
         int? ResolutionType,
         DateTimeOffset? SuppressedUntil,
         string? Sentence,
-        Guid? DecisionRecordId)
+        Guid? DecisionRecordId,
+        bool PrivilegeFlagged = false)
     {
         internal static bool TryParse(JsonElement raw, out SignalRow row)
         {
@@ -2218,7 +2259,9 @@ public sealed class SignalReadService
                 // Task 154: as stored; an empty or blank sentence is null (selected by the worklist configuration's queries).
                 ReadString(raw, "sprk_sentence") is { } sentence && !string.IsNullOrWhiteSpace(sentence) ? sentence : null,
                 // Task 045: the Decision Record that closed it (closed and decided sets select the column).
-                TryReadGuid(raw, "_sprk_decisionrecord_value", out var decisionRecord) ? decisionRecord : null);
+                TryReadGuid(raw, "_sprk_decisionrecord_value", out var decisionRecord) ? decisionRecord : null,
+                // Task 015 (FR-04; ADR-015: flagged, never decided). Selected by the Lanes query only; absent or null reads as false.
+                raw.TryGetProperty(PrivilegeFlaggedColumn, out var flagged) && flagged.ValueKind == JsonValueKind.True);
             return true;
         }
 

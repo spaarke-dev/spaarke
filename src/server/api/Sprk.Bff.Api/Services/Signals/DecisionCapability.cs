@@ -94,6 +94,34 @@ public sealed partial class DecisionCapability : IDecisionCapability
     }
 
     /// <inheritdoc />
+    public async Task<DecidePageResult> ListDecidePageAsync(ClaimsPrincipal? user, string? cursor, CancellationToken ct)
+    {
+        if (!HasSignedInCaller(user))
+        {
+            return DecidePageResult.UserContextRequired;
+        }
+
+        // A cursor that does not decode is refused before anything is read; a well-formed one that no longer matches the list is not an error.
+        DecideCursor? after = null;
+        if (!string.IsNullOrEmpty(cursor) && !DecideCursor.TryDecode(cursor, out after))
+        {
+            return DecidePageResult.CursorInvalid;
+        }
+
+        // The lane is read exactly as the Console's list is (SignalReadService, as the caller); the page only slices its result.
+        var extras = new Dictionary<Guid, WorklistItemExtras>();
+        var read = await _signalRead.ReadAsync(WorklistSet.Lanes, user, ct, extras);
+        if (read.Outcome != SignalReadOutcome.Ok || read.Response is not { } response)
+        {
+            return DecidePageResult.ReadFailed(read);
+        }
+
+        var decide = response.Lanes.FirstOrDefault(l => l.Lane == "Decide");
+        var (items, next) = DecideLanePaging.Page(decide?.Groups ?? [], extras, after);
+        return DecidePageResult.Ok(items, next);
+    }
+
+    /// <inheritdoc />
     public async Task<DecisionPlanReadResult> GetPlanAsync(HttpContext? http, Guid signalId, CancellationToken ct)
     {
         if (http is null || !HasSignedInCaller(http.User))

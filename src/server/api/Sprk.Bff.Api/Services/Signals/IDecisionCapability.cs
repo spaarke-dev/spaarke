@@ -31,6 +31,18 @@ public interface IDecisionCapability
     Task<SignalReadResult> ListDecideAsync(ClaimsPrincipal? user, CancellationToken ct, WorklistSet set = WorklistSet.Lanes);
 
     /// <summary>
+    /// One page of the caller's Decide lane as slim rows (task 015, spec FR-05, FR-11): at most <see cref="DecideLanePaging.PageSize"/>
+    /// <see cref="WorklistItemSummary"/> in exactly the order <see cref="SignalReadService"/> returns the lane for the Console, and the
+    /// cursor for the next page (null on the last). Reads the lane as <see cref="ListDecideAsync"/> does, as the caller, every call; the
+    /// cursor holds no server state, so an item resolved between pages is simply absent from the next one.
+    /// </summary>
+    /// <param name="user">The request's principal.</param>
+    /// <param name="cursor">The previous page's <see cref="DecidePageResult.NextCursor"/>; null or empty for the first page. A cursor that
+    /// does not decode is <see cref="DecidePageOutcome.CursorInvalid"/> (a stale one is not).</param>
+    /// <param name="ct">Cancellation.</param>
+    Task<DecidePageResult> ListDecidePageAsync(ClaimsPrincipal? user, string? cursor, CancellationToken ct);
+
+    /// <summary>
     /// A Signal's decision plan, resolved as the caller exactly as <c>GET /api/v1/signals/{signalId}/decision-plan</c> resolves it,
     /// and the plan-read stamp the commit route reads (<see cref="DecisionPlanReadStamp"/>), written only when the plan is returned.
     /// </summary>
@@ -46,6 +58,44 @@ public interface IDecisionCapability
     /// <see cref="DecisionCapability.UserContextRequiredCommitResult"/> before the service is called.
     /// </summary>
     Task<DecisionCommitResult> CommitAsync(HttpContext? http, Guid signalId, DecisionReview review, CancellationToken ct);
+}
+
+/// <summary>What a <see cref="IDecisionCapability.ListDecidePageAsync"/> call decided.</summary>
+public enum DecidePageOutcome
+{
+    /// <summary>The page, in <see cref="DecidePageResult.Items"/> (possibly empty).</summary>
+    Ok,
+
+    /// <summary>No request context or no authenticated caller: nothing was read.</summary>
+    UserContextRequired,
+
+    /// <summary>The cursor is not one this server wrote the shape of (malformed or tampered): nothing was read.</summary>
+    CursorInvalid,
+
+    /// <summary>The lane could not be read; <see cref="DecidePageResult.ReadFailure"/> says why (the worklist read's own answer).</summary>
+    ReadFailed,
+}
+
+/// <summary>The Decide-lane page's answer. <see cref="DecisionResultMapper"/> maps a failure to an MCP tool error.</summary>
+/// <param name="Outcome">The decision.</param>
+/// <param name="Items">The page when <see cref="Outcome"/> is <see cref="DecidePageOutcome.Ok"/>; empty otherwise.</param>
+/// <param name="NextCursor">Opaque; null on the last page.</param>
+/// <param name="ReadFailure">For <see cref="DecidePageOutcome.ReadFailed"/>, the worklist read's non-Ok result.</param>
+public sealed record DecidePageResult(
+    DecidePageOutcome Outcome,
+    IReadOnlyList<WorklistItemSummary> Items,
+    string? NextCursor = null,
+    SignalReadResult? ReadFailure = null)
+{
+    public static readonly DecidePageResult UserContextRequired = new(DecidePageOutcome.UserContextRequired, []);
+
+    public static readonly DecidePageResult CursorInvalid = new(DecidePageOutcome.CursorInvalid, []);
+
+    public static DecidePageResult Ok(IReadOnlyList<WorklistItemSummary> items, string? nextCursor) =>
+        new(DecidePageOutcome.Ok, items ?? throw new ArgumentNullException(nameof(items)), nextCursor);
+
+    public static DecidePageResult ReadFailed(SignalReadResult failure) =>
+        new(DecidePageOutcome.ReadFailed, [], ReadFailure: failure ?? throw new ArgumentNullException(nameof(failure)));
 }
 
 /// <summary>What a <see cref="IDecisionCapability.GetPlanAsync"/> call decided.</summary>
