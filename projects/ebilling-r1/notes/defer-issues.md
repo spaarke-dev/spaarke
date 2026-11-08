@@ -10,6 +10,26 @@
 
 ## Open (in priority order)
 
+### DEF-059 — Environment setup grants the BFF identity Decision Record read through a SpaarkeMaster role
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-08 |
+| **Source** | ebilling-r1 task 165b-4 design note §7.8 / §7.12 (uac-r2 answer 4) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2635 |
+
+**Description**: from 165b-4, counted spend reads `sprk_decisionrecord` (the writer-created approve record) as the BFF application identity. No SpaarkeMaster role assigned to that identity at environment setup grants that read today. The read works only through whatever other role the identity holds in a given environment. If that role is removed or absent, the spend evaluator loses the read, and the result is unknown spend, so the evaluator fails closed. 165b-4 adds a live privilege check that fails closed or alerts. The durable fix is least privilege: environment setup assigns the BFF identity Spaarke Ontology Service, or a narrower Decision Record read role.
+
+**Fix direction**: add the role assignment to customer environment provisioning and to the customer deployment guide. Add a provisioning verify step that the BFF identity holds `prvReadsprk_DecisionRecord` through a SpaarkeMaster role. Proposed owner: customer-provisioning-orchestration-r1 (hand-off when they accept).
+
+**Entry-points**: `src/dataverse/solutions/SpaarkeMaster/**/Roles/Spaarke Ontology Service.xml`; `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`; the provisioning role-assignment step; `projects/ebilling-r1/notes/165b-integrity-checks.md` §7.8.
+
+**Fails without it**: in an environment where the BFF identity has no broader role, counted spend for every core record is unknown, and spend-based Signals stop evaluating.
+
+---
+
 ### DEF-058 — Only the billing recorder writes billing action codes to the Decision Record
 
 | Field | Value |

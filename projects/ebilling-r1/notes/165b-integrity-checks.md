@@ -725,3 +725,13 @@ change under (b). The `FinanceBaseValuesSeamTests` grouped cases become row-read
 2. 165b-3's K2 (any-portion match at invoice level) carries into spend unchanged. Do you accept the same limit there?
 3. The spend reads find the records through an inner link from `sprk_regardinginvoice` to the parent's invoices. Matching is still by invoice id,
    and the key and the writer conditions are unchanged. Do you have any concern with this parent scope?
+
+### 7.12 uac-r2 answers (2026-11-08)
+
+1. **Option (b) satisfies the keyed rule for spend**, because the keyed matcher decides. Option (a) is accepted only if the keyed step cannot be skipped by construction: the sum takes only the matcher's output type, a sealed type with a private constructor that only the matcher creates (the pattern of field-mapping's `GrantedAssignment`). A test alone is not enough. Prefer (b) unless the row read is measurably too slow.
+2. **165b-3 K2 carries into spend: accepted.** Each key binds the invoice id and the portion, so there is no cross-invoice credit. Approve's single-portion refusal still gates approval.
+3. **Parent-scoped reads: accepted.** The parent scope only narrows the candidates. Matching stays by invoice id, key and writer conditions.
+   - **K (new): attribution follows the invoice's current core lookup.** A legitimate re-file (D-96) moves the invoice's spend with it, and so would an edit to that lookup made outside the BFF. That changes where spend is attributed, not whether it counts: an invoice without its keyed approve record still never counts. The existing guarded-lookup rules cover it, so it is not new risk from 165b-4.
+4. **Reading identity: both.**
+   - Now: the live privilege check beside the role-XML pin. It fails closed or alerts when the Decision Record read privilege is missing, and it must not pass only because a broad administrator role is present.
+   - Durable: least privilege, meaning the BFF identity gets the Decision Record read through a SpaarkeMaster role. That is a per-environment setup step for provisioning and the deployment guide, filed as DEF-059.
