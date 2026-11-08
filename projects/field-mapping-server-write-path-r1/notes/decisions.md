@@ -987,3 +987,24 @@ UAC-r2 (2026-11-07): the playbook Update Record and output-mapping paths run as 
 - **Inbound mapping:** recorded as a known gap, DI-022 (#2633).
 - **Checks:** (a) PASS. In place of (c), the owner hit a push-preview defect: a table with no profile failed the whole preview. It is fixed in scope as task 076c (`task-040-notes.md`).
 - **NFR-02:** the dev r3 run (`task-021-live.md`) shows a p95 delta of +1288 ms. The owner moved the verdict to UAT: "we'll test this in UAT". No 049d work starts on the dev result.
+
+## 2026-11-08 — 032b design reviews; owner on O1/O2 and the contact team (in fm's session)
+
+Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
+- **ebilling-r1 agrees to E1–E6.**
+  - **E4 condition:** the admin note uses the existing admin-attention writer, stays within the 500-character cap, and writes no status and no other column.
+  - **E6 condition:** sprk_description and sprk_highpriority never join the external invoice ReadableColumns or the firm-facing rendering without both projects' review.
+  - **Base:** 082d is merged into work/ebilling-r1 (7cd62a1710; tip d58e3a3554).
+- **UAC-r2 approves, with two conditions.**
+  - **C1:** the job payload pins the core (table, id) from the persister's committed result. Gate 2 requires invoice core == payload core == submission core, plus a must-fire re-point test.
+  - **C2:** settle U3 before 032b-2. Enumerate who resolves membership for sprk_invoice.
+    - If no caller does, the four assignee copies confer nothing. sprk_invoice leaves the registry, the copies become display copies, and the grant machinery goes.
+    - If any caller does, the copies are cleared on a core change and on Revoked/Declined.
+  - **U1, U2, U4, U5:** approved.
+- **Owner, O2 (move the mapping gates into a shared class):** approved. The owner also asked which other create processes need the same gates. An inventory of no-caller creators is in progress.
+- **Owner, O1 (after-save job vs inline):** not decided. The owner asked:
+  - what the implications are when a process fires on the field values (a form or server trigger);
+  - and stated that this must also hold for other record types that inherit the sprk_assigned* values.
+
+  The design note's round 2 answers this with a consumer inventory. It also evaluates inline-before-the-transaction if U3 lands on (c).
+- **Owner, contact owner team:** an environment setting is acceptable. First check whether a shared mechanism already exists, and use one consistent process rather than a parallel approach. An investigation is in progress.
