@@ -125,6 +125,9 @@ public static class InvoiceApprovalCodes
     /// <summary>403 (EB-D-172): closing the invoice's Signals needs the caller's rights, and the caller does not hold them.</summary>
     public const string NotAuthorized = LineDecisionCodes.NotAuthorized;
 
+    /// <summary>409 (task 165b item 1): a Fee or Expense line of unknown origin (<see cref="InvoiceLineOrigin"/>); nothing was written.</summary>
+    public const string LineOriginUnknown = InvoiceLineOrigin.UnknownOriginCode;
+
     public const string TransitionRefused = "ebilling.approve.refused";
     public const string TotalsRefused = LineDecisionCodes.TotalsRefused;
     public const string Busy = LineDecisionCodes.Busy;
@@ -606,6 +609,13 @@ public sealed class InvoiceApprovalService
                 $"{open.Pending} lines are still being processed and {open.Flagged} are flagged; decide them before approving.", OpenLines: open);
         }
 
+        // ── Task 165b item 1 (EB-D-200 (4)): approval refuses a line of unknown origin, on the line set read under both per-invoice locks and
+        //    before any write. ──
+        if (await CheckLineOriginAsync(invoiceId, lineRows, ct).ConfigureAwait(false) is { } origin)
+        {
+            return origin;
+        }
+
         var decidedOn = Seconds(_time.GetUtcNow());
 
         // ── EB-D-172: the invoice's open Signals created by the decision time, derived server-side; the close authorized BEFORE any write. ──
@@ -1054,6 +1064,42 @@ public sealed class InvoiceApprovalService
         _logger.LogError("Approve of invoice {InvoiceId}: the invoice's derived core record ({Status}, {Count} stamps) is not its one core lookup; nothing changed.",
             invoiceId, derived.Status, derived.Stamps.Count);
         return new ApprovalResult(ApprovalOutcome.Failed, InvoiceApprovalCodes.CoreUnresolved, "The invoice names no single core record.");
+    }
+
+    // ── Task 165b item 1: line origin ──
+
+    /// <summary>
+    /// Null when every Fee and Expense line has a known origin (<see cref="InvoiceLineOrigin"/>): the invoice's own submission's intake line, or
+    /// an Add line line with its <c>add-line</c> Decision Record. Otherwise 409 <see cref="InvoiceLineOrigin.UnknownOriginCode"/>, nothing
+    /// written, logged with the table and row id only. A read fault is Unavailable (fail closed).
+    /// </summary>
+    private async Task<ApprovalResult?> CheckLineOriginAsync(Guid invoiceId, IReadOnlyList<Entity> lineRows, CancellationToken ct)
+    {
+        IReadOnlyList<InvoiceLineOrigin.UnknownLine> unknown;
+        try
+        {
+            var own = await InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, [InvoiceSubmissionPersister.SubmissionInvoice], ct).ConfigureAwait(false);
+            unknown = await InvoiceLineOrigin.UnknownOriginLinesAsync(_entities, invoiceId, own?.Id, lineRows, _recorder.WriterUserIdAsync, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return Unavailable(invoiceId, "line-origin", ex);
+        }
+
+        if (unknown.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (var line in unknown)
+        {
+            _logger.LogWarning("Approval refusal {ReasonCode} on {Table} {RowId}", InvoiceLineOrigin.UnknownOriginCode, InvoiceTotalsService.LineEntity, line.Id);
+        }
+
+        // K6: an added line with no record is most likely an add that did not finish; say how to recover.
+        return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceLineOrigin.UnknownOriginCode,
+            "A line on this invoice has no known origin, so the invoice cannot be approved. An administrator must review the invoice's lines."
+            + (unknown.Any(l => l.AddedWithoutRecord) ? " If a line was added and the add did not finish, repeat the add." : string.Empty));
     }
 
     // ── F2: an earlier attempt's bulk accept ──

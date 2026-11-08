@@ -82,7 +82,13 @@ internal static class ExtractionProvenance
     /// or unreadable column, no <c>provenance</c>, another source (ordinal), a missing or unparsable decision id, no invoice on the row, and an id that
     /// does not match. Every reader of this rule reads <c>sprk_invoice</c> with the line.
     /// </summary>
-    internal static bool IsReviewerAdded(Entity line)
+    internal static bool IsReviewerAdded(Entity line) => AddedLineDecisionIdOf(line) is not null;
+
+    /// <summary>
+    /// Task 165b: the Add line decision id of a line <see cref="IsReviewerAdded"/> accepts (the same rule, one definition); null for every other
+    /// line. Approval looks up that decision's <c>add-line</c> Decision Record with it; the marker alone exempts nothing.
+    /// </summary>
+    internal static Guid? AddedLineDecisionIdOf(Entity line)
     {
         ArgumentNullException.ThrowIfNull(line);
         return ReadMember(line.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence)) is { } member
@@ -92,7 +98,9 @@ internal static class ExtractionProvenance
             && decisionId != Guid.Empty
             && line.GetAttributeValue<EntityReference>(LineInvoiceColumn)?.Id is { } invoiceId
             && invoiceId != Guid.Empty
-            && line.Id == AddedLineIdFor(invoiceId, decisionId);
+            && line.Id == AddedLineIdFor(invoiceId, decisionId)
+                ? decisionId
+                : null;
     }
 
     /// <summary>The line's invoice lookup (<c>sprk_billingevent.sprk_invoice</c>) that <see cref="IsReviewerAdded"/> reads.</summary>

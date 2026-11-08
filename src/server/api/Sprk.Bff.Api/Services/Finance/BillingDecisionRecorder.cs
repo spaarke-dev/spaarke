@@ -168,6 +168,12 @@ public sealed class BillingDecisionRecorder
         innerException: innerException);
 
     /// <summary>
+    /// Task 165b: the <c>systemuserid</c> of the identity that creates every Decision Record (<see cref="DecisionRecordWriter.WriterUserIdAsync"/>),
+    /// so a Finance reader can trust only a record that identity wrote (<c>createdby</c>). A fault propagates: the caller refuses.
+    /// </summary>
+    internal Task<Guid> WriterUserIdAsync(CancellationToken ct) => _writer.WriterUserIdAsync(ct);
+
+    /// <summary>
     /// The D-122 set a decision already recorded under <paramref name="decisionId"/> stored with its record (ebilling-r1 task 100: a retry
     /// closes exactly that set); null when no record exists yet (a first attempt). The subject table follows the code, as for
     /// <see cref="RecordAsync"/>. Read only (<see cref="DecisionRecordWriter.FindBillingDecisionResolvedSetAsync"/>).
