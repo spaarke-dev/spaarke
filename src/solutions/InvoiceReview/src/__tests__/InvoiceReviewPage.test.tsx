@@ -23,11 +23,12 @@ import {
   type MockApi,
 } from './testKit';
 
-function renderPage(api: MockApi, opts: { theme?: typeof webLightTheme; pollIntervalMs?: number; openRecord?: jest.Mock; firmNeeded?: boolean } = {}) {
+function renderPage(api: MockApi, opts: { theme?: typeof webLightTheme; pollIntervalMs?: number; openRecord?: jest.Mock; firmNeeded?: boolean; initialLineId?: string } = {}) {
   return render(
     <FluentProvider theme={opts.theme ?? webLightTheme}>
       <InvoiceReviewPage
         invoiceId={INVOICE_ID}
+        initialLineId={opts.initialLineId}
         api={api as never}
         openRecord={opts.openRecord}
         pollIntervalMs={opts.pollIntervalMs ?? 60_000}
@@ -47,6 +48,32 @@ const normal = () =>
   ]);
 
 const row = (n: number) => screen.getByTestId(`line-row-${lineId(n)}`);
+
+describe('InvoiceReviewPage: launch line (EB-D-194)', () => {
+  it('preselects a known launch line through the click path and scrolls it into view; an unknown one keeps the default', async () => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      const known = renderPage(mockApi(normal()), { initialLineId: lineId(4) });
+      expect(await screen.findByTestId(`pane-line-${lineId(4)}`)).toBeInTheDocument();
+      expect(row(4)).toHaveAttribute('aria-selected', 'true');
+      expect(row(2)).toHaveAttribute('aria-selected', 'false');
+      await waitFor(() => expect(scrolled).toContain(row(4)));
+      known.unmount();
+
+      renderPage(mockApi(normal()), { initialLineId: 'ffffffff-ffff-4fff-8fff-ffffffffffff' });
+      await screen.findByTestId('review-title');
+      expect(screen.queryByTestId(/^pane-line-/)).not.toBeInTheDocument();
+      expect(screen.queryByTestId('notice')).not.toBeInTheDocument();
+      screen.getAllByTestId(/^line-row-/).forEach(r => expect(r).toHaveAttribute('aria-selected', 'false'));
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+});
 
 describe('InvoiceReviewPage: layout and states', () => {
   it('shows a spinner, then the header, totals, count filters and lines from the read model', async () => {

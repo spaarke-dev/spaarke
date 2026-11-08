@@ -1,7 +1,7 @@
 /**
  * Invoice Review Code Page entry point (ebilling-r1 task 110; FR-31, FR-32, D-58).
  *
- * Opened with an invoice id (`data=invoiceId%3D{guid}`, `?invoiceId=`, or `id` + `typename=sprk_invoice`; see `services/launch.ts`). Every
+ * Opened with an invoice id (`data=invoiceId%3D{guid}`, `?invoiceId=`, or `id` + `typename=sprk_invoice`, plus an optional `lineId` to preselect a line; see `services/launch.ts`). Every
  * call goes through `authenticatedFetch` to the BFF; the page never reads or writes Dataverse rows itself (ADR-002): the review, the
  * decisions, the corrections and the PDF bytes are all the server's.
  *
@@ -151,7 +151,7 @@ function Root() {
       </div>
     );
   } else {
-    body = <InvoiceReviewWithDecisions invoiceId={launch.invoiceId} api={api} decisionApi={decisionApi} openRecord={openRecord} />;
+    body = <InvoiceReviewWithDecisions invoiceId={launch.invoiceId} initialLineId={launch.lineId} api={api} decisionApi={decisionApi} openRecord={openRecord} />;
   }
 
   // The FluentProvider carries only the theme; the surface colours sit on a wrapper div (project gotcha F-10).
