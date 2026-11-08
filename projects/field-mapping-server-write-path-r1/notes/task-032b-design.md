@@ -1,251 +1,308 @@
-# Task 032b design: Matter→Invoice mapping with the access-conferring columns (option B)
+# Task 032b design: Matter→Invoice mapping with the assignee columns (option B)
 
-Status: **design only, for review by ebilling-r1 and UAC-r2. No code.** The owner chose option B on 2026-11-08 (round 2,
-`task/fm-032-design` 60ecb8e9e6, `notes/task-032-design.md` §14 item 3). This note replaces round 2's placement (a fill-only
-step inside the persister, before its transaction) with ebilling-r1's preferred one: a post-commit step. It keeps every
-round-2 condition that still applies. Trees: **fm** = `work/field-mapping-server-write-path-r1` 57648a15a2; **eb** =
-`work/ebilling-r1` 31afe98fa6. Re-grep line numbers before use.
+Status: **design round 2, no code.** Round 1 (`2692910f2d`) was reviewed by ebilling-r1 (E1–E6 agreed, with conditions) and
+by UAC-r2 (approved with C1 and C2). The owner then asked about after-save versus inline placement (§8). This round answers
+C2 with a caller inventory. U3 lands on **(c)**: the invoice copies confer no access. So the grant machinery of round 1 is
+deleted, and the recommended placement returns to **inline, before the persister's transaction** (the 2026-11-06 owner
+ruling). The round-1 job design is kept in §8.4 only as the rejected alternative.
+
+Trees: **fm** = `work/field-mapping-server-write-path-r1` 57648a15a2; **eb** = `work/ebilling-r1`. Line numbers are at
+31afe98fa6; re-grep against d58e3a3554 (082d merged), the base for 032b-2 and 032b-3. Round 2 of task 032
+(`task/fm-032-design` 60ecb8e9e6, `notes/task-032-design.md`) holds the detail this note reuses by section number.
 
 ## 0. Summary
 
-1. After the persister commits, `InvoiceSubmissionAfterSteps` queues one job per invoice. The job maps the invoice's core
-   record (Matter, Project or Work Assignment) onto the invoice, fill-only, as the app identity.
-2. Two target classes are allowed: plain allow-listed columns, and the access-conferring Assigned Attorney and Assigned
-   Paralegal columns. Every other column is never a target.
-3. **The grant comes first.** The job runs the core record's Assigned-To pass through the one invariant owner,
-   `AssignedAccessMaterializer`. It then reads the core's ledger, and writes an assigned column only when the ledger shows
-   that the same person holds access on the core for the same role. No column is written while any grant is pending.
-4. The round-2 gates still apply, re-derived from current state: Secure owner answer, No Access coverage, field security,
-   Repair's secure-source logic, the allow-list, all-or-nothing on rule faults, determinism, and the money guard.
-5. The mapping runs once per persister-created invoice. Set-firm re-run, Add line, approval and re-file do not map. A
-   Correction or Resubmission is a new invoice and maps again.
+1. UAC-r2's C2 asked whether any code resolves membership for `sprk_invoice` and grants rights from it. **None does**, on
+   master or on `work/ebilling-r1` (§3). `sprk_invoice` is removed from the access-conferring registry. The four
+   attorney and paralegal columns become **display copies**: an explicit list with a Q-U6 exception.
+2. The mapping runs **inside `PersistCoreAsync`, before the transaction**. Reads and gates come first. The values go into
+   the invoice create payload (request 0), and there is no second write path to `sprk_invoice`.
+3. A gate or rule fault **maps nothing, and the invoice is still created**, with an admin-attention code (E7, agreed). A
+   mapping fault never changes the persister's outcome or its Decision Records.
+4. All round-2 gates stand: Secure owner answer, No Access coverage, field security, Repair's secure-source logic, the
+   allow-list, all-or-nothing, determinism, and the money guard.
+5. Rule for every record type carrying `sprk_assigned*` columns: **the values are in the create; grants may follow** (§8.5).
 
 ## 1. Flow
 
-| # | Where | What |
+The step sits in `PersistCoreAsync` after `FillInvoice`, the creator stamp, the supersede link and the review detail (eb
+:546-612), and immediately before `_lifecycle.BuildInvoiceCreateRequest` (eb :614). This is round 2 §2. The call is
+`await _matterMapping.ApplyAsync(invoice, outcome.CoreRecord!, owner, ct)`. It receives only the in-memory invoice, the
+core record and the owner answer that the persister has already resolved; no extraction data is passed.
+
+| Status | Effect on the invoice | Admin note (submission) |
 |---|---|---|
-| 1 | Persister (unchanged) | Commits invoice, lines, approval, files and submission link in one `ExecuteTransactionAsync`. |
-| 2 | `RunFromStoredAsync`, new **step 3a**, after the index enqueue (step 3, eb `InvoiceSubmissionAfterSteps.cs` :505-524) and before the approver refresh, the notification and the terminal status | If `stored.Kind != AutoRejected`, enqueue `InvoiceMatterMappingJob` with key `invoice-matter-mapping-{invoiceId:N}`. The step passes only ids: no extraction data and no owner object. |
-| 3 | `InvoiceMatterMappingJobHandler` (new, ADR-004 `IJobHandler`) | Calls `InvoiceMatterMapping.RunAsync(invoiceId, submissionId, ct)` and maps the result to a `JobOutcome`. |
-| 4 | `InvoiceMatterMapping` | Runs the gates (§4), the engine, the grant (§3), then one conditional update of the invoice. |
+| `Applied(columns)` | The columns are set on `invoice`, so request 0 carries them | none |
+| `NoOp(code)` | No profile, no rule left, or nothing empty to fill | none |
+| `Gated(code)` | Nothing set (Secure, No Access, a display copy found access-conferring) | none (C2) |
+| `Fault(code)` | Nothing set; `invoice` untouched | `Field mapping not applied: <code>` |
 
-**Step 3a status values** (after-steps): `Enqueued`; `Skipped(auto_rejected)`; or an enqueue fault, which ends the run
-as `Retry` with `ebilling.submission.field_mapping_enqueue_failed`, the index step's precedent. A resume calls step 3a again.
-The deterministic key de-duplicates it, and the job's done marker makes a replay a no-op.
+The commit is unchanged except for round 2 §9's **single re-commit**. If request 0 is refused at index 0 with mapped columns
+present, the persister removes them, rebuilds request 0 and the submission update at the same indexes with the note, and
+commits once more through the existing catch chain. A resume (a linked invoice, `ResumeAsync`) never maps.
 
-**Job status values** (`InvoiceMatterMappingStatus`):
+**ebilling-r1's inline checks:**
 
-| Status | Meaning | `JobOutcome` | Admin note |
-|---|---|---|---|
-| `Applied(columns)` | Columns were written | Success | none |
-| `NothingToMap(code)` | No profile, no rule left after filtering, or every target already filled | Success | none |
-| `AlreadyMapped` | The done marker is set | Success | none |
-| `Gated(code)` | Secure, No Access, core changed, not this submission's invoice | Success | none (C2) |
-| `GrantPending(code)` | A grant, ledger, flag or other transient read did not complete | Failure (retry). On the final delivery the job is Poisoned and writes the note | `grant_pending`, final delivery only |
-| `Faulted(code)` | Rule fault, unfit value, metadata unknown, or an unexpected exception | Poisoned | `<code>` |
-| `Conflict` | The invoice changed twice between read and write | Failure (retry) | none |
-
-**Why a job, not an inline step in the after-steps.** ebilling-r1's answer 1 allows the grant to be queued: nothing reads
-the invoice copies. An inline step that returns `Retry` on a grant fault keeps the submission Processing. On the final
-delivery the submission is Poisoned with "Processing stopped", and an access read fault would hold invoice acceptance.
-With the job, mapping and grant failures retry on their own, the submission completes, and the after-steps change is one
-enqueue. §11 E1 offers the inline variant.
-
-**Not in the transaction.** The fixed-id `ExecuteTransactionAsync` is not touched, so its replay contract and the persister
-tests (104, 095c, 095d-2b-3, 165a/b) are unaffected. Round 2's re-commit (Q-E1) and its local-function commit are dropped:
-a refused value fails the job's own update, not the invoice create.
+| # | Check | How it is met |
+|---|---|---|
+| 1 | Reads and gates finish before the transaction; never half-mapped | `ApplyAsync` completes before `BuildInvoiceCreateRequest`. It works on a candidate copy and copies onto `invoice` only on `Applied` (round 2 §3.2 step 11). The re-commit removes every mapped column together. |
+| 2 | Values only in the existing create payload | The step writes no row. It adds no request, and the request count and order are unchanged (T-T1). |
+| 3 | Ownership columns through the resolver | The owner is resolved before the step (eb :476). Owner, team and BU columns are in `ProtectedFromMapping` (class C). |
+| 4 | Persister tests unchanged; a refused or faulted gate writes no mapped value | §9 T-E7 and T-F1 |
+| 5 | `sprk_findingsjson`, including the internal `procedureSnapshot` member (082d), is never a source or a target | `sprk_findingsjson` is on the submission; the step only sees `invoice`. It is also named in class C, and the source is the core record only. |
 
 ## 2. Column classes
 
-| Class | Columns | Decided by | Written when |
-|---|---|---|---|
-| **A, plain** | `sprk_description`, `sprk_highpriority` | A static `AllowedPlainTargets` set, pinned by a test (round 2 §6.1; sign-off still open, §11 E6) | Target empty at the job's read; passes the gates and the fit check |
-| **B, access-conferring** | `sprk_assignedtoattorney1/2`, `sprk_assignedtoparalegal1/2` (the dev profile "Matter to Invoice (Attorney Matrix)") | **Both** a static `AllowedAssignedTargets` set **and** the one classifier, `PushRuleSelection.AssignedToColumnsOf(bound MembershipOptions.AccessConferringRoles)` for (`sprk_invoice`, column). The rule's **source** must also be a Contact-typed registry column of the core table, so that a core grant exists for it. | As class A, and also after §3 confirms the grant |
-| **C, never** | Everything else. This includes `sprk_billingexport` (writer-only, protected); money columns (class (b), money guard); `InvoiceSubmissionPersister.OwnedInvoiceColumns`; the Q-E3 five; every invoice module's `ReadableColumns` (EB-D-207); `InvoiceIndexDocument.InvoiceColumns`; status and lifecycle; filing and regarding; secure and access columns; `sprk_invoiceduedate`; `sprk_billingapproverrole`; `sprk_assignedto1/2`; and contact, user or team lookups not in class B | Round 2's deny-list (§6.2), by reference, as a second check over A and B | Never |
+| Class | Columns | Decided by |
+|---|---|---|
+| **A, plain** | `sprk_description`, `sprk_highpriority` (E6, agreed) | Static `AllowedPlainTargets` |
+| **B, display copies** | `sprk_assignedtoattorney1/2`, `sprk_assignedtoparalegal1/2`, copied from the core's `sprk_assignedattorney1/2` and `sprk_assignedparalegal1/2` (seeded profile, provisioning seeder `DataverseWebApiFieldMappingSeeder.cs` :175-189) | Static `AllowedDisplayCopies`. This is the **only** Q-U6 exception for contact lookups. At runtime the step also requires `PushRuleSelection.AssignedToColumnsOf(bound registry)` to answer **false** for each copy. If it answers true (an environment still binds the old entry), that column is `Gated(display_copy_confers)`. |
+| **C, never** | Round 2 §6.2's deny-list (by reference), plus `sprk_assignedto1/2`, `sprk_findingsjson`, and every contact, user or team lookup not in B | Second check over A and B |
 
-When the registry drops a class-B column, the classifier answers false. The column then counts as a plain contact lookup,
-which Q-U6 refuses. A static entry that the registry does not list is refused.
+**E6 condition, recorded with the §7 constraint:** `sprk_description`, `sprk_highpriority` and the four display copies may
+never join an external invoice module's `ReadableColumns` (eb `ExternalAccessModule.cs` :528-545) or the firm-facing
+rendering (EB-D-207, task 132) without returning to ebilling-r1 and UAC-r2. Test G3 pins the allow-lists against the live
+`ReadableColumns`.
 
-## 3. The grant
+## 3. Access: the U3 answer (C2)
 
-Per A6 (UAC-r2 task 142), child registry entries create no grant: only the three roots are ever materialized. So the grant
-that matches an invoice copy is **the core record's own Assigned-To grant for the same person and role**. The invoice's
-access derives from its core. Its owner is resolved from the core; external invoice access derives from the accessible
-root (fm `ExternalCallerContext.cs` :350); a secure child mirrors its root's sharees.
+**Every membership resolution in the BFF, master (fm tree) and `work/ebilling-r1` alike:**
 
-| Item | Design |
-|---|---|
-| Writer | `AssignedAccessMaterializer.AfterWriteAsync(coreTable, coreId, writtenColumns: null, grantorOid: null, ct)`: the full pass, the same run as the reconciliation job and 049's queued create grant. It is not a one-subject pass: 049b's accepted limit is that such a pass acts only on a share. |
-| Rows it writes | Only the core's: `sprk_assignedaccess` ledger rows, `sprk_externalrecordaccess` grant rows, and POA shares on the core. **None on the invoice.** No invite is sent: a background pass never invites (task 185 I-9). |
-| Idempotency key | The ledger's `sprk_ledgerkey` = `AssignedAccessStore.LedgerKey(rootType, coreId, sourceField, subject)`. An unchanged core costs reads and zero writes. |
-| Verify | After the pass, re-read the core's source columns and its ledger (`AssignedAccessStore.ReadLedgerAsync`). A class-B column may be written only when the core's source column still names the same subject, **and** the ledger row (core, rule source field, subject) is `Granted`, `Shared`, `CoveredByExisting` or `Adopted`. |
-| Pending (retry) | The outcome is null, `Failed` or `FlagsUnreadable`; any `Failures` entry; or a `Skipped` row whose reason is transient (`flags-unreadable`, `link-unreadable`, `no-access-unverifiable`, `subject-unreadable`). The result is `GrantPending`, and **no column of either class is written**. |
-| Refused by policy | `Declined`, `PendingConfirmation`, `Revoked`, or a `Skipped` row with any other reason (an unknown reason counts here). That column is dropped, with a log code and no note. The other columns proceed. |
+| Caller | Entity types | Rights from the invoice entry? |
+|---|---|---|
+| `AccessibleRecordSetService` (`AccessConferringOnly`), :2384 systemuser, :2879/:2959 contact | Only what `CallerPrincipalResolver.cs` :831-835 composes: project, matter, work assignment. No other `ComposeAsync` / `IsRecordAccessibleAsync` caller exists. | **No**: never `sprk_invoice` |
+| `DailyBriefingCollector` via `PeopleTargetedSet` (:168 `EntityInvoice`, :412-415, :722) | Seven tables, including `sprk_invoice` | **No**: people-targeting "selects; it does not authorize" (`IMembershipResolverService.cs` :194-214). Rows are read as the caller (`DailyBriefingCollector.cs` :333). |
+| `LookupUserMembershipNodeExecutor` :318 | Playbook config | **No**: emits ids to later nodes, under the AI-scoping or people surface |
+| `MembershipEndpoints` :269 | Route parameter | **No**: AI-scoping default, which does not filter by registry (`IMembershipResolverService.cs` :152-162) |
+| `PortfolioService` :387 | Matter only | **No** |
+| `EligibleApproverResolver` (eb :139-168) | Reads the **core's** role columns | Not a membership call; the invoice copies are not read |
 
-**Why this adds no access.** The subjects are the core's current assignees, and the core's invariant owner already owes
-them this access: the reconciler gives it within one cycle. The job only brings that forward.
+`work/ebilling-r1` adds no new membership caller (`git grep` for `IMembershipResolverService` and `ResolveByContactAsync`).
+The only production reference to the invoice assignee columns outside the registry is the Office invoice quick-create's
+`sprk_assignedto1` (eb `OfficeService.cs` :2697), which is a writer.
 
-**Invariant I-G: never a name without its grant.** For every class-B column c that the job writes with value s, at write
-time the core's source(c) = s, and ledger(core, source(c), s) is in a state that confers access. Enforcement, from
-strongest to weakest:
+**So U3 → (c).** Removing `sprk_invoice` from `MembershipOptionsDefaults.CanonicalAccessConferringRegistry` (`MembershipOptions.cs`
+:352-360) and from any environment's bound `Membership:AccessConferringRoles` has these effects:
 
-1. **Type.** The update builder accepts class-B values only as `GrantedAssignment`. This sealed record has a private
-   constructor, and only `VerifyGrantsAsync` creates it, so the compiler rejects a class-B write that bypasses
-   verification.
-2. **ArchTest.** In `InvoiceMatterMapping`, the single invoice-update call follows `VerifyGrantsAsync`, which follows the
-   materializer call (Roslyn order pin, with must-fire controls).
-3. **Unit tests T-G1 to T-G5** (§9).
+- **No grant exists or is owed.** Round 1 §3 is deleted: the grant step, verify, `GrantedAssignment` and I-G. The
+  stale-copy problem goes away: after a re-file or an ended assignment, a copy is out-of-date display text that confers
+  nothing.
+- **Push** (`FieldMappingEndpoints.cs` :558, `PushRuleSelection.cs` :51-52): the four invoice targets stop being Assigned-To
+  columns. They are seeded as One-time, so an ordinary push still skips them, and `includeAssignedTo` no longer adds them.
+  Invoice copies are therefore never re-pushed. **This is intended**, and it matches "no re-map". The class tests
+  (`SyncModeMigrationClassDataTests`, `FieldMappingSeederSyncModeClassTests`) are updated with the registry change.
+- **Daily Briefing:** its invoice channel no longer selects an invoice *for* a person through the invoice's Assigned
+  columns, only through Created By or a user owner. No extracted invoice carries copies today, so nothing that exists is
+  lost. Office quick-create invoices with `sprk_assignedto1` drop out of that selection. Recommendation: accept it (the
+  core record is still selected), or let UAC-r2 decide (U7).
+- **E7 condition 1 (fail closed for access)** holds trivially: copies confer nothing, so an unmapped invoice is exactly as
+  reachable as a mapped one. **U6 (conditional):** if U3 is ever re-opened so that copies confer or narrow access, then
+  "map nothing on fault" needs UAC-r2's explicit OK.
+- **Guard:** a test asserts `AllowedDisplayCopies ∩ AssignedToColumnsOf(canonical registry) = ∅` and that the registry has
+  no `sprk_invoice` entry. Re-adding the entry fails CI (must-fire seed: a registry with the entry).
 
-## 4. Gates, in order
+**Sequencing:** the registry change (UAC-r2-owned, or ours with their review) lands before or with 032b-2.
+
+## 4. Gates, in order (all before the transaction)
 
 | # | Gate | Fail-closed outcome |
 |---|---|---|
-| 1 | Done marker `invoice-matter-mapped:{invoiceId:N}` (`IIdempotencyService`) | Set → `AlreadyMapped` |
-| 2 | The invoice exists, is this submission's (`InvoiceBlockedHold.IsOwnSubmission`), and its core lookup equals the submission's core and passes `InvoiceFamilyCoreRecordGuard.Check` | Missing or foreign → `Gated(not_own_invoice)`; core changed → `Gated(core_changed)` (the D-96 rule, §7); read fault → `GrantPending` |
-| 3 | Secure-if-any (C2): ask `IRecordOwnershipResolver.ResolveOwnerAsync` the persister's question again (`RecordOwnershipContext.ForRow(sprk_invoice, core column → core)`, eb :476-480). The invoice row's `sprk_issecure` is also checked | `IsSecureOwner`, a hard-deny answer (`InPlaceOfDefaultTeamId`) or a secure flag → `Gated(secure)`; unresolved → `GrantPending` |
-| 4 | No Access: `NoAccessShareEnforcer.ReadCoverageAsync(core)`, then `ReadEntryAsync` and `TryClassify` per entry (round 2 §5.2) | An active, well-formed entry or a truncated answer → `Gated(no_access)`; unreadable → `GrantPending` |
-| 5 | Profile (core table → `sprk_invoice`, active rules), normalized and ordered by `(ExecutionOrder, Id)` (C4) | Fault → `GrantPending`; none → `NothingToMap` |
-| 6 | Class filter (§2): class-A or class-B allow-list, then the deny-list | Skipped rules are logged; none left → `NothingToMap` |
-| 7 | Metadata per delivery, no cache (`GetColumnMetadataAsync` for the core and the invoice; Q-U4) | A fault or an unknown `IsSecured` → `Faulted(metadata_unavailable)`. A secured source column is never read. A missing source column drops only its rule, with a Warning. |
-| 8 | Source read (`MappingSourceReadProbe.ReadAsync(MappingSourceReader.System, core)`), then `MappingSourceCopyGate.DecideAsync` (Repair's logic, moved; round 2 §5.3) | `Secure` → `Gated(secure_source)`; `Unknown` or unreadable → `GrantPending` |
-| 9 | Engine: `CreateTimeFieldMapping.ApplyFillOnly` on a candidate built from the invoice's current values, so a filled target counts as supplied (C3) | Any warning → `Faulted(rule_fault)`, all or nothing |
-| 10 | Fit: `MappedTargetFit.Check` | Any failure → `Faulted(value_unfit)` |
-| 11 | Grant, then verify (§3), for class-B subjects only | Pending → `GrantPending`, nothing written; refused → that column dropped |
-| 12 | One update with the surviving columns, conditional on the invoice row version read in gate 2 (`BulkUpdateIfRowVersionsMatchAsync`, one row) | A conflict restarts once from gate 2; a second → `Conflict`. A Dataverse refusal → `Faulted(update_refused)`; nothing is written. |
-| 13 | Set the done marker | A fault is logged; a replay then writes nothing, because the targets are filled |
+| 1 | Core pin (C1): the source is `outcome.CoreRecord`, the same object written into the invoice's core lookup (eb :459-462). An argument guard refuses any other core. | Mismatch → `Fault(core_mismatch)` |
+| 2 | Owner answer (C2): `owner.IsSecureOwner`, or hard-deny (`InPlaceOfDefaultTeamId`) | `Gated(secure)`, before any read |
+| 3 | Profile (core table → `sprk_invoice`), active rules, ordered by `(ExecutionOrder, Id)` | Fault → `Fault`; none → `NoOp` |
+| 4 | Class filter (§2) | None left → `NoOp`; skips are logged |
+| 5 | No Access: `ReadCoverageAsync` + `ReadEntryAsync` + `TryClassify` (U5 approved) | Covered or truncated → `Gated`; unreadable → `Fault` |
+| 6 | Metadata per delivery, no cache (Q-U4) | Fault or unknown `IsSecured` → `Fault`. A secured source column is not read. A missing source column drops its rule, with a Warning. |
+| 7 | Source read (`MappingSourceReader.System`) + `MappingSourceCopyGate.DecideAsync` | `Secure` → `Gated`; unknown → `Fault` |
+| 8 | Engine `ApplyFillOnly` on a candidate copy | Any warning → `Fault(rule_fault)`, all or nothing (C3) |
+| 9 | Fit `MappedTargetFit.Check`; re-run `InvoiceFamilyCoreRecordGuard.Check` | → `Fault` |
+| 10 | Display-copy runtime check (§2 B) | → `Gated(display_copy_confers)` for that column |
 
-The admin note (Q-E2) is a new `AdminAttentionText` segment kind, `"Field mapping not applied: <code>"`, codes only. It is
-written with `NoteAsync`, which merges into the current text, and only for `Faulted` and for a final-delivery
-`GrantPending`. `Merge` and `WithoutStopped` recognise and keep it, in a fixed order (Signals, policy, mapping, stopped,
-undone). The Signal segment shrinks to make room, so the whole stays within `AdminAttentionMaxLength` (500). The note may
-land after the terminal write: `NoteAsync` is not a status write, and the terminal write already re-reads once on a
-row-version conflict.
+**E7 (agreed with ebilling-r1, D-101):** every fault maps nothing and the invoice is created. ebilling-r1's first wording
+("a gate fault refuses the whole submission") was withdrawn: mapping is an optional fill, and intake must not fail because
+a copy could not be made. Both readings satisfy "never half-mapped".
+
+**E7 conditions:**
+- The note carries **ids and a reason code only, never a fault message**. It sits on no firm-readable surface (the SPA
+  projection, 165e/165f).
+- The outcome, its reason code, the ids, the request order and count, and the Decision Records are identical to an
+  unmapped run.
+
+**E4 condition:** the note is written by the existing `AdminAttentionText` builder into the submission update the persister
+already sends. It stays within 500 characters, with the Signal segment shrinking (round 2 §8.3). It writes no status and
+no other column.
 
 ## 5. Identity
 
-There is no caller. The job runs in the BFF's background host with the **BFF application user**
-(`IGenericEntityService` / `DataverseWebApiClient`, app-only). It uses no OBO token, no impersonation and no FR-04 probe:
-this is the Repair model that UAC-r2 accepted in round 1.
+There is no caller. The persister runs in an ADR-004 job as the **BFF application user**, app-only. The step reads the
+profile, metadata, No Access entries and the core row with that identity: the Repair model, accepted by UAC-r2 (§5 accepted
+with C1).
 
-| Read or write | Why it is safe |
+- The source is the core that intake authorized (eb `InvoiceSubmissionService.cs` :31-32).
+- The target is the invoice the persister is creating, with an id derived from the submission.
+- Secured source columns are never read.
+- The #2188 caller-mask exemption is one entry, `Uses = 1`, pinned to the system-reader call site.
+
+## 6. Replay and idempotency
+
+- One transaction carries the invoice and its mapped values, so a host crash leaves either nothing or everything; there is
+  no "grant before columns" window.
+- A rolled-back delivery stores nothing. The next delivery recomputes from current inputs (Q-E4 two-delivery test).
+- A resume makes no mapping read.
+- The re-commit runs at most once (round 2 §9).
+- Determinism: static resolver keys, `(ExecutionOrder, Id)` order, and the lookup overload of `IsFilingLookup` (C4).
+
+## 7. Re-file and later changes
+
+- **No re-map.** Only the persister create maps. The Set-firm re-run, Add line, approval and re-file (D-96) do not, and
+  push never touches the copies (§3). A Correction or Resubmission is a new invoice and maps from the current Matter.
+- After a re-file or an assignee change, a copy is stale **display text with no access effect** (U3 (c)).
+- **Constraint (ebilling-r1, binding):** no ebilling decision may ever read the invoice-level copies. Approval and its kin
+  decide only from server-written sources (EB-D-200, EB-D-208). The E6 condition (§2) sits beside this one.
+
+## 8. Placement: after-save job versus inline (owner question O1)
+
+### 8.1 Effects
+
+| Effect | After-save job | Inline in the create |
+|---|---|---|
+| Record visible without the values | Yes: seconds normally, minutes on retry, for ever if dead-lettered | Never |
+| "On create" consumers (create-message triggers, create-time snapshots) | See the values empty | See the values |
+| "On update" consumers | A second update fires them, from the app user, with a second audit row and a changed `modifiedon` | Nothing extra |
+| Form OnLoad / OnChange | A server write fires no OnChange either way. A form opened in the window shows blanks and does not refresh. | OnLoad shows the values |
+| Power Automate / Dataverse triggers with column filters | "Added" sees blanks; "Modified" filtered on these columns fires | "Added" sees the values; nothing modified |
+| BFF jobs reading the columns | Race the mapping job (for example the acceptance index job, enqueued in the after-steps) | Always see the values |
+| Search index and AI profile snapshots at create | Snapshot blanks | Snapshot the values |
+
+### 8.2 Inventory of `sprk_assigned*` consumers today (any table)
+
+| Consumer | Where | When it reads | Invoice copies? |
+|---|---|---|---|
+| Assigned-To pass (PostCreate inline maker grant + 049 queue) | `RecordCreationService.cs` :1877, :1890, :1944-2059; `AssignedAccessCreateGrantJobHandler` | After create, roots only (`AssignedAccessMaterializer.cs` :363; A6 :175) | No |
+| Reconciler, push and sync endpoint | `AssignedAccessReconciliationJob`; `FieldMappingEndpoints.cs` :1621; `AssignedAccessSyncEndpoint` | Sweep; after a push; MDA post-save | No (roots only) |
+| Form post-save script `sprk_assignedaccess_postsave.js` | Matter, Project and Work Assignment main forms; referenced from 13 tables' `RibbonDiff.xml`, including `sprk_Invoice` | After save | No: the sync endpoint resolves roots only (`AssignedAccessSyncEndpoint.cs` :158-161) |
+| Membership resolution | §3 table | Query time | Registry only; removed |
+| Approver eligibility | eb `EligibleApproverResolver.cs` :139-168 | Query time, core columns | No |
+| Signals and decisions (to-do and event `sprk_assignedto*`, `sprk_assignedtointernal`) | `DecisionActionExecutors.cs` :861-1491; `DecisionRecordWriter.cs` :81ff; `PersonalToDoAssignee.cs` :15 | Action time | No |
+| Client reads (to-do, event, record header, VisualHost) | `SmartTodo`, `LegalWorkspace` `queryHelpers.ts`, `EventDetailSidePane`, VisualHost due-date cards | Display time | No |
+| Invoice index | eb `InvoiceIndexDocument.InvoiceColumns` | Acceptance | Excluded (Q-E5) |
+| Flows, classic workflows, plugins | None in `src/dataverse/solutions/SpaarkeMaster` (no Workflows folder; ADR-002) | n/a | n/a |
+| Invoice main form | Does not carry the four columns | n/a | n/a |
+
+Headline: **nothing reads the invoice copies at create, update or later.** The only time-sensitive consumers of
+`sprk_assigned*` are root grants, which are post-create by design and do not apply to invoices. The risk of after-save is
+therefore future and customer-added consumers, especially create- or update-triggered flows, which no repo artefact can
+rule out.
+
+### 8.3 How the other inheriting types work
+
+- **Matter, Project, Work Assignment** (wizards, chat, Office): through `RecordCreationService`. Mapped values and
+  caller-entered values are in the create (FR-02). The grant follows: queued since 049, with the maker's share inline.
+- **Event and Report Card:** mapped from the Matter in the create (seeded profiles, seeder :159, :191). No grant (A6).
+- **Office invoice quick-create** (`sprk_assignedto1`): in the create.
+
+The inline option matches this model; the job does not.
+
+### 8.4 Comparison and recommendation
+
+| Criterion | Inline (recommended) | Job (round 1) |
+|---|---|---|
+| Values present at create | Yes | No (§8.1) |
+| Second write path to `sprk_invoice` | None | A conditional update, plus a new job type and DI registration |
+| Replay | Recomputed per delivery; resume never maps | Idempotent key and marker, plus a row-version retry |
+| Fixed-id conditional commit | Mapped columns ride request 0. A refusal triggers the one re-commit without them (round 2 §9, Q-E1 approved). | Untouched |
+| Persister tests | Unchanged; the commit moves into a local function (round 2 §9) | Unchanged; the persister is not touched |
+| Intake latency | Profile read always; when rules apply, about 5–7 more reads (No Access, 2 × metadata, source, secure team), in a background job. Measured in 032b-3; most submissions stop at the profile. | None at intake; the cost moves to a job |
+| Fault effect | Maps nothing; the invoice is created with a note | Same, later |
+
+**Recommendation: inline.** U3 (c) removed the only reason for a post-commit step, which was a grant that could fault
+inside the transaction. Inline keeps the values in the create, as every other inheriting type does, and adds no write path.
+Its cost is the re-commit, which ebilling-r1 has already approved, and a bounded number of reads before intake. If the
+owner prefers the job, C1 applies as UAC-r2 wrote it: payload core == invoice core == submission core, or
+`Gated(core_changed)`.
+
+### 8.5 Rule for all types carrying `sprk_assigned*`
+
+> **The values are present in the create. Grants may follow.** A creator sets or maps every `sprk_assigned*` value in the
+> create request itself. Access derived from those values may be granted after the commit, inline or queued, through the
+> one owner. No creator fills these columns with a post-create update.
+
+| Creator | Status |
 |---|---|
-| Invoice read and update | The id comes from the submission (`InvoiceIdFor`) and is checked against the submission's link. The update writes only class-A and class-B columns into targets that are empty, conditional on the row version. |
-| Core read | The core is the invoice's own core lookup, which the persister wrote from the core record authorized at intake (eb `InvoiceSubmissionService.cs` :31-32). Secured source columns are never read. |
-| Profile, metadata, No Access, ledger | Configuration and access-system reads, used only to decide. |
-| Core grant | Written by the invariant owner, with its own policy (Secure, Restricted, Limited, No Access, decline). The grantor is null. |
+| `RecordCreationService` (every route), MDA form create, Office quick-create | Complies |
+| `InvoiceSubmissionPersister` | Complies with 032b inline; **would break the rule under the job alternative** |
+| Repair pass (FR-25) | Named exception: it is a fill-only backstop on existing rows, not a creator |
+| `/push` | Out of scope: an update of existing rows, by request |
+| `ExternalDataService` creates | Inventory exception, not yet mapped. When it adopts mapping, it must comply. |
 
-#2188: one `UnmaskedCallExemptions` entry, `Uses = 1`, pinned to the `MappingSourceReader.System` call site (Q-U3).
+Task 060's matrix gains this rule with a guard: an ArchTest that no creator's post-create step writes a column the registry
+or a profile marks `sprk_assigned*`, with the Repair pass as the listed exception.
 
-## 6. Replay, idempotency and crashes
+## 9. Test plan (changes from round 2 §11)
 
-| Case | Result |
-|---|---|
-| Duplicate enqueue (resume, redelivery) | Same key; the second run is `AlreadyMapped`, or writes nothing because the targets are filled |
-| Crash after the grant, before the update | Redelivery: the grant pass makes zero writes, verify passes, the update writes. I-G holds throughout, because the columns land only after verify. |
-| Crash after the update, before the marker | Redelivery: every target is filled → `NothingToMap` |
-| Job dead-lettered while `GrantPending` | The invoice copies stay empty (the safe direction). The core grant is still owed and is completed by the reconciler. The note says `grant_pending`. A replay of the dead-lettered message resumes. |
-| A user fills a target first | Fill-only: that column is skipped. A fill between the read and the write is caught by the row-version condition. |
+| Id | Case | Expected |
+|---|---|---|
+| T-N1 | Secure core (owner answer; hard-deny) | `Gated`, no read, no note; ordinary core maps (pair) |
+| T-N2 | No Access entry (record, org wall, Secure parent; truncated) | `Gated`; inactive or malformed entry maps (pair) |
+| T-N3 | Field-secured source column | Not read, not mapped; the others map. A metadata fault → `Fault`, note |
+| T-N4 | Rule fault | Nothing mapped, either class; note |
+| T-C1 | The mapping source equals the core lookup in request 0; a different core is refused | Pair (C1) |
+| T-E7 | Gate fault: the invoice is created unmapped with the note; status, code, ids, request order and count, and Decision Records are identical to an unmapped run. Control: maps | Pair (E7 condition 3, check 4) |
+| T-E7b | The note holds ids and a code only, never an exception message; within 500 characters | Must-fire on a seeded message |
+| T-D1 | Display copies are written from the Matter's four columns. `AssignedToColumnsOf` true for a copy → that column is gated | Pair |
+| T-D2 | Registry guard (§3) | Must-fire on a registry with `sprk_invoice` |
+| T-R1 | Re-run, Add line, approval, re-file, push | No mapping (ArchTest: one `ApplyAsync` call site, in `PersistCoreAsync`) |
+| T-R2 | Correction | A new invoice maps from the current Matter |
+| T-R3 | Request 0 refused with mapping | The re-commit cases (round 2 §9) |
+| T-F1 | `findingsjson` / `procedureSnapshot` | Never a source or a target (allow-list seed must-fire) |
 
-Determinism (C4): the static resolver-key set, `(ExecutionOrder, Id)` order, and the lookup overload of `IsFilingLookup`.
-Same inputs give the same columns.
+Kept from round 2: T-P1–T-P4, T-S1–T-S2, T-C3–T-C4, T-V1, T-T1–T-T2, T-I1, T-E4, T-A1, T-DI, T-M1, and G1–G6. Deleted:
+round 1's T-G1–T-G5 and the job tests. Regression: the persister suites (104, 095c, 095d-2b-3, 165a/b) with assertions
+unchanged.
 
-## 7. Re-file (D-96) and later changes
+## 10. §11, tasks and tensions
 
-- **Rule: no re-map.** Gate 2 refuses when the invoice's core is no longer the submission's core. The job never runs on the
-  re-file path, the Set-firm re-run, Add line or approval (pinned by an ArchTest, §9).
-- After a re-file, or after the core's assignment ends, the invoice copies name the earlier assignee. ebilling decides
-  nothing from them. Approval and its kin decide only from server-written sources (EB-D-200, EB-D-208), and this note
-  records that **no ebilling decision may ever read the invoice-level copies**.
-- **Open for UAC-r2 (U3):** whether the invoice copy must be cleared, or what it confers withdrawn, once the core grant
-  that justified it ends.
-
-## 8. §11 answers and placement
+**§11 answers:**
 
 | New member | Existing | Extension | Cost of doing nothing |
 |---|---|---|---|
-| `InvoiceMatterMapping` (scoped concrete class, eb `Services/Finance/Submission/`) | `RecordCreationService`'s mapping and Repair, and `CreateTimeFieldMapping` | Neither creator-side path runs post-commit on a job-created row without a caller, and the W3 direction bars a core redesign. The step calls their owner classes and duplicates none of them. | FR-20 is unmet for extracted invoices: the owner's option B ruling cannot be delivered |
-| `InvoiceMatterMappingJobHandler`, a new job type and one DI registration beside `InvoiceIndexingJobHandler` | `AssignedAccessCreateGrantJobHandler` (roots only, no column write) and `InvoiceIndexingJobHandler` (a different owner) | Neither can write invoice columns. Folding the work into the after-steps holds acceptance on access faults (§1). | A grant fault either strands the submission in Processing or silently drops the mapping |
-| Step 3a in `RunFromStoredAsync`, plus an optional `enqueueMapping` seam parameter that defaults to a no-op, built from the already-injected `JobSubmissionService` | The step-3 index enqueue | It is the same pattern, one more call. No public constructor change. | The job is never queued |
-| `InvoiceSubmissionPersister.OwnedInvoiceColumns` (an `internal static` set) | None; round 2 C5 | — | The money guard (C5) cannot exclude persister columns by reference |
-| `AdminAttentionText` mapping segment | The stopped and undone segments | It extends the existing class | Faults are invisible to administrators (Q-E2) |
-| `GrantedAssignment` record | None | — | I-G would rest on tests alone (enforcement ladder) |
-| `MappingWriteGates.cs` (round 2's move of Repair's gate and fit logic) | Repair's private methods | A move, not a copy (Q-U5) | The gate would be re-implemented |
+| `InvoiceMatterMapping` (scoped concrete, eb `Services/Finance/Submission/`) | `RecordCreationService` mapping, Repair, `CreateTimeFieldMapping` | The service cannot take a fixed-id, multi-row create (W3: no core redesign). The step calls the owner classes. | FR-20 is unmet for extracted invoices |
+| One optional persister parameter, `OwnedInvoiceColumns`, and the re-commit local function | Round 2 §3.1, §9, C5 | — | No call site; no money guard; a refused value poisons intake |
+| `AdminAttentionText` mapping segment | The stopped and undone segments | Extends the class | Faults are invisible (Q-E2) |
+| `MappingWriteGates.cs` (move) | Repair's private methods | A move, not a copy | The gate is re-implemented (Q-U5) |
+| Registry removal | — | A deletion | The copies would confer access with no grant |
 
-**Placement** (`bff-extensions.md`): BFF, an in-process ADR-004 job (ADR-052: no Function). No endpoint, no package and no
-AI call. The persister hunk is one static set. The publish-size delta is measured against a fresh master build and is
-expected to be under 0.1 MB.
+Round 1's job handler and `GrantedAssignment` are dropped.
 
-## 9. Test plan
+**Placement:** BFF, in-process inside the existing ADR-004 job. No endpoint, no package, no new job type. The publish
+delta is measured on a fresh master build.
 
-| Id | Case | Expected | Kind |
-|---|---|---|---|
-| T-N1 | Secure core (owner `IsSecureOwner`; hard-deny; invoice flagged) | `Gated(secure)`; no profile read, no grant, no note | must-fire |
-| T-N2 | Active, well-formed No Access entry (record, org wall, Secure parent); truncated | `Gated(no_access)`, nothing written | must-fire |
-| T-N2b | Inactive or malformed entry; ordinary core | Maps | must-not-fire |
-| T-N3 | Field-secured source column | Not read, not mapped; the other rules map. A metadata fault or unknown `IsSecured` → `Faulted`, note | pair |
-| T-N4 | Any engine warning | Nothing mapped, either class; `rule_fault` note | must-fire |
-| T-G1 | The materializer fails, or a transient `Skipped` | `GrantPending`; **no column of either class written**; retry | must-fire |
-| T-G2 | Ledger `Granted`, `Shared`, `Covered` or `Adopted` | Class-B column written | must-not-fire |
-| T-G3 | `Declined`, `PendingConfirmation`, `Revoked`, Restricted `Skipped` | That column dropped; class A still written | must-fire |
-| T-G4 | The core source changed between the grant and the verify | Column dropped | must-fire |
-| T-G5 | Order: a recording fake shows materializer < ledger read < update; crash after the grant, then redelivery | Columns written once, after verify | invariant |
-| T-R1 | Set-firm re-run, Add line, approval, re-file | No enqueue and no mapping. ArchTest: `InvoiceMatterMapping` and its job are referenced only from step 3a and the handler | must-fire |
-| T-R2 | A Correction's new invoice | Its own job maps from the current Matter; the old invoice is not touched | must-not-fire |
-| T-R3 | AutoRejected | `Skipped(auto_rejected)` | pin |
-| T-I1 | Fill-only: a pre-filled target; a row-version conflict twice | Skipped; `Conflict` | pair |
-| T-I2 | Replay after success, with the marker or without it | Zero writes | idempotency |
-| T-A1 | Allow-lists: exact sets, no overlap with the deny-list groups; seeds `sprk_billingexport`, a money column, `sprk_assignedto1` | Must-fire on each seed | G3 |
-| T-A2 | `AdminAttentionText`: 60 Signal refusals plus a mapping note ≤ 500; `Merge` order; `WithoutStopped` keeps it | cap | Q-E2 |
-| T-DI | Real container: the handler, `InvoiceMatterMapping` and every dependency resolve | non-null | DI |
-| T-M1 | `MappingWriteGates` moved logic; the Repair suites pass unchanged | move proof | |
+**Tasks:**
 
-Regression, with assertions unchanged: the persister suites (104, 095c, 095d-2b-3, 165a/b); the after-steps suites;
-`InvoiceMoneyColumnsAppOnlyWriteGuardTests`; `MappingSourceCallerMaskGuardTests` (apart from the entry);
-`ADR010_DITests`; `FeatureRolePrivilegeGuardTests` plus G5 (Q-U1); the Repair suites; the materializer suites.
+| Task | Branch | Content |
+|---|---|---|
+| 032b-0 | UAC-r2 (or ours, with their review) | Registry removal; push class tests; T-D2 |
+| 032b-1 | fm work branch | `MappingWriteGates` move; G5 |
+| 032b-2 | eb task branch from d58e3a3554, after fm reaches master (E3) | `InvoiceMatterMapping`, classes, gates, unit tests; two adversarial passes |
+| 032b-3 | Same branch | Persister wiring, re-commit, note segment, ArchTests, T-E7, T-DI, latency and publish delta; one pass |
 
-## 10. Task split and ADR tension
+**Tensions:**
+- None for the project binding rule "inline, in the create request": the inline option meets it.
+- The `Repair.cs` move still needs the owner's approval (O2).
+- No ADR conflict (ADR-002, ADR-004, ADR-010, ADR-015).
 
-| Task | Branch | Content | Est. |
-|---|---|---|---|
-| 032b-1 | fm work branch | `MappingWriteGates` move, Repair wrappers, T-M1, the G5 role-source assertion | 5-7 h |
-| 032b-2 | eb task branch, cut after eb 082d's sha, with 052a and 032b-1 present (§11 E3) | `InvoiceMatterMapping`, the class lists, gates, grant and verify, `GrantedAssignment`, unit tests T-N*, T-G*, T-I*, T-A1 | 10-12 h, two adversarial passes (access) |
-| 032b-3 | the same eb branch | Job handler and DI, step 3a, `OwnedInvoiceColumns`, `AdminAttentionText` segment, ArchTests (order pin, T-R1, the #2188 entry), T-R*, T-A2, T-DI, publish delta | 6-8 h, one pass |
-
-**ADR and ruling tensions.**
-
-- (1) The owner ruling of 2026-11-06 says the step goes "before its transaction". This design runs it post-commit, at
-  ebilling-r1's request, so the owner must re-confirm (O1).
-- (2) Project binding rule (`CLAUDE.md` §2): "apply field mapping server-side, inline, in the create request". A
-  post-commit update deviates from it. The W3 direction (`decisions.md` :874) allows a named-exception creator whose table
-  is covered by "L3/L4 fill-only reconciliation, fail-closed". The job uses that model: Repair's fill-only semantics
-  against the row's current values (spec :272), app-only, with no FR-04 caller probe. Proposed resolution is path A, a
-  project exception recorded in `design.md` ADR Tensions, decided with O1.
-- (3) The `Repair.cs` move is still awaiting the owner's approval from round 2 (O2).
-- No ADR conflict: ADR-002 (no plugin), ADR-004 (job), ADR-010 (concrete class), ADR-015 (codes only), and one owner per
-  invariant (the materializer for grants, the engine for mapping, the persister for creation).
-
-## 11. Open questions
+## 11. Open questions and status
 
 **UAC-r2**
 
-| # | Question | Recommendation |
+| # | Item | Status / recommendation |
 |---|---|---|
-| U1 | Is the matching grant the core's materializer full pass (A6: no invoice-level grant), run from the invoice job with a null grantor? | Yes. It adds nothing that the reconciler would not give. |
-| U2 | Conferring states {Granted, Shared, CoveredByExisting, Adopted}; transient `Skipped` reasons as in §3; any other state refused | Approve as listed |
-| U3 | After a re-file (D-96) or an ended core assignment, the invoice copy remains. (a) Clear class-B copies through 045c's re-derivation on a core change, plus a 052 report line for ended assignments; (b) report only; (c) remove `sprk_invoice` from the access-conferring registry, so the copies confer nothing | (c) if no surface relies on conferral at invoice level; otherwise (a) |
-| U4 | Class-B allow-list: the four attorney and paralegal columns; `sprk_assignedto1/2` left out | Approve the four |
-| U5 | Carried from round 2: `ReadCoverageAsync` in place of `NoAccessListReader`; no note when Secure | Confirm both |
+| U1, U2, U4, U5 | Approved; U1, U2 and U4 are moot under (c) | Closed |
+| U3 | (c), on the §3 inventory | Confirm the inventory |
+| U6 | Map-nothing-on-fault if the copies ever confer or narrow access | Conditional; not triggered under (c) |
+| U7 | The Daily Briefing invoice channel loses selection by invoice Assigned columns | Accept |
 
-**ebilling-r1**
+**ebilling-r1:** E1 is superseded (inline recommended). E2–E6 are agreed with their conditions (§2, §4). E7 is agreed
+(§4). E3: base d58e3a3554.
 
-| # | Question | Recommendation |
-|---|---|---|
-| E1 | A queued job (§1), or inline in the after-steps with `Retry` (which holds the terminal status and Poisons on the final delivery)? | The job |
-| E2 | Leave AutoRejected invoices unmapped? | Yes, as the index step does |
-| E3 | The base needs 052a and 032b-1, which are on the fm work branch. Merge order: fm to master and then into `work/ebilling-r1`, or merge the fm tip into the task branch? | fm to master first |
-| E4 | The mapping note written after the terminal status | Accept: it is not a status write |
-| E5 | Register the job beside `InvoiceIndexingJobHandler` | Yes |
-| E6 | Class-A list `sprk_description`, `sprk_highpriority` (round 2, unsigned) | Sign off |
-
-**Owner:** O1, the post-commit placement and its project exception to "inline, in the create request" (§10 (2));
-recommend approving it. O2, the `Repair.cs` move; recommend approving it as a move with no change in behaviour.
+**Owner:** O1, placement — **recommend inline** (§8.4). O2, the `Repair.cs` move — recommend approving it.
