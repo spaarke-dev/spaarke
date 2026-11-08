@@ -4,7 +4,7 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-08 (checkpoint #104: peer review stretch; 032b round 2 arrived, review next).
+> **Last Updated**: 2026-11-08 (checkpoint #105: session moved from VS Code `-20` to the Claude Code desktop session `uac-r2`). Private details: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-handoff-2026-11-08.md` (outside the repo; read it first).
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -27,7 +27,7 @@
 
 ## Reviews queue
 - fm: **032b round 2 APPROVED** 11-08 (U3 (c) confirmed on master + ebilling work: only project/matter/WA compose rights; no dev registry override; U7 accepted, owner to see it; E7 map-nothing OK under (c); inline placement OK; registry removal in fm's branch with my review); 045A design; 052b incl. the contact-only owner rule (after the owner picks the team); 032 round 2 waits on the owner; 076c push-preview fix (BFF + RecordFamily page) joins their next PR.
-- ebilling: tell-me items: ribbon source removal reaching master; dev batch SHA (165e/f etc.) for the gate; 2b-2; the batch checklist + commit; field-security owner question.
+- ebilling: 085 pass 2 fix diff; 130-0 diff (before merge); 130-0b shape before coding. Tell-me items: ribbon source removal reaching master; dev batch SHA (165e/f etc.) for the gate; 2b-2; the batch checklist + commit; field-security owner question.
 - mcp-bff-api: Phase 0 waits on the owner's connector registration; A10, B-4, 021 later. Every deploy = master + spike until they say Phase 0 is done.
 
 ## Owner items outstanding
@@ -45,4 +45,4 @@
 #2627, #2621, #2585, #2576, #2524, gate null-column hardening, SharePoint census, #2543, K-P1 for task 191, communications by-regarding timeout → 500 (maybe 503; not filed); parked: 193 (C:/wt193), 197, #2427, 196a/196b; TASK-INDEX reconcile at 090. Unknown: a pre-compaction background agent ("Update-path existing-only fix") finished with empty output.
 
 ## Peers
-uac-r2 `-20` (this session) · ebilling `-c7` · field-mapping `-69` · ontology `-38` · provisioning `-b8` · word-add-in `-7b` · mcp-bff-api `spaarke-wt-spaarkeai-mcp-bff-api-r1-68` · website `spaarke-website-cb` · SPA R4 **`spa-r4`** (since 11-08; the old `-ad` session closed; it has the #2578 handoff; send dev BFF before/after notices and gate results there).
+uac-r2 = desktop session **`uac-r2`** (since 11-08; the VS Code `-20` session is retired) · ebilling `-c7` · field-mapping `-69` · ontology `-38` · provisioning `-b8` · word-add-in `-7b` · mcp-bff-api `spaarke-wt-spaarkeai-mcp-bff-api-r1-68` · website `spaarke-website-cb` · SPA R4 **`spa-r4`** (since 11-08; the old `-ad` session closed; it has the #2578 handoff; send dev BFF before/after notices and gate results there).
