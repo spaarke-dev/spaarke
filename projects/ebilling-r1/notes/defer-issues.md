@@ -10,6 +10,26 @@
 
 ## Open (in priority order)
 
+### DEF-057 — App-only write refusals on an update say "No owner could be resolved for a new <table>"
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-07 |
+| **Source** | ebilling-r1 task 165d adversarial review (pre-existing; not introduced by 165d) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2631 |
+
+**Description**: when `RefuseAppOnlyWrite` refuses an UPDATE from the Update Record node or the playbook output mapping, the thrown `RecordOwnerUnresolvedException` message starts "No owner could be resolved for a new {table}, so it was not written". No record is being created, so the prefix misleads. It affects every refusal thrown from those two update sites. The refusal itself is correct.
+
+**Fix direction**: an update-specific message (or exception type) at the two update sites. Owner of `RefuseAppOnlyWrite` / `RecordOwnerUnresolvedException`: unified-access-control-r2.
+
+**Entry-points**: `Services/Dataverse/RecordOwnershipResolver.cs:1619`; `Services/Ai/Nodes/UpdateRecordNodeExecutor.cs` (~:329); the output-mapping update path.
+
+**Fails without it**: a configuration refusal on an update reads as an owner-resolution failure on a create, so whoever reads it looks in the wrong place.
+
+---
+
 ### DEF-056 — A line-decision repeat cannot finish its Decision Record once the invoice leaves In Review
 
 | Field | Value |

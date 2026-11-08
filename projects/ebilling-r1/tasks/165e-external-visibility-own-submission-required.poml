@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="165e" project="ebilling-r1">
+  <metadata>
+    <title>External invoice visibility decides only from the invoice's own submission, failing closed (follows 165c)</title>
+    <phase>4 Review (165 family)</phase>
+    <gate>165c merged into work (1aff454e34). Scope confirmed with uac-r2 before code (the detail is shared by message, not in this file).</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Partner-readable visibility (ExternalAccess); two adversarial passes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>External access decision; fail-closed change on a partner read path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Infrastructure/ExternalAccess (shared with uac-r2).</parallel-reason>
+    <deps>165c</deps>
+    <tags>bff-api, ebilling, auth, external-access</tags>
+  </metadata>
+
+  <prompt>165c made both external visibility readers count a submission's invoice link only when the invoice is the submission's own (`InvoiceBlockedHold.IsOwnSubmission`). This task finishes that rule: an invoice is shown to a firm only when its own submission is found and readable. The lead's brief carries the private detail from uac-r2.
+    Read first: `notes/165c-visibility-own-submission.md`; `ExternalInvoiceVisibility` (reader 1 `DecideSubmissionsAsync`, reader 2 `ReadSubmissionSourcesAsync`).
+    Wording in commits, notes, comments and the PR stays neutral: "decides only from the invoice's own submission". Never describe a sequence of steps.</prompt>
+
+  <goal>A CIAM user sees an invoice only when the invoice's own submission is found, readable and passes the existing checks. In every other case the invoice is hidden.</goal>
+
+  <scope>
+    <in>
+      - Both readers use the one rule (`IsOwnSubmission` / `ReadOwnSubmissionAsync`); no copy.
+      - The hidden case logs a reason code with ids only.
+      - Internal users are unchanged.
+    </in>
+    <out>
+      - The `sprk_document` binding question (open with uac-r2).
+      - Field security on the submission link columns (owner schema question; dev-deploy checklist).
+      - Any client change.
+    </out>
+  </scope>
+
+  <acceptance-criteria>
+    <criterion>Must-fire: an invoice with no own submission is hidden from the firm, and so is one whose own submission is unreadable. Must-not-fire control: an invoice with its own submission is shown, as today.</criterion>
+    <criterion>One seed: drop the check, and the must-fire test fails.</criterion>
+    <criterion>Dev data (read-only): count the invoices that would become hidden. Expected 0, re-counted at the dev deploy. If more than 0, STOP and report the ids to the lead only.</criterion>
+    <criterion>Filtered unit tests (ExternalAccess, ExternalInvoiceVisibility, Finance) and the full ArchTests pass. The BFF builds.</criterion>
+    <criterion>Notes go in `notes/165c-visibility-own-submission.md`, in a new 165e section, in neutral wording.</criterion>
+    <criterion>Test scope: exactly the criteria above.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a legitimate invoice (an internal submission or a Correction) has no own submission, STOP before hiding it.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+</task>
