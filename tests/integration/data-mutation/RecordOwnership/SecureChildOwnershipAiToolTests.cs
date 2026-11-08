@@ -884,6 +884,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 // Field mapping task 031: the typed analysis route's anchor and playbook (live navigation properties).
                 ("sprk_documentid", "sprk_document", "sprk_DocumentId"),
                 ("sprk_playbook", "sprk_analysisplaybook", "sprk_Playbook"),
+                // Field mapping task 045a: the analysis's own document filing (RecordContainerResolver.ChildAncestorLinks), the
+                // second link to sprk_document beside the anchor, and its ADR-024 pair type (the analysis is polymorphic), for
+                // the type-only pair's two-candidate case.
+                ("sprk_regardingdocument", "sprk_document", "sprk_RegardingDocument"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             // Task 147 r1c (E2, the live inventory of every main form; read-only metadata, spaarkedev1, 2026-10-04): the
             // KPI assessment's and the billing event's lookups. The billing event's matter navigation property is
