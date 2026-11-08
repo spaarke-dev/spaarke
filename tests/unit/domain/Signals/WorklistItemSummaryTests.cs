@@ -34,39 +34,73 @@ public sealed class WorklistItemSummaryTests
 
     private static string Repeat(string piece, int length) => string.Concat(Enumerable.Repeat(piece, length));
 
-    private static int JsonBytes(WorklistItemSummary summary, JsonSerializerOptions options) =>
-        Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(summary, options));
+    /// <summary>The group's core record, its name and number at their longest (sprk_matter: name 400, number 100 assumed).</summary>
+    private static WorklistCoreRecord FullCore(string filler = "x") =>
+        new("sprk_matter", Guid.NewGuid(), "Matter", Repeat(filler, 400), Repeat(filler, 100));
+
+    private static int JsonBytes(object value, JsonSerializerOptions options) =>
+        Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(value, options));
+
+    private static readonly JsonSerializerOptions[] HostOptions =
+    [
+        new JsonSerializerOptions(JsonSerializerDefaults.Web),
+        new JsonSerializerOptions(),
+        new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never },
+    ];
 
     // The three serializer settings a host may use; the bound holds for all (nulls are never written, names are the same length).
     public static TheoryData<string> Fillers => new() { "x", "\"", "€", "\U0001F4C4" };
 
     [Theory]
     [MemberData(nameof(Fillers))]
-    public void ASummaryAtTheLongestStoredText_IsAtMost600Bytes_AsJson_InEveryHostSerializer(string filler)
+    public void ASummaryAtTheLongestStoredText_WithItsCoreRecordId_IsAtMost600Bytes_AsJson_InEveryHostSerializer(string filler)
     {
-        var summary = WorklistItemSummary.From(FullRow(filler), privilegeFlagged: true);
+        var core = FullCore(filler);
+        var summary = WorklistItemSummary.From(FullRow(filler), core, privilegeFlagged: true);
 
-        foreach (var options in new[]
-                 {
-                     new JsonSerializerOptions(JsonSerializerDefaults.Web),
-                     new JsonSerializerOptions(),
-                     new JsonSerializerOptions(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.Never },
-                 })
+        summary.CoreRecordId.Should().Be(core.RecordId, "the worst case carries the core record id");
+        foreach (var options in HostOptions)
         {
             JsonBytes(summary, options).Should().BeLessThanOrEqualTo(WorklistItemSummary.MaxJsonBytes);
         }
     }
 
     [Fact]
-    public void ASummary_KeepsInvoiceReviewWithBothIds_AndCarriesThePrivilegeFlag()
+    public void ASummary_KeepsInvoiceReviewWithBothIds_CarriesItsCoreRecordId_AndThePrivilegeFlag()
     {
         var row = FullRow();
-        var json = JsonSerializer.SerializeToElement(WorklistItemSummary.From(row, privilegeFlagged: true), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var core = FullCore();
+        var json = JsonSerializer.SerializeToElement(WorklistItemSummary.From(row, core, privilegeFlagged: true), new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         json.GetProperty("invoiceReview").GetProperty("invoiceId").GetGuid().Should().Be(row.InvoiceReview!.InvoiceId);
         json.GetProperty("invoiceReview").GetProperty("lineId").GetGuid().Should().Be(row.InvoiceReview.LineId!.Value);
+        json.GetProperty("coreRecordId").GetGuid().Should().Be(core.RecordId);
         json.GetProperty("privilegeFlagged").GetBoolean().Should().BeTrue();
-        WorklistItemSummary.From(row, privilegeFlagged: false).PrivilegeFlagged.Should().BeFalse();
+        json.TryGetProperty("coreName", out _).Should().BeFalse("the name is on the page once per group, not on every row");
+        WorklistItemSummary.From(row, core, privilegeFlagged: false).PrivilegeFlagged.Should().BeFalse();
+    }
+
+    [Theory]
+    [MemberData(nameof(Fillers))]
+    public void APageAtItsLongest_50WorstRows_50WorstCoreEntries_AndAFullCursor_IsUnder64KiB(string filler)
+    {
+        // NFR-02: every page result fits Cowork's 64 KiB inline cap. Worst case: 50 rows of 50 different core records, every text at its
+        // longest, and a cursor remembering the most groups it can.
+        var cores = Enumerable.Range(0, DecideLanePaging.PageSize).Select(_ => FullCore(filler)).ToList();
+        var items = cores.Select(c => WorklistItemSummary.From(FullRow(filler), c, privilegeFlagged: true)).ToList();
+        var map = cores.ToDictionary(c => c.RecordId, WorklistCoreSummary.From);
+        var cursor = (SomeCursor() with { Returned = Enumerable.Range(0, DecideCursor.MaxReturnedGroups).Select(_ => Guid.NewGuid()).ToList() }).Encode();
+        var page = DecidePageResult.Ok(items, map, cursor);
+
+        foreach (var options in HostOptions)
+        {
+            JsonBytes(new { page.Items, page.Cores, page.NextCursor }, options).Should().BeLessThan(64 * 1024);
+            foreach (var entry in map.Values)
+            {
+                JsonEncodedBytes(entry.Name!).Should().BeLessThanOrEqualTo(WorklistCoreSummary.NameBytes);
+                JsonEncodedBytes(entry.Number!).Should().BeLessThanOrEqualTo(WorklistCoreSummary.NumberBytes);
+            }
+        }
     }
 
     [Fact]
@@ -79,20 +113,33 @@ public sealed class WorklistItemSummaryTests
             .Where(p => p.DeclaringType == typeof(WorklistItemRow) && p.Name != "EqualityContract").Select(p => p.Name).ToList();
 
         summaryMembers.Should().NotContain(["EvidenceRefs", "Sentence", "Decision", "Steps"]);
-        summaryMembers.Except(rowMembers).Should().BeEquivalentTo(["PrivilegeFlagged"], "the only member the row does not have is the privilege flag");
+        summaryMembers.Except(rowMembers).Should().BeEquivalentTo(["CoreRecordId", "PrivilegeFlagged"],
+            "the only members the row does not have are its group's core record id and the privilege flag");
+        rowMembers.Should().NotContain("CoreRecordId", "the Console's REST row gains no member");
         rowMembers.Should().NotContain("PrivilegeFlagged", "the Console's REST response gains no member");
     }
 
     [Fact]
     public void ClippedText_EndsInAnEllipsis_AndShortTextIsUnchanged()
     {
-        var summary = WorklistItemSummary.From(FullRow(), false);
+        var summary = WorklistItemSummary.From(FullRow(), FullCore(), false);
         summary.Title.Should().EndWith("…").And.HaveLength(WorklistItemSummary.TitleBytes - 5, "an ellipsis escapes to six bytes");
 
         var short1 = FullRow() with { Title = "Fee change", SubjectName = "RE: revised fees", RuleShortName = "Budget gap" };
-        var kept = WorklistItemSummary.From(short1, false);
+        var kept = WorklistItemSummary.From(short1, FullCore(), false);
         (kept.Title, kept.SubjectName, kept.RuleShortName).Should().Be(("Fee change", "RE: revised fees", "Budget gap"));
-        WorklistItemSummary.From(FullRow() with { Title = null }, false).Title.Should().BeNull();
+        WorklistItemSummary.From(FullRow() with { Title = null }, FullCore(), false).Title.Should().BeNull();
+    }
+
+    [Fact]
+    public void ACoreEntry_ClipsTheNameAndNumber_AndKeepsShortOnesUnchanged()
+    {
+        var clipped = WorklistCoreSummary.From(FullCore());
+        clipped.Name.Should().EndWith("…").And.HaveLength(WorklistCoreSummary.NameBytes - 5);
+        clipped.Number.Should().EndWith("…").And.HaveLength(WorklistCoreSummary.NumberBytes - 5);
+
+        WorklistCoreSummary.From(new WorklistCoreRecord("sprk_matter", Guid.NewGuid(), "Matter", "Acme v. Widget", "MAT-0042"))
+            .Should().Be(new WorklistCoreSummary("Acme v. Widget", "MAT-0042"));
     }
 
     [Fact]
@@ -222,7 +269,7 @@ public sealed class WorklistItemSummaryTests
     [Fact]
     public void ToToolError_ForAPageThatCouldNotBeRead_IsTheWorklistsOwnAnswer_AndAPageIsNoError()
     {
-        DecisionResultMapper.ToToolError(DecidePageResult.Ok([], null)).Should().BeNull();
+        DecisionResultMapper.ToToolError(DecidePageResult.Ok([], new Dictionary<Guid, WorklistCoreSummary>(), null)).Should().BeNull();
         DecisionResultMapper.ToToolError(DecidePageResult.ReadFailed(SignalReadResult.Unavailable("too_many_signals")))!
             .ReasonCode.Should().Be("ontology.signal.worklist_unavailable");
         DecisionResultMapper.ToToolError(DecidePageResult.ReadFailed(SignalReadResult.CallerUnresolved))!

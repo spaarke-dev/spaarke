@@ -91,8 +91,19 @@ public sealed record DecidePageResult(
 
     public static readonly DecidePageResult CursorInvalid = new(DecidePageOutcome.CursorInvalid, []);
 
-    public static DecidePageResult Ok(IReadOnlyList<WorklistItemSummary> items, string? nextCursor) =>
-        new(DecidePageOutcome.Ok, items ?? throw new ArgumentNullException(nameof(items)), nextCursor);
+    private static readonly IReadOnlyDictionary<Guid, WorklistCoreSummary> NoCores = new Dictionary<Guid, WorklistCoreSummary>();
+
+    /// <summary>The core records of the page's rows (015 review F4, FR-12), one entry per group with a row on this page, keyed by
+    /// <see cref="WorklistItemSummary.CoreRecordId"/>; empty when the page is not <see cref="DecidePageOutcome.Ok"/>. A core record with
+    /// no row on this page has no entry.</summary>
+    public IReadOnlyDictionary<Guid, WorklistCoreSummary> Cores { get; init; } = NoCores;
+
+    public static DecidePageResult Ok(
+        IReadOnlyList<WorklistItemSummary> items, IReadOnlyDictionary<Guid, WorklistCoreSummary> cores, string? nextCursor) =>
+        new(DecidePageOutcome.Ok, items ?? throw new ArgumentNullException(nameof(items)), nextCursor)
+        {
+            Cores = cores ?? throw new ArgumentNullException(nameof(cores)),
+        };
 
     public static DecidePageResult ReadFailed(SignalReadResult failure) =>
         new(DecidePageOutcome.ReadFailed, [], ReadFailure: failure ?? throw new ArgumentNullException(nameof(failure)));

@@ -18,7 +18,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 
 /// <summary>
 /// One Work Item of the Decide lane as a list shows it (FR-11): <see cref="WorklistItemRow"/> without its evidence lines
-/// (<c>EvidenceRefs</c>), its rule sentence and its Decision Record (the steps), plus the privilege flag (FR-04). At most
+/// (<c>EvidenceRefs</c>), its rule sentence and its Decision Record (the steps), plus its group's core record id (FR-12) and the
+/// privilege flag (FR-04). At most
 /// <see cref="MaxJsonBytes"/> bytes as JSON, whatever the stored text lengths: the free-text members are clipped (<see cref="Clip"/>).
 /// </summary>
 /// <remarks>
@@ -30,10 +31,13 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// boundary to fit their byte budget and end in an ellipsis when cut. The widget's headline is the subject name, else the title.</para>
 /// <para><b>Nulls.</b> A null member is not written, whatever the host's serializer options, so the size bound holds for every host.</para>
 /// </remarks>
+/// <param name="CoreRecordId">The id of the core record whose group the item sits in (015 review F4; FR-12: the widget groups rows by
+/// matter). Its name and number are on the page once per group, in <see cref="DecidePageResult.Cores"/>, not on every row.</param>
 /// <param name="PrivilegeFlagged"><c>sprk_signal.sprk_privilegeflagged</c> (ADR-015: flagged, never decided). The tool layer reduces a
 /// flagged item to a count for the model (FR-04); nothing here branches on it.</param>
 public sealed record WorklistItemSummary(
     Guid SignalId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? CoreRecordId,
     string Lane,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Status,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Title,
@@ -52,17 +56,19 @@ public sealed record WorklistItemSummary(
 
     /// <summary>Byte budgets (as default-encoded JSON, the worst case: every non-ASCII character is a six-byte escape) of the clipped
     /// members. With every other member present, a billing item's <c>invoiceReview</c> included, they leave the row at most
-    /// <see cref="MaxJsonBytes"/> (pinned by <c>WorklistItemSummaryTests</c>).</summary>
-    internal const int TitleBytes = 48;
-    internal const int SubjectNameBytes = 56;
-    internal const int RuleShortNameBytes = 32;
+    /// <see cref="MaxJsonBytes"/> (pinned by <c>WorklistItemSummaryTests</c>). <see cref="CoreRecordId"/>'s 54 bytes came out of them
+    /// (015 review: 48/56/32 before); the subject name, the widget's headline, keeps the most.</summary>
+    internal const int TitleBytes = 28;
+    internal const int SubjectNameBytes = 36;
+    internal const int RuleShortNameBytes = 18;
 
-    /// <summary>The slim row for <paramref name="row"/>, with the privilege flag its Signal carries.</summary>
-    internal static WorklistItemSummary From(WorklistItemRow row, bool privilegeFlagged)
+    /// <summary>The slim row for <paramref name="row"/> in the group of <paramref name="core"/>, with the privilege flag its Signal carries.</summary>
+    internal static WorklistItemSummary From(WorklistItemRow row, WorklistCoreRecord? core, bool privilegeFlagged)
     {
         ArgumentNullException.ThrowIfNull(row);
         return new WorklistItemSummary(
             row.SignalId,
+            core?.RecordId,
             row.Lane,
             row.Status,
             Clip(row.Title, TitleBytes),
@@ -115,5 +121,33 @@ public sealed record WorklistItemSummary(
         }
 
         return fits ? text : text[..cutAt] + Ellipsis;
+    }
+}
+
+// COMPONENT JUSTIFICATION (CLAUDE.md section 11), 015 review F4.
+//   Existing: WorklistCoreRecord (SignalReadService.cs), the REST group's core identity, with the name and number unclipped.
+//   Extension: reusing it would put clipped text in the type the 011 golden baselines pin, and carry the record type and type label the
+//     page does not need; this is the clipped name and number of that same caller-trimmed record, nothing else.
+//   Cost of doing nothing: rows of a page cannot be grouped under a named matter (FR-12, task 031), and without a page-level map the
+//     name would cost every row its bytes under the 600-byte cap (FR-11).
+
+/// <summary>
+/// A core record as a Decide-lane page names it once for all its rows (<see cref="DecidePageResult.Cores"/>, keyed by
+/// <see cref="WorklistItemSummary.CoreRecordId"/>): the name and number of the group's <see cref="WorklistCoreRecord"/>, clipped like the
+/// row's text (<see cref="WorklistItemSummary.Clip"/>). A null member is not written.
+/// </summary>
+public sealed record WorklistCoreSummary(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Name,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Number)
+{
+    /// <summary>Byte budgets (escaped JSON, as for the row). 50 entries at most are about 10 KB.</summary>
+    internal const int NameBytes = 120;
+    internal const int NumberBytes = 40;
+
+    /// <summary>The page's entry for <paramref name="core"/>.</summary>
+    internal static WorklistCoreSummary From(WorklistCoreRecord core)
+    {
+        ArgumentNullException.ThrowIfNull(core);
+        return new WorklistCoreSummary(WorklistItemSummary.Clip(core.Name, NameBytes), WorklistItemSummary.Clip(core.Number, NumberBytes));
     }
 }

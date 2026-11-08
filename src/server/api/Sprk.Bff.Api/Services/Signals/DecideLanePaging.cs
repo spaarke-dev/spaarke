@@ -195,10 +195,11 @@ internal static class DecideLanePaging
 
     /// <summary>
     /// The page after <paramref name="after"/> (the first page when null) of the lane's <paramref name="groups"/>, which are in Console
-    /// order as <see cref="SignalReadService"/> returned them, and the cursor for the next page (null on the last).
+    /// order as <see cref="SignalReadService"/> returned them, the core record of every group with a row on the page (clipped name and
+    /// number, from that same caller-trimmed group; <see cref="DecidePageResult.Cores"/>), and the cursor for the next page (null on the last).
     /// </summary>
     /// <param name="extras">For every item of <paramref name="groups"/>: its rank keys and privilege flag.</param>
-    internal static (IReadOnlyList<WorklistItemSummary> Items, string? NextCursor) Page(
+    internal static (IReadOnlyList<WorklistItemSummary> Items, IReadOnlyDictionary<Guid, WorklistCoreSummary> Cores, string? NextCursor) Page(
         IReadOnlyList<WorklistGroup> groups, IReadOnlyDictionary<Guid, WorklistItemExtras> extras, DecideCursor? after)
     {
         var returned = new List<Guid>(after?.Returned ?? []);
@@ -220,6 +221,7 @@ internal static class DecideLanePaging
         }
 
         var page = new List<WorklistItemSummary>(PageSize);
+        var cores = new Dictionary<Guid, WorklistCoreSummary>();
         (RankKey Best, Guid? CoreId, RankKey Rank, Guid Id) last = default;
         foreach (var group in sequence)
         {
@@ -248,10 +250,15 @@ internal static class DecideLanePaging
 
                 if (page.Count == PageSize)
                 {
-                    return (page, new DecideCursor(last.Best, last.CoreId, last.Rank, last.Id, returned).Encode());
+                    return (page, cores, new DecideCursor(last.Best, last.CoreId, last.Rank, last.Id, returned).Encode());
                 }
 
-                page.Add(WorklistItemSummary.From(item, extra.PrivilegeFlagged));
+                page.Add(WorklistItemSummary.From(item, group.Core, extra.PrivilegeFlagged));
+                if (group.Core is { } named && !cores.ContainsKey(named.RecordId))
+                {
+                    cores.Add(named.RecordId, WorklistCoreSummary.From(named));
+                }
+
                 last = (best, group.Core?.RecordId, extra.Rank, item.SignalId);
                 listed++;
             }
@@ -264,7 +271,7 @@ internal static class DecideLanePaging
             }
         }
 
-        return (page, null);
+        return (page, cores, null);
     }
 
     private static bool IsAfter(RankKey rank, Guid signalId, DecideCursor cursor)

@@ -110,7 +110,9 @@ public sealed partial class SignalReadRouteTests
         pages.SelectMany(p => p.Items).Select(i => i.SignalId).Should().Equal(console, "every item once, in the Console's order");
         foreach (var page in pages)
         {
-            JsonSerializer.SerializeToUtf8Bytes(page.Items, WebJson).Length.Should().BeLessThan(64 * 1024);
+            // NFR-02: the whole page (rows, the core map and the cursor) is under 64 KiB; the map has one entry per group on the page.
+            JsonSerializer.SerializeToUtf8Bytes(new { page.Items, page.Cores, page.NextCursor }, WebJson).Length.Should().BeLessThan(64 * 1024);
+            page.Cores.Keys.Should().BeEquivalentTo(page.Items.Select(i => i.CoreRecordId!.Value).Distinct());
             foreach (var item in page.Items)
             {
                 JsonSerializer.SerializeToUtf8Bytes(item, WebJson).Length.Should().BeLessThanOrEqualTo(WorklistItemSummary.MaxJsonBytes);
@@ -192,6 +194,49 @@ public sealed partial class SignalReadRouteTests
 
         rest.Should().OnlyHaveUniqueItems();
         rest.Should().NotIntersectWith(page1Ids.Where(id => !resolved.Contains(id)), "nothing already returned comes back");
+    }
+
+    // 015 review (F4, FR-12): every row names its group's core record by id, and the page names each of those records once (clipped name
+    // and number, from the same caller-trimmed group the REST worklist returns). A record with no row on the page has no entry.
+    [Fact]
+    public async Task DecidePaging_EachRowsCoreRecordId_ResolvesThroughThePagesCoreMap_AndAMatterNotOnThePageHasNoEntry()
+    {
+        var world = new World();
+        var acme = world.Matter(readers: [Alice], name: LongText("Acme v. Widget ", 400), number: "MAT-0042");
+        var globex = world.Matter(readers: [Alice], name: "Globex merger", number: "MAT-0043");
+        var initech = world.Matter(readers: [Alice], name: "Initech lease", number: "MAT-0044");
+        var start = DateTimeOffset.Parse("2026-09-01T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        string At(int hour) => start.AddHours(hour).ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
+        for (var i = 0; i < 30; i++) world.Signal(Decide, core: (MatterType, acme), severity: Critical, firstDetected: At(i));
+        for (var i = 0; i < 20; i++) world.Signal(Decide, core: (MatterType, globex), severity: Warning, firstDetected: At(i));
+        for (var i = 0; i < 10; i++) world.Signal(Decide, core: (MatterType, initech), severity: Info, firstDetected: At(i));
+        world.Signal(Decide, core: (MatterType, world.Matter(readers: [Bob], name: "Bob only")), severity: Critical);
+
+        var page1 = await PageAsync(world, null);
+        var page2 = await PageAsync(world, page1.NextCursor);
+
+        page1.Items.Should().HaveCount(50, "Acme's 30 and Globex's 20");
+        page1.Items.Should().OnlyContain(i => i.CoreRecordId != null && page1.Cores.ContainsKey(i.CoreRecordId.Value));
+        page1.Items.Count(i => i.CoreRecordId == acme).Should().Be(30);
+        page1.Items.Count(i => i.CoreRecordId == globex).Should().Be(20);
+        page1.Cores.Keys.Should().BeEquivalentTo([acme, globex], "Initech has no row on page 1, and Bob's matter is not Alice's");
+        page1.Cores[acme].Should().Be(new WorklistCoreSummary(WorklistItemSummary.Clip(LongText("Acme v. Widget ", 400), WorklistCoreSummary.NameBytes), "MAT-0042"));
+        page1.Cores[globex].Should().Be(new WorklistCoreSummary("Globex merger", "MAT-0043"));
+
+        page2.Items.Should().HaveCount(10).And.OnlyContain(i => i.CoreRecordId == initech);
+        page2.Cores.Keys.Should().BeEquivalentTo([initech]);
+        page2.Cores[initech].Should().Be(new WorklistCoreSummary("Initech lease", "MAT-0044"));
+
+        // The REST body's group names the same records, unclipped (the page map takes its text from those groups).
+        var rest = Lane(await OkAsync(world, Alice), "Decide").GetProperty("groups").EnumerateArray().Select(g => g.GetProperty("core")).ToList();
+        rest.Select(c => c.GetProperty("recordId").GetGuid()).Should().Equal(acme, globex, initech);
+        var pageCores = page1.Cores.Concat(page2.Cores).ToDictionary();
+        foreach (var core in rest)
+        {
+            pageCores[core.GetProperty("recordId").GetGuid()].Should().Be(new WorklistCoreSummary(
+                WorklistItemSummary.Clip(core.GetProperty("name").GetString(), WorklistCoreSummary.NameBytes),
+                WorklistItemSummary.Clip(core.GetProperty("number").GetString(), WorklistCoreSummary.NumberBytes)));
+        }
     }
 
     private static Guid CoreOf(World world, Guid signalId) =>

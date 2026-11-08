@@ -128,7 +128,8 @@
   <notes>Spec assumption 'page 1 carries at most 50 slim rows'. The new reason code name is chosen here (ontology.worklist.cursor_invalid) to follow the ontology.{area}.{reason} convention of DecisionCommitReasons; ontology review confirms it.
 Completed 2026-11-07 in commit 4b23aec7fd. Decisions, deviations (the 600-byte row drops Sentence), publish-size delta (+31,767 B), tests (unit 4393, integration 153, ArchTests 1998 pass) and review outcome: notes/decisions.md, section 'Task 015'.
 rework: fix-round-1 task 015
-PrivilegeFlagged has no production writer (ontology DI-64); FR-04 source pending owner decision (2026-11-07)</notes>
+PrivilegeFlagged has no production writer (ontology DI-64); FR-04 source pending owner decision (2026-11-07)
+022 must also drop page-map entries (core name and number) for groups whose items are privilege-reduced in model-visible structuredContent</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

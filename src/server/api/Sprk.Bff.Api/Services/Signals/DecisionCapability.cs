@@ -117,8 +117,8 @@ public sealed partial class DecisionCapability : IDecisionCapability
         }
 
         var decide = response.Lanes.FirstOrDefault(l => l.Lane == "Decide");
-        var (items, next) = DecideLanePaging.Page(decide?.Groups ?? [], extras, after);
-        return DecidePageResult.Ok(items, next);
+        var (items, cores, next) = DecideLanePaging.Page(decide?.Groups ?? [], extras, after);
+        return DecidePageResult.Ok(items, cores, next);
     }
 
     /// <inheritdoc />
