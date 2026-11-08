@@ -63,6 +63,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         // Signals step (step 9) re-reads it the same way and clears the reconciled changes in one app-only, row-version-conditioned write
         typeof(InvoiceLineAddService),
         typeof(InvoiceBlockedHold), // task 165a: reads it app-only (the IGenericEntityService its callers pass) for the recorded outcome the FR-20 hold decides from; never writes it
+        typeof(RuleSetService), // task 083: GetFirmClauseAsync reads the invoice's own submission app-only (IGenericEntityService, InvoiceBlockedHold.ReadOwnSubmissionAsync) for the procedureSnapshot member only; never writes it
     ];
 
     /// <summary>

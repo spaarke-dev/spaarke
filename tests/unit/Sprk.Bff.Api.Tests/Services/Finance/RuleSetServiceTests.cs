@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -13,7 +14,9 @@ using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Procedures;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
@@ -510,10 +513,11 @@ public sealed class RuleSetServiceTests
 
         public Guid RuleSet(
             int status = RuleSetService.RuleSetDraft, bool visible = true, int? scope = (int)RuleSetScope.ClientDefault, Guid? firm = null,
-            int? domain = RuleDomains.PolicyDomainBilling, DateTime? effectiveFrom = null, string? notConverted = null)
+            int? domain = RuleDomains.PolicyDomainBilling, DateTime? effectiveFrom = null, string? notConverted = null, Guid? procedure = null)
         {
             var e = new Entity("sprk_ruleset", Guid.NewGuid());
             e["sprk_name"] = "Acme guidelines";
+            if (procedure is { } p) e["sprk_procedure"] = new EntityReference("sprk_procedure", p);
             e["statuscode"] = new OptionSetValue(status);
             e["sprk_visibletofirms"] = visible;
             if (scope is { } s) e["sprk_scope"] = new OptionSetValue(s);
@@ -570,6 +574,40 @@ public sealed class RuleSetServiceTests
             if (location is not null) v["sprk_clauselocation"] = location;
             Seed(v);
             return v.Id;
+        }
+
+        /// <summary>A Procedure (task 083): its internal name and, when given, its firm-facing name.</summary>
+        public Guid Procedure(string name, string? firmFacingName = null)
+        {
+            var e = new Entity("sprk_procedure", Guid.NewGuid());
+            e["sprk_name"] = name;
+            if (firmFacingName is not null) e["sprk_firmfacingname"] = firmFacingName;
+            Seed(e);
+            return e.Id;
+        }
+
+        /// <summary>
+        /// An invoice of <paramref name="firm"/> (the test firm when null; none when <paramref name="noFirm"/>) with its OWN submission (the id the
+        /// invoice's id derives from) storing <paramref name="findingsJson"/> (no findings column when null). Returns the invoice id.
+        /// </summary>
+        public Guid Invoice(string? findingsJson, Guid? firm = null, bool noFirm = false)
+        {
+            var submissionId = Guid.NewGuid();
+            var invoiceId = InvoiceSubmissionPersister.InvoiceIdFor(submissionId);
+            var invoice = new Entity("sprk_invoice", invoiceId);
+            if (!noFirm) invoice["sprk_vendororg"] = new EntityReference("sprk_organization", firm ?? FirmId);
+            Seed(invoice);
+            AddSubmission(invoiceId, submissionId, findingsJson);
+            return invoiceId;
+        }
+
+        /// <summary>A submission linked to <paramref name="invoiceId"/>; its id is the invoice's own only when it is the one the invoice id derives from.</summary>
+        public void AddSubmission(Guid invoiceId, Guid submissionId, string? findingsJson)
+        {
+            var submission = new Entity("sprk_invoicesubmission", submissionId);
+            submission["sprk_invoice"] = new EntityReference("sprk_invoice", invoiceId);
+            if (findingsJson is not null) submission["sprk_findingsjson"] = findingsJson;
+            Seed(submission);
         }
 
         private void Apply(string entity, Guid id, Dictionary<string, object> fields)
@@ -649,6 +687,27 @@ public sealed class RuleSetServiceTests
     private static DateTime Utc(int y, int m, int d) => new(y, m, d, 0, 0, 0, DateTimeKind.Utc);
 
     private static readonly string[] DomainIsolated = { "sprk_policy", "sprk_ruleset" };
+
+    // Task 083: the invoice's snapshot, built by the real builder (082d) so the reader the firm clause uses is checked against what is stored.
+    private static BillingRuleApplication AppliedOn(Guid version) =>
+        new(version, BillingRuleSource.Procedure, [BillingSubject.ForInvoice()], [], []);
+
+    private static BillingRuleApplication DisplacedOn(Guid version) =>
+        new(version, BillingRuleSource.Procedure, [], [BillingSubject.ForInvoice()], []);
+
+    private static JsonObject SnapshotOf(params BillingRuleApplication[] applications) =>
+        ProcedureSnapshotPatchKit.SnapshotOf(new BillingProcedureBasis([], [], applications));
+
+    private static string FindingsWith(JsonNode? snapshot, bool member = true)
+    {
+        var root = new JsonObject { ["schema"] = 1, ["kind"] = "Accepted" };
+        if (member) root[ProcedureSnapshot.Member] = snapshot;
+        return root.ToJsonString();
+    }
+
+    /// <summary>An invoice of the test firm whose snapshot applied exactly <paramref name="versions"/>.</summary>
+    private static Guid JudgedInvoice(Harness h, params Guid[] versions) =>
+        h.Invoice(FindingsWith(SnapshotOf(versions.Select(AppliedOn).ToArray())));
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Create
@@ -921,7 +980,7 @@ public sealed class RuleSetServiceTests
         await service.PublishAsync(set, Effective, default);
         await service.AssignAsync(set, RuleSetScope.ClientDefault, null, default);
         await service.SetVisibilityAsync(set, false, default);
-        await service.GetFirmClauseAsync(version, FirmId, default);
+        await service.GetFirmClauseAsync(version, JudgedInvoice(h, version), default);
 
         var reads = h.Queries.Where(q => DomainIsolated.Contains(q.EntityName)).ToList();
         reads.Should().NotBeEmpty();
@@ -947,8 +1006,9 @@ public sealed class RuleSetServiceTests
 
         (await service.PublishAsync(set, Effective, default)).ErrorCode.Should().Be("ruleset.nothing_to_publish");
         (await service.GetAsync(set, default)).Value!.Proposals.Should().BeEmpty();
-        (await service.GetFirmClauseAsync(v1, FirmId, default)).Should().Be(FirmClauseText.None);
-        (await service.GetFirmClauseAsync(v2, FirmId, default)).Should().Be(FirmClauseText.None);
+        var invoice = JudgedInvoice(h, v1, v2);
+        (await service.GetFirmClauseAsync(v1, invoice, default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(v2, invoice, default)).Should().Be(FirmClauseText.None);
         h.Writes.Should().BeEmpty("nothing about an Ontology policy is written");
     }
 
@@ -1538,12 +1598,12 @@ public sealed class RuleSetServiceTests
         var (policy, version) = h.Rule(set, state: ProposalState.Accepted, current: true, from: Utc(2026, 1, 1));
         h.Row("sprk_policyversion", version)["sprk_rejectionreason"] = "INTERNAL: " + Reason; // even a stray value on a version in force
 
-        var shown = await h.Service().GetFirmClauseAsync(version, FirmId, default);
+        var shown = await h.Service().GetFirmClauseAsync(version, JudgedInvoice(h, version), default);
 
         shown.Should().Be(new FirmClauseText("No timekeeper may bill more than 10 hours a day.", "Section 4.2, p. 7"));
         System.Text.Json.JsonSerializer.Serialize(shown).Should().NotContain("INTERNAL").And.NotContain(Reason).And.NotContainEquivalentOf("reason");
-        typeof(FirmClauseText).GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name).Should().BeEquivalentTo(new[] { "Quote", "SectionReference" },
-            "the firm projection has exactly the clause and its location");
+        typeof(FirmClauseText).GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name).Should().BeEquivalentTo(
+            new[] { "Quote", "SectionReference", "FirmFacingName" }, "the firm projection has exactly the clause, its location and its label");
         h.Queries.Where(q => q.EntityName == "sprk_policyversion").Should().OnlyContain(
             q => !q.ColumnSet.AllColumns && !q.ColumnSet.Columns.Contains(RuleSetService.RejectionReasonColumn),
             "the firm read never selects the reason column, nor all columns");
@@ -2740,90 +2800,349 @@ public sealed class RuleSetServiceTests
         text.SectionReference.Should().Be("Section 4.2");
         typeof(FirmClauseText).GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Select(p => p.Name).Where(n => n != "EqualityContract")
-            .Should().BeEquivalentTo(new[] { "Quote", "SectionReference" }, "the result has no member that could carry the source document or a link to it");
+            .Should().BeEquivalentTo(new[] { "Quote", "SectionReference", "FirmFacingName" }, "the result has no member that could carry the source document or a link to it");
         RuleSetClauseVisibility.ForFirm(true, " ", null).Should().Be(FirmClauseText.None);
+        RuleSetClauseVisibility.ForFirm(true, " ", null, "A label alone").Should().Be(FirmClauseText.None, "a label without a clause is no text");
+        RuleSetClauseVisibility.ForFirm(false, "Quote", "Section 1", "Label").Should().Be(FirmClauseText.None, "the flag off hides the label too");
     }
 
-    [Fact]
-    public async Task GetFirmClause_ReadsTheRuleSetFlag_AndFailsClosedOnEveryOtherPath()
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Task 083: a firm sees a clause only for a policy version its invoice's snapshot applied
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private const string Quote = "No timekeeper may bill more than 10 hours a day.";
+    private const string Section = "Section 4.2, p. 7";
+
+    /// <summary>A Published, visible, Procedure-owned rule set with one rule in force; the Procedure and its version row.</summary>
+    private static (Guid Procedure, Guid Set, Guid Policy, Guid Version) ProcedureRule(
+        Harness h, string name = "INTERNAL Acme OCG v3", string? firmFacing = "Acme billing guidelines", bool visible = true, int status = RuleSetService.RuleSetPublished)
+    {
+        var procedure = h.Procedure(name, firmFacing);
+        var set = h.RuleSet(status, visible, procedure: procedure);
+        var (policy, version) = h.Rule(set, "BILL-P", ProposalState.Accepted, current: true);
+        return (procedure, set, policy, version);
+    }
+
+    [Fact(DisplayName = "083: a version the invoice's snapshot applied shows its quote, section and the Procedure's firm-facing name")]
+    public async Task GetFirmClause_ForAnAppliedVersion_ShowsTheClauseWithTheFirmFacingName()
     {
         var h = new Harness();
-        var on = h.RuleSet(RuleSetService.RuleSetPublished, visible: true);
-        var off = h.RuleSet(RuleSetService.RuleSetPublished, visible: false);
+        var (_, _, _, version) = ProcedureRule(h);
+
+        var shown = await h.Service().GetFirmClauseAsync(version, JudgedInvoice(h, version), default);
+
+        shown.Should().Be(new FirmClauseText(Quote, Section, "Acme billing guidelines"));
+    }
+
+    [Fact(DisplayName = "083: the label is the Procedure's name when its firm-facing name is blank")]
+    public async Task GetFirmClause_WithABlankFirmFacingName_LabelsWithTheName()
+    {
+        var h = new Harness();
+        var (_, _, _, blank) = ProcedureRule(h, name: "Acme OCG", firmFacing: "  ");
+        var (_, _, _, absent) = ProcedureRule(h, name: "Beta OCG", firmFacing: null);
+        var invoice = JudgedInvoice(h, blank, absent);
+
+        (await h.Service().GetFirmClauseAsync(blank, invoice, default)).FirmFacingName.Should().Be("Acme OCG");
+        (await h.Service().GetFirmClauseAsync(absent, invoice, default)).FirmFacingName.Should().Be("Beta OCG");
+    }
+
+    [Fact(DisplayName = "083 (a): a version the snapshot lists as displaced, as excluded or not at all shows no text; the applied one beside it does")]
+    public async Task GetFirmClause_ForADisplacedExcludedOrUnlistedVersion_ShowsNothing()
+    {
+        var h = new Harness();
+        var (_, _, _, applied) = ProcedureRule(h);
+        var (_, _, _, displaced) = ProcedureRule(h);
+        var (_, _, _, excluded) = ProcedureRule(h);
+        var (_, _, _, unlisted) = ProcedureRule(h);
+        var (_, _, _, mixed) = ProcedureRule(h);
+        var snapshot = SnapshotOf(
+            AppliedOn(applied), DisplacedOn(displaced),
+            new BillingRuleApplication(mixed, BillingRuleSource.Procedure, [BillingSubject.ForLine(0)], [BillingSubject.ForLine(1)], []));
+        snapshot["resolutions"] = new JsonArray(new JsonObject
+        {
+            ["dates"] = new JsonArray("2026-11-01"),
+            ["procedures"] = new JsonArray(),
+            ["rules"] = new JsonArray(),
+            ["excludedRules"] = new JsonArray(new JsonObject { ["policyVersionId"] = excluded.ToString("D") }),
+            ["excludedProcedures"] = new JsonArray(),
+            ["gaps"] = new JsonArray(),
+        });
+        var invoice = h.Invoice(FindingsWith(snapshot));
+        var service = h.Service();
+
+        (await service.GetFirmClauseAsync(applied, invoice, default)).Quote.Should().Be(Quote, "the control: the applied version shows");
+        (await service.GetFirmClauseAsync(mixed, invoice, default)).Quote.Should().Be(Quote, "applied on one subject and displaced on another is applied");
+        (await service.GetFirmClauseAsync(displaced, invoice, default)).Should().Be(FirmClauseText.None, "displaced: it never judged this invoice");
+        (await service.GetFirmClauseAsync(excluded, invoice, default)).Should().Be(FirmClauseText.None, "excluded: it never judged this invoice");
+        (await service.GetFirmClauseAsync(unlisted, invoice, default)).Should().Be(FirmClauseText.None, "not in the snapshot");
+    }
+
+    [Fact(DisplayName = "083 (b): with the visible-to-firms flag off an applied version shows nothing, label included")]
+    public async Task GetFirmClause_WithTheFlagOff_ShowsNothingForAnAppliedVersion()
+    {
+        var h = new Harness();
+        var (_, _, _, off) = ProcedureRule(h, visible: false);
+        var (_, _, _, on) = ProcedureRule(h);
+        var legacyOff = h.Rule(h.RuleSet(RuleSetService.RuleSetPublished, visible: false), "BILL-L", ProposalState.Accepted, current: true).Version;
+        var invoice = JudgedInvoice(h, off, on, legacyOff);
+        var service = h.Service();
+
+        (await service.GetFirmClauseAsync(on, invoice, default)).Quote.Should().Be(Quote, "the control: the same world with the flag on shows");
+        (await service.GetFirmClauseAsync(off, invoice, default)).Should().Be(FirmClauseText.None, "D-79: the flag is off");
+        (await service.GetFirmClauseAsync(legacyOff, invoice, default)).Should().Be(FirmClauseText.None, "D-79: the flag is off");
+    }
+
+    [Theory(DisplayName = "083 (c): an invoice with no usable snapshot shows no text, however the snapshot is missing")]
+    [InlineData("absentMember")]
+    [InlineData("nullMember")]
+    [InlineData("unknownVersion")]
+    [InlineData("notAnObject")]
+    [InlineData("noApplications")]
+    [InlineData("noFindingsColumn")]
+    [InlineData("blankFindings")]
+    [InlineData("malformedFindings")]
+    [InlineData("arrayFindings")]
+    public async Task GetFirmClause_WithoutAUsableSnapshot_ShowsNothing(string shape)
+    {
+        var h = new Harness();
+        var (_, _, _, version) = ProcedureRule(h);
+        var good = SnapshotOf(AppliedOn(version));
+
+        var invoice = shape switch
+        {
+            "absentMember" => h.Invoice(FindingsWith(null, member: false)),
+            "nullMember" => h.Invoice(FindingsWith(null)),
+            "unknownVersion" => h.Invoice(FindingsWith(WithMember(good, "version", 2))),
+            "notAnObject" => h.Invoice(FindingsWith(JsonValue.Create("applied"))),
+            "noApplications" => h.Invoice(FindingsWith(WithMember(good, "applications", null))),
+            "noFindingsColumn" => h.Invoice(null),
+            "blankFindings" => h.Invoice("  "),
+            "malformedFindings" => h.Invoice("{\"procedureSnapshot\":"),
+            _ => h.Invoice("[]"),
+        };
+        var control = JudgedInvoice(h, version);
+        var service = h.Service();
+
+        (await service.GetFirmClauseAsync(version, control, default)).Quote.Should().Be(Quote, "the control: a usable snapshot shows");
+        (await service.GetFirmClauseAsync(version, invoice, default)).Should().Be(FirmClauseText.None);
+    }
+
+    private static JsonObject WithMember(JsonObject snapshot, string name, JsonNode? value)
+    {
+        var copy = (JsonObject)snapshot.DeepClone();
+        copy[name] = value;
+        return copy;
+    }
+
+    [Fact(DisplayName = "083: no submission, or only a submission that is not the invoice's own, shows no text")]
+    public async Task GetFirmClause_WithoutTheInvoicesOwnSubmission_ShowsNothing()
+    {
+        var h = new Harness();
+        var (_, _, _, version) = ProcedureRule(h);
+        var snapshot = FindingsWith(SnapshotOf(AppliedOn(version)));
+
+        var noSubmission = Guid.NewGuid();
+        h.Seed(new Entity("sprk_invoice", noSubmission) { ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId) });
+        var foreign = h.Invoice(FindingsWith(SnapshotOf(DisplacedOn(version))));
+        h.AddSubmission(foreign, Guid.NewGuid(), snapshot); // linked to the invoice, but its id does not derive the invoice's: never the invoice's snapshot
+        var service = h.Service();
+
+        (await service.GetFirmClauseAsync(version, noSubmission, default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(version, foreign, default)).Should().Be(FirmClauseText.None,
+            "the own submission displaced it; a foreign linked submission that applied it is not read");
+    }
+
+    [Fact(DisplayName = "083: an invoice with no firm, an unknown invoice, an empty id or a read fault shows no text")]
+    public async Task GetFirmClause_FailsClosedWithoutAFirmOrAnInvoice()
+    {
+        var h = new Harness();
+        var (_, _, _, version) = ProcedureRule(h);
+        var findings = FindingsWith(SnapshotOf(AppliedOn(version)));
+        var firmless = h.Invoice(findings, noFirm: true);
+        var service = h.Service();
+
+        (await service.GetFirmClauseAsync(version, h.Invoice(findings), default)).Quote.Should().Be(Quote, "the control: with a firm it shows");
+        (await service.GetFirmClauseAsync(version, firmless, default)).Should().Be(FirmClauseText.None, "the invoice has no firm");
+        (await service.GetFirmClauseAsync(version, Guid.NewGuid(), default)).Should().Be(FirmClauseText.None, "no such invoice");
+        (await service.GetFirmClauseAsync(version, Guid.Empty, default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(Guid.Empty, h.Invoice(findings), default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(Guid.NewGuid(), h.Invoice(findings), default)).Should().Be(FirmClauseText.None, "the snapshot does not list it");
+    }
+
+    [Theory(DisplayName = "083: a fault on any read shows no text and throws nothing; the log carries no id or name")]
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_invoicesubmission")]
+    [InlineData("sprk_policyversion")]
+    [InlineData("sprk_policy")]
+    [InlineData("sprk_ruleset")]
+    [InlineData("sprk_procedure")]
+    public async Task GetFirmClause_OnAReadFault_ShowsNothing_AndLogsNoIdOrName(string faultingTable)
+    {
+        var h = new Harness();
+        var (procedure, set, policy, version) = ProcedureRule(h);
+        var invoice = JudgedInvoice(h, version);
+        var service = h.Service();
+        (await service.GetFirmClauseAsync(version, invoice, default)).Quote.Should().Be(Quote, "the control: without the fault it shows");
+        h.Logs.Clear();
+        var secrets = new[] { invoice, version, procedure, set, policy, FirmId }.Select(id => id.ToString("D")).Append("INTERNAL Acme OCG v3").ToArray();
+        h.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == faultingTable), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse fault on " + string.Join(" ", secrets)));
+
+        var shown = await service.GetFirmClauseAsync(version, invoice, default);
+
+        shown.Should().Be(FirmClauseText.None);
+        h.Logs.Should().Contain(l => l.Level == LogLevel.Warning, "a fault is logged");
+        h.Logs.Where(l => l.Level >= LogLevel.Information).Should().OnlyContain(l => secrets.All(s => !l.Message.Contains(s)));
+    }
+
+    [Fact(DisplayName = "083: a caller's own cancellation is not turned into a clause answer")]
+    public async Task GetFirmClause_WhenTheCallerCancels_Propagates()
+    {
+        var h = new Harness();
+        var (_, _, _, version) = ProcedureRule(h);
+        var invoice = JudgedInvoice(h, version);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        h.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_invoice"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+
+        var act = () => h.Service().GetFirmClauseAsync(version, invoice, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact(DisplayName = "083: a Procedure published, changed or retired after the invoice was judged does not change the answer for that invoice")]
+    public async Task GetFirmClause_DoesNotReResolve_ALaterProcedureChangeLeavesTheAnswerAlone()
+    {
+        var h = new Harness();
+        var (_, set, policy, v1) = ProcedureRule(h);
+        var invoice = JudgedInvoice(h, v1);
+        var service = h.Service();
+        var before = await service.GetFirmClauseAsync(v1, invoice, default);
+
+        // Later: version 2 of the rule goes live (v1 ends, the pointer moves), another Procedure and its rule are published, and the Procedure is renamed.
+        var v2 = h.AddVersion(policy, 2, ProposalState.Accepted, quote: "A newer clause.", location: "Section 9", from: Utc(2026, 11, 1));
+        h.Row("sprk_policyversion", v1)["sprk_inforceto"] = Utc(2026, 11, 1);
+        h.Row("sprk_policy", policy)["sprk_currentversion"] = new EntityReference("sprk_policyversion", v2);
+        var (_, _, _, newcomer) = ProcedureRule(h, name: "Published later");
+        h.Row("sprk_ruleset", set)["statuscode"] = new OptionSetValue(RuleSetService.RuleSetRetired);
+        h.Queries.Clear();
+
+        var after = await service.GetFirmClauseAsync(v1, invoice, default);
+
+        after.Should().Be(before, "the invoice was judged on v1; nothing published or retired since changes what its firm sees");
+        (await service.GetFirmClauseAsync(v2, invoice, default)).Should().Be(FirmClauseText.None, "v2 did not judge this invoice, though it is in force now");
+        (await service.GetFirmClauseAsync(newcomer, invoice, default)).Should().Be(FirmClauseText.None, "a Procedure published later did not judge it");
+        h.Queries.Select(q => q.EntityName).Distinct().Should().BeSubsetOf(
+            new[] { "sprk_invoice", "sprk_invoicesubmission", "sprk_policyversion", "sprk_policy", "sprk_ruleset", "sprk_procedure" },
+            "no Procedure assignment, override or Procedure Version is read: the snapshot is not re-resolved");
+    }
+
+    [Fact(DisplayName = "083: a record rule's clause carries the neutral label, never the Procedure's names, and reads no Procedure")]
+    public async Task GetFirmClause_ForARecordRule_CarriesTheNeutralLabel()
+    {
+        var h = new Harness();
+        var procedure = h.Procedure("BASE-INTERNAL-NAME", "BASE-FIRM-NAME");
+        var recordSet = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: RecordRuleSet.ScopeRecord, procedure: procedure);
+        var firmRecordSet = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: RecordRuleSet.ScopeFirmRecord, firm: FirmId, procedure: procedure);
+        var (_, record) = h.Rule(recordSet, "BRR-1", ProposalState.Accepted, current: true);
+        var (_, firmRecord) = h.Rule(firmRecordSet, "BRR-2", ProposalState.Accepted, current: true);
+        var invoice = JudgedInvoice(h, record, firmRecord);
+
+        var shown = await h.Service().GetFirmClauseAsync(record, invoice, default);
+        var shownForFirm = await h.Service().GetFirmClauseAsync(firmRecord, invoice, default);
+
+        shown.Should().Be(new FirmClauseText(Quote, Section, "Billing instructions for this record"));
+        shownForFirm.FirmFacingName.Should().Be("Billing instructions for this record");
+        System.Text.Json.JsonSerializer.Serialize(shown).Should().NotContain("BASE-");
+        h.Queries.Should().NotContain(q => q.EntityName == "sprk_procedure", "the neutral label needs no Procedure");
+    }
+
+    [Fact(DisplayName = "083: a legacy rule set (no Procedure) shows its clause with no label")]
+    public async Task GetFirmClause_ForALegacyRuleSet_HasNoLabel()
+    {
+        var h = new Harness();
+        var legacy = h.RuleSet(RuleSetService.RuleSetPublished, visible: true);
+        var (_, version) = h.Rule(legacy, "BILL-L", ProposalState.Accepted, current: true);
+
+        var shown = await h.Service().GetFirmClauseAsync(version, JudgedInvoice(h, version), default);
+
+        shown.Should().Be(new FirmClauseText(Quote, Section, null));
+    }
+
+    [Fact(DisplayName = "083: the snapshot is the authority, not the rule set's scope: another firm's set that judged this invoice shows")]
+    public async Task GetFirmClause_HasNoScopeSwitchOfItsOwn()
+    {
+        var h = new Harness();
+        var procedure = h.Procedure("Other firm OCG", "Other firm guidelines");
+        var otherFirmsSet = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: (int)RuleSetScope.Firm, firm: OtherFirmId, procedure: procedure);
+        var (_, version) = h.Rule(otherFirmsSet, "BILL-O", ProposalState.Accepted, current: true);
+
+        var shown = await h.Service().GetFirmClauseAsync(version, JudgedInvoice(h, version), default);
+
+        shown.FirmFacingName.Should().Be("Other firm guidelines");
+        shown.Quote.Should().Be(Quote);
+    }
+
+    [Fact(DisplayName = "083: a rule set that is not Published or Retired, a non-Billing policy or rule set, and an unnameable Procedure show no text")]
+    public async Task GetFirmClause_FailsClosedOnTheRuleSide()
+    {
+        var h = new Harness();
         var draftSet = h.RuleSet(RuleSetService.RuleSetDraft, visible: true);
         var ontologySet = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, domain: RuleDomains.PolicyDomainOntology);
-        var (_, vOn) = h.Rule(on, "BILL-ON", ProposalState.Accepted, current: true);
-        var (_, vOff) = h.Rule(off, "BILL-OFF", ProposalState.Accepted, current: true);
-        var (_, vEnded) = h.Rule(on, "BILL-ENDED", ProposalState.Accepted, to: Utc(2026, 6, 1));
-        var (_, vNeverInForce) = h.Rule(on, "BILL-DRAFT", ProposalState.Accepted);
+        var published = h.RuleSet(RuleSetService.RuleSetPublished, visible: true);
         var (_, vDraftSet) = h.Rule(draftSet, "BILL-DS", ProposalState.Accepted, current: true);
-        var (_, vOntologyPolicy) = h.Rule(on, "ONT-P", ProposalState.Accepted, current: true, domain: RuleDomains.PolicyDomainOntology);
+        var (_, vOntologyPolicy) = h.Rule(published, "ONT-P", ProposalState.Accepted, current: true, domain: RuleDomains.PolicyDomainOntology);
         var (_, vOntologySet) = h.Rule(ontologySet, "BILL-OS", ProposalState.Accepted, current: true);
+        var gone = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, procedure: Guid.NewGuid());
+        var (_, vGone) = h.Rule(gone, "BILL-G", ProposalState.Accepted, current: true);
+        var nameless = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, procedure: h.Procedure("  ", null));
+        var (_, vNameless) = h.Rule(nameless, "BILL-N", ProposalState.Accepted, current: true);
+        var retiredVersion = ProcedureRule(h, status: RuleSetService.RuleSetRetired).Version;
+        var (_, vPublished) = h.Rule(published, "BILL-OK", ProposalState.Accepted, current: true);
+        var orphanVersion = Guid.NewGuid();
+        var invoice = JudgedInvoice(h, vDraftSet, vOntologyPolicy, vOntologySet, vGone, vNameless, retiredVersion, vPublished, orphanVersion);
         var service = h.Service();
 
-        (await service.GetFirmClauseAsync(vOn, FirmId, default)).Should().Be(new FirmClauseText("No timekeeper may bill more than 10 hours a day.", "Section 4.2, p. 7"));
-        (await service.GetFirmClauseAsync(vEnded, FirmId, default)).Quote.Should().NotBeNull("a superseded published version's clause is still citable");
-        (await service.GetFirmClauseAsync(vOff, FirmId, default)).Should().Be(FirmClauseText.None, "the flag is off");
-        (await service.GetFirmClauseAsync(vNeverInForce, FirmId, default)).Should().Be(FirmClauseText.None, "a draft's clause is never shown");
-        (await service.GetFirmClauseAsync(vDraftSet, FirmId, default)).Should().Be(FirmClauseText.None, "the rule set is not Published");
-        (await service.GetFirmClauseAsync(vOntologyPolicy, FirmId, default)).Should().Be(FirmClauseText.None, "an Ontology policy has no firm clause");
-        (await service.GetFirmClauseAsync(vOntologySet, FirmId, default)).Should().Be(FirmClauseText.None, "an Ontology rule set is not a billing rule set");
-        (await service.GetFirmClauseAsync(Guid.NewGuid(), FirmId, default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(vPublished, invoice, default)).Quote.Should().Be(Quote, "the control: a Published billing set shows");
+        (await service.GetFirmClauseAsync(retiredVersion, invoice, default)).Quote.Should().Be(Quote, "a retired set still holds the versions that judged earlier invoices");
+        (await service.GetFirmClauseAsync(vDraftSet, invoice, default)).Should().Be(FirmClauseText.None, "the rule set is a draft");
+        (await service.GetFirmClauseAsync(vOntologyPolicy, invoice, default)).Should().Be(FirmClauseText.None, "an Ontology policy has no firm clause");
+        (await service.GetFirmClauseAsync(vOntologySet, invoice, default)).Should().Be(FirmClauseText.None, "an Ontology rule set is not a billing rule set");
+        (await service.GetFirmClauseAsync(vGone, invoice, default)).Should().Be(FirmClauseText.None, "the Procedure cannot be read, so the clause cannot be labelled");
+        (await service.GetFirmClauseAsync(vNameless, invoice, default)).Should().Be(FirmClauseText.None, "the Procedure has no usable name");
+        (await service.GetFirmClauseAsync(orphanVersion, invoice, default)).Should().Be(FirmClauseText.None, "the snapshot lists a version that does not exist");
     }
 
-    [Fact]
-    public async Task GetFirmClause_ShowsAFirmsOwnRuleSetToThatFirmOnly_AndTheClientDefaultToEveryFirm()
+    [Fact(DisplayName = "083: the result and the logs never carry the Procedure name (when a firm-facing name is set), an id or an override reason")]
+    public async Task GetFirmClause_NeverCarriesTheBasis()
     {
         var h = new Harness();
-        var own = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: (int)RuleSetScope.Firm, firm: FirmId);
-        var other = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: (int)RuleSetScope.Firm, firm: OtherFirmId);
-        var everyone = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: (int)RuleSetScope.ClientDefault);
-        var (_, vOwn) = h.Rule(own, "BILL-OWN", ProposalState.Accepted, current: true);
-        var (_, vOther) = h.Rule(other, "BILL-OTHER", ProposalState.Accepted, current: true);
-        var (_, vEveryone) = h.Rule(everyone, "BILL-ALL", ProposalState.Accepted, current: true);
-        var service = h.Service();
-
-        (await service.GetFirmClauseAsync(vOwn, FirmId, default)).Quote.Should().NotBeNull("a firm sees the clause of a rule set assigned to it");
-        (await service.GetFirmClauseAsync(vOwn, OtherFirmId, default)).Should().Be(FirmClauseText.None, "another firm's rule set is not for this firm");
-        (await service.GetFirmClauseAsync(vOther, FirmId, default)).Should().Be(FirmClauseText.None);
-        (await service.GetFirmClauseAsync(vOther, OtherFirmId, default)).Quote.Should().NotBeNull();
-        (await service.GetFirmClauseAsync(vEveryone, FirmId, default)).Quote.Should().NotBeNull("the client default applies to every firm");
-        (await service.GetFirmClauseAsync(vEveryone, OtherFirmId, default)).Quote.Should().NotBeNull();
-    }
-
-    [Fact]
-    public async Task GetFirmClause_WithTheFlagOff_ShowsNothingToAnyFirm_EvenTheOneTheRuleSetIsAssignedTo()
-    {
-        var h = new Harness();
-        var own = h.RuleSet(RuleSetService.RuleSetPublished, visible: false, scope: (int)RuleSetScope.Firm, firm: FirmId);
-        var everyone = h.RuleSet(RuleSetService.RuleSetPublished, visible: false, scope: (int)RuleSetScope.ClientDefault);
-        var (_, vOwn) = h.Rule(own, "BILL-OWN", ProposalState.Accepted, current: true);
-        var (_, vEveryone) = h.Rule(everyone, "BILL-ALL", ProposalState.Accepted, current: true);
-        var service = h.Service();
-
-        foreach (var firm in new[] { FirmId, OtherFirmId })
+        var (procedure, set, policy, version) = ProcedureRule(h);
+        var snapshot = SnapshotOf(AppliedOn(version));
+        snapshot["overrides"] = new JsonArray(new JsonObject
         {
-            (await service.GetFirmClauseAsync(vOwn, firm, default)).Should().Be(FirmClauseText.None, "D-79: the flag is off");
-            (await service.GetFirmClauseAsync(vEveryone, firm, default)).Should().Be(FirmClauseText.None, "D-79: the flag is off");
+            ["rowId"] = Guid.NewGuid().ToString("D"), ["mode"] = "Exclude", ["procedureId"] = procedure.ToString("D"),
+            ["reason"] = "OVERRIDE-REASON-TEXT", ["pinnedVersionId"] = Guid.NewGuid().ToString("D"),
+        });
+        snapshot["chain"] = new JsonArray(new JsonObject { ["table"] = "sprk_matter", ["id"] = Guid.NewGuid().ToString("D"), ["distance"] = 0 });
+        var invoice = h.Invoice(FindingsWith(snapshot));
+        var procedureVersion = Guid.NewGuid();
+        h.Row("sprk_policyversion", version)["sprk_procedureversion"] = new EntityReference("sprk_procedureversion", procedureVersion);
+
+        var shown = await h.Service().GetFirmClauseAsync(version, invoice, default);
+
+        shown.FirmFacingName.Should().Be("Acme billing guidelines");
+        var forbidden = new[] { "INTERNAL Acme OCG v3", "OVERRIDE-REASON-TEXT", procedure.ToString("D"), procedureVersion.ToString("D"), set.ToString("D"), policy.ToString("D"), version.ToString("D"), invoice.ToString("D") };
+        var surfaces = new[] { System.Text.Json.JsonSerializer.Serialize(shown), shown.ToString(), $"{shown}" };
+        foreach (var surface in surfaces)
+        {
+            forbidden.Should().OnlyContain(f => !surface.Contains(f));
         }
-    }
 
-    [Fact]
-    public async Task GetFirmClause_FailsClosedWhenTheAssignmentIsIncompleteOrNoFirmIsAsking()
-    {
-        var h = new Harness();
-        var firmNoFirm = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: (int)RuleSetScope.Firm);
-        var noScope = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: null, firm: FirmId);
-        var everyone = h.RuleSet(RuleSetService.RuleSetPublished, visible: true, scope: (int)RuleSetScope.ClientDefault);
-        var (_, vFirmNoFirm) = h.Rule(firmNoFirm, "BILL-A", ProposalState.Accepted, current: true);
-        var (_, vNoScope) = h.Rule(noScope, "BILL-B", ProposalState.Accepted, current: true);
-        var (_, vEveryone) = h.Rule(everyone, "BILL-C", ProposalState.Accepted, current: true);
-        var service = h.Service();
-
-        (await service.GetFirmClauseAsync(vFirmNoFirm, FirmId, default)).Should().Be(FirmClauseText.None, "a firm rule set without its firm is for nobody");
-        (await service.GetFirmClauseAsync(vFirmNoFirm, Guid.Empty, default)).Should().Be(FirmClauseText.None);
-        (await service.GetFirmClauseAsync(vNoScope, FirmId, default)).Should().Be(FirmClauseText.None, "a rule set with no scope is not assigned to anyone");
-        (await service.GetFirmClauseAsync(vEveryone, Guid.Empty, default)).Should().Be(FirmClauseText.None, "an empty firm id means the caller has no firm");
+        h.Logs.Where(l => l.Level >= LogLevel.Information && forbidden.Any(f => l.Message.Contains(f))).Should().BeEmpty("no log line at Information or above names one");
+        h.Queries.Where(q => q.EntityName == "sprk_policyversion").Should().OnlyContain(q => !q.ColumnSet.AllColumns && !q.ColumnSet.Columns.Contains("sprk_procedureversion"),
+            "the Procedure Version link is not even selected");
     }
 
     [Fact]
@@ -2832,11 +3151,12 @@ public sealed class RuleSetServiceTests
         var h = new Harness();
         var set = h.RuleSet(RuleSetService.RuleSetPublished, visible: true);
         var (_, version) = h.Rule(set, state: ProposalState.Accepted, current: true);
+        var invoice = JudgedInvoice(h, version);
         var service = h.Service();
 
-        (await service.GetFirmClauseAsync(version, FirmId, default)).Quote.Should().NotBeNull();
+        (await service.GetFirmClauseAsync(version, invoice, default)).Quote.Should().NotBeNull();
         await service.SetVisibilityAsync(set, false, default);
 
-        (await service.GetFirmClauseAsync(version, FirmId, default)).Should().Be(FirmClauseText.None);
+        (await service.GetFirmClauseAsync(version, invoice, default)).Should().Be(FirmClauseText.None);
     }
 }
