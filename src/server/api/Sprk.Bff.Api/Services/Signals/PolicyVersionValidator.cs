@@ -147,8 +147,8 @@ public sealed class PolicyVersionValidator
     /// the related-table filter columns remains the owner's call.</para>
     /// <para><b>Residual, derived Thresholds (accepted by the same re-signing, D-161).</b> A Threshold on <c>sprk_totalspendtodate</c>,
     /// <c>sprk_totalbudget</c> or <c>sprk_budgetutilizationpercent</c> records only the stored subject column in
-    /// <see cref="CompiledPredicate.ReadColumns"/>, but the evaluator decides it from org-wide grouped sums
-    /// (<c>FinanceBaseValues.BuildGroupedSpendFetchXml</c>) over <c>sprk_invoice.sprk_approvedtotal</c> and
+    /// <see cref="CompiledPredicate.ReadColumns"/>, but the evaluator decides it from org-wide sums
+    /// (<c>FinanceBaseValues.ReadCountedInvoicesAsync</c>, task 165b-4: the counted invoices that have their approve record) over <c>sprk_invoice.sprk_approvedtotal</c> and
     /// <c>sprk_invoice.sprk_totalamount</c> (the approved total, else the billed total: ebilling-r1 D-130),
     /// <c>sprk_invoice.statuscode</c> (ebilling-r1 D-41 / D-103, ontology D-166; counted = Approved, Sent to AP, Paid) and <c>sprk_budget.sprk_totalbudget</c>. Those base columns are not on this list;
     /// <c>DerivedBaseColumnsFieldSecurityTests</c> and <c>SignalPredicateTests</c> guard their field security (two invoice totals are secured on

@@ -4,7 +4,7 @@
     <title>Invoice integrity, part 165b-4: the spend paths decide only from server-written sources (pending spend excludes held invoices; counted spend needs the approve record)</title>
     <phase>4 Review (165 family)</phase>
     <gate>ontology-r1 agreed the shape on 2026-11-08 with conditions O1-O8 below (one review of this combined task). 165b-3 merged (it moves the writer-created rule to Services/Signals). Step 1 is a design note sent to ontology-r1 BEFORE any code.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Spend values read by Signals and the finance UI (.cs); ontology-r1-owned code.</rigor-reason>
     <model-tier>opus</model-tier>

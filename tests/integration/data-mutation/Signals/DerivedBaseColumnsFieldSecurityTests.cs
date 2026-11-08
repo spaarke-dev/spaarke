@@ -83,6 +83,13 @@ public class DerivedBaseColumnsFieldSecurityTests
             ("sprk_invoicesubmission", "sprk_processingstatus"),
             ("sprk_invoicesubmission", "sprk_outcomereasoncode"),
             ("sprk_invoicesubmission", "sprk_invoice"),
+            // Task 165b-4: counted spend needs the writer's approve Decision Record under the approval portion's key.
+            ("sprk_decisionrecord", "sprk_regardinginvoice"),
+            ("sprk_decisionrecord", "sprk_actioncode"),
+            ("sprk_decisionrecord", "sprk_steps"),
+            ("sprk_decisionrecord", "createdby"),
+            ("sprk_decisionrecord", "createdonbehalfby"),
+            ("sprk_invoiceapproval", "sprk_invoice"),
         });
     }
 

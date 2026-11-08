@@ -126,14 +126,20 @@ public sealed class SignalEvaluator
     private readonly PolicyVersionValidator _validator;
     private readonly IGenericEntityService _entities;
     private readonly SignalWriter _writer;
+    private readonly OntologyWriterDataverseClient _writerClient;
     private readonly ILogger<SignalEvaluator> _logger;
 
+    /// <param name="writerClient">Task 165b-4 (ontology-r1 Q2): the one writer-id source
+    /// (<see cref="OntologyWriterDataverseClient.GetWriterUserIdAsync"/>, cached WhoAmI), as <c>DecisionCommitService</c> takes it. Read only when a
+    /// policy reads spend: counted spend keeps an invoice only when the writer created its approve record.</param>
     public SignalEvaluator(
-        PolicyVersionValidator validator, IGenericEntityService entities, SignalWriter writer, ILogger<SignalEvaluator> logger)
+        PolicyVersionValidator validator, IGenericEntityService entities, SignalWriter writer, OntologyWriterDataverseClient writerClient,
+        ILogger<SignalEvaluator> logger)
     {
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+        _writerClient = writerClient ?? throw new ArgumentNullException(nameof(writerClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -223,15 +229,21 @@ public sealed class SignalEvaluator
         }
 
         // The candidates are the subjects the rule's scope selects (its 'when' and, for a triggered run, the one subject). Now the
-        // comparison: spend and budget per candidate from GROUPED aggregates (one query per base table per chunk of candidates,
-        // not one per subject), utilization in C#, then the operator and number the author declared.
+        // comparison: spend and budget per candidate from reads per chunk of candidates (never one per subject), utilization in C#,
+        // then the operator and number the author declared.
         var computed = new Dictionary<Guid, decimal>();
         var missing = new List<SignalMissingInput>();
         if (derived is not null)
         {
             var (needSpend, needBudget) = FinanceBaseValues.Needs(derived.Field);
+            // Task 165b-4: counted spend decides only from server-written sources (an invoice counts only with the writer's approve record),
+            // so a policy that reads spend needs the writer id. Fetched only then: a fault, or an empty id, throws and this policy's truth is
+            // unknown this run; a policy that reads no spend never asks.
+            var writerUserId = needSpend && candidates.Count > 0
+                ? await _writerClient.GetWriterUserIdAsync(ct).ConfigureAwait(false)
+                : Guid.Empty;
             var bases = await FinanceBaseValues.ReadAsync(
-                _entities, subject, candidates.Select(r => r.Id).ToList(), needSpend, needBudget, ct, _logger).ConfigureAwait(false);
+                _entities, subject, candidates.Select(r => r.Id).ToList(), needSpend, needBudget, writerUserId, ct, _logger).ConfigureAwait(false);
             var judged = new List<Entity>(candidates.Count);
             foreach (var row in candidates)
             {

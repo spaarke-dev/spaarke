@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -15,9 +14,11 @@ namespace Sprk.Bff.Api.Services.Finance.Tools;
 /// </summary>
 public class FinancialCalculationToolHandler : IAiToolHandler
 {
-    // INTENTIONAL: Keeps IDataverseService — casts to ServiceClient for FetchXML queries.
-    // Cannot use narrow interface until FetchXML support is added to IFieldMappingDataverseService.
+    // The application identity's IDataverseService, read through its IGenericEntityService members (task 165b-4).
     private readonly IDataverseService _dataverseService;
+
+    // Task 165b-4: the source of the writer identity only (BillingDecisionRecorder.WriterUserIdAsync), as ApExportService takes it.
+    private readonly BillingDecisionRecorder _recorder;
     private readonly FinanceTelemetry _telemetry;
     private readonly ILogger<FinancialCalculationToolHandler> _logger;
 
@@ -25,9 +26,6 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     public string ToolName => ToolNameConst;
 
     // Entity and field constants
-    private const string Invoice_Matter = "sprk_matter";
-    private const string Invoice_Project = "sprk_project";
-
     private const string MatterEntity = "sprk_matter";
     private const string ProjectEntity = "sprk_project";
 
@@ -42,10 +40,12 @@ public class FinancialCalculationToolHandler : IAiToolHandler
 
     public FinancialCalculationToolHandler(
         IDataverseService dataverseService,
+        BillingDecisionRecorder recorder,
         FinanceTelemetry telemetry,
         ILogger<FinancialCalculationToolHandler> logger)
     {
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -125,86 +125,37 @@ public class FinancialCalculationToolHandler : IAiToolHandler
         }
     }
 
-    /// <summary>The parent's invoices whose <c>statuscode</c> is one of <see cref="FinanceBaseValues.CountedInvoiceStatuses"/>: the
-    /// same query the rollup sends (<see cref="FinanceRollupService.BuildInvoiceQuery"/>), so the tool's totals agree with the
-    /// matter form. Internal so a test can pin it.</summary>
-    internal static QueryExpression BuildInvoiceQuery(string lookupField, Guid parentId) =>
-        FinanceRollupService.BuildInvoiceQuery(parentId, lookupField);
-
     /// <summary>
     /// Calculate financial totals for a matter by querying invoices and budget.
     /// </summary>
-    private async Task<FinancialTotals> CalculateMatterFinancialTotalsAsync(
-        Guid matterId,
-        CancellationToken ct)
-    {
-        // Resolve to ServiceClient for QueryExpression support (Bug-1: unwrap the concrete impl).
-        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinancialCalculationToolHandler));
-
-        // Query the matter's counted invoices
-        var invoiceQuery = BuildInvoiceQuery(Invoice_Matter, matterId);
-
-        var invoiceResults = await Task.Run(() => serviceClient.RetrieveMultiple(invoiceQuery), ct);
-
-        decimal totalSpend = 0;
-        int invoiceCount = invoiceResults.Entities.Count;
-
-        foreach (var invoice in invoiceResults.Entities)
-        {
-            totalSpend += FinanceBaseValues.SpendAmount(invoice);   // D-130: approved total, else billed total
-        }
-
-        _logger.LogDebug(
-            "Matter {MatterId} has {InvoiceCount} invoices with total spend {TotalSpend:C}",
-            matterId, invoiceCount, totalSpend);
-
-        // Get budget amount using same pattern as SpendSnapshotService
-        var budget = await GetBudgetAmountForMatterAsync(serviceClient, matterId, ct);
-        var budgetValue = budget ?? 0m;
-
-        var remainingBudget = budgetValue - totalSpend;
-        var budgetUtilization = budgetValue > 0 ? (totalSpend / budgetValue) * 100 : 0;
-
-        return new FinancialTotals
-        {
-            TotalBudget = budgetValue,
-            TotalSpendToDate = totalSpend,
-            RemainingBudget = remainingBudget,
-            BudgetUtilizationPercent = budgetUtilization,
-            InvoiceCount = invoiceCount,
-            AverageInvoiceAmount = invoiceCount > 0 ? totalSpend / invoiceCount : 0
-        };
-    }
+    private Task<FinancialTotals> CalculateMatterFinancialTotalsAsync(Guid matterId, CancellationToken ct) =>
+        CalculateFinancialTotalsAsync(MatterEntity, Budget_Matter, matterId, ct);
 
     /// <summary>
     /// Calculate financial totals for a project by querying invoices and budget.
     /// </summary>
-    private async Task<FinancialTotals> CalculateProjectFinancialTotalsAsync(
-        Guid projectId,
-        CancellationToken ct)
+    private Task<FinancialTotals> CalculateProjectFinancialTotalsAsync(Guid projectId, CancellationToken ct) =>
+        CalculateFinancialTotalsAsync(ProjectEntity, Budget_Project, projectId, ct);
+
+    /// <summary>
+    /// The parent's totals. Task 165b-4: the counted invoices come from the shared reader
+    /// (<see cref="FinanceBaseValues.ReadCountedInvoicesAsync"/>: counted status AND the approve record), the same one the rollup and the Signal
+    /// evaluator use, so the tool's totals agree with the matter form and decide only from server-written sources. Every read is app-only
+    /// through <see cref="IGenericEntityService"/>. A fault (the writer id or any read) propagates and <see cref="ExecuteAsync"/> answers an error.
+    /// </summary>
+    private async Task<FinancialTotals> CalculateFinancialTotalsAsync(string parentEntity, string budgetLookup, Guid parentId, CancellationToken ct)
     {
-        // Resolve to ServiceClient for QueryExpression support (Bug-1: unwrap the concrete impl).
-        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinancialCalculationToolHandler));
+        var writerUserId = await _recorder.WriterUserIdAsync(ct).ConfigureAwait(false);
+        var invoices = await FinanceBaseValues.ReadCountedInvoicesAsync(_dataverseService, parentEntity, [parentId], writerUserId, ct).ConfigureAwait(false);
 
-        // Query the project's counted invoices
-        var invoiceQuery = BuildInvoiceQuery(Invoice_Project, projectId);
-
-        var invoiceResults = await Task.Run(() => serviceClient.RetrieveMultiple(invoiceQuery), ct);
-
-        decimal totalSpend = 0;
-        int invoiceCount = invoiceResults.Entities.Count;
-
-        foreach (var invoice in invoiceResults.Entities)
-        {
-            totalSpend += FinanceBaseValues.SpendAmount(invoice);   // D-130: approved total, else billed total
-        }
+        var totalSpend = FinanceBaseValues.SumSpend(invoices);   // D-130: approved total, else billed total
+        var invoiceCount = invoices.Count;
 
         _logger.LogDebug(
-            "Project {ProjectId} has {InvoiceCount} invoices with total spend {TotalSpend:C}",
-            projectId, invoiceCount, totalSpend);
+            "{ParentEntity} {ParentId} has {InvoiceCount} counted invoices with total spend {TotalSpend:C}",
+            parentEntity, parentId, invoiceCount, totalSpend);
 
-        // Get budget amount
-        var budget = await GetBudgetAmountForProjectAsync(serviceClient, projectId, ct);
+        var budget = await GetBudgetAmountAsync(parentEntity, budgetLookup, parentId, ct).ConfigureAwait(false);
         var budgetValue = budget ?? 0m;
 
         var remainingBudget = budgetValue - totalSpend;
@@ -222,88 +173,28 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     }
 
     /// <summary>
-    /// Look up budget amount for the matter from Budget entity.
-    /// Matter can have multiple Budget records (spanning budget cycles/time periods).
-    /// Returns the sum of all Budget.sprk_totalbudget values for this matter.
+    /// The sum of the parent's Budget.sprk_totalbudget values (a parent may span several budget cycles); null when it has no budget row.
     /// </summary>
-    private async Task<decimal?> GetBudgetAmountForMatterAsync(
-        ServiceClient serviceClient,
-        Guid matterId,
-        CancellationToken ct)
+    private async Task<decimal?> GetBudgetAmountAsync(string parentEntity, string budgetLookup, Guid parentId, CancellationToken ct)
     {
-        // Query ALL Budget records for this matter
         var budgetQuery = new QueryExpression(BudgetEntity)
         {
             ColumnSet = new ColumnSet(Budget_TotalBudget),
             Criteria = new FilterExpression()
         };
-        budgetQuery.Criteria.AddCondition(Budget_Matter, ConditionOperator.Equal, matterId);
+        budgetQuery.Criteria.AddCondition(budgetLookup, ConditionOperator.Equal, parentId);
 
-        var budgetResults = await Task.Run(() => serviceClient.RetrieveMultiple(budgetQuery), ct);
+        var budgetResults = await _dataverseService.RetrieveMultipleAsync(budgetQuery, ct).ConfigureAwait(false);
         if (budgetResults.Entities.Count == 0)
         {
-            _logger.LogDebug("No budget records found for matter {MatterId}.", matterId);
+            _logger.LogDebug("No budget records found for {ParentEntity} {ParentId}.", parentEntity, parentId);
             return null;
         }
 
-        // Sum all budget amounts (matter may span multiple budget cycles)
-        decimal totalBudget = 0;
-        foreach (var budget in budgetResults.Entities)
-        {
-            var amount = budget.GetAttributeValue<Money>(Budget_TotalBudget);
-            if (amount != null)
-            {
-                totalBudget += amount.Value;
-            }
-        }
-
+        var totalBudget = FinanceBaseValues.SumMoney(budgetResults.Entities, Budget_TotalBudget);
         _logger.LogDebug(
-            "Budget amount for matter {MatterId}: {BudgetAmount:C} (from {BudgetCount} budget record(s))",
-            matterId, totalBudget, budgetResults.Entities.Count);
-
-        return totalBudget;
-    }
-
-    /// <summary>
-    /// Look up budget amount for the project from Budget entity.
-    /// Project can have multiple Budget records (spanning budget cycles/time periods).
-    /// Returns the sum of all Budget.sprk_totalbudget values for this project.
-    /// </summary>
-    private async Task<decimal?> GetBudgetAmountForProjectAsync(
-        ServiceClient serviceClient,
-        Guid projectId,
-        CancellationToken ct)
-    {
-        // Query ALL Budget records for this project
-        var budgetQuery = new QueryExpression(BudgetEntity)
-        {
-            ColumnSet = new ColumnSet(Budget_TotalBudget),
-            Criteria = new FilterExpression()
-        };
-        budgetQuery.Criteria.AddCondition(Budget_Project, ConditionOperator.Equal, projectId);
-
-        var budgetResults = await Task.Run(() => serviceClient.RetrieveMultiple(budgetQuery), ct);
-        if (budgetResults.Entities.Count == 0)
-        {
-            _logger.LogDebug("No budget records found for project {ProjectId}.", projectId);
-            return null;
-        }
-
-        // Sum all budget amounts (project may span multiple budget cycles)
-        decimal totalBudget = 0;
-        foreach (var budget in budgetResults.Entities)
-        {
-            var amount = budget.GetAttributeValue<Money>(Budget_TotalBudget);
-            if (amount != null)
-            {
-                totalBudget += amount.Value;
-            }
-        }
-
-        _logger.LogDebug(
-            "Budget amount for project {ProjectId}: {BudgetAmount:C} (from {BudgetCount} budget record(s))",
-            projectId, totalBudget, budgetResults.Entities.Count);
-
+            "Budget amount for {ParentEntity} {ParentId}: {BudgetAmount:C} (from {BudgetCount} budget record(s))",
+            parentEntity, parentId, totalBudget, budgetResults.Entities.Count);
         return totalBudget;
     }
 }

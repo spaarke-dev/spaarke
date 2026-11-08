@@ -1690,12 +1690,48 @@ public partial class SignalReevaluationJobTests
 
         await h.RunAsync();
 
-        // ebilling-r1 D-130: an aggregate cannot coalesce per row, so spend is two grouped invoice queries (the approved total, and the
-        // billed total where there is none), plus the one budget query: still grouped, never one query per matter.
-        h.Sysadmin.AggregateFetches.Should().HaveCount(4, "three grouped reads for invoices (billed, approved, billed re-check) and one for budgets, for all five matters");
-        h.Sysadmin.AggregateFetches.Select(f => XElement.Parse(f).Element("entity")!.Attribute("name")!.Value)
-            .Should().BeEquivalentTo("sprk_invoice", "sprk_invoice", "sprk_invoice", "sprk_budget");
+        // Task 165b-4: spend is one paged invoice row read (the snapshot) filtered by the parent-scoped portion and approve-record reads;
+        // budget stays the one grouped query. Still a fixed number of reads for all five matters, never one query per matter.
+        h.Sysadmin.AggregateFetches.Should().ContainSingle("one grouped read for budgets, for all five matters");
+        h.Sysadmin.AggregateFetches.Select(f => XElement.Parse(f).Element("entity")!.Attribute("name")!.Value).Should().Equal("sprk_budget");
         h.Sysadmin.AggregateFetches.Should().OnlyContain(f => f.Contains("aggregate=\"true\"") && f.Contains("groupby=\"true\""));
+        h.Sysadmin.Spend.Reads.Select(q => q.EntityName).Should().Equal(new[] { "sprk_invoice", "sprk_invoiceapproval", "sprk_decisionrecord" },
+            "one row read, one portion read and one approve-record read, for all five matters");
+    }
+
+    [Fact]
+    public async Task Run_SpendThreshold_WhenTheWriterIdIsUnknown_IsAPolicyFailure_NeverZeroSpend_165b4()
+    {
+        // Task 165b-4 (ontology-r1 §7.13 item 2, S4): counted spend needs the writer id. A WhoAmI fault makes the spend policy's truth
+        // unknown this run: a policy failure, nothing raised or closed, never "no records, so 0 spend".
+        const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":"<=","value":10}}""";
+        var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId) { ["sprk_matterid"] = MatterId });
+        h.WithInvoice("sprk_matter", MatterId, 30000m);
+        h.Org.WhoAmIFault = new TimeoutException("WhoAmI timed out.");
+
+        var result = await h.RunAsync();
+
+        result.ResultJson.Should().Contain("\"policyFailures\":1", "the fault is reported, never silent");
+        h.Org.CreatedPayloads.Should().BeEmpty("an unknown writer id never reads as 0 spend (which would hold '<= 10')");
+        h.Sysadmin.Spend.Reads.Should().BeEmpty("the writer id is asked for before any spend read");
+    }
+
+    [Fact]
+    public async Task Run_BudgetThreshold_IsNotAffectedByAnUnknownWriterId_165b4()
+    {
+        // The control: a policy that reads no spend never asks for the writer id, so the same fault does not touch it.
+        const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalbudget","operator":">=","value":1000}}""";
+        var h = new Harness().WithThresholdPolicy(body, "Budget is {{sprk_totalbudget}}.");
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId) { ["sprk_matterid"] = MatterId });
+        h.WithBudget("sprk_matter", MatterId, 5000m);
+        h.Org.WhoAmIFault = new TimeoutException("WhoAmI timed out.");
+
+        var result = await h.RunAsync();
+
+        result.ResultJson.Should().Contain("\"policyFailures\":0");
+        h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_sentence").Should().Be("Budget is 5000.");
+        h.Sysadmin.Spend.Reads.Should().BeEmpty("no spend read for a budget-only policy");
     }
 
     [Fact]
@@ -1716,8 +1752,9 @@ public partial class SignalReevaluationJobTests
 
         await h.RunAsync();
 
-        h.Sysadmin.AggregateFetches.Should().HaveCount(3, "the two parts of the D-130 amount rule plus the billed re-check, all over invoices, none over budgets")
-            .And.OnlyContain(f => f.Contains("sprk_invoice"));
+        h.Sysadmin.AggregateFetches.Should().BeEmpty("spend is the row read (task 165b-4) and budget is not asked for");
+        h.Sysadmin.Spend.Reads.Select(q => q.EntityName).Should().Equal(new[] { "sprk_invoice", "sprk_invoiceapproval", "sprk_decisionrecord" },
+            "the counted row read, then the portion and approve-record reads that filter it; nothing over budgets");
         h.Org.CreatedPayloads.Should().BeEmpty("30000 + 15000 + 4000 = 49000 is under 50000, and the uncounted rows must not be added");
 
         h.WithInvoice("sprk_matter", MatterId, 1000m); // Approved (the default): now exactly 50000, at-least is inclusive
@@ -1831,6 +1868,8 @@ public partial class SignalReevaluationJobTests
         created.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(ProjectId);
         created.GetAttributeValue<string>("sprk_sentence").Should().Be("Budget utilization has reached 95 percent.");
         h.Sysadmin.AggregateFetches.Should().OnlyContain(f => f.Contains("attribute=\"sprk_project\""), "the project lookup, not the matter's");
+        h.Sysadmin.Spend.Reads.Where(q => q.EntityName == "sprk_invoice").Should().OnlyContain(q => q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_project"),
+            "task 165b-4: the counted row read is scoped by the project lookup too");
     }
 
     // ---- D-120: a Threshold Signal resolved Acted re-raises only after a RE-CROSSING ---------------------------------------
@@ -2619,7 +2658,7 @@ public partial class SignalReevaluationJobTests
                 Ownership, scopes, Clock, Logger<SignalWriter>());
             var schema = new RuleBodySchemaValidator();
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, Clock), Logger<PolicyVersionValidator>());
-            Evaluator = new SignalEvaluator(validator, Sysadmin, Writer, Logger<SignalEvaluator>());
+            Evaluator = new SignalEvaluator(validator, Sysadmin, Writer, writerClient, Logger<SignalEvaluator>());
             Closure = new SignalClosureService(Writer, Sysadmin, Clock, Logger<SignalClosureService>());
             Suppression = new SignalSuppressionService(Sysadmin, writerClient, Clock, configuration, scopes, Logger<SignalSuppressionService>());
             Records = new DecisionRecordWriter(writerClient, Ownership,
@@ -2696,6 +2735,12 @@ public partial class SignalReevaluationJobTests
             }
 
             Sysadmin.InvoiceRows.Add(invoice);
+            if (FinanceBaseValues.CountedInvoiceStatuses.Contains(status))
+            {
+                // Task 165b-4: a counted invoice counts only with the writer's approve record under the approval's own key.
+                Sysadmin.Spend.ApproveRecord(invoice, Sprk.Bff.Api.Tests.Services.Finance.SpendWorld.KeyOf(invoice.Id, Sysadmin.Spend.Portion(invoice)));
+            }
+
             return this;
         }
 
@@ -2887,6 +2932,10 @@ public partial class SignalReevaluationJobTests
         public List<Entity> InvoiceRows { get; } = new();
         public List<Entity> BudgetRows { get; } = new();
         public List<string> AggregateFetches { get; } = new();
+
+        /// <summary>Task 165b-4: the spend readers' row reads (invoices, portions, approve records) over <see cref="InvoiceRows"/>.</summary>
+        public Sprk.Bff.Api.Tests.Services.Finance.SpendWorld Spend => _spend ??= new(InvoiceRows, BudgetRows);
+        private Sprk.Bff.Api.Tests.Services.Finance.SpendWorld? _spend;
 
         public Dictionary<string, List<Entity>> WitnessRows { get; } = new(StringComparer.Ordinal)
         {
@@ -3146,6 +3195,12 @@ public partial class SignalReevaluationJobTests
         public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default)
         {
             if (FaultOn?.Invoke(query) is { } fault) throw fault;
+            if (query.EntityName is "sprk_invoice" or "sprk_invoiceapproval"
+                || (query.EntityName == "sprk_decisionrecord" && query.LinkEntities.Any(l => l.LinkToEntityName == "sprk_invoice")))
+            {
+                return Task.FromResult(Spend.Answer(query)); // task 165b-4: counted spend's row and keyed reads
+            }
+
             object? Value(string attribute) => query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == attribute)?.Values[0];
             var result = new EntityCollection();
             switch (query.EntityName)
@@ -3512,6 +3567,9 @@ public partial class SignalReevaluationJobTests
         public bool FailConditionalUpdates { get; set; }
         public bool FailCreates { get; set; }
 
+        /// <summary>Task 165b-4: WhoAmI on the writer's connection fails (the writer id is unknown).</summary>
+        public Exception? WhoAmIFault { get; set; }
+
         /// <summary>K1: when set, every create throws exactly this (a typed Dataverse fault, say), instead of the plain failure.</summary>
         public Exception? CreateFault { get; set; }
 
@@ -3664,6 +3722,8 @@ public partial class SignalReevaluationJobTests
         {
             switch (request)
             {
+                case WhoAmIRequest when WhoAmIFault is { } fault:
+                    return Task.FromException<OrganizationResponse>(fault);
                 case WhoAmIRequest:
                     return Task.FromResult<OrganizationResponse>(new WhoAmIResponse { Results = { ["UserId"] = WriterUserId } });
                 case RetrieveRequest retrieve:

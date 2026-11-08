@@ -118,19 +118,18 @@ public sealed class InvoiceRejectReturnServiceTests
         FinanceBaseValues.PendingInvoiceStatuses.Should().NotContain(w.InvoiceStatus, "pending spend counts In Review only (D-104)");
         FinanceBaseValues.CountedInvoiceStatuses.Should().NotContain([InvoiceStatusCodes.Rejected, InvoiceStatusCodes.ReturnedToFirm]);
 
-        // The sets are what the rollup queries are BUILT from (BuildGroupedSpendFetchXml / BuildGroupedPendingSpendFetchXml): the statuses the
-        // decision lands on appear in neither query, so a decided invoice drops out of actual and pending spend.
-        foreach (var part in Enum.GetValues<FinanceBaseValues.SpendAmountPart>())
+        // The sets are what the shared row reads are BUILT from (FinanceBaseValues.InvoiceRowQuery, task 165b-4): the statuses the
+        // decision lands on appear in neither read, so a decided invoice drops out of actual and pending spend.
+        var counted = FinanceBaseValues.InvoiceRowQuery("sprk_matter", FinanceBaseValues.CountedInvoiceStatuses, [Guid.NewGuid()]);
+        var pending = FinanceBaseValues.InvoiceRowQuery("sprk_matter", FinanceBaseValues.PendingInvoiceStatuses, [Guid.NewGuid()]);
+        foreach (var query in new[] { counted, pending })
         {
-            var counted = FinanceBaseValues.BuildGroupedSpendFetchXml("sprk_matter", part, [Guid.NewGuid()]);
-            var pending = FinanceBaseValues.BuildGroupedPendingSpendFetchXml("sprk_matter", part, [Guid.NewGuid()]);
-            foreach (var query in new[] { counted, pending })
-            {
-                query.Should().NotContain($">{w.InvoiceStatus}<", "the decided status is in neither rollup query");
-            }
-
-            pending.Should().Contain($">{InvoiceStatusCodes.InReview}<", "pending spend still counts In Review");
+            query.Criteria.Conditions.Single(c => c.AttributeName == "statuscode").Values.Cast<int>()
+                .Should().NotContain(w.InvoiceStatus, "the decided status is in neither rollup read");
         }
+
+        pending.Criteria.Conditions.Single(c => c.AttributeName == "statuscode").Values.Cast<int>()
+            .Should().Contain(InvoiceStatusCodes.InReview, "pending spend still counts In Review");
     }
 
     // ── FR-36: the reason ──

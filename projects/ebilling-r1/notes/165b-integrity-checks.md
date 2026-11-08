@@ -751,3 +751,113 @@ change under (b). The `FinanceBaseValuesSeamTests` grouped cases become row-read
 7. **Yes:** the rollup calls `ReadPendingSpendAsync`, so there is one pending reader. EB-D-201 is accepted. The reader logs the count of In Review invoices it leaves out as unlinked; the count is in memory, so it costs no extra query.
 
 Review: the `FinanceBaseValues` and `Services/Signals` hunks go through ontology-r1's review on the PR. One independent review per change set, then a re-check of the fixes.
+
+## 8. 165b-4 implementation
+
+Option (b) as §7 describes it, with §7.12 and §7.13 applied. Every spend reader decides only from server-written sources: counted spend keeps
+an invoice only when the writer's approve Decision Record exists under one of the invoice's own approval keys, and pending spend leaves out the
+invoices `InvoiceBlockedHold` holds.
+
+### 8.1 What changed
+
+- **One keyed matcher** (`Services/Finance/InvoiceApproveRecord.cs`, new static class). It has two scopes over one rule (`Keys` + `Matched`, pure):
+  invoice-id scope (approval, AP export, Mark Paid, through `InvoiceApprovalService.InvoicesWithApproveRecordAsync`, which now delegates with no
+  copy) and parent scope (the three spend readers). The writer conditions come from `WriterCreatedRecord` (Services/Signals); no copy.
+- **Counted spend.** `FinanceBaseValues.ReadCountedInvoicesAsync` is the one counted reader: read 1 (paged row read, `InvoiceRowQuery`) is the
+  snapshot; reads 2 (portions) and 3 (approve records), parent-scoped with an inner link to the invoice, only filter it. `ReadAsync` (evaluator),
+  `FinanceRollupService` and `FinancialCalculationToolHandler` all sum it with `SpendAmount` per row (null-only coalesce; 0 counts as 0).
+- **Pending spend.** `ReadPendingSpendAsync` is the one pending reader (the rollup now calls it): a paged In Review row read, then
+  `InvoiceBlockedHold.CheckBatchAsync` (one paged submission read per chunk, inner link to the parent's In Review invoices, rule applied in memory).
+  Only `InvoiceBlockedHold`'s hold leaves pending; `sprk_firmhold` is not read. The reader logs (Warning) the count of In Review invoices it leaves
+  out because they have no linked own submission (EB-D-201), from memory.
+- **O5 canary** is in the batch read: an own linked submission whose findings read back empty throws, so the pending figure is unknown, never
+  "not held".
+- **Writer id.** `SignalEvaluator` takes `OntologyWriterDataverseClient` by injection and fetches the id only when the policy reads spend and has
+  candidates; a fault fails that policy (unknown, S4). `ReadAsync` and `ReadCountedInvoicesAsync` refuse `Guid.Empty` before any read. The rollup
+  and the tool get it from `BillingDecisionRecorder.WriterUserIdAsync` (the same client).
+- **Rollup and tool reads** now go through `IGenericEntityService` (the same app-only connection); the `ServiceClient` unwrap is gone, which is
+  what makes the three readers testable on one fixture.
+- **Retired** (H5): `SpendAmountPart`, `SpendAmountPartsInReadOrder`, `ReadSpendPartsAsync`, `ReadPartAsync`, `SameSums`, the grouped spend and
+  pending builders and the part/held branches of the generic builder (the budget builder stays), `HeldAlias`, the rollup's `BuildInvoiceQuery`,
+  `BuildPendingInvoiceQuery` and `QueryPendingInvoicesAsync`, and the tool's `BuildInvoiceQuery`.
+
+### 8.2 K1 (ontology-r1 condition ii)
+
+Read 1 is the snapshot. Reads 2 and 3 are an allow-list over it: they can remove an invoice, never add one. An invoice approved after read 1 is
+left out until the next run. The code says so in `ReadCountedInvoicesAsync`'s remarks.
+
+### 8.3 Reads per call (O7)
+
+Per chunk of 200 parents: counted = 1 paged row read + 1 portion read + 1 record read (2 and 3 skipped when the snapshot is empty); budget = 1
+grouped aggregate; pending = 1 paged row read + 1 submission read. The evaluator's spend policy therefore sends 4 reads per chunk (was 3 invoice +
+1 budget). The count test pins it: 1 invoice and 50 invoices give the same reads (4 counted-and-budget, 2 pending).
+
+### 8.4 Hunks for ontology-r1's review (line numbers in the new file)
+
+- **`FinanceBaseValues.cs`**
+  - Class remarks `:27-28` (counted spend needs the approve record).
+  - `SpendAmount` doc `:76-77`; `SpendAmountPart` and `SpendAmountPartsInReadOrder` removed (old `:89-111`).
+  - `DerivedBaseColumns` `:96-120` (doc rewritten; six entries added: `sprk_decisionrecord.sprk_regardinginvoice`, `sprk_actioncode`,
+    `sprk_steps`, `createdby`, `createdonbehalfby`, `sprk_invoiceapproval.sprk_invoice`).
+  - New `HoldSourceColumns` `:125-128` (forwards to `InvoiceBlockedHold.HoldSourceColumns`; the C1 findings ArchTest allows the column
+    name only in reviewed types, so the list lives there).
+  - `HeldSubmissionConditions` doc `:158-170`; `HeldAlias` removed.
+  - `ReadAsync` `:244-290` (`writerUserId` parameter, `Guid.Empty` refused, spend from `ReadCountedInvoicesAsync`).
+  - `ReadPendingSpendAsync` `:292-352` (row read, hold batch, unlinked count log).
+  - New `ReadCountedInvoicesAsync` `:355-405`, `InvoiceRowQuery` `:409-425`, `Distinct` `:427-432`, `SumSpendByParent` `:434-451`.
+  - `BuildGroupedBudgetFetchXml` `:453-470` (budget only); the grouped spend path removed (old `:317-432`).
+- **`Services/Signals`**
+  - `SignalEvaluator.cs`: constructor and field `:129-142`; `EvaluateAsync` `:232-246` (writer id fetched only when the policy reads spend and has
+    candidates, passed to `ReadAsync`).
+  - `PolicyVersionValidator.cs:150-151`: the remark names `ReadCountedInvoicesAsync`.
+  - No change to `WriterCreatedRecord`. No DI change (`SignalEvaluator` is a singleton; the client is already registered).
+- **ebilling:** `InvoiceApproveRecord.cs` (new); `InvoiceApprovalService.cs:1402-1407` (only `InvoicesWithApproveRecordAsync`'s body and doc);
+  `InvoiceBlockedHold.cs:101-170` (`HoldSourceColumns`, `CheckBatchAsync`); `FinanceRollupService.cs` and `Tools/FinancialCalculationToolHandler.cs`
+  (constructors take `BillingDecisionRecorder`; reads via the shared readers).
+
+### 8.5 Precondition and dev comparison (read-only, as the operator's CLI identity; ids to the lead only)
+
+- Precondition: linked own submissions with a null `sprk_findingsjson`, legacy rows included: **0** (6 linked submissions, all own, all readable).
+- Counted spend, old grouped path against the new path, per parent with counted invoices: `sprk_matter` 2 parents, 2 equal, 0 differ (2 counted
+  invoices, both kept); `sprk_project` 0 parents. Pending: `sprk_matter` 2 parents, 2 equal, 0 differ; `sprk_project` 0 parents. No difference,
+  so `ReadSpendPartsAsync` was deleted.
+
+### 8.6 Tests
+
+- `SpendServerWrittenSourcesTests` (new, over `SpendWorld`, an in-memory store answering the real queries) runs every case through the evaluator's
+  reader, the rollup and the tool: S1, S2 (another user, on behalf of the writer), key mismatch (another invoice's key, unrelated key, no key, no
+  portion), D-211 (approved total 0 counts 0; a reviewer-added line's record is not an approve record and is not needed), S5, S3 (three hold
+  shapes on both pending readers, with the override control), the unlinked log, O5, S4 (a fault on the invoice, portion, record or writer-id read
+  fails the read and counts nothing; an unknown writer is refused before any read), O6 parity, and the count test.
+- `SignalReevaluationJobTests` (evaluator level, ontology-r1 §7.13 item 2): a WhoAmI fault makes a spend policy a policy failure with no
+  spend read and nothing raised; control, a budget-only policy under the same fault raises its Signal. The read-count assertions there and in
+  `SignalEvaluationTriggerHandlerTests` now expect 1 budget aggregate plus the row, portion and record reads.
+- `SpendHeldAndPendingTests`: K1 column collector over the real reads (every column is a derived base column or a listed hold source), with its
+  control.
+- ArchTest `SpendReaderSourceAccessGuardTests`: O3 (the reading role's Decision Record read is Global; must-fire Deep, Local, Basic, missing,
+  look-alike) and O4 (each hold source is secured and the profile grants read; controls).
+- Live (opt-in, `SIGNALS_LIVE_DATAVERSE_URL`): `SpendReaderSourceAccessLiveTests` (O3 read depth and O4 profile membership for the WhoAmI
+  identity; it names no role and no identity) and the rewritten `FinanceBaseValuesSeamTests` (row reads, matcher and hold batch accepted by
+  Dataverse). Not run in this task.
+- Seeds (each file restored byte-identical; run over the 61 tests of `SpendServerWrittenSourcesTests`, `SpendHeldAndPendingTests` and the
+  two evaluator tests, all passing unseeded):
+  1. Drop the key match (`InvoiceApproveRecord.Matched` ignores the key): 12 fail.
+  2. Drop the hold exclusion (`ReadPendingSpendAsync` keeps held rows): 8 fail, among them the unlinked-log test and O6 parity.
+  3. Drop the canary (`CheckBatchAsync` never throws on unreadable findings): 2 fail.
+  4. Drop the writer conditions (`RecordQuery` without `WriterCreatedRecord`): 4 fail, among them O6 parity.
+  5. Ask for the writer id for every policy (`SignalEvaluator` without `needSpend &&`): 1 fails (the budget-only control).
+  (Failing theory cases were counted, not listed by name.)
+
+### 8.7 Known limits
+
+- K1 above.
+- 165b-3 K2 (any-portion match) carries into spend (uac-r2 §7.12 item 2).
+- uac-r2 §7.12 item 4 asks that the live privilege check not pass only because a broad administrator role is present. The live O3 test reads the
+  effective depth, so a broad role satisfies it; the least-privilege grant is the owner decision tracked on DEF-059.
+
+### 8.8 Verification
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- Filtered unit tests (Finance | Signals | ApExport | Approval | MarkPaid | Rollup): 11201 total, 11193 passed, 8 skipped, 0 failed.
+- `dotnet test tests/Spaarke.ArchTests/`: 2189 passed, 0 failed (the D-130 tool guard now also requires the shared counted reader).
+- No package added or changed.
