@@ -106,6 +106,7 @@
     <criterion testable="true">NFR-02 p90 under 3 s for page open and context pane, recorded.</criterion>
     <criterion testable="true">108–111 and 052 ui-tests pass in dev, including dark mode.</criterion>
     <criterion testable="true">SpaarkeMaster source holds the sprk_ebillingoverride table and prvWritesprk_ebillingoverride at Global in the Spaarke Core User role (D-142); a dev read after the import still shows the privilege at Global.</criterion>
+    <criterion testable="true">(From 165e pass 2, K4.) SpaarkeMaster source's `WebResources/sprk_createinvoicewizard` is replaced by the current CreateInvoiceWizard build. The 2026-10-13 bundle in 1.2.2.0 still creates `sprk_invoice` directly. Checked by content: the exported bundle contains no `createRecord("sprk_invoice"`. Until then, no environment imports SpaarkeMaster without redeploying the wizard afterwards.</criterion>
     <criterion testable="true">Evidence recorded in notes/112-wp4-deploy.md.</criterion>
   </acceptance-criteria>
 

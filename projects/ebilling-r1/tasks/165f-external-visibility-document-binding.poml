@@ -26,7 +26,7 @@
     <in>
       - Readers 1 and 2 call the one rule (no copy). A mismatched pair logs a reason code with ids only, following 165c's log-level split (reader 1 Warning; reader 2 Information, or Debug when reader 1 already logged the pair).
       - Extend `OwnSubmissionRuleSingleSourceTests`, or add a sibling guard with the same mechanics, so that a document-id comparison outside the rule fails.
-      - (From 165e pass 1, K1.) Reader 1 decides a submission with no invoice link whose derived invoice exists (looked up the way the firm-hold check already does, `InvoiceKeysOf`) by that invoice's verdict, not by channel alone. A read fault there withholds the submission.
+      - (From 165e pass 1, K1.) Reader 1 decides a submission with no invoice link whose derived invoice exists (looked up the way the firm-hold check already does, `InvoiceKeysOf`) by that invoice's verdict, not by channel alone. A read fault there withholds the submission. The existence check is required (165e pass 2): a Received or Processing submission with no invoice yet must stay decided by channel, not withheld.
     </in>
     <out>
       - Field security on the submission link columns (owner question, dev-deploy checklist).
