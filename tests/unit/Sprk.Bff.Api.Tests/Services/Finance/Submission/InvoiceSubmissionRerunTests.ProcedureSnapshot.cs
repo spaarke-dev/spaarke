@@ -1,8 +1,10 @@
 using System.Text.Json.Nodes;
 using FluentAssertions;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals.Billing;
 using Xunit;
+using ProcessorHarness = Sprk.Bff.Api.Tests.Services.Finance.Submission.InvoiceSubmissionProcessorTests.Harness;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance.Submission;
 
@@ -50,5 +52,50 @@ public sealed partial class InvoiceSubmissionRerunTests
         result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed);
         world.Findings()[ProcedureSnapshot.Member].Should().BeNull();
         ProcedureSnapshot.Read(world.Findings()).Should().BeNull();
+    }
+
+    private static ProcessorHarness WithOverSizeSnapshot() => new()
+    {
+        Channel = InvoiceSubmissionChannel.Internal,
+        EvaluationEdit = result => result with
+        {
+            ProcedureBasis = ProcedureSnapshotPatchKit.Padded(result.ProcedureBasis ?? new BillingProcedureBasis([], [], []), ProcedureSnapshotPatchKit.OverTheColumn),
+        },
+    };
+
+    [Fact(DisplayName = "082d fix round 3: a re-run whose findings are over the column only because of the Procedure snapshot drops the member (JSON null) and writes, not refuses")]
+    public async Task ARerun_WhoseFindingsAreOverTheColumnOnlyBecauseOfTheSnapshot_DropsTheMember_AndWrites()
+    {
+        var world = await World.SeedAsync();
+        world.Processor = WithOverSizeSnapshot();
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Completed, result.Code);
+        world.Applied.Should().ContainSingle("control: the commit was sent");
+        var written = world.Row(SubmissionId).GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
+        written.Length.Should().BeLessThanOrEqualTo(InvoiceSubmissionPersister.FindingsJsonMaxLength);
+        var stored = world.Findings();
+        stored.ContainsKey(ProcedureSnapshot.Member).Should().BeTrue();
+        stored[ProcedureSnapshot.Member].Should().BeNull("JSON null: readers treat it as no snapshot");
+        stored[InvoiceAssignFirmService.StoredDecisionMember]!["rulesRerun"]!.GetValue<string>().Should().Be(InvoiceAssignFirmService.RulesRerunCompleted, "control: the rest of the re-run is written");
+    }
+
+    [Fact(DisplayName = "082d fix round 3: a re-run whose findings are still over the column without the snapshot is refused TooLarge, with nothing written")]
+    public async Task ARerun_WhoseFindingsAreStillOverTheColumnWithoutTheSnapshot_IsRefusedTooLarge_AndWritesNothing()
+    {
+        var world = await World.SeedAsync();
+        world.EditFindings(f => f["padding"] = new string('x', InvoiceSubmissionPersister.FindingsJsonMaxLength + 1));
+        world.Processor = WithOverSizeSnapshot();
+        var before = world.Snapshot();
+
+        var result = await world.RunAsync();
+
+        result.Status.Should().Be(InvoiceSubmissionRerunStatus.Refused);
+        result.Code.Should().Be(InvoiceSubmissionRerunCodes.TooLarge);
+        result.Permanent.Should().BeTrue();
+        world.Applied.Should().BeEmpty();
+        world.Attempts.Should().Be(0);
+        world.Snapshot().Should().BeEquivalentTo(before, "nothing was written");
     }
 }

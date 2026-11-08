@@ -964,6 +964,9 @@ public class InvoiceSubmissionProcessorTests
         /// <summary>082c: the Procedure stream the evaluation sees (none by default).</summary>
         public ProcedureResolution? Procedures { get; init; }
 
+        /// <summary>082d fix round 3: edits the evaluation's result (e.g. pads its Procedure basis past the findings column), or null.</summary>
+        public Func<BillingEvaluationResult, BillingEvaluationResult>? EvaluationEdit { get; init; }
+
         /// <summary>082c: what the evaluation throws instead of evaluating (a resolver fault), or null.</summary>
         public Exception? EvaluationFault { get; set; }
 
@@ -1049,6 +1052,7 @@ public class InvoiceSubmissionProcessorTests
                     }
 
                     var result = Evaluator(LoggerFor<InvoiceComplianceEvaluator>()).Evaluate(request, Loaded([.. Rules]) with { Procedures = Procedures ?? NoProcedures() });
+                    result = EvaluationEdit?.Invoke(result) ?? result;
 
                     // A row written outside the publish path: the evaluation gate would downgrade the consequence, so the decider's
                     // own guard is proved by restoring Reject after the gate (defence in depth, as 073's DecideAsync warns about).
