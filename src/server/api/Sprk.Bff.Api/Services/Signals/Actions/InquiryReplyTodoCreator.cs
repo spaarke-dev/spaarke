@@ -56,6 +56,7 @@ public sealed class InquiryReplyTodoCreator(
     /// <summary>The first line of the To Do's notes: <c>serviceRequestId=</c> and the Inquiry's id. The UI reads the Inquiry from it.</summary>
     public const string NotesKey = "serviceRequestId=";
     private const string Todo = "sprk_todo";
+    private const string MatterNumberColumn = "sprk_matternumber";
 
     public async Task<InquiryReplyTodoOutcome> OnReplyArrivedAsync(Guid communicationId, CancellationToken ct)
     {
@@ -110,13 +111,17 @@ public sealed class InquiryReplyTodoCreator(
         }
 
         var nameField = RegardingNameFields.PrimaryNameField("sprk_matter");
+        // The matter's number rides on this same read (045c): the To Do's display columns carry it beside the name and url.
         var matter = await entities.RetrieveAsync(
             "sprk_matter", matterRef.Id,
-            AssignedToDefaults.ResponsibleContactColumns.Concat(nameField is null ? [] : [nameField]).ToArray(), ct).ConfigureAwait(false);
+            AssignedToDefaults.ResponsibleContactColumns.Concat(nameField is null ? [] : [nameField]).Append(MatterNumberColumn).ToArray(), ct)
+            .ConfigureAwait(false);
         var matterName = (nameField is null ? null : matter.GetAttributeValue<string>(nameField))?.Trim() ?? string.Empty;
 
         await new TodoRegardingBuilder(recordTypes, coreAncestors, logger)
-            .ApplyResolverFieldsAsync(entity, "sprk_matter", matterRef.Id, matterName, ct).ConfigureAwait(false);
+            .ApplyResolverFieldsAsync(
+                entity, "sprk_matter", matterRef.Id, matterName, ct, matter.GetAttributeValue<string>(MatterNumberColumn))
+            .ConfigureAwait(false);
 
         // The service request the UI calls the disposition route with: a machine-readable first line of the notes. The
         // typed sprk_regardingservicerequest lookup cannot ALSO be set: ADR-024 allows one specific regarding lookup.

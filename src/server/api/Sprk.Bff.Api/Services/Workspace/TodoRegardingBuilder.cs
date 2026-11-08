@@ -134,6 +134,7 @@ internal sealed class TodoRegardingBuilder
     internal const string FieldRegardingRecordId = "sprk_regardingrecordid";
     internal const string FieldRegardingRecordName = "sprk_regardingrecordname";
     internal const string FieldRegardingRecordUrl = "sprk_regardingrecordurl";
+    internal const string FieldRegardingRecordNumber = "sprk_regardingrecordnumber";
 
     // ─────────────────────────────────────────────────────────────────────────
     // Dependencies
@@ -181,6 +182,8 @@ internal sealed class TodoRegardingBuilder
     /// <param name="regardingId">Parent record GUID.</param>
     /// <param name="regardingDisplayName">Parent display name (for <c>sprk_regardingrecordname</c>).</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="regardingRecordNumber">The parent's reference number, when the caller already holds it (045c). Written to
+    /// <c>sprk_regardingrecordnumber</c> beside the id, name and url; when null or blank no number column is written.</param>
     /// <exception cref="ArgumentNullException">Any required argument is null.</exception>
     /// <exception cref="ArgumentException">
     /// Empty <paramref name="regardingId"/>, a <paramref name="regardingEntityName"/> the host table has no lookup for,
@@ -195,11 +198,12 @@ internal sealed class TodoRegardingBuilder
         string regardingEntityName,
         Guid regardingId,
         string regardingDisplayName,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? regardingRecordNumber = null)
     {
         // 1) Specific lookup + 2) resolver fields (4), populated atomically.
         await ApplyLookupAndPairAsync(
-            todoEntity, nameof(todoEntity), regardingEntityName, regardingId, regardingDisplayName, ct);
+            todoEntity, nameof(todoEntity), regardingEntityName, regardingId, regardingDisplayName, ct, regardingRecordNumber);
 
         // 3) FR-26 core-ancestor stamp — LAST, so it can never be overwritten by steps 1–2, and so the
         //    ADR-024 mutual-exclusion guard above (which fires on an ALREADY-SET lookup) does not mistake
@@ -273,7 +277,8 @@ internal sealed class TodoRegardingBuilder
         string regardingEntityName,
         Guid regardingId,
         string? regardingDisplayName,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? regardingRecordNumber = null)
     {
         if (host is null)
             throw new ArgumentNullException(hostParameterName);
@@ -317,7 +322,7 @@ internal sealed class TodoRegardingBuilder
         };
 
         // 2) Resolver fields (4) — populated atomically
-        await ApplyResolverPairAsync(host, regardingEntityName, regardingId, regardingDisplayName, ct);
+        await ApplyResolverPairAsync(host, regardingEntityName, regardingId, regardingDisplayName, ct, regardingRecordNumber);
     }
 
     /// <summary>
@@ -339,7 +344,8 @@ internal sealed class TodoRegardingBuilder
         string regardingEntityName,
         Guid regardingId,
         string? regardingDisplayName,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? regardingRecordNumber = null)
     {
         ArgumentNullException.ThrowIfNull(host);
 
@@ -347,6 +353,11 @@ internal sealed class TodoRegardingBuilder
         host[FieldRegardingRecordId] = cleanId;
         host[FieldRegardingRecordName] = regardingDisplayName ?? string.Empty;
         host[FieldRegardingRecordUrl] = BuildRecordUrl(regardingEntityName, cleanId);
+
+        // The reference number is written only when the caller already holds it (045c): the builder reads no record itself, so an
+        // unknown number leaves the column unset, never empty and never guessed.
+        if (!string.IsNullOrWhiteSpace(regardingRecordNumber))
+            host[FieldRegardingRecordNumber] = regardingRecordNumber.Trim();
 
         var recordTypeRef = await ResolveRecordTypeRefAsync(regardingEntityName, ct);
         if (recordTypeRef.HasValue)

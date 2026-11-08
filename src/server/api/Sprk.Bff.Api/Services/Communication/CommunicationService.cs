@@ -2907,14 +2907,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 primary.EntityType);
         }
 
-        // A reply's copied type and number describe the SOURCE's record (CopyRegardingFromSourceAsync): when the explicit
-        // association names another record they leave with the id they described, so the row never holds one record's id
-        // beside another's type or number. The same record keeps them.
+        // A reply's copied display values describe the SOURCE's record (CopyRegardingFromSourceAsync): when the explicit
+        // association names another record they leave with the id they described (type, number, name and url), so the row
+        // never holds one record's id beside another's values. The association's own name and url are written below when it
+        // gives them; otherwise they stay unset. The same record keeps what was copied.
         if (communication.GetAttributeValue<string>("sprk_regardingrecordid") is { Length: > 0 } copiedId
             && !string.Equals(copiedId, primary.EntityId.ToString(), StringComparison.OrdinalIgnoreCase))
         {
             communication.Attributes.Remove("sprk_regardingrecordtype");
             communication.Attributes.Remove("sprk_regardingrecordnumber");
+            communication.Attributes.Remove("sprk_regardingrecordname");
+            communication.Attributes.Remove("sprk_regardingrecordurl");
         }
 
         // Set denormalized regarding fields

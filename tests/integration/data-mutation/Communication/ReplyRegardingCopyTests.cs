@@ -146,6 +146,44 @@ public class ReplyRegardingCopyTests
         row.GetAttributeValue<string>("sprk_regardingrecordnumber").Should().Be("MAT-000123");
     }
 
+    [Fact]
+    public async Task Reply_WithAnExplicitAssociationToAnotherRecord_ThatCarriesNoNameOrUrl_KeepsNoSourceNameOrUrl()
+    {
+        // The association names another record but gives no display values. The source's name and url belong to the source's
+        // record, so none survives beside the new id (nothing is better than another record's).
+        var harness = new Harness(WholeSource());
+        var request = Reply() with
+        {
+            Associations = new[] { new CommunicationAssociation { EntityType = "sprk_matter", EntityId = OtherMatterId } },
+        };
+
+        await harness.Service.SendAsync(request, harness.SignedInUser());
+
+        var row = harness.Created.Should().ContainSingle(e => e.LogicalName == "sprk_communication").Subject;
+        row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(OtherMatterId.ToString());
+        row.Contains("sprk_regardingrecordname").Should().BeFalse("it was the source record's name");
+        row.Contains("sprk_regardingrecordurl").Should().BeFalse("it was the source record's url");
+        row.Contains("sprk_regardingrecordtype").Should().BeFalse();
+        row.Contains("sprk_regardingrecordnumber").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Reply_WithAnExplicitAssociationToTheSameRecord_ThatCarriesNoNameOrUrl_KeepsTheSourcesNameAndUrl()
+    {
+        // Must not fire: the association names the record the source names, so the copied display values still describe it.
+        var harness = new Harness(WholeSource());
+        var request = Reply() with
+        {
+            Associations = new[] { new CommunicationAssociation { EntityType = "sprk_matter", EntityId = MatterId } },
+        };
+
+        await harness.Service.SendAsync(request, harness.SignedInUser());
+
+        var row = harness.Created.Should().ContainSingle(e => e.LogicalName == "sprk_communication").Subject;
+        row.GetAttributeValue<string>("sprk_regardingrecordname").Should().Be("Acme Corp");
+        row.GetAttributeValue<string>("sprk_regardingrecordurl").Should().Contain(MatterId.ToString("D"));
+    }
+
     private static SendCommunicationRequest Reply() => new()
     {
         To = new[] { "counsel@other.example" },
