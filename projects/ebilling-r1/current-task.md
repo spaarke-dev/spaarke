@@ -39,7 +39,7 @@
 
 - **uac-r2:** 165b-3 part B fix diff (F1 only); 082d review; 165f pass-2 result. DEF-057 (#2631) on their backlog.
 - **ontology-r1:** 165b-4 design note (before code); DI-144 (#2632) adopts `WriterCreatedRecord`; DEF-058 (#2634, filed with ebilling-r1 label; hand off when they accept): only the billing recorder writes billing action codes.
-- **field-mapping:** 082d sha sent. fm-032b round 2 design note comes to us + uac-r2 together (nothing built before). If U3 = (c), they may switch to the inline option (mapping reads/gates before the persister transaction, values in the create payload); our checks: E7 agreed (a gate/rule fault maps NOTHING, invoice still created unmapped + admin note with ids/reason code only; condition: unmapped never more visible than mapped, else uac-r2 OK), no second sprk_invoice write path, resolver for ownership columns, `procedureSnapshot` never mapped.
+- **field-mapping:** fm-032b round 2 (`9083f5df93`, notes/task-032b-design.md) **confirmed by us and uac-r2**: U3 (c) (sprk_invoice leaves the access registry; copies are display only), inline in `PersistCoreAsync` before `BuildInvoiceCreateRequest`, E7 (fault maps nothing, invoice created + ids-only note). We asked: branch 032b-2 from the CURRENT work tip (re-anchor line numbers), add 082d snapshot tests to the regression list, T-E7 asserts identical `sprk_findingsjson`. fm owns owner questions O1 (placement; our view inline) and O2 (`Repair.cs` move). fm sends us the 032b-2/3 diffs before merge into work; we verify the tip.
 
 ## Standing gates (unchanged)
 
