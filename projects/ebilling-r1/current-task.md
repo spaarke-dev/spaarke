@@ -24,11 +24,11 @@
 
 | Work | Branch / base | Next |
 |---|---|---|
-| 130-0 fix round 1 (Opus) | `task/ebilling-130-0-fix1` from `64cdfbe304` | uac-r2 ruling (private message 2026-11-08): F1-1 todo/event (lists, single reads, counts), F1-2 documents follow their invoice on every route (known limit recorded), K1 503 after record check, K2-K4 notes lines, census. |
-| 130-0b (Opus) | `task/ebilling-130-0b` from `64cdfbe304` | Also asked to confirm the assistant seam covers todo/event/document regarding an invoice. |
-| 130b (agent `a4fe3b028fa655e29`) | `task/ebilling-130b` on `task/ebilling-130a` @ `60a2b64dc0` | Routes + 403 firm filter + ArchTest entries + writer-created reason filter. |
+| 130-0 fix round 1 (Opus) | `task/ebilling-130-0-fix1` from `64cdfbe304`, merges `446a40bb4e` (130-0b helper + firm refactor + ArchTest listing) | uac-r2 rulings: (a) full seam decision per linked invoice; (b) any linked invoice (document: `sprk_invoice` + `sprk_relatedinvoice`); (c) child decided by its invoice; (d) analysis/memo routes join; ROOTS never hidden, invoice link redacted (incl. fault); census; K1 503; K2-K4 lines. Then pass 2 (census check), diff to uac-r2. |
+| 130-0b step 1 of 3 (Opus): firm rule on the family seam | `task/ebilling-130-0b` (done: `10107ef8ac` helper, `ac3da15fb7` root/child, `18746299d2` `ReadContactFirmsAsync`/`ReadSystemUserFirmsAsync`, `446a40bb4e`) | Then step 2 (child rows via `InvoiceLinks`, per table x tool x 3 cases), step 3 (root link redaction; search_data hit fields open). Submission on assistant plane: hidden if invoice not visible OR own firm not caller's (sent to uac-r2 for veto). Then two passes, diff to uac-r2. |
+| 130a+130b adversarial pass 1 (Opus) | `13a8c63292..origin/task/ebilling-130b` (`34f6188cb5`) | Fix round if needed, pass 2, diff to uac-r2, merge both. Key check: 130b's firm source = the 130-0 definition. Then 130c (FR-18). |
 
-Idle: 130-0 implementer worktree `agent-ab27afb0265db7790` (branch `task/ebilling-130-0`, `64cdfbe304`); 130a implementer `ac7598016a7f4e696`.
+Idle: 130-0 implementer worktree `agent-ab27afb0265db7790` (`task/ebilling-130-0` @ `64cdfbe304`); 130a implementer; 130b implementer (`agent-a4fe3b028fa655e29`); 130-0b first implementer (`agent-a8e4c13635e858018`).
 
 ## Decisions made this stretch (2026-11-08)
 
