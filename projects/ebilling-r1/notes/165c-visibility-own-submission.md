@@ -299,4 +299,31 @@ endpoint or registration added.
 
 Step 9.5 (code-review, adr-check) not run here: the lead runs two adversarial passes after this task.
 
+### 9.5 Fix round 1
+
+Review findings F3-1, F3-2, K2-1, K3-1. Test and guard changes only; `ExternalInvoiceVisibility` is unchanged.
+
+- **F3-1, F3-2, sibling name.** In the no-firm cases whose row names a document (`NoFirm_TheAssistantTools_...` `internal-readable-document`,
+  `External_list_withholds_a_returned_submission_with_no_firm` `internal-with-document`, and
+  `NoFirm_Internal_WithAReadableDocument_IsWithheld_...`) the firmless row had a random id with the shared document, so the own-document rule
+  withheld it whether or not the firm check ran. Each firmless row now has its own readable document and the id derived from it, so only the
+  firm check can withhold it. The sibling's name is now true; its `firm_missing=1` reason assertion is kept.
+  Seed: `HasNoFirm` removed from the firm withhold in `DecideSubmissionsAsync`; 11 cases fail, including `internal-readable-document`,
+  `internal-with-document` and the sibling x2; restored byte-identical.
+- **K2-1.** `IsComparedBefore`, `IsComparedAfter` and `IsLocalCompared` skip grouping parentheses (a balanced `(`...`)` pair around only the
+  operand, not a call's) and whitespace. New cases: must fire `(ExistingDocumentSubmissionIdFor(d)) == s`, `s != (X.ExistingDocumentSubmissionIdFor(d))`,
+  `( ( ... ) ) != s`, the parenthesised local `((e) == s)`, `s != ( e )`, `(e).Equals(s)`, and the invoice derivation; must not fire a
+  parenthesised derivation that is passed on, returned, guarded against `Guid.Empty`, or wrapped in a call that is itself compared. Seed:
+  grouping skip disabled; the must-fire case fails, the rest pass.
+  Known limits of the scan (a full fix needs a Roslyn analyzer): `is var` patterns, `.Contains` on a set of derived ids, `CompareTo`, a
+  derivation re-spelled through `InvoiceSubmissionPersister.IdOf` literals, and the exempt files.
+- **K3-1.** New in `ExternalInvoiceVisibilityTests.OwnDocument.cs` (9 cases): a row the filter cannot produce (another id, or no id) in the
+  existence read withholds the submission (control: without it the Spa submission is visible); 60 unlinked submissions read two chunks, both
+  are read and each chunk's invoice decides its submission; a fault in the second chunk faults the decision and withholds that chunk's
+  submissions (and, the decision being one, the page). `InvoiceWorld` gained `Stray` and `FaultOn` hooks. Seeds: stray row ignored, 4 fail;
+  only the first chunk used, 2 fail; each restored byte-identical.
+  **Known limit, cost log.** The existence read is not counted in `InvoiceVisibilityCost`, so it is absent from the per-request cost line.
+  Counting it is not a one-line change (the helper returns the set only, the cost object is created after it, and the log template in
+  `ExternalDataService` lists each counter), so it is left; the firm-hold read has the same gap today. Both reads are one per 50 ids.
+
 rework: none task 165f

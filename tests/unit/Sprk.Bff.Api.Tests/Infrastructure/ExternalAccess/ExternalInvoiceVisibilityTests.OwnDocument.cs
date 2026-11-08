@@ -306,4 +306,70 @@ public sealed partial class ExternalInvoiceVisibilityTests
         _world.Reads("sprk_invoices").Should().ContainSingle("its own invoice is looked up, and does not exist yet");
         _world.Reads("sprk_storedfiles").Should().BeEmpty("no invoice is decided for it");
     }
+
+    // ── K3-1 (fix round 1): the existence read fails closed and reads every chunk ─────────────────────────────────────
+
+    [Theory(DisplayName = "165f K3-1 (seed: a stray row ignored by ReadExistingInvoicesAsync): a row the filter cannot have produced fails closed; the submission is withheld")]
+    [InlineData("contact", "other-id")]
+    [InlineData("contact", "no-id")]
+    [InlineData("flagged-systemuser", "other-id")]
+    [InlineData("flagged-systemuser", "no-id")]
+    public async Task K3_AStrayRowInTheExistenceRead_WithholdsTheSubmission(string caller, string shape)
+    {
+        var submission = Guid.NewGuid();
+
+        // Control: with no stray row the invoice does not exist yet and the Spa submission is visible by its channel.
+        var before = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.SpaChannel));
+        before.IsVisible(submission).Should().BeTrue(before.HiddenSummary());
+
+        _world.Stray["sprk_invoices"] = new()
+        {
+            new Dictionary<string, object?> { ["sprk_invoiceid"] = shape == "no-id" ? null : Guid.NewGuid().ToString() },
+        };
+        var decision = await DecideSubmissions(caller, SubmissionView(submission, InvoiceWorld.SpaChannel));
+
+        decision.IsVisible(submission).Should().BeFalse("a row the filter cannot produce counts the chunk's invoices as existing: decided by the invoice");
+        decision.Faulted.Should().BeFalse();
+    }
+
+    private static List<Guid> UnlinkedSpaSubmissions(int count) => Enumerable.Range(0, count).Select(_ => Guid.NewGuid()).ToList();
+
+    [Theory(DisplayName = "165f K3-1: more than 50 unlinked submissions are looked up in two chunks, both are read and each chunk's invoices are decided")]
+    [MemberData(nameof(ExternalCallers))]
+    public async Task K3_MoreThan50UnlinkedSubmissions_ReadBothChunks(string caller)
+    {
+        var ids = UnlinkedSpaSubmissions(60);
+        var first = ids[0];
+        var second = ids[55];
+        _world.Invoice(InvoiceSubmissionPersister.InvoiceIdFor(first)); // exists, no submission linked: hidden
+        _world.Invoice(InvoiceSubmissionPersister.InvoiceIdFor(second));
+
+        var decision = await DecideSubmissions(caller, ids.Select(id => SubmissionView(id, InvoiceWorld.SpaChannel)).ToArray());
+
+        var reads = _world.Reads("sprk_invoices");
+        reads.Should().HaveCount(2, "60 invoices are looked up in chunks of 50");
+        reads.Should().ContainSingle(u => u.Contains(InvoiceSubmissionPersister.InvoiceIdFor(first).ToString()));
+        reads.Should().ContainSingle(u => u.Contains(InvoiceSubmissionPersister.InvoiceIdFor(second).ToString()));
+        decision.IsVisible(first).Should().BeFalse("its own invoice exists in the first chunk and is hidden");
+        decision.IsVisible(second).Should().BeFalse("its own invoice exists in the second chunk and is hidden");
+        ids.Where(id => id != first && id != second).Should().OnlyContain(id => decision.IsVisible(id), "no invoice yet: decided by channel");
+        decision.Faulted.Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "165f K3-1: a fault in the second chunk of the existence read withholds that chunk's submissions (and, the decision being one, the page)")]
+    [MemberData(nameof(ExternalCallers))]
+    public async Task K3_AFaultInTheSecondChunk_WithholdsItsSubmissions(string caller)
+    {
+        var ids = UnlinkedSpaSubmissions(60);
+        var inSecondChunk = InvoiceSubmissionPersister.InvoiceIdFor(ids[55]).ToString();
+        _world.FaultOn = url => url.Contains("/sprk_invoices?", StringComparison.Ordinal) && url.Contains(inSecondChunk, StringComparison.Ordinal)
+            ? HttpStatusCode.ServiceUnavailable
+            : null;
+
+        var decision = await DecideSubmissions(caller, ids.Select(id => SubmissionView(id, InvoiceWorld.SpaChannel)).ToArray());
+
+        decision.Faulted.Should().BeTrue();
+        ids.Skip(50).Should().OnlyContain(id => !decision.IsVisible(id), "the submissions of the chunk that faulted");
+        ids.Should().OnlyContain(id => !decision.IsVisible(id), "one decision per page: a read fault withholds every asked submission");
+    }
 }

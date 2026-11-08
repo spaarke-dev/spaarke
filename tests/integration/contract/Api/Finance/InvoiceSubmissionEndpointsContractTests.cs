@@ -1214,7 +1214,9 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
     public async Task External_list_withholds_a_returned_submission_with_no_firm(string kind)
     {
         var document = _world.Document(Guid.NewGuid(), permission: StandardPermission);
-        var blank = kind == "spa" ? SubmissionRow("INV-BLANK", Spa) : SubmissionRow("INV-BLANK", Internal, document, id: Guid.NewGuid());
+        // The firmless Internal row has its own readable document (its id is derived from it), so only the firm check can withhold it.
+        var blankDocument = _world.Document(Guid.NewGuid(), permission: StandardPermission);
+        var blank = kind == "spa" ? SubmissionRow("INV-BLANK", Spa) : SubmissionRow("INV-BLANK", Internal, blankDocument);
         WithoutFirm(blank);
         var control = kind == "spa" ? SubmissionRow("INV-CONTROL", Spa) : SubmissionRow("INV-CONTROL", Internal, document);
 

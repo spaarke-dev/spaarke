@@ -20,8 +20,10 @@ namespace Spaarke.ArchTests;
 /// within that local's block, other than against <c>Guid.Empty</c>, <c>default</c> or <c>null</c>.</item>
 /// </list>
 /// Deriving an id (an assignment, an argument, a write target) is not a comparison. Not caught, by design of a scan: a derived id passed
-/// to another method that compares it, a comparison through a field or property, and a comparison through a second local copied from the
-/// first. The baseline is empty. Controls: <see cref="TheDetector_FiresOnAComparison"/>, <see cref="TheDetector_FiresOnALocalAndEquals"/>,
+/// to another method that compares it, a comparison through a field or property, a comparison through a second local copied from the
+/// first, a pattern (<c>is var</c>), <c>.Contains</c> on a set of derived ids, <c>CompareTo</c>, a derivation re-spelled through
+/// <c>InvoiceSubmissionPersister.IdOf</c> literals, and the exempt files. Grouping parentheses and whitespace around an operand are skipped
+/// (task 165f fix round 1). A full fix needs a Roslyn analyzer. The baseline is empty. Controls: <see cref="TheDetector_FiresOnAComparison"/>, <see cref="TheDetector_FiresOnALocalAndEquals"/>,
 /// <see cref="TheDetector_StaysQuietOnADerivation"/> and <see cref="TheDetector_StaysQuietOnALocalThatIsNotCompared"/>.
 /// <para>Task 165f: the same scan, with the same mechanics and blind spots, holds the own-document rule
 /// (<c>InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(documentId, submissionId)</c>, a document is a source only for the
@@ -81,7 +83,7 @@ public class OwnSubmissionRuleSingleSourceTests
         foreach (Match match in call.Matches(text))
         {
             var open = match.Index + match.Length - 1;
-            if (IsComparedBefore(text, match.Index) || IsComparedAfter(text, open) || IsEqualsArgument(text, match.Index)
+            if (IsComparedBefore(text, match.Index, open) || IsComparedAfter(text, match.Index, open) || IsEqualsArgument(text, match.Index)
                 || IsEqualsReceiver(text, open))
                 found.Add(SourceScan.LineOf(text, match.Index));
         }
@@ -102,24 +104,69 @@ public class OwnSubmissionRuleSingleSourceTests
         return found.ToList();
     }
 
-    // Left operand: skip the qualifier (InvoiceSubmissionPersister., Sprk.Bff.Api.…) and whitespace, then look for the operator.
-    private static bool IsComparedBefore(string text, int callStart)
+    // The start of the call's operand: the qualifier (InvoiceSubmissionPersister., Sprk.Bff.Api.…) is part of it.
+    private static int OperandStart(string text, int callStart)
     {
         var i = callStart - 1;
         while (i >= 0 && (char.IsLetterOrDigit(text[i]) || text[i] is '_' or '.'))
             i--;
-        while (i >= 0 && char.IsWhiteSpace(text[i]))
-            i--;
-        return i >= 1 && text[i] == '=' && text[i - 1] is '=' or '!';
+        return i + 1;
     }
 
-    // Right operand: find the call's closing parenthesis, then look for the operator after it.
-    private static bool IsComparedAfter(string text, int openParen)
+    // A `(` that opens a call or a keyword's condition (`Foo(`, `if (`), not a grouping around an operand. `return (x)` groups.
+    private static bool IsCallParen(string text, int open)
+    {
+        var i = open - 1;
+        while (i >= 0 && char.IsWhiteSpace(text[i]))
+            i--;
+        if (i < 0 || !(char.IsLetterOrDigit(text[i]) || text[i] is '_' or '>' or ']'))
+            return false;
+        var end = i + 1;
+        while (i >= 0 && (char.IsLetterOrDigit(text[i]) || text[i] == '_'))
+            i--;
+        return text[(i + 1)..end] != "return";
+    }
+
+    // What lies either side of the operand text[start..end] once the grouping parentheses that wrap it (and only it) are skipped,
+    // with the whitespace beside them: `((x))` and `( x )` are the operand x.
+    private static (string Before, string After) Around(string text, int start, int end)
+    {
+        var before = start;
+        var after = end;
+        while (true)
+        {
+            var b = before - 1;
+            while (b >= 0 && char.IsWhiteSpace(text[b]))
+                b--;
+            var a = after;
+            while (a < text.Length && char.IsWhiteSpace(text[a]))
+                a++;
+            if (b < 0 || a >= text.Length || text[b] != '(' || text[a] != ')' || IsCallParen(text, b))
+                break;
+            before = b;
+            after = a + 1;
+        }
+
+        return (text[..before].TrimEnd(), text[after..].TrimStart());
+    }
+
+    // Left operand: skip the qualifier, the grouping parentheses and whitespace, then look for the operator.
+    private static bool IsComparedBefore(string text, int callStart, int openParen)
     {
         var close = CloseOf(text, openParen);
         if (close < 0)
             return false;
-        var rest = text[(close + 1)..].TrimStart();
+        var before = Around(text, OperandStart(text, callStart), close + 1).Before;
+        return before.EndsWith("==", StringComparison.Ordinal) || before.EndsWith("!=", StringComparison.Ordinal);
+    }
+
+    // Right operand: find the call's closing parenthesis, skip the grouping parentheses, then look for the operator after it.
+    private static bool IsComparedAfter(string text, int callStart, int openParen)
+    {
+        var close = CloseOf(text, openParen);
+        if (close < 0)
+            return false;
+        var rest = Around(text, OperandStart(text, callStart), close + 1).After;
         return rest.StartsWith("==", StringComparison.Ordinal) || rest.StartsWith("!=", StringComparison.Ordinal);
     }
 
@@ -140,8 +187,7 @@ public class OwnSubmissionRuleSingleSourceTests
     // A local holding a derived id, as an operand: `x == a`, `a != x`, `a.Equals(x)`, `x.Equals(a)`, `Equals(a, x)`.
     private static bool IsLocalCompared(string text, int start, int end)
     {
-        var before = text[..start].TrimEnd();
-        var after = text[end..].TrimStart();
+        var (before, after) = Around(text, start, end);
         if ((before.EndsWith("==", StringComparison.Ordinal) || before.EndsWith("!=", StringComparison.Ordinal))
             && !EmptyBefore.IsMatch(before[..^2].TrimEnd()))
             return true;
@@ -280,6 +326,53 @@ public class OwnSubmissionRuleSingleSourceTests
                 var row = Get(ExistingDocumentSubmissionIdFor(documentId, 2));
                 var own = InvoiceSubmissionService.IsExistingDocumentSubmissionIdOf(documentId, submissionId);
                 // a note: ExistingDocumentSubmissionIdFor(documentId) == submissionId
+            }
+            """;
+
+        Assert.Empty(ComparisonLines(code, DocumentDerivation));
+    }
+
+    [Fact(DisplayName = "165f fix round 1 control (must fire): a derived id or a local wrapped in grouping parentheses, with whitespace, on either side")]
+    public void TheDetector_FiresOnAParenthesisedOperand()
+    {
+        const string call = """
+            void A(Guid documentId, Guid s)
+            {
+                var a = (ExistingDocumentSubmissionIdFor(documentId)) == s;
+                var b = s != (InvoiceSubmissionService.ExistingDocumentSubmissionIdFor(documentId));
+                var c = ( ( ExistingDocumentSubmissionIdFor(documentId) ) ) != s;
+                if (s == ( ExistingDocumentSubmissionIdFor(documentId) )) return;
+            }
+            """;
+        Assert.Equal(new[] { 3, 4, 5, 6 }, ComparisonLines(call, DocumentDerivation));
+
+        const string local = """
+            void A(Guid documentId, Guid s)
+            {
+                var e = ExistingDocumentSubmissionIdFor(documentId);
+                var a = ((e) == s);
+                var b = s != ( e );
+                var c = (e).Equals(s);
+            }
+            """;
+        Assert.Equal(new[] { 4, 5, 6 }, ComparisonLines(local, DocumentDerivation));
+
+        // The invoice derivation is scanned the same way.
+        Assert.Equal(new[] { 1 }, ComparisonLines("var a = (InvoiceSubmissionPersister.InvoiceIdFor(s)) == link;"));
+    }
+
+    [Fact(DisplayName = "165f fix round 1 control (must not fire): a parenthesised derivation that is passed on, returned or wrapped in a call is not a comparison")]
+    public void TheDetector_StaysQuietOnAParenthesisedDerivation()
+    {
+        const string code = """
+            Guid A(Guid documentId, Guid s)
+            {
+                var e = ExistingDocumentSubmissionIdFor(documentId);
+                Use((ExistingDocumentSubmissionIdFor(documentId)), s == Guid.Empty);
+                var wrapped = Get((ExistingDocumentSubmissionIdFor(documentId))) == s;
+                var copy = (e);
+                if ((e) == Guid.Empty) return (e);
+                return (ExistingDocumentSubmissionIdFor(documentId));
             }
             """;
 

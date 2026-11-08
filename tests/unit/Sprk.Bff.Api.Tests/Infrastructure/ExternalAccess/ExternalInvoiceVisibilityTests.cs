@@ -1132,12 +1132,13 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task NoFirm_Internal_WithAReadableDocument_IsWithheld_ItWouldOtherwiseDeferToTheDocument(string caller)
     {
         var document = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
+        var blankDocument = _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter());
         var withFirm = InvoiceWorld.SubmissionFor(document);
-        var blank = Guid.NewGuid();
+        var blank = InvoiceWorld.SubmissionFor(blankDocument); // its own readable document: only the firm check withholds it
 
         var decision = await DecideSubmissions(caller,
             SubmissionView(withFirm, InvoiceWorld.InternalChannel, document),
-            SubmissionView(blank, InvoiceWorld.InternalChannel, document, noFirm: true));
+            SubmissionView(blank, InvoiceWorld.InternalChannel, blankDocument, noFirm: true));
 
         decision.IsVisible(blank).Should().BeFalse("no firm: withheld before the document narrowing is consulted");
         decision.HiddenSummary().Should().Be(NoFirmCode);
@@ -1219,7 +1220,11 @@ public sealed partial class ExternalInvoiceVisibilityTests
             _ => throw new ArgumentOutOfRangeException(nameof(source)),
         };
         var (channel, document) = shape;
-        var blank = _world.PendingSubmission(document, channel, noFirm: true, id: Guid.NewGuid());
+        // The firmless row has its own readable document (its id is derived from it), so only the firm check can withhold it.
+        var blankDocument = source == "internal-readable-document"
+            ? _world.Document(Guid.NewGuid(), permission: Standard, matter: CleanMatter())
+            : document;
+        var blank = _world.PendingSubmission(blankDocument, channel, noFirm: true);
         var withFirm = _world.PendingSubmission(document, channel);
 
         var hidden = await _world.NewService(_identity.Object)
@@ -1608,6 +1613,12 @@ internal sealed class InvoiceWorld : HttpMessageHandler
     public ConcurrentQueue<string> Urls { get; } = new();
 
     public Dictionary<string, HttpStatusCode> Faults { get; } = new();
+
+    /// <summary>Task 165f fix round 1: a fault chosen per request (the full URL), checked after <see cref="Faults"/>; for a fault in one chunk.</summary>
+    public Func<string, HttpStatusCode?>? FaultOn { get; set; }
+
+    /// <summary>Task 165f fix round 1: rows a set answers WHATEVER the filter (a row the filter cannot have produced).</summary>
+    public Dictionary<string, List<Dictionary<string, object?>>> Stray { get; } = new();
 
     public Dictionary<Guid, RootRecordFlags> Flags { get; } = new();
 
@@ -2073,6 +2084,8 @@ internal sealed class InvoiceWorld : HttpMessageHandler
         var set = path[(path.LastIndexOf('/') + 1)..];
         if (Faults.TryGetValue(set, out var fault))
             return Task.FromResult(new HttpResponseMessage(fault));
+        if (FaultOn?.Invoke(url) is { } chosen)
+            return Task.FromResult(new HttpResponseMessage(chosen));
 
         var query = url.Contains('?') ? url[(url.IndexOf('?') + 1)..] : string.Empty;
         var select = Regex.Match(query, @"\$select=([^&]*)");
@@ -2107,6 +2120,9 @@ internal sealed class InvoiceWorld : HttpMessageHandler
 
         if (top.Success)
             rows = rows.Take(int.Parse(top.Groups[1].Value)).ToList();
+
+        if (Stray.TryGetValue(set, out var stray))
+            rows.AddRange(stray.Select(r => r.Where(kv => columns is null || columns.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value)));
 
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
