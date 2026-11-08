@@ -43,7 +43,6 @@ import type { ILookupItem } from '../../types/LookupTypes';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 import { describeHeldBackForSecure, provisionSecureProject, type IProvisionProjectResult } from './provisioningService';
-import { syncAssignedAccess } from '../../services/assignedAccessSync';
 import { SecureProvisioningOutcome } from './SecureProvisioningOutcome';
 import { EventService } from '../CreateEventWizard/eventService';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
@@ -560,9 +559,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         const currentFormValues = formValuesRef.current;
         const mergedFormValues: ICreateProjectFormState = { ...currentFormValues };
 
-        // 1. Resolve BU-derived cascade defaults (FR-WIZ-02 / G2 fix).
-        // Non-fatal: if resolution fails, we still create the project — the BFF
-        // backfill chain handles `sprk_containerid` / `sprk_searchindexname` server-side.
+        // 1. Resolve the host's BU-derived cascade defaults and hand them to ProjectService. Since task 022 (FR-16,
+        // FR-38/FR-40) nothing reads them: the project's index and container columns are the server's, and the
+        // uploaded files are indexed without naming an index. The call stays so existing hosts keep their
+        // `resolveUserBuDefaults` contract (as the Matter wizard, task 021). Non-fatal: if the host doesn't provide it
+        // or it throws, the project is created the same way.
         let cascadeDefaults: IUserBuCascadeDefaults | undefined;
         if (resolveUserBuDefaults) {
           try {
@@ -570,18 +571,13 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           } catch (err) {
             const message = err instanceof Error ? err.message : 'Unknown error';
             console.warn('[CreateProjectWizard] BU cascade resolution failed (non-fatal):', message);
-            warnings.push(
-              `Could not resolve Business Unit defaults for container/index (${message}). ` +
-                'The project was still created — fields will be populated by server-side backfill.'
-            );
           }
         }
 
-        // 2. Create sprk_project record (with INV-5-safe BU cascade applied inside the service)
-        // Task 020 (spec FR-12): pass authFetch/bffBaseUrl + the AssociateToStep
-        // selection so ProjectService can drive the Field Mapping Framework
-        // engine (graceful no-op when the host omits either, there's no
-        // association, or no configured profile for the pair).
+        // 2. Create the sprk_project record through the BFF child-records route (task 022, FR-16): only the user's
+        // values travel; the server maps (fill-only), owns and numbers the project. The AssociateToStep selection is the
+        // explicit mapping source, and a secure request is created secure from creation (task 049 fix round 2). Without
+        // authFetch/bffBaseUrl the service refuses the create (it never falls back to Xrm.WebApi).
         const projectService = new ProjectService(dataService, authFetch, bffBaseUrl);
         const result = await projectService.createProject(mergedFormValues, cascadeDefaults, context.association);
         if (!result.success) {
@@ -593,10 +589,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         warnings.push(...result.warnings);
 
         // 1a. Provision Secure Project infrastructure when the Secure Project toggle is enabled — FIRST, before any
-        //     child record or file (task 150). The server marks the project secure (sprk_issecure is field-secured;
-        //     this client never writes it), shares it to the creator (task 061; task 133 issues it BEFORE the move and
-        //     proves it after), assigns it to the Secure Record business unit's named owner team, then provisions its
-        //     own SPE container and records it. No business unit or account is created (BFF task 021).
+        //     child record or file (task 150). Since task 022 every secure-requested project is created secure from
+        //     creation (task 049 fix round 2: flagged, owned by the Secure Record business unit's named owner team and
+        //     shared to the creator in the create itself), so this call does only what is left — normally nothing
+        //     (`already_provisioned`, success), else the container the create could not finish. A failure keeps the
+        //     hold-back below. No business unit or account is created (BFF task 021).
         let provisioningWarning: string | undefined;
         let provisioningSucceeded = false;
         // Task 133: a failure the SAME caller can finish is rendered with its "Try securing again" action instead of
@@ -645,6 +642,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           // Same user-visible situation as an unconfigured environment, so it gets the same
           // treatment: say what did not happen, in copy written for the person reading it.
           // (Task 150: now literally true — the client no longer writes the flag, so the record is not marked secure.)
+          // Task 022: unreachable through the real ProjectService, which refuses the create without a BFF connection;
+          // kept as the fail-closed answer for any ProjectService that reports a create here.
           provisioningWarning =
             'This project was not secured, because securing a project needs a connection to the Spaarke service that is not configured here. The project was created as a normal project; an administrator can secure it.';
         }
@@ -809,13 +808,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           }
         }
 
-        // 1e. Task 142 (owner Q5 + A3): a project created SECURE is synced only now, after provisioning, so the
-        //     Assigned-To rule sees the secure flag and suggests its people in Manage Access instead of granting them
-        //     before the record was secured. (A non-secure project was synced by ProjectService at create.) Task 150
-        //     moved provisioning to step 1a, first; this sync still runs after it.
-        if (mergedFormValues.isSecure) {
-          await syncAssignedAccess(authFetch, bffBaseUrl, 'project', projectId);
-        }
+        // 1e. No client access sync (task 022). The "Assigned *" pass is the server's, run by the create itself: on a
+        //     secure-from-creation project it runs once the record is secured, so the Assigned-To rule sees the secure
+        //     flag and suggests its people in Manage Access (task 142, owner A3); when the create could not finish the
+        //     securing, the assigned-access reconciliation job runs it (task 049 fix round 1). The client's
+        //     `/assigned-access/sync` call that stood here only repeated that pass.
 
         // 2. Upload files to SPE + create document records
         //
@@ -857,7 +854,9 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
 
               // Trigger RAG indexing per file (canonical sync OBO path via
               // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal —
-              // file uploads already succeeded; indexing is best-effort.
+              // file uploads already succeeded; indexing is best-effort. No index is named (task 022, as task 021
+              // fix round 1): the server's FileIndexRequest has no searchIndexName, the index follows the content
+              // type (FR-40).
               const indexingWarnings = await entityService.indexUploadedFiles(
                 uploadResult.uploadedFiles,
                 tenantId ?? '',
@@ -866,8 +865,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
                   entityId: projectId,
                   entityName: projectName,
                 },
-                docResult.createdDocumentIds,
-                cascadeDefaults?.searchIndexName
+                docResult.createdDocumentIds
               );
               if (indexingWarnings.length > 0) {
                 warnings.push(...indexingWarnings);

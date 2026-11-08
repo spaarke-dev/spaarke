@@ -3,9 +3,9 @@
  * unfilled. A privilege or access refusal now becomes one plain sentence naming no ids, users, tables or privilege
  * names, chosen from the privilege the raw message names (Create / AppendTo or Append / none); a BFF child-record
  * refusal (`child_record.denied`) gets the neutral sentence; any other error keeps a clean message. Covers the helper,
- * the Xrm.WebApi create wizard end to end (Project), and the six BFF-routed create wizards end to end
- * (Event, Invoice, Report Card, To Do, Work Assignment, Matter) through the BFF's 403. The Matter wizard moved to the
- * BFF child-records route in field-mapping-server-write-path-r1 task 021.
+ * and the seven BFF-routed create wizards end to end (Event, Invoice, Report Card, To Do, Work Assignment, Matter,
+ * Project) through the BFF's 403. The Matter and Project wizards moved to the BFF child-records route in
+ * field-mapping-server-write-path-r1 tasks 021 and 022, so no Xrm.WebApi create wizard is left here.
  */
 
 import { describeWebApiCreateError } from '../webApiCreateError';
@@ -262,18 +262,9 @@ describe('describeWebApiCreateError', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The Xrm.WebApi create wizards, end to end through their service
+// The create wizards' forms. No Xrm.WebApi create wizard is left: the Matter (task 021) and the Project (task 022)
+// create through the BFF child-records route and are covered with the BFF-routed wizards below.
 // ---------------------------------------------------------------------------
-
-function rejectingDataService(err: unknown): IDataService {
-  return {
-    createRecord: jest.fn().mockRejectedValue(err),
-    retrieveRecord: jest.fn().mockResolvedValue({}),
-    retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
-    updateRecord: jest.fn().mockResolvedValue(undefined),
-    deleteRecord: jest.fn().mockResolvedValue(undefined),
-  };
-}
 
 const PROJECT_FORM: ICreateProjectFormState = {
   projectTypeId: '',
@@ -305,47 +296,6 @@ const MATTER_FORM: ICreateMatterFormState = {
   assignedOutsideCounselName: '',
   summary: '',
 };
-
-describe('create wizards show the sentence for a privilege refusal and log the full error', () => {
-  let errorSpy: jest.SpyInstance;
-
-  beforeEach(() => {
-    (global as any).fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ value: [] }) });
-    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    jest.spyOn(console, 'info').mockImplementation(() => undefined);
-    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  it('Project: the sentence, no template, and the full error object in console.error', async () => {
-    const result = await new ProjectService(rejectingDataService(PRIVILEGE_ERROR)).createProject(PROJECT_FORM);
-
-    expect(result.success).toBe(false);
-    expect(result.errorMessage).toBe(NEUTRAL_SENTENCE('project'));
-    expect(errorSpy).toHaveBeenCalledWith('[ProjectService] createRecord error:', PRIVILEGE_ERROR);
-  });
-
-  it('Project: any other error keeps the "Failed to create project record" message', async () => {
-    const result = await new ProjectService(rejectingDataService(new Error('Dataverse boom'))).createProject(
-      PROJECT_FORM
-    );
-
-    expect(result.errorMessage).toBe('Failed to create project record: Dataverse boom');
-  });
-
-  it.each([
-    ['AppendTo on a reference table', missing('prvAppendTosprk_ProjectType_Ref'), LINK_SENTENCE('project')],
-    ['Create on the project itself', missing('prvCreatesprk_Project'), CREATE_SENTENCE('project')],
-  ])('Project: %s gets its own sentence', async (_label, err, sentence) => {
-    const result = await new ProjectService(rejectingDataService(err)).createProject(PROJECT_FORM);
-
-    expect(result.errorMessage).toBe(sentence);
-  });
-  // Matter: moved to the BFF child-records route (task 021) -- covered with the BFF-routed wizards below.
-});
 
 // ---------------------------------------------------------------------------
 // The BFF-routed create wizards, end to end through their service and the BFF's 403
@@ -432,6 +382,7 @@ describe('the BFF-routed create wizards show the neutral sentence for the BFF re
       f => new TodoService(readOnlyDataService(), f, BFF).createTodo({ ...EMPTY_TODO_FORM, title: 'Call' }),
     ],
     ['Matter', 'matter', f => new MatterService(readOnlyDataService(), f, BFF).createMatter(MATTER_FORM, [], {})],
+    ['Project', 'project', f => new ProjectService(readOnlyDataService(), f, BFF).createProject(PROJECT_FORM)],
     [
       'Work Assignment',
       'work assignment',
@@ -510,6 +461,27 @@ describe('a root create (matter) that gets the BFF uniform not-found', () => {
 
     expect(result.status).toBe('error');
     expect(result.errorMessage).toBe(ROOT_NOT_FOUND_SENTENCE);
+    expect(result.errorMessage).not.toMatch(/filed under/i);
+  });
+
+  // Task 022: the project create names no parent either (the wizard files it under its matter after the create), so the
+  // route's uniform not-found is one of the values the user selected.
+  it('the Project wizard shows the root-create sentence too, never "filed under"', async () => {
+    const fetch = throwingAuthenticatedFetch(async (url: string, init?: RequestInit) =>
+      CHILD_CREATE.test(url) && (init?.method ?? 'GET').toUpperCase() === 'POST'
+        ? fakeResponse(404, {
+            ...BFF_NOT_FOUND,
+            detail: 'A record this project is filed under was not found. The project was not saved.',
+          })
+        : fakeResponse(200, {})
+    );
+
+    const result = await new ProjectService(readOnlyDataService(), fetch, BFF).createProject(PROJECT_FORM);
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toBe(
+      "One of the values you selected was not found, or you don't have permission to link it to this project. Ask your administrator."
+    );
     expect(result.errorMessage).not.toMatch(/filed under/i);
   });
 

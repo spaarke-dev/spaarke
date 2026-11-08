@@ -3,8 +3,9 @@
  * secure is secure from creation.
  *
  *   - `ProjectService.createProject` sends the intent (`secure=true`) with the BFF create when the Secure choice is on
- *     and its creates go through the BFF (the data service is `withBffChildWrites`-decorated, as InAppWizardHost does);
- *     it reports `securedAtCreate`. No intent for an ordinary project, and the undecorated (Xrm.WebApi) path is unchanged.
+ *     and reports `securedAtCreate`. No intent for an ordinary project. Task 022: every host creates through the BFF
+ *     route, so the undecorated data service (the standalone code page) sends the intent too — it no longer creates
+ *     through Xrm.WebApi.
  *   - `provisionSecureProject` with `securedAtCreate` treats `already_provisioned` as success (UAC-r2 ruling D2); without
  *     it, and for any other code, the answer is the failure it always was.
  */
@@ -116,16 +117,18 @@ describe('ProjectService.createProject — the secure intent travels with the BF
     ]);
   });
 
-  it('a secure project on an undecorated data service (Xrm.WebApi, task 022) is created as before, with no intent', async () => {
+  it('a secure project on an undecorated data service (the standalone code page) is created through the BFF with the intent (task 022)', async () => {
     const { service, createSpy } = innerDataService();
     const host = bff();
 
     const result = await new ProjectService(service, host.fetch, BFF).createProject(FORM);
 
     expect(result.success).toBe(true);
-    expect(result.securedAtCreate).toBeUndefined();
-    expect(createSpy).toHaveBeenCalledWith('sprk_project', expect.any(Object));
-    expect(host.urls.some(u => u.includes('/api/v1/child-records/'))).toBe(false);
+    expect(result.securedAtCreate).toBe(true);
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(host.urls.filter(u => u.includes('/api/v1/child-records/'))).toEqual([
+      `${BFF}/api/v1/child-records/sprk_project?secure=true`,
+    ]);
   });
 
   it('a refused secure create (the delegation rule) is a failed create, and nothing else is asked', async () => {
