@@ -172,6 +172,8 @@ internal sealed class DecisionLookupRouteHost : IAsyncDisposable
         builder.Services.AddSingleton((SignalSuppressionService)RuntimeHelpers.GetUninitializedObject(typeof(SignalSuppressionService)));
         // Task 014: DecisionCapability also takes the commit service; the lookup route never commits.
         builder.Services.AddSingleton((DecisionCommitService)RuntimeHelpers.GetUninitializedObject(typeof(DecisionCommitService)));
+        // Task 018: the capability takes the FR-04 privilege derivation (registered by SignalsModule in the real host).
+        builder.Services.AddScoped<WorkItemPrivilege>();
         builder.Services.AddScoped<IDecisionCapability, DecisionCapability>();
         builder.Services.AddScoped<IDecisionLookupSearch, DecisionLookupSearch>();
 

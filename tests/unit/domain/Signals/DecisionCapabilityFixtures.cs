@@ -62,6 +62,7 @@ internal static class DecisionCapabilityFixtures
             caller ?? new Mock<IDataverseUserClient>(MockBehavior.Strict).Object,
             suppressionLogger ?? NullLogger<SignalSuppressionService>.Instance,
             commits ?? Unused<DecisionCommitService>(),
+            new WorkItemPrivilege(NullLogger<WorkItemPrivilege>.Instance),
             planReadStamp,
             parameterSources);
 

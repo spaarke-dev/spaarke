@@ -4,8 +4,10 @@
 // IntegrationTests assembly by the link in its csproj, and removed from the unit-test assembly's regression glob.
 //
 // Seeded world: 200 Decide-lane Signals over 4 matters the caller reads, every text at its longest, mixed severities inside each matter
-// (so a matter's best item is not its only item), every 7th Signal privilege-flagged, every 10th a billing line item (invoiceReview with both
-// ids). Bob alone reads one more matter whose flagged Signal must never reach Alice.
+// (so a matter's best item is not its only item), every 10th a billing line item (invoiceReview with both ids). Task 018 (FR-04 as amended
+// 2026-11-08): every 7th Signal is privileged through a communication (a Privileged or Potentially Privileged communication subject, or, on a
+// billing item, a Privileged witness communication; a communication subject is an untyped pair, as live, DI-63); others have a None or unclassified communication, or the never-written sprk_signal column
+// set to true, and are not flagged. Bob alone reads one more matter whose privileged Signal must never reach Alice.
 using System.Security.Claims;
 using System.Text.Json;
 using FluentAssertions;
@@ -25,6 +27,19 @@ public sealed partial class SignalReadRouteTests
 
     private static string LongText(string prefix, int length) => (prefix + new string('x', length))[..length];
 
+    private const int ClassNone = 100000000;
+    private const int ClassPotentiallyPrivileged = 100000001;
+    private const int ClassPrivileged = 100000002;
+
+    /// <summary>Task 018: the caller's classification read (one per page).</summary>
+    private const string ClassificationRead = "sprk_communications?$select=sprk_communicationid,sprk_privilegeclassification";
+
+    private static int ClassificationReads(World world) => world.Requests.Count(r => r.StartsWith(ClassificationRead, StringComparison.Ordinal));
+
+    /// <summary>Evidence quoting the communications by ref only (no text, so the D-142 witness read is not involved).</summary>
+    private static string WitnessRefs(params Guid[] communications) =>
+        JsonSerializer.Serialize(communications.Select(id => new { kind = "communication", @ref = $"sprk_communication:{id:D}", tier = "Fact" }));
+
     private static DecideSeed SeedDecideLane(int count = 200)
     {
         var world = new World();
@@ -37,21 +52,35 @@ public sealed partial class SignalReadRouteTests
         for (var i = 0; i < count; i++)
         {
             (Guid? Type, Guid Id)? subject = null;
+            var evidence = "[]";
             if (i % 10 == 0)
             {
                 var invoice = world.Invoice([Alice], VendorOrg, matter: matters[i % 4]);
                 subject = (BillingEventType, world.BillingEvent([Alice], invoice));
+                if (i % 7 == 0) evidence = WitnessRefs(world.Communication([Alice], ClassPrivileged)); // (b) a privileged witness
+            }
+            else if (i % 7 == 0)
+            {
+                // (a) a Privileged or Potentially Privileged communication subject
+                subject = (null, world.Communication([Alice], i % 14 == 0 ? ClassPrivileged : ClassPotentiallyPrivileged));
+            }
+            else if (i % 7 == 3)
+            {
+                // (c) None, and an unclassified witness
+                subject = (null, world.Communication([Alice], ClassNone));
+                evidence = WitnessRefs(world.Communication([Alice], null));
             }
 
             var id = world.Signal(Decide, core: (MatterType, matters[i % 4]), subject: subject, severity: severities[i % 3], shortName: shortNames[i % 3],
                 title: LongText($"Title {i:000} ", 200), subjectName: LongText($"Subject {i:000} ", 400),
                 firstDetected: start.AddHours(i).ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture),
-                evidence: "[]", sentence: LongText("Sentence ", 2000), privilegeFlagged: i % 7 == 0);
+                evidence: evidence, sentence: LongText("Sentence ", 2000),
+                privilegeFlagged: i % 7 == 5); // the never-written column (DI-64) is not a source: these are not flagged
             if (i % 7 == 0) privileged.Add(id);
         }
 
         var hiddenMatter = world.Matter(readers: [Bob]);
-        var hidden = world.Signal(Decide, core: (MatterType, hiddenMatter), privilegeFlagged: true);
+        var hidden = world.Signal(Decide, core: (MatterType, hiddenMatter), subject: (null, world.Communication([Bob], ClassPrivileged)));
         return new DecideSeed(world, privileged, hidden);
     }
 
@@ -127,6 +156,8 @@ public sealed partial class SignalReadRouteTests
 
         var items = (await AllPagesAsync(seed.World)).SelectMany(p => p.Items).ToList();
 
+        // (a), (b), (c): derived from the communications, never from the sprk_signal column (every 7th + 5 sets it, and none is flagged).
+        seed.Privileged.Should().HaveCount(29);
         items.Where(i => i.PrivilegeFlagged).Select(i => i.SignalId).Should().BeEquivalentTo(seed.Privileged);
         items.Count(i => !i.PrivilegeFlagged).Should().Be(200 - seed.Privileged.Count);
         items.Select(i => i.SignalId).Should().NotContain(seed.HiddenPrivileged, "a flagged Signal on a matter the caller cannot read is not theirs to see");
@@ -135,6 +166,131 @@ public sealed partial class SignalReadRouteTests
         var body = await OkAsync(seed.World, Alice);
         AllItems(body).Should().HaveCount(200);
         AllItems(body).Should().OnlyContain(i => !i.EnumerateObject().Any(p => p.Name.Equals("privilegeFlagged", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    // Task 018 (g): one batched classification read per page, as the caller; the Console's REST worklist makes none, and no worklist query
+    // selects the never-written sprk_signal column any more.
+    [Fact]
+    public async Task DecidePrivilege_IsOneBatchedCallerReadPerPage_AndTheRestWorklistMakesNone()
+    {
+        var seed = SeedDecideLane();
+
+        var restBefore = ClassificationReads(seed.World);
+        await OkAsync(seed.World, Alice);
+        ClassificationReads(seed.World).Should().Be(restBefore, "the Console's REST worklist is unchanged (FR-09)");
+
+        string? cursor = null;
+        do
+        {
+            var before = ClassificationReads(seed.World);
+            var page = await PageAsync(seed.World, cursor);
+            ClassificationReads(seed.World).Should().Be(before + 1, "one batched read per page, never one per item");
+            cursor = page.NextCursor;
+        }
+        while (cursor is not null);
+
+        seed.World.Requests.Where(r => r.StartsWith("sprk_signals?fetchXml=", StringComparison.Ordinal))
+            .Should().OnlyContain(r => !Uri.UnescapeDataString(r).Contains("sprk_privilegeflagged", StringComparison.Ordinal),
+                "sprk_signal.sprk_privilegeflagged is not a source (ontology DI-64)");
+    }
+
+    // Task 018 (f): a page about no communication is not flagged and reads nothing for privilege.
+    [Fact]
+    public async Task DecidePrivilege_APageWithNoCommunication_IsNotFlagged_AndMakesNoClassificationRead()
+    {
+        var world = new World();
+        var matter = world.Matter(readers: [Alice]);
+        for (var i = 0; i < 5; i++) world.Signal(Decide, core: (MatterType, matter), evidence: "[]", privilegeFlagged: true);
+
+        var page = await PageAsync(world, null);
+
+        page.Items.Should().HaveCount(5).And.OnlyContain(i => !i.PrivilegeFlagged);
+        ClassificationReads(world).Should().Be(0);
+    }
+
+    // Task 018 (h), FR-04 done-when: a Privileged (or Potentially Privileged) communication subject is flagged on its summary, so task 022
+    // reduces its title and subject name in model-visible text. The marker's absence from that text is 022's test (022 does the reduction).
+    [Theory]
+    [InlineData(ClassPrivileged)]
+    [InlineData(ClassPotentiallyPrivileged)]
+    public async Task DecidePrivilege_APrivilegedCommunicationSubject_WithAMarkerInItsTitleAndSubjectName_IsFlagged(int classification)
+    {
+        const string Marker = "ZQX-PRIVILEGED-MARKER-7731";
+        var world = new World();
+        var matter = world.Matter(readers: [Alice]);
+        var privileged = world.Signal(Decide, core: (MatterType, matter), subject: (null, world.Communication([Alice], classification)),
+            title: $"Reply to {Marker}", subjectName: $"{Marker} settlement");
+        var plain = world.Signal(Decide, core: (MatterType, matter), subject: (null, world.Communication([Alice], ClassNone)));
+
+        var items = (await PageAsync(world, null)).Items;
+
+        var item = items.Single(i => i.SignalId == privileged);
+        item.Title.Should().Contain("ZQX", "the seed carries the marker into the summary (seeding proof)");
+        item.PrivilegeFlagged.Should().BeTrue();
+        items.Single(i => i.SignalId == plain).PrivilegeFlagged.Should().BeFalse();
+    }
+
+    // Task 018 (d): a fault in the caller's classification read flags every item that names a communication; the page is still returned.
+    [Theory]
+    [InlineData("500")]
+    [InlineData("401")]
+    [InlineData("429")]
+    [InlineData("unparseable")]
+    [InlineData("throw")]
+    public async Task DecidePrivilege_AClassificationReadFault_FlagsEveryItemThatNamesACommunication_AndThePageIsStillReturned(string fault)
+    {
+        var world = new World();
+        var matter = world.Matter(readers: [Alice]);
+        var onCommunication = world.Signal(Decide, core: (MatterType, matter), subject: (null, world.Communication([Alice], ClassNone)));
+        var onWitness = world.Signal(Decide, core: (MatterType, matter), evidence: WitnessRefs(world.Communication([Alice], null)));
+        var plain = world.Signal(Decide, core: (MatterType, matter));
+        world.PathFaults[ClassificationRead] = fault;
+        _factory.Logs.Warnings.Clear();
+
+        var page = await PageAsync(world, null);
+
+        page.Outcome.Should().Be(DecidePageOutcome.Ok);
+        page.Items.Where(i => i.PrivilegeFlagged).Select(i => i.SignalId).Should().BeEquivalentTo([onCommunication, onWitness], "fail closed");
+        page.Items.Single(i => i.SignalId == plain).PrivilegeFlagged.Should().BeFalse();
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("Work Item privilege: the caller's read of sprk_communication", StringComparison.Ordinal));
+    }
+
+    // Task 018 (adversarial review F2): the privilege sources come from the evidence AS STORED. Evidence that is not a JSON array is returned
+    // as null by the witness rule (step 9), so judging the returned row would read it as "no communication"; it must flag instead.
+    [Fact]
+    public async Task DecidePrivilege_StoredEvidenceThatIsNotAnArray_FlagsItsItem_EvenThoughTheReturnedRowCarriesNone()
+    {
+        var world = new World();
+        var matter = world.Matter(readers: [Alice]);
+        var malformed = world.Signal(Decide, core: (MatterType, matter),
+            evidence: JsonSerializer.Serialize(new { kind = "communication", @ref = $"sprk_communication:{world.Communication([Alice], ClassPrivileged):D}" }));
+        var plain = world.Signal(Decide, core: (MatterType, matter));
+
+        var items = (await PageAsync(world, null)).Items;
+
+        items.Where(i => i.PrivilegeFlagged).Select(i => i.SignalId).Should().BeEquivalentTo([malformed]);
+        AllItems(await OkAsync(world, Alice)).Single(i => i.GetProperty("signalId").GetGuid() == malformed)
+            .GetProperty("evidenceRefs").ValueKind.Should().Be(JsonValueKind.Null, "the returned row carries no evidence, so only the stored value can flag it");
+    }
+
+    // Task 018 (e): a communication the caller cannot read (not returned to them, or no Read on the table) flags its item.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DecidePrivilege_ACommunicationTheCallerCannotRead_FlagsItsItem(bool noReadOnTheTable)
+    {
+        var world = new World();
+        var matter = world.Matter(readers: [Alice]);
+        var bobsOnly = world.Signal(Decide, core: (MatterType, matter), subject: (null, world.Communication([Bob], ClassNone)));
+        var readable = world.Signal(Decide, core: (MatterType, matter), subject: (null, world.Communication([Alice], ClassNone)));
+        var plain = world.Signal(Decide, core: (MatterType, matter));
+        if (noReadOnTheTable) world.TableDenied[Alice] = ["sprk_communication"];
+
+        var items = (await PageAsync(world, null)).Items;
+
+        items.Select(i => i.SignalId).Should().BeEquivalentTo([bobsOnly, readable, plain], "privilege never gates a read (owner 2026-07-16)");
+        items.Where(i => i.PrivilegeFlagged).Select(i => i.SignalId).Should()
+            .BeEquivalentTo(noReadOnTheTable ? [bobsOnly, readable] : new[] { bobsOnly });
     }
 
     [Fact]

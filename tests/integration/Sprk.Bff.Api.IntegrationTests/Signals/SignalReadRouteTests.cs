@@ -2499,6 +2499,7 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             [EventType] = ("sprk_event", "Event", "sprk_eventname", null),
             [TodoType] = ("sprk_todo", "To Do", "sprk_name", null),
             [BillingEventType] = ("sprk_billingevent", "Billing Event", "sprk_name", null),
+            // No sprk_communication row, as live (DI-63): a communication subject is an untyped pair (task 018 seeds it with a null type).
         };
 
         public Guid Record(string table, Guid[] readers, Dictionary<string, object?>? columns = null)
@@ -2682,6 +2683,10 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             Records[row.Id] = ("sprk_communication", [Alice, Bob, Carol], []);
             return row.Id;
         }
+
+        /// <summary>Task 018 (FR-04): a communication the readers read as themselves, with its <c>sprk_privilegeclassification</c> (null: none set).</summary>
+        public Guid Communication(Guid[] readers, int? privilege) =>
+            Record("sprk_communication", readers, new() { ["sprk_privilegeclassification"] = privilege });
 
         /// <summary>Only <paramref name="readers"/> read the witness row as themselves (D-142).</summary>
         public void OnlyReadableBy(Guid witness, params Guid[] readers) => Records[witness] = Records[witness] with { Readers = readers };
@@ -3022,7 +3027,8 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
             {
                 slice = slice.Select(r => r.Where(kv => kv.Key != "sprk_sentence").ToDictionary(kv => kv.Key, kv => kv.Value)).ToList();
             }
-            // Task 015 (FR-04): the privilege flag is returned only when the query selects it (the Lanes query adds it; the other sets do not).
+            // Task 015 (FR-04): the privilege flag is returned only when the query selects it (since task 018 no worklist query does: the flag is
+            // derived from communications, and sprk_signal.sprk_privilegeflagged is never written, DI-64).
             if (!text.Contains("<attribute name=\"sprk_privilegeflagged\" />", StringComparison.Ordinal))
             {
                 slice = slice.Select(r => r.Where(kv => kv.Key != "sprk_privilegeflagged").ToDictionary(kv => kv.Key, kv => kv.Value)).ToList();

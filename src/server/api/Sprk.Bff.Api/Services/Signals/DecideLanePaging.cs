@@ -198,7 +198,10 @@ internal static class DecideLanePaging
     /// order as <see cref="SignalReadService"/> returned them, the core record of every group with a row on the page (clipped name and
     /// number, from that same caller-trimmed group; <see cref="DecidePageResult.Cores"/>), and the cursor for the next page (null on the last).
     /// </summary>
-    /// <param name="extras">For every item of <paramref name="groups"/>: its rank keys and privilege flag.</param>
+    /// <param name="extras">For every item of <paramref name="groups"/>: its rank keys (and its privilege sources, which the caller judges).</param>
+    /// <remarks>Every summary is returned FLAGGED (<see cref="WorklistItemSummary.PrivilegeFlagged"/> true): the flag is derived after
+    /// the page is cut, with one read for the page's own items (<see cref="DecisionCapability.ListDecidePageAsync"/>, task 018), so a page
+    /// that is never judged fails closed.</remarks>
     internal static (IReadOnlyList<WorklistItemSummary> Items, IReadOnlyDictionary<Guid, WorklistCoreSummary> Cores, string? NextCursor) Page(
         IReadOnlyList<WorklistGroup> groups, IReadOnlyDictionary<Guid, WorklistItemExtras> extras, DecideCursor? after)
     {
@@ -253,7 +256,7 @@ internal static class DecideLanePaging
                     return (page, cores, new DecideCursor(last.Best, last.CoreId, last.Rank, last.Id, returned).Encode());
                 }
 
-                page.Add(WorklistItemSummary.From(item, group.Core, extra.PrivilegeFlagged));
+                page.Add(WorklistItemSummary.From(item, group.Core, privilegeFlagged: true)); // fail closed until judged
                 if (group.Core is { } named && !cores.ContainsKey(named.RecordId))
                 {
                     cores.Add(named.RecordId, WorklistCoreSummary.From(named));

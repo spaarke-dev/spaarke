@@ -135,6 +135,11 @@ public static class SignalsModule
         // decision-plan and suppression routes and the MCP tools (tasks 022-024) call. Scoped like the request-caller services it runs;
         // unconditional like the routes that use it (bff-extensions.md F.1). An interface because two hosts consume it (REST, MCP).
         services.AddScoped<IDecisionCapability, DecisionCapability>();
+        // spaarkeai-mcp-bff-api-r1 task 018 (FR-04, owner ruling 2026-11-08): the privilege flag of a Work Item, derived from its communications
+        // as the caller (one batched read per Decide-lane page). Existing: nothing derived it (the sprk_signal column is never written, DI-64);
+        // extension: a concrete (ADR-010), reused by ontology DI-143 for the Decision Record snapshot; cost of doing nothing: 022 reduces
+        // nothing and privileged detail reaches the model. Scoped like the capability; unconditional like it (bff-extensions.md F.1).
+        services.AddScoped<WorkItemPrivilege>();
         // spaarkeai-mcp-bff-api-r1 task 016 (B-3, FR-07): the plan-driven lookup search the lookup route and the MCP lookup tool (task 023)
         // call. Scoped like the caller client it reads through; unconditional like the route; an interface because two hosts consume it.
         services.AddScoped<IDecisionLookupSearch, DecisionLookupSearch>();

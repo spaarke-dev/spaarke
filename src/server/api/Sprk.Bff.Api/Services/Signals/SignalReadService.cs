@@ -149,8 +149,10 @@ public sealed record WorklistInvoiceReview(Guid InvoiceId, Guid? LineId);
 public readonly record struct RankKey(int SeverityRank, bool HighPriority, DateTimeOffset? FirstDetected);
 
 /// <summary>What <see cref="SignalReadService"/> knows about a returned Signal that <see cref="WorklistItemRow"/> deliberately does not carry
-/// (the Console's REST response gains no member, task 015): the privilege flag (FR-04) and the rank keys the Decide-lane page's cursor orders by.</summary>
-public sealed record WorklistItemExtras(bool PrivilegeFlagged, RankKey Rank);
+/// (the Console's REST response gains no member, task 015): the rank keys the Decide-lane page's cursor orders by, and what its privilege flag
+/// is derived from (FR-04 as amended 2026-11-08, task 018: <see cref="WorkItemPrivilege.SourcesOf"/> over the subject and the STORED evidence;
+/// the page reads the classification once, <see cref="WorkItemPrivilege.FlaggedAsync{TKey}"/>).</summary>
+public sealed record WorklistItemExtras(RankKey Rank, WorkItemPrivilegeSources Privilege);
 
 /// <summary>
 /// The Signal read route's service (task 038). Every row-visibility question is asked AS THE CALLER through
@@ -215,9 +217,6 @@ public sealed class SignalReadService
 
     internal const string SignalEntitySet = "sprk_signals";
 
-    /// <summary><c>sprk_signal.sprk_privilegeflagged</c> (ADR-015: flagged, never decided). The Lanes query selects it (task 015, FR-04)
-    /// so the slim list can carry it; it changes no filter and no row, and <see cref="WorklistItemRow"/> does not carry it.</summary>
-    internal const string PrivilegeFlaggedColumn = "sprk_privilegeflagged";
     internal const string HighPriorityColumn = "sprk_highpriority";
 
     /// <summary><c>sprk_todo.sprk_notes</c>: it carries the inquiry hint of an inquiry-outcome To Do (task 071, task 154).</summary>
@@ -330,8 +329,8 @@ public sealed class SignalReadService
 
     /// <summary>
     /// The caller's visible Signals in <paramref name="set"/>, grouped and ordered. When <paramref name="extras"/> is given it is also
-    /// filled with, for each returned Signal, what the row type does not carry (<see cref="WorklistItemExtras"/>: the privilege flag and
-    /// the D-42 rank keys), for the slim Decide-lane page (spaarkeai-mcp-bff-api-r1 task 015). The pipeline, the read rules and the
+    /// filled with, for each returned Signal, what the row type does not carry (<see cref="WorklistItemExtras"/>: the D-42 rank keys and
+    /// the privilege sources, task 018), for the slim Decide-lane page (spaarkeai-mcp-bff-api-r1 task 015). The pipeline, the read rules and the
     /// returned <see cref="WorklistResponse"/> are the same whether or not it is given. One method, not an overload pair: the task 167
     /// authorization guard credits a route only when every overload reaches the caller's Dataverse client in its own body.
     /// </summary>
@@ -518,9 +517,13 @@ public sealed class SignalReadService
 
             if (extras is not null)
             {
+                // Task 018 (FR-04): the privilege sources from the subject and the evidence AS STORED (steps 9 and 9b reshape the returned
+                // lines; a reference they drop must still count). No read here: the page reads the classification once, for its own items.
+                var stored = rows.ToDictionary(r => r.SignalId, r => r.EvidenceRefs);
                 foreach (var v in visible)
                 {
-                    extras[v.Row.SignalId] = new WorklistItemExtras(v.Row.PrivilegeFlagged, RankOf(v));
+                    extras[v.Row.SignalId] = new WorklistItemExtras(
+                        RankOf(v), WorkItemPrivilege.SourcesOf(SubjectTable(v.Row, catalog), v.Row.SubjectId, stored.GetValueOrDefault(v.Row.SignalId)));
                 }
             }
 
@@ -626,7 +629,9 @@ public sealed class SignalReadService
                 {
                     WorklistSet.ClosedToday or WorklistSet.ClosedEarlier => WithDecisionRecordColumn(fetch),
                     WorklistSet.Decided => DecidedFetch(fetch),
-                    WorklistSet.Lanes => WithColumn(fetch, PrivilegeFlaggedColumn),
+                    // Task 018 (FR-04): the privilege sources need the stored evidence; the live configuration already selects it, so this is a
+                    // no-op today and keeps a configuration edit from silently dropping the witness communications.
+                    WorklistSet.Lanes => WithColumn(fetch, "sprk_evidencerefs"),
                     _ => fetch,
                 });
             }
@@ -2216,8 +2221,7 @@ public sealed class SignalReadService
         int? ResolutionType,
         DateTimeOffset? SuppressedUntil,
         string? Sentence,
-        Guid? DecisionRecordId,
-        bool PrivilegeFlagged = false)
+        Guid? DecisionRecordId)
     {
         internal static bool TryParse(JsonElement raw, out SignalRow row)
         {
@@ -2259,9 +2263,7 @@ public sealed class SignalReadService
                 // Task 154: as stored; an empty or blank sentence is null (selected by the worklist configuration's queries).
                 ReadString(raw, "sprk_sentence") is { } sentence && !string.IsNullOrWhiteSpace(sentence) ? sentence : null,
                 // Task 045: the Decision Record that closed it (closed and decided sets select the column).
-                TryReadGuid(raw, "_sprk_decisionrecord_value", out var decisionRecord) ? decisionRecord : null,
-                // Task 015 (FR-04; ADR-015: flagged, never decided). Selected by the Lanes query only; absent or null reads as false.
-                raw.TryGetProperty(PrivilegeFlaggedColumn, out var flagged) && flagged.ValueKind == JsonValueKind.True);
+                TryReadGuid(raw, "_sprk_decisionrecord_value", out var decisionRecord) ? decisionRecord : null);
             return true;
         }
 

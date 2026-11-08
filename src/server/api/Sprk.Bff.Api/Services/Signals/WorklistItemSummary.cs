@@ -33,8 +33,10 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// </remarks>
 /// <param name="CoreRecordId">The id of the core record whose group the item sits in (015 review F4; FR-12: the widget groups rows by
 /// matter). Its name and number are on the page once per group, in <see cref="DecidePageResult.Cores"/>, not on every row.</param>
-/// <param name="PrivilegeFlagged"><c>sprk_signal.sprk_privilegeflagged</c> (ADR-015: flagged, never decided). The tool layer reduces a
-/// flagged item to a count for the model (FR-04); nothing here branches on it.</param>
+/// <param name="PrivilegeFlagged">FR-04 as amended 2026-11-08 (task 018): true when the item's subject communication or any witness or
+/// evidence communication is Privileged or Potentially Privileged, read as the caller and failing closed (<see cref="WorkItemPrivilege"/>;
+/// never <c>sprk_signal.sprk_privilegeflagged</c>, which nothing writes). ADR-015: flagged, never decided. The tool layer reduces a
+/// flagged item to a count for the model (task 022); nothing here branches on it.</param>
 public sealed record WorklistItemSummary(
     Guid SignalId,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? CoreRecordId,
@@ -62,7 +64,7 @@ public sealed record WorklistItemSummary(
     internal const int SubjectNameBytes = 36;
     internal const int RuleShortNameBytes = 18;
 
-    /// <summary>The slim row for <paramref name="row"/> in the group of <paramref name="core"/>, with the privilege flag its Signal carries.</summary>
+    /// <summary>The slim row for <paramref name="row"/> in the group of <paramref name="core"/>, with the given privilege flag.</summary>
     internal static WorklistItemSummary From(WorklistItemRow row, WorklistCoreRecord? core, bool privilegeFlagged)
     {
         ArgumentNullException.ThrowIfNull(row);

@@ -28,7 +28,7 @@ Tasks (2026-11-06, 28 POMLs): Phase 0 spike 001–003 · Phase A BFF rework 011�
 - Decision-slice services keep their `HttpContext`/`ClaimsPrincipal` parameters. Capability methods take the request `HttpContext` (or `ClaimsPrincipal`) and pass it through unchanged (FR-10 as amended 2026-11-07, option C).
 
 **Model-visible output**
-- Privileged Work Items (`sprk_privilegeflagged` on Signal or subject) reach `content`/`structuredContent` of model-visible tools only as "N privileged items — open to review"; detail only via app-only tools (FR-04).
+- Privileged Work Items (`WorklistItemSummary.PrivilegeFlagged`: a Privileged or Potentially Privileged subject or witness communication, derived as the caller by `WorkItemPrivilege`, fail closed; owner ruling 2026-11-08, task 018) reach `content`/`structuredContent` of model-visible tools only as "N privileged items — open to review"; detail only via app-only tools (FR-04).
 - `spaarke_show_decisions` input is a closed `category` enum mirroring `laneCountFilters.ts` (incl. `invoiceDecisions`), no other properties (FR-03). Every tool has an explicit `readOnlyHint`, a title, and a ≤ 1,024-char "use for / not for" description.
 - Every tool result < 64 KiB at 200 Work Items; page 1 ≤ 50 slim rows; list row ≤ 600 bytes (FR-05, FR-11, NFR-02).
 
@@ -91,7 +91,7 @@ Full log: `notes/decisions.md`. Owner decisions O-1–O-26: `design.md` §0.
 ## 6. Gotchas — do not re-learn
 
 - 2026-11-06 — `HttpContext` reaches beyond the spec's list: `DecisionCommitService.CommitAsync` (L439) and helpers (L622, L770, L927, L1578), `DecisionPlanReadStamp` L42/L86, `Actions/DecisionParameterSources` L109/L404, `Actions/DecisionActionExecutors` (record field `HttpContext Http` L73), `Actions/DecisionRouteCores` (7 methods), `AssignTaskNotifier` (5), `DecisionCommitFollowUps` L70, `Actions/BudgetInquiryExecutor` (`IHttpContextAccessor`). `SignalReadService` takes `ClaimsPrincipal` (no change). Fix (2026-11-07, option C): leave these parameters in place; capabilities and MCP tools pass the request `HttpContext` through; 012 is cancelled.
-- 2026-11-06 — The worklist list projection does not select `sprk_privilegeflagged` (only `DecisionCommitService.cs:313` reads it). Fix: 015 adds it to the list projection only.
+- 2026-11-06 — The worklist list projection does not select `sprk_privilegeflagged` (only `DecisionCommitService.cs:313` reads it). Fix: 015 adds it to the list projection only. **Superseded 2026-11-08:** nothing writes that column (DI-64); task 018 derives the flag from communications and the Lanes query no longer selects it.
 - 2026-11-06 — `WorklistItemSummary` does not exist; the row type is `WorklistItemRow` (with #2580's `InvoiceReview` member). B-5 creates the summary and must keep `invoiceReview`.
 - 2026-11-06 — `WorklistLanePanel` is not exported from the Worklist barrel. Fix: deep import plus the exported `buildLaneView` (`worklistView.ts`); fallback a single-lane prop on `WorklistWidget`.
 - 2026-11-06 — `openInvoiceReview.ts` calls Xrm `navigateTo` and cannot run in the widget. Reuse only its `data` rules (`buildInvoiceReviewLaunch(...).pageInput.data`, encoded once more inside a URL) with host `openLink`.

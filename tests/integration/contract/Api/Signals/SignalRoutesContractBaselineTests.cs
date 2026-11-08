@@ -125,6 +125,8 @@ public sealed partial class DecisionCommitServiceTests
                 // Task 013 (B-1): the plan and suppression routes now call the decision capability, registered as SignalsModule registers
                 // it. This host maps no worklist route, so the capability's list collaborator is a stateless placeholder that is never called.
                 builder.Services.AddSingleton((SignalReadService)RuntimeHelpers.GetUninitializedObject(typeof(SignalReadService)));
+                // Task 018: the capability takes the FR-04 privilege derivation (registered by SignalsModule in the real host).
+                builder.Services.AddScoped<WorkItemPrivilege>();
                 builder.Services.AddScoped<IDecisionCapability, DecisionCapability>();
 
                 builder.WebHost.UseTestServer();

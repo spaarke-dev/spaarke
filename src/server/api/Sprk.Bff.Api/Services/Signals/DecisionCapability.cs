@@ -46,11 +46,13 @@ public sealed partial class DecisionCapability : IDecisionCapability
     private readonly IDataverseUserClient _caller;
     private readonly ILogger<SignalSuppressionService> _suppressionLogger;
     private readonly DecisionCommitService _commits;
+    private readonly WorkItemPrivilege _privilege;
     private readonly DecisionPlanReadStamp? _planReadStamp;
     private readonly DecisionParameterSources? _parameterSources;
 
     /// <param name="suppressionLogger">The suppression route's logger, kept so its log category is unchanged by the move.</param>
     /// <param name="commits">The single owner of completion (task 014); <see cref="CommitAsync"/> delegates to it unchanged.</param>
+    /// <param name="privilege">FR-04's derivation (task 018): the Decide-lane page's privilege flags, read as the caller.</param>
     /// <param name="planReadStamp">Optional exactly as it was on the plan route: without it no stamp is written.</param>
     /// <param name="parameterSources">Optional exactly as it was on the plan route: without it no option list is resolved.</param>
     public DecisionCapability(
@@ -62,6 +64,7 @@ public sealed partial class DecisionCapability : IDecisionCapability
         IDataverseUserClient caller,
         ILogger<SignalSuppressionService> suppressionLogger,
         DecisionCommitService commits,
+        WorkItemPrivilege privilege,
         DecisionPlanReadStamp? planReadStamp = null,
         DecisionParameterSources? parameterSources = null)
     {
@@ -73,6 +76,7 @@ public sealed partial class DecisionCapability : IDecisionCapability
         _caller = caller ?? throw new ArgumentNullException(nameof(caller));
         _suppressionLogger = suppressionLogger ?? throw new ArgumentNullException(nameof(suppressionLogger));
         _commits = commits ?? throw new ArgumentNullException(nameof(commits));
+        _privilege = privilege ?? throw new ArgumentNullException(nameof(privilege));
         _planReadStamp = planReadStamp;
         _parameterSources = parameterSources;
     }
@@ -118,6 +122,11 @@ public sealed partial class DecisionCapability : IDecisionCapability
 
         var decide = response.Lanes.FirstOrDefault(l => l.Lane == "Decide");
         var (items, cores, next) = DecideLanePaging.Page(decide?.Groups ?? [], extras, after);
+
+        // FR-04 (task 018): the page's privilege flags, derived from its items' communications with one batched read as the caller (In lists
+        // of at most 200 distinct ids, so one request for a page that names up to 200; none when no item names a communication). The page arrives flagged; only an item judged not privileged is cleared.
+        var flagged = await _privilege.FlaggedAsync(_caller, items.ToDictionary(i => i.SignalId, i => extras[i.SignalId].Privilege), ct);
+        items = [.. items.Select(i => i with { PrivilegeFlagged = flagged.Contains(i.SignalId) })];
         return DecidePageResult.Ok(items, cores, next);
     }
 
