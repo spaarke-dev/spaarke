@@ -10,6 +10,28 @@
 
 ## Open (in priority order)
 
+### DEF-060 — No writer populates the Signal firm reason shown to partners
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-08 |
+| **Source** | ebilling-r1 task 130 prep (firm findings projection) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2637 |
+
+**Description**: task 026 created `sprk_signal.sprk_firmreason`: Memo 2000, field-secured, with a writer profile whose only member is the ontology writer identity. Nothing in `src` writes it. Task 130's firm findings projection reads it, as the BFF identity, to tell partners why a finding applies to their invoice. Until a writer exists, every finding a partner sees carries no firm-facing reason, only the rule name, plus the clause quote when the rule set is visible to firms. Task 130 shows the reason when present and omits it when null; it never substitutes other text.
+
+**Fix direction**: decide the source of the text, for example the rule's firm-facing description resolved when the Signal is created. Then set `sprk_firmreason` in the Signal writer path that the ontology writer runs, with ontology-r1 review because it owns the Signal writer.
+
+**Entry-points**: `projects/ebilling-r1/notes/026-signal-dr-line-subject.md`; `projects/ebilling-r1/tasks/130-firm-findings-projection.poml` (~:62); `src/server/api/Sprk.Bff.Api/Services/Signals/` (Signal creation through `OntologyWriterDataverseClient`).
+
+**Estimated effort**: 0.5-1 day, plus a decision on the text source.
+**Blockers**: the decision on the text source.
+**Related**: task 026 (D-95(2)), task 130.
+
+---
+
 ### DEF-059 — Environment setup grants the BFF identity Decision Record read through a SpaarkeMaster role
 
 | Field | Value |

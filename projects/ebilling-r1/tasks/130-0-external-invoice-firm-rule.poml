@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130-0" project="ebilling-r1">
+  <metadata>
+    <title>External invoices: apply the firm rule on every path</title>
+    <phase>5 Partner surfaces; lands before 130b</phase>
+    <gate>Branch from origin/work/ebilling-r1 at 13a8c63292 or later</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tenant isolation: decides which invoices an external partner can see on every external path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Tenant-isolation rule across five external read paths; fail-closed semantics.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>044, 051</deps>
+    <tags>bff, external-access, tenant-isolation, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Apply design.md:414 ("they see only their firm's submissions and invoices") on every external invoice path: an invoice is visible to an external caller only when its firm (sprk_vendororg) is one of the caller's active firms.</prompt>
+
+  <goal>A new hide reason in ExternalInvoiceVisibility hides every invoice whose firm is not among the caller's firms, on every path the hiding seam serves, failing closed when the caller's firms cannot be read.</goal>
+
+  <context>
+    <background>Agreed with unified-access-control-r2 (reviewer) on 2026-11-08. The hiding seam (ExternalInvoiceHiding, fed by ExternalInvoiceVisibility) already runs on the module list and /record read, the project-data child reads, messages and the notification feed, and drives the taint family, so lines, linked documents and messages follow the invoice. The caller's firms come from the source 044/051 use (ExternalUserContextFirms: active firms, one query).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalInvoiceVisibility.cs</file>
+      <file role="modify">tests (the visibility unit and integration tests for the five paths)</file>
+      <file role="new">projects/ebilling-r1/notes/130-0-external-invoice-firm-rule.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="uac-r2 2026-11-08">Do not change Infrastructure/DI/ExternalAccessModule.cs or any other file under Infrastructure/ExternalAccess/ except ExternalInvoiceVisibility.cs.</constraint>
+    <constraint source="uac-r2 2026-11-08">Fail closed: a fault reading the caller's firms, or unknown firms, hides every invoice for that caller.</constraint>
+    <constraint source="uac-r2 2026-11-08; owner question open">A caller with no firm membership sees no invoices (fail-closed default, pending the owner's ruling); the decision sits in one branch with one test.</constraint>
+    <constraint source="existing rule">An invoice with no firm stays withheld.</constraint>
+    <constraint source="public repository">Code, comments, notes, commits and test names describe the rule, never an exposure; no identity or role names.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Read ExternalInvoiceVisibility and the firm source used by 044/051.</step>
+    <step order="2">Add the hide reason and the fail-closed branches.</step>
+    <step order="3">Add the tests below and one seeding proof for the new reason.</step>
+    <step order="4">Filtered tests, full ArchTests, publish-size delta, notes with the §11 answers.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">On each of the module list, /record read, project-data child reads, messages and notification feed, an invoice of a firm the caller does not belong to is hidden, with its lines and linked documents.</criterion>
+    <criterion testable="true">The caller's own firm's invoice stays visible (list path and one other path).</criterion>
+    <criterion testable="true">A multi-firm caller sees invoices of each of its firms and not of a third firm.</criterion>
+    <criterion testable="true">A fault reading the caller's firms hides all invoices; a caller with no firm sees none; an invoice with no firm stays withheld.</criterion>
+    <criterion testable="true">One seeding proof: removing the new hide reason makes the named must-fire tests fail.</criterion>
+    <criterion testable="true">Two adversarial verifier passes (tenant isolation) and uac-r2's review of the diff before merge.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A listed path does not go through the hiding seam, or the fix needs another file under Infrastructure/ExternalAccess/ or ExternalAccessModule.cs: STOP and report.</trigger>
+  </escalation>
+</task>
