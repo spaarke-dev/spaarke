@@ -312,11 +312,12 @@ public class ServerWriterAncestorStampingTests
             Times.Never);
     }
 
-    // A sprk_recordtype_ref row is the one regarding target whose typed lookup on sprk_event IS the pair's type column
-    // (sprk_regardingrecordtype), so TaskActionCore writes no pair for it (owner round 8 item 2). Reachable: the playbook
-    // create-task node and the communication follow-up apply both pass the regarding type through as text.
-    [Fact(DisplayName = "Task 156 (owner round 8 item 2): a task filed under a sprk_recordtype_ref row keeps that row in its typed lookup — which is also the pair's type column — and gets no pair id, name or url naming the record-type row")]
-    public async Task CreateTask_WhenRegardingARecordTypeRow_KeepsItsTypedLookupAndWritesNoPair()
+    // A sprk_recordtype_ref row is a catalog row, not a record a task is filed under. Before field mapping task 045a fix
+    // round 1, TaskActionCore wrote it into sprk_regardingrecordtype (the pair's TYPE column) with no id: a half pair.
+    // Reachable: the playbook create-task node and the communication follow-up apply both pass the regarding type through as
+    // text. Now such a task is created unfiled, as for any other type that is not an ownership parent.
+    [Fact(DisplayName = "Task 045a fix round 1 (K4): a task 'regarding' a sprk_recordtype_ref row is created unfiled — no half regarding pair (a type with no id), and no pair at all")]
+    public async Task CreateTask_WhenRegardingARecordTypeRow_IsCreatedUnfiled_WithNoHalfPair()
     {
         var recordTypeRowId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
         var created = new List<Entity>();
@@ -342,10 +343,7 @@ public class ServerWriterAncestorStampingTests
 
         id.Should().NotBe(Guid.Empty, "a record-type row is outside the core-ancestor taxonomy, so nothing refuses the task");
         var task = created.Should().ContainSingle().Subject;
-        var typed = task.GetAttributeValue<EntityReference>("sprk_regardingrecordtype");
-        typed.Should().NotBeNull();
-        typed!.LogicalName.Should().Be("sprk_recordtype_ref");
-        typed.Id.Should().Be(recordTypeRowId, "the typed lookup names the record the task is filed under, not a record-type row for its type");
+        task.Contains("sprk_regardingrecordtype").Should().BeFalse("a type with no id is a half pair (045a, G1)");
         task.Contains("sprk_regardingrecordid").Should().BeFalse("a pair id would name the record-type row as if it were a filed record");
         task.Contains("sprk_regardingrecordurl").Should().BeFalse("no record URL is written for a record-type row");
         task.Contains("sprk_regardingrecordname").Should().BeFalse("no pair is written at all");

@@ -198,6 +198,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public async Task ChildCreate_AToDoBindingTheRecordTypeCatalog_IsCreated_WhenTheCallerHoldsItsAppendToPrivilege()
     {
+        // Task 045a fix round 1 (F3): the catalog row names its table, as a real matter type's does (a row naming none is
+        // now cleared by step 4½); the to-do's matter then completes the pair.
+        CatalogKnowsTheMatterType();
+
         var result = await CreateChild("sprk_todo", new()
         {
             ["sprk_name"] = "Call back",
