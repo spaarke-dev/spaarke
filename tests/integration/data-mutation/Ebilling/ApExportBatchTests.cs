@@ -71,11 +71,12 @@ public sealed class ApExportBatchTests
         world.OwnerQuestions.Should().NotContain(q => q.RequestedBy == null || q.RequestedBy.SystemUserId == null,
             "every ownership question names the exporting user; without one the Stored File write fails closed");
 
-        // The CSV: D-56 header, one row per invoice, in invoice-number order, with the values read once.
+        // The CSV: D-56 header, one row per invoice, in invoice-number order, with the values read once. Task 165b-2: the world stores the totals the
+        // calculator derives from the lines (no decided line: billed 900, no adjustments, approved 900).
         var csv = world.TextOf(world.FileOf(batch.Id, Csv)).Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
         csv[0].Should().StartWith("BatchId,SpaarkeInvoiceId,VendorName,VendorApId,VendorTaxId,InvoiceNumber,TrackingNumber,InvoiceDate,DueDate");
         csv.Should().HaveCount(3);
-        csv[1].Should().Contain($"{batch.GetAttributeValue<string>("sprk_name")},{a.Id:D},Acme Law LLP,,,INV-A,INV-A.1,2026-09-30,,2026-09-01,2026-09-30,USD,1000.00,60.00,40.00,900.00,Matter,M-1001,\"Smith v. Jones, et al.\",M-1001,,,Pat Approver,2026-10-20T15:00:00Z,");
+        csv[1].Should().Contain($"{batch.GetAttributeValue<string>("sprk_name")},{a.Id:D},Acme Law LLP,,,INV-A,INV-A.1,2026-09-30,,2026-09-01,2026-09-30,USD,900.00,0.00,0.00,900.00,Matter,M-1001,\"Smith v. Jones, et al.\",M-1001,,,Pat Approver,2026-10-20T15:00:00Z,");
         csv[2].Should().Contain(",INV-B,");
 
         // The JSON: the same columns plus lines[] (date, type, timekeeper, hours, rate, billed, approved, codes).

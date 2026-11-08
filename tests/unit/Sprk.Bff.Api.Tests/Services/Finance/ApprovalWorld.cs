@@ -137,6 +137,7 @@ internal sealed class ApprovalWorld
             ["sprk_regardingrecordurl"] = "https://example.invalid/c",
             ["sprk_regardingrecordnumber"] = "C-1",
         });
+        StoreTotalsFromLines(); // Task 165b-2: no line yet; AddLine stores them again after each line
 
         // Default roles (settings): Assigned Attorney 1 (Alice) + Assigned To Internal (Bob). Carol is assigned nowhere; Dan (no user) is Paralegal 1.
         Put(new Entity(coreEntity, CoreId)
@@ -267,7 +268,11 @@ internal sealed class ApprovalWorld
             {
                 lock (Gate)
                 {
-                    Rows[("sprk_invoice", InvoiceId)]["sprk_approvedtotal"] = new Money((decimal)fields["sprk_approvedtotal"]!);
+                    // Task 165b-2: the five totals the service writes (approval compares them with the lines).
+                    foreach (var column in InvoiceTotalsService.StoredTotalsColumns.Where(fields.ContainsKey))
+                    {
+                        Rows[("sprk_invoice", InvoiceId)][column] = new Money((decimal)fields[column]!);
+                    }
                 }
             })
             .Returns(Task.CompletedTask);
@@ -355,7 +360,35 @@ internal sealed class ApprovalWorld
             [CoreEntity == "sprk_workassignment" ? "sprk_regardingworkassignment" : CoreEntity] = new EntityReference(CoreEntity, CoreId),
             ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
         };
+        StoreTotalsFromLines();
         return line;
+    }
+
+    /// <summary>
+    /// Task 165b-2: stores the invoice's five derived totals as the totals service does after every line change: <see cref="InvoiceTotalsCalculator"/>
+    /// over the invoice's counted lines with its stored billed total. A refused calculation stores nothing (as the service). A test that edits a stored
+    /// total or a line afterwards makes them differ.
+    /// </summary>
+    public void StoreTotalsFromLines()
+    {
+        lock (Gate)
+        {
+            var invoice = Rows[("sprk_invoice", InvoiceId)];
+            var lines = Rows.Values
+                .Where(r => r.LogicalName == "sprk_billingevent" && r.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == InvoiceId && InvoiceTotalsService.IsCounted(r))
+                .Select(InvoiceTotalsService.ToRow).ToList();
+            var calculation = InvoiceTotalsCalculator.Calculate(invoice.GetAttributeValue<Money>("sprk_totalamount")?.Value, lines);
+            if (calculation.IsRefused)
+            {
+                return;
+            }
+
+            invoice["sprk_feestotal"] = new Money(calculation.FeesTotal);
+            invoice["sprk_expensestotal"] = new Money(calculation.ExpensesTotal);
+            invoice["sprk_lineadjustmentstotal"] = new Money(calculation.LineAdjustmentsTotal);
+            invoice["sprk_invoiceadjustmentstotal"] = new Money(calculation.InvoiceAdjustmentsTotal);
+            invoice["sprk_approvedtotal"] = new Money(calculation.ApprovedTotal);
+        }
     }
 
     /// <summary>Task 095c-4: the invoice names no firm (the from-email no-firm invoice of 095c-3).</summary>

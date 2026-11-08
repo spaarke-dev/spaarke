@@ -71,6 +71,14 @@ public static class ApExportCodes
     /// <summary>The log code of <see cref="ReasonApprovalNotRecorded"/> (logged with the table and the row id only). Task 165b-3 part B fix round
     /// (K1): also the 409 <c>errorCode</c> of Mark Paid on a Sent to AP invoice without that record (nothing is written).</summary>
     public const string ApprovalNotRecorded = "ebilling.apexport.approval_not_recorded";
+
+    /// <summary>Task 165b-2 (EB-D-200 item 3): a stored total of the invoice differs from what <see cref="InvoiceTotalsCalculator"/> derives from its lines
+    /// (<see cref="InvoiceTotalsService.StoredTotalsOf"/>). A per-invoice reason of <see cref="SelectionRefused"/>; the candidate list leaves the invoice out.</summary>
+    public const string ReasonTotalsMismatch = "totals_mismatch";
+
+    /// <summary>The log code of <see cref="ReasonTotalsMismatch"/> (logged with the table and the row id only), and the 409 <c>errorCode</c> when the
+    /// re-check after the claim finds the difference (nothing is exported).</summary>
+    public const string TotalsMismatch = "ebilling.apexport.totals_mismatch";
 }
 
 /// <summary>Stable codes of <c>POST /api/finance/invoices/{invoiceId}/mark-paid</c> (task 151a). A refused move carries the lifecycle's own <see cref="InvoiceTransitionReasons"/> code.</summary>
@@ -188,7 +196,10 @@ public sealed class ApExportService
     [
         "statuscode", BatchLookup, "versionnumber", "sprk_invoicenumber", "sprk_trackingnumber", "sprk_invoicedate", "sprk_invoiceduedate",
         "sprk_billingperiodstart", "sprk_billingperiodend", "sprk_currency", "sprk_totalamount", "sprk_lineadjustmentstotal",
-        "sprk_invoiceadjustmentstotal", "sprk_approvedtotal", "sprk_vendororg", "sprk_matter", "sprk_project", "sprk_regardingworkassignment",
+        "sprk_invoiceadjustmentstotal", "sprk_approvedtotal",
+        // Task 165b-2: with the four above, the stored totals InvoiceTotalsService.StoredTotalsOf compares with the lines.
+        InvoiceTotalsService.InvoiceFeesTotal, InvoiceTotalsService.InvoiceExpensesTotal,
+        "sprk_vendororg", "sprk_matter", "sprk_project", "sprk_regardingworkassignment",
         "sprk_regardingagreement", "sprk_regardingrecordnumber", "sprk_regardingrecordname",
     ];
 
@@ -382,6 +393,28 @@ public sealed class ApExportService
             }
         }
 
+        // Task 165b-2 (EB-D-200 item 3): an invoice whose stored totals differ from what the calculator derives from its lines is refused per invoice, the
+        // same way (nothing is claimed). One batched line read.
+        if (selected.Count > 0)
+        {
+            IReadOnlySet<Guid> matching;
+            try
+            {
+                matching = await TotalsMatchAsync(selected, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError("AP export: the lines of the selected invoices could not be read ({ExceptionType}); nothing was claimed", ex.GetType().Name);
+                return ApExportResult.Refused(ApExportOutcome.Unavailable, ApExportCodes.Unavailable, "The selected invoices could not be read. Nothing was exported. Try again.");
+            }
+
+            foreach (var row in selected.Where(r => !matching.Contains(r.Id)).ToList())
+            {
+                selected.Remove(row);
+                refusals.Add(new ApExportInvoiceRefusal(row.Id, ApExportCodes.ReasonTotalsMismatch));
+            }
+        }
+
         if (refusals.Count > 0)
         {
             return new ApExportResult(ApExportOutcome.SelectionRefused, ApExportCodes.SelectionRefused, SelectionRefusedDetail(refusals), null, refusals, null);
@@ -460,9 +493,13 @@ public sealed class ApExportService
             // (7) Still Approved after the claim (a status change does not look at the batch lookup).
             // Task 095c-4: and still has a firm and no "firm needed" hold. This is the guard of the Sent to AP writer (step 9, the only caller of
             // the lifecycle's move to Sent to AP): it runs after the claim and before any file or status write, so nothing irreversible follows it.
+            var freshRows = new List<Entity>(selected.Count);
             foreach (var row in selected)
             {
-                var fresh = await _entities.RetrieveAsync(InvoiceEntity, row.Id, ["statuscode", BatchLookup, "sprk_vendororg"], ct).ConfigureAwait(false);
+                // Task 165b-2: with the stored totals, re-compared with the lines below.
+                var fresh = await _entities.RetrieveAsync(
+                    InvoiceEntity, row.Id, ["statuscode", BatchLookup, "sprk_vendororg", .. InvoiceTotalsService.StoredTotalsColumns], ct).ConfigureAwait(false);
+                freshRows.Add(fresh);
                 if (StatusOf(fresh) != InvoiceStatusCodes.Approved || BatchOf(fresh) != batchId)
                 {
                     throw new Stopped(ApExportOutcome.Conflict, ApExportCodes.InvoiceConflict,
@@ -487,6 +524,15 @@ public sealed class ApExportService
             {
                 throw new Stopped(ApExportOutcome.Conflict, ApExportCodes.InvoiceConflict,
                     "An invoice in the selection changed while the export was being prepared. Nothing was exported. Reload and try again.");
+            }
+
+            // Task 165b-2 (EB-D-200 item 3): and each one's stored totals, as read now, still equal the calculator over its lines, before any file or
+            // Sent to AP write. One batched line read.
+            var stillMatching = await TotalsMatchAsync(freshRows, ct).ConfigureAwait(false);
+            if (freshRows.Any(r => !stillMatching.Contains(r.Id)))
+            {
+                throw new Stopped(ApExportOutcome.Conflict, ApExportCodes.TotalsMismatch,
+                    "An invoice in the selection has stored totals that no longer match its lines. Nothing was exported. An administrator must review it.");
             }
 
             // (8) The values, read once; the files, written once.
@@ -629,6 +675,14 @@ public sealed class ApExportService
         {
             var recorded = await ApproveRecordedAsync(rows, ct).ConfigureAwait(false);
             rows = rows.Where(r => recorded.Contains(r.Id)).ToList();
+        }
+
+        // Task 165b-2 (EB-D-200 item 3): nor one whose stored totals differ from its lines, so the other candidates export without it. One batched line
+        // read per chunk; a fault throws, so nothing is shown.
+        if (rows.Count > 0)
+        {
+            var matching = await TotalsMatchAsync(rows, ct).ConfigureAwait(false);
+            rows = rows.Where(r => matching.Contains(r.Id)).ToList();
         }
 
         var allowed = await _authorization.FilterExportableAsync(caller, rows.Select(r => r.Id).ToList(), ct).ConfigureAwait(false);
@@ -813,6 +867,22 @@ public sealed class ApExportService
     }
 
     /// <summary>
+    /// Task 165b-2 (EB-D-200 item 3): the invoices among <paramref name="rows"/> whose stored totals equal what <see cref="InvoiceTotalsCalculator"/> derives
+    /// from their lines (<see cref="InvoiceTotalsService.InvoicesWithMatchingStoredTotalsAsync"/>, one batched line read per chunk). Each other one is logged
+    /// with the code, the table and the row id only. Throws on a read fault.
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> TotalsMatchAsync(IReadOnlyCollection<Entity> rows, CancellationToken ct)
+    {
+        var matching = await InvoiceTotalsService.InvoicesWithMatchingStoredTotalsAsync(_entities, rows, ct).ConfigureAwait(false);
+        foreach (var row in rows.Where(r => !matching.Contains(r.Id)))
+        {
+            _logger.LogWarning("AP export refusal {ReasonCode} on {Table} {RowId}", ApExportCodes.TotalsMismatch, InvoiceEntity, row.Id);
+        }
+
+        return matching;
+    }
+
+    /// <summary>
     /// Task 165b-3 part B fix round (K1; EB-D-208): Mark Paid's approval check. <c>Recorded</c> is true when the invoice has the writer-created
     /// approve record under its approval's key (<see cref="InvoiceApprovalService.InvoicesWithApproveRecordAsync"/>, the export's own batched
     /// read). Otherwise <c>Invoice</c> is the invoice's status as read now (null when the invoice does not exist), so Mark Paid can answer for an
@@ -845,6 +915,11 @@ public sealed class ApExportService
         if (refusals.All(r => r.Reason == ApExportCodes.ReasonApprovalNotRecorded))
         {
             return "An invoice in the selection has no recorded approval: an administrator must review it. Nothing was exported.";
+        }
+
+        if (refusals.All(r => r.Reason == ApExportCodes.ReasonTotalsMismatch))
+        {
+            return "An invoice in the selection has stored totals that do not match its lines: an administrator must review it. Nothing was exported.";
         }
 
         var firm = refusals.Count(r => r.Reason == ApExportCodes.ReasonFirmMissing);

@@ -292,5 +292,7 @@ public static class InvoiceTotalsCalculator
     private static InvoiceTotalsCalculation Refused(InvoiceTotalsRefusal refusal) =>
         new(0m, 0m, 0m, 0m, 0m, new Dictionary<Guid, decimal>(), refusal);
 
-    private static decimal Round(decimal value) => Math.Round(value, Decimals, MidpointRounding.AwayFromZero);
+    /// <summary>The one money rounding of the totals: 2 decimals, a midpoint away from zero. Task 165b-2's stored-totals comparison
+    /// (<see cref="InvoiceTotalsService.StoredTotalsOf"/>) rounds the stored values with it.</summary>
+    internal static decimal Round(decimal value) => Math.Round(value, Decimals, MidpointRounding.AwayFromZero);
 }

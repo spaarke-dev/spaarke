@@ -484,6 +484,7 @@ public partial class InvoiceSubmissionPersisterTests
             row["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId);
             row["versionnumber"] = 101L;
             world.Put(row);
+            world.StoreTotalsFromLines(); // Task 165b-2: as the totals service does after the persister writes the lines
             world.H.Rows[("sprk_billingevent", row.Id)] = new Entity("sprk_billingevent", row.Id)
             {
                 ["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId),
@@ -633,6 +634,7 @@ public partial class InvoiceSubmissionPersisterTests
             row["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId);
             row["versionnumber"] = 101L;
             world.Put(row);
+            world.StoreTotalsFromLines(); // Task 165b-2: as the totals service does after the persister writes the lines
             world.H.Rows[("sprk_billingevent", row.Id)] = new Entity("sprk_billingevent", row.Id)
             {
                 ["sprk_matter"] = new EntityReference("sprk_matter", world.CoreId),

@@ -159,6 +159,11 @@ public static class InvoiceApprovalCodes
     /// writer-created record was found for, so the record it names is not one the writer created under the completion's filter.</summary>
     public const string CompletionRecordNotWriterCreated = "ebilling.approve.completion.record_not_writer_created";
 
+    /// <summary>409 (task 165b-2, EB-D-200 item 3): a stored total of the invoice differs from what <see cref="InvoiceTotalsCalculator"/> derives from
+    /// its lines (<see cref="InvoiceTotalsService.StoredTotalsOf"/>). Refused at approve before any write and, the same check, at completion, where it
+    /// is the log reason of <see cref="CompletionRefused"/>.</summary>
+    public const string TotalsMismatch = "ebilling.approve.totals_mismatch";
+
     public const string TransitionRefused = "ebilling.approve.refused";
     public const string TotalsRefused = LineDecisionCodes.TotalsRefused;
     public const string Busy = LineDecisionCodes.Busy;
@@ -294,7 +299,9 @@ public sealed class InvoiceApprovalService
 
     private static readonly string[] InvoiceColumns =
     [
-        "statuscode", InvoiceTotalsService.InvoiceBilledTotal, InvoiceSubmissionPersister.InvoiceVendorOrg,
+        "statuscode", InvoiceSubmissionPersister.InvoiceVendorOrg,
+        // Task 165b-2: the billed total and the five stored totals, compared with the calculator over the lines (no extra query).
+        .. InvoiceTotalsService.StoredTotalsColumns,
         // Task 165b-3 part B: the completion's bounds, read with the invoice (no extra query): server-written createdon, and the currency.
         InvoiceCreatedOn, InvoiceSubmissionPersister.InvoiceCurrency,
         .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity),
@@ -600,7 +607,7 @@ public sealed class InvoiceApprovalService
                 "Another approver's approval of this invoice has not finished. They complete it by approving again.");
         }
 
-        // ── The holds, the corrections, I-2 and the line origin, on the line set read under both locks, before any write. ──
+        // ── The holds, the corrections, I-2, the line origin and the stored totals, on the line set read under both locks, before any write. ──
         var approvable = await CheckApprovableAsync(invoice, ct).ConfigureAwait(false);
         if (approvable.Refusal is { } refused)
         {
@@ -1189,12 +1196,13 @@ public sealed class InvoiceApprovalService
         return new Eligibility(null, new ApprovalResult(ApprovalOutcome.NotEligible, InvoiceApprovalCodes.NotEligible, "You are not an eligible approver of this invoice."));
     }
 
-    private sealed record Approvable(List<Entity> Lines, ApprovalResult? Refusal);
+    /// <summary>The lines read, the first failed check (null when all pass) and, once the stored-totals check ran, the calculator's result over the lines.</summary>
+    private sealed record Approvable(List<Entity> Lines, ApprovalResult? Refusal, InvoiceTotalsCalculation? Totals = null);
 
     /// <summary>
     /// The checks approve runs on the invoice and its line set before any write, in this order: the currency (165b-3 part B), the FR-20 hold,
-    /// the firm gate, the Procedure hold, the corrections whose follow-through did not finish, I-2 (no line Pending or Flagged) and the line
-    /// origin (165b). Returns the lines read (under the caller's locks) when every check passes. A read fault is Unavailable (fail closed).
+    /// the firm gate, the Procedure hold, the corrections whose follow-through did not finish, I-2 (no line Pending or Flagged), the line
+    /// origin (165b) and the stored totals (165b-2). Returns the lines read (under the caller's locks) when every check passes. A read fault is Unavailable (fail closed).
     /// Nothing is written. Completion calls the same method, so approve and completion never disagree.
     /// </summary>
     private async Task<Approvable> CheckApprovableAsync(Entity invoice, CancellationToken ct)
@@ -1271,7 +1279,39 @@ public sealed class InvoiceApprovalService
 
         // ── Task 165b item 1 (EB-D-200 (4)): approval refuses a line of unknown origin, on the line set read under both per-invoice locks and
         //    before any write. ──
-        return new Approvable(lineRows, await CheckLineOriginAsync(invoiceId, lineRows, ct).ConfigureAwait(false));
+        if (await CheckLineOriginAsync(invoiceId, lineRows, ct).ConfigureAwait(false) is { } unknownOrigin)
+        {
+            return new Approvable(lineRows, unknownOrigin);
+        }
+
+        // ── Task 165b-2 (EB-D-200 item 3): the stored totals equal the calculator over the same line set, before any write. ──
+        var stored = InvoiceTotalsService.StoredTotalsOf(invoice, lineRows);
+        return new Approvable(lineRows, CheckStoredTotals(invoiceId, stored), stored.Calculation);
+    }
+
+    /// <summary>
+    /// Task 165b-2 (EB-D-200 item 3): approval decides only from server-written sources, so the invoice's stored totals must equal what
+    /// <see cref="InvoiceTotalsCalculator"/> derives from its lines (<see cref="InvoiceTotalsService.StoredTotalsOf"/>). A calculation the calculator
+    /// refuses is the answer approve already gave for it (<see cref="InvoiceApprovalCodes.TotalsRefused"/> with the calculator's code), now given before
+    /// any write; a difference is 409 <see cref="InvoiceApprovalCodes.TotalsMismatch"/>. Either is logged with the reason code, the table and the row id
+    /// only. Null when the totals match. Pure: no query, nothing written.
+    /// </summary>
+    private ApprovalResult? CheckStoredTotals(Guid invoiceId, InvoiceTotalsService.StoredTotals stored)
+    {
+        if (stored.Match)
+        {
+            return null;
+        }
+
+        if (stored.Calculation.Refusal is { } refusal)
+        {
+            _logger.LogWarning("Approval refusal {ReasonCode} on {Table} {RowId}", refusal.Code, InvoiceReviewReadService.InvoiceEntity, invoiceId);
+            return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.TotalsRefused, refusal.Code);
+        }
+
+        _logger.LogWarning("Approval refusal {ReasonCode} on {Table} {RowId}", InvoiceApprovalCodes.TotalsMismatch, InvoiceReviewReadService.InvoiceEntity, invoiceId);
+        return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceApprovalCodes.TotalsMismatch,
+            "This invoice's stored totals do not match its lines, so it cannot be approved. Nothing was changed. An administrator must review the invoice.");
     }
 
     /// <summary>
@@ -1317,14 +1357,8 @@ public sealed class InvoiceApprovalService
         }
 
         // Part B (uac-r2 note a): the currency is checked by CheckApprovableAsync above, the same check approve ran before its claim.
-        var totals = InvoiceTotalsCalculator.Calculate(
-            invoice.GetAttributeValue<Money>(InvoiceTotalsService.InvoiceBilledTotal)?.Value,
-            approvable.Lines.Where(InvoiceTotalsService.IsCounted).Select(InvoiceTotalsService.ToRow).ToList());
-        if (totals.IsRefused)
-        {
-            return CompletionRefused(invoiceId, reasonCode: totals.Refusal!.Code);
-        }
-
+        // Task 165b-2: so are the stored totals against the lines; the calculation it ran (never refused here) gives the approved total.
+        var totals = approvable.Totals!;
         return portion.GetAttributeValue<Money>(PortionAmount)?.Value == totals.ApprovedTotal
             ? null
             : CompletionRefused(invoiceId, reasonCode: InvoiceApprovalCodes.CompletionAmountMismatch);
