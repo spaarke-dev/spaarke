@@ -4,16 +4,16 @@
 > - **Standing rules:** project `CLAUDE.md`. **Decisions:** `notes/decisions.md`. **Defer list:** `notes/defer-issues.md`.
 > - **History:** git log of this file.
 
-> **Last Updated**: 2026-11-08 ~04:15Z (checkpoint #103: 6fbb3a7642 (049c + MCP spike) deployed with the RecordCreation Debug setting; gate running to 04:30:55Z; PR #2629 review in progress).
+> **Last Updated**: 2026-11-08 ~05:40Z (021 timing closed, Debug setting removed; #2629 approved + merged; 165b-3 part A approved).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Final push, round-90 rules. Merge needs Router + "Client lint (type-aware ratchet)": `git merge-tree`, then `--squash --match-head-commit <sha>`, no `--delete-branch`. Live actions, deploys, role and settings changes need the owner's go IN THIS SESSION; a peer's go is never the owner's. |
-| **Running** | Background gate query (bash `bkdj4pti1`) for window 04:00:55Z → 04:30:55Z; it waits until 04:31:40Z and prints REQ/ROUTES/MARKERS/RCDEBUG/EXC/WARN. When it lands: write `notes/deploy-gate-2026-11-08-6fbb3a7642.md` (template: `deploy-gate-2026-11-07-22487c6537.md`), commit, tell fm, ontology, ebilling, word-add-in. |
-| **Dev state** | BFF = **6fbb3a7642** (master 23567b2f93 = 049c, plus the MCP spike; PR #2615 green) since 2026-11-08 04:00:55Z (owner go: "Deploy + logging setting"). **227 settings**: `Logging__ApplicationInsights__LogLevel__Sprk.Bff.Api.Services.RecordCreation=Debug` set 03:59:32Z for fm's 021 timing run; REMOVE it after fm's run (or with the next deploy). Read-back: 39.96 MB, hashes OK, healthz/dataverse 200, anon 401; MCP gate PASS (anon 401, signed 200). Pre-checks PASS (-Verify, reconcile false, 174/175 OPEN, no 095a, no client change, baseline 130 req 0 5xx 0 403). Rollback: `deploy/rollback/wwwroot-20261108T035611Z.zip` (22487c6537). Detached worktree `C:/wtd6fbb`: remove with `Remove-WorktreeSafe.ps1`. |
-| **Next action** | 1. Finish the review of fm **PR #2629** (030b + 034 + 052a, head f5fb4fc01b, auto-merge OFF until I approve). Checked so far: Office save/worker/attachment children put association, parent link and SPE pointer in the CREATE; the new CreateDocumentRequest members are `[JsonIgnore]` (Association has internal set); `StageDocumentAssociation` refuses non-association columns. Still to read: Repair.cs (052a metadata + fit), EmailAttachmentProcessor deletion, the guard tests. Then reply "approve" or findings. 2. Gate write-up (above). 3. Remove the Debug setting after fm's 021 run. |
+| **Running** | Nothing. |
+| **Dev state** | BFF = **6fbb3a7642** (master 23567b2f93 = 049c, plus the MCP spike; PR #2615) since 2026-11-08 04:00:55Z. Gate PASS (`notes/deploy-gate-2026-11-08-6fbb3a7642.md`); two boot-window 500s unexplained: check the next deploy's boot window. **226 settings** (RecordCreation Debug removed 05:19:20Z), reconcile false. Rollback: `deploy/rollback/wwwroot-20261108T035611Z.zip` (22487c6537). Detached worktree `C:/wtd6fbb`: remove with `Remove-WorktreeSafe.ps1`. Master since then: #2629 (57748ebf6d, fm 030b/034/052a) not yet on dev; next deploy = master + spike, owner go per SHA. |
+| **Next action** | Wait for peer items: ebilling part B (B1 approval allow-list, B2 AP export) + Ontology Administrator holder count; fm 032b design note and contact owner rule; mcp-bff-api Phase 0. Meanwhile, work my own backlog (below). |
 
 ## Decisions and rulings this stretch
 - Owner (here): "Deploy now" for 22487c6537 (done, PASS); "Deploy + logging setting" for 6fbb3a7642 (done).
@@ -23,7 +23,7 @@
 - Gate query must use a contains match on `changed_only_by_its_writer` (165d adds `.column`).
 
 ## Reviews queue
-- fm: #2629 (in progress); 045A design; 052b (incl. coming contact-only owner rule → customer main-BU team, after owner picks the team); 032 round 2 waits on the owner; **032b design note** (invoice Matter→Invoice mapping + assigned-access grant in ebilling's post-commit after-step; grant sign-off mine + re-file revoke/keep, joint with ebilling). 021 timing: closed on dev (20/20 lost to #2158; NFR-02 verdict moved to UAT by owner); Debug setting removed 05:19:20Z, 226 settings.
+- fm: 045A design; 052b (incl. coming contact-only owner rule → customer main-BU team, after owner picks the team); 032 round 2 waits on the owner; **032b design note** (invoice Matter→Invoice mapping + assigned-access grant in ebilling's post-commit after-step; grant sign-off mine + re-file revoke/keep, joint with ebilling). 021 timing: closed on dev (20/20 lost to #2158; NFR-02 verdict moved to UAT by owner); Debug setting removed 05:19:20Z, 226 settings.
 - ebilling: 165d diff (after option A), 165e, 165f, 165b, 2b-2, the batch checklist + commit. **165b-3 part A (276c1201af) APPROVED** 11-08 (cond. on their Opus pass; notes: decision-record row updatability, currency precision, Unavailable on re-approve). Part B (approval/AP export allow-list) next; spend waits on ontology.
 - mcp-bff-api: Phase 0 waits on the owner's connector registration (task 002); A10, B-4 and 021 still to come. Every deploy = master + spike until they say Phase 0 is done.
 
