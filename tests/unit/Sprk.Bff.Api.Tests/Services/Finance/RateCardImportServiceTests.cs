@@ -411,9 +411,11 @@ public sealed class RateCardImportServiceTests
         typeof(UpdateDocumentRequest).GetProperties()
             .Where(p => p.Name.EndsWith("Lookup", StringComparison.Ordinal))
             .Should().OnlyContain(p => p.GetValue(pointers) == null, "the source document is created unlinked (DEF-015)");
+        // The create's lookups are unset too. (Field mapping task 030b gave CreateDocumentRequest its first lookup,
+        // ParentDocumentLookup; the import never sets it — asserted on the value, not on the type's shape.)
         typeof(CreateDocumentRequest).GetProperties()
             .Where(p => p.Name.EndsWith("Lookup", StringComparison.Ordinal))
-            .Should().BeEmpty();
+            .Should().OnlyContain(p => p.GetValue(h.DocumentCreates[0]) == null, "the source document is created unlinked (DEF-015)");
     }
 
     [Fact]
