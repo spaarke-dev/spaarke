@@ -43,3 +43,36 @@ pwsh -File scripts/ebilling/Deploy-EbillingBillingEventRibbon.ps1 -EnvironmentUr
 ```
 
 The script imports through `Invoke-ScopedSolutionImport` (`scripts/lib/Publish-SolutionComponents.ps1`, which wraps `pac solution import` and the scoped `PublishXml`), so there is no separate `Import-SolutionScoped.ps1` call. It then re-runs the `-Verify` check with a bounded retry (up to about 3 minutes); exit 0 means all five hides are in effect. Order: (1) Q6 resolved and the SecureChild ribbon for `sprk_billingevent` removed from dev, (2) a dry run that no longer refuses, (3) the owner's go, (4) `-Apply`, (5) `-Verify`.
+
+### Fix round (review of 8e8ea5e79d), 2026-11-08
+
+#### Q6 decided: option (b), by uac-r2
+
+The import may replace exactly four live definitions on `sprk_billingevent` that the checked-in diff does not carry: `sprk.SecureChild.sprk_billingevent.New.Command`, `sprk.SecureChild.sprk_billingevent.NativeNewAllowed.EnableRule`, `sprk.SecureChild.sprk_billingevent.NewAvailable.EnableRule` and `Mscrm.AddNewRecordFromSubGridStandard` (the SecureChild override of the platform command for this table). They are the named list `$ReplacedByQ6` in the script (exact, case-sensitive match; no prefix, no wildcard), commented "replaced by this import per uac-r2 Q6 (b), 2026-11-08; billingevent's SecureChild New was removed in 096b/164a". The drift, `$lost` and `$unknown` refusals skip only those four; every other live id the diff does not carry still refuses (exit 2). The dry run prints the four as "will be replaced (uac-r2 Q6)".
+
+Two `-Apply` conditions (the operator checks both before running it):
+
+1. Our source removal (096b and this branch's `RibbonDiff.xml`) is on master no later than the dev `-Apply`.
+2. After `-Apply`, the read-backs go to uac-r2: our `-Verify` with all 11 hides, and SecureChild `-Verify` passing for the remaining eight tables.
+
+Dry run on dev after the change (exit 2, read-only): the four print as "will be replaced"; the content drift check is 0; the run then refuses on three OTHER stored SecureChild diff rows that the allow-list does not cover: `sprk.SecureChild.sprk_billingevent.New.LabelText`, `sprk.SecureChild.sprk_billingevent.New.ToolTipDescription` and `sprk.SecureChild.sprk_billingevent.SubGrid.New.CustomAction`. Those are the label, tooltip and custom action of the same SecureChild New button. They were NOT added, because the decision names four ids. Open question for uac-r2: either add these three to the allow-list or remove them from dev first. Until then `-Apply` stays refused and the pack and pre-flight steps are not reached live (the pack was checked locally).
+
+#### Refusal message (F4)
+
+When the refused set holds any `sprk.SecureChild.*` id or `Mscrm.AddNewRecordFromSubGridStandard`, the drift and `$lost` messages no longer say "Merge dev's version into the diff". They say these are SecureChild definitions owned by unified-access-control-r2 and must not be merged into the billing-event diff.
+
+#### Positive control (K2)
+
+`-Verify` and the post-apply check also require the sibling control `Mscrm.Form.sprk_billingevent.Save` to be in the effective ribbon before reporting PASS. An empty or wrong payload fails (exit 1). The dry run only warns.
+
+#### Other creating controls (K1)
+
+Six more hides, with the ids exactly as they appear in the effective ribbon: `Mscrm.HomepageGrid.sprk_billingevent.ImportData`, `.ImportDataFromExcel`, `.ImportDataFromCSV`, `Mscrm.HomepageGrid.sprk_billingevent.Copy.Selected`, `Mscrm.Form.sprk_billingevent.CopySelected`, `Mscrm.SubGrid.sprk_billingevent.CopySelected`. They are in `RibbonDiff.xml` (11 `HideCustomAction` rows now), the script's hide list (read from the diff) and `-Verify`. Rationale: a new line has one owner, Add line (164a).
+
+UI hides are not a privilege boundary: a user can still create a row through the API, an import wizard route we have not hidden (`ImportDataFromXML` and the platform Import) or another client. The server refusal (164a-1) is the boundary. Open question for the owner's D3 role-change bundle: whether user Create on `sprk_billingevent` is removed the way D3 removes it for `sprk_invoice`. No role was changed here.
+
+#### Deviations from the reference script and P1
+
+Two deviations from `Deploy-EbillingBillingExportRibbon.ps1`: (1) the hide list is printed BEFORE the stored-ribbon refusal, so a refused dry run still shows the hides; (2) `$SourceDiff` is hard-coded to the mixed-case folder `sprk_BillingEvent` (the checked-in source folder), while the shell and the table logical name are lower case.
+
+P1 is met in the inverse direction: the script refuses when dev carries rows the diff does not (outside the four-id allow-list), because the import would delete them.

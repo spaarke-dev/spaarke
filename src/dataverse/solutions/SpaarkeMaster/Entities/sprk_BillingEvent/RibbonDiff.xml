@@ -6,6 +6,12 @@
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_billingevent.NewRecord.Hide" Location="Mscrm.HomepageGrid.sprk_billingevent.NewRecord" />
     <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_billingevent.AddNewStandard.Hide" Location="Mscrm.SubGrid.sprk_billingevent.AddNewStandard" />
     <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_billingevent.NewRecord.Hide" Location="Mscrm.SubGrid.sprk_billingevent.NewRecord" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_billingevent.ImportData.Hide" Location="Mscrm.HomepageGrid.sprk_billingevent.ImportData" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_billingevent.ImportDataFromExcel.Hide" Location="Mscrm.HomepageGrid.sprk_billingevent.ImportDataFromExcel" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_billingevent.ImportDataFromCSV.Hide" Location="Mscrm.HomepageGrid.sprk_billingevent.ImportDataFromCSV" />
+    <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_billingevent.Copy.Selected.Hide" Location="Mscrm.HomepageGrid.sprk_billingevent.Copy.Selected" />
+    <HideCustomAction HideActionId="sprk.Mscrm.Form.sprk_billingevent.CopySelected.Hide" Location="Mscrm.Form.sprk_billingevent.CopySelected" />
+    <HideCustomAction HideActionId="sprk.Mscrm.SubGrid.sprk_billingevent.CopySelected.Hide" Location="Mscrm.SubGrid.sprk_billingevent.CopySelected" />
   </CustomActions>
   <Templates>
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>

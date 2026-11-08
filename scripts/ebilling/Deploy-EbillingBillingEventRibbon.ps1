@@ -9,12 +9,13 @@
     commands are hidden here; the server refuses a generic create of the table on its own (164a-1). This is the UI half.
 
     WHAT. The checked-in source of truth is src/dataverse/solutions/SpaarkeMaster/Entities/sprk_BillingEvent/RibbonDiff.xml (HideCustomActions only:
-    form NewRecord and SaveAndNew, homepage grid NewRecord, subgrid AddNewStandard and NewRecord). This script packs it into the dedicated
+    form NewRecord and SaveAndNew, homepage grid NewRecord, subgrid AddNewStandard and NewRecord, plus the other creating controls: homepage grid
+    ImportData / ImportDataFromExcel / ImportDataFromCSV / Copy.Selected, form CopySelected, subgrid CopySelected). This script packs it into the dedicated
     ribbon-only solution BillingEventRibbons (the shell infrastructure/dataverse/ribbon/BillingEventRibbons holds the sprk_billingevent root
     component with behavior 2 = no subcomponents; the RibbonDiff.xml is copied in at pack time, so there is one copy). The import REPLACES the
     table's RibbonDiffXml, which is why the diff is the whole file, not only the hides. So the dry run REFUSES (exit 2) while dev's stored ribbon
-    for the table holds anything the checked-in diff does not contain, for example uac 147's sprk.SecureChild.* commands and rules (Q6): 096b
-    removed them from the checked-in diff, and an import would delete them from dev. Scoped publish only: sprk_billingevent, never PublishAllXml
+    for the table holds anything the checked-in diff does not contain, EXCEPT the four ids in $ReplacedByQ6 below (uac-r2 Q6 (b): the import may
+    replace exactly those). Any other id, including any other sprk.SecureChild.* row, still refuses. Scoped publish only: sprk_billingevent, never PublishAllXml
     (scripts/lib/Publish-SolutionComponents.ps1).
 
     MODES
@@ -24,7 +25,8 @@
                  import pre-flight (component types, pending collateral on the entity; read-only) and prints the PublishXml ParameterXml.
       -Apply     The same checks, then pac solution import --environment <url> (no publish), then the scoped PublishXml, then the -Verify check with
                  a bounded retry (the effective ribbon lags the publish by up to about 75 s).
-      -Verify    Read-only. Exit 0 when none of the hidden controls is in the effective ribbon, exit 1 otherwise.
+      -Verify    Read-only. Exit 0 when none of the hidden controls is in the effective ribbon AND the sibling control Mscrm.Form.sprk_billingevent.Save
+                 is (an empty or wrong payload never passes), exit 1 otherwise.
 
     OPERATOR-RUN ONLY for -Apply (the main session; a live write). Needs pac CLI and the operator's own az CLI identity. No secrets.
 
@@ -50,6 +52,24 @@ $Table = 'sprk_billingevent'
 $SolutionName = 'BillingEventRibbons'
 $ShellFolder = Join-Path $repo 'infrastructure' 'dataverse' 'ribbon' $SolutionName
 $SourceDiff = Join-Path $repo 'src' 'dataverse' 'solutions' 'SpaarkeMaster' 'Entities' 'sprk_BillingEvent' 'RibbonDiff.xml'
+
+# A control that always exists on the table's form ribbon: -Verify and the post-apply check require it, so an empty or wrong payload cannot pass.
+$PositiveControl = 'Mscrm.Form.sprk_billingevent.Save'
+# replaced by this import per uac-r2 Q6 (b), 2026-11-08; billingevent's SecureChild New was removed in 096b/164a
+# Exact, case-sensitive match only (-ccontains): no prefix, no wildcard. Every other live id the checked-in diff does not carry still refuses.
+$ReplacedByQ6 = @(
+    'sprk.SecureChild.sprk_billingevent.New.Command'
+    'sprk.SecureChild.sprk_billingevent.NativeNewAllowed.EnableRule'
+    'sprk.SecureChild.sprk_billingevent.NewAvailable.EnableRule'
+    'Mscrm.AddNewRecordFromSubGridStandard'
+)
+# The refusal advice: SecureChild definitions belong to unified-access-control-r2, so they are never merged into the billing-event diff.
+function Get-RefusalAdvice([string[]]$Ids) {
+    if (@($Ids | Where-Object { $_ -cmatch '^sprk\.SecureChild\.' -or $_ -ceq 'Mscrm.AddNewRecordFromSubGridStandard' }).Count -gt 0) {
+        return 'These are SecureChild definitions owned by unified-access-control-r2 and must not be merged into the billing-event diff; ask uac-r2 (the Q6 allow-list covers only four ids).'
+    }
+    "Merge dev's version into $SourceDiff first (the rollback copy has it)."
+}
 
 $api = "$BaseUrl/api/data/v9.2"
 $token = az account get-access-token --resource $BaseUrl --query accessToken -o tsv 2>$null
@@ -77,9 +97,14 @@ Write-Host "Deploy-EbillingBillingEventRibbon  env: $BaseUrl  mode: $mode"
 
 $ribbon = Get-EffectiveRibbon
 $present = Get-StillPresent $ribbon
+function Test-PositiveControl([xml]$Ribbon) { [bool]$Ribbon.SelectSingleNode("//*[@Id='$PositiveControl']") }
 
 if ($Verify) {
-    if ($present.Count -eq 0) { Write-Host "VERIFY PASS: none of the $($hides.Count) hidden controls is in the effective ribbon of $Table." -ForegroundColor Green; exit 0 }
+    if (-not (Test-PositiveControl $ribbon)) {
+        Write-Host "VERIFY FAIL: the sibling control $PositiveControl is not in the effective ribbon of $Table, so an empty or wrong payload came back; the hides cannot be judged." -ForegroundColor Red
+        exit 1
+    }
+    if ($present.Count -eq 0) { Write-Host "VERIFY PASS: none of the $($hides.Count) hidden controls is in the effective ribbon of $Table (sibling control $PositiveControl present)." -ForegroundColor Green; exit 0 }
     Write-Host "VERIFY FAIL: still in the effective ribbon: $($present -join ', '). Run again in a few minutes if an import just ran." -ForegroundColor Red
     exit 1
 }
@@ -131,19 +156,28 @@ function Find-SourceNode([string]$Id, [string]$Kind) {
 }
 # The hides come first, so a refusal below still shows what the diff would hide (the criterion: the dry run lists the hides).
 # Every Location must be a control the published ribbon has now, or one this diff already hides (its HideActionId is a stored row).
-$unknown = @($hides | Where-Object { -not $ribbon.SelectSingleNode("//*[@Id='$($_.Location)']") -and ($storedIds -notcontains $_.Id) })
+$unknown = @($hides | Where-Object { -not $ribbon.SelectSingleNode("//*[@Id='$($_.Location)']") -and ($storedIds -notcontains $_.Id) -and ($ReplacedByQ6 -cnotcontains $_.Location) })
 Write-Host "Hidden controls in the diff: $($hides.Count); in the effective ribbon now: $($present.Count); already hidden by a stored row: $(@($hides | Where-Object { $storedIds -contains $_.Id }).Count)"
 foreach ($h in $hides) {
     $state = if ($present -contains $h.Location) { 'present now (will be hidden)' } elseif ($storedIds -contains $h.Id) { 'already hidden' } else { 'NOT FOUND' }
     Write-Host ("  {0,-70} {1}" -f $h.Location, $state)
 }
+# The four ids the import may replace (uac-r2 Q6 (b)), as they stand on dev.
+$liveIds = @(@($storedIds) + @($storedCommands | ForEach-Object { "$($_.command)" }) + @($storedRules | ForEach-Object { "$($_.ruleid)" }))
+foreach ($q in $ReplacedByQ6) {
+    $q6state = if ($liveIds -ccontains $q) { 'will be replaced (uac-r2 Q6)' } else { 'not on dev (nothing to replace)' }
+    Write-Host ("  {0,-70} {1}" -f $q, $q6state)
+}
+if (-not (Test-PositiveControl $ribbon)) { Write-Host "WARNING: the sibling control $PositiveControl is not in the effective ribbon: an empty or wrong payload came back." -ForegroundColor Yellow }
 $drift = @()
-foreach ($d in $storedDiffs) { $s = Find-SourceNode $d.diffid 'diff'; if ($s) { [xml]$x = $d.rdx; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += "ribbondiff $($d.diffid)" } } }
-foreach ($c in $storedCommands) { $s = Find-SourceNode $c.command 'command'; if (-not $s) { $drift += "command $($c.command) (not in the checked-in diff)" } else { [xml]$x = $c.commanddefinition; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += "command $($c.command)" } } }
-foreach ($r in $storedRules) { $s = Find-SourceNode $r.ruleid 'rule'; if (-not $s) { $drift += "rule $($r.ruleid) (not in the checked-in diff)" } else { [xml]$x = $r.ruledefinition; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += "rule $($r.ruleid)" } } }
-Write-Host "Stored definitions compared by content: $($storedDiffs.Count) diff rows, $($storedCommands.Count) commands, $($storedRules.Count) rules; differing from the checked-in diff: $($drift.Count)"
+foreach ($d in $storedDiffs) { $s = Find-SourceNode $d.diffid 'diff'; if ($s) { [xml]$x = $d.rdx; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += [pscustomobject]@{ Id = "$($d.diffid)"; Text = "ribbondiff $($d.diffid)" } } } }
+foreach ($c in $storedCommands) { $s = Find-SourceNode $c.command 'command'; if (-not $s) { $drift += [pscustomobject]@{ Id = "$($c.command)"; Text = "command $($c.command) (not in the checked-in diff)" } } else { [xml]$x = $c.commanddefinition; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += [pscustomobject]@{ Id = "$($c.command)"; Text = "command $($c.command)" } } } }
+foreach ($r in $storedRules) { $s = Find-SourceNode $r.ruleid 'rule'; if (-not $s) { $drift += [pscustomobject]@{ Id = "$($r.ruleid)"; Text = "rule $($r.ruleid) (not in the checked-in diff)" } } else { [xml]$x = $r.ruledefinition; if ((ConvertTo-Canonical $x.DocumentElement) -ne (ConvertTo-Canonical $s)) { $drift += [pscustomobject]@{ Id = "$($r.ruleid)"; Text = "rule $($r.ruleid)" } } } }
+# Q6 (b): the four allow-listed ids are replaced on purpose; every other difference still refuses.
+$drift = @($drift | Where-Object { $ReplacedByQ6 -cnotcontains $_.Id })
+Write-Host "Stored definitions compared by content: $($storedDiffs.Count) diff rows, $($storedCommands.Count) commands, $($storedRules.Count) rules; differing from the checked-in diff (outside the Q6 allow-list): $($drift.Count)"
 if ($drift.Count -gt 0) {
-    Write-Host "REFUSED: dev's stored ribbon for $Table differs from the checked-in diff, and the import would replace it: $($drift -join '; '). Merge dev's version into $SourceDiff first (the rollback copy has it). Nothing was changed." -ForegroundColor Red
+    Write-Host "REFUSED: dev's stored ribbon for $Table differs from the checked-in diff, and the import would replace it: $(@($drift | ForEach-Object { $_.Text }) -join '; '). $(Get-RefusalAdvice @($drift | ForEach-Object { $_.Id })) Nothing was changed." -ForegroundColor Red
     exit 2
 }
 
@@ -154,10 +188,10 @@ if ($unknown.Count -gt 0) {
 
 # The ids the checked-in diff owns: custom actions, hides, labels, commands, rules.
 $owned = @($diffXml.SelectNodes('//*[@Id or @HideActionId]') | ForEach-Object { if ($_.GetAttribute('HideActionId')) { $_.GetAttribute('HideActionId') } else { $_.GetAttribute('Id') } })
-$lost = @($storedIds | Where-Object { $owned -notcontains $_ })
-Write-Host "Stored ribbon diff rows for ${Table}: $($rows.Count); not in the checked-in diff: $($lost.Count)"
+$lost = @($storedIds | Where-Object { $owned -notcontains $_ -and $ReplacedByQ6 -cnotcontains $_ })
+Write-Host "Stored ribbon diff rows for ${Table}: $($rows.Count); not in the checked-in diff (outside the Q6 allow-list): $($lost.Count)"
 if ($lost.Count -gt 0) {
-    Write-Host "REFUSED: $Table carries stored ribbon customizations the checked-in diff does not contain, and the import would replace them: $($lost -join ', '). Merge them into $SourceDiff first. Nothing was changed." -ForegroundColor Red
+    Write-Host "REFUSED: $Table carries stored ribbon customizations the checked-in diff does not contain, and the import would replace them: $($lost -join ', '). $(Get-RefusalAdvice $lost) Nothing was changed." -ForegroundColor Red
     exit 2
 }
 
@@ -189,8 +223,11 @@ Invoke-ScopedSolutionImport -EnvironmentUrl $BaseUrl -ZipPath $zip -SolutionUniq
 
 foreach ($delay in @(0, 15, 30, 45, 60, 30)) {
     if ($delay -gt 0) { Write-Host "The effective ribbon can lag the publish; re-checking in $delay s."; Start-Sleep -Seconds $delay }
-    $present = Get-StillPresent (Get-EffectiveRibbon)
-    if ($present.Count -eq 0) { Write-Host "APPLIED and VERIFIED: the $($hides.Count) controls are hidden." -ForegroundColor Green; exit 0 }
+    $after = Get-EffectiveRibbon
+    $present = Get-StillPresent $after
+    $sibling = Test-PositiveControl $after
+    if ($present.Count -eq 0 -and $sibling) { Write-Host "APPLIED and VERIFIED: the $($hides.Count) controls are hidden (sibling control $PositiveControl present)." -ForegroundColor Green; exit 0 }
 }
+if (-not $sibling) { Write-Host "APPLIED, but the sibling control $PositiveControl is not in the effective ribbon after about 3 minutes (empty or wrong payload). Run -Verify later." -ForegroundColor Red; exit 1 }
 Write-Host "APPLIED, but still present after about 3 minutes: $($present -join ', '). Run -Verify later; if it still fails, inspect the import." -ForegroundColor Red
 exit 1
