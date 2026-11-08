@@ -29,6 +29,10 @@ namespace Sprk.Bff.Api.Services.Finance.Submission;
 /// </summary>
 public static class InvoiceLineOrigin
 {
+    /// <summary>A line whose origin is not known. <paramref name="AddedWithoutRecord"/>: it carries the Add line marker and id for this invoice but has
+    /// no matching <c>add-line</c> record (an add that may not have finished); false for every other case.</summary>
+    public readonly record struct UnknownLine(Guid Id, bool AddedWithoutRecord);
+
     /// <summary>The refusal code: a Fee or Expense line of unknown origin (logged with the table and row id only).</summary>
     public const string UnknownOriginCode = "ebilling.approve.line_origin_unknown";
 
@@ -37,6 +41,7 @@ public static class InvoiceLineOrigin
     private const string RecordActionCode = "sprk_actioncode";
     private const string RecordSteps = "sprk_steps";
     private const string RecordFacts = "sprk_factsnapshot";
+    private const string CreatedOnBehalfByColumn = "createdonbehalfby";
 
     /// <summary>
     /// True when <paramref name="line"/> is line <c>sequence</c> of the submission <paramref name="submissionId"/>'s intake: its id is
@@ -56,11 +61,12 @@ public static class InvoiceLineOrigin
 
     /// <summary>
     /// The Fee and Expense lines among <paramref name="lines"/> (the invoice's lines, read with <c>sprk_linesequence</c>,
-    /// <c>sprk_extractionconfidence</c> and <c>sprk_invoice</c>) whose origin is not known, in the order given. Reads the <c>add-line</c> records
+    /// <c>sprk_extractionconfidence</c> and <c>sprk_invoice</c>) whose origin is not known, in the order given, each flagged when it is an added line
+    /// without its record. Reads the <c>add-line</c> records
     /// app-only through <paramref name="entities"/>, only when a line passes the Add line id rule; a record counts only when
-    /// <c>createdby</c> is <paramref name="writerUserId"/>. Throws on a read fault (callers refuse).
+    /// <c>createdby</c> is <paramref name="writerUserId"/> and <c>createdonbehalfby</c> is empty. Throws on a read fault (callers refuse).
     /// </summary>
-    public static async Task<IReadOnlyList<Guid>> UnknownOriginLinesAsync(
+    public static async Task<IReadOnlyList<UnknownLine>> UnknownOriginLinesAsync(
         IGenericEntityService entities, Guid invoiceId, Guid? ownSubmissionId, IReadOnlyList<Entity> lines, Func<CancellationToken, Task<Guid>> writerUserId,
         CancellationToken ct)
     {
@@ -69,6 +75,7 @@ public static class InvoiceLineOrigin
         ArgumentNullException.ThrowIfNull(writerUserId);
 
         var unknown = new List<Guid>();
+        var withoutRecord = new HashSet<Guid>();
         var added = new Dictionary<Guid, Guid>(); // line id -> its Add line decision id
         foreach (var line in lines.Where(IsChargeLine))
         {
@@ -90,11 +97,12 @@ public static class InvoiceLineOrigin
         if (added.Count > 0)
         {
             var recorded = await RecordedAddedLinesAsync(entities, invoiceId, added, await writerUserId(ct).ConfigureAwait(false), ct).ConfigureAwait(false);
-            unknown.AddRange(added.Keys.Where(id => !recorded.Contains(id)));
+            withoutRecord.UnionWith(added.Keys.Where(id => !recorded.Contains(id)));
+            unknown.AddRange(withoutRecord);
         }
 
         var order = lines.Select((l, i) => (l.Id, i)).ToDictionary(p => p.Id, p => p.i);
-        return unknown.OrderBy(id => order[id]).ToList();
+        return unknown.OrderBy(id => order[id]).Select(id => new UnknownLine(id, withoutRecord.Contains(id))).ToList();
     }
 
     /// <summary>The lines of <paramref name="added"/> that have their <c>add-line</c> record (see the type remarks).</summary>
@@ -111,6 +119,8 @@ public static class InvoiceLineOrigin
         query.Criteria.AddCondition(RecordLineLookup, ConditionOperator.In, added.Keys.Cast<object>().ToArray());
         query.Criteria.AddCondition(RecordActionCode, ConditionOperator.Equal, InvoiceLineAddService.ActionCode);
         query.Criteria.AddCondition(DecisionRecordWriter.CreatedByColumn, ConditionOperator.Equal, writerUserId);
+        // K4: a row created on behalf of the writer by another identity is not the writer's own record.
+        query.Criteria.AddCondition(CreatedOnBehalfByColumn, ConditionOperator.Null);
         query.AddOrder(DecisionRecordEntity + "id", OrderType.Ascending);
 
         var found = new HashSet<Guid>();

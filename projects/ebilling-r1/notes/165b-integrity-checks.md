@@ -63,6 +63,32 @@ persister end-to-end tests build the world from the persister's submission.
 - K: only the own submission counts (stricter than "a linked submission"), consistent with 165a. An invoice with no own submission linked is
   already refused by the 165a hold before this check runs.
 
+## 1.1 Review fix round (item 1)
+
+- **F3, Clean case.** `ALineOfUnknownOrigin_IsRefused` now also runs a stray Fee and a stray Expense line in status Clean. Approval refuses them
+  with `Writes == 0` and one log line, so the check runs before the Clean bulk-accept write (`AcceptCleanHeldAsync`).
+- **F3, the D-96 test.** The old test set `sprk_invoice` to null and straight back, which proved nothing. It now models the sequence on the
+  world's rows: clear each line's `sprk_invoice`, move the invoice's core lookup and each line's core lookup (and the approval portion's core
+  stamp) to a new core record with the same role assignments, re-attach the lines, approve, and expect success. The rule holds because it reads
+  only the row id, the sequence, the reviewer marker and the invoice lookup, never a core.
+- **K4.** The `add-line` record lookup also requires `createdonbehalfby` is null, next to the `createdby` = writer filter, so a row created on
+  the writer's behalf by another identity does not count. New must-fire test: `createdby` = writer with `createdonbehalfby` set is refused.
+  With the condition removed that test fails; with it, it passes. `DecisionRecordWriter.cs` (ontology-r1) is not changed: its own "already
+  recorded" lookups filter on `createdby` alone and have the same gap. Known limit, for the lead to pass on to ontology-r1.
+- **K6, message.** `InvoiceLineOrigin.UnknownOriginLinesAsync` now returns `UnknownLine(Id, AddedWithoutRecord)`. When a refused line passes
+  `AddedLineDecisionIdOf` (marker, this invoice, derived id) but has no matching record, the refusal text adds: "If a line was added and the add
+  did not finish, repeat the add." Every other case keeps the original text. The tests pin both texts.
+
+**Known limits (added by this round).**
+
+- K: the post-check window is unchanged (section 1: a change after the check, by a path that takes no approval lock, is not seen).
+- K: the completion path's origin check (a bulk accept finished by `CompleteEarlierBulkAcceptAsync`, and the other completion routes) is in task
+  165b-3's scope.
+- K: a changed sequence fails closed. An intake line whose `sprk_linesequence` was changed no longer derives its id, so it is refused.
+- K: a line with no cost type is refused by the totals calculator only after the Clean bulk-accept write. This ordering predates 165b; task
+  165b-2's totals check before any write closes it.
+- K: the Decision Record writer's own lookups (`DecisionRecordWriter.cs`, ontology-r1) filter on `createdby` without `createdonbehalfby`. Not changed here.
+
 ## 2. Ontology-owned files
 
 Item 1 changes no file in `FinanceBaseValues` or `Services/Signals/**`. No hunks to review.

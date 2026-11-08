@@ -1075,7 +1075,7 @@ public sealed class InvoiceApprovalService
     /// </summary>
     private async Task<ApprovalResult?> CheckLineOriginAsync(Guid invoiceId, IReadOnlyList<Entity> lineRows, CancellationToken ct)
     {
-        IReadOnlyList<Guid> unknown;
+        IReadOnlyList<InvoiceLineOrigin.UnknownLine> unknown;
         try
         {
             var own = await InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, [InvoiceSubmissionPersister.SubmissionInvoice], ct).ConfigureAwait(false);
@@ -1091,13 +1091,15 @@ public sealed class InvoiceApprovalService
             return null;
         }
 
-        foreach (var lineId in unknown)
+        foreach (var line in unknown)
         {
-            _logger.LogWarning("Approval refusal {ReasonCode} on {Table} {RowId}", InvoiceLineOrigin.UnknownOriginCode, InvoiceTotalsService.LineEntity, lineId);
+            _logger.LogWarning("Approval refusal {ReasonCode} on {Table} {RowId}", InvoiceLineOrigin.UnknownOriginCode, InvoiceTotalsService.LineEntity, line.Id);
         }
 
+        // K6: an added line with no record is most likely an add that did not finish; say how to recover.
         return new ApprovalResult(ApprovalOutcome.Conflict, InvoiceLineOrigin.UnknownOriginCode,
-            "A line on this invoice has no known origin, so the invoice cannot be approved. An administrator must review the invoice's lines.");
+            "A line on this invoice has no known origin, so the invoice cannot be approved. An administrator must review the invoice's lines."
+            + (unknown.Any(l => l.AddedWithoutRecord) ? " If a line was added and the add did not finish, repeat the add." : string.Empty));
     }
 
     // ── F2: an earlier attempt's bulk accept ──

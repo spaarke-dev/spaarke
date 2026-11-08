@@ -1,8 +1,10 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Tests.Services.Signals;
 using Xunit;
 using static Sprk.Bff.Api.Tests.Services.Finance.ApprovalWorld;
 
@@ -18,13 +20,17 @@ public sealed class InvoiceApprovalLineOriginTests
 {
     private static readonly Guid AddDecision = Guid.Parse("165b0000-0000-4000-8000-0000000000a1");
 
-    private static async Task<ApprovalResult> RefusedFor(ApprovalWorld w, Guid lineId)
+    private const string BaseRefusal = "A line on this invoice has no known origin, so the invoice cannot be approved. An administrator must review the invoice's lines.";
+    private const string RepeatTheAdd = " If a line was added and the add did not finish, repeat the add.";
+
+    /// <param name="addedWithoutRecord">K6: the refused line passes the Add line marker and id rule but has no matching record, so the text adds how to recover.</param>
+    private static async Task<ApprovalResult> RefusedFor(ApprovalWorld w, Guid lineId, bool addedWithoutRecord = false)
     {
         var result = await w.ApproveAs(AliceUser);
 
         result.Outcome.Should().Be(ApprovalOutcome.Conflict, result.Detail);
         result.Code.Should().Be(InvoiceApprovalCodes.LineOriginUnknown);
-        result.Detail.Should().Be("A line on this invoice has no known origin, so the invoice cannot be approved. An administrator must review the invoice's lines.");
+        result.Detail.Should().Be(addedWithoutRecord ? BaseRefusal + RepeatTheAdd : BaseRefusal);
         w.Writes.Should().Be(0, "a refused approve writes nothing");
         w.Transitions.Should().Be(0);
         w.InvoiceStatus.Should().Be(InvoiceStatusCodes.InReview);
@@ -41,13 +47,16 @@ public sealed class InvoiceApprovalLineOriginTests
     // ── Must fire ──
 
     [Theory(DisplayName = "165b must fire: a Fee or Expense line that is neither an intake line nor an added line is refused (409 line_origin_unknown), nothing written")]
-    [InlineData(InvoiceLineCostType.Fee)]
-    [InlineData(InvoiceLineCostType.Expense)]
-    public async Task ALineOfUnknownOrigin_IsRefused(InvoiceLineCostType type)
+    [InlineData(InvoiceLineCostType.Fee, InvoiceLineStatus.Accepted)]
+    [InlineData(InvoiceLineCostType.Expense, InvoiceLineStatus.Accepted)]
+    // F3: a Clean stray line is refused before the Clean bulk-accept write (Writes == 0 is asserted by RefusedFor).
+    [InlineData(InvoiceLineCostType.Fee, InvoiceLineStatus.Clean)]
+    [InlineData(InvoiceLineCostType.Expense, InvoiceLineStatus.Clean)]
+    public async Task ALineOfUnknownOrigin_IsRefused(InvoiceLineCostType type, InvoiceLineStatus status)
     {
         var w = new ApprovalWorld();
         w.AddLine(InvoiceLineStatus.Accepted, 400m, approved: 400m);
-        var stray = w.AddLine(InvoiceLineStatus.Accepted, 100m, type, approved: 100m, id: Guid.NewGuid());
+        var stray = w.AddLine(status, 100m, type, approved: status == InvoiceLineStatus.Accepted ? 100m : null, id: Guid.NewGuid());
 
         await RefusedFor(w, stray.Id);
     }
@@ -70,7 +79,7 @@ public sealed class InvoiceApprovalLineOriginTests
         var added = AddedLine(w, AddDecision);
         ExtractionProvenance.IsReviewerAdded(added).Should().BeTrue("the setup: the marker and id rule hold");
 
-        await RefusedFor(w, added.Id);
+        await RefusedFor(w, added.Id, addedWithoutRecord: true);
     }
 
     [Fact(DisplayName = "165b must fire: an add-line record the writer identity did not create does not count")]
@@ -87,7 +96,25 @@ public sealed class InvoiceApprovalLineOriginTests
         record["createdby"] = new EntityReference("systemuser", BobUser);
         w.H.Seeded.Add(record);
 
-        await RefusedFor(w, added.Id);
+        await RefusedFor(w, added.Id, addedWithoutRecord: true);
+    }
+
+    [Fact(DisplayName = "165b must fire (K4): an add-line record with createdby = the writer but createdonbehalfby set does not count")]
+    public async Task ARecordCreatedOnBehalfOfTheWriter_IsRefused()
+    {
+        var w = new ApprovalWorld();
+        w.AddLine(InvoiceLineStatus.Accepted, 400m, approved: 400m);
+        var added = AddedLine(w, AddDecision);
+        await w.RecordAddedLineAsync(added.Id, AddDecision);
+
+        // The same record, createdby the writer as Dataverse stores it, but created on the writer's behalf by another identity.
+        var record = w.H.Created.Single();
+        w.H.Created.Clear();
+        record["createdby"] = new EntityReference("systemuser", DecisionRecordWriterTests.WriterUser);
+        record["createdonbehalfby"] = new EntityReference("systemuser", BobUser);
+        w.H.Seeded.Add(record);
+
+        await RefusedFor(w, added.Id, addedWithoutRecord: true);
     }
 
     [Fact(DisplayName = "165b must fire: an add-line record of another decision, or whose facts name another invoice, does not count for the line")]
@@ -97,13 +124,13 @@ public sealed class InvoiceApprovalLineOriginTests
         var added = AddedLine(other, AddDecision);
         await other.RecordAddedLineAsync(added.Id, Guid.Parse("165b0000-0000-4000-8000-0000000000b2"));
 
-        await RefusedFor(other, added.Id);
+        await RefusedFor(other, added.Id, addedWithoutRecord: true);
 
         var named = new ApprovalWorld();
         var line = AddedLine(named, AddDecision);
         await named.RecordAddedLineAsync(line.Id, AddDecision, factsInvoiceId: Guid.NewGuid());
 
-        await RefusedFor(named, line.Id);
+        await RefusedFor(named, line.Id, addedWithoutRecord: true);
     }
 
     [Fact(DisplayName = "165b must fire: a line added on another invoice and moved here is refused, even with that invoice's record")]
@@ -152,22 +179,51 @@ public sealed class InvoiceApprovalLineOriginTests
         w.Log.Entries.Should().NotContain(e => e.Message.Contains(InvoiceLineOrigin.UnknownOriginCode));
     }
 
-    [Fact(DisplayName = "165b must not fire (D-96): a line detached and re-attached to the same invoice keeps its id and its origin, and approves")]
-    public async Task ALineReattachedToTheSameInvoice_Approves()
+    [Fact(DisplayName = "165b must not fire (D-96): lines detached, the invoice and its lines moved to a new core, then re-attached keep their ids and origin, and approve")]
+    public async Task LinesDetachedMovedToANewCoreAndReattached_Approve()
     {
         var w = new ApprovalWorld();
         var intake = w.AddLine(InvoiceLineStatus.Accepted, 400m, approved: 400m);
         var added = AddedLine(w, AddDecision);
         await w.RecordAddedLineAsync(added.Id, AddDecision);
-        foreach (var line in new[] { intake, added })
+        var lines = new[] { intake, added };
+
+        // The D-96 sequence: detach every line, move the invoice and each line to a new core record, re-attach the lines.
+        foreach (var line in lines)
         {
-            var row = w.Rows[("sprk_billingevent", line.Id)];
-            row["sprk_invoice"] = null;
-            row["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId);
+            w.Rows[("sprk_billingevent", line.Id)].Attributes.Remove("sprk_invoice");
+            w.H.Rows[("sprk_billingevent", line.Id)].Attributes.Remove("sprk_invoice");
+        }
+
+        var newCoreId = Guid.NewGuid();
+        var newCore = new EntityReference(w.CoreEntity, newCoreId);
+        var oldCore = w.Core;
+        w.Put(new Entity(w.CoreEntity, newCoreId)
+        {
+            ["sprk_assignedattorney1"] = oldCore["sprk_assignedattorney1"],
+            ["sprk_assignedtointernal"] = oldCore["sprk_assignedtointernal"],
+            ["sprk_assignedparalegal1"] = oldCore["sprk_assignedparalegal1"],
+        });
+        var coreColumn = w.CoreEntity == "sprk_workassignment" ? "sprk_regardingworkassignment" : w.CoreEntity;
+        w.Invoice[coreColumn] = newCore;
+        w.Invoice["sprk_regardingrecordid"] = newCoreId.ToString("D");
+        w.H.Rows[("sprk_invoice", w.InvoiceId)][coreColumn] = newCore;
+        w.Portion[CoreAncestorResolver.StampColumnFor(w.CoreEntity)] = newCore;
+        foreach (var line in lines)
+        {
+            w.H.Rows[("sprk_billingevent", line.Id)][coreColumn] = newCore;
+        }
+
+        foreach (var line in lines)
+        {
+            var reference = new EntityReference("sprk_invoice", w.InvoiceId);
+            w.Rows[("sprk_billingevent", line.Id)]["sprk_invoice"] = reference;
+            w.H.Rows[("sprk_billingevent", line.Id)]["sprk_invoice"] = reference;
         }
 
         var result = await w.ApproveAs(AliceUser);
 
         result.Outcome.Should().Be(ApprovalOutcome.Approved, $"{result.Code} {result.Detail}");
+        w.Log.Entries.Should().NotContain(e => e.Message.Contains(InvoiceLineOrigin.UnknownOriginCode));
     }
 }
