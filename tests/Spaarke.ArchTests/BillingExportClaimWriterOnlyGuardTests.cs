@@ -21,16 +21,17 @@ namespace Spaarke.ArchTests;
 /// edit of its own) or <c>RecordTableRules.RefuseWriterOnlyColumns</c> directly - or be listed in <see cref="Exempt"/> with its reason. A listed
 /// member that does ask the refusal is stale and fails, so the list can only shrink. <c>RecordTableRules.RefuseWriterOnlyColumns</c> is asked from
 /// <c>RefuseAppOnlyWrite</c> (the single extension of uac-r2's refusal) and from the exact callers in <see cref="DirectColumnAskers"/>: the two
-/// create-path members of <c>RecordCreationService</c> (the CREATE is not an update and asks no table-level check) and the work-product persister
-/// (its target column comes from a registry row, configuration, #2257). The pin checks MEMBERS, not branches: a member in the list that asks
+/// create-path members of <c>RecordCreationService</c> (the CREATE is not an update and asks no table-level check), the work-product persister
+/// (its target column comes from a registry row, configuration, #2257) and the four writers that write AS the person (uac-r2 U1, option A: the
+/// column check alone, never the full refusal). The pin checks MEMBERS, not branches: a member in the list that asks
 /// the refusal for only one of its identities or modes still passes it.</para>
 /// <para><b>U4 - AP export writes through its own path.</b> <see cref="ApExportService"/> never asks <c>RefuseAppOnlyWrite</c> or
 /// <c>RefuseWriterOnlyColumns</c> and reaches Dataverse through <see cref="IGenericEntityService"/>; and the set of types that name the column
 /// (an IL string load, so the inlined constant is found) is exactly the reviewed one, so a new writer must be reviewed before it can name the
 /// claim (approach of <c>InvoiceMoneyColumnsAppOnlyWriteGuardTests</c>).</para>
-/// <para><b>Not covered</b> (code-review concerns): a writer that builds the column name at run time; a write made as a person under their own
-/// Dataverse privileges (the members in <see cref="Exempt"/>, and the confirmed-proposal apply of the action seam), which the column's field
-/// security would close (the 165d notes, known limit U5: an owner question, not built here). Enforced by: this guard (CI and the Stop hook),
+/// <para><b>Not covered</b> (code-review concerns): a writer that builds the column name at run time; the confirmed-proposal apply of the action
+/// seam (it skips the app-only refusal by design: the person confirmed the exact payload), and a native write by a person with Write on the
+/// invoice, which the column's field security would close (the 165d notes, known limit U5: an owner question, not built here). Enforced by: this guard (CI and the Stop hook),
 /// with must-fire and must-not-fire controls below.</para>
 /// </remarks>
 public sealed class BillingExportClaimWriterOnlyGuardTests
@@ -40,23 +41,13 @@ public sealed class BillingExportClaimWriterOnlyGuardTests
     private static readonly Lazy<IReadOnlyList<Type>> BffTypes = new(() => typeof(Program).Assembly.GetTypes());
 
     /// <summary>
-    /// The members that ask the table-level writer-only check and NOT the app-only refusal, each with why. Three kinds: a write AS the person
-    /// (their own Dataverse privileges decide it; <c>RefuseAppOnlyWrite</c> is the refusal of payloads built by configuration or a model, and
-    /// <c>RefuseAppOnlyWriteCallerIdentityGuardTests</c> allows its Caller identity to the field-mapping push alone); a check that carries no
-    /// payload columns; a delete.
+    /// The members that ask the table-level writer-only check and NO column refusal, each with why: a check that carries no payload columns
+    /// (since uac-r2 chose option A for U1, the writers that write AS the person ask the column check directly, see <see cref="DirectColumnAskers"/>).
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> Exempt = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints.ValidatePushRequest"] =
             "The push's request check: it carries the target table only, no columns. The per-rule ask is in ApplyMappingsToChildRecordsAsync (WriteIdentity.Caller).",
-        ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler.ValidateChat"] =
-            "The chat update tool's validation (before the confirm dialog): the table only. It writes AS the person (user token) after they confirm.",
-        ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler.ExecuteChatAsync"] =
-            "The chat update tool writes AS the person, through the user-token client, after they confirm the exact payload: their own edit, decided by their Dataverse privileges.",
-        ["Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync"] =
-            "The browser child-record update writes AS the caller (IDataverseUserClient), the shape of a form edit: their own Dataverse privileges decide it.",
-        ["Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.RefileAsync"] =
-            "The re-file core applies the caller's own PATCH AS the caller (IDataverseUserClient): their own Dataverse privileges decide it.",
     };
 
     /// <summary>
@@ -65,6 +56,16 @@ public sealed class BillingExportClaimWriterOnlyGuardTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> DirectColumnAskers = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        // The person-token writers (uac-r2 U1, option A): they write AS the person, so they ask the writer-only COLUMN check alone, never the full
+        // RefuseAppOnlyWrite (its document, owner and creator refusals are not a person's edit's).
+        ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler.ValidateChat"] =
+            "The chat update tool's validation (before the confirm dialog): a person's write, the column check alone.",
+        ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler.ExecuteChatAsync"] =
+            "The chat update tool writes AS the person after they confirm: the column check alone.",
+        ["Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync"] =
+            "The browser child-record update writes AS the caller (IDataverseUserClient): the column check alone.",
+        ["Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.RefileAsync"] =
+            "The re-file core applies the caller's own PATCH AS the caller: the column check alone.",
         ["Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.CallerBlockedColumnRefusal"] =
             "The caller's create (and the chat create tool's pre-suspend check): an invoice must not be created already claimed.",
         ["Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.DecideAsync"] =
@@ -265,9 +266,9 @@ public sealed class BillingExportClaimWriterOnlyGuardTests
             var asksRefusal = appOnlyAskers.Contains(site);
             var listed = exempt.ContainsKey(Name(site));
             if (!asksRefusal && !listed)
-                yield return $"{Name(site)}: asks a writer-only TABLE check but not InheritedAccessPermission.RefuseAppOnlyWrite, and is not in Exempt.";
+                yield return $"{Name(site)}: asks a writer-only TABLE check but neither InheritedAccessPermission.RefuseAppOnlyWrite nor RecordTableRules.RefuseWriterOnlyColumns, and is not in Exempt.";
             if (asksRefusal && listed)
-                yield return $"{Name(site)}: listed in Exempt but it asks RefuseAppOnlyWrite (stale: remove it from the list).";
+                yield return $"{Name(site)}: listed in Exempt but it asks a column refusal (stale: remove it from the list).";
         }
 
         var all = updateAskers.Select(Name).ToHashSet(StringComparer.Ordinal);

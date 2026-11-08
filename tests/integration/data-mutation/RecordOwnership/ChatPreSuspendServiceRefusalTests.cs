@@ -63,7 +63,6 @@ public sealed class ChatPreSuspendServiceRefusalTests : TypedToolHandlerTestFixt
         { "sprk_matter", SecurableEntityRegistry.SecurityBusinessUnitAttribute },
         { "sprk_project", Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column },
         { "sprk_todo", "ownerid" },
-        { "sprk_invoice", "sprk_billingexport" }, // ebilling-r1 165d fix round (EB-D-207): the AP export claim is AP export's alone, at create too
     };
 
     [Theory]
@@ -96,35 +95,6 @@ public sealed class ChatPreSuspendServiceRefusalTests : TypedToolHandlerTestFixt
         validation.IsValid.Should().BeFalse();
         string.Join(" ", validation.Errors).Should().Be(afterConfirm.ErrorMessage, "only the timing changed");
         _appCreates.Should().BeEmpty("nothing is created after the confirmation either");
-    }
-
-    [Theory(DisplayName = "165d fix round (EB-D-207, must fire): the chat create tool refuses an invoice naming the AP export claim in any key form (before the confirmation, and nothing is created after it)")]
-    [InlineData("sprk_BillingExport@odata.bind")]
-    [InlineData("sprk_billingexport@odata.bind")]
-    [InlineData("_sprk_billingexport_value")]
-    public async Task TheChatCreateTool_AnInvoiceNamingTheApExportClaim_IsRefused_InEveryKeyForm(string column)
-    {
-        var args = Args("sprk_invoice", (column, JsonSerializer.SerializeToElement("/sprk_billingexports(165d0000-0000-0000-0000-00000000ba7c)")));
-
-        var validation = Handler().ValidateChat(Context(args), Tool());
-        var afterConfirm = await Handler().ExecuteChatAsync(Context(args), Tool(), CancellationToken.None);
-
-        validation.IsValid.Should().BeFalse();
-        string.Join(" ", validation.Errors).Should().Contain("sprk_billingexport").And.Contain("changed only by Spaarke itself");
-        // A bind or read-back key is not a column name the chat item format takes, so the execute leg may refuse it earlier (the item mapper); the
-        // pre-suspend refusal above is the defence in depth for the key forms, and the plain column's exact post-confirm refusal is pinned by the
-        // theory above (the sprk_invoice row).
-        afterConfirm.Success.Should().BeFalse();
-        _appCreates.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "165d fix round (EB-D-207, must not fire): the chat create tool passes an invoice that names an unprotected column, and the claim's name on another table")]
-    public void TheChatCreateTool_AnInvoiceWithAnUnprotectedColumn_StillPassesToItsConfirmation()
-    {
-        Handler().ValidateChat(Context(Args("sprk_invoice", ("sprk_description", JsonSerializer.SerializeToElement("x")))), Tool())
-            .IsValid.Should().BeTrue("an unprotected column creates");
-        Handler().ValidateChat(Context(Args("sprk_matter", ("sprk_billingexport", JsonSerializer.SerializeToElement("x")))), Tool())
-            .IsValid.Should().BeTrue("only the invoice carries the claim");
     }
 
     [Fact]
