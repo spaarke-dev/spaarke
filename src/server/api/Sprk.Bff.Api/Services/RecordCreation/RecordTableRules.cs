@@ -297,6 +297,7 @@ internal static partial class RecordTableRules
             // field-mapping rule may not set it.
             // ebilling-r1 task 166 fix round (EB-D-200): plus the billed total and the five derived totals, field-secured and written only by the
             // typed finance writers (the BFF application user is a Writers member, so field security alone does not stop a generic mapping).
+            // ebilling-r1 task 165d (EB-D-207): plus the AP export claim, which only AP export sets and clears (WriterOnlyColumns below).
             MappingProtectedColumns = Columns([
                 .. InvoiceFamilyCoreLookupsOf("sprk_invoice"),
                 Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column,
@@ -305,7 +306,11 @@ internal static partial class RecordTableRules
                 Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceExpensesTotal,
                 Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceLineAdjustmentsTotal,
                 Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceInvoiceAdjustmentsTotal,
-                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceApprovedTotal]),
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceApprovedTotal,
+                Sprk.Bff.Api.Services.Finance.ApExportService.BatchLookup]),
+            // ebilling-r1 task 165d (EB-D-207, uac-r2 U1-U2, approved 2026-11-07): the AP export claim (the invoice's batch lookup) is set and cleared
+            // only by ApExportService, which selects an invoice for a batch only while the lookup is empty. No generic writer sets or clears it.
+            WriterOnlyColumns = Columns(Sprk.Bff.Api.Services.Finance.ApExportService.BatchLookup),
             PreWriteRules = [InvoiceFamilyRule],
         },
         new RecordTableRule { Table = "sprk_reportcard", Kind = RecordTableKind.Child },
@@ -533,6 +538,38 @@ internal static partial class RecordTableRules
         Find(table) is { CreatedOnlyByItsWriter: true } rule
             ? RecordOwnerResolution.Refused(ChangedOnlyByItsWriterReasonCode, ChangedOnlyByItsWriterMessage(rule.Table))
             : null;
+
+    /// <summary>
+    /// The reason code when a generic write names a column of <see cref="RecordTableRule.WriterOnlyColumns"/>
+    /// (<see cref="RefuseWriterOnlyColumns"/>). It extends the <see cref="ChangedOnlyByItsWriterReasonCode"/> marker, so a query that counts
+    /// <c>changed_only_by_its_writer</c> counts this refusal too; the message names the column. Nothing is written.
+    /// </summary>
+    internal const string ChangedOnlyByItsWriterColumnReasonCode = ChangedOnlyByItsWriterReasonCode + ".column";
+
+    /// <summary>
+    /// The column-level counterpart of <see cref="RefuseWriterOnlyTableUpdate"/> (ebilling-r1 task 165d, EB-D-207; unified-access-control-r2
+    /// U1-U2, approved 2026-11-07): a payload naming a column of <see cref="RecordTableRule.WriterOnlyColumns"/> on <paramref name="table"/> is
+    /// refused whole, or <c>null</c> when it names none. Asked ONLY from <c>InheritedAccessPermission.RefuseAppOnlyWrite</c>, which the generic
+    /// writers already ask, so none carries a check of its own. Pure: it reads nothing, answers the same for any record and identity, and
+    /// matches the table trimmed and in any case. A key is matched in any form a writer sends (<c>col</c>, <c>col@odata.bind</c>,
+    /// <c>_col_value</c>, any case).
+    /// </summary>
+    /// <param name="table">The table the write names.</param>
+    /// <param name="keys">The payload's keys, in any form a writer sends.</param>
+    internal static RecordOwnerResolution? RefuseWriterOnlyColumns(string? table, IEnumerable<string> keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (Find(table) is not { WriterOnlyColumns.Count: > 0 } rule)
+            return null;
+
+        var named = keys.Select(k => Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k).Trim())
+            .FirstOrDefault(rule.WriterOnlyColumns.Contains);
+        return named is null
+            ? null
+            : RecordOwnerResolution.Refused(ChangedOnlyByItsWriterColumnReasonCode,
+                $"{named} of a {rule.Table} is changed only by Spaarke itself and can't be changed by this write; nothing was written. " +
+                $"({ChangedOnlyByItsWriterColumnReasonCode})");
+    }
 
     /// <summary>The reason code when a generic BFF delete path is asked to remove a row of a table only its writer changes
     /// (<see cref="RefuseWriterOnlyTableDelete"/>). Nothing is removed.</summary>
@@ -1103,6 +1140,25 @@ internal sealed record RecordTableRule
     /// Decision Record, the playbook writers.
     /// </remarks>
     public IReadOnlySet<string> FixedAfterCreateColumns { get; init; } = NoColumns;
+
+    /// <summary>
+    /// Columns of THIS table that only the table's typed writer sets or clears (ebilling-r1 task 165d, EB-D-207; unified-access-control-r2
+    /// U1-U2): every generic writer is refused a payload naming one, whoever it writes as
+    /// (<see cref="RecordTableRules.RefuseWriterOnlyColumns"/>, asked from <c>InheritedAccessPermission.RefuseAppOnlyWrite</c> for every
+    /// <c>WriteIdentity</c>), with the <c>changed_only_by_its_writer</c> marker. The column-level sibling of
+    /// <see cref="CreatedOnlyByItsWriter"/>, which is table-level. Today <c>sprk_invoice</c> → { the AP export claim,
+    /// <c>ApExportService.BatchLookup</c> }. The typed writer reaches Dataverse through its own seam and never asks the refusal
+    /// (<c>BillingExportClaimWriterOnlyGuardTests</c>). Empty when the table has none.
+    /// </summary>
+    /// <remarks>
+    /// <b>Component justification (CLAUDE.md §11).</b> Existing — <c>InheritedAccessPermission.AccessColumns</c> (columns that confer or narrow
+    /// access; its owner declines a workflow claim there), <see cref="MappingProtectedColumns"/> (create-time mapping only) and
+    /// <see cref="CreatedOnlyByItsWriter"/> (a whole table). Extension — none reaches an update writer's payload for a column of an otherwise
+    /// ordinary table, so a sibling per-table set that the one existing refusal also reads is the narrow fit. Cost of doing nothing — a
+    /// playbook Update Record node or an output mapping can set or clear an invoice's AP export claim, which removes an approved invoice from
+    /// payment selection or attaches it to a batch it was never exported in.
+    /// </remarks>
+    public IReadOnlySet<string> WriterOnlyColumns { get; init; } = NoColumns;
 
     /// <summary>The column the platform autonumber fills (the create leaves it empty and retries on its alternate key).</summary>
     public string? AutonumberColumn { get; init; }

@@ -197,7 +197,9 @@ public class RecordTableRulesTests
         string[] expected = table == "sprk_invoice"
             ? ["sprk_matter", "sprk_project", "sprk_regardingworkassignment", "sprk_reviewdetail",
                 // ebilling-r1 task 166 fix round (EB-D-200): the billed total and the five derived totals, written only by typed finance writers.
-                "sprk_totalamount", "sprk_feestotal", "sprk_expensestotal", "sprk_lineadjustmentstotal", "sprk_invoiceadjustmentstotal", "sprk_approvedtotal"]
+                "sprk_totalamount", "sprk_feestotal", "sprk_expensestotal", "sprk_lineadjustmentstotal", "sprk_invoiceadjustmentstotal", "sprk_approvedtotal",
+                // ebilling-r1 task 165d (EB-D-207): the AP export claim, set and cleared only by AP export.
+                "sprk_billingexport"]
             : ["sprk_matter", "sprk_project", "sprk_regardingworkassignment"];
         RecordTableRules.Get(table).MappingProtectedColumns.Should().BeEquivalentTo(expected);
         RecordTableRules.Get(table).MappingProtectedColumns.Contains("SPRK_Matter").Should().BeTrue("case-insensitive, as every list");

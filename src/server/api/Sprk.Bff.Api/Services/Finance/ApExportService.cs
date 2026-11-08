@@ -144,6 +144,10 @@ public sealed record ApExportResult(
 /// <c>ebilling.export.transition_incomplete</c> naming the batch for the operator. Known limit, recorded in the task notes.</para>
 /// <para><b>Not guaranteed here.</b> A process crash between (5) and (10) leaves a Generating batch holding claims; nothing sweeps it in R1 (the claim
 /// is the double-payment guard, so it fails safe: the invoices cannot be exported again until an operator clears the batch).</para>
+/// <para><b>The only writer of <see cref="BatchLookup"/> (EB-D-207, task 165d).</b> The claim and the release go through this class's own
+/// <c>IGenericEntityService</c> calls and never ask <c>InheritedAccessPermission.RefuseAppOnlyWrite</c>. Every generic writer does ask it, and it
+/// refuses a payload naming this column on <c>sprk_invoice</c> for every identity (<c>RecordTableRule.WriterOnlyColumns</c>; the column is also
+/// mapping-protected). <c>BillingExportClaimWriterOnlyGuardTests</c> pins both facts.</para>
 /// </remarks>
 public sealed class ApExportService
 {
