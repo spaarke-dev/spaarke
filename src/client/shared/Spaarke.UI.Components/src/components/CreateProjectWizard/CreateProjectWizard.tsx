@@ -37,7 +37,6 @@ import { EMPTY_PROJECT_FORM } from './projectFormTypes';
 import type { ICreateProjectFormState } from './projectFormTypes';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
-import type { IUserBuCascadeDefaults } from '../../services/EntityCreationService';
 import type { IDataService, INavigationService, IUploadService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
@@ -116,7 +115,6 @@ async function associateProjectWithAccount(
     // Use fallback column name
   }
 
-  const _orgUrl = window.location.origin;
   await dataService.updateRecord('sprk_project', projectId, {
     [navPropBind]: `/accounts(${accountId})`,
   });
@@ -227,19 +225,6 @@ export interface ICreateProjectWizardProps {
    * Called when the wizard opens. If not provided, file uploads will be skipped.
    */
   resolveSpeContainerId?: () => Promise<string>;
-  /**
-   * Optional callback to resolve BU-derived cascade defaults
-   * (`sprk_containerid`, `sprk_searchindexname`) at finish time.
-   * Called once just before the Project record is created so the wizard can
-   * stamp both fields from the current user's owning Business Unit
-   * (FR-WIZ-02 / G2 latent-gap fix). When omitted, the cascade step is skipped
-   * and the BFF backfill chain handles the fields server-side.
-   *
-   * Implementations typically resolve `userId` from
-   * `Xrm.Utility.getGlobalContext().userSettings.userId` and call
-   * {@link EntityCreationService.resolveUserBuDefaults}.
-   */
-  resolveUserBuDefaults?: () => Promise<IUserBuCascadeDefaults>;
   /**
    * AAD tenant ID. Forwarded to `EntityCreationService.indexUploadedFiles()` so
    * post-upload RAG indexing via `@spaarke/sdap-client` can route to the
@@ -364,7 +349,6 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   authenticatedFetch: authFetch,
   bffBaseUrl,
   resolveSpeContainerId,
-  resolveUserBuDefaults,
   tenantId,
   initialFormValues,
   initialFileRefs,
@@ -559,27 +543,15 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         const currentFormValues = formValuesRef.current;
         const mergedFormValues: ICreateProjectFormState = { ...currentFormValues };
 
-        // 1. Resolve the host's BU-derived cascade defaults and hand them to ProjectService. Since task 022 (FR-16,
-        // FR-38/FR-40) nothing reads them: the project's index and container columns are the server's, and the
-        // uploaded files are indexed without naming an index. The call stays so existing hosts keep their
-        // `resolveUserBuDefaults` contract (as the Matter wizard, task 021). Non-fatal: if the host doesn't provide it
-        // or it throws, the project is created the same way.
-        let cascadeDefaults: IUserBuCascadeDefaults | undefined;
-        if (resolveUserBuDefaults) {
-          try {
-            cascadeDefaults = await resolveUserBuDefaults();
-          } catch (err) {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            console.warn('[CreateProjectWizard] BU cascade resolution failed (non-fatal):', message);
-          }
-        }
+        // 1. No BU-derived defaults are resolved (task 022, FR-16, FR-38/FR-40): the project's index and container
+        // columns are the server's, and the uploaded files are indexed without naming an index.
 
         // 2. Create the sprk_project record through the BFF child-records route (task 022, FR-16): only the user's
         // values travel; the server maps (fill-only), owns and numbers the project. The AssociateToStep selection is the
         // explicit mapping source, and a secure request is created secure from creation (task 049 fix round 2). Without
         // authFetch/bffBaseUrl the service refuses the create (it never falls back to Xrm.WebApi).
         const projectService = new ProjectService(dataService, authFetch, bffBaseUrl);
-        const result = await projectService.createProject(mergedFormValues, cascadeDefaults, context.association);
+        const result = await projectService.createProject(mergedFormValues, undefined, context.association);
         if (!result.success) {
           throw new Error(result.errorMessage ?? 'Failed to create project');
         }
@@ -635,18 +607,11 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               provisioningWarning = provisionResult.errorMessage;
             }
           }
-        } else if (mergedFormValues.isSecure) {
-          // Secure was REQUESTED but there is no BFF to ask — the host did not supply an
-          // authenticated fetch or a base URL. This branch used to fall through silently and then
-          // announce "Secure Project created!", which named a designation the record did not have.
-          // Same user-visible situation as an unconfigured environment, so it gets the same
-          // treatment: say what did not happen, in copy written for the person reading it.
-          // (Task 150: now literally true — the client no longer writes the flag, so the record is not marked secure.)
-          // Task 022: unreachable through the real ProjectService, which refuses the create without a BFF connection;
-          // kept as the fail-closed answer for any ProjectService that reports a create here.
-          provisioningWarning =
-            'This project was not secured, because securing a project needs a connection to the Spaarke service that is not configured here. The project was created as a normal project; an administrator can secure it.';
         }
+        // Task 022: "secure requested but no BFF to ask" cannot reach this point — `ProjectService.createProject` refuses
+        // the create without `authFetch`/`bffBaseUrl` (no Xrm.WebApi fallback), so the condition above only narrows types.
+        // Were it ever reached, `provisioningSucceeded` stays false: the hold-back below holds and the title is not
+        // "Secure Project created!".
 
         // Task 150 — THE ORDERING TRAP. The client no longer writes sprk_issecure, so a secure-requested project whose
         // provisioning stopped BEFORE the server marked it secure is an ordinary record: an upload or a child created
@@ -996,7 +961,6 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       bffBaseUrl,
       navigationService,
       resolveSpeContainerId,
-      resolveUserBuDefaults,
       webApiAdapter,
       handoffFiles,
       initialAssociation,

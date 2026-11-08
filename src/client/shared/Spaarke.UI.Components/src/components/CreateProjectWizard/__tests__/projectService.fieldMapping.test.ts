@@ -21,7 +21,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { ProjectService } from '../projectService';
+import { ProjectService, saysProjectNotCreated } from '../projectService';
 import type { ICreateProjectFormState } from '../projectFormTypes';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import type { AssociationResult } from '../../AssociateToStep/types';
@@ -287,18 +287,32 @@ describe('ProjectService — creates through the server write path (task 022, FR
     expect(JSON.stringify(withSource.body).toLowerCase()).not.toContain('regarding');
   });
 
-  it('a secure project under a matter sends both the mapping source and the secure intent in the query', async () => {
-    const fetchMock = makeFetch();
-    await new ProjectService(makeDataService(), fetchMock, BFF_BASE).createProject(
-      makeForm({ isSecure: true }),
-      undefined,
-      MATTER_ASSOCIATION
-    );
+  it.each<[string, AssociationResult, string]>([
+    ['a matter', MATTER_ASSOCIATION, `mappingSourceEntity=sprk_matter&mappingSourceId=${MATTER_ID}`],
+    [
+      'an account',
+      { entityType: 'account', recordId: '{33333333-3333-3333-3333-333333333333}', recordName: 'Acme' },
+      'mappingSourceEntity=account&mappingSourceId=33333333-3333-3333-3333-333333333333',
+    ],
+  ])(
+    'a secure-intent create from %s carries BOTH secure=true and the mapping source in the query, neither in the body',
+    async (_label, association, sourceQuery) => {
+      const fetchMock = makeFetch();
+      const result = await new ProjectService(makeDataService(), fetchMock, BFF_BASE).createProject(
+        makeForm({ isSecure: true }),
+        undefined,
+        association
+      );
 
-    expect(createRequests(fetchMock).map(r => r.url)).toEqual([
-      `${ROUTE}?mappingSourceEntity=sprk_matter&mappingSourceId=${MATTER_ID}&secure=true`,
-    ]);
-  });
+      const requests = createRequests(fetchMock);
+      expect(requests.map(r => r.url)).toEqual([`${ROUTE}?${sourceQuery}&secure=true`]);
+      const body = JSON.stringify(requests[0].body).toLowerCase();
+      expect(body).not.toContain('issecure');
+      expect(body).not.toContain(association.recordId.replace(/[{}]/g, '').toLowerCase());
+      expect(result.success).toBe(true);
+      expect(result.securedAtCreate).toBe(true);
+    }
+  );
 
   it('does not map on the client: applyFieldMappings is never called and no field-mapping profile is read', async () => {
     const fetchMock = makeFetch();
@@ -370,6 +384,34 @@ describe('ProjectService — creates through the server write path (task 022, FR
     expect(result.securedAtCreate).toBeUndefined();
     expect(result.errorMessage).toBe('Failed to create project record: Name is required.');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  // K1 (022 review): the server's refusal details already say the project was not saved; the service's own prefix would
+  // say it twice ("Failed to create project record: The project was not created: …").
+  it.each<[number, string]>([
+    [409, 'The project was not created: it may not be filed there.'],
+    [400, 'The project was not saved: the core record it belongs to cannot be determined.'],
+    [503, 'Dataverse could not be reached, so the project was not created. Try again in a few minutes.'],
+  ])(
+    'a %s refusal whose detail already says the project was not saved is shown as is, unprefixed',
+    async (status, detail) => {
+      const fetchMock = jest.fn(async (): Promise<Response> => {
+        throw apiErrorFor(status, { title: 'Refused', status, detail, reasonCode: 'child_record.refused' });
+      });
+
+      const result = await new ProjectService(makeDataService(), fetchMock, BFF_BASE).createProject(makeForm());
+
+      expect(result.success).toBe(false);
+      expect(result.errorMessage).toBe(detail);
+    }
+  );
+
+  it('saysProjectNotCreated recognises the "not created / not saved" sentences and nothing else', () => {
+    expect(saysProjectNotCreated('The project was not created: x.')).toBe(true);
+    expect(saysProjectNotCreated('…, so the project was not created.')).toBe(true);
+    expect(saysProjectNotCreated('The project was not saved: x.')).toBe(true);
+    expect(saysProjectNotCreated('Name is required.')).toBe(false);
+    expect(saysProjectNotCreated('The matter was not created.')).toBe(false);
   });
 
   it('the route\'s uniform not-found is the root-create sentence, never "filed under" (the create names no parent)', async () => {

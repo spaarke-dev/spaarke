@@ -47,6 +47,16 @@ export interface ICreateProjectResult {
   securedAtCreate?: boolean;
 }
 
+/**
+ * Whether a create-failure message already says the project was not saved ("The project was not created: …", "…, so the
+ * project was not created.", "The project was not saved: …" — the BFF's refusal details and this service's fail-closed
+ * sentence). Callers that put their own "failed" prefix in front of `errorMessage` skip it then, so the sentence is not
+ * said two or three times.
+ */
+export function saysProjectNotCreated(message: string): boolean {
+  return /\bproject was not (created|saved)\b/i.test(message);
+}
+
 // ---------------------------------------------------------------------------
 // Metadata discovery — find correct OData navigation property names
 // ---------------------------------------------------------------------------
@@ -208,7 +218,8 @@ export class ProjectService {
    * Field-mapping write path (project field-mapping-server-write-path-r1, task 022, FR-16, FR-15): the payload holds ONLY
    * what the user entered or picked. This method does not map fields, default a search index, resolve an owner or write
    * the secure flag — the server does each of them in the one create (fill-only mapping FR-02, owner FR-09, search index
-   * FR-38/FR-40, the project number by the platform autonumber). A mapped value the caller may not write is dropped by
+   * FR-38/FR-40, the project number by the platform autonumber). The create names no parent, so its owner is the acting
+   * user's business-unit team; the matter's team follows only after the later filing and the ownership jobs. A mapped value the caller may not write is dropped by
    * the server with a warning, which arrives in `warnings`. It never falls back to `Xrm.WebApi`: with no BFF connection
    * the create is refused and nothing is written.
    *
@@ -272,7 +283,8 @@ export class ProjectService {
     //     server's on a project (FR-38; `RecordTableRule.SearchIndexed`), and since task 041 (FR-40) the index follows
     //     the content type.
     //   - `sprk_containerid` stays unwritten (task 076): provisioning records it.
-    //   - No owner, owning team or impersonation value (FR-09): the BFF decides ownership from the caller.
+    //   - No owner, owning team or impersonation value (FR-09): the BFF decides ownership. With no parent named in the
+    //     create, that is the acting user's business-unit team until the project is filed under its matter.
     //   - No mapped value (FR-02): the server maps fill-only, so a value the user typed here wins.
 
     // Add lookup bindings — match by referenced entity name (robust).
@@ -350,8 +362,10 @@ export class ProjectService {
     try {
       console.info('[ProjectService] createRecord payload:', JSON.stringify(entity, null, 2));
       // Task 022 (FR-16): the create goes to the BFF child-records route, never to Xrm.WebApi. The server maps the fields
-      // fill-only (the user's own value wins), decides the owner record-first, and the platform autonumber issues the
-      // project number. A secure request is created INTO isolation (task 049 fix round 2): there is no moment at which
+      // fill-only (the user's own value wins), decides the owner, and the platform autonumber issues the project number.
+      // The create names no parent (the matter filing is a later PATCH), so the server's owner is the acting user's
+      // business-unit team; the matter's team takes over only after `fileProjectUnderMatter` succeeds and the ownership
+      // jobs run (the filing itself writes no owner). A secure request is created INTO isolation (task 049 fix round 2): there is no moment at which
       // the secure-requested project exists as an ordinary record.
       const created = await createRecordViaBffWithWarnings(
         authenticatedFetch,
@@ -384,9 +398,14 @@ export class ProjectService {
       // one of the values the user selected: the root-create sentence, never "filed under".
       const described = describeWebApiCreateError(err, 'project', { rootCreate: true });
       const message = described.message;
+      // A server refusal usually says itself that nothing was saved ("The project was not created: …", "…, so the project
+      // was not created."); a prefix would then say it twice.
       return {
         success: false,
-        errorMessage: described.isAccessDenied ? message : `Failed to create project record: ${message}`,
+        errorMessage:
+          described.isAccessDenied || saysProjectNotCreated(message)
+            ? message
+            : `Failed to create project record: ${message}`,
         warnings,
       };
     }
