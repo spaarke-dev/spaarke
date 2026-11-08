@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using FindingGroup = Sprk.Bff.Api.Services.Finance.DuplicateDetailGate.FindingGroup;
@@ -287,6 +288,7 @@ public sealed class SubmissionOverrideService
     private readonly HumanDecisionSignalClose.CloseActed _closeActed;
     private readonly Func<string, Guid, Guid, CancellationToken, Task<DecisionRecordWriter.BillingStoredResolvedSet?>> _findStored;
     private readonly TimeProvider _time;
+    private readonly JobSubmissionService? _jobs;
     private readonly ILogger<SubmissionOverrideService> _logger;
 
     /// <param name="user">The CALLER's Dataverse client (OBO): the read's D-176 earlier-invoice check reads with it, never app-only (ADR-028).</param>
@@ -300,13 +302,16 @@ public sealed class SubmissionOverrideService
         IDataverseUserClient user,
         EarlierInvoiceReadability earlierInvoices,
         SignalWriter signals,
-        ILogger<SubmissionOverrideService> logger)
+        ILogger<SubmissionOverrideService> logger,
+        JobSubmissionService? jobs = null)
         : this(
             entities, lifecycle, idempotency, sink, probe, user, earlierInvoices, logger,
             (recorder ?? throw new ArgumentNullException(nameof(recorder))).RecordAsync,
             recorder.Preflight,
             (signals ?? throw new ArgumentNullException(nameof(signals))).CloseActedByDecisionAsync,
-            recorder.FindStoredResolvedSetAsync)
+            recorder.FindStoredResolvedSetAsync,
+            time: null,
+            jobs: jobs)
     {
     }
 
@@ -326,8 +331,10 @@ public sealed class SubmissionOverrideService
         Action<BillingDecision> preflight,
         HumanDecisionSignalClose.CloseActed closeActed,
         Func<string, Guid, Guid, CancellationToken, Task<DecisionRecordWriter.BillingStoredResolvedSet?>> findStored,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        JobSubmissionService? jobs = null)
     {
+        _jobs = jobs; // Task 152: null in a test seam; the DI path always supplies it (JobSubmissionService is a singleton).
         _closeActed = closeActed ?? throw new ArgumentNullException(nameof(closeActed));
         _findStored = findStored ?? throw new ArgumentNullException(nameof(findStored));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -676,6 +683,7 @@ public sealed class SubmissionOverrideService
 
         // The invoice must still be where the decision expects it. Override releases a HELD invoice, so it must be In Review. Return
         // moves an In Review invoice, or finishes an interrupted return (the invoice already Returned to Firm, the submission not yet).
+        // Task 097: a Superseded invoice (closed by its correction) is neither, so both verbs refuse it as not held.
         var invoiceOk = verb == Verb.Override
             ? invoiceStatus == InvoiceLifecycleStatus.InReview
             : invoiceStatus is InvoiceLifecycleStatus.InReview or InvoiceLifecycleStatus.ReturnedToFirm;
@@ -911,6 +919,14 @@ public sealed class SubmissionOverrideService
         _logger.LogInformation("Submission {SubmissionId} {Outcome} by {Decider}; invoice {InvoiceId}, Decision Record {RecordId}, already recorded {AlreadyRecorded}, Signals not closed {SignalsNotClosed}",
             submissionId, verb == Verb.Override ? "overridden" : "returned", decider, invoiceId, recorded.RecordId, recorded.AlreadyRecorded, signalsNotClosed);
 
+        // Task 152 (FR-43): an override releases the hold without a status move (a Return moves the status, and the lifecycle service re-indexes
+        // that), so the index document is rebuilt here. The change is the override's decision id (one per submission). Best effort; never fails the decision.
+        if (verb == Verb.Override)
+        {
+            await InvoiceIndexingJobHandler.TryEnqueueAsync(
+                _jobs, _logger, invoiceId, $"o{decisionId.ToString("N", CultureInfo.InvariantCulture)}").ConfigureAwait(false);
+        }
+
         await NotifyDecidedAsync(verb, submissionId, invoiceId, ct).ConfigureAwait(false);
 
         if (signalsNotClosed > 0)
@@ -999,7 +1015,12 @@ public sealed class SubmissionOverrideService
     private BlockedDecisionResult RecordRefusal(Guid submissionId, Guid invoiceId, DecisionRecordRefusedException ex)
     {
         _logger.LogWarning("Submission {SubmissionId}: the Decision Record was refused ({Reason})", submissionId, ex.Reason);
-        return ex.Reason switch
+        return RefusalOf(submissionId, invoiceId, ex);
+    }
+
+    /// <summary>What a refused Decision Record answers; logs nothing (a catch filter asks it, and the handler logs once).</summary>
+    private static BlockedDecisionResult RefusalOf(Guid submissionId, Guid invoiceId, DecisionRecordRefusedException ex) =>
+        ex.Reason switch
         {
             DecisionRecordRefusalReason.ReviewInvalid => BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status409Conflict,
                 BlockedSubmissionErrors.DecisionConflict,
@@ -1012,7 +1033,6 @@ public sealed class SubmissionOverrideService
             _ => BlockedDecisionResult.Refuse(submissionId, StatusCodes.Status503ServiceUnavailable, BlockedSubmissionErrors.RecordUnavailable,
                 "The decision could not be recorded right now. Nothing was changed. Try again.", invoiceId),
         };
-    }
 
     /// <summary>
     /// Best effort: tell the notification seam the held submission was decided. An override is Accepted (task 132 notifies the eligible
@@ -1252,10 +1272,10 @@ public sealed class SubmissionOverrideService
                 return denied.StatusCode == StatusCodes.Status503ServiceUnavailable ? 1 : 0;
             }
         }
-        catch (DecisionRecordRefusedException ex) when (RecordRefusal(submissionId, invoiceId, ex).StatusCode != StatusCodes.Status503ServiceUnavailable)
+        catch (DecisionRecordRefusedException ex) when (RefusalOf(submissionId, invoiceId, ex).StatusCode != StatusCodes.Status503ServiceUnavailable)
         {
             // Permanent: the writer refused to read the stored set (more than one record under the key, or a set that cannot be read). A repeat
-            // does not change it, so the repeat's answer stands. A lookup that merely faulted (503 in RecordRefusal) falls to the next catch.
+            // does not change it, so the repeat's answer stands. A lookup that merely faulted (503 in RefusalOf) falls to the next catch. The filter logs nothing; this handler logs the refusal once.
             _logger.LogWarning("Submission {SubmissionId}: the repeat could not use the stored Signals ({Reason}); nothing is re-closed", submissionId, ex.Reason);
             return 0;
         }
@@ -1270,9 +1290,9 @@ public sealed class SubmissionOverrideService
         return await HumanDecisionSignalClose.CloseSetAsync(_closeActed, set, recordId, decider, _logger, ct).ConfigureAwait(false);
     }
 
-    /// <summary>The invoice's core record (the line decisions' rule, <see cref="InvoiceLineDecisionService.CoreOf"/>).</summary>
+    /// <summary>The invoice's ONE core record (approve's rule, <see cref="EligibleApproverResolver.SingleCoreOf"/>); null when it names none or several (fail closed, never the first found).</summary>
     private static DecisionCoreRecord? CoreOf(Entity invoice) =>
-        InvoiceLineDecisionService.CoreOf(invoice) is { } core ? new DecisionCoreRecord(core.Entity, core.Id) : null;
+        EligibleApproverResolver.SingleCoreOf(InvoiceReviewReadService.InvoiceEntity, invoice) is { } core ? new DecisionCoreRecord(core.Entity, core.Id) : null;
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════
     // Reads and helpers

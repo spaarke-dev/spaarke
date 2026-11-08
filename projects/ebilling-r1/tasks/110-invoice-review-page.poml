@@ -157,6 +157,7 @@
     <criterion testable="true">The prototype-to-shared mapping in the constraints is used; no file imports from the prototype repository; the grid decision is recorded.</criterion>
     <criterion testable="true">ensureNavigatorSidePane() is called on mount; no file under src/dataverse/solutions/SpaarkeMaster/ changed.</criterion>
     <criterion testable="true">The ui-tests above pass, including dark mode; a 150-line invoice opens in under 3 s in dev (measured in 112).</criterion>
+    <criterion testable="true">Line findings (EB-D-175/176/101 review F2; read model `ReviewLineDto.lineFindings`, codes `coding.not_returned`, `line.no_description`, `rules.not_checked`): a Flagged line shows each entry's `message` as its reason, including a line with no policy findings, and the line's badge counts them (the server's `findingCount` counts policy findings only). An entry with a null message shows a fixed fallback text for its code.</criterion>
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 

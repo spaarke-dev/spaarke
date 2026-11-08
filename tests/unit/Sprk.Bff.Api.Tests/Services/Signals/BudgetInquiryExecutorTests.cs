@@ -123,8 +123,17 @@ public sealed class BudgetInquiryExecutorTests
     private static (BudgetInquiryExecutor Sut, Rig Rig) Build(FakeUser user, FakeSender sender, bool secure = false)
     {
         var rig = new Rig(secure);
-        var sut = new BudgetInquiryExecutor(user, rig.Ownership.Object, rig.AppOnly.Object, sender,
-            new Microsoft.AspNetCore.Http.HttpContextAccessor(), NullLogger<BudgetInquiryExecutor>.Instance);
+        // Field mapping task 017 (2d-3): the executor creates through the ONE server create, resolved from the request's
+        // services (as DecisionRouteCores does); the rig's resolver and app-only writer are the service's.
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services,
+            Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.RouteRecordCreation.Default(rig.Ownership.Object, rig.AppOnly.Object));
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            RequestServices = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services),
+        };
+        var sut = new BudgetInquiryExecutor(user, rig.Ownership.Object, sender,
+            new Microsoft.AspNetCore.Http.HttpContextAccessor { HttpContext = http }, NullLogger<BudgetInquiryExecutor>.Instance);
         return (sut, rig);
     }
 

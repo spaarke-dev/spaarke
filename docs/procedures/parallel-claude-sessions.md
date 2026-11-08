@@ -3,7 +3,7 @@
 > **Purpose**: Guide for running multiple Claude Code sessions simultaneously without merge conflicts.
 >
 > **Last Updated**: 2026-01-06
-> **Last Reviewed**: 2026-04-05
+> **Last Reviewed**: 2026-11-05
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: Verified
 
@@ -474,6 +474,10 @@ Two mechanical guards back this up:
   reports links that point outside the worktree; then runs `git worktree remove`. It never falls back to a recursive
   delete: a path git cannot remove is reported for a human. It refuses locked worktrees and touches nothing if any
   folder cannot be scanned. Tests: `tests/scripts/Remove-WorktreeSafe.Tests.ps1`.
+- `scripts/worktree/Clean-AgentWorktrees.ps1` removes **finished sub-agent copies** under the main checkout's
+  `.claude\worktrees` (unlocked, idle ≥ 12 h, clean, commits on another branch), through `Remove-WorktreeSafe.ps1`.
+  Every session's isolated agents put their copies there, and they pile up (FAILURE-MODES G-25). Run it with
+  `-WhatIf` first; `/devops-project-archive` runs it with `-Project <slug>`.
 - The PreToolUse hook `scripts/quality/guard-worktree-links.py` (Bash and PowerShell tools) denies creating a link
   whose two ends sit in different worktrees, and denies `rm -r`, `Remove-Item -Recurse`, `rd /s` or
   `git worktree remove` aimed exactly at a worktree root or at `.claude/worktrees`. Deleting a subfolder inside a

@@ -21,18 +21,26 @@ public static class PlaybookEndpoints
             .WithTags("AI Playbooks");
 
         // POST /api/ai/playbooks - Create new playbook
+        // Create, clone, share and unshare are for playbook administrators: the caller's own table privilege, decided
+        // before anything is read or written (owner decision 2026-10-30; the services write app-only).
         group.MapPost("/", CreatePlaybook)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.CreatePlaybookPrivilege)
             .WithName("CreatePlaybook")
             .WithSummary("Create a new analysis playbook")
             .WithDescription("Creates a new playbook with specified actions, skills, knowledge, and tools.")
             .Produces<PlaybookResponse>(201)
             .ProducesProblem(400)
             .ProducesProblem(401)
+            .ProducesProblem(403)
             .ProducesValidationProblem();
 
         // PUT /api/ai/playbooks/{id} - Update existing playbook
+        // Write routes: the caller's own Write privilege first, then ownership. An update that changes IsPublic also
+        // needs Share (the stored value is read only after the Write gate).
         group.MapPut("/{id:guid}", UpdatePlaybook)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.WritePlaybookPrivilege)
             .AddPlaybookOwnerAuthorizationFilter()
+            .AddPlaybookPublicFlagShareFilter()
             .WithName("UpdatePlaybook")
             .WithSummary("Update an existing playbook")
             .WithDescription("Updates playbook configuration. User must own the playbook.")
@@ -96,6 +104,7 @@ public static class PlaybookEndpoints
 
         // POST /api/ai/playbooks/{id}/share - Share a playbook
         group.MapPost("/{id:guid}/share", SharePlaybook)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.SharePlaybookPrivilege)
             .AddPlaybookOwnerAuthorizationFilter()
             .WithName("SharePlaybook")
             .WithSummary("Share a playbook with teams or organization")
@@ -108,6 +117,7 @@ public static class PlaybookEndpoints
 
         // POST /api/ai/playbooks/{id}/unshare - Revoke sharing
         group.MapPost("/{id:guid}/unshare", RevokeShare)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.SharePlaybookPrivilege)
             .AddPlaybookOwnerAuthorizationFilter()
             .WithName("RevokePlaybookShare")
             .WithSummary("Revoke sharing from a playbook")
@@ -142,6 +152,7 @@ public static class PlaybookEndpoints
 
         // PUT /api/ai/playbooks/{id}/canvas - Save canvas layout
         group.MapPut("/{id:guid}/canvas", SaveCanvasLayout)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.WritePlaybookPrivilege)
             .AddPlaybookOwnerAuthorizationFilter()
             .WithName("SaveCanvasLayout")
             .WithSummary("Save canvas layout for playbook builder")
@@ -162,6 +173,7 @@ public static class PlaybookEndpoints
 
         // POST /api/ai/playbooks/{id}/clone - Clone a playbook
         group.MapPost("/{id:guid}/clone", ClonePlaybook)
+            .AddPlaybookTablePrivilegeFilter(PlaybookAuthorizationFilter.CreatePlaybookPrivilege)
             .AddPlaybookAccessAuthorizationFilter()
             .WithName("ClonePlaybook")
             .WithSummary("Clone a playbook")

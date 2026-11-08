@@ -443,13 +443,14 @@ public class AssignTaskRecipientGate
     /// <summary>
     /// What the portal's stored-link read says about a WorkforceHome contact's home pair (<c>sprk_externaltenantid</c>, its
     /// bound oid): <see cref="ContactBindingDecision.DecideHomeLink"/> over the same read the home sign-in makes
-    /// (<see cref="IContactIdentityStore.FindHomeLinkedSystemUsersAsync"/>). A pair that cannot be parsed, or a read that throws,
-    /// is <see cref="HomeLinkOutcome.Denied"/> (could not tell).
+    /// (<see cref="IContactIdentityStore.FindHomeLinkedSystemUsersAsync"/>). The tenant is the STORED one, read by
+    /// <see cref="IContactIdentityStore.ReadHomeTenantAsync"/> (r3 task 079, #2491): <paramref name="contact"/> is the
+    /// <c>GetContactAsync</c> row, whose select leaves the A9 column out by design, so it carries none. A pair that cannot be
+    /// read or parsed, or a read that throws, is <see cref="HomeLinkOutcome.Denied"/> (could not tell).
     /// </summary>
     internal virtual async Task<HomeLinkOutcome> HomeLinkAsync(ContactBindingRow contact, CancellationToken ct)
     {
-        if (!Guid.TryParse(contact.RawExternalTenantId?.Trim(), out var homeTenant) || homeTenant == Guid.Empty
-            || contact.Binding.Oid is not { } homeOid)
+        if (contact.Binding.Oid is not { } homeOid)
         {
             _logger.LogWarning(AssignTaskNotifierEvents.EmailSkipped,
                 "[ASSIGN-TASK-NOTIFY] WorkforceHome contact {ContactId} carries no readable home pair.", contact.ContactId);
@@ -458,13 +459,22 @@ public class AssignTaskRecipientGate
 
         try
         {
+            var tenant = await _identities.ReadHomeTenantAsync(contact.ContactId, ct).ConfigureAwait(false);
+            if (tenant.HomeTenantId is not { } homeTenant)
+            {
+                _logger.LogWarning(AssignTaskNotifierEvents.EmailSkipped,
+                    "[ASSIGN-TASK-NOTIFY] WorkforceHome contact {ContactId} carries no readable home pair ({Status}).",
+                    contact.ContactId, tenant.Status);
+                return HomeLinkOutcome.Denied;
+            }
+
             var lookup = await _identities.FindHomeLinkedSystemUsersAsync(homeTenant, homeOid, ct).ConfigureAwait(false);
             return ContactBindingDecision.DecideHomeLink(lookup, homeTenant, homeOid).Outcome;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogWarning(AssignTaskNotifierEvents.EmailSkipped,
-                "[ASSIGN-TASK-NOTIFY] the home link read for contact {ContactId} threw ({ExceptionType}).",
+                "[ASSIGN-TASK-NOTIFY] the home tenant or home link read for contact {ContactId} threw ({ExceptionType}).",
                 contact.ContactId, ex.GetType().Name);
             return HomeLinkOutcome.Denied;
         }

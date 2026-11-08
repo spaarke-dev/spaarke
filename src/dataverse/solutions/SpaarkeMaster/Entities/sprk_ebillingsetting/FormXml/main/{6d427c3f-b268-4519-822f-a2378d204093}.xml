@@ -164,6 +164,14 @@
                   </labels>
                   <rows>
                     <row>
+                      <cell id="{1F3C3A90-6FF0-42D9-8AAD-82FA5A319909}">
+                        <labels>
+                          <label description="AP export email" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_apexportemail" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_apexportemail" />
+                      </cell>
+                    </row>
+                    <row>
                       <cell id="{30DC4223-A612-8CFE-96EF-7DD2445DA953}" colspan="2" rowspan="3">
                         <labels>
                           <label description="AP Export Mapping" languagecode="1033" />

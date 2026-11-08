@@ -537,7 +537,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.ProbeReturning(
                     Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.AllRootColumns),
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance),
-            CreateLogger<EmailDraftToolHandler>(), _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
+            CreateLogger<EmailDraftToolHandler>(), DraftCreation(), visibility, visibilityAccessor);
 
         Task<ToolResult> Draft(Guid invoice) => handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
@@ -573,7 +573,12 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var handler = new EmailDraftToolHandler(
             _user, Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi>(),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
-            CreateLogger<EmailDraftToolHandler>(), _world.Resolver(), _appOnly.Object, visibility, visibilityAccessor);
+            CreateLogger<EmailDraftToolHandler>(),
+            // Task 017 (2d-4): the server create's step 10 reads the same invoice (filed under nothing: no stamp) that the
+            // handler's derivation reads, as one Dataverse answers both in production.
+            DraftCreation(new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld()
+                .Row("sprk_invoice", invoice).Restamper),
+            visibility, visibilityAccessor);
 
         var result = await handler.ExecuteChatAsync(
             BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new

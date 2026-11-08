@@ -72,6 +72,13 @@ internal static class FieldMappingPushLookups
     private static readonly HashSet<string> LookupAttributeTypes =
         new(StringComparer.OrdinalIgnoreCase) { "Lookup", "Customer", "Owner" };
 
+    private static readonly HashSet<string> ChoiceAttributeTypes =
+        new(StringComparer.OrdinalIgnoreCase) { "Picklist", "State", "Status" };
+
+    /// <summary>A single-choice attribute (an option set, a state or a status reason).</summary>
+    internal static bool IsChoiceType(string? attributeType)
+        => attributeType is not null && ChoiceAttributeTypes.Contains(attributeType);
+
     /// <summary>A lookup-family attribute (its Web API property is <c>_{name}_value</c>).</summary>
     internal static bool IsLookupType(string? attributeType)
         => attributeType is not null && LookupAttributeTypes.Contains(attributeType);
@@ -169,7 +176,12 @@ internal static class FieldMappingPushLookups
 
             if (!IsLookupType(type))
             {
-                result[field] = row.TryGetValue(field, out var value) ? toClr(value) : null;
+                var clr = row.TryGetValue(field, out var value) ? toClr(value) : null;
+                // Task 040: a choice carries the label Dataverse returned, which a Copy into a Text target writes (the create-time
+                // convention). The number alone is what every other consumer of the map has always seen.
+                result[field] = IsChoiceType(type) && clr is long whole && whole is >= int.MinValue and <= int.MaxValue
+                    ? new SourceChoiceValue((int)whole, TryGetString(row, field + FormattedValueAnnotation, out var label) ? label : null)
+                    : clr;
                 continue;
             }
 

@@ -34,8 +34,9 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// Web API payload) with the row's lookups AS THEY WILL BE after the write (for an update, the stored values merged with
 /// the change), then <see cref="DeriveResolverFieldsAsync"/>, and writes <see cref="InvoiceFamilyResolverFields.ToFields"/>
 /// with the lookup. A refusal means nothing is written; <see cref="InvoiceFamilyCoreRecord.RefusalCode"/> is stable.</para>
-/// <para><b>The write core invokes it (ISS-010, #1973; unified-access-control-r2).</b> <c>OwnedChildWrite.CreateAsync</c> and
-/// <c>OwnedChildWrite.RefileAsync</c> — the core every child-record route and chat create / update tool writes through —
+/// <para><b>The write core invokes it (ISS-010, #1973; unified-access-control-r2).</b> <c>RecordCreationService</c>'s
+/// pre-write step (the create; task 017 replaced the owned create that called it, deleted in 017) and
+/// <c>OwnedChildWrite.RefileAsync</c> — the cores every child-record route and chat create / update tool writes through —
 /// call <see cref="CheckWriteAsync"/> for every write of a family table, keyed by table: on an update, on the stored
 /// lookups read as the caller and overlaid with the change (<see cref="GuardedLookups"/>). This class owns the rule; the
 /// core only assembles the row and reads what the rule needs.</para>

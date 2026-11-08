@@ -117,7 +117,8 @@ internal static partial class MappingSourceCallerMask
             return null;
         }
 
-        if (!EntityAccessFilter.TryResolveEntitySet(sourceEntityLogicalName, out var entitySet))
+        // Task 043: the mapping-source entity set (the association map's, then the Document access path's for sprk_document).
+        if (!MappingSourceReadProbe.TryResolveSourceEntitySet(sourceEntityLogicalName, out var entitySet))
         {
             logger?.LogWarning(
                 "[FIELD-MAPPING-SOURCE] {EntityType} has no entity-set mapping, so it cannot be read as the caller; the source is unavailable.",

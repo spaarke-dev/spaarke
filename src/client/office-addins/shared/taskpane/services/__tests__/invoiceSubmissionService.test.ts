@@ -7,6 +7,7 @@ import type { AttachmentInfo } from '@shared/adapters/types';
 import {
   createInvoiceSubmitHandler,
   FROM_EMAIL_ROUTE,
+  loadCorrectionPrefill,
   loadInvoiceFirms,
   pollSubmission,
   submitInvoiceFromEmail,
@@ -383,6 +384,28 @@ describe('submitInvoiceFromEmail — the answer', () => {
     expect(await submit()).not.toHaveProperty('filingKept');
   });
 
+  it('ebilling task 192: a well-formed filedUnder on the 409 is read; a malformed one is ignored', async () => {
+    const filedUnder = { entityType: 'Matter', entityId: 'b1a2c3d4-0000-0000-0000-000000000001', name: 'PAT-897705' };
+    mockFetch.mockResolvedValueOnce(
+      res(409, { errorCode: 'ebilling.submission.document_core_record_mismatch', filedUnder })
+    );
+    expect(await submit()).toMatchObject({ kind: 'refused', status: 409, filedUnder });
+
+    // must-not-fire: absent, a non-core type, a missing name or id, or not an object
+    for (const bad of [
+      undefined,
+      { ...filedUnder, entityType: 'Account' },
+      { entityType: 'Matter', entityId: filedUnder.entityId },
+      { entityType: 'Project', name: 'P-1' },
+      'PAT-897705',
+    ]) {
+      mockFetch.mockResolvedValueOnce(
+        res(409, { errorCode: 'ebilling.submission.document_core_record_mismatch', filedUnder: bad })
+      );
+      expect(await submit()).not.toHaveProperty('filedUnder');
+    }
+  });
+
   it('no response at all → retryable (the same key makes the retry safe)', async () => {
     mockFetch.mockRejectedValueOnce(new TypeError('network'));
     expect(await submit()).toEqual({ kind: 'retryable', status: 0, code: undefined });
@@ -480,6 +503,70 @@ describe('loadInvoiceFirms (§8)', () => {
   });
 });
 
+describe('loadCorrectionPrefill (§10, ebilling 097e)', () => {
+  const INVOICE_ID = '3c9d2b1a-7e4f-4a6b-8c2d-1e0f9a8b7c65';
+  const PREFILL = {
+    invoiceId: INVOICE_ID,
+    firm: { id: 'f1', name: 'Morrison Foerster' },
+    coreRecord: { entityType: 'Matter', entityId: 'm1', name: 'PAT-792345' },
+    invoiceStatus: 'InReview',
+    trackingNumber: 'INV-012.2',
+    firmInvoiceNumber: 'INV-012',
+    canCorrect: true,
+    reason: null,
+    replacedBy: null,
+  };
+
+  it('calls the §10 route with the cleaned id and returns the body', async () => {
+    mockFetch.mockResolvedValueOnce(res(200, PREFILL));
+    expect(await loadCorrectionPrefill(`{${INVOICE_ID.toUpperCase()}}`, config)).toEqual(PREFILL);
+    expect(mockFetch.mock.calls[0]![0]).toBe(`${BASE}/api/finance/invoices/${INVOICE_ID}/correction-prefill`);
+  });
+
+  it('a Superseded invoice carries its replacement; an unreadable replacement is null', async () => {
+    const superseded = {
+      ...PREFILL,
+      invoiceStatus: 'Superseded',
+      canCorrect: false,
+      reason: 'invoice_status',
+      replacedBy: { invoiceId: 'i2', name: 'INV-013' },
+    };
+    mockFetch.mockResolvedValueOnce(res(200, superseded));
+    expect(await loadCorrectionPrefill(INVOICE_ID, config)).toMatchObject({
+      canCorrect: false,
+      reason: 'invoice_status',
+      replacedBy: { invoiceId: 'i2', name: 'INV-013' },
+    });
+
+    mockFetch.mockResolvedValueOnce(res(200, { ...superseded, replacedBy: { invoiceId: 'i2' } }));
+    expect(await loadCorrectionPrefill(INVOICE_ID, config)).toMatchObject({ replacedBy: null });
+  });
+
+  it('must-not-fire: a body missing what a correction keeps is not used', async () => {
+    for (const bad of [
+      { ...PREFILL, firm: null },
+      { ...PREFILL, coreRecord: { ...PREFILL.coreRecord, entityType: 'Account' } },
+      { ...PREFILL, firmInvoiceNumber: undefined },
+      { ...PREFILL, canCorrect: 'yes' },
+      null,
+    ]) {
+      mockFetch.mockResolvedValueOnce(res(200, bad));
+      await expect(loadCorrectionPrefill(INVOICE_ID, config)).rejects.toThrow(/couldn't be read/);
+    }
+  });
+
+  it('the uniform 404, ebilling.disabled, another 503 and no answer each have their sentence', async () => {
+    mockFetch.mockResolvedValueOnce(res(404, { reasonCode: 'sdap.access.deny.record_unavailable' }));
+    await expect(loadCorrectionPrefill(INVOICE_ID, config)).rejects.toThrow(/This invoice isn't available to you/);
+    mockFetch.mockResolvedValueOnce(res(503, { errorCode: 'ebilling.disabled' }));
+    await expect(loadCorrectionPrefill(INVOICE_ID, config)).rejects.toThrow(/turned off in Spaarke/);
+    mockFetch.mockResolvedValueOnce(res(503, { errorCode: 'ebilling.submission.record_unavailable' }));
+    await expect(loadCorrectionPrefill(INVOICE_ID, config)).rejects.toThrow(/couldn't read this invoice right now/);
+    mockFetch.mockRejectedValueOnce(new TypeError('network'));
+    await expect(loadCorrectionPrefill(INVOICE_ID, config)).rejects.toThrow(/Couldn't reach Spaarke/);
+  });
+});
+
 describe('createInvoiceSubmitHandler — submit, then follow the status', () => {
   const poll = { sleep: async () => undefined };
 
@@ -554,6 +641,33 @@ describe('createInvoiceSubmitHandler — submit, then follow the status', () => 
     );
     const outcome = await createInvoiceSubmitHandler({ config, email: emailSource(), poll })(INPUT, { actionId: 'a' });
     expect(outcome).toMatchObject({ kind: 'refused', message: expect.stringMatching(/stays filed there\.$/) });
+  });
+
+  it('ebilling task 192: the mismatch refusal names the filed-under record and carries it for the view', async () => {
+    const filedUnder = {
+      entityType: 'Project',
+      entityId: 'b1a2c3d4-0000-0000-0000-000000000002',
+      name: 'Harbor Lease',
+    };
+    mockFetch.mockResolvedValueOnce(
+      res(409, { errorCode: 'ebilling.submission.document_core_record_mismatch', filedUnder })
+    );
+    const handler = createInvoiceSubmitHandler({ config, email: emailSource(), poll });
+    expect(await handler(INPUT, { actionId: 'a' })).toEqual({
+      kind: 'refused',
+      message:
+        'This email is filed under Harbor Lease, so its invoice can only be submitted to that record. Nothing was submitted.',
+      filedUnder,
+    });
+
+    // must-not-fire: without filedUnder the refusal names no record and offers none
+    mockFetch.mockResolvedValueOnce(res(409, { errorCode: 'ebilling.submission.document_core_record_mismatch' }));
+    const plain = await handler(INPUT, { actionId: 'b' });
+    expect(plain).not.toHaveProperty('filedUnder');
+    expect(plain).toMatchObject({
+      kind: 'refused',
+      message: expect.stringMatching(/can't be submitted to this record/),
+    });
   });
 
   it('OFFICE_AUTH_ERROR (500, 2026-10-28) is retryable', async () => {
@@ -767,6 +881,34 @@ describe('review fixes (task 133) — what the handler says after the 202', () =
 
   it('Accepted with a catalog Failed code is still the neutral held sentence, not a failure sentence', async () => {
     const outcome = await run({ status: 'Accepted', outcomeReasonCode: 'ebilling.submission.processing_failed' });
+    expect(outcome).toMatchObject({ kind: 'success', message: HELD_FOR_REVIEW_MESSAGE });
+  });
+
+  it('097f must-fire: Accepted and replaced by a correction is not "held"; it names the correcting tracking number', async () => {
+    const outcome = await run({
+      status: 'Accepted',
+      outcomeReasonCode: 'ebilling.submission.replaced_by_correction',
+      replacedBy: { submissionId: 'sub-2', trackingNumber: 'INV-4711.2' },
+    });
+    expect(outcome).toEqual({
+      kind: 'success',
+      trackingNumber: 'INV-4711.1',
+      message: 'This invoice was replaced by a correction (tracking INV-4711.2).',
+    });
+    expect(JSON.stringify(outcome)).not.toContain(HELD_FOR_REVIEW_MESSAGE);
+  });
+
+  it('097f: replacedBy absent (unreadable, ambiguous or a lookup fault) still says replaced, without a number', async () => {
+    const outcome = await run({ status: 'Accepted', outcomeReasonCode: 'ebilling.submission.replaced_by_correction' });
+    expect(outcome).toMatchObject({ kind: 'success', message: 'This invoice was replaced by a correction.' });
+  });
+
+  it('097f must-not-fire: replacedBy on another code changes nothing (still held)', async () => {
+    const outcome = await run({
+      status: 'Accepted',
+      outcomeReasonCode: 'ebilling.submission.held_for_review',
+      replacedBy: { trackingNumber: 'INV-4711.2' },
+    });
     expect(outcome).toMatchObject({ kind: 'success', message: HELD_FOR_REVIEW_MESSAGE });
   });
 

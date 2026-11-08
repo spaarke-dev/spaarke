@@ -1225,29 +1225,28 @@ or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 ite
 **Safety model:** dry-run default (`-WhatIf` forces a preview even with `-Apply`); a **write-ahead reversal manifest** records each row's previous owner before its write, so `-RevertManifest` undoes a run; every assignment is **read back** (Dataverse silently ignores an unrecognised `@odata.bind`); only application-user-owned rows are candidates; an ambiguous or missing default team is reported `Unresolvable`, never guessed. Detail: [`projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md`](../projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md) §6.9.
 
 ### `Set-FieldMappingRuleSyncMode.ps1`
-**Purpose:** Migrates every existing **Copy** field-mapping rule (`sprk_fieldmappingrule.sprk_mapping_type = 0`) to sync mode **Manual Refresh** (`sprk_syncmode = 1`), so `/push` (task 040) can select the rules it re-applies by that value. Default/Concat/Template rules and rules already at 1 are never written; an empty `sprk_syncmode` counts as not migrated; an inactive Copy rule is reported, never touched; an unrecognised mapping type or sync mode stops the run before any write (exit 2). The PATCH body is exactly `{ "sprk_syncmode": 1 }`.
-**Usage:** 🔴 One-time (per environment); idempotent — a second `-Apply` reports `ToMigrate: 0`.
-**Lifecycle:** ✅ Maintained (added 2026-10-21 by `field-mapping-server-write-path-r1` task 005, FR-05d)
+**Purpose:** Sets every **Copy** field-mapping rule's sync mode (`sprk_fieldmappingrule.sprk_syncmode`) to the value its **class** calls for, so `/push` (task 040) applies the rules it should: an **Assigned-To** target column (the BFF's access-conferring registry) stays **One-time** (0), a **filing** target column (a family edge: typed filing lookup, regarding pair, regarding stamp) stays One-time (0, so an ordinary push does not re-file), anything else is **Manual Refresh** (1). Class comes from the rule's target table (profile → target record type) and target column. Writes only an active Copy rule short of its class value (`Migrate` to 1, `Demote` to 0); an empty value reads as One-time; Default/Concat/Template rules and rules already at their class value are never written; an inactive rule is reported, never touched; an unrecognised mapping type or sync mode, or a rule whose target table cannot be resolved, stops the run before any write (exit 2). The PATCH body is exactly `{ "sprk_syncmode": 0 or 1 }`. The class tables are copies of the BFF's registries, held to them by `SyncModeMigrationClassDataTests`.
+**Usage:** 🔴 One-time (per environment, after the owner has reviewed a dry run); idempotent — a second `-Apply` reports `ToMigrate: 0`, `ToDemote: 0`.
+**Lifecycle:** ✅ Maintained (added 2026-10-21 by `field-mapping-server-write-path-r1` task 005, FR-05d; class-aware 2026-11-06 by task 040)
 **Dependencies:** Azure CLI (`az login`) with access to the environment, PowerShell 7+
 **Owner:** `field-mapping-server-write-path-r1`
-**Last Used:** 2026-10-21 — `-SelfTest` PASS; read-only dry run + `-Verify` baseline against `spaarkedev1` (25 Copy rules: 21 would migrate — 20 empty, 1 One-time — 4 already Manual Refresh). **No `-Apply` has been run**: it needs the owner's explicit OK per environment.
+**Last Used:** 2026-11-06 — `-SelfTest` PASS; read-only dry run against `spaarkedev1` (40 Copy rules: 28 Assigned-To rules at Manual Refresh would demote to One-time, 12 plain-data rules already Manual Refresh, nothing to migrate). **No `-Apply` has been run**: it needs the owner's explicit OK per environment.
 
-**Command:**
 ```powershell
-# Dry run (default) — zero writes; lists each rule that would move, with its current mode, and the totals.
+# Dry run (default) — zero writes; lists each rule that would change, with its class, current mode and new value, and the totals.
 .\Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
 
-# Read-only baseline — exits 1 while any Copy rule is not at Manual Refresh.
+# Read-only baseline — exits 1 while any Copy rule is not at its class value.
 .\Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify
 
-# Migrate (owner OK required), read each row back, then verify.
+# Apply (owner OK required, after a reviewed dry run), read each row back, then verify.
 .\Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply -Verify
 
 # Offline checks of the classifier and idempotency.
 .\Set-FieldMappingRuleSyncMode.ps1 -SelfTest
 ```
 
-**Safety model:** dry-run default (`-WhatIf` forces a preview even with `-Apply`); `If-Match: *` so the PATCH can only update; every write is read back; `-Verify` is read-only and fails on any Copy rule short of Manual Refresh, active or not.
+**Safety model:** dry-run default (`-WhatIf` forces a preview even with `-Apply`); `If-Match: *` so the PATCH can only update; every write is read back; `-Verify` is read-only and fails on any Copy rule short of its class value, active or not.
 
 ### `Set-DocumentAccessPermissionSchema.ps1`
 **Purpose:** Brings `sprk_document.sprk_accesspermission` into source (owner round 81): the column exists, is a Choice bound to the SAME global choice as the roots' Access Permission, and ships in `SpaarkeCore` (membership decided through `scripts/common/DataverseSolutionMembership.ps1`). Task 189 (D7 T7a, #2126) adds the document's own-narrowing record `sprk_document.sprk_accessinheritance` (Multiple lines of text, 4000, audited, **NOT field-secured** — decision D1; see `docs/data-model/access-inheritance.md`). `-Apply` creates each column when absent (or adds it to the solution); it never alters an existing one (`COLUMN_MISMATCH` / `RECORD_MISMATCH` refuse — a secured record column is a mismatch). `-Verify` also asserts the record column is on no `sprk_document` form.
@@ -1327,6 +1326,34 @@ $bff = '5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458
 - Dataverse caches principal privileges, so re-probe an assignment until it is stable across 3 polls (setup guide §7).
 
 Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md).
+
+### `Set-ProductConfigurationReadDepth.ps1`
+**Purpose:** Raises `Read` to Global on the Spaarke product configuration tables in [`config/product-configuration-read-role.json`](../config/product-configuration-read-role.json) for `Spaarke Core User` and `Spaarke Basic User`, and removes the two roles' privileges on `sprk_externalserviceconfig` (an unused read grant). Product data is owned in the root business unit, and a Read at Deep does not reach it from a customer unit (owner decision 2026-10-29). The solution role XML is the source of truth; this script brings one environment to it ahead of a SpaarkeMaster import, and verifies it.
+**Usage:** 🟡 Per environment that has not had the SpaarkeMaster import carrying the change; `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-29 by `unified-access-control-r2`)
+**Dependencies:** Azure CLI (`az login`) with System Administrator in the environment, PowerShell 7+
+**Owner:** `unified-access-control-r2`
+
+**Command:**
+```powershell
+# Dry run (default): each change, per business-unit copy of each role. Zero writes.
+.\Set-ProductConfigurationReadDepth.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+
+# Raise the listed Reads to Global and remove the unused grant on both root roles, then read the root and every copy back.
+.\Set-ProductConfigurationReadDepth.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
+
+# Check: exit 0 = every copy reads every listed table at Global and holds no privilege on sprk_externalserviceconfig; exit 1 names each gap.
+.\Set-ProductConfigurationReadDepth.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify
+```
+
+**Safety model:**
+- Raises the listed Reads and removes the privileges on the tables in `$NoEndUserPrivilegeTables` (today `sprk_externalserviceconfig`, which nothing reads as a user); lowers nothing else, removes nothing else, and touches no other privilege. `ProductConfigurationReadRoleGuardTests` reads that list and fails the build if any end-user Spaarke role XML holds a privilege on one of its tables.
+- Refuses a config other than Read at Global for exactly those two roles, and any table in the restricted-content, customer-configuration or Secure Record owner role files.
+- Refuses, in every mode (dry run, `-Apply`, `-Verify`) and before it connects, any listed table that is platform service configuration: `sprk_externalserviceconfig`, `sprk_dataverseenvironment`, `sprk_aimodeldeployment`. The one list is `$PlatformServiceTables` in the script; `ProductConfigurationReadRoleGuardTests` reads it from there. Tested by `tests/scripts/Set-ProductConfigurationReadDepth.Tests.ps1` (Pester 3.4).
+- Playbook create, clone and share stay with playbook administrators: only `Spaarke AI Analysis Admin` holds Create and Share on `sprk_analysisplaybook`, and the BFF create, clone, share and unshare routes require the caller's own privilege.
+- Refuses to run until both role XML files hold each listed Read at Global and no privilege on a `$NoEndUserPrivilegeTables` table.
+- Resolves each role to exactly one root role and changes only that; every business-unit copy takes its privileges from it and is read back.
+- Takes privilege ids from entity metadata and refuses a name mismatch; names any privilege the platform added unasked, and fails if a privilege outside the lists changed depth or was removed.
 
 ### `Deploy-ExternalShareExpiryViews.ps1`
 **Purpose:** Creates two public views on `sprk_externalrecordaccess` in SpaarkeCore. "Active External Shares by Expiration" lists every active row, soonest expiry first. "External Shares Expiring in 30 Days" lists the same rows with an expiry on or before today + 30, using a relative filter that never goes stale. Together they answer what is about to lapse across all external shares, which the per-grant reminders (FR-33) cannot.

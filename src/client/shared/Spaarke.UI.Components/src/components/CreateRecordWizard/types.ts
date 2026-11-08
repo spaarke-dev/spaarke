@@ -78,6 +78,14 @@ export interface IAssociateToStepConfig {
    * before for every other launch context.
    */
   lockAssociation?: boolean;
+
+  /**
+   * Optional: told the current association whenever it changes — the launch-context pre-fill when the wizard opens, the
+   * user's pick or skip (`null`) afterwards (unified-access-control-r2 task 195: the Create Matter wizard reads where a
+   * picked project is filed, so the user can choose before Finish). The association still reaches `onFinish` through
+   * `context.association` either way.
+   */
+  onAssociationChange?: (association: AssociationResult | null) => void;
 }
 
 // ---------------------------------------------------------------------------

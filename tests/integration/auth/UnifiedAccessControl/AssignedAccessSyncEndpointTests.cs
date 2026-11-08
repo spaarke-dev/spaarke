@@ -228,6 +228,90 @@ public class AssignedAccessSyncEndpointTests : IClassFixture<AssignedAccessSyncT
         body.GetProperty("detail").GetString().Should().Contain(external.ToString());
     }
 
+    /// <summary>
+    /// Field-mapping task 049: while another holder has the record's removal lease (for instance a create's queued
+    /// Assigned-To grant), the sync's No Access re-application removes nothing and the route answers ProblemDetails
+    /// <c>no_access_incomplete</c> with a message that says to try again — never a bare 500.
+    /// </summary>
+    [Fact]
+    public async Task Sync_WhileTheRecordsRemovalLeaseIsHeld_NoAccessRemovesNothing_AndTheAnswerSaysTryAgain()
+    {
+        var (author, walled, colleague) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        H.Participations.Flags[_matter] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        _fixture.EnforcementStore.Person(author);
+        _fixture.EnforcementStore.Person(walled);
+        _fixture.EnforcementStore.Person(colleague);
+        _fixture.EnforcementStore.Rights[(author, _matter)] = AccessRights.Read | AccessRights.Write;
+        H.Shares.Seed("sprk_matter", _matter, DataversePrincipalRef.User(colleague), 262167);
+        H.Shares.Seed("sprk_matter", _matter, DataversePrincipalRef.User(walled), 262167);
+        _fixture.EnforcementStore.AddEntry(subjectUser: walled, objectRecord: ("sprk_matter", _matter), modifiedBy: author);
+        _fixture.WritableRecords[_matter] = true;
+
+        var (lease, lockId, token) = await HoldRemovalLeaseAsync(_matter);
+        try
+        {
+            var response = await _fixture.CreateAuthenticatedClient()
+                .PostAsJsonAsync(SyncRoute, new { recordType = "matter", recordId = _matter });
+
+            response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, await response.Content.ReadAsStringAsync());
+            response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+            var body = await BodyOf(response);
+            body.GetProperty("reasonCode").GetString().Should().Be(AssignedAccessSyncEndpoint.NoAccessIncompleteReasonCode);
+            body.GetProperty("detail").GetString().Should()
+                .Contain("another access change is under way on this record").And.Contain("Try again");
+            body.TryGetProperty("traceId", out _).Should().BeTrue();
+            body.GetProperty("outcome").GetProperty("noAccess").EnumerateArray()
+                .SelectMany(r => r.GetProperty("failures").EnumerateArray())
+                .Should().ContainSingle().Which.GetProperty("kind").GetString().Should().Be("record-busy");
+            H.Shares.MaskOf("sprk_matter", _matter, DataversePrincipalRef.User(walled)).Should().Be(262167);
+        }
+        finally
+        {
+            await lease.ReleaseAsync(lockId, token, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Field-mapping task 049: on a Restricted record, the same held lease stops the external-user rule; the route answers
+    /// ProblemDetails <c>restricted_external_incomplete</c> with a message that says to try again — never a bare 500.
+    /// </summary>
+    [Fact]
+    public async Task Sync_OfARestrictedRecord_WhileTheRecordsRemovalLeaseIsHeld_AnswersRestrictedExternalIncomplete_SayingTryAgain()
+    {
+        H.Participations.Flags[_matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var external = H.SystemUser(isExternal: true);
+        H.Shares.Seed("sprk_matter", _matter, DataversePrincipalRef.User(external), 1);
+        _fixture.WritableRecords[_matter] = true;
+
+        var (lease, lockId, token) = await HoldRemovalLeaseAsync(_matter);
+        try
+        {
+            var response = await _fixture.CreateAuthenticatedClient()
+                .PostAsJsonAsync(SyncRoute, new { recordType = "matter", recordId = _matter });
+
+            response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, await response.Content.ReadAsStringAsync());
+            var body = await BodyOf(response);
+            body.GetProperty("reasonCode").GetString().Should().Be(AssignedAccessSyncEndpoint.RestrictedExternalIncompleteReasonCode);
+            body.GetProperty("detail").GetString().Should()
+                .Contain("another access change is under way").And.Contain("Try again");
+            body.TryGetProperty("traceId", out _).Should().BeTrue();
+            H.Shares.MaskOf("sprk_matter", _matter, DataversePrincipalRef.User(external)).Should().Be(1);
+        }
+        finally
+        {
+            await lease.ReleaseAsync(lockId, token, CancellationToken.None);
+        }
+    }
+
+    private async Task<(Spaarke.Scheduling.IScheduledJobLease Lease, string LockId, string Token)> HoldRemovalLeaseAsync(Guid matter)
+    {
+        var lease = _fixture.Services.GetRequiredService<Spaarke.Scheduling.IScheduledJobLease>();
+        var lockId = NoAccessShareEnforcer.RecordLockId("sprk_matter", matter);
+        var held = await lease.TryAcquireAsync(lockId, null, TimeSpan.FromMinutes(1), CancellationToken.None);
+        held.Status.Should().Be(Spaarke.Scheduling.ScheduledJobLeaseStatus.Granted);
+        return (lease, lockId, held.Token!);
+    }
+
     [Fact]
     public async Task Sync_OfALinkedUser_ClearsTheirRootSetUnderTheCallersTenant()
     {

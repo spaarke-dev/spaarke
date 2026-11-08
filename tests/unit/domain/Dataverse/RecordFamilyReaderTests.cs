@@ -65,6 +65,20 @@ public class RecordFamilyReaderTests
 
     // ── Pruning (UAC F2): a readable record below an unreadable one is absent, and nothing reveals it ──
 
+    // Every Filing table the walk can list has a display-name column, so a new RecordFamilyEdges row cannot land with members
+    // that show no name (ebilling's invoice-family rows did, 2026-10-29).
+    [Fact]
+    public void EveryFilingFamilyTable_HasADisplayNameColumn()
+    {
+        var unnamed = RecordFamilyReader.FamilyTablesOf(FamilyKind.Filing)
+            .Where(table => RecordFamilyReader.NameColumnOf(table) is null)
+            .OrderBy(table => table, StringComparer.Ordinal)
+            .ToList();
+
+        unnamed.Should().BeEmpty(
+            "each family table needs its primary name attribute (Entity.xml) in RecordFamilyReader.NameColumnsBeyondTheRegardingMap");
+    }
+
     [Fact]
     public async Task ReadAsync_ReadableRecordsBelowAnUnreadableSecureRecord_AreAbsentAndTheViewEqualsAFamilyWithoutThatBranch()
     {
@@ -323,6 +337,44 @@ public class RecordFamilyReaderTests
         member.Status.Should().Be("Active");
         read.Members.Single(m => m.Id == matter).Should().Match<RecordFamilyMember>(m =>
             m.Name == "Acme v Contoso" && m.RecordNumber == "MAT-0001");
+    }
+
+    // #2513: each table with a record-number column returns it, read through the table's own column.
+    [Theory]
+    [InlineData("sprk_budget", "sprk_matter", "sprk_budgetnumber", "BUD-000001")]
+    [InlineData("sprk_event", "sprk_regardingmatter", "sprk_eventnumber", "EVT-0001")]
+    [InlineData("sprk_analysis", "sprk_regardingmatter", "sprk_analysis_number", "ANL-0001")]
+    [InlineData("sprk_document", "sprk_matter", "sprk_document_number", "DOC-0001")]
+    [InlineData("sprk_invoice", "sprk_matter", "sprk_invoicenumber", "INV-0001")]
+    [InlineData("sprk_reportcard", "sprk_regardingmatter", "sprk_reportcardnumber", "RC-0001")]
+    [InlineData("sprk_signal", "sprk_matter", "sprk_signalnumber", "SIG-00001")]
+    [InlineData("sprk_decisionrecord", "sprk_matter", "sprk_decisionnumber", "DR-00001")]
+    [InlineData("sprk_workassignment", "sprk_regardingmatter", "sprk_workassignmentnumber", "WRK-000001")]
+    public async Task ReadAsync_TableWithARecordNumberColumn_ReturnsTheNumber(string table, string lookup, string numberColumn, string number)
+    {
+        var matter = Record(Matter);
+        var child = Record(table, (lookup, matter), (numberColumn, number));
+
+        var read = await ReadAsync(Matter, matter);
+
+        read.Members.Single(m => m.Id == child).RecordNumber.Should().Be(number);
+    }
+
+    // #2513: a table with no record-number column shows nothing, and a row whose number is empty shows nothing.
+    [Theory]
+    [InlineData("sprk_communication", "sprk_regardingmatter")]
+    [InlineData("sprk_communicationthread", "sprk_regardingmatter")]
+    [InlineData("sprk_memo", "sprk_regardingmatter")]
+    [InlineData("sprk_budget", "sprk_matter")]
+    [InlineData("sprk_event", "sprk_regardingmatter")]
+    public async Task ReadAsync_NoRecordNumberToShow_ComesBackNull(string table, string lookup)
+    {
+        var matter = Record(Matter);
+        var child = Record(table, (lookup, matter));
+
+        var read = await ReadAsync(Matter, matter);
+
+        read.Members.Single(m => m.Id == child).RecordNumber.Should().BeNull();
     }
 
     [Fact]
@@ -647,6 +699,123 @@ public class RecordFamilyReaderTests
         foreach (var (column, target, value) in lookups)
             row[column] = new EntityReference(target, value);
         return row;
+    }
+
+    // ── Children of one record in one table (task 040, FR-34): the push's way to the children it previews and writes ──
+
+    private Task<RecordFamilyChildren> ChildrenAsync(
+        string sourceTable, Guid sourceId, string targetTable, int max = 500, FamilyKind kind = FamilyKind.Filing) =>
+        Reader().ReadChildrenAsync(Caller, kind, sourceTable, sourceId, targetTable, max, CancellationToken.None);
+
+    [Fact]
+    public async Task ReadChildrenAsync_ListsTheTargetTableOneLevelDown_AndNothingElse()
+    {
+        var matter = Record(Matter, ("sprk_mattername", "M"));
+        var first = Record(Agreement, ("sprk_regardingmatter", matter));
+        var second = Record(Agreement, ("sprk_regardingmatter", matter));
+        var document = Record(Document, ("sprk_matter", matter));
+        Record(FileVersion, ("sprk_document", document));
+        var elsewhere = Record(Matter);
+        Record(Agreement, ("sprk_regardingmatter", elsewhere));
+
+        var children = await ChildrenAsync(Matter, matter, Agreement);
+
+        children.Outcome.Should().Be(RecordFamilyReadOutcome.Read);
+        children.Children.Select(c => c.Id).Should().BeEquivalentTo(new[] { first, second });
+        children.Children.Should().OnlyContain(c => c.Table == Agreement && c.Parent!.Id == matter && c.Depth == 1);
+        children.Truncated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ReadChildrenAsync_ARowFiledFirstUnderAnotherRecord_IsNotTheSourcesChild()
+    {
+        // The primary-parent rule (one family per record): an agreement whose document ranks before its matter is the document's.
+        var matter = Record(Matter);
+        var document = Record(Document, ("sprk_matter", matter));
+        var ownedByMatter = Record(Agreement, ("sprk_regardingmatter", matter));
+        var ownedByDocument = Record(Agreement, ("sprk_regardingdocument", document), ("sprk_regardingmatter", matter));
+
+        var children = await ChildrenAsync(Matter, matter, Agreement);
+
+        children.Children.Select(c => c.Id).Should().Equal(ownedByMatter);
+        children.Children.Select(c => c.Id).Should().NotContain(ownedByDocument);
+    }
+
+    [Fact]
+    public async Task ReadChildrenAsync_AProjectFiledByTheRegardingPair_IsAChildOfItsMatter()
+    {
+        var matter = Record(Matter);
+        var project = Record(Project);
+        PairUnder(project, MatterType, matter);
+        var other = Record(Project);
+        PairUnder(other, MatterType, Record(Matter));
+
+        var children = await ChildrenAsync(Matter, matter, Project);
+
+        var member = children.Children.Should().ContainSingle().Which;
+        member.Id.Should().Be(project);
+        member.EdgeKind.Should().Be(EdgeKind.Pair);
+        member.Parent!.Id.Should().Be(matter);
+    }
+
+    [Fact]
+    public async Task ReadChildrenAsync_MoreThanAskedFor_IsTruncated_AndOnlyTheAskedForNumberIsReturned()
+    {
+        var matter = Record(Matter);
+        for (var i = 0; i < 3; i++)
+            Record(Agreement, ("sprk_regardingmatter", matter));
+
+        var children = await ChildrenAsync(Matter, matter, Agreement, max: 2);
+
+        children.Children.Should().HaveCount(2);
+        children.Truncated.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ReadChildrenAsync_AnAnchorTheCallerCannotRead_OrATableNoEdgeJoins_IsOneAnswer_AndReadsNoChild()
+    {
+        var hidden = SecureRecord(Matter, shared: false);
+        Record(Agreement, ("sprk_regardingmatter", hidden));
+        var matter = Record(Matter);
+
+        var unreadable = await ChildrenAsync(Matter, hidden, Agreement);
+        var noEdge = await ChildrenAsync(Matter, matter, FileVersion);
+        var missing = await ChildrenAsync(Matter, Guid.NewGuid(), Agreement);
+
+        unreadable.Outcome.Should().Be(RecordFamilyReadOutcome.AnchorNotFound);
+        noEdge.Outcome.Should().Be(RecordFamilyReadOutcome.AnchorNotFound);
+        missing.Outcome.Should().Be(RecordFamilyReadOutcome.AnchorNotFound);
+        new[] { unreadable, noEdge, missing }.Should().OnlyContain(r => r.Children.Count == 0 && !r.Truncated);
+    }
+
+    [Fact]
+    public async Task ReadChildrenAsync_AKindOtherThanFiling_IsRefusedBeforeARead()
+    {
+        var matter = Record(Matter);
+
+        var children = await ChildrenAsync(Matter, matter, Agreement, kind: (FamilyKind)99);
+
+        children.Outcome.Should().Be(RecordFamilyReadOutcome.KindNotSupported);
+    }
+
+    [Theory]
+    [InlineData("sprk_eventlog")]
+    [InlineData("sprk_emailreviewlog")]
+    [InlineData("sprk_billingevent")]
+    public void HasListedEdge_ADetailTable_IsNeverAPushTarget(string detail)
+    {
+        RecordFamilyReader.HasListedEdge(FamilyKind.Filing, WorkAssignment, detail).Should().BeFalse();
+        RecordFamilyReader.HasListedEdge(FamilyKind.Filing, Matter, detail).Should().BeFalse();
+    }
+
+    [Fact]
+    public void HasListedEdge_ATypedLookupAndThePair_AreEdges_AndAnUnrelatedTableIsNot()
+    {
+        RecordFamilyReader.HasListedEdge(FamilyKind.Filing, Matter, Agreement).Should().BeTrue();
+        RecordFamilyReader.HasListedEdge(FamilyKind.Filing, Matter, Project).Should().BeTrue("a project is filed by the regarding pair");
+        RecordFamilyReader.HasListedEdge(FamilyKind.Filing, " SPRK_MATTER ", "sprk_agreement").Should().BeTrue();
+        RecordFamilyReader.HasListedEdge(FamilyKind.Filing, Matter, FileVersion).Should().BeFalse();
+        RecordFamilyReader.HasListedEdge(FamilyKind.Filing, null, Agreement).Should().BeFalse();
     }
 
     // ── Fixture ──

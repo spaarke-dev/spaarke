@@ -267,6 +267,7 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
                 Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
                     () => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard(),
                     new Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable()),
+                new InvoiceLifecycleService(new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object, Microsoft.Extensions.Logging.Abstractions.NullLogger<InvoiceLifecycleService>.Instance),
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<SubmissionCommitGate>.Instance)
         {
         }
@@ -767,6 +768,29 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         early.Writes.Should().BeEmpty("a delivery that will be retried says nothing");
         last.StatusWrites.Should().BeEmpty();
         last.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote("ebilling.submission.signal_write_skipped"));
+    }
+
+    [Theory(DisplayName = "097d follow-up (ontology-r1, bounded and visible): a supersede-close Retry on the final delivery is dead-lettered with its code, stays Processing with the 'Processing stopped' note, and logs a Warning naming the submission; earlier deliveries are redelivered")]
+    [InlineData(InvoiceSubmissionAfterSteps.SignalChangedCode)]
+    [InlineData(InvoiceSubmissionAfterSteps.SupersedeSignalsFailedCode)]
+    public async Task SupersedeCloseRetry_OnTheFinalDelivery_IsDeadLetteredAndVisible(string code)
+    {
+        var early = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        early.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Retry, code));
+        var last = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        last.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Retry, code));
+
+        var redelivered = await early.Build().ProcessAsync(Job(), CancellationToken.None);
+        var deadLettered = await last.Build().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        redelivered.Status.Should().Be(JobStatus.Failed, "the broker redelivers; the resume re-runs the close");
+        early.Writes.Should().BeEmpty();
+        deadLettered.Status.Should().Be(JobStatus.Poisoned);
+        deadLettered.ErrorMessage.Should().Be(code, "the dead-letter carries the reason");
+        last.StatusWrites.Should().BeEmpty("never Failed: the invoice is committed and a replay resumes it");
+        last.Row.GetAttributeValue<OptionSetValue>("sprk_processingstatus").Value.Should().Be(Processing);
+        last.Row.GetAttributeValue<string>(AttentionColumn).Should().Be(AdminAttentionText.StoppedNote(code));
+        last.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains(SubmissionId.ToString()) && e.Message.Contains(code));
     }
 
     [Fact(DisplayName = "049 R3: the final delivery with NO link is Failed as before and sets no attention text (the Failed status is the signal)")]

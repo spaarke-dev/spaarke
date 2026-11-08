@@ -1,0 +1,14 @@
+# Skills over the 500-line cap without a length justification, recorded 2026-11-03 (ratchet baseline).
+# Listed skills pass while they do not grow past the recorded count. Delete a line when fixed.
+# Format: skill|lines
+dataverse-create-schema|806
+dataverse-deploy|799
+jps-playbook-design|608
+merge-to-master|626
+project-continue|542
+provision-environment|3057
+push-to-github|686
+repo-cleanup|565
+ui-test|569
+worktree-setup|764
+worktree-sync|510

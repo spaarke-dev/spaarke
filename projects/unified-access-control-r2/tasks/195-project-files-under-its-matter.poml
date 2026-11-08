@@ -3,7 +3,7 @@
   <metadata>
     <title>A project associated with a matter is filed under it through the regarding pair: one root per project (#2352 (i) + (ii))</title>
     <phase>Session 28: UAC (#2352, owner choice (a), 2026-10-27)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes which parent a core record is filed under, which the access model reads (I-6, secure-if-any); .cs + .tsx; access-control.</rigor-reason>
     <model-tier>opus</model-tier>

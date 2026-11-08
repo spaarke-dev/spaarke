@@ -232,9 +232,9 @@ public class DocumentBffOwnedColumnAppOnlyWriterTests
                 Lookups: null, ImpersonateSystemUserId: user, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal),
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_document", Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_filepath")),
-            It.IsAny<CancellationToken>(), user), Times.Once);
+            user, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -249,8 +249,8 @@ public class DocumentBffOwnedColumnAppOnlyWriterTests
                 Lookups: null),
             CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
-            table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), It.IsAny<CancellationToken>(), null),
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            table, Row, It.Is<Dictionary<string, object?>>(f => f.ContainsKey(column)), null, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -278,10 +278,10 @@ public class DocumentBffOwnedColumnAppOnlyWriterTests
             new Dictionary<string, object?> { ["sprk_documentdescription"] = "x", ["sprk_filepathnote"] = "y" },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_document", Row,
             It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_documentdescription") && f.ContainsKey("sprk_filepathnote")),
-            It.IsAny<CancellationToken>(), null), Times.Once);
+            null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── Field-mapping push (a rule targeting an owned column is skipped; the rest of the push applies) ───────────
@@ -300,10 +300,10 @@ public class DocumentBffOwnedColumnAppOnlyWriterTests
 
         (updated, failed, skipped).Should().Be((1, 0, 0));
         errors.Should().BeEmpty();
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_document", Row,
             It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_documentdescription")),
-            It.IsAny<CancellationToken>(), Caller), Times.Once);
+            Caller, It.IsAny<CancellationToken>()), Times.Once);
         results.Should().ContainSingle(r => r.TargetField == target)
             .Which.Should().Match<FieldMappingResultDto>(r =>
                 r.Status == FieldMappingStatus.Skipped && r.ErrorMessage!.Contains("set by Spaarke"));

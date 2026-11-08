@@ -24,11 +24,13 @@
 
 .EXAMPLE
     pwsh -File scripts/provisioning/Test-RolePrivilegeExpectations.ps1 -EnvironmentUrl https://spaarke-acme.crm.dynamics.com `
-        -ExpectationsPath scripts/provisioning/role-privilege-expectations/spaarkemaster-1.2.4.0.json
+        -ExpectationsPath scripts/provisioning/role-privilege-expectations/spaarkemaster-1.3.0.0.json
     Exit 0 = every role matches; 1 = a mismatch (listed); 2 = the check could not run (role missing, read failed).
+    Use the file of the version the environment was just upgraded TO; each file is cumulative from 1.2.4.0.
 
 .NOTES
-    customer-provisioning-orchestration-r1. Expectations for 1.2.4.0 come from spaarke-ontology-platform-r1 (2026-10-29).
+    customer-provisioning-orchestration-r1. Expectations for 1.2.4.0 come from spaarke-ontology-platform-r1 (2026-10-29);
+    1.3.0.0 adds the role diff of the published 1.2.4.0 to the 1.3.0.0 source (2026-11-06).
 #>
 #Requires -Version 7.3
 [CmdletBinding()]

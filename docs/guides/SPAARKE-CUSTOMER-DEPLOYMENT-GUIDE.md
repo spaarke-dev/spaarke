@@ -1279,10 +1279,13 @@ former `scripts/Register-EntraAppRegistrations.ps1` path was retired by task 130
   Known limit (ISS-018 K1): an app registration H3 created before 2026-10-14 would keep a stale delegated entry with id `75359482-...` (the reconcile only adds); none exists, because H3 had never run live.
 
 **Office add-in and Teams sign-in redirects are NOT on the customer's registration.** The shared clients sign in with
-their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Add-in (Production)"), so `brk-multihub://<host>` and
-`https://<host>/auth-callback.html` are registered ONCE, on that client app, for the production site
+their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Add-in (Production)"), so `brk-multihub://<host>`,
+`brk-9199bf20-a13f-4107-85dc-02114787ef48://<host>` (the broker scheme for Outlook on the web and new Outlook; without
+it those users fall back to the popup) and `https://<host>/auth-callback.html` are registered ONCE, on that client app, for the production site
 (`addins.spaarke.com`) — never per customer. A customer BFF only pre-authorizes the client (above) and lists its origin in
 CORS (H4b). Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts).
+For the External Access Teams app (package build, customer-tenant install, Teams sign-in prerequisites and support), see
+[EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md](EXTERNAL-ACCESS-TEAMS-APP-GUIDE.md).
 
 **The `acct` optional claim (access tokens) — REQUIRED on every per-customer BFF registration** (task 141).
 The BFF's first-sign-in identity binding admits only a MEMBER of a configured customer tenant (§6.5.2), and
@@ -1297,7 +1300,7 @@ it once by hand:
 ```
 
 Both are idempotent and keep every other optional claim. Optional claims on the resource registration apply to
-every access token issued FOR it — including the workforce tokens the External Access SPA and Teams tab acquire (the single-tenant Spaarke client, NAA then MSAL popup, scope `user_impersonation`; the Teams manifest declares no `webApplicationInfo` and there is no Teams-SSO path, ADR-028 A8) — see
+every access token issued FOR it — including the workforce tokens the External Access SPA and Teams tab acquire (the browser company-account sign-in and the Teams tab use the multitenant workforce client on the user's own tenant authority, NAA then MSAL popup in Teams, scope `user_impersonation`; the Teams manifest declares no `webApplicationInfo` and there is no Teams-SSO path, ADR-028 A9; the single-tenant Spaarke client is used only for a licensed user's account link — corrected 2026-10-29 against `src/client/external-spa/src/auth/msal-auth.ts`) — see
 Microsoft's [optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
 Without it every contact-only Type-2 sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
 
@@ -1838,6 +1841,32 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 > configuration rows to this team, so it must exist before either runs for the customer. Until they ship, no seeder does:
 > the rows stay with the seeding identity, and an operator re-owns them to this team after setup. Users keep reading the
 > rows through their own roles (`Spaarke Core User`, Deep).
+>
+> **Product configuration is read at Global (owner decision 2026-10-29).** Spaarke product data stays owned in the root
+> (owner round 136), and people work in the customer's business unit below it, where a Read at Deep does not reach the
+> root. So `Spaarke Core User` and `Spaarke Basic User` read the product configuration tables at Global: the playbooks and
+> their actions, skills, tools and knowledge, the AI type catalogs, the Assistant's context map, and grid configuration.
+> This is Read only, on those tables only. Restricted content (`sprk_policy`, `sprk_policyversion`, `sprk_ruleset`,
+> `sprk_procedureassignment`, `sprk_storedfile`), customer records, customer configuration and per-user tables keep their
+> depths. The one list is `config/product-configuration-read-role.json` (with the tables left out and why); the roles'
+> solution XML carries it, so a SpaarkeMaster import applies it. On an environment that has not had that import, run
+> `scripts/Set-ProductConfigurationReadDepth.ps1` (dry run, then `-Apply`, then `-Verify`, which must exit 0).
+> `ProductConfigurationReadRoleGuardTests` fails the build if the list gains a customer or restricted table or platform
+> service configuration (`sprk_externalserviceconfig`, `sprk_dataverseenvironment`, `sprk_aimodeldeployment`), if an
+> entry names any privilege other than the table's own Read, or if either role gains Create on `sprk_gridconfiguration`.
+> Nothing in the product reads `sprk_externalserviceconfig` as a user, so no end-user Spaarke role holds a privilege on
+> it, and its `sprk_clientsecret` column is field-secured with no Spaarke field security profile (only the platform's
+> System Administrator profile reads it); the same guard checks both. An environment imported before that change still
+> holds the old Read on the two roles: the same script's dry run lists it, `-Apply` removes it, and `-Verify` fails
+> until it is gone.
+> Because every user can read every playbook, **creating, cloning and sharing playbooks is for playbook administrators
+> only**: in the role XML only `Spaarke AI Analysis Admin` holds Create and Share on `sprk_analysisplaybook`, and the BFF
+> routes `POST /api/ai/playbooks`, `/{id}/clone`, `/{id}/share` and `/{id}/unshare` require the caller's own Create
+> (create, clone) or Share (share, unshare) privilege on that table before anything is read or written. Every playbook
+> write route (`PUT /api/ai/playbooks/{id}`, `PUT /{id}/canvas`, and the node create, update, delete and scopes routes)
+> requires the caller's own Write privilege first, and an update that changes whether the playbook is public also
+> requires Share. A user without the privilege gets 403. Give a person who builds playbooks the
+> `Spaarke AI Analysis Admin` role.
 
 Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration that
 no solution import can create. Since T256, **H7b creates it on every run**, after H6 and before H9:
@@ -1845,7 +1874,12 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
 - the named, memberless `Secure Record Owners` team;
 - the `Secure Record Owner` role, created inside that unit, with the Read-at-Basic set in
   `config/secure-record-owner-role.json`, on that team only;
-- the BFF-managed field-security memberships;
+- the BFF-managed field-security memberships: `Spaarke BFF-Managed Field Writers` holds the stamp's BFF application
+  users only, and `Spaarke BFF-Managed Field Readers` holds the default team of every business unit that exists when
+  H7b runs (ACME, 2026-11-06: 2 BFF users; 3 of 3 default teams). **When the customer adds a business unit later**, its
+  default team is not a Reader until H7b runs again or an operator runs
+  `scripts/Deploy-ExternalRecordAccessContactGrantor.ps1` (dry run, then `-Apply`); until then that unit's users cannot
+  read the BFF-managed fields;
 - the contact identity-link memberships;
 - the BFF's two application users as members of the `Standing Grant Administrators` field-security profile (without
   it the platform hides `contact.sprk_standinggrant` from the BFF and every standing grant reads as not held; ISS-020 /
@@ -2203,6 +2237,47 @@ goes out in **two SpaarkeMaster versions**:
 Between steps 4 and 5 the column is absent; keep that gap short and do not run Signal jobs inside it. Both versions are
 cut at release time (`Assemble-SpaarkeMasterSolution.ps1 -Version`); this task did not bump the version, and the source
 still carries `IntroducedVersion` `1.0.0.0` on the new components.
+
+### 10.6 Upgrade step: set each field-mapping rule's sync mode to its class (2026-11-06)
+
+**Who is affected.** Every environment that already has field-mapping rules. The field-mapping push
+(`POST /api/v1/field-mappings/push`) applies only **Copy** rules whose Sync Mode is **Manual Refresh**. Rules authored before this
+change hold **One-time** or an empty value, so after the upgrade a push would apply none of them. A new environment is seeded
+correctly (each seeded rule is written with its class value, see below); only rules that existed
+before the upgrade need this step.
+
+**The value depends on the rule's class** (the script reads the rule's target table and column):
+
+| Class | Rule's target column | Sync Mode |
+|---|---|---|
+| Assigned-To | an access-conferring Assigned-To column of the target table | One-time (0) |
+| Filing | a filing column of the target table (typed filing lookup, regarding pair, regarding stamp) | One-time (0): not re-pushed while it stays 0 |
+| Plain data | anything else | Manual Refresh (1) |
+
+An Assigned-To rule is applied by a push only on a request that opts in (`includeAssignedTo`, which also needs Write on the source
+record), whatever its Sync Mode. "Assigned-To" means exactly the columns the BFF's access registry lists for the target table
+(`Membership:AccessConferringRoles`, seeded from `MembershipOptionsDefaults.CanonicalAccessConferringRegistry`): matter, project,
+work assignment, event, invoice, to-do and analysis. The push, this script and the provisioning seeder all classify from that one
+registry. A filing rule is applied by a push only while its Sync Mode is Manual Refresh (it then re-files the child); the script
+keeps it at One-time. Default, Concat and Template rules are never written.
+
+A newly provisioned environment's attorney-matrix rules are seeded at their class value: Matter → Event and Matter → Invoice
+target Assigned-To columns (One-time); Matter → Report Card targets columns the registry does not list, so they are plain data
+(Manual Refresh).
+
+1. **Dry run first (read-only).** `scripts/Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl <url>` lists each rule that would
+   change (class, current value, new value) and the totals. It writes nothing.
+2. **The environment owner reviews the dry run** and says whether to apply it. Do not apply without that OK.
+3. **Apply and verify.** `scripts/Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl <url> -Apply -Verify` writes only the rules
+   that differ from their class value, reads each one back, then exits 0 only when every Copy rule is at its class value.
+   Re-running finds nothing to change.
+4. **Inactive rules** short of their class value are listed but never written (Dataverse refuses to update an inactive row);
+   reactivate the rule if it should be pushed, then re-run.
+5. A rule whose target table cannot be resolved, or whose Sync Mode or mapping type is outside the known values, stops the run
+   before any write (exit 2). A person decides it.
+
+The script carries copies of the Assigned-To registry and of the filing columns; `SyncModeMigrationClassDataTests` fail the build
+when either copy drifts from the BFF's own tables.
 
 ---
 
@@ -2770,6 +2845,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 
 | Date | Change | Source |
 |---|---|---|
+| 2026-11-06 | §10.6 upgrade step: set each field-mapping rule's Sync Mode to its class (Assigned-To and filing One-time, plain data Manual Refresh) with `Set-FieldMappingRuleSyncMode.ps1`, dry run reviewed by the owner before `-Apply` | `field-mapping-server-write-path-r1` task 040 (DI-003 / #2181) |
 | 2026-08-17 | Initial consolidation (task 001 of `customer-provisioning-orchestration-r1`) | spec.md Gap 4 + R6 doc-drift carry-over; design.md §2 (3-generation fragmentation) |
 | 2026-08-25 | §12.5 (T1 exit-134 SIGABRT symptom recognition + recovery) + §12.6 (slot-persistence BINDING — `keyVaultReferenceIdentity` not copied by `--configuration-source`) added | task 202 A40 (auth-v4 §10.1 Δ4 + §10.2 CORRECTION; FR-37, T1/T5) |
 | 2026-10-01 | §6.5.2 (customer workforce tenants `WorkforceIdentity__CustomerTenantIds__N`, identity-link job switch, contact identity-binding schema prerequisite) + §6.5.3 (identity-collision operator procedure) + §7.3 (`acct` optional claim, `-AcctClaimOnly`) added | `unified-access-control-r2` task 141 (owner decisions I1 = (b), I2 = (1)); provisioning handoff `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` |

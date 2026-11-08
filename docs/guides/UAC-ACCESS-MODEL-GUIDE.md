@@ -437,7 +437,9 @@ least as strict as the matter.
   `teamName` the setup script creates from `config/restricted-content-owner-role.json`. Set one without the other and no
   team is found: every ordinary hard-deny write is refused (`OwnerTeamNotFound`, fail closed). The reconciler's ordinary
   pass leaves an author-owned row, or one owned by a non-default team, where it is and reports it, without refusing it; a
-  hard-deny row owned by a non-default team other than the restricted-content team is always reported, by id.
+  hard-deny row owned by a non-default team other than the restricted-content team is always reported, by id. A mirrored
+  share on a hard-deny row (a Secure root's sharee on its `sprk_policy` or `sprk_policyversion` child) carries Read only,
+  whatever the root share carries (#2560); the share reconcile narrows a wider one and logs `HardDenyRowShareWiderThanRead`.
 - **A Decision Record** is also filed under the subject of every Signal it resolved (the ids its `sprk_steps` lists). A
   Secure pass reaches it through those Signals even when it lies outside the record's own family, so it moves into
   isolation, or out, with them.
@@ -523,6 +525,22 @@ Spaarke children can be filed under several kinds of parent (a document links to
 more), so there is no one parent to cascade from, and every Spaarke relationship is NoCascade. A cascade would also copy
 the parent's owner onto the child, while Spaarke's rule (I-6) gives a child its business unit's default owner team.
 Spaarke does not use plugins (ADR-002), so the re-own is the scheduled job's.
+
+**A work assignment's or project's own owner** (owner decision 2026-10-29: a family shares one ownership). The
+secure-root inheritance job (every 5 minutes) re-owns an ordinary work assignment or project whose owner is a person, or the
+default team of another business unit, to its family's team: filed, its matter's (then its project's) business-unit team;
+unfiled, its person's business-unit team. "Filed" is what a create of the same record would be filed under: a work
+assignment under only an invoice or event goes with that record's matter or project, else with the invoice or event itself.
+A project is filed only through its BFF-managed pair; a project whose pair is empty, or names a record that no longer
+exists, counts as unfiled and goes to its person's business-unit team, which is the unit it already sits in, so who can see
+it does not change (decision 2026-10-30; projects are not excluded). Secure records, records owned in the Secure Record
+business unit and records under a secure parent are never touched; a record owned by a named (non-default) team is
+reported, not moved; matters are not part of it; at most 200 records are resolved and 25 re-owned a run, and the next run
+continues after the last record this one reached. The record's own container column is not changed, but its documents'
+expected container follows its owning business unit, so a re-own into another unit (`crossUnit` in the run's report) leaves
+its documents for the ordinary-moves pass to move. Report-only unless `SecureRoot:Inheritance:RootOwnerWritesEnabled` AND
+`SecureChild:Reconciliation:OrdinaryMovesWritesEnabled` are `true` (the first alone stays report-only and logs a warning;
+the recent-changes emergency stop stops it too); each run's plan is `ResultJson.followParents.rootOwners`.
 
 **Switches** (app settings): `SecureChild:Reconciliation:OrdinaryMovesWritesEnabled` (default `false`, report-only;
 turned on only after UAC reads a report-only run and the owner gives the go), `SecureChild:Reconciliation:MaxOrdinaryMovesPerRun`

@@ -614,6 +614,15 @@ jobs:
         shell: pwsh
         run: ./scripts/quality/Test-InstructionPaths.ps1
 
+      # SKILL.md files over 500 lines must justify their length; long skill reference files need a contents
+      # list. Ratcheted: scripts/quality/skill-length.baseline.txt lists the known ones; only a NEW violation
+      # (or a baselined skill growing) fails. Standard: .claude/skills/_template/SKILL.md items 7-9.
+      - name: Check skill length
+        id: skilllength
+        continue-on-error: true
+        shell: pwsh
+        run: python3 scripts/quality/check-skill-length.py   # ubuntu image ships python3; no setup-python needed
+
       - name: Report result
         id: report
         if: always()
@@ -621,6 +630,8 @@ jobs:
         run: |
           if ("${{ steps.instrpaths.outcome }}" -eq "failure") {
             "result=fail (instruction paths)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } elseif ("${{ steps.skilllength.outcome }}" -eq "failure") {
+            "result=fail (skill length)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } elseif ("${{ steps.mdcheck.outputs.skipped }}" -eq "true") {
             "result=skip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } elseif ("${{ steps.mdcheck.outcome }}" -eq "success") {
@@ -643,14 +654,15 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.run-last-reviewed != 'false' }}
     continue-on-error: true
-    timeout-minutes: 2
+    timeout-minutes: 5
     outputs:
       result: ${{ steps.report.outputs.result }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0   # need history for git diff
+          fetch-depth: 0       # need history for the merge-base diff
+          filter: blob:none    # commits + trees only; a full clone outgrew the 2-min budget (cancelled at checkout, 2026-11-03)
 
       - name: Check Last Reviewed stamp on touched docs
         id: stamp
@@ -660,13 +672,16 @@ jobs:
           # Determine merge base for diff
           $baseRef = $env:GITHUB_BASE_REF
           if (-not $baseRef) { $baseRef = 'master' }
-          git fetch origin $baseRef --depth=1 2>$null
+          git fetch origin $baseRef 2>$null   # no --depth: a shallow fetch into the full clone can cut off the merge base
           $base = "origin/$baseRef"
-          $changed = git diff --name-only --diff-filter=AM $base...HEAD 2>$null
+          # Quote the range: unquoted, PowerShell splits `$base...HEAD` into two arguments ("origin/master", "...HEAD"),
+          # git printed its usage, and with stderr discarded the empty result passed as "No changed files" on every PR.
+          $changed = git diff --name-only --diff-filter=AM "${base}...HEAD"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::git diff ${base}...HEAD failed; cannot determine touched docs"; exit 1 }
           if (-not $changed) { Write-Host 'No changed files vs base'; exit 0 }
 
           $targets = @(
-            '^\.claude/skills/[^/]+/SKILL\.md$',
+            '^\.claude/skills/(?!_)[^/]+/SKILL\.md$',   # skip _template (placeholder stamp) and _archived
             '^\.claude/constraints/.+\.md$',
             '^docs/standards/.+\.md$',
             '^docs/architecture/.+\.md$',

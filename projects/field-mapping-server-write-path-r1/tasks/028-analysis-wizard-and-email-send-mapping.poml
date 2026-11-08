@@ -13,7 +13,7 @@
     <parallel-group>W3-wizards</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Wizards migrate one at a time, each live-verified before the next (spec FR-16).</parallel-reason>
-    <deps>027</deps>
+    <deps>027, 041</deps>
     <tags>frontend, fluent-ui, bff-api, field-mapping, communication, deploy, testing</tags>
     <estimated-effort>8-12 hours</estimated-effort>
   </metadata>
@@ -29,6 +29,7 @@
       <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/CreateAnalysisWizardWidget.test.tsx (payload = user-entered values; email request carries only typed subject/body)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (SendAsync ~:1490: fill-only subject/body from the sprk_analysis to sprk_communication mapping when the analysis id is supplied)</file>
       <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceSendMappingTests.cs (empty subject filled; typed subject survives; no mapping profile = unchanged)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/createXrmEmailComposeHandlers.ts (added 2026-11-02 by task 041 / design §14.4: the email-attachment sprk_document create stops sending the index: delete ~:308-310 (sprk_searchindexname and the sprk_AI_Search_Index bind) and the resolveUserBuDefaults call at ~:281 if nothing else on that path reads it)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/FieldMapping/CreateTimeFieldMapping.cs (canonical engine (task 001); fill-only applier from task 002)</file>
       <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts (reference migration (task 021))</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (created by task 012; Analysis and Communication rows)</file>
@@ -119,6 +120,9 @@
     <criterion testable="true">Negative: with a user value and a mapped value for the same field, the user value is stored; a mapped field the user never touched is populated on first load of the new record; the wizard payload contains no key the user did not enter.</criterion>
     <criterion testable="true">Deployed to dev via code-page-deploy; live check recorded in the task notes (mapped fields present on first load, user values kept, owner = owning team per FR-09); rollback bundle noted.</criterion>
     <criterion testable="true">Widget jest and host build pass; no existing test outside the Analysis wizard and send path changes.</criterion>
+    <criterion testable="true">(Added 2026-11-02, FR-40 / task 041.) createXrmEmailComposeHandlers.ts sends no sprk_searchindexname and no sprk_AI_Search_Index bind on the attachment's sprk_document create (grep), and no longer calls resolveUserBuDefaults unless another value on that path still needs it (reason in the notes); a jest test on the handler's create payload proves it; the Spaarke.UI.Components build and tests pass.</criterion>
+    <criterion testable="true">(Added 2026-11-05, task 043 review.) The Analysis wizard reads the optional `warnings` array of the /api/ai/analysis/create 201 body (analysisService.ts) and shows it to the user (e.g. "no fields were copied from the document"); a jest test with a body carrying one warning proves it is shown, and a body with no warnings member shows nothing.</criterion>
+    <criterion testable="true">(Added 2026-11-05, task 043 review.) The wizard keeps creating the analysis through /api/ai/analysis/create. POST /child-records/sprk_analysis passes no document decision to the mapping, so a Document to Analysis profile maps nothing there; moving the wizard onto that route needs the route to pass the document narrowing decision first (notes/task-043-notes.md, Known limits).</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-16, FR-17. PR #1501 overlaps the widget; PR #2110 overlaps CommunicationService.cs.</notes>

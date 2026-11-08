@@ -499,6 +499,24 @@ public class InvoiceContextServiceTests
     }
 
     [Fact]
+    public async Task ASupersededPriorInvoice_IsListedAsSuperseded_AndIsNotADecidedInvoice_Task097a()
+    {
+        var h = FullFixture();
+        var superseded = Guid.NewGuid();
+        h.Prior.Add(PriorInvoice(superseded, "INV-SUP", new DateTime(2026, 6, 1), 10m, null, InvoiceStatusCodes.Superseded));
+        h.DisallowLines.Add(DisallowLine(superseded, InvoiceLineStatus.Disallowed, 5000m, null, "Replaced"));
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        context.PriorInvoices.Data!.Items.Single(i => i.Id == superseded).Should().Match<PriorInvoiceItem>(
+            i => i.Status == "Superseded" && i.StatusCode == InvoiceStatusCodes.Superseded);
+        var q = h.Queries.Single(x => Classify(x) == Kind.Disallow);
+        AllConditions(q).Single(c => c.AttributeName == "sprk_invoice").Values.Cast<Guid>()
+            .Should().NotContain(superseded, "a Superseded invoice was never decided");
+        context.DisallowHistory.Data!.DisallowedAmount.Should().Be(340m);
+    }
+
+    [Fact]
     public async Task Disallow_CountsOnlyDecidedInvoices_AndOnlyFeeAndExpenseLines()
     {
         var h = FullFixture();

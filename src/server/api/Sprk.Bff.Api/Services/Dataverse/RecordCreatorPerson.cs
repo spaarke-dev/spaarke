@@ -20,7 +20,8 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// <para><b>Who writes it.</b> Only the BFF: every BFF create path of the three tables stamps it — the app-only paths
 /// in the create payload itself (Office quick-create: the Office caller; the deleted <c>POST /api/v1/work-assignments</c>
 /// stamped its caller, resolved by WhoAmI, so rows it created carry the column too), and the chat create (<c>dataverse.create_record</c>), which task 146 moved to
-/// create-as-the-app (owner round 7 item 3), in that create's payload too (<c>OwnedChildWrite.CreateAsync</c>; task 133's
+/// create-as-the-app (owner round 7 item 3), in that create's payload too (today <c>RecordCreationService</c>'s step 11,
+/// which replaced the owned create in task 017; task 133's
 /// interim app-only follow-up update was removed at the batch 4 integration, so there is one stamp). It is field-secured
 /// (<c>scripts/Set-RecordCreatorPersonSchema.ps1</c>): every user can READ it (the reader profile sits on every
 /// business unit's default team), only the BFF application user(s) can create or update it — so a client create cannot

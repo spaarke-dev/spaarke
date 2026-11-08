@@ -190,14 +190,13 @@ public class FieldMappingRuleProjectionTests
     #region Push Regression — ApplyMappingRule tolerates the extended rule shape (no deserialization break)
 
     /// <summary>
-    /// PushFieldMappingsAsync shares MapRuleEntityToDto (via QueryProfileWithRulesByEntityPairAsync)
-    /// and feeds the resulting FieldMappingRuleDto[] straight into ApplyMappingRule. This test proves
-    /// that a rule carrying all 5 new fields still flows through the existing Copy-style
-    /// SourceField/TargetField engine correctly — the additive fields are inert until a later task
-    /// wires the engine to branch on MappingType (spec FR-16).
+    /// PushFieldMappingsAsync shares MapRuleEntityToDto and feeds the resulting FieldMappingRuleDto[] into
+    /// ApplyMappingRule. Task 040 (FR-23): the engine now branches on MappingType, and a push applies Copy rules only, so a rule
+    /// carrying all 5 new fields as a Default rule is skipped, never applied and never an error. (Before task 040 this test
+    /// pinned that the Default rule's source value was copied; that behaviour is the one the task removes.)
     /// </summary>
     [Fact]
-    public void ApplyMappingRule_RuleWithAllNewFieldsPopulated_StillMapsSourceToTargetCorrectly()
+    public void ApplyMappingRule_DefaultRuleWithAllNewFieldsPopulated_IsSkipped_NotApplied()
     {
         // Arrange — a rule as it would be projected for a Default/Resolve/Required configuration
         var rule = new FieldMappingRuleDto
@@ -220,13 +219,12 @@ public class FieldMappingRuleProjectionTests
         // Act
         var result = FieldMappingEndpoints.ApplyMappingRule(rule, sourceValues, updatePayload);
 
-        // Assert — push path is unaffected by the additive fields
-        result.Status.Should().Be(FieldMappingStatus.Mapped);
+        // Assert — a push applies Copy rules only: the Default rule is skipped with the fixed text and writes nothing
+        result.Status.Should().Be(FieldMappingStatus.Skipped);
         result.SourceField.Should().Be("sprk_client");
         result.TargetField.Should().Be("sprk_regardingaccount");
-        result.ErrorMessage.Should().BeNull();
-        updatePayload.Should().ContainKey("sprk_regardingaccount")
-            .WhoseValue.Should().Be("Acme Corp");
+        result.ErrorMessage.Should().Be(FieldMappingEndpoints.NotACopyRuleMessage);
+        updatePayload.Should().BeEmpty();
     }
 
     [Fact]

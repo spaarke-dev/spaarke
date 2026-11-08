@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
@@ -757,7 +756,8 @@ public class ContactCreateOwnerPolicyGuardTests
             BffRoot + "Services/Ai/Handlers/DataverseCreateRecordHandler.cs",
             "tablename",
             "Chat dataverse.create_record with tablename=contact: the table is a RUNTIME tool argument, so no source text names it. "
-            + "App-only, owned by the caller's business-unit team via the general record-first resolver (OwnedChildWrite), and "
+            + "App-only, owned by the caller's business-unit team via the general record-first resolver (RecordCreationService "
+            + "since field-mapping task 017), and "
             + "it does NOT use ExternalAccess:CustomerBusinessUnitId: it is not an identity-contact create."),
     };
 
@@ -1614,18 +1614,16 @@ public class ContactCreateOwnerPolicyGuardTests
     public void Control_DesignationLocals_AndAHeldMethod_ThatAreNotACreate_AreNotFlagged(string statement)
         => Assert.Empty(ContactCreates(BffRoot + "Services/X/Makes.cs", "private Task MakeAsync() { " + statement + " }"));
 
-    [Fact(DisplayName = "ISS-005 guard: 60 assignments to one local resolve in bounded time, and the contacts one among them is still found")]
-    public void Control_ManyAssignmentsToOneLocal_ResolveInBoundedTime()
+    [Fact(DisplayName = "ISS-005 guard: 60 assignments to one local resolve, and the contacts one among them is still found")]
+    public void Control_ManyAssignmentsToOneLocal_Resolve()
     {
         var lines = string.Join(" ", Enumerable.Range(0, 60).Select(i => $"u = u + \"/p{i}\";"));
         string Code(string extra) => "private Task MakeAsync() { var u = GetApiUrl(); " + lines + extra + " return http.PostAsync(u, body, ct); }";
 
-        var clock = Stopwatch.StartNew();
+        // No wall-clock bound (Stopwatch is banned in tests): an unbounded local following would hang this test, which the
+        // CI job timeout reports.
         Assert.Empty(ContactCreates(BffRoot + "Services/X/Makes.cs", Code(string.Empty)));
         Assert.Single(ContactCreates(BffRoot + "Services/X/Makes.cs", Code(" u = u + \"/contacts\";")));
-        clock.Stop();
-
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5), $"resolving 60 assignments took {clock.Elapsed}: the local following is not bounded");
     }
 
     // ── UAC round 6: the resolution's depth, cap and null-coalescing arms ─────────────────────────────

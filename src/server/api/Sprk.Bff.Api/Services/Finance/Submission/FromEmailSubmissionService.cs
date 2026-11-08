@@ -1,6 +1,7 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
@@ -33,6 +34,14 @@ internal sealed record FromEmailSubmissionOutcome
     /// </summary>
     public bool FilingKept { get; init; }
 
+    /// <summary>
+    /// Task 192: on the 409 <c>document_core_record_mismatch</c> of "the communication is filed under another core record" only, the ONE
+    /// record it is filed under, when it may be a candidate to name: it is not isolated under a secure record (the test step A files by,
+    /// <see cref="ExistingDocumentIsolationCheck"/>) and exactly one other record is involved. The route names it (<c>filedUnder</c>) only
+    /// when the caller can also open it (the caller's own Read) and its name could be read. Null in every other case and on every other refusal.
+    /// </summary>
+    public InvoiceCoreRecord? FiledUnder { get; init; }
+
     public static FromEmailSubmissionOutcome Accepted(FromEmailReceipt receipt) => new() { Receipt = receipt, Status = StatusCodes.Status202Accepted };
 
     public static FromEmailSubmissionOutcome Refused(int status, string errorCode, string detail, IReadOnlyDictionary<string, object?>? extensions = null) =>
@@ -51,9 +60,10 @@ internal sealed record FromEmailReceipt(Guid SubmissionId, Guid JobId, string Tr
 /// through <see cref="ISubmitInvoiceFromEmail"/>. Every refusal before the save writes nothing.
 /// </summary>
 /// <remarks>
-/// <para><b>Order</b> (contract section 6 "Order"): marks (400), bytes (422), the firm invoice number (400), Correction (409, OP-7), the
-/// firm (400 / 503) and its link (403 / 503), the operation's availability (503), the replay of K (section 5), the communication's filing
-/// (409), the save, the <c>.eml</c>'s resolution, the operation.</para>
+/// <para><b>Order</b> (contract section 6 "Order"): marks (400), bytes (422), the firm invoice number (400), a Correction's Write on its
+/// invoice (the uniform 404; task 097b), the firm (400 / 503) and its link (403 / 503), the operation's availability (503), the replay of K
+/// (section 5), the communication's filing (409), a Correction's own checks (409 correction_not_allowed; task 097b), the save, the
+/// <c>.eml</c>'s resolution, the operation.</para>
 /// <para><b>Logs</b> carry ids, ordinals and codes only: never a file name, a subject or a Message-ID (model §9.1 step 3).</para>
 /// </remarks>
 internal sealed class FromEmailSubmissionService
@@ -74,6 +84,7 @@ internal sealed class FromEmailSubmissionService
     private const string DocumentParentDocument = "sprk_parentdocument";
 
     private readonly InvoiceSubmissionService _submissions;
+    private readonly ExistingDocumentIsolationCheck _isolation;
     private readonly ISubmitInvoiceFromEmail _operation;
     private readonly IOfficeSubmissionEmailSave _save;
     private readonly IGenericEntityService _entities;
@@ -84,6 +95,7 @@ internal sealed class FromEmailSubmissionService
 
     public FromEmailSubmissionService(
         InvoiceSubmissionService submissions,
+        ExistingDocumentIsolationCheck isolation,
         ISubmitInvoiceFromEmail operation,
         IOfficeSubmissionEmailSave save,
         IGenericEntityService entities,
@@ -93,6 +105,7 @@ internal sealed class FromEmailSubmissionService
         ILogger<FromEmailSubmissionService> logger)
     {
         _submissions = submissions ?? throw new ArgumentNullException(nameof(submissions));
+        _isolation = isolation ?? throw new ArgumentNullException(nameof(isolation));
         _operation = operation ?? throw new ArgumentNullException(nameof(operation));
         _save = save ?? throw new ArgumentNullException(nameof(save));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
@@ -140,12 +153,19 @@ internal sealed class FromEmailSubmissionService
                 "The firm invoice number is required.");
         }
 
-        // ── 3. Correction (OP-7): not available until task 097 ──
+        // ── 3. Correction (task 097b; OP-7 until then): the caller's own Write on the invoice it replaces, before anything else is read
+        //       about it. Without it, or for an invoice that does not exist, the uniform not-found answer (the route returns it as is) ──
+        Entity? correctedInvoice = null;
         if (input.Mode == FromEmailModes.Correction)
         {
-            return FromEmailSubmissionOutcome.Refused(StatusCodes.Status409Conflict, FromEmailSubmissionErrors.CorrectionNotAllowed,
-                "Correcting an existing invoice from an email is not available yet. Nothing was saved.",
-                new Dictionary<string, object?> { ["reason"] = FromEmailCorrectionReasons.NotAvailable });
+            var correction = await InvoiceSubmissionEndpoints.PrepareCorrectionAsync(
+                input.InvoiceId ?? throw new ArgumentException("A Correction names its invoice (the body check).", nameof(input)), http, ct);
+            if (correction.Refusal is { } correctionRefused)
+            {
+                throw new FromEmailRouteAnswerException(correctionRefused);
+            }
+
+            correctedInvoice = correction.Invoice;
         }
 
         // ── 4. The firm: active (400 / 503), then linked to the record (D-106: 403 / 503) ──
@@ -212,6 +232,22 @@ internal sealed class FromEmailSubmissionService
             return filingRefusal;
         }
 
+        // ── 7b. Task 097b: a Correction's own checks (the invoice's firm, core record, status, submission and firm invoice number; 409
+        //        correction_not_allowed with its reason), read-only, before the save. Only a NEW attempt reaches here: an existing attempt of
+        //        K (which names the invoice) was answered by the replay above, so a retry is never refused for what its own commit did. ──
+        Guid? resubmissionOf = null;
+        if (correctedInvoice is not null)
+        {
+            var (correctionRefusal, target) = await _submissions.CheckCorrectionAsync(input.CoreRecord, input.FirmId, number, correctedInvoice, ct);
+            if (correctionRefusal is not null)
+            {
+                return FromEmailSubmissionOutcome.Refused(correctionRefusal.StatusCode, correctionRefusal.ErrorCode!,
+                    correctionRefusal.Detail ?? "The invoice was not submitted.", correctionRefusal.Extensions);
+            }
+
+            resubmissionOf = target;
+        }
+
         // ── 8. The email-only save (model §9.1 step 1): the /office/save pipeline in-process, no attachment Documents ──
         var saveRequest = new SaveRequest
         {
@@ -246,6 +282,7 @@ internal sealed class FromEmailSubmissionService
             Generation = generation,
             Mode = input.Mode,
             InvoiceId = input.InvoiceId,
+            ResubmissionOf = resubmissionOf,
             CallerSystemUserId = callerId,
             CallerObjectId = Guid.TryParse(CallerResolution.ResolveObjectId(http.User), out var oid) ? oid : null,
             CorrelationId = http.TraceIdentifier,
@@ -492,15 +529,43 @@ internal sealed class FromEmailSubmissionService
             return Unavailable("The record the email is filed under could not be read right now. Nothing was saved; try again shortly.");
         }
 
-        if (filed.Any(f => f.Kind != core.Kind || f.Id != core.RecordId))
+        var others = filed.Where(f => f.Kind != core.Kind || f.Id != core.RecordId).Select(f => (f.Kind, f.Id)).Distinct().ToList();
+        if (others.Count > 0)
         {
-            // The other record is never named: the caller was authorized against this record, not that one.
+            // The detail never names the other record (the caller was authorized against this record, not that one). Task 192: the route may
+            // add the optional `filedUnder` field, only for the candidate below and only when the caller can open that record.
             _logger.LogInformation("From-email submission refused: communication {CommunicationId} is filed under another core record", communicationId);
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
-                "The email is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved.");
+                "The email is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved.")
+                with { FiledUnder = await FiledUnderCandidateAsync(communicationId, others, ct) };
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Task 192: the record the 409 may name. Exactly one other record is involved, and the communication is not isolated under a secure
+    /// record by the very test step A files by (<see cref="ExistingDocumentIsolationCheck.CheckCommunicationForFilingAsync"/>): any verdict
+    /// but Allowed, a fault included, leaves no candidate. A fault is a Warning and no candidate; it never changes the 409.
+    /// </summary>
+    private async Task<InvoiceCoreRecord?> FiledUnderCandidateAsync(
+        Guid communicationId, IReadOnlyList<(InvoiceCoreRecordKind Kind, Guid Id)> others, CancellationToken ct)
+    {
+        if (others.Count != 1)
+        {
+            return null;
+        }
+
+        try
+        {
+            var isolation = await _isolation.CheckCommunicationForFilingAsync(communicationId, ct);
+            return isolation.Verdict == ExistingDocumentIsolationVerdict.Allowed ? new InvoiceCoreRecord(others[0].Kind, others[0].Id) : null;
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning(ex, "From-email submission: the isolation of communication {CommunicationId} could not be read; the 409 names no record", communicationId);
+            return null;
+        }
     }
 
     private sealed record ResolvedEml(Guid EmlDocumentId, Guid CommunicationId, IReadOnlyList<FromEmailMarkedPart> Parts, FromEmailSubmissionOutcome? Refusal)
