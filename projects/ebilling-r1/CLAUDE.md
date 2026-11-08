@@ -130,6 +130,7 @@ Full rationale for each decision is in `notes/decisions-log.md`.
 - 2026-10-15 — D-68: external-identifier key = (firm, type, normalized value, core record).
 - 2026-10-15 — D-69: confidence weights seeded provisionally; validated in 161 / 162 and checked at UAT (163).
 - 2026-10-15 — D-70: CIAM users see only their own firm's invoices (`sprk_vendororg`), in addition to core-record and secure-root scoping (task 130; uac-r2 reviews).
+- 2026-11-08 — Owner ruling on D-70 (task 130-0): an external caller with no firm membership who has been given access to a record sees that record's invoices; the firm rule applies to firm members only. A firm read that fails stays fail closed.
 - 2026-10-15 — D-71: legacy Finance extraction deleted; confirm route redirected into 044; ontology-r1 confirmed no dependency 2026-10-15; keep `sprk_totalamount` + matter/project lookup for `FinanceBaseValues`; send the 050 PR to ontology-r1 for review.
 
 - 2026-10-15 — D-72 (F-2): approve with undecided Clean lines allowed (Accepted in bulk, not labels).
