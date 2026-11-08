@@ -237,3 +237,14 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
 - **Plan.** Task 018 (opus/high, FULL, deps 015) builds the derivation. 022 depends on 018 as a hard dependency; its hard-gate trigger now reads "do not start until 018 is done". Spec FR-04 is amended, with an Owner Clarifications row for 2026-11-08.
 - **Done-when split.** 018's test (h) asserts the flag is true on the summary of a Privileged communication subject seeded with a marker in its title and subject name. The test that the marker is absent from model-visible text belongs to 022, which does the reduction.
 
+
+## 2026-11-08 — FYI from legal-ai-accelerator-claude-r2 (coordination, no scope change)
+
+- r2 v1 needs no MCP server. `/mcp/legal-operations` is r2's v2 "connected mode", and r2 won't build its own server. Its r2 work has moved to the Claude Desktop session "accelerator-claude-r2".
+- **Claude as a host (future, not v1 scope):**
+  - remote MCP connectors are called from Anthropic's infrastructure, and only Owners add custom connectors on Team/Enterprise plans;
+  - read-only tools need read-only annotations (our tools already carry `readOnlyHint`);
+  - Claude for Word in Foundry mode calls MCP servers from the user's machine and needs CORS for `https://pivot.claude.ai`;
+  - an admin "bootstrap endpoint" (per-user MCP servers and up to 20 skills) is a possible v2 BFF job.
+- MCP Apps (`ui://`) render in both Claude and M365 Copilot, so the same widget could serve both.
+- Source: `projects/spaarke-legal-ai-accelerator-claude-r2/notes/research/` (`a727322de3`).
