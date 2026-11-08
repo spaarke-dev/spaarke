@@ -113,4 +113,4 @@ the Term instructions starting `SNAPSHOT-TEST:`. Claude tells you when that's do
 | R5 (offered? runs without attaching?) | Yes and yes |
 | R6 (copy or link; stale signal; delete or replace and clicks) | Copy; only "Last updated" date; no delete or replace in the chat UI |
 | R7 (skill or plain chat?) | Skill: routed to Review contract without `/`, imported an unsaved card, ran; 19/24; edits only on Apply |
-| G1, G2 | |
+| G1, G2 | G1: 4/4 (NDA-3.3, 3.4, 3.5, 4.3); internal policy only via "Something else"; asked for the playbook to define Deviation. G2: pass (blank Effective Date; both signature blocks incomplete; completeness only, not authority) |

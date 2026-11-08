@@ -161,6 +161,37 @@ Screenshots are in OneDrive `Documents/Cowork/Test/POC-Act2/screens/`. The revie
       heading.
   - **Same playbook content as R3 and a different rating on 3 topics**, so this is run-to-run variation (gap #29).
     Word's single-run score is about 19–20/24 with this playbook.
+- **G1, Identify regulatory gaps against our policy (2026-11-07). 4/4 on the key.**
+  - **Route.** `/Identify regulatory gaps` → delivery: In chat. It then offered **only outside law** (Federal DTSA,
+    California law, both), picked from the NDA's California governing law. **No internal-policy option**, so the
+    owner typed it under "Something else". Word asked for the file, and the owner attached it from
+    `Legal Knowledge/Grounding/Normative/NDA/`.
+  - **Output.** A cited conformance report: 16 requirements traced, coverage reconciled, states Addressed / Partial /
+    Gap / Conflict / Cannot determine. The report is saved as
+    `POC-Act2/screens/Identify Regulatory Gaps - … v1.0.md`.
+  - **Key items:**
+    - NDA-3.3: non-solicit needs GC approval (R04);
+    - NDA-3.4: no compelled-disclosure notice (R05 Gap);
+    - NDA-3.5: residuals conflict (R06);
+    - NDA-4.3: GC approval for residuals before signature (R15).
+  - It also noted the blank Effective Date and the VP signatory (R14 Partial).
+  - **It asked for our playbook:** "Deviation" (NDA-2.1) is defined by the current Acme NDA playbook, which wasn't
+    attached, so R12/R13 were "Cannot determine". Attaching the playbook as well should resolve them.
+  - **This closes gap #18 for Word**: policy is not an input to Review contract, but this second skill does the
+    policy check well. The Word path becomes two steps: Review contract (playbook) and Identify regulatory gaps
+    (policy, plus the playbook as the deviation benchmark).
+  - **Setup note:** users have to know to type the internal policy under "Something else". This belongs on the quick
+    card.
+- **G2, Check execution readiness (2026-11-07). Pass.** It asked no questions and answered in chat:
+  - "Not ready for execution";
+  - **blank Effective Date**, noting that it also starts the two-year disclosure period. This is the planted
+    housekeeping YELLOW (`make_kit.py` variant Y = blank date);
+  - both signature blocks incomplete, with Priya Raman and Jordan Ellis named;
+  - no defined-term or cross-reference issues;
+  - "Information needed: what Effective Date?".
+
+  It checks completeness only, not signature *authority*. That comes from G1 (R14: VP named; the policy requires
+  VP or above for a Deviation). Together the three skills cover the review, the policy and execution.
 
 ## Act 3
 
