@@ -555,7 +555,12 @@ public static class FieldMappingEndpoints
                     UpdatedCount = 0,
                     FailedCount = 0,
                     SkippedCount = 0,
-                    Warnings = ["Profile has no mapping rules configured."]
+                    Warnings = ["Profile has no mapping rules configured."],
+                    // Task 076c: a preview is answered AS a preview (the Family page rejects a 200 that is not one).
+                    Preview = request.Preview ? true : null,
+                    Changes = request.Preview ? [] : null,
+                    SkippedNoWriteCount = request.Preview ? 0 : null,
+                    Truncated = request.Preview ? false : null,
                 });
             }
 

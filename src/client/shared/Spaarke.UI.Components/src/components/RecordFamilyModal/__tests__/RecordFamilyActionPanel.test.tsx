@@ -369,6 +369,27 @@ describe('RecordFamilyActionPanel', () => {
     expect(onApplied).toHaveBeenCalledWith({ updatedCount: 1, failedCount: 0, failedTables: ['sprk_invoice'] });
   });
 
+  it('a table whose profile has no rules (a preview with no changes) does not stop the other table from previewing and applying', async () => {
+    const { fetchFn, sent } = pushServer({
+      preview: b =>
+        b.targetEntity === 'sprk_document'
+          ? previewBody([], { warnings: ['Profile has no mapping rules configured.'] })
+          : previewBody([CHANGE_A]),
+      apply: () => ({ success: true, updatedCount: 1, failedCount: 0, errors: [] }),
+    });
+    renderPanel({
+      authenticatedFetch: fetchFn,
+      rows: [...ROWS, { table: 'sprk_document', id: 'dddddddd-0000-0000-0000-00000000000d' }],
+    });
+
+    expect(await screen.findByText('Hearing A')).toBeTruthy();
+    expect(screen.queryByText(PUSH_FAILED_TEXT)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Update 1 record' }));
+    await screen.findByText('1 record was updated.');
+
+    expect(sent.filter(b => !b.preview).map(b => b.targetEntity)).toEqual(['sprk_event']);
+  });
+
   // Task 076c: a table with no mapping profile from the source is a 404 carrying `field_mapping_profile_missing`.
   const NO_PROFILE = { title: 'Profile Not Found', status: 404, reasonCode: 'field_mapping_profile_missing' };
   const DOC_A = 'dddddddd-0000-0000-0000-00000000000d';

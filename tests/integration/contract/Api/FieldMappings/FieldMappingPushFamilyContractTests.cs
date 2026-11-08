@@ -335,6 +335,39 @@ public class FieldMappingPushFamilyContractTests
         json["skippedRuleCount"]!.GetValue<int>().Should().Be(1);
     }
 
+    /// <summary>Task 076c: an active profile whose rules are all off returns no rules at all. A preview must still answer AS a
+    /// preview (the Family page throws on a 200 that is not), and an apply keeps its ordinary answer.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AProfileWithNoRules_AnswersAPreviewAsAPreview_AndAnApplyAsBefore(bool preview)
+    {
+        await using var world = await World.StartAsync(writable: [ChildA], rules: []);
+
+        var response = await world.PostAsync(new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", preview });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        var json = JsonNode.Parse(body)!.AsObject();
+        json["success"]!.GetValue<bool>().Should().BeTrue();
+        json["warnings"]!.AsArray().Select(w => w!.GetValue<string>()).Should().Equal("Profile has no mapping rules configured.");
+        if (preview)
+        {
+            json["preview"]!.GetValue<bool>().Should().BeTrue();
+            json["changes"]!.AsArray().Should().BeEmpty();
+            json["skippedNoWriteCount"]!.GetValue<int>().Should().Be(0);
+            json["truncated"]!.GetValue<bool>().Should().BeFalse();
+        }
+        else
+        {
+            (json["preview"]?.GetValue<bool>() ?? false).Should().BeFalse("an apply keeps today's non-preview answer");
+            json["changes"].Should().BeNull();
+        }
+
+        world.Dataverse.Queries.Should().BeEmpty();
+        world.Host.Writes.Should().BeEmpty();
+    }
+
     // ───────────────────────── the Assigned-To policies on a previewed change ─────────────────────────
 
     [Fact]
