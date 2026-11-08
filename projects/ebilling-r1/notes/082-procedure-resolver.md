@@ -246,6 +246,8 @@ Branch `task/ebilling-082b`, from `origin/work/ebilling-r1` at `0735a566e5`. Not
 
 No surface names a parent core record today. 082d must keep `ChainRecord` and `Reason` out of any reader-facing member of `sprk_findingsjson`. Model 7.4 lists "chain record" in the submission snapshot while U3 lists findings JSON as reader-facing. **082d must resolve that tension**: for example, an internal-only member that the review read model never projects, or the distance only.
 
+Resolved in 082d: the internal-only member (`procedureSnapshot`); see "082d implementation", "The ~:247 tension, resolved".
+
 ### 082b gates and seeding proofs
 
 | Run | Result |
@@ -1294,3 +1296,68 @@ Branch `task/ebilling-082c-3b` from `origin/work/ebilling-r1` (d120d64735). Clie
 
 - R4 and the word-add-in notices are in the 082c-3 report (not sent from this slice).
 - 114 and C22 are unchanged.
+
+## 082d implementation (2026-11-08)
+
+Branch `task/ebilling-082d`, cut from `origin/work/ebilling-r1` at `ee0b173288` (contains `d415d37508`). Deviation: the agent worktree's HEAD was master-based, so the branch was created from the project branch instead of merging the project branch into that HEAD. Step 9.5 not run here (the lead runs two adversarial passes).
+
+### What changed
+
+- `InvoiceComplianceEvaluator.cs`: `BillingEvaluationResult.ProcedureBasis` (`BillingProcedureBasis`: the chain, the `ProcedureRulesOnDate` of every subject date the run judged with, and per selected version a `BillingRuleApplication` with the subjects it was applied to, displaced on (Replace) or cap-displaced on (Split)). The precedence loop now records an outright displacement before the handler check; the evaluation result is unchanged.
+- `ProcedureSnapshot.cs` (new): builds the `procedureSnapshot` member from the basis (ids, enums, numbers, distances, override reasons; **no names**), reads it back (`StoredProcedureSnapshot`) and builds the bounded Decision Record summary.
+- `InvoiceSubmissionPersister.cs`: one hunk in `BuildFindingsJson`, `[ProcedureSnapshot.Member] = ProcedureSnapshot.Build(outcome.Evaluation)`, always written (null with no evaluation).
+- `InvoiceSubmissionAfterSteps.cs`: `StoredFindings.ProcedureSnapshot` (read in `Parse`) and the summary in `BuildRejectionDecision` when the row stores a snapshot.
+- `CurrentVersionReaderRatchetTests.cs` (new ArchTest).
+- The 101 B2a golden (`InvoiceSubmissionPersisterTests.MixedInvoiceGoldenJson`) gains the trailing member; every earlier byte is unchanged.
+
+### The ~:247 tension, resolved
+
+The 7.4 basis (chain record ids, parent record ids, override row ids and reasons, Procedure and Procedure Version ids) lives in ONE internal member, `procedureSnapshot`, of the field-secured, app-only `sprk_findingsjson`. No reader projection reads it: the review read model (`InvoiceReviewReadService.ParsedFindings`) projects named members field by field and never names it; the status view and the holds read other members. Reader-facing Procedure data stays what it was: the existing `ForReaders()` gap finding. No reader-facing member was added, so no escalation. Held by tests: `ProcedureSnapshotTests` (U3: every member except `procedureSnapshot` is free of the secrets; control: the internal member carries them) and `InvoiceReviewReadServiceTests.TheReviewResponse_NeverCarriesTheProcedureBasis` (the serialized review DTO of a row that stores the basis holds no override reason, Procedure name, Procedure id, Procedure Version id, row id or chain record id).
+
+### Snapshot shape (`version` 1)
+
+`chain[{table,id,distance}]`; `overrides[]` (every deciding row once, by row id: `rowId, mode, record{table,id,distance}, procedureId, pinnedVersionId, policyId, firmId, reason`); `resolutions[]` (dates with identical content grouped: `dates[], procedures[{procedureId, procedureVersionId, level, distance, firmSpecific, sources, pinned, overrides[]}], rules[{policyId, policyVersionId, procedureId, procedureVersionId, recordRule}], excludedRules[], excludedProcedures[], gaps[]`); `applications[{policyVersionId, source, applied{invoice, lines[]}, displaced?, capDisplaced?}]`. Stored from the run's own resolution, never recomputed (`DatesResolved` unchanged by the build). Names are resolved at read time by whoever reads it (083, 113), never frozen.
+
+Reader compatibility: a row with no member (pre-082d), an unknown version, a member that is not an object, missing `applications`/`resolutions` or an application without an id reads as **no snapshot** (fail closed for 083 and 113). The re-run writes the member through the same builder (`FindingsAfter` copies fresh members), and a re-run without an evaluation writes null over an older snapshot.
+
+### Decision Record summary
+
+`facts.procedureSnapshot = {version, submissionId, member, procedures, appliedRules, displacedRules, excludedRules, excludedProcedures, gaps}`: counts and the pointer, never the basis. Only a row that stores a snapshot gets it, so a record rebuilt for a pre-082d row keeps its facts and hash.
+
+### K6
+
+The five records and `CoreRecordLink` already print no ids (082b K2, 082c C17). `ProcedureResolution` is a class (prints its type name) and `Chain` is a list; a test pins `ToString`, `string.Join` and interpolation of both, plus the on-date record, the basis, an application and the stored snapshot (counts only).
+
+### Ratchet (model 7.2)
+
+`CurrentVersionReaderRatchetTests`: every `src/server` file whose code names `sprk_currentversion` / `_sprk_currentversion_value` (not `sprk_currentversionid`) calls a `RuleDomains` filter or check, or is in the baseline. Baseline (owner ontology-r1): `OntologyAdminAuthoringService.cs`, `OntologyAdminClassificationService.cs`, `OntologyAdminRulesService.cs`. A baseline entry that stops reading or starts applying `RuleDomains` fails (it only shrinks). Must-fire: 4 planted readers; must-not-fire: 5 (three compliant readers, the document version lookup, a comment); the real readers classified (`BillingFactLoader`, `RuleSetService`, `SignalReevaluationJob` apply; `OntologyAdminRulesService` does not and is listed). Known limit: per file, not per read site.
+
+### NFR-01 and reads
+
+- 150 lines on 150 work dates, two Procedure Versions (11 rule types each) beside 11 legacy types: evaluation plus snapshot 101.4 ms in the first measured run, 83 ms in the gate run; 1,857 findings; snapshot 27,579 characters. Limit p90 ≤ 2 min: no escalation.
+- `BillingFactLoaderProcedureTests.TheReads_AreBounded_On150WorkDates_AndTheSnapshotReadsNothing`: the queried tables for 1 line equal those for 150 lines; building the snapshot adds no read; 2 dates resolved for 1 line, 150 for 150.
+
+### Component justification (CLAUDE.md §11)
+
+- `ProcedureSnapshot` / `BillingProcedureBasis`: existing: `ExtractionProvenance` is the same per-member builder shape; no member holds the Procedure basis. Extension: the basis is the evaluator's, so it is returned on the existing result rather than re-resolved. Cost of doing nothing: 083 cannot name the applied versions and 113 cannot compare a re-run, so model 7.4 fails.
+- No new column, endpoint, DI registration or package.
+
+### Before / after and seeds (each restored from HEAD; tree clean afterwards)
+
+- Before (persister member and Decision Record line removed): 12 of 14 snapshot tests and both re-run tests fail; the 2 that pass are guards that hold either way (pre-082d Decision Record unchanged; not recomputed).
+- Reader-projection seed: the review projection given a pipeline finding carrying the member's raw text; `TheReviewResponse_NeverCarriesTheProcedureBasis` failed on the chain record id.
+- Ratchet seed: `internal const string SeedColumn = "sprk_currentversion";` in `ProcedureSnapshot.cs`; the real-code ratchet failed naming that file.
+
+### Gates
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- Filtered unit (`ProcedureResolver|BillingRule|CoreRecordChain|Submission|Finance|InvoiceReview`): 7701 passed, 0 failed, 4 skipped.
+- ArchTests (full): 2143 passed, 0 failed.
+- Publish size (Release, framework-dependent linux-x64, `git archive` trees in the scratchpad, `Compress-Archive -CompressionLevel Optimal`, 191 files each side): task parent `ee0b173288` 41,457,612 B → `2fbb6b2465` 41,464,494 B (**+6,882 B**; `Sprk.Bff.Api.dll` +19,456 B). Against a fresh `origin/master` build (`57748ebf6d`, 41,170,157 B) the branch is +294,337 B, almost all of it the project branch's earlier slices. Total 41.5 MB, under the 55 MB review threshold. No package changed (no CVE delta).
+
+### Known limits
+
+- The ratchet is file-level (above); a column name built at run time, and readers outside `src/server`, are not seen.
+- A rate rule skipped for currency is listed as applied to its subjects (the evaluator ran it).
+- C12 interim and K3 (note only, not fixed): after a 101 correction the stored snapshot is still the submission-time one until a re-run writes a new one.
+- The Decision Record summary is added only for rows that store a snapshot, so the same submission's record differs before and after 082d by that one fact.
