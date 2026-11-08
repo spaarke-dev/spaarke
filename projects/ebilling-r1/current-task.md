@@ -8,7 +8,7 @@
 |-------|-------|
 | **Mode** | Owner: "keep progressing on open tasks so we can complete the project" (and earlier "proceed, parallel where possible"). At most 4 agents. Merge each finished branch after its reviews. One adversarial pass per change set; two for partner-readable/auth; a scoped Sonnet re-check when a fix changes the approach. FILTERED tests only. Every agent launch states a model. Never `--no-verify`. |
 | **Public-repo rule** | Never put the mechanism of an open access gap in notes, comments, commits, PRs or issues. Private findings go to uac-r2 by message only. |
-| **Merged into work today** | 165c (`1aff454e34`); 095d-2b-3 (`c2239d9d58`); 165a + 095d-2b-2 (`2fac72b8a5`; #2571 closed; ontology OK'd the SignalWriter doc diff); 164b Add line client (`01854564a3`). |
+| **Merged into work today** | 165b item 1 (`b49465d972`); 165c (`1aff454e34`); 095d-2b-3 (`c2239d9d58`); 165a + 095d-2b-2 (`2fac72b8a5`; #2571 closed; ontology OK'd the SignalWriter doc diff); 164b Add line client (`01854564a3`). |
 | **Decisions today** | EB-D-206 (2b-3: the re-run writes the supersedes link in its commit; AMENDED: the predecessor's Return must predate the invoice, plus a predecessor lock); EB-D-207 (fm-032 allow-list + secure/No Access gate, uac-r2 agreed; partners have no invoice search; task 132 renders only ReadableColumns; `sprk_billingexport` writer-only → 165d). |
 
 ## Agents / branches in flight
@@ -16,7 +16,6 @@
 | Item | Branch / worktree | State → next action |
 |---|---|---|
 | **096b** | `task/ebilling-096b` @ `7c8c5fb7f3` (wt agent-a15eb2fe1fbf31eaa) | Review → fix (chat create blocked, subgrid New hidden, wizard on core-record hosts via `NATIVE_NEW_CLOSED` + template StringParameter) → re-check → follow-ups. **Waiting only on uac-r2's OK of the secure-child template change.** Then merge, remove the wt. D3 role change deferred (R1 confirm route, R2 Office quick-create task 096, R4 launcher display rule). Live: ribbon + web resource re-import (web resource first) in the dev deploy, then `-Verify`. |
-| **165b** | `task/ebilling-165b` @ `f0017580b7` (wt agent-a8494c782d7ce1f7b) | Item 1 built; review: no defect, 2 F3 test gaps + K4 (createdonbehalfby) + K6 (message). **Fix round running (Sonnet)**, then merge. Then 165b-2, 165b-3 (K3 completion-path origin check is in 165b-3 part A). EB-D-208 awaits uac-r2. Tell ontology: DecisionRecordWriter lookups also lack a createdonbehalfby filter (admin-level known limit). |
 | **165d** | `task/ebilling-165d` @ `998c22b365` (wt agent-a087b7b20f22d544d) | Review: 3 F1 (create path never asks the column refusal; node maps the code to InternalError; doubled code in message), F3 pin bypass, K1 batch-side collection bind, TopicRegistry exempt reason wrong. **Fix round running (Sonnet).** Then a scoped re-check (create-path approach), uac-r2 diff + DEF-057 note, merge. U1 (five person-identity writers) still with uac-r2. |
 
 The 164b and 092 wts are removed (deregistered; empty folders still held open by a process, harmless). 165d is built (`998c22b365`): the adversarial pass is running, and uac-r2 was asked to decide U1 for the five person-identity writers (A: column-only check at those sites, recommended; B: accept them and rely on U5 field security). Tell uac-r2 to match the refusal code by prefix.
@@ -25,7 +24,7 @@ The 164b and 092 wts are removed (deregistered; empty folders still held open by
 
 - **164c** ribbon (billing event Add line hides) after 096b merges (both touch `sprk_billingevent` hides).
 - **165e** visibility fail-closed (after uac-r2 confirms scope; two passes). Open with uac-r2: `sprk_document` binding; field security on submission link columns.
-- **165b-2** (totals + pending spend; ontology reviews FinanceBaseValues hunks) then **165b-3** (completion fix; part B after uac-r2 on EB-D-208), serial after 165b merges.
+- **165b-3** part A next (approval completion; includes the origin check at completion), part B after uac-r2 on EB-D-208; then **165b-2** (totals + pending spend; ontology reviews FinanceBaseValues hunks). Serial (both edit InvoiceApprovalService). ontology filed the createdonbehalfby limit as DI-144 (#2632), 7 sites, one shared helper later; ours stays consistent.
 - **Task 130** firm projection (EB-D-202) with uac-r2's pin test. Deps 083 (082 partial).
 - **`InvoiceReview` `launch.ts` optional `lineId`** before the master PR.
 - **Dev deploy batch** (after this wave merges): send uac-r2 the commit and checklist. Owner go needed for:

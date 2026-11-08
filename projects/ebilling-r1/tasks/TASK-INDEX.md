@@ -185,11 +185,11 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 162 | 🔲 [open] | Accuracy and performance evaluation; tuning | STANDARD | opus / high | none | 005, 160, 161 |
 | 163 | 🔲 [open] | UAT with the owner and dev rollout | STANDARD | sonnet / high | none | 162 |
 | 164 | 🔄 [164a merged (eeac33b1c2, 682dc4a661); 164b client done 9fa56c32a2, adversarial review running; 164c ribbon waits for 096b (both hide sprk_billingevent New)] | Add line (reviewer-added invoice line, EB-D-192/198/199) | FULL | opus / high | none | 100, 103 |
-| 165 | 🔄 [165a merged (2fac72b8a5); 165b item 1 built (f0017580b7, review running); items 3-4 → 165b-2, item 2 + completion fix → 165b-3] | Invoice integrity (EB-D-200): hold, approval, AP export and spend decide only from server-written sources | FULL | opus / high | none | 164a |
+| 165 | 🔄 [165a merged (2fac72b8a5); 165b item 1 merged (b49465d972); items 3-4 → 165b-2, item 2 + completion fix → 165b-3] | Invoice integrity (EB-D-200): hold, approval, AP export and spend decide only from server-written sources | FULL | opus / high | none | 164a |
 | 165c | ✅ [merged into work 1aff454e34] | External invoice visibility counts a submission's invoice link only when it is its own invoice | FULL | opus / high | none | 165a |
 | 165e | 🔲 [after 165c; scope confirmed with uac-r2 first] | External invoice visibility decides only from the invoice's own submission, failing closed | FULL | opus / high | none | 165c |
-| 165b-2 | 🔲 [after 165b merges] | Stored totals match the lines at approval and AP export; pending spend excludes held invoices (165 items 3-4) | FULL | opus / high | none | 165b |
-| 165b-3 | 🔲 [after 165b; part B waits on uac-r2 re EB-D-208] | Approval completion decides only from server-written sources; counted statuses need the approve record (165 item 2) | FULL | opus / high | none | 165b |
+| 165b-2 | 🔲 [after 165b-3 part A] | Stored totals match the lines at approval and AP export; pending spend excludes held invoices (165 items 3-4) | FULL | opus / high | none | 165b |
+| 165b-3 | 🔲 [next; part B waits on uac-r2 re EB-D-208] | Approval completion decides only from server-written sources; counted statuses need the approve record (165 item 2) | FULL | opus / high | none | 165b |
 | 165d | 🟡 [built 998c22b365; review running; U1 question with uac-r2] | The AP export claim `sprk_billingexport` is writer-only: refused to generic app-only writers and field mapping (EB-D-207) | FULL | sonnet / high | none | 165a |
 | 166 | ✅ [merged into work `ab95fe67d6`; live dev apply pending owner go] | `sprk_invoice` money and firm columns field-secured (EB-D-200) | FULL | opus / high | none | — |
 | 189 | 🔲 [open] | Docs: retire "Procedure Library"; data-model docs for the Procedure and Stored File tables; file-store architecture note | STANDARD | sonnet / high | none | 079 |
