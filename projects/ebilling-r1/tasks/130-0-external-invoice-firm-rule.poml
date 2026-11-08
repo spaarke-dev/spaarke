@@ -30,7 +30,7 @@
   </context>
 
   <constraints>
-    <constraint source="uac-r2 2026-11-08">Do not change Infrastructure/DI/ExternalAccessModule.cs or any other file under Infrastructure/ExternalAccess/ except ExternalInvoiceVisibility.cs.</constraint>
+    <constraint source="uac-r2 2026-11-08 (option 1)">Edit points outside tests are exactly: the ExternalInvoiceHiding binding in Infrastructure/DI/ExternalAccessModule.cs (a caller-firm reader), ExternalDataService.HideInvoicesForAsync / InvoiceVisibilityReadersOver (firms resolved once per call), ExternalInvoiceVisibility.cs (the new reason, with the invoice firm read in the existing app-only batch), and one reviewed-reader entry in InvoiceFirmHoldAppOnlyGuardTests. Internal callers hide nothing and trigger no firm read. The assistant tools' seam is task 130-0b.</constraint>
     <constraint source="uac-r2 2026-11-08">Fail closed: a fault reading the caller's firms, or unknown firms, hides every invoice for that caller.</constraint>
     <constraint source="uac-r2 2026-11-08; owner question open">A caller with no firm membership sees no invoices (fail-closed default, pending the owner's ruling); the decision sits in one branch with one test.</constraint>
     <constraint source="existing rule">An invoice with no firm stays withheld.</constraint>

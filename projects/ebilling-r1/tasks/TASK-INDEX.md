@@ -151,7 +151,8 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 
 | ID | Status | Title | Rigor | Model / Effort | Group | Deps |
 |---|---|---|---|---|---|---|
-| 130-0 | 🔄 [in progress; blocked on uac-r2's ruling on the edit points] | External invoices: apply the firm rule on every path (design.md:414) | FULL | opus / high | none | 044, 051 |
+| 130-0 | 🔄 [in progress; uac-r2 approved four edit points: ExternalAccessModule binding, ExternalDataService.HideInvoicesForAsync, ExternalInvoiceVisibility, one guard-test entry] | External invoices: apply the firm rule on every path (design.md:414) | FULL | opus / high | none | 044, 051 |
+| 130-0b | 🔲 [open; shape to uac-r2 before coding; must land before the batch carrying 130-0 reaches dev] | Assistant tools' seam: apply the same firm rule for external callers | FULL | opus / high | none | 130-0 |
 | 130 | 🔲 [open; amended by EB-D-202: In Review shows reviewer-added and decided lines with reasons] | Firm-visible findings projection (clause quotes, visibility filtering) | FULL | sonnet / high | none | 019, 049, 100, 083 |
 | 131 | 🔲 [open] | Firm notice Action `INVOICE-FIRM-NOTICE@v1` with template fallback | STANDARD | sonnet / high | P5-B | 041, 130 |
 | 132 | 🔲 [open] | Notifications: email, SPA feed, approver in-app | STANDARD | sonnet / high | none | 131, 133, 024, 103, 104 |
