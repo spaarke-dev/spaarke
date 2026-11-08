@@ -148,11 +148,6 @@ public sealed class FirmFindingsProjection
     private const int ChunkSize = 200;
     private const int PageSize = 5000;
 
-    private static readonly string[] HeaderColumns =
-    [
-        "statuscode", InvoiceReviewService.InvTrackingNumber, InvoiceTotalsService.InvoiceBilledTotal, InvoiceTotalsService.InvoiceApprovedTotal,
-    ];
-
     private static readonly string[] RecordColumns =
     [
         "sprk_actioncode", "sprk_reason", "sprk_regardinginvoice", "sprk_regardinginvoiceline", "sprk_decidedon", "createdon",
@@ -186,10 +181,10 @@ public sealed class FirmFindingsProjection
             return null;
         }
 
-        Entity? invoice;
+        InvoiceReviewReadService.InvoiceHeaderFacts? invoice;
         try
         {
-            invoice = await ReadInvoiceAsync(invoiceId, ct).ConfigureAwait(false);
+            invoice = await InvoiceReviewReadService.ReadHeaderFactsAsync(_entities, invoiceId, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsFault(ex, ct))
         {
@@ -202,14 +197,13 @@ public sealed class FirmFindingsProjection
             return null;
         }
 
-        var statusCode = invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 0;
-        if (!InvoiceStatusCodes.TryFromStatusCode(statusCode, out var lifecycle))
+        if (!InvoiceStatusCodes.TryFromStatusCode(invoice.StatusCode, out var lifecycle))
         {
             return Unavailable();
         }
 
-        var tracking = invoice.GetAttributeValue<string>(InvoiceReviewService.InvTrackingNumber);
-        var billed = Money(invoice, InvoiceTotalsService.InvoiceBilledTotal);
+        var tracking = invoice.TrackingNumber;
+        var billed = invoice.Billed;
         switch (lifecycle)
         {
             case InvoiceLifecycleStatus.Rejected:
@@ -246,7 +240,7 @@ public sealed class FirmFindingsProjection
             return statusOnly;
         }
 
-        var approved = decided ? Money(invoice, InvoiceTotalsService.InvoiceApprovedTotal) : null;
+        var approved = decided ? invoice.Approved : null;
         return lifecycle switch
         {
             InvoiceLifecycleStatus.InReview => new FirmOutcome(FirmOutcomeKind.InvoiceInReview, tracking, "In review", billed, null, items, false),
@@ -297,8 +291,9 @@ public sealed class FirmFindingsProjection
                 try
                 {
                     // The submission's own invoice (a derived id, never a link read from a column), once it exists.
-                    var own = await ReadInvoiceAsync(InvoiceSubmissionPersister.InvoiceIdFor(submissionId), ct).ConfigureAwait(false);
-                    billed = own is null ? null : Money(own, InvoiceTotalsService.InvoiceBilledTotal);
+                    var own = await InvoiceReviewReadService.ReadHeaderFactsAsync(
+                        _entities, InvoiceSubmissionPersister.InvoiceIdFor(submissionId), ct).ConfigureAwait(false);
+                    billed = own?.Billed;
                 }
                 catch (Exception ex) when (IsFault(ex, ct))
                 {
@@ -466,19 +461,6 @@ public sealed class FirmFindingsProjection
             : new FirmOutcomeCitation(rule.Name, firmReason, null, null, null, null);
 
     // ── Reads (app-only, each bounded by this invoice) ──
-
-    private async Task<Entity?> ReadInvoiceAsync(Guid invoiceId, CancellationToken ct)
-    {
-        var query = new QueryExpression(InvoiceReviewReadService.InvoiceEntity)
-        {
-            ColumnSet = new ColumnSet(HeaderColumns),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            TopCount = 1,
-        };
-        query.Criteria.AddCondition($"{InvoiceReviewReadService.InvoiceEntity}id", ConditionOperator.Equal, invoiceId);
-        var page = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        return page.Entities.FirstOrDefault(r => r.Id == invoiceId);
-    }
 
     private async Task<Entity?> ReadSubmissionAsync(Guid submissionId, CancellationToken ct)
     {

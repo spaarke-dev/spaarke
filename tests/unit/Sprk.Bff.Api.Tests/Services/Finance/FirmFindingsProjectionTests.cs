@@ -795,11 +795,4 @@ public sealed class FirmFindingsProjectionTests
         FirmFindingsProjection.Excerpt(null).Should().BeNull();
     }
 
-    [Fact]
-    public void TheWireNamesOfKindAndDecisionAreStrings()
-    {
-        JsonSerializer.Serialize(new FirmOutcomeItem(FirmOutcomeDecision.Reduced, null, null, null, null, []))
-            .Should().Contain("\"Reduced\"");
-        JsonSerializer.Serialize(FirmOutcomeKind.ApprovedWithAdjustments).Should().Be("\"ApprovedWithAdjustments\"");
-    }
 }

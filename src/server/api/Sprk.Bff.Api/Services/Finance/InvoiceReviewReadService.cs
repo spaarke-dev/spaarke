@@ -493,6 +493,34 @@ public sealed class InvoiceReviewReadService
         return page.Entities.FirstOrDefault();
     }
 
+    /// <summary>The invoice header facts the firm projection (ebilling-r1 task 130a) reads: status code, tracking number, billed and approved totals.</summary>
+    internal sealed record InvoiceHeaderFacts(int StatusCode, string? TrackingNumber, decimal? Billed, decimal? Approved);
+
+    /// <summary>
+    /// ebilling-r1 task 130a: the header facts of <paramref name="invoiceId"/> (app-only, one read), or null when the invoice does not exist. Kept
+    /// here, beside <see cref="ReadInvoiceAsync"/>, so the field-secured totals are named by this reviewed reader and not by a second type. A read
+    /// fault propagates.
+    /// </summary>
+    internal static async Task<InvoiceHeaderFacts?> ReadHeaderFactsAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
+    {
+        var query = new QueryExpression(InvoiceEntity)
+        {
+            ColumnSet = new ColumnSet(
+                "statuscode", InvoiceReviewService.InvTrackingNumber, InvoiceTotalsService.InvoiceBilledTotal, InvoiceTotalsService.InvoiceApprovedTotal),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition($"{InvoiceEntity}id", ConditionOperator.Equal, invoiceId);
+        var page = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return page.Entities.FirstOrDefault(r => r.Id == invoiceId) is { } row
+            ? new InvoiceHeaderFacts(
+                row.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 0,
+                row.GetAttributeValue<string>(InvoiceReviewService.InvTrackingNumber),
+                Money(row, InvoiceTotalsService.InvoiceBilledTotal),
+                Money(row, InvoiceTotalsService.InvoiceApprovedTotal))
+            : null;
+    }
+
     internal static QueryExpression LineQuery(Guid invoiceId)
     {
         var query = new QueryExpression(LineEntity)
