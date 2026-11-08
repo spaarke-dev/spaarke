@@ -276,10 +276,6 @@ public sealed class InvoiceApprovalService
     internal const string PortionDecidedBy = "sprk_decidedby";
     internal const string PortionRecord = "sprk_decisionrecord";
 
-    /// <summary>Task 165b-3: the approve record's invoice lookup, as the Decision Record writer files a record regarding an invoice.</summary>
-    private static readonly string ApproveRecordInvoiceLookup =
-        TodoRegardingBuilder.RegardingLookupsByHostTable[InvoiceReviewReadService.DecisionRecordEntity][InvoiceReviewReadService.InvoiceEntity];
-
     /// <summary>The line-decision codes whose record proves a line's decision is recorded (F2).</summary>
     private static readonly string[] LineActionCodes = ["accept-line", "reduce-line", "disallow-line"];
 
@@ -1388,17 +1384,9 @@ public sealed class InvoiceApprovalService
     private async Task<IReadOnlyList<Guid>> WriterApproveRecordsAsync(Guid invoiceId, Guid decisionId, CancellationToken ct)
     {
         var writer = await _recorder.WriterUserIdAsync(ct).ConfigureAwait(false);
-        var query = new QueryExpression(InvoiceReviewReadService.DecisionRecordEntity)
-        {
-            ColumnSet = new ColumnSet(InvoiceLineOrigin.RecordSteps),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
-            NoLock = true,
-        };
-        query.Criteria.AddCondition(ApproveRecordInvoiceLookup, ConditionOperator.Equal, invoiceId);
-        query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.Equal, ApproveActionCode);
-        WriterCreatedRecord.AddConditions(query.Criteria, writer);
-        query.AddOrder(InvoiceReviewReadService.DecisionRecordEntity + "id", OrderType.Ascending);
+        // Task 165b-4: the same record read the spend readers and InvoicesWithApproveRecordAsync use (InvoiceApproveRecord), here for one invoice.
+        var query = InvoiceApproveRecord.RecordQuery(
+            writer, new ConditionExpression(InvoiceApproveRecord.InvoiceLookup, ConditionOperator.Equal, invoiceId));
 
         var key = BillingDecisionKey.IdOf(InvoiceReviewReadService.InvoiceEntity, invoiceId, decisionId);
         return (await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false))
@@ -1433,81 +1421,12 @@ public sealed class InvoiceApprovalService
     /// count (fail closed). Per chunk of <see cref="FinanceBaseValues.ParentChunkSize"/> invoices, at most TWO reads, each an <c>In</c> on the
     /// ids, paged and app-only: the portions, then the records (skipped when no invoice of the chunk has a portion). Never one query per invoice.
     /// Throws on a read fault, and a fault reading <paramref name="writerUserId"/> propagates: the caller fails its decision closed.
+    /// Task 165b-4: the match lives once, in <see cref="InvoiceApproveRecord"/>, which the spend readers also use; this delegates to its
+    /// invoice-id scope (no copy).
     /// </summary>
-    internal static async Task<IReadOnlySet<Guid>> InvoicesWithApproveRecordAsync(
-        IGenericEntityService entities, IReadOnlyCollection<Guid> invoiceIds, Func<CancellationToken, Task<Guid>> writerUserId, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(entities);
-        ArgumentNullException.ThrowIfNull(invoiceIds);
-        ArgumentNullException.ThrowIfNull(writerUserId);
-        var found = new HashSet<Guid>();
-        if (invoiceIds.Count == 0)
-        {
-            return found;
-        }
-
-        var writer = await writerUserId(ct).ConfigureAwait(false);
-        foreach (var chunk in invoiceIds.Distinct().Chunk(FinanceBaseValues.ParentChunkSize))
-        {
-            // (1) The approval keys: one per portion of each invoice of the chunk.
-            var portionQuery = new QueryExpression(EligibleApproverResolver.ApprovalEntity)
-            {
-                ColumnSet = new ColumnSet(EligibleApproverResolver.ApprovalInvoice),
-                Criteria = new FilterExpression(LogicalOperator.And),
-                PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
-                NoLock = true,
-            };
-            portionQuery.Criteria.AddCondition(EligibleApproverResolver.ApprovalInvoice, ConditionOperator.In, chunk.Cast<object>().ToArray());
-            portionQuery.AddOrder(EligibleApproverResolver.ApprovalEntity + "id", OrderType.Ascending);
-
-            var keys = new Dictionary<Guid, HashSet<Guid>>();
-            foreach (var portion in await InvoiceReviewReadService.ReadPagedAsync(entities, portionQuery, ct).ConfigureAwait(false))
-            {
-                if (portion.Id != Guid.Empty
-                    && portion.GetAttributeValue<EntityReference>(EligibleApproverResolver.ApprovalInvoice)?.Id is { } invoiceId
-                    && chunk.Contains(invoiceId))
-                {
-                    if (!keys.TryGetValue(invoiceId, out var set))
-                    {
-                        keys[invoiceId] = set = [];
-                    }
-
-                    set.Add(BillingDecisionKey.IdOf(InvoiceReviewReadService.InvoiceEntity, invoiceId, DecisionIdFor(portion.Id)));
-                }
-            }
-
-            if (keys.Count == 0)
-            {
-                continue;
-            }
-
-            // (2) The writer-created approve records of the invoices that have a portion, counted only under the approval's own key.
-            var query = new QueryExpression(InvoiceReviewReadService.DecisionRecordEntity)
-            {
-                ColumnSet = new ColumnSet(ApproveRecordInvoiceLookup, InvoiceLineOrigin.RecordSteps),
-                Criteria = new FilterExpression(LogicalOperator.And),
-                PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
-                NoLock = true,
-            };
-            query.Criteria.AddCondition(ApproveRecordInvoiceLookup, ConditionOperator.In, keys.Keys.Cast<object>().ToArray());
-            query.Criteria.AddCondition("sprk_actioncode", ConditionOperator.Equal, ApproveActionCode);
-            WriterCreatedRecord.AddConditions(query.Criteria, writer);
-            query.AddOrder(InvoiceReviewReadService.DecisionRecordEntity + "id", OrderType.Ascending);
-
-            foreach (var row in await InvoiceReviewReadService.ReadPagedAsync(entities, query, ct).ConfigureAwait(false))
-            {
-                if (row.GetAttributeValue<EntityReference>(ApproveRecordInvoiceLookup)?.Id is { } invoiceId
-                    && keys.TryGetValue(invoiceId, out var approvalKeys)
-                    && InvoiceLineOrigin.ReviewIdOf(row) is { } key
-                    && approvalKeys.Contains(key))
-                {
-                    found.Add(invoiceId);
-                }
-            }
-        }
-
-        return found;
-    }
+    internal static Task<IReadOnlySet<Guid>> InvoicesWithApproveRecordAsync(
+        IGenericEntityService entities, IReadOnlyCollection<Guid> invoiceIds, Func<CancellationToken, Task<Guid>> writerUserId, CancellationToken ct) =>
+        InvoiceApproveRecord.MatchedInvoicesAsync(entities, invoiceIds, writerUserId, ct);
 
     // ── F2: an earlier attempt's bulk accept ──
 

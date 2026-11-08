@@ -98,6 +98,76 @@ public static class InvoiceBlockedHold
         return Of(invoiceId, linked);
     }
 
+    /// <summary>
+    /// Task 165b-4 (ontology-r1 O4): the field-secured hold sources a batch read (<see cref="CheckBatchAsync"/>) takes, as (entity, column). They
+    /// are NOT derived base columns (<see cref="FinanceBaseValues.DerivedBaseColumns"/> must be unsecured): they are secured, and readable by the
+    /// BFF application identity through the "Spaarke BFF-Managed Field Writers" field-security profile. Guarded offline (the profile grants Read on
+    /// each, and each is secured) and by a live membership test on dev.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Entity, string Column)> HoldSourceColumns =
+    [
+        (FinanceBaseValues.SubmissionEntity, InvoiceSubmissionPersister.SubmissionFindingsJson),
+    ];
+
+    /// <summary>
+    /// Task 165b-4: the FR-20 hold of each of <paramref name="invoiceIds"/> from ONE paged read of the submissions linked to the parents'
+    /// invoices of <paramref name="invoiceStatuses"/> (an inner link to <c>sprk_invoice</c>, scoped by <paramref name="parentEntity"/>'s lookup
+    /// <c>In</c> <paramref name="parentIds"/>), with <see cref="Of"/> applied per invoice in memory. Never one query per invoice. Throws on a read fault.
+    /// </summary>
+    /// <remarks>
+    /// <b>Canary (ontology-r1 O5).</b> The persister writes the own submission's findings, naming the invoice, in the transaction that creates the
+    /// invoice (D-130(a)), and the undo clears them only together with the link. So an invoice's own LINKED submission whose findings read back
+    /// empty means this identity cannot read the secured column: the read throws (the caller's value is unknown), never "held" or "not held".
+    /// Without it an unreadable column would hold every invoice (check 3) and pending spend would read as 0.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">An own linked submission's findings read back empty (the column is not readable).</exception>
+    internal static async Task<IReadOnlyDictionary<Guid, Verdict>> CheckBatchAsync(
+        IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds, IReadOnlyList<int> invoiceStatuses,
+        IReadOnlyCollection<Guid> invoiceIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(parentIds);
+        ArgumentNullException.ThrowIfNull(invoiceStatuses);
+        ArgumentNullException.ThrowIfNull(invoiceIds);
+        var verdicts = new Dictionary<Guid, Verdict>();
+        if (invoiceIds.Count == 0)
+        {
+            return verdicts;
+        }
+
+        var query = new QueryExpression(FinanceBaseValues.SubmissionEntity)
+        {
+            ColumnSet = new ColumnSet(SubmissionColumns),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
+            NoLock = true,
+        };
+        var invoices = query.AddLink(FinanceBaseValues.InvoiceEntity, InvoiceSubmissionPersister.SubmissionInvoice, FinanceBaseValues.InvoiceKeyColumn, JoinOperator.Inner);
+        invoices.Columns = new ColumnSet(false);
+        invoices.LinkCriteria.AddCondition(FinanceBaseValues.ParentLookup(parentEntity), ConditionOperator.In, parentIds.Cast<object>().ToArray());
+        invoices.LinkCriteria.AddCondition(FinanceBaseValues.InvoiceStatusCodeColumn, ConditionOperator.In, invoiceStatuses.Cast<object>().ToArray());
+        query.AddOrder(FinanceBaseValues.SubmissionKeyColumn, OrderType.Ascending);
+
+        var linked = (await InvoiceReviewReadService.ReadPagedAsync(entities, query, ct).ConfigureAwait(false))
+            .Where(s => s.Id != Guid.Empty)
+            .ToLookup(s => s.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id ?? Guid.Empty);
+        foreach (var invoiceId in invoiceIds.Distinct())
+        {
+            var rows = linked[invoiceId].ToList();
+            if (OwnSubmissionOf(invoiceId, rows) is { } own
+                && string.IsNullOrWhiteSpace(own.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson)))
+            {
+                throw new InvalidOperationException(
+                    "An invoice's own linked submission has no readable findings, so this identity cannot read the hold source: the hold is unknown. "
+                    + "Failing closed rather than reading every invoice as held or as not held.");
+            }
+
+            verdicts[invoiceId] = Of(invoiceId, rows);
+        }
+
+        return verdicts;
+    }
+
     /// <summary>The FR-20 hold of <paramref name="invoiceId"/> over the submissions linked to it (pure; see the remarks).</summary>
     public static Verdict Of(Guid invoiceId, IEnumerable<Entity> linked)
     {

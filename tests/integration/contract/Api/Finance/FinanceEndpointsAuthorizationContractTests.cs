@@ -49,12 +49,11 @@ namespace Sprk.Bff.Api.Tests.Api.Finance;
 /// The substitution is at the <see cref="IAccessDataSource"/> boundary (a recording fake that answers "what may
 /// this caller do to record X of set S" and logs every question asked) and at the Dataverse service seams the
 /// handlers sit on. No HTTP handler is mocked (ADR-038).</para>
-/// <para><b>Why the finance recalculate 200 is not asserted here.</b> <see cref="FinanceRollupService"/> reads
-/// through a concrete Dataverse <c>ServiceClient</c> unwrapped from <see cref="IDataverseService"/>, which no
-/// in-process double can stand in for. The authorized finance route is therefore shown to REACH its handler
-/// (which then fails on the unwrappable double, a 500 that a denial can never produce); its 200 is proven by
-/// the task's manual live gate (b). The scorecard routes, whose reads go through an interface, are asserted
-/// 200 end to end.</para>
+/// <para><b>Why the finance recalculate 200 is not asserted here.</b> The authorized finance route is shown to REACH its
+/// handler, which then fails on the strict <see cref="IDataverseService"/> double with no reads set up (a 500 that a denial
+/// can never produce); its 200 is proven by the task's manual live gate (b). (Until task 165b-4 the rollup read through an
+/// unwrapped <c>ServiceClient</c>; it now reads through the interface, and its figures are tested in
+/// <c>SpendServerWrittenSourcesTests</c>.) The scorecard routes are asserted 200 end to end.</para>
 /// </remarks>
 public class FinanceEndpointsAuthorizationContractTests
 {
@@ -312,8 +311,9 @@ public class FinanceEndpointsAuthorizationContractTests
 
         var response = await host.SendAsync(BuildRequest(route, parentId));
 
-        // The filter let the request through: the handler ran FinanceRollupService, which cannot unwrap a
-        // ServiceClient from the in-process double and fails with the handler's own 500. A denial is a 404.
+        // The filter let the request through: the handler ran FinanceRollupService, whose first spend read hits the strict
+        // in-process double (no read is set up; task 165b-4 removed the ServiceClient unwrap) and fails with the handler's own 500.
+        // A denial is a 404.
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         (await response.Content.ReadAsStringAsync()).Should().Contain("An error occurred while recalculating financial fields");
     }
@@ -1318,7 +1318,9 @@ public class FinanceEndpointsAuthorizationContractTests
     internal sealed class RollupSeam : FinanceRollupService
     {
         public RollupSeam(IDataverseService reads, IFieldMappingDataverseService writes)
-            : base(reads, writes, NullLogger<FinanceRollupService>.Instance)
+            : base(reads, writes, new BillingDecisionRecorder(new Sprk.Bff.Api.Tests.Services.Signals.DecisionRecordWriterTests.Harness().Writer,
+                    new Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>().Object, NullLogger<BillingDecisionRecorder>.Instance),
+                NullLogger<FinanceRollupService>.Instance)
         {
         }
 
