@@ -263,3 +263,16 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
   - an admin "bootstrap endpoint" (per-user MCP servers and up to 20 skills) is a possible v2 BFF job.
 - MCP Apps (`ui://`) render in both Claude and M365 Copilot, so the same widget could serve both.
 - Source: `projects/spaarke-legal-ai-accelerator-claude-r2/notes/research/` (`a727322de3`).
+
+## 2026-11-08 — Ontology review of task 018: APPROVED (no F findings)
+
+- Reviewed `6aec16b753` (`Services/Signals/**`). Checked:
+  - the evidence ref format matches `SignalEvaluator` (`{clause.Related}:{id:D}`, Kind "communication");
+  - `sprk_signal.sprk_evidencerefs` is not field-secured, so the caller's read can't null it out;
+  - there are no duplicate keys in the page map;
+  - flagging is the default, and only judged items are cleared; faults and 401 flag;
+  - an untyped subject is read as a communication, so it can only over-flag;
+  - None and null don't flag.
+- Ontology accepts the three known limits as part of the ruling; they record it as D-212.
+- Their DI-143 (#2630) will reuse `WorkItemPrivilege.SourcesOf` + `FlaggedAsync` with the deciding caller's client once 018 is on master.
+- **Obligation:** notify ontology when 018 reaches master. It rides the project PR #2587.
