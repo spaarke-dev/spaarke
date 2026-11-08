@@ -17,7 +17,7 @@
 | Item | Branch / worktree | State → next action |
 |---|---|---|
 | **165b-3** | ✅ merged `5ae5590b66`, tip verified (2174/0, 11236/0), wt removed | Re-check K1-K4 in notes 6.4. |
-| **165b-4** | design note on work `a6f3c17f5e` (notes §7; identity details redacted, sent privately; unredacted branch deleted) | **Waiting on ontology-r1 (Q1-Q7) and uac-r2 (key match for spend, K2, parent-scoped reads).** Recommends (b): one static keyed matcher `InvoiceApproveRecord`, 4 reads/chunk, retires the grouped spend path (H5). Code (Opus) after both answer. |
+| **165b-4** | `task/ebilling-165b4` (Opus, from `fd628e75c5`) | Design approved: uac-r2 §7.12 (b); ontology-r1 §7.13 (b) + conditions (null-only coalesce, read-1 snapshot K1, dev before/after per parent before deleting `ReadSpendPartsAsync`, parity + 1-vs-50 count tests, writer id injected only when spend is read, live Global-depth dev test, rollup calls `ReadPendingSpendAsync` + unlinked count log). Precondition: null-findings linked own submissions == 0, else STOP → ontology-r1. Running. Next: one adversarial pass → ontology-r1 reviews FinanceBaseValues/Signals hunks → merge. Edits `InvoiceApprovalService.InvoicesWithApproveRecordAsync` body only (165b-2 is in `CheckApprovableAsync`). |
 | **165e + 165f** | ✅ merged; guard follow-up merged `6ab63efbf7` (ArchTests 2181/0, unit 4976/0) | **Ship together; send uac-r2 the dev-batch sha** when the batch is cut. |
 | **165b-2** | `task/ebilling-165b2` (Opus, from `c66b6933cf`) | Running. T1/T2 totals at approval and AP export, seeds, dev counts; pending spend out (165b-4). Next: one adversarial pass → merge. |
 | **083** | `task/ebilling-083` @ `94c2969b60` (wt agent-abce3e9bf2270020c) | Built: `GetFirmClauseAsync(policyVersionId, invoiceId, ct)` reads own submission's `procedureSnapshot`, text only if version APPLIED; label firm-facing name / "Billing instructions for this record"; rule set Published or Retired (deviation); 3 seeds OK; ArchTests 2159/0, unit 6916/0; +1.7 KB. 135 criteria ~141-142 keep old wording (fix at merge). **Adversarial pass 1 (Opus) running** → fix → pass 2 → merge → 130. |
@@ -30,6 +30,10 @@
 - **fm-032b:** fm's design note answered (E1-E6). Our 032b-2/032b-3 branch from work after 082d merges. uac-r2 condition for 032b-3: the job payload carries the committed core (table, id); gate 2 requires invoice core == payload core == submission core; must-fire re-point test. uac U3 may drop the grant step.
 - **Dev deploy batch** (after this wave; owner go needed): the BFF deploy (uac-r2 deploys; creator-person `-Verify` first); 166 field-security apply + forms; `sprk_sourceemaildocument`; 096b web resource then ribbon + `-Verify`; the forms script (165c read-only links); the field-security bundle (submission `sprk_invoice`/`sprk_document`/`sprk_resubmissionof`/**`sprk_channel`** (165f pass 2: the channel still decides; #2372), `sprk_billingexport`, portion `sprk_decidedby`/`sprk_decidedon`/`sprk_approvedamount`; list every writer first); a private read-only count of Ontology Administrator holders to uac-r2; the D3 role change (R1, R2, R4, then the privilege) **plus the question whether user Create on `sprk_billingevent` is removed too**. **164c -Apply only after its source removal is on MASTER**: `pwsh -File scripts/ebilling/Deploy-EbillingBillingEventRibbon.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply`, then `-Verify`, then send uac-r2 both read-backs (our -Verify with 11 hides stored; SecureChild -Verify on the other 8 tables) and tell them when the master merge lands.
 - **Task 112** carries: replace the stale `sprk_createinvoicewizard` bundle in SpaarkeMaster source (checked by content).
+
+## Owner questions
+
+- **DEF-059 (#2635):** should environment setup grant the BFF identity Decision Record read through a SpaarkeMaster role? uac-r2 yes (least privilege), ontology-r1 no (live test enough; role change needs owner). Not blocking.
 
 ## Open with peers
 
