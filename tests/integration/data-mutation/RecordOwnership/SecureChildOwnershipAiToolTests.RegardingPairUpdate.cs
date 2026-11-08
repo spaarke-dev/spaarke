@@ -154,6 +154,44 @@ public sealed partial class SecureChildOwnershipAiToolTests
             .Should().Be(RegardingRecordType.BuildRecordUrl("sprk_matter", OrdinaryMatter.ToString("D")));
     }
 
+    /// <summary>Q7 (b) on a re-type over the SAME id: the pair names another record (the type decides which table the id is
+    /// read in), so the display columns the update does not send are re-derived from the new type — the number from the
+    /// column its catalog row names — never left describing the record the old type named.</summary>
+    [Fact]
+    public async Task CommunicationFiling_ReTypingThePairOverTheSameId_ReDerivesItsNumberAndDisplay()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000006");
+        var projectType = Guid.Parse("a2470000-0000-4000-8000-0000000000c2");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        _user.RecordTypes[projectType] = "sprk_project";
+        CatalogKnowsTheMatterType();
+        _user.RowValues[RecordTypeMatter] = new() { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_matternumber" };
+        _user.RowValues[communication] = new()
+        {
+            ["sprk_regardingrecordid"] = OrdinaryMatter.ToString("D"),
+            ["_sprk_regardingrecordtype_value"] = projectType.ToString("D"),
+            ["sprk_regardingrecordname"] = "Old project",
+            ["sprk_regardingrecordnumber"] = "OLD-0001",
+        };
+        _user.RowValues[OrdinaryMatter] = new()
+        {
+            [RegardingRecordType.GetPrimaryNameField("sprk_matter")!] = "Acme v. Widget",
+            ["sprk_matternumber"] = "M-0042",
+        };
+
+        var result = await RefileCommunication(communication, new()
+        {
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({RecordTypeMatter:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        var body = _user.Patches.Should().ContainSingle().Subject.Body;
+        PatchedColumn(body, "sprk_regardingrecordnumber").GetString().Should().Be("M-0042", "re-derived from the new type's number column");
+        PatchedColumn(body, "sprk_regardingrecordname").GetString().Should().Be("Acme v. Widget");
+        PatchedColumn(body, "sprk_regardingrecordurl").GetString()
+            .Should().Be(RegardingRecordType.BuildRecordUrl("sprk_matter", OrdinaryMatter.ToString("D")));
+    }
+
     [Fact]
     public async Task UpdateRecord_ATypeOnlyUpdate_FillsTheIdFromTheRowsTypedLookup()
     {
