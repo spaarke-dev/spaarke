@@ -67,10 +67,14 @@ public static class ChildRecordEndpoints
     /// it — these tables have no product create surface of their own. ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line
     /// (<c>sprk_billingevent</c>) is no longer created here; its new rows have one server-side owner (extraction, a line
     /// decision, Add line), and the general create refuses it (<see cref="RecordTableRule.GenericCreateRefused"/>).
+    /// ebilling-r1 task 096b (EB-D-201): an invoice (<c>sprk_invoice</c>) is no longer created here either; invoices are created
+    /// only by submission (the Create Invoice wizard and the Outlook Submit Invoice, both on the submission operation). A POST for
+    /// either table is the route's unsupported-table answer, before any Dataverse call. The invoice stays in
+    /// <see cref="RefileTables"/> (re-filing is unchanged).
     /// </summary>
     internal static readonly IReadOnlySet<string> CreateTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "sprk_todo", "sprk_event", "sprk_memo", "sprk_invoice", "sprk_reportcard", "sprk_analysis", "sprk_document",
+        "sprk_todo", "sprk_event", "sprk_memo", "sprk_reportcard", "sprk_analysis", "sprk_document",
         "sprk_budget", "sprk_kpiassessment",
         // spaarke-ontology-platform-r1 task 046 (D-21; uac-r2's answer D-113 on #1355): the Create Work Assignment wizard's
         // create and a decision's Assign Work follow-on — ONE server create path for the table, this one. A work assignment is
@@ -197,7 +201,7 @@ public static class ChildRecordEndpoints
         // the resolver's team. Authorization is decided in the handler, as the caller, on every record the body binds.
         group.MapPost("/{table}", CreateAsync)
             .WithName("CreateChildRecord")
-            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment), a work assignment, a matter or a project")
+            .WithSummary("Create a child record (to-do, event, memo, report card, analysis, document, budget, KPI assessment), a work assignment, a matter or a project")
             .WithDescription("Takes the Dataverse Web API payload a browser writer would have sent. Checks AS THE CALLER " +
                 "that they could create it (table privilege, AppendTo on every record it binds, no owner or field-secured " +
                 "column), then the application creates it owned by the team the ownership rule names (the Secure Record " +

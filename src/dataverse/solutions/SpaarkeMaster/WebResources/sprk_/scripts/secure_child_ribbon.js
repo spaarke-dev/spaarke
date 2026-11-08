@@ -17,9 +17,13 @@
  *       sprk_communication -> the Communication page in compose mode (sent through the BFF),
  *       sprk_budget, sprk_kpiassessment -> POST /api/v1/child-records/{table} (no wizard of their own),
  *       then the new row opens.
- *     sprk_billingevent is served (its native "+ New" is hidden like any other) but has NO create here: ebilling-r1 task
- *     164a-1 (uac-r2 Q6) - an invoice line's new rows have one server-side owner (extraction, a line decision, Add line in
- *     the invoice's review), and the BFF refuses its generic create.
+ *     sprk_billingevent is NOT served: ebilling-r1 task 096b (EB-D-201; before it 164a-1, uac-r2 Q6) - an invoice line's new
+ *     rows have one server-side owner (extraction, a line decision, Add line in the invoice's review), so its platform
+ *     "+ New" is hidden outright in the sprk_BillingEvent RibbonDiff and this script carries no command for it. The
+ *     sprk_invoice entry opens the Invoice wizard (a submission): invoices are created only by submission.
+ *     For sprk_invoice the platform "+ New" is closed on EVERY host (ns.NATIVE_NEW_CLOSED; the RibbonDiff also hides
+ *     AddNewStandard / NewRecord) and the Invoice wizard is the one "New" on every core-record host (a saved matter, project
+ *     or work assignment - ns.ROOTS, the records the submission route accepts), whether the host is secure or not.
  *
  * FAIL CLOSED (ADR-003): the native "+ New" is allowed ONLY when the host is a project / matter / work assignment whose
  * sprk_issecure was read (through Xrm.WebApi) and is false, or a party (contact, organization, account - never an
@@ -27,7 +31,8 @@
  * document, an invoice, an analysis, a budget: its secure ancestor is not known here) hides the native command and shows
  * the BFF one, which is right for any host: the BFF files the new record under whatever it names and decides its owner.
  *
- * Not a security boundary on its own: the Create privilege is NOT removed (owner round 28); a native create that slips
+ * Not a security boundary on its own: the Create privilege is NOT removed (owner round 28; EB-D-201 narrows this for
+ * sprk_invoice only: see projects/ebilling-r1/notes/096b-close-direct-create.md); a native create that slips
  * past (an API client, an import) is re-owned by the reconcile job's recent-changes pass every 2 minutes.
  *
  * Libraries on every command and rule, in order (ribbon commands do not load form libraries):
@@ -70,6 +75,15 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
      */
     ns.NO_NEW_HOSTS = { sprk_billingexport: true };
 
+    /**
+     * ebilling-r1 task 096b (EB-D-201): tables whose platform "+ New" is closed on EVERY host, secure or not, because their
+     * new rows have one server-side owner. For these, nativeNewAllowed answers false and newChildAvailable answers true on a
+     * saved core-record host only (ns.ROOTS: the wizard files the invoice under a matter, project or work assignment, the
+     * records the submission route accepts): sprk_invoice -> the Invoice wizard, which creates an invoice only by submission.
+     * The ribbon passes the table as a string parameter; a call with none (the Add KPI command) behaves as before.
+     */
+    ns.NATIVE_NEW_CLOSED = { sprk_invoice: true };
+
     /** Wizard code pages (envelope: entityType / entityId / bffBaseUrl - sprk_wizard_commands.js). */
     ns.WIZARDS = {
         sprk_todo: { page: "sprk_createtodowizard", title: "Create New To Do" },
@@ -91,7 +105,7 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
 
     /** Every child table this script serves (the template's per-entity instances must stay within it). */
     ns.TABLES = ["sprk_todo", "sprk_event", "sprk_invoice", "sprk_reportcard", "sprk_document", "sprk_communication", "sprk_budget",
-        "sprk_kpiassessment", "sprk_billingevent"];
+        "sprk_kpiassessment"];
 
     var DIALOG_OPTIONS = { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" } };
     var COMPOSE_OPTIONS = { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } };
@@ -141,9 +155,12 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
     /**
      * EnableRule added to the native subgrid "+ New" (Mscrm.AddNewRecordFromSubGridStandard): true ONLY when the host is
      * a root read as NOT secure. A host that is not a form record (no parent) keeps the native command - it prefills
-     * nothing. Returns a promise (UCI waits for it).
+     * nothing. Returns a promise (UCI waits for it). `table` (optional): a table in NATIVE_NEW_CLOSED never allows it.
      */
-    ns.nativeNewAllowed = function (primaryControl) {
+    ns.nativeNewAllowed = function (primaryControl, table) {
+        if (table && ns.NATIVE_NEW_CLOSED[table]) {
+            return false;
+        }
         var host = ns.hostOf(primaryControl);
         if (host && ns.NO_NEW_HOSTS[host.entity]) {
             return false;
@@ -154,9 +171,12 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
         return ns.hostSecureFlag(primaryControl).then(function (flag) { return flag === false; });
     };
 
-    /** EnableRule for the "New <thing>" command: the exact complement of nativeNewAllowed (one of the two is shown), except NO_NEW_HOSTS, where neither is. */
-    ns.newChildAvailable = function (primaryControl) {
+    /** EnableRule for the "New <thing>" command: the exact complement of nativeNewAllowed (one of the two is shown), except NO_NEW_HOSTS, where neither is. A NATIVE_NEW_CLOSED table shows it on a saved core-record host (ns.ROOTS) only. */
+    ns.newChildAvailable = function (primaryControl, table) {
         var host = ns.hostOf(primaryControl);
+        if (host && table && ns.NATIVE_NEW_CLOSED[table]) {
+            return !!ns.ROOTS[host.entity];
+        }
         if (!host || ns.PARTIES[host.entity] || ns.NO_NEW_HOSTS[host.entity]) {
             return false;
         }
