@@ -166,7 +166,7 @@ None open from the prototype (F-2, F-7, F-8, F-9 decided as D-72 to D-75). Remai
   - ontology-r1 reviews FR-09, FR-15, FR-24 and FR-30, plus the `CountedInvoiceStatuses` change in 015.
   - Notify ontology-r1 when the `sprk_invoicestatus` retirement PR and the schema PRs open.
 - **unified-access-control-r2** reviews FR-05 (core-ancestor derivation) and FR-15. It last touched `InvoiceReviewService.cs`. It shares `Infrastructure/ExternalAccess/**`: `parallel-safe=false` on tasks that edit it, and run `/conflict-check` before every BFF PR.
-- **External Access R4** (successor to R3, which is closed; session `spaarke-wt-spa-external-access-platform-ad`, worktree spaarke-wt-SPA-external-access-platform-r4) wants a copy of anything that changes the SPA invoice or record-modal UI.
+- **External Access R4** (successor to R3, which is closed; session **`spa-r4`** from 2026-11-08, replacing `spaarke-wt-spa-external-access-platform-ad`; worktree spaarke-wt-SPA-external-access-platform-r4; it receives the 082c-3/114 master PR review) wants a copy of anything that changes the SPA invoice or record-modal UI.
 - **spaarke-SPA-external-access-platform-r3** shares the external SPA (`src/client/external-spa/**`) and `deploy-external-spa.yml`. Coordinate on the Invoices widget and the SPA notification feed.
 - **customer-provisioning-orchestration-r1** received the hand-off for SPE container provisioning in customer environments (task 028, DEF-013 / #1967). EB-D-163 withdraws it: eBilling needs no SPE container on a stamp, only 091's file store; task 124 closes #1967 and tells them.
 - **notification-spine-r1 / ADR-047** — notifications (132) go through the spine.

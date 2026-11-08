@@ -865,3 +865,146 @@ grouped aggregate; pending = 1 paged row read + 1 submission read. The evaluator
   Release, `Compress-Archive -CompressionLevel Optimal` over the publish folder, PDBs included, each side from a fresh `git archive` export at
   a short path, 191 files on every side. `origin/master` (57748ebf6d) 39.26 MB; the parent commit (fd628e75c5) 39.56 MB; this task 39.56 MB.
   This task's own delta is -337 bytes (0.00 MB); the +0.30 MB against master is the unmerged ebilling-r1 work already on the branch.
+
+## 9. 165b-2 — stored totals must match the lines at approval and AP export
+
+Task `tasks/165b2-totals-and-pending-spend.poml`, item 3 only (item 4, pending spend, moved to 165b-4). Rigor FULL. Branch `task/ebilling-165b2` from
+`work/ebilling-r1` at `c66b6933cf` (165b-3 merged). Wording stays neutral: approval and AP export decide only from server-written sources.
+
+**Rule (EB-D-200 item 3).** An invoice's five stored totals (`sprk_feestotal`, `sprk_expensestotal`, `sprk_lineadjustmentstotal`,
+`sprk_invoiceadjustmentstotal`, `sprk_approvedtotal`) must equal what `InvoiceTotalsCalculator` derives from its current lines with its stored billed
+total (`sprk_totalamount`). The one computation is reused, never copied: `InvoiceTotalsService.StoredTotalsOf(invoice, lines)` runs
+`InvoiceTotalsCalculator.Calculate` over the counted lines through `InvoiceTotalsService.ToRow` / `IsCounted`, the same mapping `RecalculateAsync` and
+the 165b-3 completion use (D-42: approved = billed + added lines - line adjustments - invoice adjustments).
+
+**The comparison.** They match when the calculation is not refused AND, for each of the five columns, `InvoiceTotalsCalculator.Round(stored) ==
+calculated` (exact `decimal` equality; `Round` is the calculator's own rounding, 2 decimals, midpoint away from zero, now `internal` instead of
+`private`). A missing stored total does not match. Decimal equality ignores scale, so a stored `885.0000` equals `885`.
+
+- Why 2 decimals and not the currency's own: the five columns are Money with precision 2 (`docs/data-model/sprk_invoice.md`) and the calculator
+  rounds every total to 2, so a total the server wrote is always exactly equal at 2 decimals. `BillingCurrency` holds no minor-unit table (it
+  normalises the code only). Every currency approval accepts has 2 decimals or fewer: `CurrencyRefused` (through `BillingCurrency.Normalise`) refuses
+  the 3-decimal codes before this check runs. Comparing a 0-decimal currency (JPY) at 0 decimals would accept a stored total that differs from the
+  server's own value by up to half a unit, so the stricter 2-decimal equality is used for every currency. No legitimate difference exists, so the
+  escalation trigger (a rounding or currency rule the calculator does not cover) did not fire.
+
+**Approval (T1).** In `InvoiceApprovalService.CheckApprovableAsync`, last, after the 165b line-origin check: under both per-invoice locks, on the
+line set approval already reads, with the invoice row approval already reads (the stored totals were added to `InvoiceColumns`; no extra query),
+before any write (the Clean bulk accept included).
+
+- A difference: 409 `ebilling.approve.totals_mismatch`, text "This invoice's stored totals do not match its lines, so it cannot be approved. Nothing
+  was changed. An administrator must review the invoice." One log line `Approval refusal ebilling.approve.totals_mismatch on sprk_invoice {id}`.
+- Lines the calculator refuses (for example a line with no cost type): the answer approve already gave for them, 409
+  `LineDecisionCodes.TotalsRefused` with the calculator's code as the detail, now before any write. This closes the section 1.1 known limit ("refused
+  by the totals calculator only after the Clean bulk-accept write"). Logged the same way with the calculator's code.
+- Completion runs the same method (165b-3), so a completion whose stored totals differ is 409 `completion_refused` with the log reason
+  `ebilling.approve.totals_mismatch`, no approve record. Completion's amount check now uses the calculation the check ran (one calculator run, not
+  two); its own refused-calculation branch could no longer be reached and was removed. This closes 165b-3 part A known limit K1 (section 6.1).
+
+**AP export (T2).** Left out the way 165b-3 leaves out an invoice without its approve record (lead brief: "the same way"):
+
+- **Candidate list:** not offered, so the other candidates export without it.
+- **Explicit request:** the per-invoice reason `totals_mismatch` in the existing 400 `selection_refused`; nothing is claimed. As decided for
+  `approval_not_recorded` (lead, option 1), one refused invoice refuses the request; there is never a silent partial export. A selection refused only
+  for this reason gets its own sentence.
+- **Re-check after the claim (step 7):** the stored totals are re-read with the step-7 invoice read and compared with a fresh line read; a difference
+  is 409 `ebilling.apexport.totals_mismatch` before any file or Sent to AP write, and the claims are released.
+- **Log line:** `AP export refusal ebilling.apexport.totals_mismatch on sprk_invoice {id}`.
+- **Query count:** one batched line read per check (an `In` on the invoice lookup, chunked at `FinanceBaseValues.ParentChunkSize`, paged, removed
+  Adjustment lines excluded by `ExcludeInactiveAdjustments`): one for the candidate list, two per batch. Never one per invoice.
+
+**Reuse (§11).** No new type file, endpoint, DI registration or package. New surface inside existing files:
+
+- `InvoiceTotalsService.StoredTotalsOf` with its `StoredTotals` record and `StoredTotalsColumns`. (1) Existing: `RecalculateAsync` computes and
+  writes; the 165b-3 completion ran the calculator inline; nothing compared stored with derived. (2) Extension: this is the extension, placed on the
+  totals owner so approval and AP export share one comparison; it calls the calculator and copies none of its arithmetic. (3) Without it each caller
+  would carry its own copy of the comparison (F2).
+- `InvoiceTotalsService.InvoicesWithMatchingStoredTotalsAsync`. (1) Existing: `InvoiceTotalsService.ReadLinesAsync` (one invoice) and the export's
+  `ValueReader.ReadLinesAsync` (one invoice, for the file). (2) Neither is batched; the line columns are now one list (`CalculatorLineColumns`) shared
+  with `ReadLinesAsync`. (3) Without it AP export makes one line query per invoice (F3) or cannot check at all.
+- `InvoiceApprovalCodes.TotalsMismatch`, `ApExportCodes.ReasonTotalsMismatch` and `ApExportCodes.TotalsMismatch`: the codes the POML names; without
+  them the refusal has no stable code.
+- `InvoiceApprovalService.CheckStoredTotals` and `ApExportService.TotalsMatchAsync`: private, the refusal and log line of each caller (the pattern of
+  `CheckLineOriginAsync` and `ApproveRecordedAsync`).
+
+**Tests.**
+
+- **T1** (`tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceApprovalTotalsTests.cs`, 12 cases). Must fire, each with the code, the text,
+  `Writes == 0`, no transition, no record and the one log line: each of the five stored totals off by one cent (5); a line amount edited without a
+  recalculation; a missing stored total; lines the calculator refuses (TotalsRefused before any write); completion with a stored total that differs.
+  Controls: matching totals approve and freeze the calculator's amount (885, with a Reduced line, a Clean line and a 10% adjustment); the same
+  amount at another scale matches; completion with matching totals completes with one record.
+- **T2** (`tests/integration/data-mutation/Ebilling/ApExportTotalsTests.cs`, 10 cases). Must fire (8 rows): each of the five stored totals off by one
+  cent, a line edited, lines the calculator refuses, a missing total. Each: not a candidate while the other invoice is, the log line, an explicit
+  request refused per invoice with nothing written, and the other invoice then exports. The step-7 re-check (a line changed after the selection):
+  409 `totals_mismatch`, no file, nothing sent, the claim released. Control: two matching invoices (one with a Reduced line and an adjustment) are
+  candidates and export, with one batched line read for the candidate list.
+
+**Seeds** (each file restored byte-identical, compared with `cmp`):
+
+- **The check dropped at approval** (`CheckApprovableAsync` returns no refusal for the stored totals): the 9 T1 must-fire cases fail; the 3 controls pass.
+- **The check dropped at AP export** (`TotalsMatchAsync` still reads the lines but answers every invoice as matching): the 9 T2 must-fire cases fail;
+  the control passes.
+
+**Fixture changes.** `ApprovalWorld` and `ApExportWorld` invoices now carry the totals the calculator derives from their lines
+(`StoreTotalsFromLines`, run on creation and by `AddLine`, as the totals service runs after every line change), and the approval world's
+`RecalculateAsync` stand-in stores all five totals (it stored only the approved total). `ApExportWorld.AddInvoice` stores the requested approved total
+as the billed total (no line is decided, so approved = billed); its earlier fixed 1,000 / 60 / 40 did not derive from its lines. Its Adjustment lines
+are Fixed adjustments whose value is their amount (the calculator refuses a line with no method). Updated to match: the FR-41 CSV row
+(`900.00,0.00,0.00,900.00`), the 165b-3 C2 control and the two persister end-to-end tests (each stores the totals after setting its lines directly).
+
+**Dev data (read-only, 2026-11-08).**
+
+- Invoices: 6 (2 In Review, 2 Sent to AP, 2 Superseded); lines: 71. Every line is a Fee or Expense line, Active, and Clean, Flagged or Accepted; no
+  Reduced or Disallowed line, no Adjustment line. For each invoice the stored fees and expenses equal the sums of its lines, both adjustment totals are
+  0 and the approved total equals the billed total (the two invoices with no lines store 0 fees and expenses, and approved = billed).
+- **Live invoices whose stored totals differ from their lines: 0. None would be refused at approval or AP export.**
+- For 165b-4: held invoices now counted in pending spend: **0**. Pending spend counts In Review (`FinanceBaseValues.PendingInvoiceStatuses`); both In
+  Review invoices have one linked submission, processing status Accepted, recorded outcome `Accepted` naming that invoice, so neither is held by the
+  column state or the recorded outcome. (The own-submission derivation was not recomputed here; 165b-4 runs the real rule.)
+
+**Gates.** `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. Full ArchTests: 2174 passed, 0 failed. Filtered unit tests (Finance,
+ApExport, Approval, MarkPaid, Submission): 7474 passed, 0 failed, 4 skipped (7452 before the new tests). Publish (`dotnet publish -c Release`):
+fresh master `57748ebf6d` 130.60 MB, this task's base `c66b6933cf` 131.47 MB, this branch 131.47 MB. This task's delta is +9.7 KB on
+`Sprk.Bff.Api.dll` and about 0 in total; the +0.87 MB against master is the unmerged ebilling work already on `work/ebilling-r1`. No package added.
+
+**Escalation triggers.** Not fired: no rounding or currency rule makes a server-written total differ from the calculator (the column precision and
+the calculator are both 2 decimals), and no live invoice would be refused.
+
+**Known limits.**
+
+- K: the window after the step-7 re-check. A line changed out of band between the re-check and the file read (step 8) is not seen; the file reads
+  the lines once. The same window exists for every step-7 check.
+- K: an interrupted recalculation leaves stored totals that differ from the lines until the next line change recalculates. The trigger is any fault
+  in the recalculation that follows a committed line decision, add-line or adjustment change (the totals read, the Adjustment line amounts write, or
+  the invoice totals write, including its three failed attempts), not only a failed totals write: that call returns Incomplete at "totals".
+  Approval and AP export refuse meanwhile (fail closed). There is no administrator recalculate tool; the remedy is to repeat the last line or
+  adjustment action, which recalculates (the refusal text says so, fix round 1).
+- K: the approval state's `canApprove` does not reflect the totals check (as for the currency check, section 6.3); approve answers 409.
+- K: the clients show `totals_mismatch` (approval and AP export) through their generic fallback, as for `approval_not_recorded`.
+- K: at completion, lines the calculator refuses are now logged with the reason `LineDecisionCodes.TotalsRefused` (the shared check's code), not the
+  calculator's own code as in section 6; still 409 `completion_refused`, nothing written.
+- K: Mark Paid does not run the totals check (the POML scopes approval and AP export). A Sent to AP invoice already passed it at export.- K: an Adjustment line's own stored `sprk_amount` is not compared. It is a line column; the totals derive from the line's method and value, and the
+  invoice adjustments total, which is compared, shows a changed value.
+- Interpretation for the lead: the POML says an invoice that fails AP export "is left out of the batch, not the whole batch failed"; the brief says
+  "the same way" as 165b-3. This follows 165b-3: left out of the candidates, refused per invoice in an explicit request (option 1: no silent partial
+  export), and a whole-batch 409 at the step-7 re-check (a change during the export). If the lead wants an explicit request to export the rest
+  without the refused invoice, that changes the request-level rule for every reason.
+
+### 9.1 Fix round 1 (165b-2, adversarial pass)
+
+- **F4-1: the refusal names the real remedy.** Approval's `ebilling.approve.totals_mismatch` now says "The stored totals do not match the invoice lines.
+  Repeat the last line or adjustment decision, then approve again."; AP export's per-invoice selection refusal says to repeat the last line or
+  adjustment decision on the invoice and select it again. The earlier "an administrator must review" pointed at a tool that does not exist. The
+  known limit above was corrected: any fault in the recalculation after a committed change is the trigger. The step-7 re-check's 409 text was changed
+  too (lead): "The stored totals of an invoice changed or no longer match its lines. Repeat the last line or adjustment decision on it, then export
+  again. Nothing was exported." Both re-check tests now assert it.
+- **F4-2: the export fixture has distinct adjustment totals.** In the FR-41 test, invoice A is billed 1000 with a Fee line of 1000 reduced to 940 (line
+  adjustments 60) and a Fixed invoice adjustment of 40 (invoice adjustments 40), approved 900; the stored totals are those the calculator derives from
+  the lines. The CSV row is `1000.00,60.00,40.00,900.00` again (the JSON fee line's billed is 1000). Seed: with the line-adjustment and invoice-adjustment
+  columns swapped in the export mapping the test fails; restored, it passes (the 165b-2 earlier fixture, 0.00 / 0.00, could not show a swap).
+- **K2: the export writes the re-checked values.** The step-7 re-check validated the freshly read rows, but the files are written from the rows read
+  before the claim. It now also requires each invoice's fresh stored totals (the billed total and the five totals, `StoredTotalsColumns`) to equal the
+  ones on the row the file is read from; otherwise the same 409 `ebilling.apexport.totals_mismatch`, claims released, one log line per changed
+  invoice. No extra query (the fresh rows were already read). Tests: must fire (a line and the stored totals changed together after the claim:
+  409, no file, nothing sent, claim released) and a control (the totals stored again unchanged after the claim: exports).

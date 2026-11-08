@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-08 (checkpoint at 86% context, session ebilling-r1-c7, authoritative). Work head `adfb7aeec8`, pushed. Dev BFF: uac-r2's `6fbb3a7642` (master 23567b2f93 + fm 049c + MCP spike; reconcile false; gate PASS). **None of this project's work is on master or the dev BFF.**
+> **Last Updated**: 2026-11-08 (checkpoint at 86% context, session ebilling-r1-c7, authoritative). Work head = origin/work/ebilling-r1 (+ the in-progress 165b-2 merge). Dev BFF: uac-r2's `6fbb3a7642` (master 23567b2f93 + fm 049c + MCP spike; reconcile false; gate PASS). **None of this project's work is on master or the dev BFF.**
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -14,14 +14,16 @@
 
 ## Agents / branches in flight
 
+> 165b-2 merged `cd35ae8fc3` and verified (ArchTests 2181/0, unit 7476/0). 085 fix round 1 running with uac-r2 conditions (publish filter APPROVED: 403 on fault/unknown/no-version/no-Procedure; filter passes the checked version id, handler 409 if it differs; dev count of version-less Draft cards; K4 panel = DESIGN DECISION, pinned by test).
+
 | Item | Branch / worktree | State → next action |
 |---|---|---|
-| **165b-3** | ✅ merged `5ae5590b66`, tip verified (2174/0, 11236/0), wt removed | Re-check K1-K4 in notes 6.4. |
-| **165b-4** | design note on work `a6f3c17f5e` (notes §7; identity details redacted, sent privately; unredacted branch deleted) | **Waiting on ontology-r1 (Q1-Q7) and uac-r2 (key match for spend, K2, parent-scoped reads).** Recommends (b): one static keyed matcher `InvoiceApproveRecord`, 4 reads/chunk, retires the grouped spend path (H5). Code (Opus) after both answer. |
-| **165e + 165f** | ✅ merged; guard follow-up merged `6ab63efbf7` (ArchTests 2181/0, unit 4976/0) | **Ship together; send uac-r2 the dev-batch sha** when the batch is cut. |
-| **165b-2** | `task/ebilling-165b2` (Opus, from `c66b6933cf`) | Running. T1/T2 totals at approval and AP export, seeds, dev counts; pending spend out (165b-4). Next: one adversarial pass → merge. |
-| **083** | `task/ebilling-083` @ `94c2969b60` (wt agent-abce3e9bf2270020c) | Built: `GetFirmClauseAsync(policyVersionId, invoiceId, ct)` reads own submission's `procedureSnapshot`, text only if version APPLIED; label firm-facing name / "Billing instructions for this record"; rule set Published or Retired (deviation); 3 seeds OK; ArchTests 2159/0, unit 6916/0; +1.7 KB. 135 criteria ~141-142 keep old wording (fix at merge). **Adversarial pass 1 (Opus) running** → fix → pass 2 → merge → 130. |
-| **085** | `task/ebilling-085` (Sonnet, from `d58e3a3554`) | Stopped at escalation, lead answered (2026-11-08): may edit `InvoiceContextService.cs` (panel = versions `RulesOn` picks per distinct line date, else invoice date; one resolver read; fault → empty, no fallback) and `ApprovedRateHandler.cs` (`approvedRate.scope` → `approvedRate.rank`, invariant, no ids/names). Resumed. Next: one adversarial pass → merge → tell ontology-r1 of the evidence-key change. |
+| **165b-2** | ✅ merged `cd35ae8fc3` | Done. |
+| **083** | fix1 `task/ebilling-083-fix1` @ `9a4835f157`; **fix2 `task/ebilling-083-fix2` (Sonnet, running)** | Pass 1 (3 F) fixed; pass 2: code/tests clean, 2 F4 in POMLs (130:126 flag-off label; 135 step 1 still calls GetFirmClauseAsync) + K1 Warning gets invoiceId/policyVersionId (no exception) + K3 last-linked test. Next: merge fix2 (no 3rd pass) → verify → TASK-INDEX 083 ✅ → launch **130** (Sonnet/Opus per POML; partner-readable → 2 passes). Remove wts agent-abce3e9bf2270020c, agent-a7ba828dad62a6665 + fix2's. |
+| **085** | `task/ebilling-085` @ `417889cce0` (on `ecc8a73639`) | Done (ArchTests 2159/0, unit 8669/0, +4.3 KB; new filter `RequireWriteOnTheVersionsProcedure` + ledger; `RateProcedureWorld.cs`). **Adversarial pass 1 (Opus) running** → fix → pass 2 → merge → tell ontology-r1 `approvedRate.scope` → `approvedRate.rank`. wt agent-aab0af68fc90e3222. |
+| **165b-4** | `task/ebilling-165b4` (Opus, from `fd628e75c5`, running) | Design approved (notes §7.12 uac-r2, §7.13 ontology-r1). Precondition null-findings count must be 0 else STOP. Next: one adversarial pass → ontology-r1 reviews FinanceBaseValues/Signals hunks → merge. |
+| **165e + 165f** | ✅ merged; guard follow-up `6ab63efbf7` | Ship together; send uac-r2 the dev-batch sha when the batch is cut. |
+| **fm-032b** | fm's | Round 2 `9083f5df93` confirmed by us + uac-r2 (inline, U3 (c), E7). fm implements 032b-2/3 from the CURRENT work tip and sends us diffs before merge into work. |
 
 ## Queued
 
@@ -31,11 +33,15 @@
 - **Dev deploy batch** (after this wave; owner go needed): the BFF deploy (uac-r2 deploys; creator-person `-Verify` first); 166 field-security apply + forms; `sprk_sourceemaildocument`; 096b web resource then ribbon + `-Verify`; the forms script (165c read-only links); the field-security bundle (submission `sprk_invoice`/`sprk_document`/`sprk_resubmissionof`/**`sprk_channel`** (165f pass 2: the channel still decides; #2372), `sprk_billingexport`, portion `sprk_decidedby`/`sprk_decidedon`/`sprk_approvedamount`; list every writer first); a private read-only count of Ontology Administrator holders to uac-r2; the D3 role change (R1, R2, R4, then the privilege) **plus the question whether user Create on `sprk_billingevent` is removed too**. **164c -Apply only after its source removal is on MASTER**: `pwsh -File scripts/ebilling/Deploy-EbillingBillingEventRibbon.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply`, then `-Verify`, then send uac-r2 both read-backs (our -Verify with 11 hides stored; SecureChild -Verify on the other 8 tables) and tell them when the master merge lands.
 - **Task 112** carries: replace the stale `sprk_createinvoicewizard` bundle in SpaarkeMaster source (checked by content).
 
+## Owner questions
+
+- **DEF-059 (#2635):** should environment setup grant the BFF identity Decision Record read through a SpaarkeMaster role? uac-r2 yes (least privilege), ontology-r1 no (live test enough; role change needs owner). Not blocking.
+
 ## Open with peers
 
 - **uac-r2:** 165b-3 part B fix diff (F1 only); 082d review; 165f pass-2 result. DEF-057 (#2631) on their backlog.
 - **ontology-r1:** 165b-4 design note (before code); DI-144 (#2632) adopts `WriterCreatedRecord`; DEF-058 (#2634, filed with ebilling-r1 label; hand off when they accept): only the billing recorder writes billing action codes.
-- **field-mapping:** owed the 082d merge sha; payload shape (committed core) sent.
+- **field-mapping:** fm-032b round 2 (`9083f5df93`, notes/task-032b-design.md) **confirmed by us and uac-r2**: U3 (c) (sprk_invoice leaves the access registry; copies are display only), inline in `PersistCoreAsync` before `BuildInvoiceCreateRequest`, E7 (fault maps nothing, invoice created + ids-only note). We asked: branch 032b-2 from the CURRENT work tip (re-anchor line numbers), add 082d snapshot tests to the regression list, T-E7 asserts identical `sprk_findingsjson`. fm owns owner questions O1 (placement; our view inline) and O2 (`Repair.cs` move). fm sends us the 032b-2/3 diffs before merge into work; we verify the tip.
 
 ## Standing gates (unchanged)
 
