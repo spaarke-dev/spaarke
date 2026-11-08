@@ -26,7 +26,7 @@
 - Gate query uses a contains match on `changed_only_by_its_writer` (165d adds `.column`).
 
 ## Reviews queue
-- ebilling **085 APPROVED** (rounds 1+2, `f962dc952c`): F2 done; type check-then-use fixed; native admin-role writes bypassing the BFF-only Procedure check = K-limit in the notes (condition: Service Writer is not held by a non-admin human). Merges after ontology-r1's OK on the F1-b revert.
+- ebilling **085 APPROVED** (rounds 1+2, `f962dc952c`): F2 done; type check-then-use fixed; native admin-role writes bypassing the BFF-only Procedure check = K-limit in the notes (condition met: no human holds Service Writer). MERGED into ebilling work at `052307dc0b`; the K note is at `8bd27cab66`.
 - ebilling **130-0** scope widened (to-dos, events and documents on root lists follow their invoice; fault → 503); census before pass 2; diff to me after pass 2. 130-0b shape answered. Detail private.
 - fm **032b-1 APPROVED** 11-08 on access (no grant lost: the materializer grants on roots only). F1 premise: Office quick-create writes the invoice's `sprk_assignedto1`, so invoice Assigned-To targeting is lost against round 2 item 9 → fm puts U7 back to the owner (i) targeting without access, recommended, or (ii) accept; comment fixed now.
 - fm 022 review finding: classified fix-now, fm's gate approved for 022's fix round (detail private). fm's 060 ownership shape: approved in direction with conditions (detail private); fm sends its task POML before code. One owner question open (private handoff).
