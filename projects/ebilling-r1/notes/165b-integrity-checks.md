@@ -466,3 +466,15 @@ all 6 live invoices, normalised: USD 5, GBP 1. None is refused.
 - K: the approval state's `canApprove` does not reflect the currency check (approve refuses with 409 `currency_unsupported`).
 - K: Mark Paid's status read on the refusal path mirrors the lifecycle's answers for a status other than Sent to AP; the lifecycle stays the only
   status writer.
+
+## 6.4 Part B re-check and merge (2026-11-08)
+
+uac-r2 closed F1 at `4ba88a6de1` and approved part B. A scoped Sonnet re-check of the fix diff found no fix-now item. Merged into work as `5ae5590b66`.
+
+Known limits recorded from the re-check:
+
+- **K1: time of check.** In Mark Paid, the keyed record check and the lifecycle transition are two calls, not one atomic step. Removing the record between them needs the writer identity.
+- **K2: any-portion match.** The batched read matches at invoice level, so a record for one portion counts for the invoice. Approve refuses invoices with more than one portion (`PortionAmbiguous`), so this does not happen on a normal path.
+- **K3: closed currency list.** The refused set is the seven 3-decimal ISO codes. CLF and UYW (4-decimal unit-of-account codes, not invoice currencies) are not listed. A future 3-decimal currency is a manual addition.
+- **K4: guard upkeep.** The baseline reasons quote line numbers that will go stale. Every entry carries the same citation. `LinkToAttributeName` and positional `LinkEntity` arguments are not detected. Mark Paid's answers for statuses other than Sent to AP repeat the lifecycle's answers and could drift.
+- **The re-check's F4 does not apply.** `MarkPaidAuthorizationTests` asserts `StatusReads == 0`. That counter sits at the lifecycle's own Dataverse boundary (`ApExportRoutesHost.LifecycleRecords`), and the lifecycle reads status before any write. So the assertion does prove the lifecycle was not reached.
