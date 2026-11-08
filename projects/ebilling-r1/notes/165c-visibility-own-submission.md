@@ -36,7 +36,7 @@ cannot be shown to be the invoice's own (fail closed; Dataverse always returns t
 **Escalation check (POML trigger).** No legitimate path writes a link that is not the submission's own invoice: the only server writer of
 `sprk_invoicesubmission.sprk_invoice` is `InvoiceSubmissionPersister.BuildSubmissionUpdate`, called from `PersistCoreAsync` with
 `invoiceId = InvoiceIdFor(submissionId)`; `SubmissionCommitGate` only clears it. Corrections record `sprk_resubmissionof`, not the link. No
-client, script or `@odata.bind` writes it.
+other code writes it; the form shows it read-only (pass 1 fix round, K-3).
 
 No schema, field-security, endpoint, DI registration or package change.
 
@@ -54,7 +54,8 @@ New, `ExternalInvoiceVisibilityTests.OwnSubmission.cs` (19 cases):
 
 Fixture: `InvoiceWorld.NewInvoice()` returns an invoice id derived from a new submission id; the first submission seeded on it without an
 explicit id is that own submission (later ones only point at it). Existing tests that seed a submission on an invoice now use derived ids, as
-the persister writes them. `ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice` seeds the empty-link row first (the own row).
+the persister writes them. `ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice` became
+`ConfirmRoute_AnotherSubmissionWhoseDocumentLinkIsEmpty_LeavesTheInvoiceVisible` in the pass 1 fix round (section 6).
 One expectation changed: `UnlinkedOrRepointed_StaysWithheld_ByItsOwnInvoicesMarker` ("repointed") stays withheld after the commit, with
 `invoice_link_not_own`. `NewService` takes an optional logger.
 
@@ -86,10 +87,7 @@ Publish size: section 5.
 
 Step 9.5 (code-review, adr-check) not run here: the lead runs two adversarial passes after this task.
 
-Not changed (out of scope, listed for the lead): other inline copies of the same comparison, each already fail closed:
-`SubmissionOverrideService.cs` (:621, :760, :1661), `SubmissionEvaluationOutcome.cs:253`, `InvoiceSubmissionService.cs:846`,
-`SubmitInvoiceFromEmailOperation.cs:404`. A guard that refuses a new inline `InvoiceIdFor(...) ==` outside `InvoiceBlockedHold` would be an
-ArchTest source scan; not built (not asked by the POML).
+The other inline copies of the same comparison and a guard against new ones: done in the pass 1 fix round (section 6, K-4).
 
 ## 5. Publish size
 
@@ -104,5 +102,25 @@ Fresh short-path worktrees, `dotnet publish -c Release src/server/api/Sprk.Bff.A
 
 The delta includes all of `work/ebilling-r1` not yet on master; 165c adds no package, endpoint or registration. Below every threshold
 (+5 MB, 55 MB, 60 MB).
+
+## 6. Pass 1 fix round
+
+| Finding | Change | Test |
+|---|---|---|
+| F3-1: the empty-link shape of the reader 2 must-fire case was masked (the own row's `SpaUpload` also wrote an InvoicePdf, so the invoice stayed visible with the check dropped; only the log assertion failed) | `Reader2_ARowLinkedToAnInvoiceThatIsNotItsOwn_AddsNothingToIt` seeds the own row as Spa with no document and no Stored File, so the visibility assertion proves every shape. `ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice` duplicated `Internal_AnEmptyDocumentLink_AndNoStoredFile_IsHidden`; it is now `ConfirmRoute_AnotherSubmissionWhoseDocumentLinkIsEmpty_LeavesTheInvoiceVisible` (the own row with a readable document, plus another row with an empty link and no Stored File: visible) | seed S2 below |
+| K-1: reader 2 logged a Warning per row on every read, and a second one when reader 1 had already withheld the row in the same call | `DecideSubmissionsAsync` records the pairs it logs and passes them to the invoice decision (a `DecideAsync` overload; the three-argument one passes none). Reader 2 logs a pair reader 1 already logged at Debug, any other at Warning. One Warning per (submission, invoice) pair per call; the event content is unchanged (`TheEvent_CarriesOnlyItsCodeAndTheIds`, unmodified) | `TheEvent_IsOneWarningPerPairPerCall` (new; fails with reader 2 always at Warning), `TheEvent_OnAnInvoiceDecisionAlone_IsAWarning` (new control) |
+| K-3: the link columns were editable on the submission form | `Deploy-EbillingFormsViews.ps1`: the `links` section lists `sprk_invoice`, `sprk_document` and `sprk_resubmissionof` as `ReadOnly`, like `sprk_vendororg`. No test pinned that section; the script was not run (an operator applies it) | ArchTest `InvoiceSubmissionFormLinksReadOnlyTests` (new: the pin, one must-not-fire and two must-fire parser controls; the pin fails on the previous script) |
+| K-4: six inline copies of the own-submission comparison | `SubmissionOverrideService.cs` (:621, :760, :1661), `InvoiceSubmissionService.cs:846`, `SubmissionEvaluationOutcome.cs:253` and `SubmitInvoiceFromEmailOperation.cs:404` call `InvoiceBlockedHold.IsOwnSubmission`. Behaviour is the same except that `Guid.Empty` on either side now gives false (stricter). Their tests pass unmodified | ArchTest `OwnSubmissionRuleSingleSourceTests` (new): outside `InvoiceBlockedHold.cs` and `InvoiceSubmissionPersister.cs`, no `src/server/**` source compares `InvoiceIdFor(...)` with `==` or `!=`; must-fire and must-not-fire controls; the baseline is empty. On the previous sources it reports exactly the six sites |
+
+Seeds (each applied, the tests run, then the file restored byte-identical, checked by hash, and rebuilt):
+
+| Seed | Fails |
+|---|---|
+| S2 again: the own-invoice check dropped from reader 2 | 10: reader 2 must fire, all 6 (3 shapes x 2 callers), each on the visibility assertion; the repurposed confirm-route case x2; the two new event tests |
+| Reader 2 always at Warning | 1: `TheEvent_IsOneWarningPerPairPerCall` |
+| The six sites as before this round | `OwnSubmissionRuleSingleSourceTests` main case (the six sites listed) |
+| The forms script as before this round | `InvoiceSubmissionFormLinksReadOnlyTests` pin |
+
+Gates: filtered unit suite (`ExternalAccess|ExternalInvoiceVisibility|Finance|Submission|InvoiceAssignFirm|SubmissionOverride|SubmitInvoiceFromEmail`) 11981 passed, 0 failed, 4 skipped (+2 new); ArchTests 2130 passed, 0 failed (+8 new); BFF build 0 warnings, 0 errors. No package, endpoint or registration added.
 
 rework: none task 165c

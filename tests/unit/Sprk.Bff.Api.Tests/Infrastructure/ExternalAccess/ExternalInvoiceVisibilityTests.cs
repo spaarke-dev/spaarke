@@ -358,20 +358,20 @@ public sealed partial class ExternalInvoiceVisibilityTests
         await ShouldBeVisible(caller, invoice);
     }
 
-    // Review round 2: a submission whose document link is empty hides the invoice (a submission with no document is refused
-    // before any invoice exists, so the shape is never a legitimate one).
+    // Review round 2: the invoice's own submission with an empty document link hides it (Internal_AnEmptyDocumentLink_AndNoStoredFile_IsHidden).
+    // Task 165c: visibility counts only a submission's own invoice, so another row with an empty link that only points at the invoice does
+    // not hide it; the own submission's readable document decides.
 
     [Theory, MemberData(nameof(ExternalCallers))]
-    public async Task ConfirmRoute_ASubmissionWhoseDocumentLinkIsEmpty_HidesTheInvoice(string caller)
+    public async Task ConfirmRoute_AnotherSubmissionWhoseDocumentLinkIsEmpty_LeavesTheInvoiceVisible(string caller)
     {
         var invoice = _world.NewInvoice();
         var matter = Guid.NewGuid();
         _world.Flags[matter] = RootRecordFlags.None;
-        // Task 165c: the invoice's own submission carries the empty link; the readable row seeded after it only points at the invoice.
-        _world.Submission(invoice, document: null);
-        _world.SubmissionSource(invoice, permission: Standard, matter: matter);
+        _world.SubmissionSource(invoice, permission: Standard, matter: matter); // its own submission, a readable document
+        _world.Submission(invoice, document: null, InvoiceWorld.InternalChannel, id: Guid.NewGuid()); // no Stored File on the invoice
 
-        await ShouldBeHidden(caller, invoice, InvoiceHiddenReason.SourceLinkUnreadable);
+        await ShouldBeVisible(caller, invoice);
     }
 
     [Theory, MemberData(nameof(ExternalCallers))]

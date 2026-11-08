@@ -129,7 +129,10 @@ $Spec = [ordered]@{
                 # Task 095c-4: the firm (setting it natively bypasses the pipeline and the tracking scope) and the outcome reason (it holds
                 # the invoice: firm_missing, Blocked) are written only by the BFF's typed writers: disabled on the form.
                 ReadOnly = 'sprk_vendororg', 'sprk_outcomereasoncode' }
-            @{ Name = 'links'; Label = 'Resulting invoice and documents'; Cols = 'sprk_invoice', 'sprk_resubmissionof', 'sprk_document', 'sprk_reportdocument' }
+            # Task 165c: the invoice link, the source document and the correction target are written only by the BFF (the submission's own
+            # invoice and its source): read-only on the form, like the firm.
+            @{ Name = 'links'; Label = 'Resulting invoice and documents'; Cols = 'sprk_invoice', 'sprk_resubmissionof', 'sprk_document', 'sprk_reportdocument'
+                ReadOnly = 'sprk_invoice', 'sprk_document', 'sprk_resubmissionof' }
             @{ Name = 'regarding'; Label = 'Regarding'; Cols = 'sprk_regardingmatter', 'sprk_regardingproject', 'sprk_regardingworkassignment' }
             @{ Name = 'findings'; Label = 'Firm notice'; Cols = 'sprk_firmnoticetext' }  # task 122 (#2235): sprk_findingsjson is BFF-only, never on a form
         )

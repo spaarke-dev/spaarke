@@ -843,7 +843,7 @@ public class InvoiceSubmissionService
     /// <see cref="InvoiceSubmissionPersister.InvoiceIdFor"/> (the guard records only a submission whose id derives its invoice).
     /// </summary>
     internal static bool SameCorrectionTarget(Guid? earlierResubmissionOf, Guid? requestInvoiceId) => earlierResubmissionOf is { } earlier
-        ? requestInvoiceId is { } invoice && InvoiceSubmissionPersister.InvoiceIdFor(earlier) == invoice
+        ? requestInvoiceId is { } invoice && InvoiceBlockedHold.IsOwnSubmission(invoice, earlier)
         : requestInvoiceId is null;
 
     /// <summary>

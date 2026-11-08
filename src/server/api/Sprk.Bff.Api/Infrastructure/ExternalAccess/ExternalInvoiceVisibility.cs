@@ -109,11 +109,22 @@ internal static class ExternalInvoiceVisibility
     /// has already decided that the caller is NOT an internal systemuser. <see cref="Guid.Empty"/> is ignored. A failed read
     /// THROWS.
     /// </summary>
+    internal static Task<InvoiceVisibilityResult> DecideAsync(
+        IReadOnlyCollection<Guid> invoiceIds, InvoiceVisibilityReaders readers, CancellationToken ct) =>
+        DecideAsync(invoiceIds, readers, NoneLogged, ct);
+
+    /// <summary>
+    /// <see cref="DecideAsync(IReadOnlyCollection{Guid}, InvoiceVisibilityReaders, CancellationToken)"/> within one submission decision
+    /// (<see cref="DecideSubmissionsAsync"/>): <paramref name="loggedNotOwn"/> holds the (submission, invoice) pairs that call already logged
+    /// as <see cref="InvoiceLinkNotOwnEvent"/>, so the same pair is logged once at Warning per call (task 165c).
+    /// </summary>
     internal static async Task<InvoiceVisibilityResult> DecideAsync(
-        IReadOnlyCollection<Guid> invoiceIds, InvoiceVisibilityReaders readers, CancellationToken ct)
+        IReadOnlyCollection<Guid> invoiceIds, InvoiceVisibilityReaders readers, IReadOnlySet<(Guid Submission, Guid Invoice)> loggedNotOwn,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(invoiceIds);
         ArgumentNullException.ThrowIfNull(readers);
+        ArgumentNullException.ThrowIfNull(loggedNotOwn);
         var asked = invoiceIds.Where(id => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink).Distinct().ToList();
         var hidden = new Dictionary<Guid, InvoiceHiddenReason>();
         var cost = new InvoiceVisibilityCost();
@@ -144,8 +155,8 @@ internal static class ExternalInvoiceVisibility
         //       unknown or unreadable   hidden.
         var sourcesOf = new Dictionary<Guid, List<Guid>>();
         var invoicePdfs = await ReadStoredFileSourcesAsync(open, readers.Query, sourcesOf, hidden, cost, ct).ConfigureAwait(false);
-        var internalWithoutDocument = await ReadSubmissionSourcesAsync(open, readers.Query, sourcesOf, hidden, cost, readers.Logger, ct)
-            .ConfigureAwait(false);
+        var internalWithoutDocument = await ReadSubmissionSourcesAsync(
+            open, readers.Query, sourcesOf, hidden, cost, readers.Logger, loggedNotOwn, ct).ConfigureAwait(false);
         foreach (var invoiceId in internalWithoutDocument.Where(id => !invoicePdfs.Contains(id)))
             hidden.TryAdd(invoiceId, InvoiceHiddenReason.SourceLinkUnreadable);
 
@@ -339,17 +350,20 @@ internal static class ExternalInvoiceVisibility
 
         // Task 165c: visibility counts only a submission's own invoice (the one own-submission rule,
         // InvoiceBlockedHold.IsOwnSubmission). A submission whose invoice link is not its own invoice is withheld and decides nothing.
+        // Each pair is logged once at Warning here; the invoice read below logs a pair already logged at Debug.
+        var loggedNotOwn = new HashSet<(Guid Submission, Guid Invoice)>();
         foreach (var notOwn in page.Where(s => InvoiceOf(s) is { } linked && linked != ExternalDocumentNarrowing.UnreadableLink
                      && !Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission(linked, s.SubmissionId)).ToList())
         {
             withheld[notOwn.SubmissionId] = InvoiceHiddenReason.InvoiceLinkNotOwn;
-            LogInvoiceLinkNotOwn(readers.Logger, notOwn.SubmissionId, notOwn.InvoiceId!.Value);
+            if (loggedNotOwn.Add((notOwn.SubmissionId, notOwn.InvoiceId!.Value)))
+                LogInvoiceLinkNotOwn(readers.Logger, LogLevel.Warning, notOwn.SubmissionId, notOwn.InvoiceId!.Value);
             page.Remove(notOwn);
         }
 
         // (1) With an invoice: THE invoice predicate, one call for the page.
         var invoiceIds = page.Select(s => InvoiceOf(s)).OfType<Guid>().Distinct().ToList();
-        var invoices = invoiceIds.Count == 0 ? null : await DecideAsync(invoiceIds, readers, ct).ConfigureAwait(false);
+        var invoices = invoiceIds.Count == 0 ? null : await DecideAsync(invoiceIds, readers, loggedNotOwn, ct).ConfigureAwait(false);
         var cost = invoices?.Cost ?? new InvoiceVisibilityCost();
 
         // (2) Without an invoice: by channel; an Internal submission's own document is decided with the rest of the page.
@@ -505,11 +519,13 @@ internal static class ExternalInvoiceVisibility
     /// failed read THROWS.
     /// Task 165c: only the invoice's own submission counts
     /// (<see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission"/>); a row whose link is not its own
-    /// invoice adds nothing to that invoice (no source, no hide) and is logged. A row whose own id cannot be read hides the invoice.
+    /// invoice adds nothing to that invoice (no source, no hide) and is logged: at Warning, or at Debug when the submission decision of
+    /// the same call already logged that pair (<paramref name="loggedNotOwn"/>). A row whose own id cannot be read hides the invoice.
     /// </summary>
     private static async Task<HashSet<Guid>> ReadSubmissionSourcesAsync(
         IReadOnlyList<Guid> asked, CommunicationOpenThreadGate.RowQuery query, Dictionary<Guid, List<Guid>> sourcesOf,
-        Dictionary<Guid, InvoiceHiddenReason> hidden, InvoiceVisibilityCost cost, ILogger logger, CancellationToken ct)
+        Dictionary<Guid, InvoiceHiddenReason> hidden, InvoiceVisibilityCost cost, ILogger logger,
+        IReadOnlySet<(Guid Submission, Guid Invoice)> loggedNotOwn, CancellationToken ct)
     {
         var internalWithoutDocument = new HashSet<Guid>();
         var rows = await ReadRowsOfInvoicesAsync(
@@ -526,7 +542,8 @@ internal static class ExternalInvoiceVisibility
 
             if (!Sprk.Bff.Api.Services.Finance.Submission.InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId))
             {
-                LogInvoiceLinkNotOwn(logger, submissionId, invoiceId);
+                LogInvoiceLinkNotOwn(
+                    logger, loggedNotOwn.Contains((submissionId, invoiceId)) ? LogLevel.Debug : LogLevel.Warning, submissionId, invoiceId);
                 continue;
             }
 
@@ -623,8 +640,11 @@ internal static class ExternalInvoiceVisibility
     /// <summary>Task 165c: the event a submission whose invoice link is not its own invoice logs (the two ids and this code only).</summary>
     internal const string InvoiceLinkNotOwnEvent = "ebilling.visibility.invoice_link_not_own";
 
-    private static void LogInvoiceLinkNotOwn(ILogger logger, Guid submissionId, Guid invoiceId) =>
-        logger.LogWarning("{EventCode}: submission {SubmissionId}, invoice {InvoiceId}", InvoiceLinkNotOwnEvent, submissionId, invoiceId);
+    private static void LogInvoiceLinkNotOwn(ILogger logger, LogLevel level, Guid submissionId, Guid invoiceId) =>
+        logger.Log(level, "{EventCode}: submission {SubmissionId}, invoice {InvoiceId}", InvoiceLinkNotOwnEvent, submissionId, invoiceId);
+
+    /// <summary>No pair logged yet: an invoice decision outside a submission decision.</summary>
+    private static readonly IReadOnlySet<(Guid Submission, Guid Invoice)> NoneLogged = new HashSet<(Guid Submission, Guid Invoice)>();
 
     private static void AddSource(Dictionary<Guid, List<Guid>> sourcesOf, Guid invoiceId, Guid source)
     {

@@ -618,7 +618,7 @@ public sealed class SubmissionOverrideService
         var canOverride = false;
         var canReturn = false;
         // F1-a: a sprk_invoice link to an invoice the submission did not create is refused by Override and Return, so neither is offered.
-        if (disposition is Disposition.Blocked or Disposition.ProcedureHeld && invoiceId is { } held && held == InvoiceSubmissionPersister.InvoiceIdFor(submissionId))
+        if (disposition is Disposition.Blocked or Disposition.ProcedureHeld && invoiceId is { } held && InvoiceBlockedHold.IsOwnSubmission(held, submissionId))
         {
             InvoiceLifecycleStatus? invoiceStatus;
             try
@@ -757,7 +757,7 @@ public sealed class SubmissionOverrideService
                 "The submission has no invoice to release or return.");
         }
 
-        if (invoiceId != InvoiceSubmissionPersister.InvoiceIdFor(submissionId))
+        if (!InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId))
         {
             // F1-a (ontology-r1 round 2): the persister only ever links the invoice derived from the submission id (049 requires the
             // same). Any other invoice link is refused: deciding it would record and move an invoice the caller may hold no Write on.
@@ -1658,7 +1658,7 @@ public sealed class SubmissionOverrideService
     {
         var submissionId = row.Id;
         if (row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id is not { } invoiceId || invoiceId == Guid.Empty
-            || invoiceId != InvoiceSubmissionPersister.InvoiceIdFor(submissionId))
+            || !InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId))
         {
             // F1-a: only the invoice the submission created; any other link closes nothing.
             return 0;

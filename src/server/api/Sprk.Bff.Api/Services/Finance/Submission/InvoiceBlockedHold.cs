@@ -150,6 +150,7 @@ public static class InvoiceBlockedHold
     /// THE own-submission rule (pure): <paramref name="submissionId"/> is <paramref name="invoiceId"/>'s own submission when its immutable id
     /// derives the invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>). Every reader that selects or counts a submission of an
     /// invoice by its <c>sprk_invoice</c> link applies it here (<see cref="OwnSubmissionOf"/>, task 165a; external visibility, task 165c).
+    /// Enforced by: the ArchTest <c>OwnSubmissionRuleSingleSourceTests</c> (no other source compares <c>InvoiceIdFor(...)</c> with == or !=).
     /// </summary>
     public static bool IsOwnSubmission(Guid invoiceId, Guid submissionId) =>
         invoiceId != Guid.Empty && submissionId != Guid.Empty && InvoiceSubmissionPersister.InvoiceIdFor(submissionId) == invoiceId;

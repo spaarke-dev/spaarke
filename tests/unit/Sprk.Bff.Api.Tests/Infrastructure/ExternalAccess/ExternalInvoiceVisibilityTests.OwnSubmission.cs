@@ -116,7 +116,9 @@ public sealed partial class ExternalInvoiceVisibilityTests
     public async Task Reader2_ARowLinkedToAnInvoiceThatIsNotItsOwn_AddsNothingToIt(string caller, string shape)
     {
         var invoice = _world.NewInvoice();
-        _world.SpaUpload(invoice); // its own submission and its own PDF: visible
+        // Its own submission, Spa with no document and no Stored File: visible by that row alone, so an empty Internal link counted
+        // against the invoice would hide it (no InvoicePdf to rely on), and the visibility assertion below proves every shape.
+        _world.Submission(invoice, document: null, InvoiceWorld.SpaChannel);
         var restricted = _world.Document(Guid.NewGuid(), permission: Restricted, matter: CleanMatter());
         var other = shape switch
         {
@@ -179,23 +181,58 @@ public sealed partial class ExternalInvoiceVisibilityTests
         entry.Values["InvoiceId"].Should().Be(linked);
     }
 
+    [Fact(DisplayName = "165c: one decision call logs a pair once at Warning; the invoice read of the same call logs it again only at Debug")]
+    public async Task TheEvent_IsOneWarningPerPairPerCall()
+    {
+        var linked = _world.NewInvoice();
+        var own = _world.SpaUpload(linked);
+        var other = _world.Submission(linked, document: null, channel: InvoiceWorld.SpaChannel, id: Guid.NewGuid());
+
+        // Both rows on one page: reader 1 withholds the other row, and the own row's invoice read (reader 2) meets the other row again.
+        var decision = await DecideSubmissionsLogged("contact",
+            SubmissionView(own, InvoiceWorld.SpaChannel, invoice: linked, status: InvoiceSubmissionStatus.Accepted),
+            SubmissionView(other, InvoiceWorld.SpaChannel, invoice: linked, status: InvoiceSubmissionStatus.Accepted));
+
+        decision.IsVisible(own).Should().BeTrue(decision.HiddenSummary());
+        decision.IsVisible(other).Should().BeFalse();
+        _world.Reads("sprk_invoicesubmissions").Should().NotBeEmpty("the own row's invoice is decided, which reads its submissions");
+        _events.NotOwnAt(LogLevel.Warning).Should().ContainSingle().Which.Should().Be((other, linked));
+        _events.NotOwnAt(LogLevel.Debug).Should().ContainSingle().Which.Should().Be((other, linked));
+    }
+
+    [Fact(DisplayName = "165c: an invoice decision on its own logs a row linked to an invoice that is not its own at Warning")]
+    public async Task TheEvent_OnAnInvoiceDecisionAlone_IsAWarning()
+    {
+        var invoice = _world.NewInvoice();
+        _world.SpaUpload(invoice);
+        var other = _world.Submission(invoice, document: null, InvoiceWorld.SpaChannel, id: Guid.NewGuid());
+
+        await DecideLogged("contact", invoice);
+
+        _events.NotOwnAt(LogLevel.Warning).Should().ContainSingle().Which.Should().Be((other, invoice));
+        _events.NotOwnAt(LogLevel.Debug).Should().BeEmpty();
+    }
+
     /// <summary>Captures each log entry's level and structured values.</summary>
     private sealed class EventLog : ILogger<ExternalDataService>
     {
         public List<(LogLevel Level, IReadOnlyDictionary<string, object?> Values)> Entries { get; } = new();
 
-        /// <summary>The (submission, invoice) pairs of the 165c event.</summary>
-        public IReadOnlyList<(Guid Submission, Guid Invoice)> NotOwn
+        /// <summary>The (submission, invoice) pairs of the 165c event, at any level.</summary>
+        public IReadOnlyList<(Guid Submission, Guid Invoice)> NotOwn => NotOwnWhere(_ => true);
+
+        /// <summary>The (submission, invoice) pairs of the 165c event logged at <paramref name="level"/>.</summary>
+        public IReadOnlyList<(Guid Submission, Guid Invoice)> NotOwnAt(LogLevel level) => NotOwnWhere(l => l == level);
+
+        private IReadOnlyList<(Guid Submission, Guid Invoice)> NotOwnWhere(Func<LogLevel, bool> level)
         {
-            get
+            lock (Entries)
             {
-                lock (Entries)
-                {
-                    return Entries
-                        .Where(e => e.Values.TryGetValue("EventCode", out var code) && Equals(code, ExternalInvoiceVisibility.InvoiceLinkNotOwnEvent))
-                        .Select(e => ((Guid)e.Values["SubmissionId"]!, (Guid)e.Values["InvoiceId"]!))
-                        .ToList();
-                }
+                return Entries
+                    .Where(e => level(e.Level)
+                        && e.Values.TryGetValue("EventCode", out var code) && Equals(code, ExternalInvoiceVisibility.InvoiceLinkNotOwnEvent))
+                    .Select(e => ((Guid)e.Values["SubmissionId"]!, (Guid)e.Values["InvoiceId"]!))
+                    .ToList();
             }
         }
 
