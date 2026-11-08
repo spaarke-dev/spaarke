@@ -1,6 +1,6 @@
 # Current Task State - spaarkeai-mcp-bff-api-r1
 
-> **Last Updated**: 2026-11-07 (014 + 016 done and merged; 015 running; 002 with owner)
+> **Last Updated**: 2026-11-07 (Phase A done except FR-04 privilege source; owner inputs pending)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,16 +9,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Pipeline Step 5 (option C). Done: 011, 017, 013, 014, 016 (016 merged at `40d924098c`; merged-tree suites green). **015 running** (sonnet, main worktree). **002** in the main session, waiting on the owner. |
-| **Step** | 015 is running. 020+ are gated on 003 (T0/T13), which waits on 002 (connector). |
-| **Status** | in-progress |
-| **Next Action** | (1) When 015 returns: build, run the Signals unit + integration suites and the baselines, then send it to ontology for review. (2) 002: when the owner pastes the client id, verify with `az ad app show`, then guide runbook (b). The spike is LIVE on dev, so (c) the connector can follow (b) immediately. (3) Waiting on ontology: review of 014 and 016, and their answer on ISS-004 (#2628), commit without a prior plan read. (4) Owner: who reviews PR #2622. (5) Size-test widgets (1/3/6 MB) for 003 are not built yet; they go to uac-r2 as a new spike SHA when needed. |
+| **Task** | Pipeline Step 5 (option C). Done: 011, 017, 013, 014, 016, 015 (with review fixes `3eccab0c81` and `42a3a35efa`). The Phase A BFF rework is complete except for the **privilege derivation (FR-04)**, which waits on the owner's ruling. **002** is in the main session, waiting on the owner. |
+| **Step** | Waiting on the owner. 020+ are gated on 003 (T0/T13), which waits on 002 (connector). |
+| **Status** | blocked on owner inputs |
+| **Next Action** | (1) **Owner ruling on FR-04 privilege source.** The recommendation is "A widened" (ontology agrees): at read time, as the caller, batched per page, read the subject communication's `sprk_privilegeclassification` plus its witness communications. Privileged or Potentially Privileged = flagged; a read fault or an unreadable record = flagged; None or null = not flagged. Once ruled, create a follow-up task (for example 018) that runs before 022, amend spec FR-04, and update 022. (2) 002: when the owner pastes the client id, verify it with `az ad app show`, then guide runbook (b). The spike is live on dev. (3) Ontology is reviewing 015. (4) The owner names a reviewer for PR #2622. (5) The owner gives the go for spike `6fbb3a7642` in uac-r2's session. (6) The owner deletes `C:\wt015z` (2 leftover zips; the safety check blocked the delete). |
 
 ## Active Lanes
-- **015** (FR-04 `PrivilegeFlagged`, FR-05/11 paging): background implementer.
 - **002**: owner-driven. Runbook: `notes/drafts/connector-registration-runbook.md`.
-- **Spike on dev:** `22487c6537` is live (uac-r2 gates PASS, 20:06Z). The next window carries `6fbb3a7642` (= master `23567b2f93` + spike, CI green); deploying it waits on the owner's go in uac-r2's session. Phase 0 isn't done yet, so every deploy carries the spike.
-- **ISS-002 / #2620**: fix is in draft PR #2622, waiting for the owner to name a reviewer. **ISS-003 / #2623**: filed, not ours. **ISS-004 / #2628**: question sent to ontology.
+- **Spike on dev:** `22487c6537` is live. `6fbb3a7642` (= master `23567b2f93` + spike, CI green) is queued for the next window. Phase 0 is not done.
+- **Issues:** ISS-002 #2620 (fix PR #2622, needs a reviewer); ISS-003 #2623 (not ours); ISS-004 #2628 (closed: intended, per ontology).
 
 ## State
 - Wave 1:
