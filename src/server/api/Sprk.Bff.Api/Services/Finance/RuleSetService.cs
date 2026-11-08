@@ -2436,8 +2436,11 @@ public class RuleSetService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            // Information and above carry the exception type only: a Dataverse fault message can name ids and records.
-            _logger.LogWarning("A firm clause read faulted ({ExceptionType}); no clause is shown", ex.GetType().Name);
+            // Information and above carry the exception type only (a Dataverse fault message can name ids and records), plus the invoice and
+            // policy version ids as structured parameters so a fault can be traced to its read. No other id, and never the exception itself.
+            _logger.LogWarning(
+                "A firm clause read faulted ({ExceptionType}) for invoice {InvoiceId}, policy version {PolicyVersionId}; no clause is shown",
+                ex.GetType().Name, invoiceId, policyVersionId);
             _logger.LogDebug(ex, "Firm clause read fault detail");
             return FirmClauseText.None;
         }

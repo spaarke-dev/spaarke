@@ -62,3 +62,22 @@ Known limits:
 - K4: a policy deactivated after judging hides its clause (fails closed); a Procedure rename changes the label.
 - K6: a snapshot dropped by the size cap, or nulled by a later correction, shows no clauses.
 - K7: `ReadOwnSubmissionAsync` relies on id derivation without the `NamesInvoice` cross-check.
+
+## Fix round 2
+
+Done:
+
+- F4-a: 130's criterion (flag off, D-79) now says the item carries the reason and the rule (policy) name only, with no rule-set label, version, section reference or clause text; flag on says "the label (when present)", because a legacy set has none. The escalation trigger already recommended "no rule set name", so it is unchanged.
+- F4-b: 135 steps 0, 1 and 4 now match its own constraints: the resolver (082's `ProcedureResolver`) for the caller's firm and today with no record, or for one record and firm gated by `IAccessibleRecordSetService.ComposeForCiamContactAsync` and `AccessibleRecordSet.Contains`; the clause quote and section reference of each chosen policy version; `RuleSetClauseVisibility.ForFirm` applied directly; groups labelled with the Procedure's firm-facing name (its Name when blank, never `sprk_ruleset.sprk_name`), "Billing instructions for this record" for a record rule, "from the parent record" for a direct-parent rule. The old "client default plus caller firms', visible, Published, in-force versions" selection and the `GetFirmClauseAsync` mentions are removed from the steps.
+- K1: the `GetFirmClauseAsync` fault Warning carries `invoiceId` and `policyVersionId` as structured parameters so a fault is traceable. The exception stays off it (it stays on the Debug entry). The fault-log test relaxes the id ban for exactly those two ids on the Warning only; every other id and name stays banned in every entry, those two stay banned at the other levels, and no entry at Information or above carries an exception.
+- K3 (test only): `GetFirmClause_WithoutTheInvoicesOwnSubmission_ShowsNothing` also seeds a second foreign submission that applied the version AFTER the own one, so a first-linked and a last-linked reader would each return text.
+
+Seeds (each restored with an exact reverse edit; `git diff` shows only the intended files):
+
+- K1: the Warning also logged the fault message (so other ids): `GetFirmClause_OnAReadFault_*` failed 6 of 6; restored, 6 of 6 pass.
+- K3, first-linked reader (`OwnSubmissionOf` taking `linked.FirstOrDefault()`): the test failed. Last-linked reader (`LastOrDefault()`): the test failed (it would have passed before the extra submission). Restored: the test passes.
+
+Known limits:
+
+- K2: a legacy rule set (no Procedure) has a null label, so a firm sees its clause and section with no group label, by design. A flag-off set shows no label either.
+- Not changed, for the owner: 135's background paragraph (line 27) still describes "published, in-force policy versions" from 019 and 076; the constraints and steps are authoritative.

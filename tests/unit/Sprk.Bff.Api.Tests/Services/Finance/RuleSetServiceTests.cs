@@ -2943,13 +2943,16 @@ public sealed class RuleSetServiceTests
 
         var noSubmission = Guid.NewGuid();
         h.Seed(new Entity("sprk_invoice", noSubmission) { ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId) });
-        // The foreign submission (it applied the version) is seeded FIRST, so a reader that takes "the first submission linked to the invoice"
+        // A foreign submission (it applied the version) is seeded FIRST, so a reader that takes "the first submission linked to the invoice"
         // would return text; only the own submission (its id derives the invoice's id; it displaced the version) is the invoice's snapshot.
         var ownSubmission = Guid.NewGuid();
         var foreign = InvoiceSubmissionPersister.InvoiceIdFor(ownSubmission);
         h.Seed(new Entity("sprk_invoice", foreign) { ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId) });
         h.AddSubmission(foreign, Guid.NewGuid(), snapshot);
         h.AddSubmission(foreign, ownSubmission, FindingsWith(SnapshotOf(DisplacedOn(version))));
+        // A second foreign submission that applied the version is seeded AFTER the own one, so a reader that takes "the last submission linked"
+        // would also return text. Only the own submission, in the middle, is read.
+        h.AddSubmission(foreign, Guid.NewGuid(), snapshot);
         var service = h.Service();
 
         (await service.GetFirmClauseAsync(version, noSubmission, default)).Should().Be(FirmClauseText.None);
@@ -3000,8 +3003,13 @@ public sealed class RuleSetServiceTests
         h.Logs.Where(l => l.Level >= LogLevel.Information).Should().OnlyContain(l => l.Exception == null,
             "an exception object carries the fault text (ids and names) to the log sink; only its type name may be logged");
         // The Debug detail entry carries the exception by design (the service documents it); it is below the Information threshold.
-        h.Logs.Should().OnlyContain(l => secrets.All(s => !l.Message.Contains(s)),
-            "no id or name appears in any entry's message");
+        // The Warning alone names exactly two ids, as structured parameters, so a fault can be traced to its read: the invoice and the policy
+        // version the caller passed. Every other id and name stays banned at every level, and those two stay banned at every other level.
+        var warning = h.Logs.Single(l => l.Level == LogLevel.Warning);
+        warning.Message.Should().Contain(invoice.ToString("D")).And.Contain(version.ToString("D"), "the Warning names the invoice and the version");
+        h.Logs.Should().OnlyContain(
+            l => secrets.All(s => !l.Message.Contains(s) || (l.Level == LogLevel.Warning && (s == invoice.ToString("D") || s == version.ToString("D")))),
+            "no id or name appears in any entry's message, except the invoice and policy version ids on the Warning");
         h.Logs.Where(l => l.Level >= LogLevel.Information).Should().OnlyContain(l => secrets.All(s => l.Exception == null || !l.Exception.ToString().Contains(s)),
             "no id or name appears in the exception text of an entry at Information or above");
     }
