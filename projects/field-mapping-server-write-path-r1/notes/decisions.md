@@ -1022,3 +1022,7 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
     - T-E7 asserts that `sprk_findingsjson` is identical to an unmapped run.
     - Send ebilling-r1 the diff before it merges into their work branch.
   - **Owner decisions still open:** O1 (both reviewers prefer inline) and U7 (Daily Briefing).
+- **Owner (2026-11-08): O1 inline placement: yes. U7 (Daily Briefing stops selecting invoices through the copied assignee columns): accepted.** With O2 approved earlier, the 032b design (9083f5df93) is final.
+  - 032b-1 (fm branch: shared gates, registry removal with its guard, inventory of no-caller creators) merges to master first.
+  - Then 032b-2 and 032b-3 run on the current work/ebilling-r1.
+- **Contact owner team:** reuse `ExternalAccess:CustomerBusinessUnitId`, which resolves the BU's single default Owner team. It already sets the owner for the four identity-contact creates and fails closed when unset or ambiguous. The owner did not object, so it applies to the repair pass's contact rule (052b) and to the chat contact create. UAC-r2 reviews.
