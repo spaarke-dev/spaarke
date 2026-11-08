@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-07 late (checkpoint, session ebilling-r1-c7, authoritative). Work head `59b5f756b3`, pushed. Dev BFF: uac-r2's `22487c6537` (master + 049b + MCP spike, 20:06Z). **None of this project's work is on master or the dev BFF.**
+> **Last Updated**: 2026-11-07 late (checkpoint, session ebilling-r1-c7, authoritative). Work head `59b5f756b3`, pushed. Dev BFF: uac-r2's `6fbb3a7642` (master 23567b2f93 + fm 049c + MCP spike, 04:00:55Z; reconcile false; gate PASS). **None of this project's work is on master or the dev BFF.**
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -26,6 +26,7 @@ The 164b and 092 wts are removed (deregistered; empty folders still held open by
 - **164c** ribbon (billing event Add line hides): unblocked, launch when a slot frees.
 - **165e** running (uac-r2 confirmed + (a) fault hides, (b) own submission linked elsewhere hides, (c) re-count). Then **165f** `sprk_document` binding (uac-r2 assigned to us; two passes; uac-r2 reviews).
 - **165b-3** part A next (approval completion; includes the origin check at completion), part B after uac-r2 on EB-D-208; then **165b-2** (totals + pending spend; ontology reviews FinanceBaseValues hunks). Serial (both edit InvoiceApprovalService). ontology filed the createdonbehalfby limit as DI-144 (#2632), 7 sites, one shared helper later; ours stays consistent.
+- **fm-032 option B (owner chose):** field-mapping maps Matter attorney/paralegal + allow-listed columns onto invoices with the matching access grant. Answered 2026-11-08: no ebilling reader of the invoice copies (approvers read the core); build on `work/ebilling-r1` after 082d merges (send them the sha), we merge; prefer a post-commit after-step (grant then columns) over the create transaction; Secure maps nothing; not on re-run/Add line/approval; re-file rule is uac-r2's. Their design note comes to us + uac-r2 before code.
 - **Task 130** firm projection (EB-D-202) with uac-r2's pin test. Deps 083 (082 partial).
 - **`InvoiceReview` `launch.ts` optional `lineId`** before the master PR.
 - **Dev deploy batch** (after this wave merges): send uac-r2 the commit and checklist. Owner go needed for:
