@@ -1217,12 +1217,22 @@ public partial class RouteAuthorizationGuardTests
             "Each route declares the id it authorizes; the filter evaluates it as the caller via GetCallerRecordAccessAsync + "
             + "OperationAccessPolicy.HasRequiredRights (FinanceAuthorizationFilter.cs:409-412), uniform 404 on deny (task 130)."),
         new CreditedForm("RequireWriteOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
-            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:172) and, when set, asks the caller's own Write on "
-            + "sprk_procedures via CallerReadCheck.CheckAsync (:191); a read fault or an unanswered question is 403 system_failure (:178, :200) "
+            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:270) and, when set, asks the caller's own Write on "
+            + "sprk_procedures via CallerReadCheck.CheckAsync (:289); a read fault or an unanswered question is 403 system_failure (:276, :303) "
             + "(ebilling-r1 081, uac D; /draft added in re-check round 2)."),
+        new CreditedForm("RequireWriteOnTheVersionsProcedure", "Api/Finance/RateCardImportEndpoints.cs",
+            "Reads the Procedure of the route's procedureVersionId app-only (RateCardImportEndpoints.cs:148, :241) and asks the caller's own Write "
+            + "on sprk_procedures via CallerReadCheck.CheckAsync (:159, :267); a read fault or an unanswered question is 403 system_failure "
+            + "(:151, :280), denied is 403 insufficient_rights (:277) (ebilling-r1 085, I-P5)."),
+        new CreditedForm("RequireWriteOnTheCardsProcedure", "Api/Finance/RateCardImportEndpoints.cs",
+            "The publish route's own check: reads the route card's Procedure Version app-only (RateCardImportEndpoints.cs:194), that version's "
+            + "Procedure (:214, :241) and asks the caller's own Write on sprk_procedures via the same CallerReadCheck.CheckAsync body as the import "
+            + "(:225, :267); an unknown card, a card with no version and a version with no Procedure are 403 insufficient_rights (:211, :222), a "
+            + "read fault or an unanswered question 403 system_failure (:206, :217, :280); it records the version it checked (:231) and the "
+            + "service refuses 409 ratecard.version_changed if the card names another (ebilling-r1 085 fix round 1, uac-r2 approved)."),
         new CreditedForm("RequireReadOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
-            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:172) and CallerReadCheck.CheckAsync "
-            + "(:191) asking Read; denied is 403 insufficient_rights, an unanswered question or a read fault 403 system_failure (:178, :200) "
+            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:270) and CallerReadCheck.CheckAsync "
+            + "(:289) asking Read; denied is 403 insufficient_rights (:300), an unanswered question or a read fault 403 system_failure (:276, :303) "
             + "(ebilling-r1 081, uac r2 I-P5)."),
         new CreditedForm("RequireAccessToTheRuleSet", "Api/Finance/RuleSetEndpoints.cs",
             "Asks the caller's own Read on the route rule set via CallerReadCheck.CheckAsync (RuleSetEndpoints.cs:574) and answers anything but "
@@ -1509,6 +1519,11 @@ public partial class RouteAuthorizationGuardTests
             + "filter. It switches on step 0 inside the route's own AddFinanceAuthorizationFilter (CreditedForms), which refuses a "
             + "flagged-external, row-less or unreadable caller before its record checks. It only narrows that filter and decides "
             + "nothing itself; FinanceStepZeroCoverageGuardTests pins it on every /api/finance route."),
+        new NotAuthorizationForm("RequireRateCardCreateOnARateCardProcedure",
+            "ebilling-r1 task 085 fix round 1: a table-privilege requirement (Create on sprk_ratecard and sprk_ratecardrate) on the Procedure "
+            + "version-create route, applied only when the route's Procedure is a Rate card Procedure, because copy-forward then creates cards "
+            + "(BillingAdminAuthorization.cs). It only narrows who may call; the route's record decision stays its AddFinanceAuthorizationFilter "
+            + "and it decides nothing about any record."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateFilingRequestAsync)",
             "Task 147 r1c: PATCH /api/v1/events/{id}/filing request SHAPE only (EventEndpoints.cs:172-177, "
             + "ChildRecordEndpoints.FilingShapeProblem, no I/O), before the route's RecordRouteAccessAuthorizationFilter(\"write\")."),

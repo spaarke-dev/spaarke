@@ -1343,9 +1343,13 @@ internal sealed record ProcedureVersionRow(Guid Id, Guid ProcedureId, int Number
     /// Publish marks the version's Accepted rules Published in the same transaction that makes it Active (<c>ProcedureService.PublishVersionAsync</c>,
     /// the only path to Active), so an Active version that had rules has a Published policy version. Two known limits keep the other answer:
     /// a version published with NO Accepted rule (an empty rule set, or every rule rejected) and then retired is read as never opened, as
-    /// <c>ProcedureService.ScopeLockedAsync</c> reads it (it governed nothing); and a version that opened a window by a published RATE CARD
-    /// alone also counts per model 7.1, but the resolver reads no rate card keyed to a Procedure Version today. Task 085 must extend this
-    /// method (and <c>ScopeLockedAsync</c>) with a published-card test when it keys the card to the Procedure Version.
+    /// <c>ProcedureService.ScopeLockedAsync</c> reads it (it governed nothing); and a RATE-CARD-ONLY version (085: its only evidence is a
+    /// Published rate card) that was in force and then Retired without being superseded is read the same way: work in its window is "not
+    /// applicable" rather than a gap, so its rates are not checked there, and it does not lock the Procedure's scope. That is rare (ending a
+    /// rate-card-only Procedure outright) and fails open. A Published card is NOT used as evidence that the version opened a window: a card can
+    /// be Published while its version is still a Draft, so a Draft retired without ever being published would then read as having opened one
+    /// (ontology-r1 ruling (c), 085 fix round 2). The durable fix is a server-written publish stamp on the version (the publish-stamp
+    /// deferral, filed separately).
     /// </remarks>
     public bool OpenedAWindow(IReadOnlySet<Guid> versionsWithPublishedRules) =>
         From is not null

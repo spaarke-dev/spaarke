@@ -151,6 +151,10 @@ public sealed class ProcedureServiceTests
             return p.Id;
         }
 
+        /// <summary>The type the Procedure is stored with: what the route's privilege check covers when nothing changes in between.</summary>
+        public ProcedureType TypeOf(Guid procedureId) =>
+            (ProcedureType)H.Row("sprk_procedure", procedureId).GetAttributeValue<OptionSetValue>("sprk_proceduretype").Value;
+
         public Guid RuleSetOf(Guid procedureId)
         {
             var id = H.RuleSet();
@@ -357,7 +361,7 @@ public sealed class ProcedureServiceTests
         var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1);
         w.Rule(set, "BILL-A", v1);
 
-        var outcome = await w.Service().CreateVersionAsync(p, Mar1, null, CallerOid, default);
+        var outcome = await w.Service().CreateVersionAsync(p, Mar1, null, CallerOid, w.TypeOf(p), default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         var v2 = outcome.Value!.Version.Id;
@@ -615,6 +619,21 @@ public sealed class ProcedureServiceTests
         w.H.Transactions.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "085 must-fire (ontology-r1 ruling c): a Draft version with a Published card, retired without ever being published, does not lock the scope")]
+    public async Task Update_ScopeChange_AfterARetiredDraftWithAPublishedCard_Succeeds()
+    {
+        var w = new World();
+        var p = w.Procedure(ProcedureType.RateCard, ProcedureAppliesTo.Firm, FirmId);
+        w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusRetired, Jan1); // a Draft discarded before it was ever published
+        CardOf(w, v1, statuscode: 659490000, "2027 rates"); // a card can be Published while its version is still a Draft
+
+        var outcome = await w.Service().UpdateAsync(p, Update(firm: OtherFirmId), default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+        w.H.Rows["sprk_ratecard"].Should().ContainSingle();
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Versions and copy-forward (model 7.2)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -626,7 +645,7 @@ public sealed class ProcedureServiceTests
         var p = w.Procedure();
         w.RuleSetOf(p);
 
-        var outcome = await w.Service().CreateVersionAsync(p, Jan1, null, CallerOid, default);
+        var outcome = await w.Service().CreateVersionAsync(p, Jan1, null, CallerOid, w.TypeOf(p), default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         outcome.Value!.Version.VersionNumber.Should().Be(1);
@@ -651,7 +670,7 @@ public sealed class ProcedureServiceTests
         w.H.Row("sprk_policy", off)["sprk_enabled"] = false; // a rule switched Off is not copied
         var (notHere, _) = w.Rule(set, "BILL-ELSEWHERE", other, published: false); // a draft under another version is not copied
 
-        var outcome = await w.Service().CreateVersionAsync(p, Mar1, null, CallerOid, default);
+        var outcome = await w.Service().CreateVersionAsync(p, Mar1, null, CallerOid, w.TypeOf(p), default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         outcome.Value!.RulesCopied.Should().Be(2);
@@ -675,6 +694,165 @@ public sealed class ProcedureServiceTests
         w.H.Row("sprk_policy", a).GetAttributeValue<EntityReference>("sprk_currentversion").Id.Should().Be(a1, "nothing is in force until publish");
     }
 
+    // ── 085 (model 7.2): a Rate card Procedure's next version starts with a copy of the previous version's card ──
+
+    private static Entity CardOf(World w, Guid version, int statuscode, string name, int statecode = 0)
+    {
+        var card = new Entity("sprk_ratecard", Guid.NewGuid())
+        {
+            ["sprk_name"] = name,
+            ["sprk_procedureversion"] = new EntityReference("sprk_procedureversion", version),
+            ["sprk_firm"] = new EntityReference("sprk_organization", FirmId),
+            ["sprk_effectivefrom"] = Jan1.ToDateTime(TimeOnly.MinValue),
+            ["statuscode"] = new OptionSetValue(statuscode),
+            ["statecode"] = new OptionSetValue(statecode),
+        };
+        w.H.Seed(card);
+        return card;
+    }
+
+    private static Entity RateOf(World w, Entity card, decimal approved, int statecode = 0)
+    {
+        var rate = new Entity("sprk_ratecardrate", Guid.NewGuid())
+        {
+            ["sprk_ratecard"] = new EntityReference("sprk_ratecard", card.Id),
+            ["sprk_classification"] = new OptionSetValue(100000001),
+            ["sprk_approvedrate"] = new Money(approved),
+            ["sprk_effectivefrom"] = Jan1.ToDateTime(TimeOnly.MinValue),
+            ["statecode"] = new OptionSetValue(statecode),
+        };
+        w.H.Seed(rate);
+        return rate;
+    }
+
+    [Fact(DisplayName = "085: a Rate card Procedure's new version gets a Draft copy of the previous version's Published card and its active rates, in the same transaction")]
+    public async Task CreateVersion_OfARateCardProcedure_CopiesThePreviousVersionsCardAndRates_AsADraft_InTheSameTransaction()
+    {
+        var w = new World();
+        var p = w.Procedure(ProcedureType.RateCard, ProcedureAppliesTo.Firm, FirmId);
+        w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1);
+        var card = CardOf(w, v1, statuscode: 659490000, "2027 rates");
+        var kept = RateOf(w, card, 500m);
+        RateOf(w, card, 450m, statecode: 1);                    // an inactive rate is not copied
+        CardOf(w, v1, statuscode: 1, "an unfinished draft");    // a Draft card is not copied
+        CardOf(w, v1, statuscode: 659490000, "retired", statecode: 1); // an inactive card is not copied
+
+        var outcome = await w.Service().CreateVersionAsync(p, Mar1, null, CallerOid, w.TypeOf(p), default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var v2 = outcome.Value!.Version.Id;
+        w.H.Transactions.Should().ContainSingle("the version and its cards are created together");
+        var copies = w.H.Rows["sprk_ratecard"].Where(c => c.GetAttributeValue<EntityReference>("sprk_procedureversion").Id == v2).ToList();
+        var copy = copies.Should().ContainSingle().Subject;
+        copy.GetAttributeValue<string>("sprk_name").Should().Be("2027 rates");
+        copy.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(1, "a Draft: in force nowhere until published");
+        copy.GetAttributeValue<EntityReference>("sprk_firm").Id.Should().Be(FirmId);
+        copy.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(TeamId);
+        copy.Contains("sprk_sourcedocument").Should().BeFalse("the copy has no source document");
+        var rateCopy = w.H.Rows["sprk_ratecardrate"].Where(r => r.GetAttributeValue<EntityReference>("sprk_ratecard").Id == copy.Id).ToList()
+            .Should().ContainSingle().Subject;
+        rateCopy.GetAttributeValue<Money>("sprk_approvedrate").Value.Should().Be(500m);
+        rateCopy.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(TeamId);
+
+        // The previous version's card and rate are untouched.
+        w.H.Row("sprk_ratecard", card.Id).GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(659490000);
+        w.H.Row("sprk_ratecardrate", kept.Id).GetAttributeValue<EntityReference>("sprk_ratecard").Id.Should().Be(card.Id);
+        w.H.Rows["sprk_ratecard"].Count(c => c.GetAttributeValue<EntityReference>("sprk_procedureversion").Id == v1).Should().Be(3);
+    }
+
+    [Fact(DisplayName = "085: a Procedure that is not a Rate card Procedure copies no cards")]
+    public async Task CreateVersion_OfAGuideline_CopiesNoCards()
+    {
+        var w = new World();
+        var p = w.Procedure(ProcedureType.Guideline);
+        w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1);
+        CardOf(w, v1, statuscode: 659490000, "not copied");
+
+        var outcome = await w.Service().CreateVersionAsync(p, Mar1, null, CallerOid, w.TypeOf(p), default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        w.H.Rows["sprk_ratecard"].Should().ContainSingle("only the seeded card");
+    }
+
+    [Fact(DisplayName = "085 must-fire: a Procedure that reads as a Rate card when the privilege check covered a Guideline is refused 409 procedure.type_changed and nothing is written")]
+    public async Task CreateVersion_WhenTheTypeChangedToRateCardAfterTheCheck_Is409TypeChanged_AndWritesNothing()
+    {
+        var w = new World();
+        var p = w.Procedure(ProcedureType.RateCard, ProcedureAppliesTo.Firm, FirmId);
+        w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1);
+        CardOf(w, v1, statuscode: 659490000, "2027 rates");
+
+        var outcome = await w.Service().CreateVersionAsync(p, Mar1, null, CallerOid, ProcedureType.Guideline, default);
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("procedure.type_changed");
+        w.H.Transactions.Should().BeEmpty();
+        w.H.Rows["sprk_procedureversion"].Should().ContainSingle("only v1");
+        w.H.Rows["sprk_ratecard"].Should().ContainSingle("only the seeded card");
+    }
+
+    [Fact(DisplayName = "085 must-fire: the type check also runs on the conflict retry - a Procedure that became a Rate card meanwhile is refused 409 procedure.type_changed")]
+    public async Task CreateVersion_WhenTheTypeChangesBetweenTheAttemptAndItsRetry_Is409TypeChanged_AndTheRetryWritesNothing()
+    {
+        var w = new World();
+        var p = w.Procedure(ProcedureType.Guideline);
+        w.RuleSetOf(p);
+        w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1);
+        var landed = false;
+        w.H.AfterQuery = q =>
+        {
+            if (q.EntityName == "sprk_procedureversion" && !landed)
+            {
+                landed = true; // another admin's version 2 lands (the first attempt clashes), and the Procedure is made a Rate card
+                w.Version(p, 2, ProcedureEntity.VersionStatusRetired);
+                w.H.Row("sprk_procedure", p)["sprk_proceduretype"] = new OptionSetValue((int)ProcedureType.RateCard);
+            }
+        };
+
+        var outcome = await w.Service().CreateVersionAsync(p, null, null, CallerOid, ProcedureType.Guideline, default);
+
+        outcome.ErrorCode.Should().Be("procedure.type_changed");
+        w.H.Transactions.Should().ContainSingle("the first attempt clashed; the retry was refused before writing");
+        w.H.Rows["sprk_procedureversion"].Should().HaveCount(2, "v1 and the other admin's v2 only");
+    }
+
+    [Fact(DisplayName = "085 must-not-fire: a Rate card Procedure whose privilege check covered a Rate card creates its version")]
+    public async Task CreateVersion_WhenTheCheckCoveredARateCard_IsCreated()
+    {
+        var w = new World();
+        var p = w.Procedure(ProcedureType.RateCard, ProcedureAppliesTo.Firm, FirmId);
+        w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1);
+        CardOf(w, v1, statuscode: 659490000, "2027 rates");
+
+        var outcome = await w.Service().CreateVersionAsync(p, Mar1, null, CallerOid, ProcedureType.RateCard, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+    }
+
+    [Fact(DisplayName = "085 (fail closed): an unresolvable card owner refuses the new version and writes nothing")]
+    public async Task CreateVersion_OfARateCardProcedure_WhenTheCardOwnerCannotBeResolved_IsRefused_AndWritesNothing()
+    {
+        var w = new World();
+        var p = w.Procedure(ProcedureType.RateCard, ProcedureAppliesTo.Firm, FirmId);
+        w.RuleSetOf(p);
+        var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1);
+        CardOf(w, v1, statuscode: 659490000, "2027 rates");
+        // Only the card's owner question is refused: the version's own owner is answered, so a refusal here is the card path's.
+        w.H.Ownership.Setup(o => o.ResolveOwnerAsync(It.Is<RecordOwnershipContext>(c => c.ChildEntityLogicalName == "sprk_ratecard"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "no team"));
+
+        var outcome = await w.Service().CreateVersionAsync(p, Mar1, null, CallerOid, w.TypeOf(p), default);
+
+        outcome.Kind.Should().NotBe(RuleSetOutcomeKind.Done);
+        w.H.Transactions.Should().BeEmpty();
+        w.H.Rows["sprk_procedureversion"].Should().ContainSingle("only v1");
+        w.H.Rows["sprk_ratecard"].Should().ContainSingle();
+    }
+
     [Fact]
     public async Task CreateVersion_WhileADraftExists_Is409_AndWritesNothing()
     {
@@ -683,7 +861,7 @@ public sealed class ProcedureServiceTests
         w.RuleSetOf(p);
         w.Version(p, 1, ProcedureEntity.VersionStatusDraft);
 
-        var outcome = await w.Service().CreateVersionAsync(p, null, null, CallerOid, default);
+        var outcome = await w.Service().CreateVersionAsync(p, null, null, CallerOid, w.TypeOf(p), default);
 
         outcome.ErrorCode.Should().Be("procedure.draft_exists");
         w.H.Transactions.Should().BeEmpty();
@@ -706,7 +884,7 @@ public sealed class ProcedureServiceTests
             }
         };
 
-        var outcome = await w.Service().CreateVersionAsync(p, null, null, CallerOid, default);
+        var outcome = await w.Service().CreateVersionAsync(p, null, null, CallerOid, w.TypeOf(p), default);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         outcome.Value!.Version.VersionNumber.Should().Be(3);
@@ -722,7 +900,7 @@ public sealed class ProcedureServiceTests
         w.RuleSetOf(p);
         w.ChangeProcedureAfterEveryRead(p);
 
-        var outcome = await w.Service().CreateVersionAsync(p, null, null, CallerOid, default);
+        var outcome = await w.Service().CreateVersionAsync(p, null, null, CallerOid, w.TypeOf(p), default);
 
         outcome.ErrorCode.Should().Be("procedure.version_conflict");
         w.H.Transactions.Should().HaveCount(2);
@@ -737,7 +915,7 @@ public sealed class ProcedureServiceTests
         w.RuleSetOf(p);
         w.H.TransactionOutcomeUnknown = true;
 
-        var outcome = await w.Service().CreateVersionAsync(p, null, null, CallerOid, default);
+        var outcome = await w.Service().CreateVersionAsync(p, null, null, CallerOid, w.TypeOf(p), default);
 
         outcome.ErrorCode.Should().Be("procedure.write_failed", "a version that may exist is not reported as a number clash");
         outcome.Detail.Should().Contain("Reload the Procedure");
@@ -754,7 +932,7 @@ public sealed class ProcedureServiceTests
         w.Rule(set, "BILL-A", v1);
         w.H.FailTransactionRequest = r => r is UpdateRequest u && u.Target.LogicalName == "sprk_procedure";
 
-        var outcome = await w.Service().CreateVersionAsync(p, null, null, CallerOid, default);
+        var outcome = await w.Service().CreateVersionAsync(p, null, null, CallerOid, w.TypeOf(p), default);
 
         outcome.ErrorCode.Should().Be("procedure.write_failed");
         w.H.Rows["sprk_procedureversion"].Should().ContainSingle("only v1");
@@ -996,7 +1174,7 @@ public sealed class ProcedureServiceTests
         var v1 = w.Version(p, 1, ProcedureEntity.VersionStatusActive, Jan1);
         var (a, _) = w.Rule(set, "BILL-A", v1);
         var (b, b1) = w.Rule(set, "BILL-B", v1);
-        var created = await w.Service().CreateVersionAsync(p, null, null, CallerOid, default);
+        var created = await w.Service().CreateVersionAsync(p, null, null, CallerOid, w.TypeOf(p), default);
         var v2 = created.Value!.Version.Id;
         w.SourceFile(v2);
         var b2 = w.H.Rows["sprk_policyversion"].Single(v =>

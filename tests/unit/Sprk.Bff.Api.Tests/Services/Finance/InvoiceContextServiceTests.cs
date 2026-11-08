@@ -8,7 +8,9 @@ using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
+using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance;
@@ -42,7 +44,15 @@ public class InvoiceContextServiceTests
     private const int Partner = 100000001;
     private const int Associate = 100000003;
 
-    public enum Kind { Header, Core, Budget, Prior, Disallow, FeeLines, Roster, Rates, PreviousLines }
+    // 085: the Procedure world the resolver reads for the rate history. An all-records Rate card Procedure (version AllVersion) and a
+    // Rate card Procedure of this firm (version FirmVersion), each with one version in force from 2020-01-01.
+    private static readonly Guid AllProcedure = RateProcedureWorld.ProcedureId;
+    private static readonly Guid AllVersion = RateProcedureWorld.VersionId;
+    private static readonly Guid FirmProcedure = Guid.Parse("00000000-0000-0000-0000-0000000000e3");
+    private static readonly Guid FirmVersion = Guid.Parse("00000000-0000-0000-0000-0000000000e4");
+
+    /// <summary><c>Procedure</c>: a read the Procedure resolver makes (the core-record chain, assignments, Procedures, versions, rule sets): kept apart from the panel's own reads.</summary>
+    public enum Kind { Header, Core, Budget, Prior, Disallow, FeeLines, Roster, Rates, PreviousLines, Procedure }
 
     // =========================================================================================
     // Fixture harness
@@ -59,6 +69,14 @@ public class InvoiceContextServiceTests
         public List<Entity> RosterRows = [];
         public List<Entity> RateRows = [];
         public List<Entity> PreviousLines = [];
+
+        public List<Entity> Procedures =
+        [
+            RateProcedureWorld.Procedure(AllProcedure),
+            RateProcedureWorld.Procedure(FirmProcedure, ProcedureAppliesTo.Firm, FirmId),
+        ];
+
+        public List<Entity> ProcedureVersions = [RateProcedureWorld.Version(AllVersion, AllProcedure), RateProcedureWorld.Version(FirmVersion, FirmProcedure)];
 
         public List<QueryExpression> Queries { get; } = [];
         public Func<Kind, QueryExpression, CancellationToken, Task<EntityCollection>?>? Intercept { get; set; }
@@ -123,6 +141,7 @@ public class InvoiceContextServiceTests
                 Kind.Roster => RosterRows,
                 Kind.Rates => RateRows,
                 Kind.PreviousLines => OwnedBy(PreviousLines, query),
+                Kind.Procedure => RateProcedureWorld.AnswerResolverRead(query, Procedures, ProcedureVersions)?.ToList() ?? [],
                 _ => throw new InvalidOperationException("Unclassified query."),
             };
 
@@ -144,7 +163,15 @@ public class InvoiceContextServiceTests
             case "sprk_matter":
             case "sprk_project":
             case "sprk_workassignment":
-                return columns.Contains("statuscode") ? Kind.Core : Kind.Budget;
+                // The Procedure resolver's chain read selects only filing columns; the core read has statuscode, the budget read its rollups.
+                return columns.Contains("statuscode") ? Kind.Core : columns.Contains("sprk_totalbudget") ? Kind.Budget : Kind.Procedure;
+            case "sprk_procedure":
+            case "sprk_procedureversion":
+            case "sprk_procedureassignment":
+            case "sprk_ruleset":
+            case "sprk_policy":
+            case "sprk_policyversion":
+                return Kind.Procedure;
             case "sprk_billingevent":
                 if (AllConditions(q).Any(c => c.AttributeName == "sprk_invoice" && c.Operator == ConditionOperator.Equal))
                 {
@@ -160,6 +187,8 @@ public class InvoiceContextServiceTests
                 throw new InvalidOperationException($"Unexpected query on {q.EntityName}.");
         }
     }
+
+    private static IEnumerable<object?> Flat(object? value) => value is object[] many ? many.SelectMany(Flat) : [value];
 
     private static IEnumerable<ConditionExpression> Flatten(FilterExpression? filter) =>
         filter is null ? [] : filter.Conditions.Concat(filter.Filters.SelectMany(Flatten));
@@ -262,7 +291,7 @@ public class InvoiceContextServiceTests
         return e;
     }
 
-    private static Entity Rate(Guid? timekeeper, int? classification, decimal approved, decimal? rack, DateTime from, DateTime? to, Guid? cardMatter = null)
+    private static Entity Rate(Guid? timekeeper, int? classification, decimal approved, decimal? rack, DateTime from, DateTime? to, Guid? version = null)
     {
         var e = new Entity("sprk_ratecardrate", Guid.NewGuid());
         if (timekeeper is not null) e["sprk_timekeeper"] = new EntityReference("sprk_timekeeper", timekeeper.Value);
@@ -271,11 +300,7 @@ public class InvoiceContextServiceTests
         if (rack is not null) e["sprk_rackrate"] = new Money(rack.Value);
         e["sprk_effectivefrom"] = from;
         if (to is not null) e["sprk_effectiveto"] = to.Value;
-        if (cardMatter is not null)
-        {
-            e["card.sprk_matter"] = new AliasedValue("sprk_ratecard", "sprk_matter", new EntityReference("sprk_matter", cardMatter.Value));
-        }
-
+        e["card.sprk_procedureversion"] = RateProcedureWorld.CardVersion(version ?? AllVersion);
         return e;
     }
 
@@ -314,7 +339,7 @@ public class InvoiceContextServiceTests
         h.RateRows =
         [
             Rate(Alice, null, 450m, 600m, new DateTime(2026, 1, 1), null),
-            Rate(Alice, null, 400m, null, new DateTime(2025, 1, 1), new DateTime(2025, 12, 31), cardMatter: MatterId),
+            Rate(Alice, null, 400m, null, new DateTime(2025, 1, 1), new DateTime(2025, 12, 31), version: FirmVersion),
             Rate(null, Partner, 480m, null, new DateTime(2024, 1, 1), null),
             Rate(null, Associate, 250m, null, new DateTime(2024, 1, 1), null),
         ];
@@ -375,9 +400,9 @@ public class InvoiceContextServiceTests
         var alice = rates[0];
         alice.TimekeeperId.Should().Be(Alice);
         alice.ApprovedRates.Select(r => (r.Basis, r.Scope, r.ApprovedRate, r.EffectiveFrom, r.EffectiveTo)).Should().Equal(
-            ("timekeeper", "firm", 450m, new DateOnly(2026, 1, 1), (DateOnly?)null),
-            ("timekeeper", "coreRecord", 400m, new DateOnly(2025, 1, 1), new DateOnly(2025, 12, 31)),
-            ("classification", "firm", 480m, new DateOnly(2024, 1, 1), (DateOnly?)null));
+            ("timekeeper", "AllRecords/d0", 450m, new DateOnly(2026, 1, 1), (DateOnly?)null),
+            ("timekeeper", "Firm/d0/firmSpecific", 400m, new DateOnly(2025, 1, 1), new DateOnly(2025, 12, 31)),
+            ("classification", "AllRecords/d0", 480m, new DateOnly(2024, 1, 1), (DateOnly?)null));
         alice.ApprovedRates[0].RackRate.Should().Be(600m);
         alice.BilledOnThisInvoice.Should().Equal(new BilledRateItem(500m, 2, new DateOnly(2026, 3, 1), new DateOnly(2026, 3, 2)));
         alice.BilledPreviously.Select(b => (b.Rate, b.LineCount, b.LastSeen)).Should().Equal(
@@ -489,13 +514,17 @@ public class InvoiceContextServiceTests
         var rates = h.Queries.Single(x => Classify(x) == Kind.Rates);
         Has(rates, "sprk_firm", ConditionOperator.Equal, FirmId).Should().BeTrue("rate cards are this firm's");
         Has(rates, "statuscode", ConditionOperator.Equal, 659490000).Should().BeTrue("only Published cards");
-        Has(rates, "sprk_matter", ConditionOperator.Equal, MatterId).Should().BeTrue("firm-wide cards plus cards scoped to this core record");
+        AllConditions(rates).Single(c => c.AttributeName == "sprk_procedureversion").Values.OfType<Guid>().ToList()
+            .Should().BeEquivalentTo(new[] { AllVersion, FirmVersion }, "only the cards of the Procedure Versions the resolver chose");
+        AllConditions(rates).Select(c => c.AttributeName).Should().NotContain(["sprk_matter", "sprk_project", "sprk_workassignment", "sprk_scope"],
+            "a card no longer hangs from a core record (D-120)");
 
         Has(h.Queries.Single(x => Classify(x) == Kind.FeeLines), "sprk_invoice", ConditionOperator.Equal, InvoiceId).Should().BeTrue();
 
         // Every id any query mentions is the invoice's own firm / core record / invoice, or one of its timekeepers.
-        var allowed = new HashSet<Guid> { InvoiceId, FirmId, MatterId, Alice, Bob, SiblingA, SiblingB, SiblingC };
-        var mentioned = h.Queries.SelectMany(AllConditions).SelectMany(c => c.Values).OfType<Guid>();
+        // (The resolver's own reads are judged by its tests; the rate read names the chosen versions.)
+        var allowed = new HashSet<Guid> { InvoiceId, FirmId, MatterId, Alice, Bob, SiblingA, SiblingB, SiblingC, AllVersion, FirmVersion };
+        var mentioned = h.Queries.Where(q => Classify(q) != Kind.Procedure).SelectMany(AllConditions).SelectMany(c => c.Values).SelectMany(Flat).OfType<Guid>();
         mentioned.Should().OnlyContain(id => allowed.Contains(id));
     }
 
@@ -1141,6 +1170,88 @@ public class InvoiceContextServiceTests
     // Bounded reads, determinism
     // =========================================================================================
 
+    [Fact(DisplayName = "085: a resolver fault leaves only the rate history unavailable, never a firm or core-record fallback")]
+    public async Task AProcedureResolutionFault_MakesOnlyTheRateHistoryUnavailable_AndReadsNoRates()
+    {
+        var h = FullFixture();
+        // Two versions of one Procedure in force on the same date (I-P1): the resolver refuses to choose.
+        h.ProcedureVersions =
+        [
+            RateProcedureWorld.Version(AllVersion, AllProcedure),
+            RateProcedureWorld.Version(Guid.NewGuid(), AllProcedure),
+            RateProcedureWorld.Version(FirmVersion, FirmProcedure),
+        ];
+        h.ProcedureVersions[1]["sprk_versionnumber"] = 2;
+        h.ProcedureVersions[1]["sprk_effectivefrom"] = new DateTime(2021, 1, 1);
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        context.RateHistory.Status.Should().Be(ContextSectionStatus.Unavailable);
+        context.RateHistory.Data.Should().BeNull();
+        h.Count(Kind.Rates).Should().Be(0, "no rate is read, from a Procedure or from anywhere else");
+        context.PriorInvoices.Status.Should().Be(ContextSectionStatus.Available);
+        context.DisallowHistory.Status.Should().Be(ContextSectionStatus.Available);
+    }
+
+    [Fact(DisplayName = "085: the approved rates are those of the versions chosen for each distinct line date; no dated line falls back to the invoice date")]
+    public async Task TheApprovedRates_AreJudgedOnTheLineDates_AndOnTheInvoiceDateWhenNoLineHasOne()
+    {
+        var h = FullFixture();
+        // No version is in force before 2027: the two line dates (March 2026) choose nothing, so no rate is read.
+        foreach (var v in h.ProcedureVersions) v["sprk_effectivefrom"] = new DateTime(2027, 1, 1);
+
+        var none = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        none.RateHistory.Status.Should().Be(ContextSectionStatus.Available);
+        none.RateHistory.Data!.Timekeepers.SelectMany(t => t.ApprovedRates).Should().BeEmpty();
+        h.Count(Kind.Rates).Should().Be(0, "no version chosen, nothing to read");
+        h.Queries.Count(q => q.EntityName == "sprk_procedure").Should().Be(1);
+
+        // No dated line: the invoice's own date decides (2027-02-01 is inside the versions' window).
+        var byInvoiceDate = FullFixture();
+        byInvoiceDate.Header["sprk_invoicedate"] = new DateTime(2027, 2, 1);
+        foreach (var v in byInvoiceDate.ProcedureVersions) v["sprk_effectivefrom"] = new DateTime(2027, 1, 1);
+        byInvoiceDate.FeeLines = [FeeLine(Alice, "A. Alice", 500m, default)];
+        byInvoiceDate.FeeLines[0].Attributes.Remove("sprk_eventdate");
+
+        var withDate = (await byInvoiceDate.Service().GetAsync(InvoiceId, Caller))!;
+
+        byInvoiceDate.Count(Kind.Rates).Should().Be(1);
+        withDate.RateHistory.Data!.Timekeepers.SelectMany(t => t.ApprovedRates).Should().NotBeEmpty();
+    }
+
+    // ── Design decision (uac-r2 approved, 2026-11-08): the panel shows the rates resolution applies to the invoice's work dates to any reviewer
+    // with core Read. It takes only the invoice id, chooses no Procedure or card from the client, and prints only the rank label. ──
+
+    [Fact(DisplayName = "085 design decision pin: the context response carries no Procedure identifier (id or name) and no version or card id; only the rank label")]
+    public async Task TheContext_CarriesNoProcedureIdentifier_OnlyTheRankLabel()
+    {
+        var h = FullFixture();
+        foreach (var procedure in h.Procedures)
+        {
+            procedure["sprk_name"] = "SECRET-PROCEDURE-NAME";
+        }
+
+        var context = (await h.Service().GetAsync(InvoiceId, Caller))!;
+
+        context.RateHistory.Data!.Timekeepers.SelectMany(t => t.ApprovedRates).Should().NotBeEmpty("the rates are shown");
+        var json = JsonSerializer.Serialize(context);
+        json.Should().NotContain("SECRET-PROCEDURE-NAME");
+        foreach (var id in new[] { AllProcedure, FirmProcedure, AllVersion, FirmVersion })
+        {
+            json.Should().NotContainEquivalentOf(id.ToString(), $"no Procedure or version id reaches the reviewer ({id})");
+        }
+
+        context.RateHistory.Data!.Timekeepers.SelectMany(t => t.ApprovedRates).Select(r => r.Scope)
+            .Should().OnlyContain(label => label.StartsWith("AllRecords/d0") || label.StartsWith("Firm/d0"), "the rank label is all that names the Procedure's place");
+    }
+
+    // The other two properties of the decision are pinned by existing tests: only versions the resolver chose appear
+    // (EveryCrossInvoiceQuery_IsScopedToTheInvoicesFirmAndCoreRecord_AndExcludesTheCurrentInvoice, which asserts the rate query names exactly
+    // the chosen versions, and TheApprovedRates_AreJudgedOnTheLineDates_AndOnTheInvoiceDateWhenNoLineHasOne, where no chosen version reads no
+    // rate); a core Read failure gives Unavailable (ACoreRecordTheCallerCannotRead_GivesNoDetailsNoBudgetAndNoCoreScopedRates and
+    // AFailedCoreRecordAccessCheck_MakesTheCoreSectionsUnavailable_NeverTheData).
+
     [Fact]
     public async Task QueryCount_DoesNotDependOnTheInvoicesLineCount()
     {
@@ -1154,7 +1265,8 @@ public class InvoiceContextServiceTests
         await large.Service().GetAsync(InvoiceId, Caller);
 
         large.Queries.Count.Should().Be(small.Queries.Count);
-        small.Queries.Count.Should().Be(9, "header + core + budget + prior + disallow + fee lines + roster + rates + previous lines");
+        small.Queries.Count(q => Classify(q) != Kind.Procedure).Should().Be(9, "header + core + budget + prior + disallow + fee lines + roster + rates + previous lines");
+        small.Queries.Count(q => Classify(q) == Kind.Procedure && q.EntityName == "sprk_procedure").Should().Be(1, "one resolver read per invoice, however many lines or dates");
         large.Queries.Select(Classify).Should().BeEquivalentTo(small.Queries.Select(Classify));
     }
 

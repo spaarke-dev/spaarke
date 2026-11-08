@@ -1205,7 +1205,7 @@ Each restamps afterwards, but none refuses any of these:
 
 | Field | Value |
 |---|---|
-| **Status** | Open; fix decided (owner, ontology D-172 / ebilling D-137); fixed by tasks 080 (schema) and 085 (code) |
+| **Status** | Superseded by EB-D-148: cards keyed to Procedure Version (085); live after 079 |
 | **Urgency** | medium (wrong rates applied to a whole firm's invoices) |
 | **Filed** | 2026-10-20 |
 | **Source** | rule-set scope design for #2129 (`notes/rule-set-scope-design.md`); relationships checked live on dev |

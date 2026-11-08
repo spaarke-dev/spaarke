@@ -4,7 +4,7 @@
     <title>Rate cards keyed to Procedure Version: import, copy-forward, resolver tiers re-keyed to the rank; no scope column</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-E</phase>
     <gate>080 (sprk_ratecard.sprk_procedureversion live on dev) and 082 (resolver output names each version's rate card and rank) merged</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the rate every fee line is judged against (precedence, ambiguity, fail-closed) and the rate-card import contract; .cs files across resolution and import.</rigor-reason>
     <model-tier>sonnet</model-tier>
