@@ -67,7 +67,10 @@ export interface IPushResponse {
   skippedNoWriteCount: number;
   /** More children exist than one push handles, so a preview list is partial. */
   truncated: boolean;
-  /** Rules the profile has that a push does not apply (not Copy, or not Manual Refresh). */
+  /**
+   * Rules the profile has that a push does not apply (not Copy, not Manual Refresh, or, task 032b-1, a display copy such as an
+   * invoice's attorney columns, which only the create sets). Carried on the preview and the apply.
+   */
   skippedRuleCount: number;
   changes: IPushPreviewChange[];
   errors: IPushError[];

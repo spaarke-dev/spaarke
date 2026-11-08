@@ -349,15 +349,10 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
                 new AccessConferringColumn { Field = "sprk_assignedlawfirm1", IdentityType = "Organization" },
                 new AccessConferringColumn { Field = "sprk_assignedlawfirm2", IdentityType = "Organization" },
             },
-            ["sprk_invoice"] = new[]
-            {
-                new AccessConferringColumn { Field = "sprk_assignedto1", IdentityType = "Contact" },
-                new AccessConferringColumn { Field = "sprk_assignedto2", IdentityType = "Contact" },
-                new AccessConferringColumn { Field = "sprk_assignedtoattorney1", IdentityType = "Contact" },
-                new AccessConferringColumn { Field = "sprk_assignedtoattorney2", IdentityType = "Contact" },
-                new AccessConferringColumn { Field = "sprk_assignedtoparalegal1", IdentityType = "Contact" },
-                new AccessConferringColumn { Field = "sprk_assignedtoparalegal2", IdentityType = "Contact" },
-            },
+            // No sprk_invoice entry (field-mapping-server-write-path-r1 task 032b-1; UAC-r2 U3 (c), owner-approved 2026-11-08):
+            // its attorney and paralegal columns are display copies of the core record's (DisplayCopyColumns) and confer no
+            // access; no membership caller resolved invoice access from them. InvoiceDisplayCopyRegistryGuardTests fails on a
+            // re-added entry.
             ["sprk_todo"] = new[]
             {
                 new AccessConferringColumn { Field = "sprk_assignedto", IdentityType = "Contact" },
@@ -368,6 +363,26 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
                 new AccessConferringColumn { Field = "sprk_assignedattorney2", IdentityType = "Contact" },
                 new AccessConferringColumn { Field = "sprk_assignedparalegal1", IdentityType = "Contact" },
                 new AccessConferringColumn { Field = "sprk_assignedparalegal2", IdentityType = "Contact" },
+            },
+        };
+
+    /// <summary>
+    /// DISPLAY COPIES (field-mapping-server-write-path-r1 task 032b-1; UAC-r2 U3 (c), owner-approved 2026-11-08): columns that
+    /// carry an <c>sprk_assigned*</c> value copied from the core record at create, as display text that confers NO access. They
+    /// are never in <see cref="CanonicalAccessConferringRegistry"/> (a guard test pins the two apart), and a field-mapping push
+    /// never writes them, whatever a rule's sync mode (<c>PushRuleSelection.Select</c>): only the create maps them (no re-map,
+    /// design notes/task-032b-design.md §3, §7). The sync-mode script's display-copy table is held to this set by a test.
+    /// <para>
+    /// <c>sprk_invoice</c>'s four attorney and paralegal columns, filled by the seeded "Matter to Invoice (Attorney Matrix)"
+    /// profile. <c>sprk_assignedto1/2</c> are not listed: no profile maps them, and the invoice step never writes them.
+    /// </para>
+    /// </summary>
+    internal static IReadOnlyDictionary<string, IReadOnlySet<string>> DisplayCopyColumns { get; } =
+        new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_invoice"] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "sprk_assignedtoattorney1", "sprk_assignedtoattorney2", "sprk_assignedtoparalegal1", "sprk_assignedtoparalegal2",
             },
         };
 

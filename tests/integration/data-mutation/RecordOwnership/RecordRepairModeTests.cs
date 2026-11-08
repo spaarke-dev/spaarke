@@ -1048,6 +1048,34 @@ public sealed class RecordRepairModeTests
         Field(outcome, RecordRepairPart.Mapping, "sprk_assignedlawfirm1").ReasonCode.Should().Be(RecordRepairReason.MappedValueAssignsAccess);
     }
 
+    /// <summary>
+    /// Task 032b-1 (review): an invoice's display copies (<see cref="MembershipOptionsDefaults.DisplayCopyColumns"/>) left the
+    /// access registry, so Repair's never-map list names them itself, with their own reason: Repair never re-fills a display
+    /// copy (the create alone sets it). Asked directly: an invoice row is refused before the mapping step today (#1911), which
+    /// would mask the list.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_assignedtoattorney1")]
+    [InlineData("sprk_assignedtoattorney2")]
+    [InlineData("sprk_assignedtoparalegal1")]
+    [InlineData("sprk_assignedtoparalegal2")]
+    public void AnInvoiceDisplayCopy_IsNeverMappedByRepair_WithItsOwnReason(string column)
+    {
+        _world.ColumnsRepairNeverMaps("sprk_invoice").Should().Contain(column, RecordRepairReason.MappedValueIsDisplayCopy);
+    }
+
+    [Fact]
+    public void ADisplayCopyName_OnAnotherTable_OrAPlainInvoiceColumn_IsNotADisplayCopy_MustNotFire()
+    {
+        var invoice = _world.ColumnsRepairNeverMaps("sprk_invoice");
+        invoice.Should().NotContainKeys("sprk_clientreference", "sprk_assignedto1", "sprk_assignedto2");
+
+        var eventColumns = _world.ColumnsRepairNeverMaps("sprk_event");
+        eventColumns.Should().NotContainKey("sprk_assignedtoattorney1");
+        eventColumns.Should().Contain("sprk_assignedattorney1", RecordRepairReason.MappedValueAssignsAccess,
+            "the registry's columns keep their own reason");
+    }
+
     [Fact]
     public async Task AnOrdinaryColumn_IsStillFilledFromTheProject_F1_1MustNotFire()
     {
@@ -1347,6 +1375,9 @@ internal sealed class RepairWorld
     public static readonly Guid SourceDocument = Guid.Parse("a0160000-0000-4000-8000-000000000009");
 
     public Task<RecordRepairOutcome> RepairAsync(string table, Guid id) => Service().RepairAsync(table, id, CancellationToken.None);
+
+    /// <summary>Task 032b-1 seam: Repair's never-map list for a table, asked directly (no row, no profile).</summary>
+    public IReadOnlyDictionary<string, string> ColumnsRepairNeverMaps(string table) => Service().ColumnsRepairNeverMaps(table);
 
     // ── Rows ────────────────────────────────────────────────────────────────────────────────────────────────────
 
