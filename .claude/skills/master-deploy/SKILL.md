@@ -24,10 +24,10 @@
 | 5 | SpeAdminApp | `sprk_speadmin` | `scripts/Deploy-SpeAdminApp.ps1` |
 | 6 | EventDetailSidePane | `sprk_eventdetailsidepane.html` | `scripts/Deploy-EventDetailSidePane.ps1` |
 | 7 | CalendarSidePane | `sprk_calendarsidepane.html` | `scripts/Deploy-CalendarSidePane.ps1` |
-| 8-19 | 12 wizards/CodePages | (see Deploy-WizardCodePages.ps1) | `scripts/Deploy-WizardCodePages.ps1` (one batch) |
-| 20 | **BFF API** | `spaarke-bff-dev` App Service | `/bff-deploy` skill |
+| 8-22 | 15 wizards/CodePages | (see Deploy-WizardCodePages.ps1) | `scripts/Deploy-WizardCodePages.ps1` (one batch) |
+| 23 | **BFF API** | `spaarke-bff-dev` App Service | `/bff-deploy` skill |
 
-The 12 surfaces in `Deploy-WizardCodePages.ps1`: CreateMatter, CreateProject, CreateEvent, CreateTodo, CreateWorkAssignment, SummarizeFiles, FindSimilar, PlaybookLibrary, DocumentUpload, AllDocuments, WorkspaceLayoutWizard, sprk_wizard_commands.
+The 15 surfaces in `Deploy-WizardCodePages.ps1`: CreateMatter, CreateProject, CreateEvent, CreateInvoice, CreateReportCard, CreateTodo, CreateWorkAssignment, SummarizeFiles, FindSimilar, PlaybookLibrary, RecordFamily (`sprk_recordfamily`, the Family view the Push Updates ribbon opens; deploy it before `sprk_fieldmapping_push.js` v1.3.0), DocumentUpload, AllDocuments, WorkspaceLayoutWizard, sprk_wizard_commands.
 
 **Also deployed by this skill (added 2026-10-11 — these were missing, so a "master deploy" left them stale on dev for months):**
 

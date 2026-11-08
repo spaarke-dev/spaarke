@@ -12,7 +12,7 @@
     <effort>xhigh</effort>
     <parallel-group>W5-B</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>016, 033, 050</deps>
+    <deps>016, 050</deps>
     <tags>bff-api, jobs, security, ownership, testing</tags>
     <estimated-effort>14-20 hours</estimated-effort>
   </metadata>
@@ -22,7 +22,7 @@
   <goal>Natively created or imported rows get mapping, standard owner and stamp within 10 minutes (no index column written by the server, FR-40); re-runs are no-ops; a pre-go-live row is never written; the job is leased, atomically claimed per unit, heartbeated and observable (scanned / repaired / no-op / failed); the on-demand trigger is admin-authorized and listed in the route-authorization ledger.</goal>
 
   <context>
-    <background>spec.md FR-25, NFR-03, NFR-04, NFR-01; design.md §4 (W5); task 050 fixes the repair marker. Repair mode (FR-14, task 016) is the per-row worker and is fill-only and idempotent. Go-live is a configured instant; the watermark is the end of the last fully completed window. Existing admin job endpoints (Api/Admin/JobsEndpoints.cs, group behind RequireAuthorization("SystemAdmin"), POST /{jobId}/trigger) trigger a job by id only; the on-demand pass needs table + window parameters, so extend that surface or add one admin route (decide after reading it; record the choice). Task 044(d), added 2026-11-04: the pass also backstops the Signal / Decision Record core pair for rows created after go-live, completing a type with no id from the derived root or clearing the type with a warning (042c's rule); those tables are otherwise out of repair (2026-11-02) and Decision Record is append-only, so whether the pass writes or only reports needs ontology-r1's agreement first.</background>
+    <background>spec.md FR-25, NFR-03, NFR-04, NFR-01; design.md §4 (W5); task 050 fixes the repair marker. Repair mode (FR-14, task 016) is the per-row worker and is fill-only and idempotent. Go-live is a configured instant; the watermark is the end of the last fully completed window. Existing admin job endpoints (Api/Admin/JobsEndpoints.cs, group behind RequireAuthorization("SystemAdmin"), POST /{jobId}/trigger) trigger a job by id only; the on-demand pass needs table + window parameters, so extend that surface or add one admin route (decide after reading it; record the choice). Task 044(d), revised 2026-11-06 (ontology D-204, D-210): the core pair carries no field security; only the writers set it, and they write both halves or neither (D-204). For Signal and Decision Record rows created after go-live, the pass REPORTS, and never writes, (1) any row that holds one half of the pair only and (2) any row whose pair changed after create (from the column audit history of the two pair columns). It writes nothing to these tables (they stay out of repair, 2026-11-02; Decision Record is append-only). Completing or clearing a pair stays out of scope unless ontology-r1 agrees otherwise.</background>
     <relevant-files>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorStampReconciliationJob.cs (IScheduledJob with DefaultCronSchedule "*/5 * * * *" ~:74; repair-marker idempotency via MarkEventAsProcessedAsync ~:568; RunCounts ~:839; heartbeat per attempt) - copy the claim/marker/heartbeat/counter structure</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciliationJob.cs (JobIdConstant, DefaultCronSchedule, Success=false for incomplete work, one heartbeat per attempt; registered via AddScheduledJob in ExternalAccessModule) - copy the registration and result shape</file>
@@ -38,7 +38,7 @@
     </relevant-files>
     <dependencies>
       <dependency task="016" status="pending">Repair mode (fill-only, idempotent per row).</dependency>
-      <dependency task="033" status="pending">HARD BLOCK (task 016 review pass 1 F1-d): the app-only column-metadata reader must be wired into Repair before any scheduled pass calls it; until then one mis-typed mapping rule fails a row's whole repair on every pass.</dependency>
+      <dependency task="033" status="dropped">IN SCOPE HERE since 033 was dropped (owner 2026-11-07). HARD BLOCK (task 016 review pass 1 F1-d): the app-only column-metadata reader must be wired into Repair before any scheduled pass calls it; until then one mis-typed mapping rule fails a row's whole repair on every pass.</dependency>
       <dependency task="050" status="pending">Final repair-marker decision (createdby vs impersonation).</dependency>
     </dependencies>
   </context>
@@ -114,7 +114,8 @@
     <criterion testable="true">The on-demand trigger declares the admin policy on the route, rejects unauthenticated (401) and non-admin (403) callers, rejects an unregistered table or unbounded window (400), and is present in the RouteAuthorizationGuardTests ledger with a ProvenByTest.</criterion>
     <criterion testable="true">Counters scanned / repaired / no-op / failed are emitted per table with a correlation id; no hand-rolled timer BackgroundService and no new package is introduced.</criterion>
     <criterion testable="true">Adversarial security review completed with no open F-class finding; BFF build 0 errors; all tests green; publish-size delta and CVE result recorded in the task notes.</criterion>
-    <criterion testable="true">#2124 (018b-2, 2026-10-22): Repair passes `moneyAttributes` to `ApplyFillOnly` (today `RecordCreationService.Repair.cs` ~:333 passes null, so a Default rule into a Money column writes a decimal Dataverse rejects). Read the table's Money attributes app-only (the app-only metadata reader from 033). Test: a Default rule into a Money column writes `Microsoft.Xrm.Sdk.Money`. The job does not ship without it. Then close #2124.</criterion>
+    <criterion testable="true">#2124 (018b-2, 2026-10-22): Repair passes `moneyAttributes` to `ApplyFillOnly` (today `RecordCreationService.Repair.cs` ~:333 passes null, so a Default rule into a Money column writes a decimal Dataverse rejects). Read the table's Money attributes app-only (the app-only metadata reader, wired into Repair in this task since 033 was dropped). Test: a Default rule into a Money column writes `Microsoft.Xrm.Sdk.Money`. The job does not ship without it. Then close #2124.</criterion>
+    <criterion testable="true">Task 044(d) (ontology D-204, D-210): for Signal and Decision Record rows created after go-live, the pass reports each row that holds one half of the core pair only and each row whose pair changed after create, and writes nothing to either table. Tests: a half pair is reported; a pair changed after create is reported; a whole, unchanged pair and a row with neither half are not reported; no write request reaches `sprk_signal` or `sprk_decisionrecord` in any case.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-25, NFR-01/03/04. Forward-only is binding: no historic backfill (out of scope). Task 053 live-verifies the 10-minute target on dev.</notes>

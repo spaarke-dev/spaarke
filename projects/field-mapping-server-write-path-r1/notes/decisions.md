@@ -646,7 +646,7 @@ missing to add. Owners and refusals are unchanged, and the service needs no chan
 
 ### 2026-11-02 — Ontology-r1 research: the Signal/Decision writers keep their dedicated identity (recommendation; owner to decide)
 
-- **Source:** ontology-r1, `projects/spaarke-ontology-platform-r1/notes/writer-identity-fr21-answer.md` (branch `docs/ontology-platform-design`, 4279c429d2). The owner asked for deep research first.
+- **Source:** ontology-r1's FR-21 answer (keep the dedicated writer identity; named FR-21 exception), reviewed privately with UAC-r2. The owner asked for deep research first.
 - **Why the identity exists:** ontology D-1, "ADR-028 path A", 2026-10-03/04.
   - The shared BFF identities are System Administrator. Dataverse privileges are additive with no deny, so those identities can Write and Delete `sprk_decisionrecord`.
   - `mi-ontology-writer-dev` holds only the Spaarke Ontology Service role:
@@ -830,3 +830,124 @@ Numbering note (2026-11-04): the "task 043" planned on 2026-11-02 for the `sprk_
 **Writer-only tables at role level:** no person role holds Create, Write or Delete on `sprk_signal`, `sprk_decisionrecord` or `sprk_budgetrevision`, except Spaarke Ontology Administrator, the designated cleanup role (ontology D-160). Task 046b's guard pins that rule.
 
 **How it is applied:** task 046b builds the role-file changes and an apply script (`-WhatIf`, `-Apply`, `-Verify`; edits the root role through the Web API and reads back every business-unit copy). UAC-r2 reviews it and runs `-Apply` on dev in its session under the owner's go.
+
+## 2026-11-05 — Standalone add-on rulings, two role removals, and secure-from-creation wizard projects (owner, given in UAC-r2's session; UAC-r2 decisions.md 51793949a0)
+
+- **Not standalone, by ruling:** Office Add In User and AI Analysis User are not standalone; neither is meant to be held alone, so no gap is opened for either alone (G9 dropped). Console User needs Core User. The guard and §5.1 record each as a ruled exception with that reason.
+- **Two removals (task 046b):** Ontology Administrator loses Create on `sprk_budgetrevision` and keeps Write and Delete. Basic User loses AppendTo on `sprk_reportcard`, provided no §5.1 feature needs it on Basic User. The apply script gets an explicit removal step with the same fail-closed reads and read-back of every business-unit copy. UAC-r2 applies it on dev.
+- **Secure from creation (task 049):** a project the wizard creates as secure is secure from creation. The wizard's create declares the intent in one optional field, validated on the server. RecordCreationService handles it like an isolated create, and provisioning does only what is left.
+- **049 backstop:** the record-busy answer on `/no-access/enforce` and `/assigned-access/sync` stays a 500 ProblemDetails with a message and trace id. The restricted-root and ledger-root scans take the ordered read and the recent-change window, like the first scan. Removals by the reconciliation job stay report-only until UAC-r2's gate G-8 (#2574).
+
+## 2026-11-06 — Removal R2 is not applied (under the 2026-11-05 ruling's own condition)
+
+Basic User keeps AppendTo on `sprk_reportcard`. The ruling removed it only if no §5.1 feature needed it on Basic User. Communication send, reply and re-file ask that privilege as the caller when a report card is a regarding record (`CommunicationRecordAuthorizationFilter`), so the condition fails. Task 046b adds matrix rows for those routes. Removal R1 (Ontology Administrator loses Create on `sprk_budgetrevision`) proceeds. Recorded by fm and UAC-r2; the owner was informed through UAC-r2.
+
+## 2026-11-06 — Communication send, reply and re-file need Core User (owner, in fm's session)
+
+Basic User is not raised for communication send, reply or re-file (task 046b gaps G11 and G12). These features need Core User, like the other add-on rulings of 2026-11-05. A caller who holds Basic User only is refused the way each route already refuses: a 403 ProblemDetails, or the uniform 404 where the route does not reveal the target (re-file). The gaps stay in the guard's baseline, marked "owner ruled: not granted", so any change to them is a deliberate one. Removal R1 was applied on dev on 2026-11-06 (UAC-r2, from `e6c0c94fa3`).
+
+## 2026-11-06 — Basic User is read-only on Spaarke tables (owner, in fm's session)
+
+On every Spaarke table (`sprk_*`), Spaarke Basic User holds Read only. Creating, updating, deleting, filing, assigning or sharing Spaarke records needs Core User. Platform privileges that Dataverse needs for any user are not affected. Task 046c applies the rule: the role file, a removal through the reviewed `-Remove` step (run by UAC-r2 under the owner's go), and a guard.
+
+## 2026-11-06 — Core User reads communication threads at Deep (owner, in fm's session)
+
+Sending into a communication thread asks Read on `sprk_communicationthread` as the caller, and that table is user-owned. Core User gets that Read at Deep, so a Core user can reply into threads across their business-unit tree, like Core User's other reads (task 046b gap G13). For Basic User the gap stays "owner ruled: not granted" under the read-only ruling. UAC-r2 applies it through the reviewed add step.
+
+## 2026-11-06 — G13 grant withdrawn (supersedes "Core User reads communication threads at Deep")
+
+The ruling above rested on a wrong premise. Core User is not raised. Direct threads are private by ownership and explicit shares, so the depth of Read on `sprk_communicationthread` is part of their privacy rule and stays Basic. Record threads are owned by the owner of the record they are filed to, normally a team, and a member reads them at Basic. Task 046b sets the send/reply row to match. G13 stays open only if a record thread can remain owned by its creator. The owner was told in fm's session.
+
+## 2026-11-06 — G13 is not a gap (closes "G13 grant withdrawn")
+
+The send/reply thread read needs Basic. Record threads are owned by their record's team at creation (`ThreadResolver`), and a member reads them at Basic. Threads anchored to a party, and Direct threads, are read through ownership and shares, by the privacy rule. Core User and Basic User both hold Basic, so no role changes. Task 046b, `5d079d1508`.
+
+## 2026-11-06 — Task 032 becomes a design task (owner, in fm's session)
+
+- **Finding (task 032 agent, `task/fm-032` 96769b68bf):** since ebilling-r1 task 050a (D-134), invoice review creates no invoice. The only invoice creator is ebilling's `InvoiceSubmissionPersister`, which writes the invoice, lines, approval, Stored File rows and submission link in one transaction with fixed ids, inside a background job with no caller token. `RecordCreationService` creates one row per call with a new id and refuses mapping for a system principal.
+- **Options put to the owner:** drop 032 and name the persister as an exception; a new design task; or a mapping-only step inside the persister.
+- **Ruling:** a new Opus-tier design task. The create service gains a fixed-id, multi-row transactional create and a way to map under a system principal (for example the submitter as the recorded caller). UAC-r2 and ebilling-r1 review it. Task 032's POML is re-scoped before it runs; the single-creator rule holds (no second creator).
+
+## 2026-11-06 — W3 direction: named exceptions plus guards, no core redesign in R1 (owner, in fm's session; supersedes "Task 032 becomes a design task")
+
+- **Rule as written:** one server owner per invariant (`DATAVERSE-WRITE-PATH-ARCHITECTURE.md` :17, :58, :81). The invariant owners are the classes (I-1 stamp, record-first owner, mapping engine, secure gates); `RecordCreationService` is the L1 orchestrator that calls them, not the invariant itself.
+- **Named exception:** a creator outside the service is valid when it calls the same owner classes for every invariant its table carries (or L3/L4 fill-only reconciliation covers it, fail-closed), and a guard pins it: this creator writes this table and calls these owners, and no other creator does.
+- **No core redesign in R1:** no given-id input, no multi-row transactional create, no pinned-owner input and no app-only lookup translator in `RecordCreationService`. Any of these later is an owner-rule change reviewed by UAC-r2. A given id is never accepted on a table whose ids carry meaning to another rule.
+- **032:** `InvoiceSubmissionPersister` stays the single creator of the invoice family, named in task 060's matrix with a guard. FR-20's Matter mapping for extracted invoices is deferred (the alternative, a fill-only step in the persister calling the same mapping engine, stays open if the owner wants it in R1).
+- **030:** 030a routes the Office To Do through the service (adapter, no core change). 030b keeps the document save outside the service: the association moves into the existing create call, and guards pin that only the server writes the narrowing and pointer columns, that the save calls the stamp and owner classes, and that a client-supplied id that already exists is refused, never updated.
+- **034:** the ingestors stay outside the service as named exceptions. Guards pin the dedupe on the message id, the unfiled-communication creator exception on the ingestor path only, and attachment ownership through the same resolver.
+- **033:** re-scoped under this rule before it runs; likely dropped.
+- **046c:** before Basic User loses them, Core User gains AppendTo on `sprk_agreementtype`, `sprk_organizationtype_ref` and `sprk_documenttype_ref` (Global). The add-on gaps are "requires Core User" (as 046b ruled). Before the live apply, dev users holding Basic plus an add-on without Core User are counted and either given Core User or listed for the owner.
+- **Reviewed by:** UAC-r2 (independent read, 2026-11-06).
+
+## 2026-11-06 — Owner rulings: 044 scope, 032 mapping, Office To Do assignee order, live checks (owner, in fm's session)
+
+- **044: no field security on the core pair** (revises 042c's "task 044 covers the paths outside the server: field security plus a repair-pass backstop"). The pair is written whole by the server writers only. Outside the server, an edit is detected and traced, not blocked: column auditing on both pair columns (confirmed on dev), a guard that no non-admin role gains Write on `sprk_signal` or `sprk_decisionrecord`, and task 052's report flags a half pair and a pair that changed after create. The Signals access check keeps a fail-closed re-read when the caller's read of the pair returns neither half. Ontology-r1 and UAC-r2 agreed.
+- **032: extracted invoices get Matter field mapping in R1.** `InvoiceSubmissionPersister` stays the single creator; a fill-only mapping step inside it, before its transaction, calls the same mapping engine (W3 direction, option 2). No change to `RecordCreationService`. Ebilling-r1 and UAC-r2 review.
+- **Office To Do assignee order:** the user's explicit choice; else the field-mapped value; else the user's own contact (the order 030a implements).
+- **Live checks on dev approved:** the Project→Matter profile check and the 021 re-measure, test rows prefixed FMSWP-.
+
+## 2026-11-06 — 049b: only the maker is granted inside the request (UAC-r2)
+
+**Finding (021 re-measure, task-021-live.md):** when the created root's Assigned To is its maker, 049 runs the assigned-access pass inline for every assigned subject (5 subjects, 11 writes, about 6.6 s), so the create p95 was 11.8 s.
+
+**Ruling (UAC-r2):** the inline pass exists so the maker can open the record at once. Inline grants the maker's own subject only; every other subject, external grants included, goes through the queued path the non-maker case uses. Conditions:
+1. The queued remainder uses the same ordered scan and revoke-on-change (G-8) path: no new queue, no second owner.
+2. If enqueueing the remainder fails, it is logged and the reconciler completes it; the create never reports "all granted".
+3. If the maker's inline grant fails, today's behaviour is unchanged.
+4. Tests: maker case is exactly 1 subject inline and N-1 queued; the non-maker case is unchanged; an external subject is never inline.
+
+**Amended (UAC-r2, 2026-11-07), condition 2:** when the remainder cannot be enqueued in the maker case, the full pass runs inline once, with the grantor, as master's inline path does (an external assignee still gets the invite), and a neutral event counts it. The reconciler-only fallback was rejected: an external assignee would silently never be invited. Accepted known limits: a narrow race on the unleased maker pass (master's inline full pass has it too), and a one-subject pass acts only on a share.
+
+## 2026-11-07 — Owner decisions on the open questions (owner, in fm's session)
+
+1. **NFR-02:** keep the window as written and speed the create path up further (it is about +2 s over with the grant queued). A new task (049c) profiles the remaining steps and removes the largest costs, with no change to what the create guarantees.
+2. **The "Project to Matter (Attorney Matrix)" profile stays on dev.**
+3. **046c dev apply: approved.** Core User gains its three AppendTo rights first and is verified; then Basic User's write rights on Spaarke tables are removed and verified. Rollback: `-Restore -Gap R3`. Users holding Basic plus an add-on without Core User are counted before the removal (2026-11-06 condition).
+4. **Stash `da43b8a2` (lint-staged automatic backup): drop it** once its content is confirmed committed.
+5. **mcp-bff re-merge:** the owner relays it; it does not hold this project.
+
+## 2026-11-07 — 033 dropped (owner, in fm's session)
+
+- The system creators of task 033 (generation, playbook, Signal, Decision) stay outside `RecordCreationService` as named exceptions under the W3 direction; ontology-r1 agreed that leaving the ledger writers out is valid. No field mapping goes into Signal or Decision Record rows.
+- 033's one piece another task needed (wiring the app-only column-metadata reader into Repair, including the Money attributes of #2124) moves into task 052.
+- Task 060's matrix names these creators as exceptions with guards.
+
+## 2026-11-07 — UAC-r2 review of the 032 design (`task/fm-032` a7b787ffbe): approved with conditions
+
+Binding on 032's implementation, together with ebilling-r1's answers (pending):
+- **Reader set (Q-U1):** a role-source assertion in `FeatureRolePrivilegeGuardTests` pins that `sprk_invoice` Read depth is never wider than the smallest core-table Read depth, so a widening fails CI.
+- **Partner columns (Q-U2):** the protected targets are the union of the invoice modules' `ReadableColumns`, plus the columns the invoice search-index document builder reads, unless ebilling-r1 shows partners have no search path to invoices. Ebilling-r1 confirms that partner notifications and exports render only module columns (Q-E5).
+- **#2188 exemption (Q-U3):** one entry, `Uses = 1`, pinned to the system-reader call site.
+- **Field security (Q-U4):**
+  - a metadata fault or an unknown `IsSecured` maps nothing;
+  - a source column missing from a successful metadata answer drops only its rule, with a Warning naming the rule;
+  - metadata is read per delivery, with no cache.
+- **Secure-source gate (Q-U5), required:** map nothing when the core record is Secure, or under no-access or hard-deny. Reuse Repair's `SourceMayBeCopiedAsync` logic, not a re-implementation. Tests: a Secure core maps nothing and writes the admin note (must fire); an ordinary core maps (must not fire).
+- **Mapped lookups (Q-U6):** written app-only with no AppendTo check, accepted. Filing and access-conferring lookups stay protected. Lookups that target `systemuser`, `team` or `contact` are protected too, unless they are on an explicit allow-list.
+
+## 2026-11-07 — ebilling-r1 review of the 032 design (a7b787ffbe): approved with conditions
+
+These conditions are fixed in the design before any code, together with UAC-r2's above. Checked against `work/ebilling-r1` e418803715.
+- **A refused mapped value (Q-E1): re-commit once without the mapped columns.**
+  - Only when `FailedRequestIndex == 0`, at least one column was mapped, and the outcome is not unknown.
+  - The commit and its catch are wrapped in one local function, called at most twice, so the second attempt goes through the whole existing catch chain.
+  - Request 0 and the submission update are rebuilt with the same count and order.
+  - §6 also checks option-set membership, numeric min, max and precision, and that a lookup target exists.
+  - Tests: refused once, refused twice, refused with nothing mapped.
+- **Fault note (Q-E2): faults only.** It is a new `AdminAttentionText` segment kind that `Merge` and `WithoutStopped` recognise, in a fixed order, codes only. The combined text stays within `AdminAttentionMaxLength` (500); the Signal segment shrinks to make room. A test covers the cap.
+- **Protected even when empty (Q-E3):** `sprk_currency`, `sprk_invoicedate`, `sprk_billingperiodstart` and `sprk_billingperiodend`, and `sprk_correlationid`.
+- **Re-delivery (Q-E4):** a test pins that two deliveries, the first rolled back, store exactly the second delivery's values, and that a resume reads nothing.
+- **Search index (Q-E5):** `InvoiceIndexDocument.InvoiceColumns` is excluded by reference. Partners have no search path to invoices; partner rendering is `ReadableColumns` only.
+- **Constructor (Q-E6):** three optional trailing parameters. A DI test resolves the persister from the real container with all three non-null, and one Warning is logged when the step does not run.
+- **C1, protected set:** an allow-list of target columns approved by ebilling-r1 and UAC-r2, with the deny-list as a second check. `sprk_billingexport` and `sprk_invoiceduedate` are protected unless the owner approves the due date as a target.
+- **C2, secure gate:** gate on the owner answer's secure-if-any, already resolved in the persister, so Secure ancestors are covered. Secure means map nothing and log a code, with no admin note. With UAC-r2 Q-U5, this also covers no-access and hard-deny, through Repair's `SourceMayBeCopiedAsync` logic, failing closed.
+- **C3, all or nothing:** any rule-fault warning from `ApplyFillOnly` means nothing is mapped and the note is written. A test covers it.
+- **C4, determinism:** a static resolver-field key set; ties in `ExecutionOrder` are broken by rule id; the lookup overload of `IsFilingLookup` is used.
+- **C5, money guard:** the persister exposes its owned-column list, so the step loads no money or firm string (`InvoiceMoneyColumnsAppOnlyWriteGuardTests`). That guard joins the regression list.
+
+**What 032's code waits on:** 052a's metadata reader (`task/fm-052a`), and the persister layout in `work/ebilling-r1`.
+- **UAC-r2 follow-up (2026-11-07):**
+  - UAC-r2 backs the allow-list (C1). The proposed list needs sign-off from both ebilling-r1 and UAC-r2.
+  - The secure-source gate also maps nothing when the core record is the object of any active, well-formed No Access entry, internal walls included. It reuses `NoAccessListReader` and `NoAccessShareEnforcer.TryClassify`, keyed alongside the owner answer's secure-if-any. A failed read maps nothing.
+  - Must-fire and must-not-fire tests.

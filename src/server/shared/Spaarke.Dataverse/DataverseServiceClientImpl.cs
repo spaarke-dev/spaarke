@@ -298,7 +298,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // reaches none of them at any depth below Global — and Global re-opens findings F1 and F9.
         //
         // unified-access-control-r2 task 146 (#1034): every caller now resolves the team through the BFF's
-        // IRecordOwnershipResolver (Office save + worker, POST /api/v1/documents, EmailAttachmentProcessor), so a
+        // IRecordOwnershipResolver (Office save + worker, POST /api/v1/documents), so a
         // missing owner is a programming error and REFUSES here, before any write — never the old "null keeps the
         // calling identity", which made the BFF application user own the document in the root business unit.
         if (request.OwningTeamId is not { } owningTeamId || owningTeamId == Guid.Empty)
@@ -315,6 +315,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         // spaarkeai-word-add-in-r1 task 130 (#2126): the email link and the Restricted fallback, in this one write.
         StageDocumentCommunicationFields(document, request);
+
+        // field-mapping-server-write-path-r1 task 030b (FR-18): the association, in this one write, never a follow-up update.
+        StageDocumentAssociation(document, request);
+
+        // field-mapping-server-write-path-r1 task 034: an attachment's parent link, in this same write.
+        StageDocumentParent(document, request);
+
+        // Task 030b: the SPE file pointer, in this same write.
+        StageDocumentFilePointer(document, request);
 
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
@@ -361,6 +370,82 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             document[DocumentSubmissionMarkerColumn] = true;
         }
+    }
+
+    /// <summary>
+    /// Stages <see cref="CreateDocumentRequest.Association"/> onto the document <see cref="CreateDocumentAsync"/> creates, as
+    /// <c>[column] = EntityReference(target table, id)</c>, so the document is filed in its ONE create write
+    /// (field-mapping-server-write-path-r1 task 030b). No association writes nothing. Pure (no I/O), as
+    /// <see cref="StageDocumentCommunicationFields"/> is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">An association with an empty record id, or on a column that is not one of
+    /// <see cref="DocumentAssociationMap"/>'s association columns with its verified target (refused before any write).</exception>
+    internal static void StageDocumentAssociation(Entity document, CreateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Association is not { } association)
+            return;
+
+        if (association.RecordId == Guid.Empty)
+            throw new InvalidOperationException("A document's association is created with the id of the record it is filed to (task 030b).");
+
+        if (!DocumentAssociationMap.IsAssociationField(association.Field))
+        {
+            throw new InvalidOperationException(
+                $"'{association.Field.LogicalName}' -> '{association.Field.TargetEntityLogicalName}' is not a document association column; "
+                + "a create's association is set through DocumentAssociationMap.TryApply (task 030b).");
+        }
+
+        document[association.Field.LogicalName] =
+            new EntityReference(association.Field.TargetEntityLogicalName, association.RecordId);
+    }
+
+    /// <summary>
+    /// Stages <see cref="CreateDocumentRequest.ParentDocumentLookup"/> onto the document <see cref="CreateDocumentAsync"/> creates,
+    /// as <c>sprk_parentdocument = EntityReference(sprk_document, id)</c> (field-mapping-server-write-path-r1 task 034). No parent
+    /// writes nothing. Pure (no I/O), as <see cref="StageDocumentAssociation"/> is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A parent link with an empty id (refused before any write).</exception>
+    internal static void StageDocumentParent(Entity document, CreateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.ParentDocumentLookup is not { } parentId)
+            return;
+
+        if (parentId == Guid.Empty)
+            throw new InvalidOperationException("A document's parent link is created with the id of its parent document (task 034).");
+
+        document["sprk_parentdocument"] = new EntityReference("sprk_document", parentId);
+    }
+
+    /// <summary>
+    /// Stages <see cref="CreateDocumentRequest.FilePointer"/> onto the document <see cref="CreateDocumentAsync"/> creates:
+    /// <c>sprk_graphdriveid</c>, <c>sprk_graphitemid</c> with its bound copy, and <c>sprk_filepath</c> when a URL is known, so the
+    /// pointer is part of the ONE create write (task 030b). No pointer writes nothing. Pure (no I/O), as
+    /// <see cref="StageDocumentAssociation"/> is.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A pointer without its drive or item id (refused before any write).</exception>
+    internal static void StageDocumentFilePointer(Entity document, CreateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.FilePointer is not { } pointer)
+            return;
+
+        if (string.IsNullOrWhiteSpace(pointer.DriveId) || string.IsNullOrWhiteSpace(pointer.ItemId))
+            throw new InvalidOperationException("A document's file pointer is created with both its drive id and its item id (task 030b).");
+
+        document["sprk_graphdriveid"] = pointer.DriveId;
+        document["sprk_graphitemid"] = pointer.ItemId;
+        // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
+        document[DocumentPointerBinding.BoundItemIdColumn] = pointer.ItemId;
+        if (!string.IsNullOrEmpty(pointer.WebUrl))
+            document["sprk_filepath"] = pointer.WebUrl;
     }
 
     // Task 130: sprk_document.sprk_relatedcommunication → sprk_communication (DocumentLinkFields), and the document's own
@@ -1728,6 +1813,72 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             throw new InvalidOperationException(
                 $"Failed to query collection navigation property for '{parentEntityLogicalName}.{relationshipSchemaName}': {ex.Message}", ex);
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>One <c>RetrieveEntityRequest</c> (attributes, published metadata), projected by <see cref="ColumnMetadataOf"/>.
+    /// A fault propagates: the caller fails closed.</remarks>
+    public async Task<IReadOnlyDictionary<string, ColumnMetadata>> GetColumnMetadataAsync(
+        string entityLogicalName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName.Trim().ToLowerInvariant(),
+            EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Attributes,
+        };
+
+        var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+            _serviceClient.Execute(request), ct).ConfigureAwait(false);
+        return ColumnMetadataOf(response.EntityMetadata);
+    }
+
+    /// <summary>
+    /// The columns of <paramref name="entity"/> as <see cref="ColumnMetadata"/>, keyed by logical name (case-insensitive): the
+    /// type's name, the update and field-security flags as stated, a text or memo column's maximum length, a number or Money
+    /// column's range, a lookup's target tables and a choice column's option values. Pure, and
+    /// <c>public static</c> for direct testability (the <see cref="MapToDocumentEntity"/> precedent).
+    /// </summary>
+    public static IReadOnlyDictionary<string, ColumnMetadata> ColumnMetadataOf(Microsoft.Xrm.Sdk.Metadata.EntityMetadata? entity)
+    {
+        var columns = new Dictionary<string, ColumnMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var attribute in entity?.Attributes ?? [])
+        {
+            if (attribute is null || string.IsNullOrWhiteSpace(attribute.LogicalName))
+                continue;
+
+            var maxLength = attribute switch
+            {
+                Microsoft.Xrm.Sdk.Metadata.StringAttributeMetadata text => text.MaxLength,
+                Microsoft.Xrm.Sdk.Metadata.MemoAttributeMetadata memo => memo.MaxLength,
+                _ => null,
+            };
+            (decimal? Min, decimal? Max) range = attribute switch
+            {
+                Microsoft.Xrm.Sdk.Metadata.IntegerAttributeMetadata whole => (whole.MinValue, whole.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.BigIntAttributeMetadata big => (big.MinValue, big.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.DecimalAttributeMetadata number => (number.MinValue, number.MaxValue),
+                Microsoft.Xrm.Sdk.Metadata.DoubleAttributeMetadata real => (DecimalOf(real.MinValue), DecimalOf(real.MaxValue)),
+                Microsoft.Xrm.Sdk.Metadata.MoneyAttributeMetadata money => (DecimalOf(money.MinValue), DecimalOf(money.MaxValue)),
+                _ => (null, null),
+            };
+            var targets = (attribute as Microsoft.Xrm.Sdk.Metadata.LookupAttributeMetadata)?.Targets?
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToArray();
+            var options = (attribute as Microsoft.Xrm.Sdk.Metadata.EnumAttributeMetadata)?.OptionSet?.Options?
+                .Where(o => o?.Value is not null)
+                .Select(o => o.Value!.Value)
+                .ToArray();
+            columns[attribute.LogicalName] = new ColumnMetadata(
+                attribute.LogicalName, attribute.AttributeType?.ToString(), attribute.IsValidForUpdate, attribute.IsSecured, maxLength,
+                range.Min, range.Max, targets, options);
+        }
+
+        return columns;
+
+        // A double bound as a decimal; null when no decimal holds it (the reader then treats the bound as not stated).
+        static decimal? DecimalOf(double? value) =>
+            value is { } real && double.IsFinite(real) && Math.Abs(real) < 7.9e28 ? (decimal)real : null;
     }
 
     /// <summary>
@@ -3377,12 +3528,25 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(
-                exception: ex,
-                message: "[DATAVERSE] Error retrieving {EntityType} by alternate key. Keys: {AlternateKeys}",
-                entityLogicalName,
-                string.Join(", ", alternateKeyValues.Select(k => $"{k.Key}={k.Value}")));
+            // Key VALUES are never logged: several alternate keys carry person ids (#2292). Names and count only.
+            if (IsAlternateKeyNoMatch(ex))
+            {
+                // An absent row is an ordinary answer for probe-then-create callers, not an error (#2292).
+                _logger.LogDebug(
+                    "[DATAVERSE] {EntityType} alternate-key retrieve matched no row ({KeyCount} keys)",
+                    entityLogicalName,
+                    alternateKeyValues.Count);
+            }
+            else
+            {
+                _logger.LogError(
+                    exception: ex,
+                    message: "[DATAVERSE] Error retrieving {EntityType} by alternate key. Key names: {AlternateKeyNames}",
+                    entityLogicalName,
+                    string.Join(", ", alternateKeyValues.Select(k => k.Key)));
+            }
 
+            // Same wrapper for every failure, miss included — callers classify the inner chain.
             throw new InvalidOperationException(
                 $"Failed to retrieve {entityLogicalName} by alternate key: {ex.Message}", ex);
         }
@@ -3718,6 +3882,36 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 m.Contains("Entity Key", StringComparison.OrdinalIgnoreCase) ||
                 (m.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
                  && m.Contains("already exists", StringComparison.OrdinalIgnoreCase))))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// True when <paramref name="ex"/> (or any inner exception) is the Dataverse fault an <b>alternate-key</b>
+    /// retrieve raises when no row matches: <see cref="OrganizationServiceFault.ErrorCode"/> <c>0x80060891</c>
+    /// ("A record with the specified key values does not exist in … entity"). Walks the chain because
+    /// <see cref="RetrieveByAlternateKeyAsync"/> wraps every failure in one <see cref="InvalidOperationException"/>.
+    /// <para>
+    /// <b>Exact code, typed only.</b> <c>0x80060892</c> is one integer away and means duplicate / not-Active key
+    /// (<see cref="IsAlternateKeyDuplicate"/>), so no range or prefix match. No message fallback: Dataverse fault
+    /// messages are localized. The by-id "does not exist" code (<c>0x80040217</c>) is a different answer and is
+    /// not matched. This method does NOT match <see cref="RetrieveByAlternateKeyAsync"/>'s own
+    /// "not found with provided alternate key values" throw (a null response); callers that need it check it
+    /// separately.
+    /// </para>
+    /// <para>
+    /// Lets probe-then-create callers read a miss as "create" while any other fault still propagates
+    /// (#2292: <c>MembershipJunctionUpdater</c> dead-lettered every first-time membership event because it
+    /// string-matched the outer wrapper). Also used by <c>DocumentUrlIdentityResolution</c>.
+    /// </para>
+    /// </summary>
+    public static bool IsAlternateKeyNoMatch(Exception? ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is FaultException<OrganizationServiceFault> fault
+                && fault.Detail?.ErrorCode == unchecked((int)0x80060891))
                 return true;
         }
         return false;

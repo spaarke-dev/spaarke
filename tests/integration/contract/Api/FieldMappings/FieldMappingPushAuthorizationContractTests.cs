@@ -513,7 +513,9 @@ public class FieldMappingPushAuthorizationContractTests
     public async Task Push_ALookupRule_ReadsTheValueProperty_AndWritesTheTargetsNavigationPropertyBind_MatterToInvoice()
     {
         await using var host = await PushHost.StartAsync();
-        host.Probe.Rights = AccessRights.Read;
+        // Task 040 fix round 1: sprk_invoice.sprk_assignedtoattorney1 is an Assigned-To column of the registry, so the attorney
+        // rule is pushed only on a request that opts in, which needs Write on the source.
+        host.Probe.Rights = AccessRights.Read | AccessRights.Write;
         host.ArrangeHappyPathData(
             targetEntity: "sprk_invoice", targetSet: "sprk_invoices", lookupsToSource: ["sprk_matter"],
             rules:
@@ -523,7 +525,8 @@ public class FieldMappingPushAuthorizationContractTests
             ],
             extraSourceColumns: AttorneyColumns(AttorneyId));
 
-        var response = await host.SendAsync(Authenticated(PushBody(targetEntity: "sprk_invoice")));
+        var response = await host.SendAsync(Authenticated(
+            new { sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_invoice", includeAssignedTo = true }));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, "the live Matter to Invoice (Attorney Matrix) push 500ed here");
         host.SourceReads.Should().ContainSingle().Which.Should().Be(
@@ -869,6 +872,8 @@ public class FieldMappingPushAuthorizationContractTests
         {
             Id = Guid.NewGuid(), Name = $"{sourceField}->{targetField}", SourceField = sourceField, SourceFieldType = sourceType,
             TargetField = targetField, TargetFieldType = targetType, MappingType = 0, ExecutionOrder = 1, IsActive = true,
+            // Task 040 (FR-23): a push applies Copy rules set to Manual Refresh; a rule left at One Time is not pushed.
+            SyncMode = Spaarke.Dataverse.SyncMode.ManualRefresh,
         };
 
         private static Dictionary<string, JsonElement> Relationship(
@@ -925,6 +930,18 @@ public class FieldMappingPushAuthorizationContractTests
             // Batch-4 integration (task 158): a push that files a work assignment or project under a secure record secures
             // it; no record in these tests is secure (a module boundary here).
             builder.Services.AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
+            // Task 040 fix round 1: the push's required services, REAL. The Assigned-To classifier reads the bound registry, seeded
+            // by the same post-configure the BFF registers (MembershipModule); the family reader runs over the caller-scoped seam;
+            // the participation service answers every flag read as unreadable (its Dataverse refuses), so a preview never
+            // under-reports a policy.
+            builder.Services.AddOptions<Sprk.Bff.Api.Services.Ai.Membership.MembershipOptions>();
+            builder.Services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<Sprk.Bff.Api.Services.Ai.Membership.MembershipOptions>,
+                Sprk.Bff.Api.Services.Ai.Membership.MembershipOptionsDefaults>();
+            builder.Services.AddSingleton(sp => new Sprk.Bff.Api.Services.Dataverse.RecordFamilyReader(
+                sp.GetRequiredService<IImpersonatedCommunicationQuery>(),
+                new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Dataverse.RecordFamilyReader>.Instance));
+            builder.Services.AddSingleton(_ => RefusingParticipations());
             configure?.Invoke(builder.Services);
 
             builder.WebHost.UseTestServer();
@@ -940,6 +957,27 @@ public class FieldMappingPushAuthorizationContractTests
         }
 
         public Task<HttpResponseMessage> SendAsync(HttpRequestMessage request) => _client!.SendAsync(request);
+
+        /// <summary>The REAL participation service over a Dataverse that refuses every read (503): every flag reads unreadable.</summary>
+        private static ExternalParticipationService RefusingParticipations()
+        {
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com" })
+                .Build();
+            var accessor = new Mock<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
+            return new ExternalParticipationService(
+                new HttpClient(new RefusingDataverse()) { BaseAddress = new Uri("https://test.crm.dynamics.com/api/data/v9.2/") },
+                Mock.Of<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(), configuration, new OfflineWebApiService.StaticToken(), accessor.Object,
+                NullLogger<ExternalParticipationService>.Instance,
+                Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NoFilingEntities());
+        }
+
+        /// <summary>A Dataverse that answers every request 503.</summary>
+        private sealed class RefusingDataverse : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+                => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        }
 
         public async ValueTask DisposeAsync()
         {

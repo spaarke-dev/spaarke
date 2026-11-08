@@ -140,6 +140,23 @@ public interface IGenericEntityService
     Task<Entity> RetrieveByAlternateKeyAsync(string entityLogicalName, KeyAttributeCollection alternateKeyValues, string[]? columns = null, CancellationToken ct = default);
     Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default);
     Task<LookupNavigationMetadata> GetLookupNavigationAsync(string childEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Every column of <paramref name="entityLogicalName"/> as the table declares it (published metadata, read under this
+    /// connection's identity — app-only in the BFF): its type, whether an update may set it, whether it is field-secured and,
+    /// for a text column, its maximum length. Keyed by logical name, case-insensitively. Uncached: each call is one metadata read.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added for field-mapping-server-write-path-r1 task 052 (Repair mode, the system principal): Repair has no caller
+    /// whose Web API metadata reads it could reuse, and needs field security on the mapping SOURCE (owner decision 2026-10-21,
+    /// option 1) and update-validity, length and Money on the TARGET (#2124).</para>
+    /// <para>A fault, or a table Dataverse does not know, is thrown; the caller fails closed. The default body throws, as
+    /// <see cref="ExecuteTransactionAsync"/>'s does: only the ServiceClient implementation (<c>DataverseServiceClientImpl</c>)
+    /// answers, so a substitute that does not model metadata fails loudly instead of reading as "no column is secured".</para>
+    /// </remarks>
+    Task<IReadOnlyDictionary<string, ColumnMetadata>> GetColumnMetadataAsync(string entityLogicalName, CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "GetColumnMetadataAsync is implemented by DataverseServiceClientImpl only; a substitute must model column metadata.");
     Task<string> GetCollectionNavigationAsync(string parentEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);
     Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default);
 

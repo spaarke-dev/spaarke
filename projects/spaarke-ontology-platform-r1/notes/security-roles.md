@@ -1046,6 +1046,7 @@ the deployed dev Console.
 - **Owner Q6, same window**: root-only `RemovePrivilegeRole` of `prvWritesprk_Signal` (Deep) on Ontology Administrator; all 6 copies 39 → 38, nothing else changed.
 - **03:24Z `-Verify` with `$A5Waiver = $null`** (PR #2050 branch): PASS; no non-platform, non-admin, non-writer role holds Write on `sprk_signal`.
 - **Still held — KEPT by owner decision D-160 (2026-10-17, "not a risk; we can remove later")**: Ontology Administrator keeps `prvDeletesprk_Signal` and `prvAssignsprk_Signal` (Deep). No shipped flow deletes or assigns a Signal as the caller (2026-10-17 search; test cleanups run as the operator or the writer). Console User holds neither. No Spaarke human role holds Write, Delete or Assign on `sprk_decisionrecord`.
+- **2026-11-05 — reaffirmed, designated cleanup role** (owner, relayed by uac-r2; fm task 046): Ontology Administrator keeps Signal and BudgetRevision Create/Write/Delete/Assign (Deep) as the only person role with those rights, held by a few named admins, with auditing on for the three tables; fm 046's guard pins it. No change applied. Dev audit read: table-level on; owner/BU/state/status audited; custom lookup columns not audited (D-160 note).
 - **Rollback**: §14.
 
 ## 18. 2026-10-23 — AppendTo on `sprk_eventtype_ref` for Spaarke Core User (D-110, task 159)
