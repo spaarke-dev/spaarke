@@ -4,7 +4,7 @@
     <title>External invoice visibility decides only from the invoice's own submission, failing closed (follows 165c)</title>
     <phase>4 Review (165 family)</phase>
     <gate>165c merged into work (1aff454e34). Scope confirmed by uac-r2 on 2026-11-07, with additions (a)-(c) in the criteria.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Partner-readable visibility (ExternalAccess); two adversarial passes.</rigor-reason>
     <model-tier>opus</model-tier>
