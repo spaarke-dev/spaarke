@@ -24,7 +24,7 @@
 
 ## Reviews queue
 - fm: #2629 (in progress); 045A design; 052b (incl. coming contact-only owner rule → customer main-BU team, after owner picks the team); 032 round 2 waits on the owner; **032b design note** (invoice Matter→Invoice mapping + assigned-access grant in ebilling's post-commit after-step; grant sign-off mine + re-file revoke/keep, joint with ebilling). 021 timing: closed on dev (20/20 lost to #2158; NFR-02 verdict moved to UAT by owner); Debug setting removed 05:19:20Z, 226 settings.
-- ebilling: 165d diff (after option A), 165e, 165f, 165b + 165b-3, 2b-2, the batch checklist + commit.
+- ebilling: 165d diff (after option A), 165e, 165f, 165b, 2b-2, the batch checklist + commit. **165b-3 part A (276c1201af) APPROVED** 11-08 (cond. on their Opus pass; notes: decision-record row updatability, currency precision, Unavailable on re-approve). Part B (approval/AP export allow-list) next; spend waits on ontology.
 - mcp-bff-api: Phase 0 waits on the owner's connector registration (task 002); A10, B-4 and 021 still to come. Every deploy = master + spike until they say Phase 0 is done.
 
 ## Owner items outstanding
