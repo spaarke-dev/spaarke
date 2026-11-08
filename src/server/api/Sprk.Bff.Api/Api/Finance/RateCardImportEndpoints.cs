@@ -389,7 +389,7 @@ public static class RateCardImportEndpoints
         };
     }
 
-    private static async Task<IResult> PublishRateCard(Guid rateCardId, HttpContext http, RateCardImportService service, CancellationToken ct)
+    internal static async Task<IResult> PublishRateCard(Guid rateCardId, HttpContext http, RateCardImportService service, CancellationToken ct)
     {
         // The version the filter checked; the service refuses 409 if the card names a different one now. No record of the check is a fault.
         if (!http.Items.TryGetValue(CheckedVersionItem, out var checkedItem) || checkedItem is not Guid checkedVersion)

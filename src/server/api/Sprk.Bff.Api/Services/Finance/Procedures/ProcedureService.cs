@@ -157,6 +157,7 @@ public class ProcedureService
     internal const string CodeVersionOverlap = "procedure.version_overlap";
     internal const string CodeRetired = "procedure.retired";
     internal const string CodeDraftExists = "procedure.draft_exists";
+    internal const string CodeTypeChanged = "procedure.type_changed";
     internal const string CodeVersionNotDraft = "procedure.version_not_draft";
     internal const string CodeVersionNotEditable = "procedure.version_not_editable";
     internal const string CodePublishInvalid = "procedure.publish_invalid";
@@ -466,9 +467,12 @@ public class ProcedureService
     /// Creates the next version as a Draft (number assigned here; previous version = the latest that left Draft) and, in the same transaction,
     /// copies that version's published rules as Draft policy versions of the same policies under it (model 7.2, <see cref="RuleSetService.PlanCopyForwardAsync"/>).
     /// One Draft at a time (409 <c>procedure.draft_exists</c>). A clash on the (Procedure, version number) key retries once, then 409.
+    /// <paramref name="checkedType"/> is the Procedure type the caller's privilege check covered (the route's
+    /// <c>RequireRateCardCreateOnARateCardProcedure</c>): a Procedure that reads as a Rate card now, when the check covered another type, is
+    /// refused 409 <c>procedure.type_changed</c> before anything is written, on every attempt including the retry.
     /// </summary>
     public virtual async Task<RuleSetOutcome<ProcedureVersionCreated>> CreateVersionAsync(
-        Guid procedureId, DateOnly? effectiveFrom, DateOnly? effectiveTo, Guid? callerObjectId, CancellationToken ct)
+        Guid procedureId, DateOnly? effectiveFrom, DateOnly? effectiveTo, Guid? callerObjectId, ProcedureType checkedType, CancellationToken ct)
     {
         if (effectiveFrom is { } from && effectiveTo is { } to && to <= from)
         {
@@ -486,6 +490,14 @@ public class ProcedureService
             if (IsRetired(procedure))
             {
                 return Refused<ProcedureVersionCreated>(StatusCodes.Status409Conflict, CodeRetired, "A retired Procedure cannot get a new version.");
+            }
+
+            // The privilege check covered checkedType; a Rate card Procedure's copy-forward creates cards, which that check may not have asked for.
+            var isRateCard = procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value == (int)ProcedureType.RateCard;
+            if (isRateCard && checkedType != ProcedureType.RateCard)
+            {
+                return Refused<ProcedureVersionCreated>(StatusCodes.Status409Conflict, CodeTypeChanged,
+                    "The Procedure's type changed while the version was being created; nothing was created. Try again.");
             }
 
             var versions = await LoadVersionsAsync(procedureId, ct);
@@ -553,7 +565,7 @@ public class ProcedureService
                 // 085 (model 7.2): a Rate card Procedure's next version starts with a copy of the previous version's Published card and its
                 // active rates, as a Draft, in the same transaction. The card is reusable, not a core record's child: its own owner question,
                 // with no parents.
-                if (procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value == (int)ProcedureType.RateCard)
+                if (isRateCard)
                 {
                     var cardOwner = await _ownership.ResolveOwnerAsync(RateCardImportService.CardOwnerContext(callerObjectId), ct);
                     if (!cardOwner.IsOwned)
@@ -1094,9 +1106,13 @@ public class ProcedureService
 
     /// <summary>
     /// I-P4: whether a version has been in force, which locks Applies to and Firm. Active and Superseded versions were; a Retired one was when
-    /// it put a rule in force (its publish marked policy versions under it Published) or a rate card (085: a Published, active card keyed to
-    /// it, one more query for all the Retired versions), and a Draft retired without publishing never was.
-    /// Known limit: a version published with no rule and no card and then retired does not lock (it governed nothing, so nothing depends on its scope).
+    /// it put a rule in force (its publish marked policy versions under it Published), and a Draft retired without publishing never was.
+    /// Known limits: a version published with no rule and then retired does not lock (it governed nothing, so nothing depends on its scope);
+    /// and a RATE-CARD-ONLY version (085) that was in force and then Retired without being superseded reads as never opened, so it does not
+    /// lock the Procedure's scope either. That is rare (ending a rate-card-only Procedure outright) and fails open. A Published card is not
+    /// used as evidence: a card can be Published while its version is still a Draft, so a Draft retired without ever being published would
+    /// then lock the scope (ontology-r1 ruling (c), 085 fix round 2). The durable fix is a server-written publish stamp on the version (the
+    /// publish-stamp deferral, filed separately).
     /// </summary>
     private async Task<bool> ScopeLockedAsync(IReadOnlyList<VersionRow> versions, CancellationToken ct)
     {
@@ -1114,18 +1130,8 @@ public class ProcedureService
         var query = new QueryExpression(RuleSetService.VersionEntity) { ColumnSet = new ColumnSet(RuleSetService.ProcedureVersionColumn), TopCount = 1 };
         query.Criteria.AddCondition(RuleSetService.ProcedureVersionColumn, ConditionOperator.In, retired);
         query.Criteria.AddCondition(RuleSetService.PublishStateColumn, ConditionOperator.Equal, RuleSetService.PublishStatePublished);
-        if ((await _entities.RetrieveMultipleAsync(query, ct)).Entities.Any(r =>
-                r.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id is { } id && retired.Contains(id)))
-        {
-            return true;
-        }
-
-        var cards = new QueryExpression(RateCardImportService.RateCardEntity) { ColumnSet = new ColumnSet("sprk_procedureversion"), TopCount = 1 };
-        cards.Criteria.AddCondition("sprk_procedureversion", ConditionOperator.In, retired);
-        cards.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-        cards.Criteria.AddCondition("statuscode", ConditionOperator.Equal, RateCardImportService.CardPublished);
-        return (await _entities.RetrieveMultipleAsync(cards, ct)).Entities.Any(r =>
-            r.GetAttributeValue<EntityReference>("sprk_procedureversion")?.Id is { } id && retired.Contains(id));
+        return (await _entities.RetrieveMultipleAsync(query, ct)).Entities.Any(r =>
+            r.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id is { } id && retired.Contains(id));
     }
 
     private async Task<bool> VersionNumberTakenAsync(Guid procedureId, int number, CancellationToken ct)

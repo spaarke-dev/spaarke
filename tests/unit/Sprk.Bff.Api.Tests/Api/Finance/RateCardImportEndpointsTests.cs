@@ -5,6 +5,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -578,6 +579,20 @@ public sealed class RateCardImportEndpointsTests
         problem["reasonCode"]!.GetValue<string>().Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
         problem["detail"]!.GetValue<string>().Should().Be("You need Write on this Procedure.");
         host.Access.Calls.Should().Contain(c => c.Path == FinAuth.AccessPath.Record && c.Set == "sprk_procedures" && c.Id == ProcedureId);
+        host.Service.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "Publish must-fire: a handler with no record of the Procedure check (no checked version in HttpContext.Items) answers 403 system_failure and calls no service")]
+    public async Task Publish_WithNoRecordOfTheCheck_IsSystemFailure_AndCallsNoService()
+    {
+        await using var host = await Host.StartAsync();
+        var http = new DefaultHttpContext { TraceIdentifier = "trace-1" }; // the filter never ran, so Items has no checked version
+
+        var result = await RateCardImportEndpoints.PublishRateCard(CardId, http, host.Service.Object, default);
+
+        var problem = result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
         host.Service.VerifyNoOtherCalls();
     }
 

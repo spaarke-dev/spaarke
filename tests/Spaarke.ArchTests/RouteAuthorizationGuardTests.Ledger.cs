@@ -1217,8 +1217,8 @@ public partial class RouteAuthorizationGuardTests
             "Each route declares the id it authorizes; the filter evaluates it as the caller via GetCallerRecordAccessAsync + "
             + "OperationAccessPolicy.HasRequiredRights (FinanceAuthorizationFilter.cs:409-412), uniform 404 on deny (task 130)."),
         new CreditedForm("RequireWriteOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
-            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:172) and, when set, asks the caller's own Write on "
-            + "sprk_procedures via CallerReadCheck.CheckAsync (:191); a read fault or an unanswered question is 403 system_failure (:178, :200) "
+            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:270) and, when set, asks the caller's own Write on "
+            + "sprk_procedures via CallerReadCheck.CheckAsync (:289); a read fault or an unanswered question is 403 system_failure (:276, :303) "
             + "(ebilling-r1 081, uac D; /draft added in re-check round 2)."),
         new CreditedForm("RequireWriteOnTheVersionsProcedure", "Api/Finance/RateCardImportEndpoints.cs",
             "Reads the Procedure of the route's procedureVersionId app-only (RateCardImportEndpoints.cs:148, :241) and asks the caller's own Write "
@@ -1231,8 +1231,8 @@ public partial class RouteAuthorizationGuardTests
             + "read fault or an unanswered question 403 system_failure (:206, :217, :280); it records the version it checked (:231) and the "
             + "service refuses 409 ratecard.version_changed if the card names another (ebilling-r1 085 fix round 1, uac-r2 approved)."),
         new CreditedForm("RequireReadOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
-            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:172) and CallerReadCheck.CheckAsync "
-            + "(:191) asking Read; denied is 403 insufficient_rights, an unanswered question or a read fault 403 system_failure (:178, :200) "
+            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:270) and CallerReadCheck.CheckAsync "
+            + "(:289) asking Read; denied is 403 insufficient_rights (:300), an unanswered question or a read fault 403 system_failure (:276, :303) "
             + "(ebilling-r1 081, uac r2 I-P5)."),
         new CreditedForm("RequireAccessToTheRuleSet", "Api/Finance/RuleSetEndpoints.cs",
             "Asks the caller's own Read on the route rule set via CallerReadCheck.CheckAsync (RuleSetEndpoints.cs:574) and answers anything but "

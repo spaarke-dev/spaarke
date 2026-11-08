@@ -923,6 +923,7 @@ public sealed class RateCardImportServiceTests
         var e = new Entity("sprk_ratecard", id);
         e["statuscode"] = new OptionSetValue(status);
         e["sprk_firm"] = new EntityReference("sprk_organization", FirmId);
+        e["sprk_procedureversion"] = new EntityReference("sprk_procedureversion", VersionId);
         return e;
     }
 
@@ -965,7 +966,7 @@ public sealed class RateCardImportServiceTests
             StoredRate(cardId, "C", otherFirmPending, null, new DateTime(2026, 1, 1), null),
             StoredRate(cardId, "D", null, 100000004, new DateTime(2026, 1, 1), null));
 
-        var outcome = await h.Service().PublishAsync(cardId, default);
+        var outcome = await h.Service().PublishAsync(cardId, VersionId, default);
 
         outcome.Kind.Should().Be(RateCardOutcomeKind.Done);
         outcome.Value!.Status.Should().Be("Published");
@@ -990,7 +991,7 @@ public sealed class RateCardImportServiceTests
             StoredRate(cardId, "Jane H1", jane, null, new DateTime(2026, 1, 1), new DateTime(2026, 6, 30)),
             StoredRate(cardId, "Jane H2 (edited on the form)", jane, null, new DateTime(2026, 6, 1), new DateTime(2026, 12, 31)));
 
-        var outcome = await h.Service().PublishAsync(cardId, default);
+        var outcome = await h.Service().PublishAsync(cardId, VersionId, default);
 
         outcome.Kind.Should().Be(RateCardOutcomeKind.Invalid);
         outcome.Errors.Should().ContainSingle().Which.Message.Should().Contain("overlaps");
@@ -1008,7 +1009,7 @@ public sealed class RateCardImportServiceTests
             StoredRate(cardId, "Jane H1", jane, null, new DateTime(2026, 1, 1), null));
         h.TruncatedEntity = "sprk_ratecardrate";
 
-        var outcome = await h.Service().PublishAsync(cardId, default);
+        var outcome = await h.Service().PublishAsync(cardId, VersionId, default);
 
         outcome.Kind.Should().Be(RateCardOutcomeKind.Refused);
         outcome.ErrorCode.Should().Be(RateCardImportService.CodeResultTruncated);
@@ -1043,7 +1044,7 @@ public sealed class RateCardImportServiceTests
             StoredRate(cardId, "Nobody", null, null, new DateTime(2026, 1, 1), null),
             StoredRate(cardId, "Backwards", null, 100000006, new DateTime(2026, 5, 1), new DateTime(2026, 1, 1)));
 
-        var outcome = await h.Service().PublishAsync(cardId, default);
+        var outcome = await h.Service().PublishAsync(cardId, VersionId, default);
 
         outcome.Kind.Should().Be(RateCardOutcomeKind.Invalid);
         outcome.Errors.Select(e => e.Message).Should().Contain(m => m.Contains("P2") && m.Contains("overlaps"))
@@ -1060,8 +1061,8 @@ public sealed class RateCardImportServiceTests
         var published = Guid.NewGuid();
         h.Seed(Card(published, RateCardImportService.CardPublished));
 
-        var already = await h.Service().PublishAsync(published, default);
-        var missing = await h.Service().PublishAsync(Guid.NewGuid(), default);
+        var already = await h.Service().PublishAsync(published, VersionId, default);
+        var missing = await h.Service().PublishAsync(Guid.NewGuid(), VersionId, default);
 
         already.Kind.Should().Be(RateCardOutcomeKind.Refused);
         already.StatusCode.Should().Be(409);
@@ -1098,7 +1099,9 @@ public sealed class RateCardImportServiceTests
     {
         var h = new Harness();
         var cardId = Guid.NewGuid();
-        h.Seed(Card(cardId));
+        var unversioned = Card(cardId);
+        unversioned.Attributes.Remove("sprk_procedureversion");
+        h.Seed(unversioned);
 
         var outcome = await h.Service().PublishAsync(cardId, Guid.NewGuid(), default);
 
@@ -1135,7 +1138,7 @@ public sealed class RateCardImportServiceTests
         h.Created.Where(e => e.LogicalName == "sprk_ratecard")
             .Should().OnlyContain(c => c.GetAttributeValue<OptionSetValue>("statuscode").Value == RateCardImportService.CardDraft);
 
-        var published = await h.Service().PublishAsync(imported.Value!.RateCardId, default);
+        var published = await h.Service().PublishAsync(imported.Value!.RateCardId, VersionId, default);
 
         published.Kind.Should().Be(RateCardOutcomeKind.Done);
         published.Value!.TimekeepersApproved.Should().Be(2);

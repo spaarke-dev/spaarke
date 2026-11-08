@@ -1038,7 +1038,7 @@ public sealed class ProcedureResolverTests
         onDate.Gaps.Should().ContainSingle().Which.Kind.Should().Be(expected);
     }
 
-    // ── A Retired version with a Published rate card opened a window too (085, model 7.1) ────────────────────
+    // ── A Published rate card is not evidence that its version opened a window (085, ontology-r1 ruling (c)) ────
 
     /// <summary>A rate card keyed to <paramref name="procedureVersion"/>; Published and active unless said otherwise.</summary>
     private Guid AddCard(Guid procedureVersion, int status = RateCardImportService.CardPublished, int state = 0)
@@ -1049,65 +1049,32 @@ public sealed class ProcedureResolverTests
         return id;
     }
 
-    [Fact(DisplayName = "085 must-fire (F1-b): v1 retired with a Published rate card and v2 Active later: work in the v1-only window is a GAP, not 'not applicable'; neither version is chosen, so no card of the Procedure prices it")]
-    public async Task ARetiredVersionWithAPublishedCard_OpenedItsWindow_AWorkDateInItIsAGap()
+    [Fact(DisplayName = "085 must-fire (ontology-r1 ruling c): a Draft version with a Published card, retired without ever being published, is neither a gap nor chosen: work in its dates is 'not applicable'")]
+    public async Task ARetiredDraftWithAPublishedCard_OpenedNoWindow_AWorkDateInItIsNotAGap()
     {
         var procedure = AddProcedure("Rates", ProcedureAppliesTo.AllRecords);
-        var v1 = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired); // was in force, then withdrawn
-        AddCard(v1);
+        var v1 = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired); // a Draft discarded before it was ever published
+        AddCard(v1); // a card can be Published while its version is still a Draft
         AddVersion(procedure, 2, Apr1, null); // Active from a later date
         var resolution = await Resolve(CoreRecordKind.Matter, M, F);
 
         var inWindow = resolution.RulesOn(Feb15);
 
-        inWindow.Gaps.Should().ContainSingle().Which.Should().Match<ProcedureGap>(g =>
-            g.ProcedureId == procedure && g.Kind == ProcedureGapKind.HoleBetweenVersions);
-        inWindow.Procedures.Should().BeEmpty("neither v1 (retired) nor v2 (not yet in force) is chosen, so no card of this Procedure applies");
-        resolution.RulesOn(Jan1.AddDays(-1)).Gaps.Should().BeEmpty("work dated before the version opened is not applicable");
+        inWindow.Gaps.Should().BeEmpty("the Published card does not make the discarded Draft a window it opened");
+        inWindow.Procedures.Should().BeEmpty("neither v1 (retired) nor v2 (not yet in force) is chosen: not applicable");
         resolution.RulesOn(Apr15).Procedures.Should().ContainSingle("control: v2 is chosen once it is in force");
     }
 
-    [Theory(DisplayName = "085 must-not-fire (F1-b): a Procedure whose retired version has no Published, active card (none, a Draft, an inactive one) behaves as before: not applicable, no gap")]
-    [InlineData(-1, 0)]                                              // no card at all (a Guideline Procedure)
-    [InlineData(RateCardImportService.CardDraft, 0)]                 // a Draft card was never in force
-    [InlineData(RateCardImportService.CardPublished, 1)]             // a deactivated card is not read
-    public async Task ARetiredVersionWithoutAPublishedActiveCard_OpenedNoWindow(int cardStatus, int cardState)
+    [Fact(DisplayName = "085 (known limit): the resolver reads no rate card at all, so a card changes neither the gaps nor the queries made")]
+    public async Task TheResolver_ReadsNoRateCard()
     {
         var procedure = AddProcedure("Rates", ProcedureAppliesTo.AllRecords);
-        var v1 = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired);
-        if (cardStatus >= 0)
-        {
-            AddCard(v1, cardStatus, cardState);
-        }
-
+        AddCard(AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusRetired));
         AddVersion(procedure, 2, Apr1, null);
-        var resolution = await Resolve(CoreRecordKind.Matter, M, F);
 
-        var inWindow = resolution.RulesOn(Feb15);
-
-        inWindow.Gaps.Should().BeEmpty();
-        inWindow.Procedures.Should().BeEmpty();
-    }
-
-    [Fact(DisplayName = "085: the card read is one chunked query for all Retired versions, however many there are, and none when no version is Retired")]
-    public async Task TheCardRead_IsOneQueryForAllRetiredVersions_AndSkippedWhenNoneIsRetired()
-    {
-        var procedure = AddProcedure("Rates", ProcedureAppliesTo.AllRecords);
-        for (var n = 1; n <= 3; n++)
-        {
-            AddCard(AddVersion(procedure, n, Jan1.AddDays(n), Jan1.AddDays(n + 1), ProcedureEntity.VersionStatusRetired));
-        }
-
-        AddVersion(procedure, 4, Apr1, null);
         await Resolve(CoreRecordKind.Matter, M, F);
 
-        _world.Queries.Count(q => q.EntityName == "sprk_ratecard").Should().Be(1);
-
-        var none = new ProcedureResolverTests();
-        var plain = none.AddProcedure("Plain", ProcedureAppliesTo.AllRecords);
-        none.AddVersion(plain, 1, Jan1, null);
-        await none.Resolve(CoreRecordKind.Matter, M, F);
-        none._world.Queries.Should().NotContain(q => q.EntityName == "sprk_ratecard");
+        _world.Queries.Should().NotContain(q => q.EntityName == "sprk_ratecard");
     }
 
     [Theory(DisplayName = "082b gaps (F1, ontology-r1 D-203): retiring the whole Procedure is a normal end of life: no gap, no rules, assigned or not")]

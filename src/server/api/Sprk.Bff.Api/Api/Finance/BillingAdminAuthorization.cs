@@ -131,7 +131,9 @@ public static class BillingAdminAuthorization
     /// A new version of a RATE CARD Procedure also copies the previous version's card and rates forward (085, as the application), so the caller
     /// must hold Create on <c>sprk_ratecard</c> and <c>sprk_ratecardrate</c> as well. Only a Rate card Procedure needs them: a Guideline
     /// Procedure's copy-forward creates no card. <see cref="CreateProcedureVersion"/> is a synchronous declaration and cannot read the
-    /// Procedure's type, so this filter reads it (app-only) and asks the same table-privilege question as the declaration does
+    /// Procedure's type, so this filter reads it (app-only), records the type it checked in <see cref="HttpContext.Items"/>
+    /// (<see cref="CheckedProcedureTypeItem"/>; the service refuses 409 <c>procedure.type_changed</c> if the type read there is a Rate card and
+    /// the check covered another) and asks the same table-privilege question as the declaration does
     /// (<see cref="CallerRecordAccessProbe.CallerPrivilegeAnswerAsync"/>, as the caller). Added AFTER the route's <c>AddFinanceAuthorizationFilter</c>
     /// and <c>RequireEbillingEnabled</c>; refuses before the service writes anything. Missing privilege is 403
     /// <c>insufficient_privilege</c>; a fault, an unanswered question or an unreadable Procedure is 403 <c>system_failure</c> (fail closed). An
@@ -150,7 +152,7 @@ public static class BillingAdminAuthorization
                 return await next(context); // the route constraint guarantees a guid
             }
 
-            bool isRateCard;
+            ProcedureType checkedType;
             try
             {
                 var rows = await services.GetRequiredService<IGenericEntityService>().RetrieveMultipleAsync(new QueryExpression(ProcedureEntity.Entity)
@@ -159,7 +161,12 @@ public static class BillingAdminAuthorization
                     Criteria = { Conditions = { new ConditionExpression(ProcedureEntity.Entity + "id", ConditionOperator.Equal, procedureId) } },
                     TopCount = 1,
                 }, http.RequestAborted);
-                isRateCard = rows.Entities.FirstOrDefault()?.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value == (int)ProcedureType.RateCard;
+                // A Procedure with no stored type (or none found) is checked as a Guideline: it creates no cards. The service re-reads the
+                // type and refuses 409 if it reads as a Rate card by then.
+                checkedType = rows.Entities.FirstOrDefault()?.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value is { } stored
+                    && Enum.IsDefined(typeof(ProcedureType), stored)
+                    ? (ProcedureType)stored
+                    : ProcedureType.Guideline;
             }
             catch (Exception ex)
             {
@@ -168,8 +175,9 @@ public static class BillingAdminAuthorization
                 return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
             }
 
-            if (!isRateCard)
+            if (checkedType != ProcedureType.RateCard)
             {
+                http.Items[CheckedProcedureTypeItem] = checkedType;
                 return await next(context);
             }
 
@@ -201,8 +209,15 @@ public static class BillingAdminAuthorization
                     traceId: http.TraceIdentifier);
             }
 
+            http.Items[CheckedProcedureTypeItem] = checkedType;
             return await next(context);
         });
+
+    /// <summary>
+    /// The <see cref="HttpContext.Items"/> key under which <see cref="RequireRateCardCreateOnARateCardProcedure"/> records the Procedure type
+    /// it checked. The version-create handler hands it to the service, which refuses 409 if the Procedure reads as a Rate card by then.
+    /// </summary>
+    internal const string CheckedProcedureTypeItem = "procedure.checkedType";
 
     /// <summary>Publish a version: as <see cref="WriteProcedure"/>, plus Write on both policy tables (it puts policy versions in force).</summary>
     public static FinanceAuthorizationTargets PublishProcedureVersion(EndpointFilterInvocationContext context) =>

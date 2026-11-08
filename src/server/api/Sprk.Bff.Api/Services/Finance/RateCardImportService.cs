@@ -566,17 +566,12 @@ public class RateCardImportService
     /// <summary>
     /// Draft to Published. Re-checks the overlap rule on the card's rates as they are NOW (a form edit after import can break it), approves
     /// the card firm's Pending timekeepers the rates name, then sets the card Published last, so a retry after a partial failure completes.
+    /// <paramref name="expectedVersionId"/> is the Procedure Version the caller's Procedure check named (the publish route's
+    /// <c>RequireWriteOnTheCardsProcedure</c>). It is required: the card is read again here, before any write, and a card that now names
+    /// another version (or none) is refused 409 <c>ratecard.version_changed</c>, so the Procedure checked is the Procedure published to, on
+    /// every path.
     /// </summary>
-    public Task<RateCardOutcome<RateCardPublishResult>> PublishAsync(Guid rateCardId, CancellationToken ct) =>
-        PublishAsync(rateCardId, expectedVersionId: null, ct);
-
-    /// <summary>
-    /// <see cref="PublishAsync(Guid, CancellationToken)"/> for a caller that has already checked the card's Procedure (the publish route's
-    /// <c>RequireWriteOnTheCardsProcedure</c>): <paramref name="expectedVersionId"/> is the Procedure Version that check named. The card is read
-    /// again here, before any write, and a card that now names another version (or none) is refused 409 <c>ratecard.version_changed</c>, so the
-    /// Procedure checked is the Procedure published to. Null skips the comparison.
-    /// </summary>
-    public virtual async Task<RateCardOutcome<RateCardPublishResult>> PublishAsync(Guid rateCardId, Guid? expectedVersionId, CancellationToken ct)
+    public virtual async Task<RateCardOutcome<RateCardPublishResult>> PublishAsync(Guid rateCardId, Guid expectedVersionId, CancellationToken ct)
     {
         var cards = await _entities.RetrieveMultipleAsync(new QueryExpression(RateCardEntity)
         {
@@ -591,7 +586,7 @@ public class RateCardImportService
             return RateCardOutcome<RateCardPublishResult>.Refused(StatusCodes.Status404NotFound, CodeNotFound, "The rate card was not found.");
         }
 
-        if (expectedVersionId is { } expected && card.GetAttributeValue<EntityReference>("sprk_procedureversion")?.Id != expected)
+        if (card.GetAttributeValue<EntityReference>("sprk_procedureversion")?.Id != expectedVersionId)
         {
             return RateCardOutcome<RateCardPublishResult>.Refused(
                 StatusCodes.Status409Conflict, CodeVersionChanged, "The rate card now belongs to a different Procedure Version; nothing was published.");

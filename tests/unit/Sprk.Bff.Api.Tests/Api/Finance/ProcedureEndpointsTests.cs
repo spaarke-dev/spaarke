@@ -392,13 +392,15 @@ public sealed class ProcedureEndpointsTests
     {
         await using var host = await Host.StartAsync();
         host.ProcedureIs(ProcedureType.Guideline); // GrantAdmin holds no card privilege
-        host.Service.Setup(s => s.CreateVersionAsync(ProcedureId, null, null, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.CreateVersionAsync(ProcedureId, null, null, It.IsAny<Guid?>(), ProcedureType.Guideline, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<ProcedureVersionCreated>.Done(Created()));
 
         var response = await CreateVersion(host);
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         host.Probe.Calls.Should().NotContain(c => c.Privilege == RateCardImportEndpoints.CreateRateCardPrivilege || c.Privilege == RateCardImportEndpoints.CreateRatePrivilege);
+        host.Service.Verify(s => s.CreateVersionAsync(ProcedureId, null, null, It.IsAny<Guid?>(), ProcedureType.Guideline, It.IsAny<CancellationToken>()),
+            Times.Once, "the type the check covered is the one handed to the service");
     }
 
     [Fact(DisplayName = "085 must-not-fire (F1-c): a caller with Create on both card tables creates a version of a Rate card Procedure")]
@@ -408,12 +410,28 @@ public sealed class ProcedureEndpointsTests
         host.ProcedureIs(ProcedureType.RateCard);
         host.Probe.Hold(RateCardImportEndpoints.CreateRateCardPrivilege);
         host.Probe.Hold(RateCardImportEndpoints.CreateRatePrivilege);
-        host.Service.Setup(s => s.CreateVersionAsync(ProcedureId, null, null, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+        host.Service.Setup(s => s.CreateVersionAsync(ProcedureId, null, null, It.IsAny<Guid?>(), ProcedureType.RateCard, It.IsAny<CancellationToken>()))
             .ReturnsAsync(RuleSetOutcome<ProcedureVersionCreated>.Done(Created()));
 
         var response = await CreateVersion(host);
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
+        host.Service.Verify(s => s.CreateVersionAsync(ProcedureId, null, null, It.IsAny<Guid?>(), ProcedureType.RateCard, It.IsAny<CancellationToken>()),
+            Times.Once, "the type the check covered is the one handed to the service");
+    }
+
+    [Fact(DisplayName = "085 must-fire (F1-c): a version-create handler with no record of the type check (no checked type in HttpContext.Items) answers 403 system_failure and calls no service")]
+    public async Task CreateVersion_WithNoRecordOfTheTypeCheck_IsSystemFailure_AndCallsNoService()
+    {
+        await using var host = await Host.StartAsync();
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { TraceIdentifier = "trace-1" }; // the filter never ran
+
+        var result = await ProcedureEndpoints.CreateVersion(ProcedureId, null, host.Service.Object, http, default);
+
+        var problem = result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(403);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(FinanceAuthorizationFilter.SystemFailureReasonCode);
+        host.Service.VerifyNoOtherCalls();
     }
 
     [Fact(DisplayName = "085 (F1-c, fail closed): a fault reading the Procedure's type is 403 system_failure and nothing is written")]
