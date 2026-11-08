@@ -1,8 +1,9 @@
-# Current Task State - spaarke-legal-ai-accelerator-r1 (NDA MVP spike, tenant tests)
+# Current Task State - spaarke-legal-ai-accelerator-r1 (NDA MVP spike → E2E POC, Act 7)
 
-> **Last Updated**: 2026-11-06 (E2E POC: Claude-side acts complete)
+> **Last Updated**: 2026-11-08 (by context-handoff, before moving to the Claude Desktop session `acclerator-r1`)
 > **Recovery**: Read "Quick Recovery" section first
-> **Branch**: `work/spaarke-legal-ai-accelerator-r1` · **Worktree**: `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-r1`
+> **Branch**: `work/spaarke-legal-ai-accelerator-r1` · **Worktree**: `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-r1` · **PR**: #2528 (unmerged)
+> Earlier checkpoints (verbatim): `notes/handoff-history/2026-11.md`. Session narrative: `git log`.
 
 ---
 
@@ -10,88 +11,87 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | NDA MVP spike: tenant tests per `notes/mvp-nda/runbook.md` (no POML tasks; pre-pipeline spike) |
-| **Step** | **WORD TEST SET IN PROGRESS (2026-11-07), owner in Word desktop, script `notes/poc-e2e/word-test-script.md`.**<br>**Done:**<ul><li>four-column template built and pushed (`b4d8aaae30`);</li><li>clean-up (`571b9717ac`);</li><li>new project `spaarke-legal-ai-accelerator-claude-r2` (worktree `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-claude-r2`, `e1ed088661`, research.md).</li></ul>**Results so far** (screenshots in OneDrive `Documents/Cowork/Test/POC-Act2/screens/`; reviewed copy `POC-Act2/Brightwater Mutual NDA - Word review.docx`, saved 12:07 with edits and comments applied):<ul><li>**R2** Attach from Cloud opens the SharePoint picker; Acme Company is under Quick access.</li><li>**R1 = A:** Review contract → New playbook imports the new table directly as card "Spaarke NDA – Mutual v1.1" (named from the Title): 24 topics plus General guidelines (= our scope paragraph verbatim). Word fields are Name / Rules / Examples: Instructions → Rules (with "Escalate if"), Example Text → Examples, **Compromise Positions DROPPED**. Long text is fine.</li><li>**R4:** Save playbook creates no OneDrive file.</li><li>**R3:** 20/24 vs the v1.1 key. Misses:<ul><li>independent development Y (RED edit sits under one-sided carve-outs; overlap notice);</li><li>compelled disclosure Y (key R);</li><li>reverse engineering "Not relevant" (missing clause, X9);</li><li>non-solicit RED (key Y; dropped-fallback effect).</li></ul>Term GREEN; Representatives Y correct. "Apply all › Apply edits with comments" gives tracked changes and comments authored by the user.</li><li>The picker has no saved "Spaarke … v1.0"; the stale card is "NDA - Mutual (Spaarke baseline)" (Nov 1). Use it in R6.</li></ul>**NEXT:**<ol><li>analyse the saved review docx (copy at scratchpad `wordreview.docx`); compare with the Cowork Act 5 redline;</li><li>record R1–R4 in results.md and gap-log; backlog fix: fold "Acceptable fallback: …" into Instructions, plus imperative wording for missing-clause topics;</li><li>owner continues R1b → R5 → pause for R6 (Claude swaps the library table file for a SNAPSHOT-TEST copy, then restores it) → R7 → G1/G2.</li></ol>**Earlier: act-by-act review assimilated (2026-11-06).** Design **v0.6** is done: §2.3 mirrors ontology D-209; §2.4.6 revised Word approach; §5.3 four-column template and version rules; §5.9 `Legal Knowledge/` tree; §8.1a setup modes and quick cards; §8.2 POC results and Harvey/Legora positioning; §12 Word test set R1–R7; §16, §18 (OD-39 to OD-43; OD-36 superseded), §19. Also updated:<ul><li>`package-backlog.md` (6-5 to 6-10 from the Harvey/Legora research);</li><li>runbook Act 2, now the Word test set;</li><li>results.md Act 2 note;</li><li>library note (OD-36, OD-37).</li></ul>**NEXT:** report to the owner and agree next steps. The earlier record follows. **Earlier: POC review with owner, act by act (2026-11-06).** All Claude-side POC acts are done and pushed (`062b852c1a`); results are in `notes/poc-e2e/results.md`, gaps #1–#29 in `gap-log.md`. **Act 1 discussion done**, owner decisions:<br>(1) "playbook" is the canonical concept; JPS and Microsoft playbooks are the same concept in different formats (asked the ontology session `spaarke-wt-spaarke-ontology-platform-r1-38` to record it in §3; awaiting reply);<br>(2) a Microsoft-aligned four-column template;<br>(3) a playbook library with canonical folders and naming, plus personal (OneDrive) and team (SharePoint) setup;<br>(4) user training / quick cards;<br>(5) naming convention agreed with mcp-bff-api-r1 (see Critical Context).<br>**Acts 3–5:** owner says they look good and asks what to change in the package. **Act 6:** a researcher agent is comparing with Harvey Vault and Legora Tabular Review (running in the background). **Act 2 (Word):** the owner says its feedback is already captured by the Act 1 discussion; assimilate it.<br>**IN PROGRESS:**<br>(a) write `notes/poc-e2e/package-backlog.md` (package changes by act, from the gaps plus the Act 1 decisions; include the expert demo's in-chat risk-dashboard card);<br>(b) design.md v0.6: changelog; §2.2/§2.3 terminology; §2.4.6 Word = Attach from Cloud per review, saved playbooks optional, POC findings; §5.3 template, library and profile (folder + family/side, no version; ignore `Archive/`); §5.9 `Legal Knowledge/` tree; §8.1a personal/team setup and quick cards; §12 T-P10 Cowork done plus Word tests R1–R7; §16/§18 (OD-36 superseded; new ODs: template, library/setup, quick cards, naming with OD-20, patents owner); §19;<br>(c) runbook Act 2 revised into the Word test set (R1–R7, A/B, snapshot, Act 5 step 3, regulatory-gaps and execution-readiness steps if not yet run);<br>(d) results.md Act 2 note;<br>(e) commit and push, then report changes and next steps to the owner.<br>**Owner questions still open:** OD-20 + naming; patents owner; rename timing; JPS wording from ontology. |
-| **Status** | Waiting for the owner to review: design v0.5 (OD-20 to OD-25); `notes/solution-packs-and-components.md` (OD-26 to OD-32; OD-31 and OD-32 decided 2026-11-05); and `notes/playbook-library-and-grounding.md` (OD-33 to OD-38, from the owner's W1–W7 points, 2026-11-05). The Microsoft Legal for Cowork 1.0.10 skill texts are committed in `notes/legal-for-cowork-skills/` (internal reference only; never shipped) |
-| **Next Action** | (1) Owner review of the ODs above. (2) Fold both notes into design v0.6 (each note's edit table lists the edits). (3) Close the spike (design §16 Phase 0): L15/L16/L9/L10; Word A/B import retest; T-14 with T-P2/T-P7/T-P8; **T-P15** (Microsoft's four-column playbook vs our format, with T-P4 and T-P10); re-baseline gates on wiqd 0.24.0. Uncommitted: only the root `Screenshot 2026-11-04 234407.png`, a duplicate deliberately left out |
+| **Task** | E2E POC **Act 7: document-type library** (no POML tasks; pre-pipeline spike). Can one habit ("attach the playbook for the document type, ask in plain words") serve a contract (NDA) **and** a non-contract (legal hold notice) in Word AI for Legal, and does NDA v1.2 keep its fallbacks (X2b)? |
+| **Step** | Setup **done and pushed** (`3caf65c7bd`, `0f62b0f092`). **Waiting for the owner** to run `notes/poc-e2e/doctype-test-script.md` in Word desktop: one-time custom-instruction replacement, then W0, W1a, W1b, W2, W3, W1c (optional), W4, W5 (optional) |
+| **Status** | Blocked on owner testing |
+| **Next Action** | When the owner reports W-results (screenshots in OneDrive `Documents/Cowork/Test/POC-Act7/screens/`):<ol><li>score W1a/W1c/W4 against `answer-key/legal-hold-answer-key.md` and the v1.1 NDA key (`answer-key/answer-key.md`, Brightwater section; v1.1 = term GREEN);</li><li>record the results in `results.md` Act 7 and the script's results table;</li><li>revise the step lists in `kit-src/make_doctype_library.py` (CONTRACT_STEPS / OTHER_STEPS), which regenerates the quick card and `user-steps.md`;</li><li>fold the findings into design §5.9 / §8.1a / §12 / §18.</li></ol> |
 
-### Critical Context
-- **Shared Copilot naming convention, agreed with `spaarkeai-mcp-bff-api-r1` on 2026-11-06 (pending owner confirmation at OD-20).**
-  - Plugin `spaarke-{area}` with an explicit display name. A legal practice counts as an area (`spaarke-nda` "Spaarke NDA"); the core plugin is `spaarke`.
-  - Skills `spaarke-{area}-{capability}`, e.g. `spaarke-nda-review`, `spaarke-nda-setup`, `spaarke-nda-library-review`.
-  - MCP tools `spaarke_{verb}_{object}`.
-  - One plugin per area; whoever starts patents first owns `spaarke-patents`.
-  - Rename at the first plugin build after OD-20, not during the POC.
-  - Add build gate `skill-name-prefix` (`^spaarke(-[a-z0-9]+)+$`, ≤ 64 characters) with fixtures.
-  - Source: `C:\code_files\spaarke-wt-spaarkeai-mcp-bff-api-r1\projects\spaarkeai-mcp-bff-api-r1\notes\coordination\2026-11-06-copilot-naming-and-ownership.md` §1–§2.
-- **Standing directive (owner, 2026-11-06, A1-13): playbook terminology.** "Playbook" is our canonical primitive for how a legal procedure or protocol works, including non-contract work. "Contract-review playbook" means the Microsoft subtype (the four-column table used by Word AI for Legal and `create-playbook` / `review-contract`). Always say which one. Our template aligns with Microsoft's four columns. We need a playbook library with canonical folders and naming, plus personal (OneDrive) and team (SharePoint) setup. This supersedes OD-36 ("contract families only"). JPS, legal and contract-review playbooks are one concept in different formats: ontology §3 **D-209** (commit `80b3098373`), mirrored in design §2.3.
-- **The MCP and Copilot-surface work is split out** (owner, 2026-11-05) to `projects/spaarkeai-mcp-bff-api-r1`, in its own worktree `C:\code_files\spaarke-wt-spaarkeai-mcp-bff-api-r1`, branch `work/spaarkeai-mcp-bff-api-r1`. The owner works on it in a separate window; don't edit it from here.
-- **Word deliverable in R1:** the `.docx` Word playbook only (owner confirmed, 2026-11-05).
-- **Opal (Frontier):** a browser-only computer-use agent on Windows 365 for Agents Cloud PCs. See researcher note `opal-frontier-computer-use-agent-2026-11-05.md`. Not an integration path for Spaarke. If evaluated: dev tenant, owner-only group, block-all plus allowlist, pool of 1.
-- **Word has never run our plugin.** No third-party skill loader is documented for Word (L25). But we have never tested a correctly built, instruction-only plugin there, and Harvey appears in Word.
-- **Cowork works**, and it currently has NO Spaarke install (clean-up done 2026-11-02).
-- **The component protocol** `notes/component-protocol.md` v0.2 is the design direction. Owner review is pending, except §4.5, which the owner approved.
+### Files modified this stretch (all committed and pushed)
+- `src/accelerators/build/render_word_playbook.py`: X2b, "If missing" and "Acceptable fallback (accept without redlining)" lines in Instructions.
+- `src/accelerators/core/engines/playbook_parse.py`: optional `If missing` field; `parse(require_side=False)` for non-contract types (X14).
+- `src/accelerators/core/engines/playbook_import.py`: round-trips If missing; drops the repeated fallback; strips the "Escalate if:" label (fixes a bug that predates this work).
+- `src/accelerators/build/tests/test_render_word_playbook.py`: build 31 tests, engines 59, NDA build gates OK.
+- `notes/poc-e2e/kit-src/make_doctype_library.py`:
+  - generates the Act 7 kit: NDA v1.2 Word copy and master; legal hold master and Word copy; requirement-list variant;
+  - drafts A/B; policy; template; precedent; demand letter; quick card v1.1; README;
+  - writes `answer-key/legal-hold-answer-key.md` and `user-steps.md`;
+  - output goes to `%TEMP%\act7-library` or `$env:KIT_OUT` (MAX_PATH);
+  - to upload with Chrome `file_upload`, generate into the session scratchpad and use its **long** path (`C:\Users\RalphSchroeder\...`, not `RALPHS~1`).
+- `kit-held/Act 7 - Document-type library/src/Spaarke NDA – Mutual v1.2.md`: NDA master source (positions = v1.1).
+- `design.md` §5.9: folder standard by document type. Also `doctype-test-script.md`, `user-steps.md`, `results.md` (Act 7 setup + update), `package-backlog.md` (X2b built, X14 ◐), `runbook.md` (old → new path map), `word-test-script.md` + `gap-log.md` #32 (R1–R7, G1/G2 done).
+
+### Critical context
+- **Word test set R1–R7, G1, G2 complete (2026-11-07)** (`results.md` "Word test set"):
+  - the four-column table imports directly (R1 = A);
+  - Word keeps only Name / Rules / Examples, so the Compromise column is dropped (gap #30 → X2b);
+  - a saved playbook is a **frozen copy** with no delete (R6, gap #32);
+  - a plain prompt with the playbook attached routes to Review contract without `/` and without saving (R7). This is the recommended Word path;
+  - review scores 19–20/24 and varies between runs;
+  - G1 Identify regulatory gaps against our policy = 4/4 (internal policy only via "Something else"); G2 execution readiness passes.
+- **Library = team site Acme Company › Shared Documents › `Legal Knowledge/`, reorganised by document type (design §5.9):**
+  - `<Type>/` holds only the playbook `.docx` to attach;
+  - each type has the same subfolders: `Playbook master/ · Policies/ · Precedents/ · Templates/ · Archive/`;
+  - at the root: `Start here – Quick card.docx`, `README.txt`, `Shared templates/`;
+  - types: **NDA** (Spaarke NDA – Mutual v1.2) and **Legal Hold Notice** (Spaarke Legal Hold Notice – Employee Custodians v1.0, with Acme policy, template, Kestrel precedent);
+  - test material lives in `Shared Documents/POC Workspace/`: Matters/Brightwater Systems, Matters/Harbor Point Logistics (demand letter, drafts A/B), Inbox/NDA batch, Samples/NDA, Test variants;
+  - the old function-first folders are in the site recycle bin.
+- **Cowork profile** `OneDrive/Documents/Cowork/Profile/legal-profile.md` points at `Legal Knowledge/NDA/Playbook master/`.
+- **The owner's Copilot custom instruction is stale**: it names v1.0 at `Legal Knowledge/Playbooks/NDA/`. The owner should replace it with the generic text in the quick card or `user-steps.md` before the W-tests; W3 tests whether Word follows it.
+- **Terminology** (owner 2026-11-07, D-209): "playbook" is the standard for any document type, contract or not, distinct from skills and tools. Users attach only the Word copy; the master is never attached; *creating* a playbook from precedents is a library-owner task (contracts only), not part of a review.
+- **Library file history:** `NDA/Archive/Spaarke NDA – Mutual v1.1 (table).docx` (item `6b17d5a3…`) is version 3.0, restored to the original after the R6 snapshot test.
 
 ---
 
-## State now
-- **Build:** `./src/accelerators/build/Build-Accelerator.ps1 -Practice nda` → BUILD OK. Gate tests 22 OK; engine tests 51 OK (41 + 10 in `test_visuals.py`).
-- **Package:**
-  - manifest 1.30, version 0.1.2-poc (manifest 0.1.2), GUID `211eba15-6c68-5ecb-8cfb-ecb8779148e2`;
-  - `nda-review` is at 20 companion files (the gate limit; gap-log #1). `nda-library-review` is `in_plugin: false` (own zip);
-  - single-line SKILL.md descriptions, with gate rule `description-plain`.
-- **Word playbook renderer** (`build/render_word_playbook.py`): Heading 1/2, `Topic ID:`/`Priority:`/`Review question:` lines, and General guidelines with MUST/MUST NOT.
-- **A/B import files** in OneDrive `Documents/Cowork/Test/for-T-12-desktop/` (generator in the previous session's scratchpad `make_ab.py`; regenerate from the renderer if lost).
-- **Tenant:**
-  - Cowork Added (8): Legal for Cowork (toggle OFF), Patent, Fabric IQ, Dataverse, PandaDoc, Harvey, Legora, SignatureAPI.
-  - The Spaarke plugin and its folder skills are deleted.
-  - Word web's Spaarke toggle was left ON; the plugin itself is gone.
-
-## Component protocol v0.2 (decisions in effect)
-- Positions live only in playbooks; procedures only in skills; defaults only in the profile.
-- **Playbook set:** one playbook per agreement type with its own topic namespace; shared positions live in `core/positions/` and are compiled into each playbook.
-- **Plugin K (Knowledge):** instruction-only skills. Assume it loads everywhere, Word included. It holds no review-against-playbook procedure, because in Word that is Microsoft Legal plus our Word playbook.
-- **Plugin E (Engines):** Cowork-only; holds `nda-review` plus scripts.
-- **Owner-approved §4.5:** NDAs in Cowork route to Spaarke `nda-review`. A customer who doesn't want our package uses Microsoft `review-contract` with our playbook.
-- **Playbook locations:**
-  - Governed playbooks go in a read-only SharePoint library (T-P10 to prove).
-  - Personal playbooks stay in the attorney's OneDrive `Documents/Cowork/Playbooks/<practice>/`.
-- **MCP connector** (Dataverse/SPE) = v2. It should extend the existing "Spaarke Dataverse MCP" agent.
-
 ## Next Actions (in order)
-1. ~~**T-P9 + leftovers check**~~ ✅ done 2026-11-02:
-   - Harvey = 1 RemoteMCPServer tool (5 operations) + 5 thin skills, with no instructions (L26).
-   - No accelerator copies remain in the tenant (L27).
-   - An owner item is still open: the Spaarke portal submission `5d88b948…` (Teams, pending since 2026-10-29).
-2. **After the owner reviews protocol v0.2:**
-   - Split the build into K and E plugins (separate GUIDs and names).
-   - Build a one-skill harmless Word probe plugin (T-P7).
-3. **T-14:** admin-deploy, scoped to the owner. Then test:
-   - Cowork: nda-01 ×3 with check_outputs (T-P3);
-   - routing coexistence with Legal for Cowork ON (T-P2);
-   - Word desktop and web (T-P7);
-   - PowerPoint "Organization".
-4. **Log** research round 2 (researcher note `word-vs-cowork-plugin-kinds-harvey-legora-tuning-2026-11-02.md`), the clean-up and T-14 in `notes/mvp-nda/results.md` and `run-log.md`.
-5. **Fix queue:** L9, L10/L17, L15, L16, onboarding items, model language for all topics (needs attorney input, H2).
+1. Owner runs the W-tests → Claude scores and records them (see Next Action above).
+2. Depending on W1: if the table works for non-contracts, one procedure; if only the requirement list works, the non-contract playbook format changes; if neither, non-contract review is Cowork-only. Update the quick card steps either way.
+3. W4 confirms X2b → carry "If missing" into `src/accelerators/practices/nda/positions/baseline-mutual.md` and rebuild.
+4. X14 remainder: a `practices/legal-hold/` catalogue in `src` so the build and gates cover non-contract types.
+5. Backlog P1: X12 (package zip), X13 (renderer as a setup script), X9 (absence flag), gaps #27 (double-counting) and #29 (rating stability).
+6. Offered, not accepted: record the M365 app-package assessment in design/backlog; an r1 → r2 pointer in r2's research.
 
 ## Open Owner Questions / Blockers
-- Review `notes/component-protocol.md` v0.2: the K/E split and the playbook set.
-- Word desktop UAT evidence still owed: the A/B import screenshots, the saved D2 file, D3–D6. (**T-P4 answered 2026-11-05:** `/` Review contract → saved-playbook picker; recorded in design §2.4.6.)
-- User-guide location (shipped onboarding vs attorney guide). Owner decisions H1, H2, H3.
+- W-test results (above).
+- Design ODs still open: OD-20 to OD-25 (incl. plugin naming, agreed with `spaarkeai-mcp-bff-api-r1`, pending the owner), OD-39 to OD-43, policy-as-input (backlog 3-2); new from gap #32: is a saved Word playbook acceptable for governed positions?
+- Component protocol v0.2 review (K/E plugin split deferred, design §5.10).
+- Spaarke portal submission `5d88b948…` (Teams, pending since 2026-10-29).
+
+## Related sessions and projects
+- **r2 Claude accelerator:** project `spaarke-legal-ai-accelerator-claude-r2`, worktree `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-claude-r2`; now in the Claude Desktop session `accelerator-claude-r2`.
+  - It reuses `src/accelerators/` and sends proposals for shared parts.
+  - Keep the engines **Python 3.11-compatible** (the Claude sandbox runs 3.11).
+  - Claude plugin zips must have no top-level `bin/`.
+- **MCP / Copilot surface:** `spaarkeai-mcp-bff-api-r1` (worktree `C:\code_files\spaarke-wt-spaarkeai-mcp-bff-api-r1`). Don't edit it from here. Shared naming in its `notes/coordination/2026-11-06-copilot-naming-and-ownership.md`.
+- **Ontology:** `spaarke-ontology-platform-r1`. Terminology changes originate in its §3 (D-209 adopted).
+- **Provisioning:** `customer-provisioning-orchestration-r1` is now the Claude Desktop session `provisioning-r1`.
 
 ## Standing directives (owner) — keep until revoked
-- Never commit secrets. Keep the Corteva NDA out of the repo.
+- Never commit secrets. Keep the Corteva NDA and the real RPX/Helios NDA out of the repo. Never upload `answer-key/`.
 - Never run python in Bash; use `C:\Python313\python.exe -B` from PowerShell. No bare `git stash`.
 - Sub-agents can't write `.claude/`. Every Agent launch states a model.
 - Skills and scripts embed no secrets and make no LLM or network calls.
-- Claude never types passwords and never sends email.
-- Leave the owner's tabs alone. Prefer moving over deleting. Ask before T-04 (share).
+- Claude never types passwords and never sends email; choose "No email" on Cowork cards.
+- Leave the owner's tabs alone. Prefer moving over deleting; no permanent deletes by Claude. Ask before T-04 (share).
 - No Copilot Tuning in design.md yet. No declarative agents in the package.
 - The Office add-in for redlining is out of scope; don't raise it.
 - Two editions/components (Word vs Cowork) are wanted.
+- Terminology changes originate in ontology §3.
 
 ## Tooling
-- **Word COM checks:** scratchpad scripts `word-open-check.ps1 -Dir` and `word-revisions-dump.ps1 -File`. They live in the previous session's scratchpad; recreate them if missing.
-- **Chrome:** use the active tab; background tabs time out on screenshots.
-- **Plugin upload:** Plugins › Cowork › Add › Upload → file input → Publish "Only you".
+- **Build:** `./src/accelerators/build/Build-Accelerator.ps1 -Practice nda`, or `C:\Python313\python.exe -B src/accelerators/build/build_accelerator.py --practice nda --out <dir>`. Tests: `python -B -m unittest discover -s build/tests` and `-s core/engines/tests` from `src/accelerators`.
+- **SharePoint from Chrome** (team site `https://spaarke.sharepoint.com/sites/AcmeCompany`):
+  - REST via `javascript_tool`: `/_api/contextinfo` digest; `SP.MoveCopyUtil.MoveFileByPath` / `MoveFolderByPath`; `folders/addUsingPath`; `Files/AddUsingPath(...,overwrite=true)` fed by a temporary `<input type=file>` and `file_upload`.
+  - Versioning is on. `423 SPFileLockException` means the owner has the file open.
+  - Tabs in the MCP group get replaced; re-read `tabs_context_mcp`.
+- **Word COM checks / revision dump:** scratchpad `revs.py` pattern (lxml over `word/document.xml` and `comments.xml`). Recreate if missing.
 - **Repo:** the repo-root `.gitignore` ignores `build/`, so `src/accelerators/.gitignore` re-includes `build/` and ignores only `build/out/`.
