@@ -1,6 +1,8 @@
 import {
+  EMPTY_ADD_LINE_FORM,
   LINE_FINDING_FALLBACK,
   LINE_FINDING_FALLBACK_UNKNOWN,
+  buildAddLineRequest,
   buildLineCountCards,
   filterLines,
   findingsBadge,
@@ -177,5 +179,35 @@ describe('read-only', () => {
       reason: 'This invoice is approved; it is shown read-only.',
     });
     expect(reviewAccess({ ...r, flags: { canRead: true, canDecide: false } }, false).canWrite).toBe(false);
+  });
+});
+
+describe('buildAddLineRequest: number text (164b review K1)', () => {
+  const feeWithHours = (hours: string) => buildAddLineRequest({ ...EMPTY_ADD_LINE_FORM, costType: 'fee', hours }, 'req-1');
+
+  it.each(['0x10', '1e3', '1E3', 'Infinity', '--2', '1,5', '1 2', '.', '+', '-.'])('refuses "%s" as a number and names the field', text => {
+    expect(feeWithHours(text)).toEqual({ ok: false, message: 'Hours must be a number, for example 2.5.' });
+  });
+
+  it.each([
+    ['1.5', 1.5],
+    ['-2', -2],
+    ['  2.5 ', 2.5],
+    ['300', 300],
+    ['0', 0],
+    ['.5', 0.5],
+    ['.25', 0.25],
+    ['5.', 5],
+    ['+2', 2],
+    ['-.5', -0.5],
+  ])('accepts "%s" as %s', (text, value) => {
+    const built = feeWithHours(text);
+    expect(built.ok).toBe(true);
+    if (built.ok) expect(built.request.hours).toBe(value);
+  });
+
+  it('sends a blank as null', () => {
+    const built = feeWithHours('  ');
+    expect(built.ok && built.request.hours).toBeNull();
   });
 });
