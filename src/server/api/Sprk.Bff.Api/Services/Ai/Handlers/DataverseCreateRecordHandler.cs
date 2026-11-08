@@ -162,6 +162,24 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// <summary>ebilling-r1 task 164a-1: the invoice line, whose generic create alone is refused (its own refusal words).</summary>
     internal const string InvoiceLineTable = "sprk_billingevent";
 
+    /// <summary>ebilling-r1 task 096b (EB-D-201): the invoice, created only by the submission operation (the Create Invoice wizard).</summary>
+    internal const string InvoiceTable = "sprk_invoice";
+
+    /// <summary>
+    /// ebilling-r1 task 096b (EB-D-201): this tool never creates an invoice — an invoice is created only by submission. The block is
+    /// in this handler alone (the <c>sprk_document</c> mechanism, both <see cref="ValidateChat"/> and <see cref="ExecuteChatAsync"/>),
+    /// not the registry's <see cref="RecordTableRule.GenericCreateOnlyRefused"/> flag, which would also refuse the Office quick create
+    /// and the service-level seams that still create an invoice as the caller.
+    /// </summary>
+    internal static bool IsInvoiceCreate(string tablename) => string.Equals(tablename, InvoiceTable, StringComparison.Ordinal);
+
+    /// <summary>The single rejection message for an <see cref="IsInvoiceCreate"/> create (user- and model-facing).</summary>
+    internal static string InvoiceCreateBlockedMessage(string tablename) =>
+        $"'{tablename}' records can't be created from chat — this create was REJECTED and nothing was written. An invoice is " +
+        "created only when it is submitted. " +
+        $"Do NOT retry this create — {tablename} is blocked on this tool unconditionally and no argument change makes it " +
+        "valid; open the Create Invoice wizard from the matter, project or work assignment and submit the invoice there.";
+
     /// <summary>The single rejection message for an <see cref="IsCreatedOnlyByItsWriter"/> create (user- and model-facing).</summary>
     internal static string CreatedOnlyByItsWriterCreateBlockedMessage(string tablename) =>
         string.Equals(tablename, InvoiceLineTable, StringComparison.Ordinal)
@@ -310,6 +328,10 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (string.Equals(tablename, BlockedTableLogicalName, StringComparison.Ordinal))
             return ToolValidationResult.Failure(BuildBlockedMessageWithAffordance(context.MatterId));
 
+        // ebilling-r1 task 096b (EB-D-201): an invoice is created only by submission, the same hard block.
+        if (IsInvoiceCreate(tablename))
+            return ToolValidationResult.Failure(InvoiceCreateBlockedMessage(tablename));
+
         // ebilling-r1 review of f758480f3c (2026-10-30): server-written e-billing rows, the same hard block.
         if (ServerWrittenInvoiceFamilyTables.Contains(tablename))
             return ToolValidationResult.Failure(ServerWrittenInvoiceFamilyCreateBlockedMessage(tablename));
@@ -387,6 +409,14 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
         {
             return LogOutcome(context, tablename,
                 Error(tool, BuildBlockedMessageWithAffordance(context.MatterId), ToolErrorCodes.ValidationFailed, startedAt),
+                stopwatch);
+        }
+
+        // ebilling-r1 task 096b (EB-D-201; defense in depth — ValidateChat already rejects): an invoice is created only by submission.
+        if (IsInvoiceCreate(tablename))
+        {
+            return LogOutcome(context, tablename,
+                Error(tool, InvoiceCreateBlockedMessage(tablename), ToolErrorCodes.ValidationFailed, startedAt),
                 stopwatch);
         }
 

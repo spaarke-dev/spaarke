@@ -38,13 +38,14 @@ import { isApiError, problemOf } from '../thrownFetchError';
  * same route: the server decides the owner, applies field mapping (fill-only) and, for a project filed under a secure
  * record, creates it secure. The Matter and Project wizards move onto it in tasks 021 and 022.
  * Pinned to the server's `ChildRecordEndpoints.CreateTables` by `ChildRecordCreateTablesAgreementTests` (the server also
- * creates three ribbon-only tables this client set does not hold).
+ * creates two ribbon-only tables this client set does not hold).
+ * ebilling-r1 task 096b (EB-D-201): `sprk_invoice` is not a create table; invoices are created only by submission (the Create
+ * Invoice wizard and the Outlook Submit Invoice). Re-filing an invoice is unchanged (`REFILE_ROUTES`).
  */
 export const BFF_CHILD_CREATE_TABLES: ReadonlySet<string> = new Set([
   'sprk_todo',
   'sprk_event',
   'sprk_memo',
-  'sprk_invoice',
   'sprk_reportcard',
   'sprk_analysis',
   'sprk_document',
